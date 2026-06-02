@@ -51,15 +51,19 @@ def upsert(
     table: str,
     rows: list[dict[str, Any]],
     conflict_keys: list[str],
+    update_cols: list[str] | None = None,
 ) -> int:
     """Bulk upsert. `table` may be schema-qualified ("ninja_core.devices").
     Columns are inferred from rows[0].keys(); all rows must share the
-    same shape. Conflict-key columns are excluded from the UPDATE SET.
+    same shape. `update_cols` controls which columns are written on
+    conflict — defaults to all non-key columns. Pass an explicit subset
+    for SCD-2 tables that must preserve some columns (e.g. first_observed_at).
     Returns row count affected."""
     if not rows:
         return 0
     columns = list(rows[0].keys())
-    update_cols = [c for c in columns if c not in conflict_keys]
+    if update_cols is None:
+        update_cols = [c for c in columns if c not in conflict_keys]
     table_ident = sql.SQL(".").join(sql.Identifier(p) for p in table.split("."))
     stmt = sql.SQL(
         "INSERT INTO {table} ({cols}) VALUES ({placeholders}) "
@@ -73,6 +77,33 @@ def upsert(
             sql.SQL("{c} = EXCLUDED.{c}").format(c=sql.Identifier(c))
             for c in update_cols
         ),
+    )
+    cur.executemany(stmt, rows)
+    return cur.rowcount
+
+
+def insert_ignore(
+    cur: Any,
+    table: str,
+    rows: list[dict[str, Any]],
+    conflict_keys: list[str],
+) -> int:
+    """Bulk INSERT ... ON CONFLICT DO NOTHING. Returns row count
+    inserted (excludes duplicates). Use for immutable-event tables
+    like ninja_activities.activities where the source provides a
+    stable PK and we never want to overwrite existing rows."""
+    if not rows:
+        return 0
+    columns = list(rows[0].keys())
+    table_ident = sql.SQL(".").join(sql.Identifier(p) for p in table.split("."))
+    stmt = sql.SQL(
+        "INSERT INTO {table} ({cols}) VALUES ({placeholders}) "
+        "ON CONFLICT ({conflict}) DO NOTHING"
+    ).format(
+        table=table_ident,
+        cols=sql.SQL(", ").join(sql.Identifier(c) for c in columns),
+        placeholders=sql.SQL(", ").join(sql.Placeholder(c) for c in columns),
+        conflict=sql.SQL(", ").join(sql.Identifier(c) for c in conflict_keys),
     )
     cur.executemany(stmt, rows)
     return cur.rowcount

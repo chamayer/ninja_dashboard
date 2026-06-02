@@ -20,25 +20,42 @@ _(empty — drop free-form items here)_
       (Done in v0.1.0 scaffold; revisit if env shape changes.)
 - [ ] `ingest/core/organizations.py` — fetch all, upsert into
       `ninja_core.organizations`.
-- [ ] `ingest/core/locations.py` — fetch all, upsert.
-- [ ] `ingest/core/policies.py` — fetch all, upsert.
-- [ ] `ingest/core/devices.py` — fetch via `/devices-detailed`, upsert
+- [x] `ingest/core/locations.py` — fetch all, upsert.
+- [x] `ingest/core/policies.py` — fetch all, upsert.
+- [x] `ingest/core/devices.py` — fetch via `/devices-detailed`, upsert
       into `ninja_core.devices`, write `device_snapshots` row per
-      device per run. Confirm where `needs_reboot_reasons` actually
-      live in the API response (may be nested in `os.*`, may require a
-      second call to `/v2/queries/device-health`). Populate
-      `needs_reboot_reasons text[]` accordingly.
-- [ ] `ingest/core/custom_fields.py` — fetch definitions + values,
-      upsert, regenerate `v_<entity>_custom_fields` pivoted views.
-- [ ] `ingest/patches/ingest.py` — fetch `/queries/os-patch-installs`
-      and `/queries/os-patches`, SCD-2 / hash-dedup upsert into
-      `ninja_patches.patch_facts`.
-- [ ] `ingest/activities/ingest.py` — fetch `/v2/activities`,
-      server-side filter by `sourceName` (PATCH_MANAGEMENT + SYSTEM),
-      client-side allowlist on `activityType`, incremental via
-      `ninja_core.ingest_state` key `activities.last_id`. First run
-      backfills last 7 days.
-- [ ] Wire `run_log` writes (start row, update on completion / error).
+      device per run. `needs_reboot_reasons` left NULL — confirm
+      where it lives (`/v2/queries/device-health`?) and wire later.
+- [x] `ingest/core/custom_fields.py` — fetch definitions + values,
+      upsert defs, SCD-2 values, regenerate
+      `v_<entity>_custom_fields` pivoted views. **Response shape was
+      best-guess** — verify against real Ninja data and fix mapping
+      if needed.
+- [x] `ingest/patches/ingest.py` — both endpoints, SCD-2 / hash-dedup.
+- [x] `ingest/activities/ingest.py` — server-side `sourceName` +
+      `after` cursor, client-side allowlist, ingest_state for cursor.
+      **No backfill** on first run (just sets cursor); backfill is a
+      future one-shot script.
+- [x] Wire `run_log` writes — via `ingest/runlog.py` context manager
+      reused by every module.
+
+### Follow-ups exposed during v1 ingest landing
+
+- [ ] **Confirm custom_fields API shape against real data.**
+      `_fetch_values` handles two common Ninja shapes defensively, but
+      if the live response is something else (e.g. one record per
+      device with values inlined under raw key names), the mapping
+      needs adjustment.
+- [ ] **Backfill script for activities.** Operator-triggered one-shot
+      that walks `/activities?olderThan=<id>` (or similar) backward
+      from the current cursor to populate history. Useful right after
+      first deploy.
+- [ ] **Wire `needs_reboot_reasons`** from `/v2/queries/device-health`
+      (or wherever Windows reboot reasons surface). Currently NULL.
+- [ ] **Split SCD-2 counts** — rows_changed (inserts) vs
+      rows_observed (total fetched). Currently `db.upsert` returns
+      cur.rowcount which lumps inserts + updates. Use `RETURNING xmax`
+      or similar to distinguish.
 - [ ] APScheduler in `ingest/main.py` — hourly default, configurable
       via `INGEST_SCHEDULE_HOURS`. _(Done — scheduler runs, no jobs
       wired yet)_

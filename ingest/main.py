@@ -24,16 +24,21 @@ from apscheduler.schedulers.background import BackgroundScheduler
 
 from ingest import db, migrations
 from ingest.config import settings
-from ingest.core import locations, organizations, policies
+from ingest.activities import ingest as activities_ingest
+from ingest.core import custom_fields, devices, locations, organizations, policies
 from ingest.ninja_client import NinjaClient
+from ingest.patches import ingest as patches_ingest
 
 log = logging.getLogger("ingest.main")
 
 
 def run_once() -> None:
-    """Execute one full ingest cycle. Modules added here in order:
-    core lookups → devices → custom fields → patches → activities."""
+    """Execute one full ingest cycle. Modules run in dependency order:
+    core lookups → devices → custom fields → patches → activities.
+    Shared `snapshot_at` so all rows from a single run carry the
+    same first/last_observed_at."""
     log.info("Ingest run starting")
+    snapshot_at = datetime.now(timezone.utc)
     with NinjaClient(
         base_url=settings.NINJA_BASE_URL,
         token_url=settings.NINJA_TOKEN_URL,
@@ -44,7 +49,10 @@ def run_once() -> None:
         organizations.run(client)
         locations.run(client)
         policies.run(client)
-        # TODO: devices.run, custom_fields.run, patches.run, activities.run
+        devices.run(client, snapshot_at)
+        custom_fields.run(client, snapshot_at)
+        patches_ingest.run(client, snapshot_at)
+        activities_ingest.run(client)
     log.info("Ingest run complete")
 
 
