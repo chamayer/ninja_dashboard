@@ -41,6 +41,13 @@ class Settings(BaseSettings):
     INGEST_ACTIVITY_SOURCES: str = "PATCH_MANAGEMENT"
     INGEST_ACTIVITY_TYPES_INCLUDE: str = ""
 
+    # ── Custom fields filter ─────────────────────────────────────────
+    # Empty = ingest every field (chatty). Set a comma-separated
+    # allowlist to keep only the fields you actually use in dashboards.
+    INGEST_CUSTOM_FIELDS_INCLUDE: str = ""
+    # Cap on value_text length per cell (rebootReason etc. can be 20k+).
+    INGEST_CUSTOM_FIELDS_MAX_TEXT: int = 4000
+
     @property
     def activity_sources(self) -> list[str]:
         return [s.strip() for s in self.INGEST_ACTIVITY_SOURCES.split(",") if s.strip()]
@@ -49,6 +56,11 @@ class Settings(BaseSettings):
     def activity_types_include(self) -> set[str]:
         """Empty set = accept everything from the configured sources."""
         return {s.strip() for s in self.INGEST_ACTIVITY_TYPES_INCLUDE.split(",") if s.strip()}
+
+    @property
+    def custom_fields_include(self) -> set[str]:
+        """Empty set = include every field name."""
+        return {s.strip() for s in self.INGEST_CUSTOM_FIELDS_INCLUDE.split(",") if s.strip()}
 
     @property
     def postgres_dsn(self) -> str:

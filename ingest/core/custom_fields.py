@@ -33,6 +33,7 @@ from typing import Any
 from psycopg.types.json import Json
 
 from ingest import db
+from ingest.config import settings
 from ingest.ninja_client import NinjaClient
 from ingest.runlog import run_log
 from ingest.util import content_hash
@@ -50,9 +51,20 @@ _ENTITY_TYPE_BY_SCOPE = {
 def run(client: NinjaClient, snapshot_at: datetime) -> tuple[int, int]:
     """Returns (values_observed, distinct_fields_seen)."""
     with run_log("core.custom_fields") as stats:
+        allowlist = settings.custom_fields_include
+        max_text = settings.INGEST_CUSTOM_FIELDS_MAX_TEXT
+        if not allowlist:
+            log.warning(
+                "INGEST_CUSTOM_FIELDS_INCLUDE is empty — ingesting ALL custom "
+                "fields. Set the env var to a comma-separated allowlist of "
+                "field names to keep just what your dashboards use.",
+            )
+        else:
+            log.info("Allowlist: %s", sorted(allowlist))
+
         value_rows: list[dict[str, Any]] = []
-        # (entity_type, field_name) -> minimal def we synthesize for views
         observed: dict[tuple[str, str], dict[str, Any]] = {}
+        skipped_by_allowlist = 0
 
         for rec in client.paginate_cursor("/queries/custom-fields"):
             entity_id = (
@@ -72,6 +84,10 @@ def run(client: NinjaClient, snapshot_at: datetime) -> tuple[int, int]:
                 continue
 
             for fname, fvalue in fields.items():
+                if allowlist and fname not in allowlist:
+                    skipped_by_allowlist += 1
+                    continue
+
                 # Some Ninja endpoints wrap values; tolerate either shape.
                 if isinstance(fvalue, dict) and "value" in fvalue:
                     actual_value = fvalue.get("value")
@@ -79,17 +95,19 @@ def run(client: NinjaClient, snapshot_at: datetime) -> tuple[int, int]:
                     actual_value = fvalue
 
                 value_rows.append(_value_row(
-                    entity_type, int(entity_id), fname, actual_value, snapshot_at,
+                    entity_type, int(entity_id), fname, actual_value,
+                    snapshot_at, max_text,
                 ))
                 observed.setdefault((entity_type, fname), {
                     "scope":      entity_type,
                     "name":       fname,
-                    "field_type": "TEXT",  # no type info on this endpoint
+                    "field_type": "TEXT",
                 })
 
         log.info(
-            "Custom fields: %d values across %d distinct (entity_type, field) pairs",
-            len(value_rows), len(observed),
+            "Custom fields: %d values kept across %d distinct fields "
+            "(%d field-occurrences skipped by allowlist)",
+            len(value_rows), len(observed), skipped_by_allowlist,
         )
 
         with db.transaction() as cur:
@@ -118,8 +136,15 @@ def _value_row(
     field_name: str,
     value: Any,
     snapshot_at: datetime,
+    max_text: int,
 ) -> dict[str, Any]:
     value_text, value_number = _split_value(value)
+    if value_text is not None and len(value_text) > max_text:
+        original_len = len(value_text)
+        value_text = (
+            value_text[:max_text]
+            + f"...[truncated, was {original_len} chars]"
+        )
     h = content_hash(value_text, value_number, value)
     return {
         "entity_type":       entity_type,
