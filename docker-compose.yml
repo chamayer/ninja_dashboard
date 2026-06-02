@@ -41,7 +41,10 @@ services:
     # internal docker network. For ad-hoc psql:
     #   docker exec -it ninja-postgres psql -U ninja -d ninja
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      # pg_isready with no args sends a low-level readiness probe — no
+      # auth, no env vars needed. Docker exec doesn't inherit the
+      # wrapper's env so $POSTGRES_USER would be empty here.
+      test: ["CMD", "pg_isready"]
       interval: 10s
       timeout: 5s
       retries: 5
