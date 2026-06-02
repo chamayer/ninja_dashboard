@@ -24,22 +24,34 @@ from apscheduler.schedulers.background import BackgroundScheduler
 
 from ingest import db, migrations
 from ingest.config import settings
+from ingest.core import organizations
+from ingest.ninja_client import NinjaClient
 
 log = logging.getLogger("ingest.main")
 
 
 def run_once() -> None:
-    """Execute one full ingest cycle. Stub until ingest modules land —
-    when they do, each module adds its own call here in order:
-    core/* → patches → activities."""
-    log.info("run_once: no ingest modules wired yet — nothing to do")
+    """Execute one full ingest cycle. Modules added here in order:
+    core lookups → devices → custom fields → patches → activities."""
+    log.info("Ingest run starting")
+    with NinjaClient(
+        base_url=settings.NINJA_BASE_URL,
+        token_url=settings.NINJA_TOKEN_URL,
+        client_id=settings.NINJA_CLIENT_ID,
+        client_secret=settings.NINJA_CLIENT_SECRET.get_secret_value(),
+        scope=settings.NINJA_SCOPE,
+    ) as client:
+        organizations.run(client)
+        # TODO: locations.run, policies.run, devices.run,
+        # custom_fields.run, patches.run, activities.run
+    log.info("Ingest run complete")
 
 
 def last_successful_run_at() -> datetime | None:
     with db.transaction() as cur:
         cur.execute(
             "SELECT MAX(finished_at) FROM ninja_core.run_log "
-            "WHERE status = 'ok' AND domain = 'core'"
+            "WHERE status = 'ok'"
         )
         row = cur.fetchone()
         return row[0] if row else None
