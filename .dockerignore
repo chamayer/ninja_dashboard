@@ -1,0 +1,45 @@
+# Build context exclusions — keep the ingest image small and free of
+# secrets / docs / test data.
+
+.git/
+.gitignore
+.dockerignore
+
+# Docs (not needed at runtime)
+*.md
+REQUIREMENTS.md
+CONTEXT.md
+CHANGELOG.md
+SESSIONS.md
+TODO.md
+PROCESS.md
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local data
+postgres-data/
+metabase-data/
+backups/
+test-data/
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Compose itself doesn't go in the image
+docker-compose.yml

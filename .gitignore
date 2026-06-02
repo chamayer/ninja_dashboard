@@ -1,0 +1,38 @@
+# ── Secrets ──────────────────────────────────────────────────────────
+.env
+.env.local
+*.pem
+*.key
+
+# ── Python ───────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.venv/
+venv/
+env/
+.Python
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ── Docker / local data ──────────────────────────────────────────────
+postgres-data/
+metabase-data/
+backups/
+test-data/
+
+# ── Reference data (not code) ────────────────────────────────────────
+# NinjaRMM OpenAPI spec — large reference file used to design the
+# schema. Re-download from Ninja docs if needed for future domains.
+NinjaRMM-API-v2*.json
+
+# ── Editor / OS ──────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
