@@ -146,15 +146,16 @@ class NinjaClient:
     ) -> Iterator[dict[str, Any]]:
         """Yield items from /queries/* endpoints using cursor paging.
 
-        Ninja's cursor model on /queries/* endpoints sometimes returns
-        the SAME cursor name across pages on large result sets — using
-        it naively gets you an infinite loop. We stop on any of:
+        Ninja's cursor model on /queries/* endpoints returns the SAME
+        cursor name across pages — the actual progress lives in
+        cursor.offset / cursor.count. We stop on any of:
           - empty results
           - missing cursor in response
-          - cursor name unchanged from the one we just sent
-          - cursor.offset + len(results) >= cursor.count (when present)
+          - cursor.offset + len(results) >= cursor.count (primary)
+          - cursor.offset didn't advance vs. last page (server-bug guard)
         """
         cursor_name: str | None = None
+        last_offset = -1
         seen_records = 0
         for _ in range(_MAX_PAGES):
             q = dict(params or {})
@@ -174,17 +175,23 @@ class NinjaClient:
             new_cursor_name = cursor_obj.get("name")
             if not new_cursor_name:
                 return
-            if new_cursor_name == cursor_name:
-                # Server handed us back the cursor we sent — no more data.
-                return
-            count = cursor_obj.get("count")
+
             offset = cursor_obj.get("offset")
+            count = cursor_obj.get("count")
             if (
-                count is not None
-                and offset is not None
+                offset is not None
+                and count is not None
                 and offset + len(results) >= count
             ):
                 return
+            if offset is not None and offset <= last_offset:
+                log.warning(
+                    "Cursor offset stalled (%d → %d) on %s — stopping",
+                    last_offset, offset, path,
+                )
+                return
+            if offset is not None:
+                last_offset = offset
 
             cursor_name = new_cursor_name
         log.warning(
