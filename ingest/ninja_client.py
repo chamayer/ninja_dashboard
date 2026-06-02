@@ -157,6 +157,7 @@ class NinjaClient:
         cursor_name: str | None = None
         last_offset = -1
         seen_records = 0
+        pages_done = 0
         for _ in range(_MAX_PAGES):
             q = dict(params or {})
             q["pageSize"] = page_size
@@ -167,17 +168,26 @@ class NinjaClient:
             for item in results:
                 yield item
             seen_records += len(results)
+            pages_done += 1
 
             if not results:
                 return
 
             cursor_obj = resp.get("cursor") or {}
             new_cursor_name = cursor_obj.get("name")
-            if not new_cursor_name:
-                return
-
             offset = cursor_obj.get("offset")
             count = cursor_obj.get("count")
+
+            # Heartbeat every 10 pages so big paginations don't look like
+            # infinite loops to anyone tailing logs.
+            if pages_done % 10 == 0:
+                log.info(
+                    "paginate_cursor %s: page %d, %d records, offset=%s count=%s",
+                    path, pages_done, seen_records, offset, count,
+                )
+
+            if not new_cursor_name:
+                return
             if (
                 offset is not None
                 and count is not None
