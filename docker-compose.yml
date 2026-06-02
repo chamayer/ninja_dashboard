@@ -1,11 +1,21 @@
 version: "3.8"
 
-# All secrets / per-host config come from the host-side .env file at
-# /amr-ch-01_data/ninja-dashboard/.env, loaded via env_file: on each
-# service. The docker daemon resolves env_file paths server-side, so
-# Portainer doesn't need to read the host filesystem. Static values
-# (service names, ports, fixed types) stay in environment: blocks so
-# they can't be wrongly overridden by .env.
+# Env handling — bind-mount + read-at-start (dmarc pattern).
+#
+# Portainer's git-deployed stacks can't use:
+#   - ${VAR} substitution (env panel isn't honored in repository mode)
+#   - env_file: with absolute host paths (Portainer's compose process
+#     can't see /amr-ch-01_data/ on its own filesystem)
+#
+# What WORKS is bind-mounting host files into the container — those
+# are resolved by the docker daemon server-side. Each service then
+# reads its env from the bind-mounted file at startup:
+#
+#   - ingest:    python-dotenv reads /app/.env (config.py).
+#   - postgres:  entrypoint wrapper sources /etc/secrets.env.
+#   - metabase:  entrypoint wrapper sources /etc/secrets.env.
+#
+# Single source of truth: /amr-ch-01_data/ninja-dashboard/.env on host.
 
 services:
   # ───────────────────────────────────────────────────────────────────
@@ -15,16 +25,21 @@ services:
     image: postgres:16-alpine
     container_name: ninja-postgres
     restart: unless-stopped
-    env_file:
-      - /amr-ch-01_data/ninja-dashboard/.env
+    # Wrap the official entrypoint: source the bind-mounted env file,
+    # export everything in it (`set -a`), then exec the real entrypoint.
+    # `.` fails loud if /etc/secrets.env is missing, so we don't start
+    # postgres with no password.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - "set -a; . /etc/secrets.env; set +a; exec docker-entrypoint.sh postgres"
     volumes:
+      - /amr-ch-01_data/ninja-dashboard/.env:/etc/secrets.env:ro
       - /amr-ch-01_data/ninja-dashboard/postgres-data:/var/lib/postgresql/data
       - ./sql/init:/docker-entrypoint-initdb.d:ro
-    # No public port — Metabase and ingest reach Postgres on the internal
-    # docker network. For ad-hoc psql, use `docker exec -it ninja-postgres psql ...`
-    # If you really need it published, uncomment and bind to loopback:
-    #   ports:
-    #     - "127.0.0.1:5432:5432"
+    # No public port — Metabase and ingest reach Postgres on the
+    # internal docker network. For ad-hoc psql:
+    #   docker exec -it ninja-postgres psql -U ninja -d ninja
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 10s
@@ -38,15 +53,18 @@ services:
     image: metabase/metabase:latest
     container_name: ninja-metabase
     restart: unless-stopped
-    env_file:
-      - /amr-ch-01_data/ninja-dashboard/.env
+    # Same wrapper trick. metabase's real entrypoint is /app/run_metabase.sh.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - "set -a; . /etc/secrets.env; set +a; exec /app/run_metabase.sh"
     environment:
-      # Static — never overridden. Postgres is always reached as the
-      # docker service "postgres" on its container port 5432.
+      # Static — never overridden, not in the .env file.
       MB_DB_TYPE: postgres
       MB_DB_HOST: postgres
       MB_DB_PORT: 5432
     volumes:
+      - /amr-ch-01_data/ninja-dashboard/.env:/etc/secrets.env:ro
       - /amr-ch-01_data/ninja-dashboard/metabase-data:/metabase-data
     ports:
       - "3001:3000"
@@ -68,21 +86,16 @@ services:
     build: .
     container_name: ninja-ingest
     restart: unless-stopped
-    env_file:
-      - /amr-ch-01_data/ninja-dashboard/.env
     environment:
-      # Static — never overridden. Pin DB host/port to the docker
-      # network values regardless of what .env says.
+      # Static — never overridden. Pin DB host/port to docker network.
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
     volumes:
-      # Bind-mount kept as a belt-and-braces fallback: if someone runs
-      # `docker exec ninja-ingest python -m ingest.smoke` outside the
-      # compose-managed env, python-dotenv still picks up /app/.env.
+      # Bind-mount the host .env into the container. config.py uses
+      # python-dotenv to load /app/.env at startup and merge into
+      # os.environ. Same trick as dmarc-manager.
       - /amr-ch-01_data/ninja-dashboard/.env:/app/.env:ro
-    # Loopback only — /healthz and /run are operator endpoints, not for
-    # external traffic. Exposed on the host but not the LAN.
-    # `curl http://localhost:8090/run` from an SSH session triggers a run.
+    # Loopback only — /healthz and /run are operator endpoints, not LAN.
     ports:
       - "127.0.0.1:8090:8090"
     depends_on:

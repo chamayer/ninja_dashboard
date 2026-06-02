@@ -140,6 +140,13 @@ _(empty — drop free-form items here)_
       Postgres connectivity, applies pending migrations, Ninja auth,
       and one `/organizations` call. Non-zero exit on any failure.
 - [x] Added `psycopg-pool==3.2.3` to `requirements.txt`.
+- [x] Env handling settled on bind-mount + read-at-start (dmarc
+      pattern). ingest uses python-dotenv on `/app/.env`; postgres
+      and metabase wrap their entrypoints to `source /etc/secrets.env`
+      before exec'ing the real entrypoint. Single source of truth on
+      host: `/amr-ch-01_data/ninja-dashboard/.env`. Sidesteps
+      Portainer's git-mode limits on `${VAR}` and `env_file:` with
+      absolute paths.
 - [x] `docker-compose.yml` switched from `${VAR}` substitution to
       `env_file: /amr-ch-01_data/ninja-dashboard/.env` on each service.
       Host `.env` is now the single source of truth — no Portainer-side
