@@ -144,8 +144,18 @@ class NinjaClient:
         page_size: int = _DEFAULT_PAGE_SIZE,
         params: dict[str, Any] | None = None,
     ) -> Iterator[dict[str, Any]]:
-        """Yield items from /queries/* endpoints using cursor paging."""
+        """Yield items from /queries/* endpoints using cursor paging.
+
+        Ninja's cursor model on /queries/* endpoints sometimes returns
+        the SAME cursor name across pages on large result sets — using
+        it naively gets you an infinite loop. We stop on any of:
+          - empty results
+          - missing cursor in response
+          - cursor name unchanged from the one we just sent
+          - cursor.offset + len(results) >= cursor.count (when present)
+        """
         cursor_name: str | None = None
+        seen_records = 0
         for _ in range(_MAX_PAGES):
             q = dict(params or {})
             q["pageSize"] = page_size
@@ -155,8 +165,29 @@ class NinjaClient:
             results = resp.get("results") or []
             for item in results:
                 yield item
-            cursor_obj = resp.get("cursor")
-            cursor_name = cursor_obj.get("name") if cursor_obj else None
-            if not cursor_name or not results:
+            seen_records += len(results)
+
+            if not results:
                 return
-        log.warning("paginate_cursor hit page cap (%d) on %s", _MAX_PAGES, path)
+
+            cursor_obj = resp.get("cursor") or {}
+            new_cursor_name = cursor_obj.get("name")
+            if not new_cursor_name:
+                return
+            if new_cursor_name == cursor_name:
+                # Server handed us back the cursor we sent — no more data.
+                return
+            count = cursor_obj.get("count")
+            offset = cursor_obj.get("offset")
+            if (
+                count is not None
+                and offset is not None
+                and offset + len(results) >= count
+            ):
+                return
+
+            cursor_name = new_cursor_name
+        log.warning(
+            "paginate_cursor hit page cap (%d) on %s after %d records",
+            _MAX_PAGES, path, seen_records,
+        )
