@@ -24,7 +24,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 
 from ingest import db, migrations
 from ingest.config import settings
-from ingest.core import organizations
+from ingest.core import locations, organizations, policies
 from ingest.ninja_client import NinjaClient
 
 log = logging.getLogger("ingest.main")
@@ -42,8 +42,9 @@ def run_once() -> None:
         scope=settings.NINJA_SCOPE,
     ) as client:
         organizations.run(client)
-        # TODO: locations.run, policies.run, devices.run,
-        # custom_fields.run, patches.run, activities.run
+        locations.run(client)
+        policies.run(client)
+        # TODO: devices.run, custom_fields.run, patches.run, activities.run
     log.info("Ingest run complete")
 
 
