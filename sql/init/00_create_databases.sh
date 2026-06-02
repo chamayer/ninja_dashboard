@@ -1,8 +1,10 @@
-#!/usr/bin/env bash
+#!/bin/sh
 # Runs once, on first Postgres container boot. Creates the Metabase app
 # DB and role. The main `ninja` DB is created by Postgres itself from
 # $POSTGRES_DB.
-set -euo pipefail
+#
+# Uses POSIX sh (not bash) — postgres:16-alpine doesn't ship bash.
+set -eu
 
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
     CREATE ROLE "${MB_DB_USER}" WITH LOGIN PASSWORD '${MB_DB_PASS}';
