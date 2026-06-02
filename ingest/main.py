@@ -4,44 +4,85 @@ Boot sequence:
   1. Load settings, configure logging.
   2. Initialise DB pool.
   3. Apply pending migrations.
-  4. Start APScheduler (interval = INGEST_SCHEDULE_HOURS).
-  5. Start a tiny HTTP server for /healthz and /run (manual trigger).
-  6. Decide whether to run immediately based on run_log:
-       - If the last successful run was more than INGEST_SCHEDULE_HOURS
-         ago, treat as a missed schedule and run once now (catch-up).
-       - Otherwise, do NOT run on startup. Wait for the next scheduled
-         tick. This avoids hammering the Ninja API on container
-         restarts / redeploys.
-       - On a fresh install (empty run_log) we also wait for the first
-         scheduled tick. Operator can hit POST /run for immediate data.
+  4. Start APScheduler at the configured interval. No jobs wired yet —
+     each ingest module adds its job once it lands.
+  5. Catch-up: if the last successful core run is older than the
+     schedule interval, fire run_once now in a background thread.
+     Fresh installs (no run_log rows) wait for the first scheduled tick.
+  6. Start HTTP server for /healthz and /run, block forever.
 """
 
+from __future__ import annotations
+
+import http.server
 import logging
+import socketserver
+import threading
 from datetime import datetime, timedelta, timezone
 
+from apscheduler.schedulers.background import BackgroundScheduler
+
+from ingest import db, migrations
 from ingest.config import settings
+
+log = logging.getLogger("ingest.main")
 
 
 def run_once() -> None:
-    """Execute one full ingest cycle: core lookups → patches → ...
-    Each module writes its own run_log row."""
-    raise NotImplementedError
+    """Execute one full ingest cycle. Stub until ingest modules land —
+    when they do, each module adds its own call here in order:
+    core/* → patches → activities."""
+    log.info("run_once: no ingest modules wired yet — nothing to do")
 
 
 def last_successful_run_at() -> datetime | None:
-    """Most recent `finished_at` from ninja_core.run_log where
-    status='ok' and domain='core' (the orchestrator row). None if no
-    successful run has ever completed."""
-    raise NotImplementedError
+    with db.transaction() as cur:
+        cur.execute(
+            "SELECT MAX(finished_at) FROM ninja_core.run_log "
+            "WHERE status = 'ok' AND domain = 'core'"
+        )
+        row = cur.fetchone()
+        return row[0] if row else None
 
 
 def should_catch_up(now: datetime | None = None) -> bool:
-    """True if a scheduled run was missed while we were down."""
     now = now or datetime.now(timezone.utc)
     last = last_successful_run_at()
     if last is None:
-        return False  # fresh install — wait for next scheduled tick
+        return False
     return (now - last) > timedelta(hours=settings.INGEST_SCHEDULE_HOURS)
+
+
+# ── HTTP endpoints ──────────────────────────────────────────────────
+
+class _Handler(http.server.BaseHTTPRequestHandler):
+    def log_message(self, fmt: str, *args: object) -> None:
+        log.info("http %s - %s", self.address_string(), fmt % args)
+
+    def do_GET(self) -> None:
+        if self.path == "/healthz":
+            self._respond(200, b"ok\n")
+        else:
+            self.send_error(404)
+
+    def do_POST(self) -> None:
+        if self.path == "/run":
+            threading.Thread(target=run_once, daemon=True).start()
+            self._respond(202, b"run scheduled\n")
+        else:
+            self.send_error(404)
+
+    def _respond(self, code: int, body: bytes) -> None:
+        self.send_response(code)
+        self.send_header("Content-Type", "text/plain")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
+class _ThreadingServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
+    daemon_threads = True
+    allow_reuse_address = True
 
 
 def main() -> None:
@@ -49,7 +90,39 @@ def main() -> None:
         level=settings.INGEST_LOG_LEVEL,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
-    raise NotImplementedError
+
+    log.info("Initialising DB pool")
+    db.init(settings.postgres_dsn)
+
+    log.info("Applying pending migrations")
+    migrations.apply_pending()
+
+    scheduler = BackgroundScheduler()
+    scheduler.add_job(
+        run_once,
+        "interval",
+        hours=settings.INGEST_SCHEDULE_HOURS,
+        id="ingest_cycle",
+    )
+    scheduler.start()
+    log.info(
+        "Scheduler started (every %dh, no jobs wired yet)",
+        settings.INGEST_SCHEDULE_HOURS,
+    )
+
+    if should_catch_up():
+        log.info(
+            "Catch-up: last successful run > %dh ago — firing run_once",
+            settings.INGEST_SCHEDULE_HOURS,
+        )
+        threading.Thread(target=run_once, daemon=True).start()
+    else:
+        log.info("No catch-up needed (fresh install or recent run)")
+
+    addr = ("0.0.0.0", settings.INGEST_HTTP_PORT)
+    log.info("HTTP server listening on %s:%d (/healthz, /run)", *addr)
+    with _ThreadingServer(addr, _Handler) as httpd:
+        httpd.serve_forever()
 
 
 if __name__ == "__main__":

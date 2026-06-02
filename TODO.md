@@ -40,9 +40,11 @@ _(empty — drop free-form items here)_
       backfills last 7 days.
 - [ ] Wire `run_log` writes (start row, update on completion / error).
 - [ ] APScheduler in `ingest/main.py` — hourly default, configurable
-      via `INGEST_SCHEDULE_HOURS`.
+      via `INGEST_SCHEDULE_HOURS`. _(Done — scheduler runs, no jobs
+      wired yet)_
 - [ ] HTTP endpoint for manual trigger (`/run`) + healthcheck
-      (`/healthz`).
+      (`/healthz`). _(Done — stdlib threading HTTP server on
+      INGEST_HTTP_PORT)_
 - [ ] Verify row counts match the existing PowerShell CSV against a
       real Ninja instance.
 
