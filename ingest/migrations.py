@@ -17,7 +17,7 @@ from pathlib import Path
 
 import psycopg
 
-from ingest.db import pool
+from ingest import db  # import module, not name — db.pool is rebound at runtime
 
 log = logging.getLogger(__name__)
 
@@ -48,7 +48,7 @@ def _discover() -> list[Path]:
 
 
 def _applied_versions() -> set[str]:
-    with pool.connection() as conn, conn.cursor() as cur:
+    with db.pool.connection() as conn, conn.cursor() as cur:
         try:
             cur.execute("SELECT version FROM ninja_core.schema_migrations")
             return {row[0] for row in cur.fetchall()}
@@ -60,7 +60,7 @@ def _applied_versions() -> set[str]:
 
 def _apply_one(path: Path, version: str) -> None:
     body = path.read_text(encoding="utf-8")
-    with pool.connection() as conn, conn.cursor() as cur:
+    with db.pool.connection() as conn, conn.cursor() as cur:
         cur.execute(body)
         cur.execute(
             "INSERT INTO ninja_core.schema_migrations (version) VALUES (%s) "
