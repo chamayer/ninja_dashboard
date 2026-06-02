@@ -33,8 +33,9 @@ log = logging.getLogger("ingest.main")
 
 
 def run_once() -> None:
-    """Execute one full ingest cycle. Modules run in dependency order:
-    core lookups → devices → custom fields → patches → activities.
+    """Execute one full ingest cycle. Modules run in dependency order
+    with per-module exception isolation: a failure in one module is
+    logged with status='failed' in run_log and the rest continue.
     Shared `snapshot_at` so all rows from a single run carry the
     same first/last_observed_at."""
     log.info("Ingest run starting")
@@ -46,14 +47,21 @@ def run_once() -> None:
         client_secret=settings.NINJA_CLIENT_SECRET.get_secret_value(),
         scope=settings.NINJA_SCOPE,
     ) as client:
-        organizations.run(client)
-        locations.run(client)
-        policies.run(client)
-        devices.run(client, snapshot_at)
-        custom_fields.run(client, snapshot_at)
-        patches_ingest.run(client, snapshot_at)
-        activities_ingest.run(client)
+        _safe("organizations",  organizations.run, client)
+        _safe("locations",      locations.run, client)
+        _safe("policies",       policies.run, client)
+        _safe("devices",        devices.run, client, snapshot_at)
+        _safe("custom_fields",  custom_fields.run, client, snapshot_at)
+        _safe("patches",        patches_ingest.run, client, snapshot_at)
+        _safe("activities",     activities_ingest.run, client)
     log.info("Ingest run complete")
+
+
+def _safe(name: str, func, *args) -> None:
+    try:
+        func(*args)
+    except Exception:
+        log.exception("%s ingest failed; continuing with next module", name)
 
 
 def last_successful_run_at() -> datetime | None:
