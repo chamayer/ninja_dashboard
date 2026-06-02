@@ -2,27 +2,38 @@ version: "3.8"
 
 # Env handling — bind-mount + read-at-start (dmarc pattern).
 #
-# Portainer's git-deployed stacks can't use:
-#   - ${VAR} substitution (env panel isn't honored in repository mode)
-#   - env_file: with absolute host paths (Portainer's compose process
-#     can't see /amr-ch-01_data/ on its own filesystem)
+# Portainer Repository-mode stacks have two firm constraints:
+#   - No ${VAR} substitution (env panel isn't honored in repo mode).
+#   - No env_file: with absolute host paths (Portainer's compose can't
+#     see /amr-ch-01_data/ on its own filesystem).
+#   - Repo-relative bind-mounts at runtime do NOT work — Portainer
+#     extracts the repo only for build contexts, not as a persistent
+#     tree on disk. Anything that needs files from git at RUNTIME
+#     either ships in the image (via Dockerfile COPY) or sits under
+#     /amr-ch-01_data/<stack>/ as a host file (and is bind-mounted by
+#     absolute path).
 #
-# What WORKS is bind-mounting host files into the container — those
-# are resolved by the docker daemon server-side. Each service then
-# reads its env from the bind-mounted file at startup:
+# What DOES work:
+#   - Bind-mounts of absolute host paths (docker daemon resolves them).
+#   - Image builds from the cloned repo via `build:` directives.
 #
-#   - ingest:    python-dotenv reads /app/.env (config.py).
-#   - postgres:  entrypoint wrapper sources /etc/secrets.env.
-#   - metabase:  entrypoint wrapper sources /etc/secrets.env.
-#
-# Single source of truth: /amr-ch-01_data/ninja-dashboard/.env on host.
+# Result: each service reads its env from the bind-mounted host .env
+# at startup:
+#   - ingest    → python-dotenv reads /app/.env (config.py).
+#   - postgres  → entrypoint wrapper sources /etc/secrets.env.
+#   - metabase  → entrypoint wrapper sources /etc/secrets.env.
+# Init script for postgres ships baked into the custom image.
+# Single source of truth for secrets: /amr-ch-01_data/ninja-dashboard/.env.
 
 services:
   # ───────────────────────────────────────────────────────────────────
   # postgres — main data store (ninja DB) + metabase app DB
+  # Built from postgres.Dockerfile so the init script is in the image.
   # ───────────────────────────────────────────────────────────────────
   postgres:
-    image: postgres:16-alpine
+    build:
+      context: .
+      dockerfile: postgres.Dockerfile
     container_name: ninja-postgres
     restart: unless-stopped
     # Wrap the official entrypoint: source the bind-mounted env file,
@@ -35,8 +46,7 @@ services:
       - "set -a; . /etc/secrets.env; set +a; exec docker-entrypoint.sh postgres"
     volumes:
       - /amr-ch-01_data/ninja-dashboard/.env:/etc/secrets.env:ro
-      - /amr-ch-01_data/ninja-dashboard/postgres-data:/var/lib/postgresql/data
-      - ./sql/init:/docker-entrypoint-initdb.d:ro
+      - postgres-data:/var/lib/postgresql/data
     # No public port — Metabase and ingest reach Postgres on the
     # internal docker network. For ad-hoc psql:
     #   docker exec -it ninja-postgres psql -U ninja -d ninja
@@ -68,7 +78,7 @@ services:
       MB_DB_PORT: 5432
     volumes:
       - /amr-ch-01_data/ninja-dashboard/.env:/etc/secrets.env:ro
-      - /amr-ch-01_data/ninja-dashboard/metabase-data:/metabase-data
+      - metabase-data:/metabase-data
     ports:
       - "3001:3000"
     depends_on:
@@ -83,10 +93,12 @@ services:
 
   # ───────────────────────────────────────────────────────────────────
   # ingest — Python service, pulls Ninja API on schedule into Postgres
-  # Built from this repo by Portainer on every git push.
+  # Built from ingest.Dockerfile by Portainer on every git push.
   # ───────────────────────────────────────────────────────────────────
   ingest:
-    build: .
+    build:
+      context: .
+      dockerfile: ingest.Dockerfile
     container_name: ninja-ingest
     restart: unless-stopped
     environment:
@@ -104,3 +116,13 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+
+# ── Named volumes ────────────────────────────────────────────────────
+# Auto-managed (NOT external: true). Survives normal stack ops
+# (Portainer "stop", "redeploy", `docker compose down`). Only
+# destroyed by explicit "remove stack WITH volumes" or
+# `docker compose down -v`. Promote to `external: true` once there's
+# real data to protect (see TODO.md).
+volumes:
+  postgres-data:
+  metabase-data:

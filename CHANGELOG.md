@@ -45,6 +45,26 @@ stack definition, database schemas, and supporting docs only.
   `${VAR}` substitution. Host `.env` is the single source of truth;
   no Portainer-side env panel needed. Pg healthcheck rewritten to
   use `$$VAR` shell-time substitution.
+- **Compose env handling rewritten** (the saga's resolution): env
+  vars come from the bind-mounted host `.env` read by each container
+  at startup. Postgres + Metabase use entrypoint wrappers that source
+  `/etc/secrets.env`; ingest uses python-dotenv on `/app/.env`.
+  Sidesteps every Portainer-Repository-mode limitation (no
+  `${VAR}`, no `env_file:` with abs paths, no repo-relative bind
+  mounts at runtime).
+- **Postgres init script baked into custom image** via
+  `postgres.Dockerfile` instead of bind-mounted from `./sql/init`.
+  The bind-mount path was always empty in Portainer Repository mode
+  because Portainer doesn't extract repo files to disk for runtime
+  use — only for build contexts.
+- **Renamed `Dockerfile` → `ingest.Dockerfile`**; postgres now has
+  its own `postgres.Dockerfile`. Both built by Portainer on push.
+- **Switched `postgres-data` and `metabase-data` to auto-managed
+  named volumes** instead of host bind-mounts under
+  `/amr-ch-01_data/ninja-dashboard/`. Eliminates the chown/wipe
+  foot-guns; `docker volume rm` is the unambiguous reset.
+- Postgres healthcheck simplified to bare `pg_isready` (no env
+  needed; docker exec doesn't inherit the entrypoint wrapper's env).
 - `PORTS.md` — host port map + what this stack publishes
   (3001 Metabase on LAN; 8090 ingest on loopback; Postgres internal).
 - `TODO.md`, `SESSIONS.md` per `Development/DEVELOPMENT.md` conventions.

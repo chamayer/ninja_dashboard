@@ -37,7 +37,8 @@ Three containers, one Compose file. `ingest` is built from this repo;
 
 ```
 ├── docker-compose.yml          # 3-service stack
-├── Dockerfile                  # ingest container
+├── ingest.Dockerfile           # ingest container (Python)
+├── postgres.Dockerfile         # postgres:16-alpine + baked init script
 ├── requirements.txt            # pinned Python deps
 ├── .env.example                # template (real .env lives on host)
 ├── ingest/                     # Python package
@@ -151,5 +152,31 @@ scp am-ch-01:/amr-ch-01_data/ninja-dashboard/backups/ninja-*.sql ./test-data/
 
 Push to GitHub. Portainer's stack for this repo rebuilds and
 redeploys on push. Host data and secrets live at
-`/amr-ch-01_data/ninja-dashboard/` (`.env`, `postgres-data/`,
-`metabase-data/`, `backups/`).
+`/amr-ch-01_data/ninja-dashboard/` — at minimum:
+- `.env` (chmod 644, owned by root)
+- `backups/` (`pg_dump` target)
+
+Postgres + Metabase data live in **named docker volumes**
+(`postgres-data`, `metabase-data`) — not host bind-mounts.
+
+### Portainer Repository-mode constraints (read this once)
+
+The constraints below are non-obvious and keep biting people:
+
+- **Repo files exist on disk only during `docker build`**, not at
+  runtime. So `volumes: - ./foo:/bar` (repo-relative bind-mount) does
+  NOT work — the source dir is empty. Anything needed at runtime must
+  either be **baked into the image** (Dockerfile `COPY`) or live under
+  `/amr-ch-01_data/<stack>/` as a host file and be bind-mounted by
+  absolute path.
+- **No `${VAR}` substitution** — Portainer's env-variable panel is
+  not honored in repo mode.
+- **No `env_file:` with absolute host paths** — Portainer's compose
+  process can't see `/amr-ch-01_data/` on its own filesystem.
+- **What works:** absolute-path bind-mounts (daemon resolves them
+  server-side) and `build:` directives (daemon receives a tar of the
+  context).
+
+That's why our compose ships secrets as a bind-mounted `.env` that
+each container reads at startup, and ships the postgres init script
+via a custom Dockerfile.

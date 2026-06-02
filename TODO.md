@@ -67,6 +67,12 @@ _(empty — drop free-form items here)_
 
 ### Ops / hardening
 
+- [ ] Promote `postgres-data` (and possibly `metabase-data`) to
+      `external: true` named volumes once there's real data worth
+      protecting. Today they're auto-managed — survive normal stack
+      ops but get destroyed by explicit "remove stack WITH volumes"
+      or `docker compose down -v`. External requires pre-creating
+      the volumes with `docker volume create` but won't auto-delete.
 - [ ] `backup-db.sh` — nightly `pg_dump` of `ninja` DB to
       `/amr-ch-01_data/ninja-dashboard/backups/`, 14-day retention.
 - [ ] `PROCESS.md` — host setup steps, first deploy, secrets
