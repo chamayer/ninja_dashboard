@@ -2,6 +2,29 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.7.0] — 2026-06-03
+
+### Performance
+
+Patch ingest stops re-walking the entire 376k install history every
+hour. The two patch endpoints now use different strategies:
+
+  - `/queries/os-patch-installs` (events: INSTALLED, FAILED) →
+    INCREMENTAL via `?installedAfter=<unix_seconds>`. High-water
+    mark = MAX(installed_at) currently in patch_facts. First run
+    pulls everything; subsequent runs pull only patches installed
+    since the last seen install.
+  - `/queries/os-patches` (state: PENDING, APPROVED, REJECTED,
+    DELAYED, MANUAL) → FULL PULL each run. State transitions don't
+    always carry a usable timestamp, and the set is small (~50k).
+
+Impact: a normal hourly tick that previously HTTP'd 376k records
+now HTTP's only the handful installed in the last hour, plus the
+~50k state records. Estimate: minutes → seconds per cycle.
+
+SCD-2 hash dedup means re-fetching boundary records (anything
+installed at the same second as our high-water mark) is harmless.
+
 ## [0.6.1] — 2026-06-03
 
 ### Removed

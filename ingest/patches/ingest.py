@@ -1,19 +1,26 @@
 """Patches ingest.
 
-Sources (both paginate_cursor):
-  - GET /v2/queries/os-patch-installs   → INSTALLED, FAILED  (events)
-  - GET /v2/queries/os-patches          → PENDING, APPROVED, REJECTED  (state)
+Two endpoints, two ingest strategies:
+
+  - /v2/queries/os-patch-installs   (INSTALLED, FAILED — EVENTS)
+      Incremental via ?installedAfter=<unix_seconds>. Highest
+      installed_at we've already stored becomes the next request's
+      lower bound. First run pulls everything.
+
+  - /v2/queries/os-patches           (PENDING, APPROVED, REJECTED,
+                                      DELAYED, MANUAL — STATE)
+      Full pull every run. State can change without an event-style
+      timestamp (admin re-approves a REJECTED patch, schedule moves,
+      etc.) and the set isn't huge (~50k records).
 
 Both feed ninja_patches.patch_facts; `status` distinguishes the source.
 
 SCD-2: insert new row on content_hash change, otherwise advance
 last_observed_at on the existing row. content_hash excludes Ninja's
-`timestamp` field (data-collection time) so re-fetches dedupe.
+`timestamp` field so re-fetches dedupe.
 
-Upserts are batched (BATCH_SIZE rows at a time) so the full hundreds
-of thousands of patch rows don't sit in Python memory waiting for a
-single end-of-run upsert. Also means partial progress is committed
-if the container is restarted mid-run.
+Upserts batch every BATCH_SIZE rows so memory stays bounded and
+partial progress is committed if the container is restarted mid-run.
 """
 
 from __future__ import annotations
@@ -40,28 +47,72 @@ def run(client: NinjaClient, snapshot_at: datetime) -> tuple[int, int]:
         total_observed = 0
         total_changed = 0
 
-        for source_path in ("/queries/os-patch-installs", "/queries/os-patches"):
-            batch: list[dict[str, Any]] = []
-            for rec in client.paginate_cursor(source_path):
-                batch.append(_to_row(rec, snapshot_at))
-                total_observed += 1
-                if len(batch) >= _BATCH_SIZE:
-                    total_changed += _flush(batch)
-                    batch.clear()
-            if batch:
-                total_changed += _flush(batch)
+        # ── /queries/os-patch-installs : INCREMENTAL ─────────────
+        last_installed = _get_last_installed_at()
+        installs_params: dict[str, Any] = {}
+        if last_installed is not None:
+            # Unix seconds. Re-fetched boundary records dedupe via
+            # SCD-2 hash, so the exact threshold is safe.
+            installs_params["installedAfter"] = int(last_installed.timestamp())
             log.info(
-                "%s: complete, total observed so far: %d",
-                source_path, total_observed,
+                "os-patch-installs: incremental from %s (installedAfter=%d)",
+                last_installed.isoformat(),
+                installs_params["installedAfter"],
             )
+        else:
+            log.info("os-patch-installs: first run (no high-water mark) — full pull")
+
+        installs_count = 0
+        batch: list[dict[str, Any]] = []
+        for rec in client.paginate_cursor(
+            "/queries/os-patch-installs", params=installs_params,
+        ):
+            batch.append(_to_row(rec, snapshot_at))
+            total_observed += 1
+            installs_count += 1
+            if len(batch) >= _BATCH_SIZE:
+                total_changed += _flush(batch)
+                batch.clear()
+        if batch:
+            total_changed += _flush(batch)
+            batch.clear()
+        log.info("os-patch-installs: %d records pulled", installs_count)
+
+        # ── /queries/os-patches : FULL PULL ───────────────────────
+        # State endpoint — must walk the whole set each run because a
+        # patch's status (PENDING/APPROVED/REJECTED) can flip without
+        # a per-record event timestamp we could filter on.
+        log.info("os-patches (state): full pull")
+        pending_count = 0
+        for rec in client.paginate_cursor("/queries/os-patches"):
+            batch.append(_to_row(rec, snapshot_at))
+            total_observed += 1
+            pending_count += 1
+            if len(batch) >= _BATCH_SIZE:
+                total_changed += _flush(batch)
+                batch.clear()
+        if batch:
+            total_changed += _flush(batch)
+        log.info("os-patches: %d records pulled", pending_count)
 
         stats["rows_inserted"] = total_changed
         stats["rows_upserted"] = total_observed
         log.info(
-            "patch_facts: %d observed, %d inserts/updates",
-            total_observed, total_changed,
+            "patch_facts: %d observed (installs %d + state %d), %d inserts/updates",
+            total_observed, installs_count, pending_count, total_changed,
         )
         return total_changed, total_observed
+
+
+def _get_last_installed_at() -> datetime | None:
+    """Highest installed_at we've ever stored. None on a fresh DB."""
+    with db.transaction() as cur:
+        cur.execute(
+            "SELECT MAX(installed_at) FROM ninja_patches.patch_facts "
+            "WHERE installed_at IS NOT NULL"
+        )
+        row = cur.fetchone()
+        return row[0] if row and row[0] else None
 
 
 def _flush(rows: list[dict[str, Any]]) -> int:
@@ -71,8 +122,6 @@ def _flush(rows: list[dict[str, Any]]) -> int:
             "ninja_patches.patch_facts",
             rows,
             conflict_keys=["device_id", "patch_uid", "content_hash"],
-            # SCD-2: only advance last_observed_at on duplicate hash;
-            # first_observed_at is preserved.
             update_cols=["last_observed_at", "ninja_observed_at", "data"],
         )
 
