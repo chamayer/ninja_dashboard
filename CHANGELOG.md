@@ -2,6 +2,33 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.7.3] — 2026-06-03
+
+### Added
+- **Number cards drill into target dashboards on click.** Previously
+  clicking a scalar tried to "filter for this value" (meaningless on
+  a one-cell display). Now each scalar pre-sets a filter on the
+  target dashboard via a URL link:
+    Overview "Patches Ready" → Detail filtered to APPROVED
+    Overview "Failed" → Detail filtered to FAILED
+    Overview "Manual / Delayed" → Detail filtered to MANUAL
+    Overview "Active Devices" → Detail (no filter — see all)
+    Overview "Patching Active (7d)" → Patch Coverage filtered to active_patching
+    Overview "Patching Stale" → Patch Coverage filtered to stale_patch_data
+    Overview "No Patch Data" → Patch Coverage filtered to no_patch_data
+    Patch Coverage scalars → same dashboard with `pcov_status` pre-set
+
+### Fixed
+- Five stray `ORDER BY n DESC` references that should have been
+  `ORDER BY patches DESC` — leftover from the earlier `AS n` →
+  `AS patches` rename. Caused "column 'n' does not exist" on Patch
+  State Breakdown and the four Detail charts.
+- `COUNT(*) AS needs_attention` had been corrupted to
+  `COUNT(*) AS patcheseeds_attention` by the same blunt replace —
+  fixed back. Operator never saw this fail because the card with
+  the corrupted column returned NULL (which Metabase rendered as
+  "no value").
+
 ## [0.7.2] — 2026-06-03
 
 ### Fixed

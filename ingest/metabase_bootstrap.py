@@ -73,6 +73,9 @@ OVERVIEW_CARDS: list[dict[str, Any]] = [
         "name":       "Active Devices",
         "display":    "scalar",
         "row": 0, "col": 0, "size_x": 6, "size_y": 4,
+        # Click → Detail (no status filter — see all patches for the
+        # active fleet).
+        "click_behavior": {"target": DASH_DETAIL, "preset": {}},
         "query": """
 SELECT COUNT(*) AS active_devices
 FROM ninja_core.v_active_devices
@@ -83,6 +86,7 @@ FROM ninja_core.v_active_devices
         "name":       "Patches Ready to Install",
         "display":    "scalar",
         "row": 0, "col": 6, "size_x": 6, "size_y": 4,
+        "click_behavior": {"target": DASH_DETAIL, "preset": {"status": "APPROVED"}},
         "query": """
 WITH current_state AS (
     SELECT DISTINCT ON (device_id, patch_uid) status
@@ -98,13 +102,16 @@ FROM current_state WHERE status = 'APPROVED'
         "name":       "Manual / Delayed",
         "display":    "scalar",
         "row": 0, "col": 12, "size_x": 6, "size_y": 4,
+        # Status filter on Detail accepts one value; pick MANUAL —
+        # operator can add DELAYED via the dropdown.
+        "click_behavior": {"target": DASH_DETAIL, "preset": {"status": "MANUAL"}},
         "query": """
 WITH current_state AS (
     SELECT DISTINCT ON (device_id, patch_uid) status
     FROM ninja_patches.patch_facts
     ORDER BY device_id, patch_uid, last_observed_at DESC
 )
-SELECT COUNT(*) AS patcheseeds_attention
+SELECT COUNT(*) AS needs_attention
 FROM current_state WHERE status IN ('MANUAL', 'DELAYED')
 """,
     },
@@ -113,6 +120,7 @@ FROM current_state WHERE status IN ('MANUAL', 'DELAYED')
         "name":       "Failed Installs",
         "display":    "scalar",
         "row": 0, "col": 18, "size_x": 6, "size_y": 4,
+        "click_behavior": {"target": DASH_DETAIL, "preset": {"status": "FAILED"}},
         "query": """
 WITH current_state AS (
     SELECT DISTINCT ON (device_id, patch_uid) status
@@ -128,6 +136,10 @@ FROM current_state WHERE status = 'FAILED'
         "name":    "Patching Active (last 7d)",
         "display": "scalar",
         "row": 4, "col": 0, "size_x": 8, "size_y": 4,
+        "click_behavior": {
+            "target": DASH_PCOV,
+            "preset": {"pcov_status": "active_patching"},
+        },
         "query": """
 WITH dps AS (
     SELECT device_id, MAX(last_observed_at) AS last_seen_at
@@ -145,6 +157,10 @@ WHERE d.approval_status = 'APPROVED'
         "name":    "Patching Stale (>7d)",
         "display": "scalar",
         "row": 4, "col": 8, "size_x": 8, "size_y": 4,
+        "click_behavior": {
+            "target": DASH_PCOV,
+            "preset": {"pcov_status": "stale_patch_data"},
+        },
         "query": """
 WITH dps AS (
     SELECT device_id, MAX(last_observed_at) AS last_seen_at
@@ -162,6 +178,10 @@ WHERE d.approval_status = 'APPROVED'
         "name":    "No Patch Data Ever",
         "display": "scalar",
         "row": 4, "col": 16, "size_x": 8, "size_y": 4,
+        "click_behavior": {
+            "target": DASH_PCOV,
+            "preset": {"pcov_status": "no_patch_data"},
+        },
         "query": """
 SELECT COUNT(*) AS no_data
 FROM ninja_core.devices d
@@ -197,7 +217,7 @@ WITH current_state AS (
 SELECT status, COUNT(*) AS patches
 FROM current_state
 GROUP BY status
-ORDER BY n DESC
+ORDER BY patches DESC
 """,
     },
     {
@@ -362,7 +382,40 @@ def _build_param_mapping(params: dict[str, str]) -> dict[str, dict]:
 def _build_click_behavior_json(
     spec: dict, dash_id_by_name: dict[str, int],
 ) -> dict | None:
+    """Two shapes:
+
+    A. preset (for scalar/number cards): URL navigation to a target
+       dashboard with pre-set filter values via query string.
+           spec = {"target": <dash name>, "preset": {<slug>: <value>}}
+       → Metabase click_behavior = {linkType:url, linkTemplate:/dashboard/N?slug=val}
+
+       The dashboard slug must match the target dashboard's parameter
+       slug. For Detail/Drilldown/Coverage that's "status", "org",
+       "pcov_status", etc.
+
+    B. params (for charts/tables with source columns):
+           spec = {"target": "self" OR <dash name>, "params": {<param_id>: <col>}}
+       → crossfilter (self) or dashboard-link with parameterMapping
+       reading values from the result row's columns.
+    """
     target = spec.get("target")
+    preset = spec.get("preset")
+
+    if preset is not None:
+        target_id = dash_id_by_name.get(target)
+        if target_id is None:
+            log.warning("Click behavior: unknown target dashboard %r", target)
+            return None
+        path = f"/dashboard/{target_id}"
+        if preset:
+            qs = "&".join(f"{k}={v}" for k, v in preset.items())
+            path = f"{path}?{qs}"
+        return {
+            "type":         "link",
+            "linkType":     "url",
+            "linkTemplate": path,
+        }
+
     if target == "self":
         return {
             "type":             "crossfilter",
@@ -588,7 +641,7 @@ JOIN ninja_core.organizations o  ON o.id = d.organization_id
 WHERE d.approval_status = 'APPROVED'
 {_FILTER_PREDICATES}
 GROUP BY cs.status
-ORDER BY n DESC
+ORDER BY patches DESC
 """,
     },
     {
@@ -609,7 +662,7 @@ JOIN ninja_core.organizations o  ON o.id = d.organization_id
 WHERE d.approval_status = 'APPROVED'
 {_FILTER_PREDICATES}
 GROUP BY 1
-ORDER BY n DESC
+ORDER BY patches DESC
 """,
     },
     {
@@ -632,7 +685,7 @@ JOIN ninja_core.organizations o  ON o.id = d.organization_id
 WHERE d.approval_status = 'APPROVED'
 {_FILTER_PREDICATES}
 GROUP BY d.system_name
-ORDER BY n DESC
+ORDER BY patches DESC
 LIMIT 15
 """,
     },
@@ -656,7 +709,7 @@ JOIN ninja_core.organizations o  ON o.id = d.organization_id
 WHERE d.approval_status = 'APPROVED'
 {_FILTER_PREDICATES}
 GROUP BY kb_number
-ORDER BY n DESC
+ORDER BY patches DESC
 LIMIT 20
 """,
     },
@@ -1083,6 +1136,11 @@ PCOV_CARDS = [
         "row": 0, "col": 0, "size_x": 6, "size_y": 4,
         "template_tags":  _PCOV_TAGS,
         "param_mappings": _PCOV_PARAM_MAPPINGS,
+        # Click → narrow this dashboard to active_patching devices.
+        "click_behavior": {
+            "target": DASH_PCOV,
+            "preset": {"pcov_status": "active_patching"},
+        },
         "query": f"""
 {_PCOV_CTE}
 SELECT COUNT(*) AS active
@@ -1099,6 +1157,10 @@ WHERE c.patch_status = 'active_patching'
         "row": 0, "col": 6, "size_x": 6, "size_y": 4,
         "template_tags":  _PCOV_TAGS,
         "param_mappings": _PCOV_PARAM_MAPPINGS,
+        "click_behavior": {
+            "target": DASH_PCOV,
+            "preset": {"pcov_status": "stale_patch_data"},
+        },
         "query": f"""
 {_PCOV_CTE}
 SELECT COUNT(*) AS stale
@@ -1115,6 +1177,10 @@ WHERE c.patch_status = 'stale_patch_data'
         "row": 0, "col": 12, "size_x": 6, "size_y": 4,
         "template_tags":  _PCOV_TAGS,
         "param_mappings": _PCOV_PARAM_MAPPINGS,
+        "click_behavior": {
+            "target": DASH_PCOV,
+            "preset": {"pcov_status": "no_patch_data"},
+        },
         "query": f"""
 {_PCOV_CTE}
 SELECT COUNT(*) AS no_data
