@@ -126,6 +126,20 @@ _(empty — drop free-form items here)_
       (separate from any admin script credential). One-time Ninja-side
       setup.
 
+### Parked (revisit later)
+
+- [ ] **Patch age / waiting time surface.** Currently no UI signal for
+      how long a patch has been sitting in MANUAL or DELAYED.
+      Constraint: Ninja API exposes no release date or
+      first-discovered timestamp on patches — confirmed against
+      `NinjaRMM-API-v2_formatted.json` (all 4 patch endpoints return
+      only id, name, severity, status, type, kbNumber, +/- timestamps
+      tied to data collection or install attempt). What we *can* use:
+      `patch_facts.first_observed_at` (= how long in our DB). For real
+      release dates, would need external enrichment via `kbNumber` →
+      MSRC / Microsoft Update Catalog. Park until there's operator
+      demand strong enough to justify the enrichment work.
+
 ### Schema / data
 
 - [ ] Snapshot retention job — drop `device_snapshots` older than 90
