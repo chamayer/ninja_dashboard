@@ -65,8 +65,7 @@ OVERVIEW_CARDS: list[dict[str, Any]] = [
         "row": 0, "col": 0, "size_x": 6, "size_y": 4,
         "query": """
 SELECT COUNT(*) AS active_devices
-FROM ninja_core.devices
-WHERE approval_status = 'APPROVED'
+FROM ninja_core.v_active_devices
 """,
     },
     {
@@ -211,7 +210,7 @@ SELECT
     ) AS pct_installed,
     COUNT(*) AS total_patches
 FROM current_state cs
-JOIN ninja_core.devices d        ON d.id = cs.device_id
+JOIN ninja_core.v_active_devices d ON d.id = cs.device_id
 JOIN ninja_core.organizations o  ON o.id = d.organization_id
 WHERE d.approval_status = 'APPROVED'
 GROUP BY o.name
@@ -246,7 +245,7 @@ SELECT
     COUNT(*)                                                                 AS total_patches,
     COUNT(DISTINCT cs.device_id)                                             AS devices
 FROM current_state cs
-JOIN ninja_core.devices d        ON d.id = cs.device_id
+JOIN ninja_core.v_active_devices d ON d.id = cs.device_id
 JOIN ninja_core.organizations o  ON o.id = d.organization_id
 WHERE d.approval_status = 'APPROVED'
 GROUP BY o.name
@@ -260,23 +259,16 @@ ORDER BY pct_installed ASC, total_patches DESC
         "display":    "table",
         "row": 26, "col": 0, "size_x": 24, "size_y": 8,
         "query": """
-WITH latest_snap AS (
-    SELECT DISTINCT ON (device_id) *
-    FROM ninja_core.device_snapshots
-    ORDER BY device_id, snapshot_at DESC
-)
 SELECT
     d.system_name,
     o.name AS organization,
     d.node_class,
-    ls.last_contact,
-    ls.snapshot_at AS reported_at
-FROM latest_snap ls
-JOIN ninja_core.devices d        ON d.id = ls.device_id
-JOIN ninja_core.organizations o  ON o.id = d.organization_id
-WHERE ls.needs_reboot = TRUE
-  AND d.approval_status = 'APPROVED'
-ORDER BY ls.last_contact DESC
+    d.last_contact,
+    d.last_snapshot_at AS reported_at
+FROM ninja_core.v_active_devices d
+JOIN ninja_core.organizations o ON o.id = d.organization_id
+WHERE d.needs_reboot = TRUE
+ORDER BY d.last_contact DESC
 """,
     },
     {
@@ -447,7 +439,7 @@ DETAIL_CARDS = [
 {_CTE_CURRENT_STATE}
 SELECT cs.status, COUNT(*) AS patches
 FROM current_state cs
-JOIN ninja_core.devices d        ON d.id = cs.device_id
+JOIN ninja_core.v_active_devices d ON d.id = cs.device_id
 JOIN ninja_core.organizations o  ON o.id = d.organization_id
 WHERE d.approval_status = 'APPROVED'
 {_FILTER_PREDICATES}
@@ -467,7 +459,7 @@ ORDER BY n DESC
 {_CTE_CURRENT_STATE}
 SELECT COALESCE(NULLIF(cs.severity, ''), 'NONE') AS severity, COUNT(*) AS patches
 FROM current_state cs
-JOIN ninja_core.devices d        ON d.id = cs.device_id
+JOIN ninja_core.v_active_devices d ON d.id = cs.device_id
 JOIN ninja_core.organizations o  ON o.id = d.organization_id
 WHERE d.approval_status = 'APPROVED'
 {_FILTER_PREDICATES}
@@ -489,7 +481,7 @@ SELECT
     d.system_name AS device,
     COUNT(*) AS patches
 FROM current_state cs
-JOIN ninja_core.devices d        ON d.id = cs.device_id
+JOIN ninja_core.v_active_devices d ON d.id = cs.device_id
 JOIN ninja_core.organizations o  ON o.id = d.organization_id
 WHERE d.approval_status = 'APPROVED'
 {_FILTER_PREDICATES}
@@ -512,7 +504,7 @@ SELECT
     COALESCE(NULLIF(cs.kb_number, ''), '(none)') AS kb_number,
     COUNT(*) AS patches
 FROM current_state cs
-JOIN ninja_core.devices d        ON d.id = cs.device_id
+JOIN ninja_core.v_active_devices d ON d.id = cs.device_id
 JOIN ninja_core.organizations o  ON o.id = d.organization_id
 WHERE d.approval_status = 'APPROVED'
 {_FILTER_PREDICATES}
@@ -534,7 +526,7 @@ SELECT
     DATE_TRUNC('day', pf.installed_at)::date AS day,
     COUNT(*) AS installs
 FROM ninja_patches.patch_facts pf
-JOIN ninja_core.devices d        ON d.id = pf.device_id
+JOIN ninja_core.v_active_devices d ON d.id = pf.device_id
 JOIN ninja_core.organizations o  ON o.id = d.organization_id
 WHERE pf.installed_at IS NOT NULL
   AND pf.installed_at > NOW() - (INTERVAL '1 day' * {{{{days}}}})
@@ -564,7 +556,7 @@ SELECT
     d.node_class,
     COUNT(*)             AS patches
 FROM current_state cs
-JOIN ninja_core.devices d        ON d.id = cs.device_id
+JOIN ninja_core.v_active_devices d ON d.id = cs.device_id
 JOIN ninja_core.organizations o  ON o.id = d.organization_id
 WHERE d.approval_status = 'APPROVED'
 {_FILTER_PREDICATES}
@@ -588,7 +580,7 @@ SELECT
     COUNT(DISTINCT cs.device_id) AS devices,
     COUNT(*)                     AS patches
 FROM current_state cs
-JOIN ninja_core.devices d        ON d.id = cs.device_id
+JOIN ninja_core.v_active_devices d ON d.id = cs.device_id
 JOIN ninja_core.organizations o  ON o.id = d.organization_id
 WHERE d.approval_status = 'APPROVED'
 {_FILTER_PREDICATES}
@@ -619,7 +611,7 @@ SELECT
     END AS days_since_install,
     cs.last_observed_at
 FROM current_state cs
-JOIN ninja_core.devices d        ON d.id = cs.device_id
+JOIN ninja_core.v_active_devices d ON d.id = cs.device_id
 JOIN ninja_core.organizations o  ON o.id = d.organization_id
 WHERE d.approval_status = 'APPROVED'
 {_FILTER_PREDICATES}
@@ -1072,7 +1064,12 @@ ORDER BY pct_active ASC, total DESC
         "template_tags":  _PCOV_TAGS,
         "param_mappings": _PCOV_PARAM_MAPPINGS,
         "query": f"""
-{_PCOV_CTE}
+{_PCOV_CTE},
+latest_contact AS (
+    SELECT DISTINCT ON (device_id) device_id, last_contact
+    FROM ninja_core.device_snapshots
+    ORDER BY device_id, snapshot_at DESC
+)
 SELECT
     c.device_id,
     c.system_name,
@@ -1080,12 +1077,17 @@ SELECT
     c.node_class,
     c.os_name,
     c.patch_status,
-    c.last_seen_at,
+    c.last_seen_at AS patch_last_seen,
+    lc.last_contact,
     CASE WHEN c.last_seen_at IS NULL THEN NULL
          ELSE EXTRACT(DAY FROM (NOW() - c.last_seen_at))::int
-    END AS days_since_seen
+    END AS days_since_patch_seen,
+    CASE WHEN lc.last_contact IS NULL THEN NULL
+         ELSE EXTRACT(DAY FROM (NOW() - lc.last_contact))::int
+    END AS days_since_contact
 FROM classified c
 JOIN ninja_core.organizations o ON o.id = c.organization_id
+LEFT JOIN latest_contact lc ON lc.device_id = c.device_id
 WHERE 1=1
 {_PCOV_FILTERS}
 ORDER BY

@@ -2,6 +2,36 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.4.0] — 2026-06-03
+
+### Added
+- New SQL view `ninja_core.v_active_devices` defined as: approved
+  AND last contact within 30 days. The view exposes the latest
+  device_snapshots fields inline (`last_contact`, `last_boot`,
+  `needs_reboot`, `maintenance_*`, etc.) so downstream queries
+  don't need to re-join the snapshots table.
+- Migration `004_active_devices_view.sql` creates the view on next
+  container start (run by ingest.migrations).
+- Patch Coverage all-devices table gains `last_contact` and
+  `days_since_contact` columns. Combined with `patch_status`,
+  operators can spot devices that are both stale-patching AND
+  hardware-unreachable (decommission candidates) vs stale-patching
+  but contactable (agent / config problem).
+
+### Changed (behavioral)
+- **Overview and Detail dashboards now filter to "active devices"**
+  (the new view's definition). Counts, compliance %, top-N, all-orgs,
+  and the patch detail table all narrow to the active fleet.
+- Drilldown deliberately stays on raw `ninja_core.devices` so you
+  can still investigate inactive / decommissioned devices.
+- Patch Coverage deliberately stays on raw devices so it surfaces
+  the very devices the active-view excludes.
+
+### Process
+- VERSION bumped to 0.4.0 — semantic change to default scope of
+  multiple dashboards is a MINOR bump even though backward-
+  compatible at the SQL level.
+
 ## [0.3.1] — 2026-06-03
 
 ### Added
