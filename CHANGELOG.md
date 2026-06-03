@@ -2,6 +2,16 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.6.1] — 2026-06-03
+
+### Removed
+- `triggered_by_user_id` column from the Device Drilldown's "Recent
+  Activities" card. Ninja's `userId` is internal audit (which API
+  client/service triggered the event), not the device's logged-in
+  user or an MSP technician — no business value. Schema keeps the
+  column to avoid a destructive migration but it's no longer
+  surfaced anywhere. Documented as permanently-parked in TODO.md.
+
 ## [0.6.0] — 2026-06-03
 
 ### Added

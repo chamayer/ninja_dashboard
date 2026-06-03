@@ -927,7 +927,6 @@ SELECT
     a.activity_type        AS event_code,
     a.subject              AS event,
     a.message,
-    a.user_id              AS triggered_by_user_id,
     a.source_name          AS category,
     a.id                   AS activity_id
 FROM ninja_activities.activities a

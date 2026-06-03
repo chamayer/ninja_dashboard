@@ -88,14 +88,19 @@ _(empty — drop free-form items here)_
 - [ ] Export dashboard JSON to repo (`metabase/dashboards/`) for
       version control.
 
+### Permanently parked (do not revisit)
+
+- **Activity `user_id` in dashboards** — Ninja's `userId` on activity
+  records is internal audit (which Ninja API user/service triggered
+  the event), not the device's logged-in user or the MSP technician.
+  No business value. The column stays in the schema because removing
+  it is more disruption than benefit; **do NOT surface it in
+  dashboards, do NOT add a user-name lookup, do NOT bring it up
+  again.**
+
 ### Active priority
 
-- [ ] **Activities ingest fix** — `/v2/activities` returns a
-      `{lastActivityId, activities}` shape (not the cursor model the
-      `/queries/*` endpoints use). Needs a dedicated paginator
-      (probably `?olderThan=<id>` or `?after=<id>` — confirm via
-      probe). Once working, unlocks SYSTEM_REBOOTED events + "what
-      happened around this patch" enrichment for Device Drilldown.
+- [x] **Activities ingest** — done in 0.6.0.
 
 ### Ops / hardening (backlog)
 
