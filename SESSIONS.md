@@ -5,6 +5,53 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-03 — v0.8.0 Org Overview + patching status model
+
+**Done:**
+- Picked up from Claude's dashboard-design conversation and carried the
+  agreed operator model into the Metabase bootstrap:
+  Fleet Overview → Org Overview → Device Drilldown, with Patch Detail
+  kept as the flat filterable work list.
+- Added **Ninja — Org Overview** with org-scoped cards for patch
+  compliance, active Windows devices, not-being-patched count, failed
+  installs, ready/manual queues, patch state, Windows class/OS
+  compliance, top problem patches, and reboot attention.
+- Rewired Fleet Overview org clicks to **Org Overview** instead of
+  sending operators straight to Patch Detail.
+- Added a Device dropdown to Patch Detail and changed Device Drilldown
+  from free-text substring search to exact device selection. Device
+  names are populated from `ninja_core.v_active_devices`.
+- Renamed **Ninja — Patch Coverage** to **Ninja — Patching Status**.
+  Bootstrap now renames the legacy dashboard in place if it already
+  exists, rather than creating a duplicate dashboard.
+- Scoped patch operator dashboards to Windows patching only:
+  `WINDOWS_WORKSTATION` and `WINDOWS_SERVER`.
+- Added migration `005_active_windows_devices_view.sql` so already
+  deployed databases replace `ninja_core.v_active_devices` even if
+  migration `004` was already recorded.
+- Updated `CHANGELOG.md`, `VERSION`, `CONTEXT.md`, and `TODO.md`.
+
+**Validation:**
+- `python -m compileall ingest` passes.
+- Did not run live Metabase bootstrap from this workstation; runtime
+  verification still needs to happen against the deployed Metabase API.
+
+**Decisions confirmed:**
+- "Overview is overview and details is details": Org Overview is not a
+  flat patch list, and Device Drilldown remains a device profile.
+- "Patching Status" is the current name for the former Patch Coverage
+  concept. It is framed as device patching status, not governance and
+  not generic device reporting.
+- Non-Windows devices remain in the database but are out of scope for
+  v1 patch operator dashboards.
+
+**Pending:**
+- Run/re-run Metabase bootstrap after deploy and verify dashboard
+  parameters, click behavior, and exact-device dropdown behavior in
+  the live Metabase UI.
+- If the device dropdown feels slow with the full active fleet, revisit
+  a query-backed or text/autocomplete parameter approach.
+
 ## 2026-06-02 — Project kickoff & design
 
 **Done:**

@@ -72,8 +72,11 @@ _(empty — drop free-form items here)_
 ### Dashboards (after ingest is producing data)
 
 - [ ] Configure Metabase data source: read-only Postgres user.
-- [ ] Overview dashboard: total devices, pending, failed, compliance %,
+- [x] Overview dashboard: total devices, pending, failed, compliance %,
       status donut, by-org bar, by-OS bar, offline > 7d, needs reboot.
+- [x] Org Overview dashboard: org-scoped compliance, active Windows
+      devices, patching status, Windows class/OS breakdown, problem
+      patches, and reboot attention.
 - [ ] Filterable Detail dashboard: patch table + per-org +
       per-device drilldown. Filters include custom-field columns from
       the pivoted views. Per-device drilldown shows activity log

@@ -22,6 +22,10 @@ deployed by Portainer from this git repo.
 The architecture supports additional Ninja domains (tickets, alerts,
 jobs, AV, etc.) as drop-in modules — see `REQUIREMENTS.md` §9.
 
+Dashboard scope is Windows patching only:
+`WINDOWS_WORKSTATION` and `WINDOWS_SERVER`. Non-Windows devices remain
+in `ninja_core.devices` but are excluded from patch operator views.
+
 ## Architecture at a glance
 
 ```

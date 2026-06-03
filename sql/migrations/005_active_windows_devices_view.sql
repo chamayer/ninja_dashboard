@@ -1,13 +1,8 @@
 -- =============================================================================
--- 004_active_devices_view.sql
--- Defines the "active device" view used by Overview / Detail / Drilldown
--- dashboards. Patching Status intentionally bypasses this view because
--- its purpose is to surface devices that AREN'T being managed (including
--- ones that haven't checked in for a long time).
---
--- "Active" = approved Windows workstation/server AND last contact within
--- 30 days. The view exposes the latest device_snapshots fields inline so
--- downstream queries don't need to re-join the snapshots table.
+-- 005_active_windows_devices_view.sql
+-- Tightens ninja_core.v_active_devices to the actual v1 dashboard scope:
+-- Windows patching only. Non-Windows inventory remains in ninja_core.devices
+-- but is excluded from patch operator dashboards.
 -- =============================================================================
 
 CREATE OR REPLACE VIEW ninja_core.v_active_devices AS

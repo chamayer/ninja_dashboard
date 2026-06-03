@@ -2,6 +2,28 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.8.0] — 2026-06-03
+
+### Added
+- New **Ninja — Org Overview** dashboard. Fleet org clicks now drill
+  into this org-scoped overview instead of jumping straight to the
+  flat Patch Detail list.
+- Patch Detail now has a real **Device** dropdown filter populated
+  from active Windows devices.
+
+### Changed
+- Renamed **Ninja — Patch Coverage** to **Ninja — Patching Status**.
+  Bootstrap renames the old dashboard in place when found.
+- Device Drilldown now uses an exact Device dropdown instead of a
+  free-text substring filter.
+- Dashboard scope is now Windows patching only:
+  `WINDOWS_WORKSTATION` and `WINDOWS_SERVER`.
+
+### Database
+- Migration `005_active_windows_devices_view.sql` replaces
+  `ninja_core.v_active_devices` on already-deployed stacks so the
+  Windows-only scope applies even if migration `004` already ran.
+
 ## [0.7.4] — 2026-06-03
 
 ### Changed

@@ -36,6 +36,10 @@ Layout uses Metabase's 24-column grid:
   Row 2 (y=12) : all-orgs compliance table (full 24 cols)
   Row 3 (y=22) : devices-needing-reboot table (full 24 cols)
   Row 4 (y=30) : run-log table (full 24 cols)
+
+The former "Ninja — Patch Coverage" dashboard is now named
+"Ninja — Patching Status"; bootstrap renames the legacy dashboard in
+place when present.
 """
 
 from __future__ import annotations
@@ -60,9 +64,10 @@ COLLECTION_NAME = "Ninja"
 # Dashboard names — defined early so card-spec click_behaviors below
 # can reference them. Don't rename without updating drill targets.
 DASH_OVERVIEW    = "Ninja — Overview"
+DASH_ORG         = "Ninja — Org Overview"
 DASH_DETAIL      = "Ninja — Patch Detail (Filterable)"
 DASH_DRILLDOWN   = "Ninja — Device Drilldown"
-DASH_PCOV        = "Ninja — Patch Coverage"
+DASH_PCOV        = "Ninja — Patching Status"
 
 
 # ── Card specs ──────────────────────────────────────────────────────
@@ -175,7 +180,7 @@ WHERE d.approval_status = 'APPROVED'
     },
     {
         "key":     "ov_pcov_none",
-        "name":    "No Patch Data Ever",
+        "name":    "Fleet Not Being Patched",
         "display": "scalar",
         "row": 4, "col": 16, "size_x": 8, "size_y": 4,
         "click_behavior": {
@@ -229,9 +234,9 @@ ORDER BY patches DESC
             "graph.dimensions": ["organization"],
             "graph.metrics":    ["pct_installed"],
         },
-        # Click an org bar → open Detail filtered to that org.
+        # Click an org bar → open Org Overview filtered to that org.
         "click_behavior": {
-            "target": DASH_DETAIL,
+            "target": DASH_ORG,
             "params": {"p_org": "organization"},
         },
         "query": """
@@ -266,7 +271,7 @@ LIMIT 15
         "row": 16, "col": 0, "size_x": 24, "size_y": 10,
         "column_click_behaviors": {
             "organization": {
-                "target": DASH_DETAIL,
+                "target": DASH_ORG,
                 "params": {"p_org": "organization"},
             },
         },
@@ -307,7 +312,7 @@ ORDER BY pct_installed ASC, total_patches DESC
         "column_click_behaviors": {
             # Meaningful drills
             "system_name":  {"target": DASH_DRILLDOWN, "params": {"p_device": "system_name"}},
-            "organization": {"target": DASH_DETAIL,    "params": {"p_org":    "organization"}},
+            "organization": {"target": DASH_ORG,       "params": {"p_org":    "organization"}},
             "node_class":   {"target": DASH_DETAIL,    "params": {"p_class":  "node_class"}},
             # Inert columns: suppress the default drill menu with a
             # no-op self-link.
@@ -517,19 +522,15 @@ PARAM_SEV     = "p_severity"
 PARAM_OS      = "p_os"
 PARAM_KB      = "p_kb"
 PARAM_DAYS    = "p_days"
+PARAM_DEVICE      = "p_device"
+PARAM_DEVICE_DAYS = "p_device_days"
 
 # Static dropdown options for known small enums. Dynamic ones (orgs, OS
 # names) are populated from the DB in build_detail_parameters().
 _STATUS_OPTIONS = [
     "INSTALLED", "FAILED", "APPROVED", "PENDING", "REJECTED", "DELAYED", "MANUAL",
 ]
-_NODE_CLASS_OPTIONS = [
-    "WINDOWS_WORKSTATION", "WINDOWS_SERVER",
-    "MAC", "MAC_SERVER",
-    "LINUX_WORKSTATION", "LINUX_SERVER",
-    "NMS_SWITCH", "NMS_ROUTER", "NMS_FIREWALL", "NMS_PRINTER", "NMS_OTHER",
-    "VMWARE_VM_HOST", "VMWARE_VM_GUEST", "HYPERV_VMM_HOST", "HYPERV_VMM_GUEST",
-]
+_NODE_CLASS_OPTIONS = ["WINDOWS_WORKSTATION", "WINDOWS_SERVER"]
 _SEVERITY_OPTIONS = ["CRITICAL", "IMPORTANT", "OPTIONAL", "MODERATE", "LOW", "NONE"]
 
 
@@ -562,7 +563,9 @@ def _param_text(pid: str, name: str, slug: str) -> dict:
     }
 
 
-def build_detail_parameters(org_names: list[str], os_names: list[str]) -> list[dict]:
+def build_detail_parameters(
+    org_names: list[str], os_names: list[str], device_names: list[str],
+) -> list[dict]:
     """Construct the dashboard's parameter widgets. Dropdown values for
     Org and OS are populated from live data; Status/NodeClass/Severity
     use built-in enums; KB is a free-text search.
@@ -572,6 +575,7 @@ def build_detail_parameters(org_names: list[str], os_names: list[str]) -> list[d
     Operator picks WINDOWS_SERVER etc. from the dropdown when ready."""
     return [
         _param_dropdown(PARAM_ORG,    "Organization", "org",        org_names),
+        _param_dropdown(PARAM_DEVICE, "Device",       "device",     device_names),
         _param_dropdown(PARAM_STATUS, "Status",       "status",     _STATUS_OPTIONS),
         _param_dropdown(PARAM_CLASS,  "Node Class",   "node_class", _NODE_CLASS_OPTIONS,
                         default="WINDOWS_WORKSTATION"),
@@ -591,6 +595,7 @@ _FILTER_TAGS = {
     "severity":   {"id": "tt_severity",   "name": "severity",   "display-name": "Severity",     "type": "text"},
     "os":         {"id": "tt_os",         "name": "os",         "display-name": "OS Name",      "type": "text"},
     "kb":         {"id": "tt_kb",         "name": "kb",         "display-name": "KB Number",    "type": "text"},
+    "device":     {"id": "tt_device",     "name": "device",     "display-name": "Device",       "type": "text"},
 }
 
 # Timeline-only template tag (only the install-timeline card maps the
@@ -610,6 +615,7 @@ _FILTER_PARAM_MAPPINGS = {
     PARAM_SEV:    ["variable", ["template-tag", "severity"]],
     PARAM_OS:     ["variable", ["template-tag", "os"]],
     PARAM_KB:     ["variable", ["template-tag", "kb"]],
+    PARAM_DEVICE: ["variable", ["template-tag", "device"]],
 }
 
 _TIMELINE_PARAM_MAPPINGS = {
@@ -635,6 +641,7 @@ _FILTER_PREDICATES = """
   [[AND cs.severity = {{severity}}]]
   [[AND d.os_name = {{os}}]]
   [[AND cs.kb_number = {{kb}}]]
+  [[AND d.system_name = {{device}}]]
 """
 
 DETAIL_CARDS = [
@@ -758,6 +765,7 @@ WHERE pf.installed_at IS NOT NULL
   [[AND pf.severity = {{{{severity}}}}]]
   [[AND d.os_name = {{{{os}}}}]]
   [[AND pf.kb_number = {{{{kb}}}}]]
+  [[AND d.system_name = {{{{device}}}}]]
 GROUP BY 1
 ORDER BY 1
 """,
@@ -861,13 +869,8 @@ LIMIT 1000
 
 # ── Device Drilldown dashboard ──────────────────────────────────────
 #
-# Per-device deep dive. Filter is a free-text device name (matches
-# system_name / display_name / dns_name case-insensitively, contains).
-# Type a substring like "CL-35" or "DESKTOP-B1" to pull the device's
-# full history.
-
-PARAM_DEVICE      = "p_device"
-PARAM_DEVICE_DAYS = "p_device_days"
+# Per-device deep dive. Filter is an exact device name selected from
+# the active Windows fleet.
 
 DEVICE_TAGS = {
     "device": {"id": "tt_device", "name": "device", "display-name": "Device", "type": "text"},
@@ -891,14 +894,14 @@ DEVICE_TIMELINE_PARAM_MAPPINGS = {
     PARAM_DEVICE_DAYS: ["variable", ["template-tag", "days"]],
 }
 
-_DEVICE_FILTER = "[[AND (d.system_name ILIKE '%' || {{device}} || '%' OR d.display_name ILIKE '%' || {{device}} || '%' OR d.dns_name ILIKE '%' || {{device}} || '%')]]"
+_DEVICE_FILTER = "[[AND d.system_name = {{device}}]]"
 
 
-def build_device_parameters() -> list[dict]:
-    """Device search + timeline window."""
+def build_device_parameters(device_names: list[str]) -> list[dict]:
+    """Device selector + timeline window."""
     return [
-        _param_text(  PARAM_DEVICE,      "Device (name/substring)", "device"),
-        _param_number(PARAM_DEVICE_DAYS, "Timeline window (days)",  "device_days", 180),
+        _param_dropdown(PARAM_DEVICE,      "Device", "device", device_names),
+        _param_number(  PARAM_DEVICE_DAYS, "Timeline window (days)", "device_days", 180),
     ]
 
 
@@ -982,7 +985,7 @@ JOIN ninja_core.devices d ON d.id = pf.device_id
 WHERE pf.installed_at IS NOT NULL
   AND pf.installed_at > NOW() - (INTERVAL '1 day' * {{{{days}}}})
   AND d.approval_status = 'APPROVED'
-  {_DEVICE_FILTER.replace('{{device}}', '{{{{device}}}}')}
+{_DEVICE_FILTER}
 GROUP BY 1
 ORDER BY 1
 """,
@@ -1051,7 +1054,7 @@ LIMIT 5000
 ]
 
 
-# ── Patch Coverage dashboard ────────────────────────────────────────
+# ── Patching Status dashboard ───────────────────────────────────────
 #
 # Ninja's API doesn't return a "patch management enabled" flag on
 # devices, so we infer status from observed patch_facts activity:
@@ -1139,6 +1142,7 @@ classified AS (
     FROM ninja_core.devices d
     LEFT JOIN device_patch_signal dps ON dps.device_id = d.id
     WHERE d.approval_status = 'APPROVED'
+      AND d.node_class IN ('WINDOWS_WORKSTATION', 'WINDOWS_SERVER')
 )
 """
 
@@ -1193,7 +1197,7 @@ WHERE c.patch_status = 'stale_patch_data'
     },
     {
         "key":     "pcov_none",
-        "name":    "No Patch Data Ever",
+        "name":    "Patching Status: Not Being Patched",
         "display": "scalar",
         "row": 0, "col": 12, "size_x": 6, "size_y": 4,
         "template_tags":  _PCOV_TAGS,
@@ -1229,7 +1233,7 @@ WHERE 1=1
     },
     {
         "key":     "pcov_status_pie",
-        "name":    "Patch Coverage Breakdown (by status)",
+        "name":    "Patching Status Breakdown",
         "display": "pie",
         "row": 4, "col": 0, "size_x": 8, "size_y": 8,
         "click_behavior": {"target": "self", "params": {"p_pcov_status": "patch_status"}},
@@ -1255,7 +1259,7 @@ ORDER BY devices DESC
     },
     {
         "key":     "pcov_class_pie",
-        "name":    "Coverage by Node Class",
+        "name":    "Patching Status by Node Class",
         "display": "pie",
         "row": 4, "col": 8, "size_x": 8, "size_y": 8,
         "click_behavior": {"target": "self", "params": {"p_pcov_class": "node_class"}},
@@ -1281,7 +1285,7 @@ ORDER BY devices DESC
     },
     {
         "key":     "pcov_os_stacked",
-        "name":    "Patch Coverage by OS (top 20)",
+        "name":    "Patching Status by OS (top 20)",
         "display": "bar",
         "row": 4, "col": 16, "size_x": 8, "size_y": 8,
         "click_behavior": {"target": "self", "params": {"p_pcov_os": "os_name"}},
@@ -1311,7 +1315,7 @@ LIMIT 20
     },
     {
         "key":     "pcov_by_org",
-        "name":    "Coverage by Organization",
+        "name":    "Patching Status by Organization",
         "display": "table",
         "row": 12, "col": 0, "size_x": 24, "size_y": 8,
         "column_click_behaviors": {
@@ -1393,8 +1397,311 @@ ORDER BY
 ]
 
 
-def build_dashboards(org_names: list[str], os_names: list[str]) -> list[dict]:
-    """All dashboards this script provisions. Detail / Patch Coverage
+# ── Org Overview dashboard ──────────────────────────────────────────
+
+_ORG_TAGS = {
+    "org": {"id": "tt_org_overview_org", "name": "org", "display-name": "Organization", "type": "text"},
+}
+
+_ORG_PARAM_MAPPINGS = {
+    PARAM_ORG: ["variable", ["template-tag", "org"]],
+}
+
+
+def build_org_parameters(org_names: list[str]) -> list[dict]:
+    return [
+        _param_dropdown(PARAM_ORG, "Organization", "org", org_names),
+    ]
+
+
+ORG_OVERVIEW_CARDS = [
+    {
+        "key":     "org_compliance",
+        "name":    "Org Patch Compliance",
+        "display": "scalar",
+        "row": 0, "col": 0, "size_x": 6, "size_y": 4,
+        "template_tags":  _ORG_TAGS,
+        "param_mappings": _ORG_PARAM_MAPPINGS,
+        "query": """
+WITH current_state AS (
+    SELECT DISTINCT ON (device_id, patch_uid) device_id, patch_uid, status
+    FROM ninja_patches.patch_facts
+    ORDER BY device_id, patch_uid, last_observed_at DESC
+)
+SELECT ROUND(
+    COUNT(*) FILTER (WHERE cs.status = 'INSTALLED') * 100.0
+    / NULLIF(COUNT(*), 0),
+    1
+) AS pct_installed
+FROM current_state cs
+JOIN ninja_core.v_active_devices d ON d.id = cs.device_id
+JOIN ninja_core.organizations o ON o.id = d.organization_id
+WHERE d.approval_status = 'APPROVED'
+  [[AND o.name = {{org}}]]
+""",
+    },
+    {
+        "key":     "org_active_devices",
+        "name":    "Org Active Windows Devices",
+        "display": "scalar",
+        "row": 0, "col": 6, "size_x": 6, "size_y": 4,
+        "template_tags":  _ORG_TAGS,
+        "param_mappings": _ORG_PARAM_MAPPINGS,
+        "query": """
+SELECT COUNT(*) AS active_devices
+FROM ninja_core.v_active_devices d
+JOIN ninja_core.organizations o ON o.id = d.organization_id
+WHERE 1=1
+  [[AND o.name = {{org}}]]
+""",
+    },
+    {
+        "key":     "org_not_patching",
+        "name":    "Org Not Being Patched",
+        "display": "scalar",
+        "row": 0, "col": 12, "size_x": 6, "size_y": 4,
+        "template_tags":  _ORG_TAGS,
+        "param_mappings": _ORG_PARAM_MAPPINGS,
+        "click_behavior": {"target": DASH_PCOV, "params": {"p_pcov_org": "organization"}},
+        "query": """
+SELECT o.name AS organization, COUNT(*) AS devices
+FROM ninja_core.devices d
+JOIN ninja_core.organizations o ON o.id = d.organization_id
+LEFT JOIN ninja_patches.patch_facts pf ON pf.device_id = d.id
+WHERE d.approval_status = 'APPROVED'
+  AND d.node_class IN ('WINDOWS_WORKSTATION', 'WINDOWS_SERVER')
+  AND pf.device_id IS NULL
+  [[AND o.name = {{org}}]]
+GROUP BY o.name
+""",
+    },
+    {
+        "key":     "org_failed",
+        "name":    "Org Failed Installs",
+        "display": "scalar",
+        "row": 0, "col": 18, "size_x": 6, "size_y": 4,
+        "template_tags":  _ORG_TAGS,
+        "param_mappings": _ORG_PARAM_MAPPINGS,
+        "click_behavior": {"target": DASH_DETAIL, "params": {"p_org": "organization"}},
+        "query": """
+WITH current_state AS (
+    SELECT DISTINCT ON (device_id, patch_uid) device_id, patch_uid, status
+    FROM ninja_patches.patch_facts
+    ORDER BY device_id, patch_uid, last_observed_at DESC
+)
+SELECT o.name AS organization, COUNT(*) AS failed
+FROM current_state cs
+JOIN ninja_core.v_active_devices d ON d.id = cs.device_id
+JOIN ninja_core.organizations o ON o.id = d.organization_id
+WHERE cs.status = 'FAILED'
+  [[AND o.name = {{org}}]]
+GROUP BY o.name
+""",
+    },
+    {
+        "key":     "org_ready",
+        "name":    "Org Patches Ready",
+        "display": "scalar",
+        "row": 4, "col": 0, "size_x": 8, "size_y": 4,
+        "template_tags":  _ORG_TAGS,
+        "param_mappings": _ORG_PARAM_MAPPINGS,
+        "click_behavior": {"target": DASH_DETAIL, "params": {"p_org": "organization"}},
+        "query": """
+WITH current_state AS (
+    SELECT DISTINCT ON (device_id, patch_uid) device_id, patch_uid, status
+    FROM ninja_patches.patch_facts
+    ORDER BY device_id, patch_uid, last_observed_at DESC
+)
+SELECT o.name AS organization, COUNT(*) AS approved_queued
+FROM current_state cs
+JOIN ninja_core.v_active_devices d ON d.id = cs.device_id
+JOIN ninja_core.organizations o ON o.id = d.organization_id
+WHERE cs.status = 'APPROVED'
+  [[AND o.name = {{org}}]]
+GROUP BY o.name
+""",
+    },
+    {
+        "key":     "org_manual",
+        "name":    "Org Manual / Delayed",
+        "display": "scalar",
+        "row": 4, "col": 8, "size_x": 8, "size_y": 4,
+        "template_tags":  _ORG_TAGS,
+        "param_mappings": _ORG_PARAM_MAPPINGS,
+        "click_behavior": {"target": DASH_DETAIL, "params": {"p_org": "organization"}},
+        "query": """
+WITH current_state AS (
+    SELECT DISTINCT ON (device_id, patch_uid) device_id, patch_uid, status
+    FROM ninja_patches.patch_facts
+    ORDER BY device_id, patch_uid, last_observed_at DESC
+)
+SELECT o.name AS organization, COUNT(*) AS needs_attention
+FROM current_state cs
+JOIN ninja_core.v_active_devices d ON d.id = cs.device_id
+JOIN ninja_core.organizations o ON o.id = d.organization_id
+WHERE cs.status IN ('MANUAL', 'DELAYED')
+  [[AND o.name = {{org}}]]
+GROUP BY o.name
+""",
+    },
+    {
+        "key":     "org_patch_state",
+        "name":    "Org Patch State Breakdown",
+        "display": "pie",
+        "row": 8, "col": 0, "size_x": 8, "size_y": 8,
+        "viz_settings": {
+            "pie.dimension": "status",
+            "pie.metric": "patches",
+            "pie.slice_threshold": 0,
+            "pie.show_legend": True,
+            "pie.show_total": True,
+        },
+        "template_tags":  _ORG_TAGS,
+        "param_mappings": _ORG_PARAM_MAPPINGS,
+        "click_behavior": {"target": DASH_DETAIL, "params": {"p_org": "organization", "p_status": "status"}},
+        "query": """
+WITH current_state AS (
+    SELECT DISTINCT ON (device_id, patch_uid) device_id, patch_uid, status
+    FROM ninja_patches.patch_facts
+    ORDER BY device_id, patch_uid, last_observed_at DESC
+)
+SELECT o.name AS organization, cs.status, COUNT(*) AS patches
+FROM current_state cs
+JOIN ninja_core.v_active_devices d ON d.id = cs.device_id
+JOIN ninja_core.organizations o ON o.id = d.organization_id
+WHERE 1=1
+  [[AND o.name = {{org}}]]
+GROUP BY o.name, cs.status
+ORDER BY patches DESC
+""",
+    },
+    {
+        "key":     "org_class_compliance",
+        "name":    "Org Compliance by Windows Class",
+        "display": "bar",
+        "row": 8, "col": 8, "size_x": 8, "size_y": 8,
+        "viz_settings": {"graph.dimensions": ["node_class"], "graph.metrics": ["pct_installed"]},
+        "template_tags":  _ORG_TAGS,
+        "param_mappings": _ORG_PARAM_MAPPINGS,
+        "click_behavior": {"target": DASH_DETAIL, "params": {"p_org": "organization", "p_class": "node_class"}},
+        "query": """
+WITH current_state AS (
+    SELECT DISTINCT ON (device_id, patch_uid) device_id, patch_uid, status
+    FROM ninja_patches.patch_facts
+    ORDER BY device_id, patch_uid, last_observed_at DESC
+)
+SELECT
+    o.name AS organization,
+    d.node_class,
+    ROUND(COUNT(*) FILTER (WHERE cs.status = 'INSTALLED') * 100.0 / NULLIF(COUNT(*), 0), 1) AS pct_installed
+FROM current_state cs
+JOIN ninja_core.v_active_devices d ON d.id = cs.device_id
+JOIN ninja_core.organizations o ON o.id = d.organization_id
+WHERE 1=1
+  [[AND o.name = {{org}}]]
+GROUP BY o.name, d.node_class
+ORDER BY pct_installed ASC
+""",
+    },
+    {
+        "key":     "org_os_compliance",
+        "name":    "Org Compliance by OS",
+        "display": "bar",
+        "row": 8, "col": 16, "size_x": 8, "size_y": 8,
+        "viz_settings": {"graph.dimensions": ["os_name"], "graph.metrics": ["pct_installed"]},
+        "template_tags":  _ORG_TAGS,
+        "param_mappings": _ORG_PARAM_MAPPINGS,
+        "click_behavior": {"target": DASH_DETAIL, "params": {"p_org": "organization", "p_os": "os_name"}},
+        "query": """
+WITH current_state AS (
+    SELECT DISTINCT ON (device_id, patch_uid) device_id, patch_uid, status
+    FROM ninja_patches.patch_facts
+    ORDER BY device_id, patch_uid, last_observed_at DESC
+)
+SELECT
+    o.name AS organization,
+    COALESCE(NULLIF(d.os_name, ''), '(unknown)') AS os_name,
+    ROUND(COUNT(*) FILTER (WHERE cs.status = 'INSTALLED') * 100.0 / NULLIF(COUNT(*), 0), 1) AS pct_installed
+FROM current_state cs
+JOIN ninja_core.v_active_devices d ON d.id = cs.device_id
+JOIN ninja_core.organizations o ON o.id = d.organization_id
+WHERE 1=1
+  [[AND o.name = {{org}}]]
+GROUP BY o.name, 2
+ORDER BY pct_installed ASC
+LIMIT 20
+""",
+    },
+    {
+        "key":     "org_problem_patches",
+        "name":    "Org Top Problem Patches",
+        "display": "table",
+        "row": 16, "col": 0, "size_x": 12, "size_y": 10,
+        "template_tags":  _ORG_TAGS,
+        "param_mappings": _ORG_PARAM_MAPPINGS,
+        "column_click_behaviors": {
+            "kb_number": {"target": DASH_DETAIL, "params": {"p_org": "organization", "p_kb": "kb_number"}},
+            "severity":  {"target": DASH_DETAIL, "params": {"p_org": "organization", "p_severity": "severity"}},
+        },
+        "query": """
+WITH current_state AS (
+    SELECT DISTINCT ON (device_id, patch_uid)
+        device_id, patch_uid, status, severity, kb_number, name AS patch_name
+    FROM ninja_patches.patch_facts
+    ORDER BY device_id, patch_uid, last_observed_at DESC
+)
+SELECT
+    o.name AS organization,
+    COALESCE(NULLIF(cs.kb_number, ''), '(none)') AS kb_number,
+    cs.patch_name,
+    cs.severity,
+    COUNT(DISTINCT cs.device_id) AS devices_affected,
+    COUNT(*) FILTER (WHERE cs.status = 'FAILED') AS failed,
+    COUNT(*) FILTER (WHERE cs.status IN ('MANUAL','DELAYED','APPROVED')) AS queued
+FROM current_state cs
+JOIN ninja_core.v_active_devices d ON d.id = cs.device_id
+JOIN ninja_core.organizations o ON o.id = d.organization_id
+WHERE cs.status IN ('FAILED', 'MANUAL', 'DELAYED', 'APPROVED')
+  [[AND o.name = {{org}}]]
+GROUP BY o.name, 2, cs.patch_name, cs.severity
+ORDER BY failed DESC, queued DESC, devices_affected DESC
+LIMIT 20
+""",
+    },
+    {
+        "key":     "org_reboot_devices",
+        "name":    "Org Devices Needing Reboot",
+        "display": "table",
+        "row": 16, "col": 12, "size_x": 12, "size_y": 10,
+        "template_tags":  _ORG_TAGS,
+        "param_mappings": _ORG_PARAM_MAPPINGS,
+        "column_click_behaviors": {
+            "system_name":  {"target": DASH_DRILLDOWN, "params": {"p_device": "system_name"}},
+            "organization": {"target": "self", "params": {"p_org": "organization"}},
+            "node_class":   {"target": DASH_DETAIL, "params": {"p_org": "organization", "p_class": "node_class"}},
+            "last_contact": {"target": "self", "preset": {}},
+        },
+        "query": """
+SELECT
+    d.system_name,
+    o.name AS organization,
+    d.node_class,
+    d.os_name,
+    d.last_contact
+FROM ninja_core.v_active_devices d
+JOIN ninja_core.organizations o ON o.id = d.organization_id
+WHERE d.needs_reboot = TRUE
+  [[AND o.name = {{org}}]]
+ORDER BY d.last_contact DESC
+""",
+    },
+]
+
+
+def build_dashboards(
+    org_names: list[str], os_names: list[str], device_names: list[str],
+) -> list[dict]:
+    """All dashboards this script provisions. Detail / Patching Status
     dropdowns are populated from the live data passed in."""
     return [
         {
@@ -1403,38 +1710,51 @@ def build_dashboards(org_names: list[str], os_names: list[str]) -> list[dict]:
             "cards":      OVERVIEW_CARDS,
         },
         {
+            "name":       DASH_ORG,
+            "parameters": build_org_parameters(org_names),
+            "cards":      ORG_OVERVIEW_CARDS,
+        },
+        {
             "name":       "Ninja — Patch Detail (Filterable)",
-            "parameters": build_detail_parameters(org_names, os_names),
+            "parameters": build_detail_parameters(org_names, os_names, device_names),
             "cards":      DETAIL_CARDS,
         },
         {
             "name":       "Ninja — Device Drilldown",
-            "parameters": build_device_parameters(),
+            "parameters": build_device_parameters(device_names),
             "cards":      DEVICE_CARDS,
         },
         {
-            "name":       "Ninja — Patch Coverage",
+            "name":       DASH_PCOV,
             "parameters": build_pcov_parameters(org_names, os_names),
             "cards":      PCOV_CARDS,
         },
     ]
 
 
-def _fetch_dropdown_sources() -> tuple[list[str], list[str]]:
-    """Query Postgres for the current orgs and distinct OS names.
-    Returns (org_names, os_names), each sorted alphabetically."""
+def _fetch_dropdown_sources() -> tuple[list[str], list[str], list[str]]:
+    """Query Postgres for current orgs, OS names, and active devices."""
     db.init(settings.postgres_dsn)
     with db.transaction() as cur:
         cur.execute("SELECT name FROM ninja_core.organizations ORDER BY name")
         org_names = [r[0] for r in cur.fetchall() if r[0]]
         cur.execute(
-            "SELECT DISTINCT os_name FROM ninja_core.devices "
+            "SELECT DISTINCT os_name FROM ninja_core.v_active_devices "
             "WHERE os_name IS NOT NULL AND os_name <> '' "
             "ORDER BY os_name"
         )
         os_names = [r[0] for r in cur.fetchall() if r[0]]
-    log.info("Dropdown sources: %d orgs, %d OS names", len(org_names), len(os_names))
-    return org_names, os_names
+        cur.execute(
+            "SELECT system_name FROM ninja_core.v_active_devices "
+            "WHERE system_name IS NOT NULL AND system_name <> '' "
+            "ORDER BY system_name"
+        )
+        device_names = [r[0] for r in cur.fetchall() if r[0]]
+    log.info(
+        "Dropdown sources: %d orgs, %d OS names, %d devices",
+        len(org_names), len(os_names), len(device_names),
+    )
+    return org_names, os_names, device_names
 
 
 # ── HTTP helpers ────────────────────────────────────────────────────
@@ -1525,8 +1845,12 @@ def _upsert_dashboard(
     r = client.get("/api/dashboard")
     r.raise_for_status()
     existing = None
+    legacy_names = {
+        DASH_PCOV: ["Ninja — Patch Coverage"],
+    }
     for d in r.json():
-        if d.get("name") == name and d.get("collection_id") == collection_id:
+        names = [name, *legacy_names.get(name, [])]
+        if d.get("name") in names and d.get("collection_id") == collection_id:
             existing = d
             break
 
@@ -1542,6 +1866,12 @@ def _upsert_dashboard(
         r.raise_for_status()
         dash = r.json()
         log.info("Using existing dashboard: %s (id=%s)", name, dash["id"])
+
+        if dash.get("name") != name:
+            r = client.put(f"/api/dashboard/{dash['id']}", json={"name": name})
+            r.raise_for_status()
+            dash = r.json()
+            log.info("Renamed dashboard to: %s (id=%s)", name, dash["id"])
 
     if parameters is not None:
         # Update parameters (dashboard-level filter widgets).
@@ -1632,8 +1962,8 @@ def run_bootstrap(
       2. Once all dashboard IDs are known, apply click_behavior
          (cross-dashboard drill-through and crossfilter).
     Raises on auth / API errors."""
-    org_names, os_names = _fetch_dropdown_sources()
-    dashboards = build_dashboards(org_names, os_names)
+    org_names, os_names, device_names = _fetch_dropdown_sources()
+    dashboards = build_dashboards(org_names, os_names, device_names)
 
     urls: list[str] = []
     dash_id_by_name: dict[str, int] = {}
