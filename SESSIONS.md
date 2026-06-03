@@ -5,6 +5,49 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-03 — v0.11.0 nav bar + terminology consolidation
+
+**Done:**
+- Added a cross-dashboard nav bar (Metabase virtual text dashcard)
+  to all 6 dashboards. Bolds the current dashboard, links to the
+  rest. Implemented via `card_id: null` + `visualization_settings.
+  virtual_card` and a new `_build_nav_markdown` helper.
+- Restructured `run_bootstrap` into 3 passes so dashboard layouts
+  (which now need the nav bar to resolve sibling dashboard URLs)
+  run after all dashboard IDs are collected.
+- `_set_dashboard_layout` gained an optional `nav_markdown`
+  parameter that prepends the nav and shifts other cards down by
+  `NAV_HEIGHT` — keeps card specs free of layout offset math.
+- Terminology pass per operator review:
+  - Patch state pie cards (lived on 4 dashboards) renamed from
+    "Patching Status" to "Current Patch State" to free up "Patching
+    Status" for the PCOV concept exclusively.
+  - PCOV "Patch Activity" column/filter/cards renamed to "Patching
+    Status" so dashboard name and contents agree.
+  - Device-state triple is now unambiguously about devices:
+    "Patching Devices / Stalled Devices / Never-Patched Devices"
+    (replaces "Recent Patch Activity / Stale Patching / Never
+    Patched"). The old labels read as patch states, not device
+    states.
+  - Fleet Overview's lumped "Manual / Delayed" scalar split into two
+    scalars matching Command Center and Org Overview.
+  - "Delayed Install" → "Delayed Patches"; "Approved Windows
+    Devices" → "Active Devices".
+
+**Validation:**
+- `python -m py_compile ingest/metabase_bootstrap.py` passes.
+- Spot-checked all card "name" lines — no remaining "Stale Patching",
+  "Never Patched" (bare), or "Recent Patch Activity" labels;
+  DASH_PCOV value still intact.
+
+**Honest caveat:**
+- This is the first time virtual text dashcards have been provisioned
+  via API in this codebase. The JSON shape (`card_id: null` +
+  `visualization_settings.virtual_card`) comes from Metabase API
+  docs and is consistent with public references, but it's untested
+  on the live Metabase here. If the layout PUT 4xx's on first
+  bootstrap after redeploy, that's where to look first.
+
 ## 2026-06-03 — v0.10.2 Command Center org click fix
 
 **Done:**

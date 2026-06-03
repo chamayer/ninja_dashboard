@@ -2,6 +2,49 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.11.0] — 2026-06-03
+
+### Added
+- **Cross-dashboard nav bar.** Every dashboard now opens with a
+  one-row markdown panel linking to the other dashboards in the set
+  (Command Center · Fleet Overview · Org Overview · Patching Status ·
+  Patch Detail · Device Drilldown). The current dashboard is bolded
+  without a link. Implemented via Metabase virtual text dashcards
+  (`card_id: null` + `visualization_settings.virtual_card`).
+- Fleet Overview now splits the lumped **Manual / Delayed** scalar
+  into **Manual Approval** and **Delayed Patches** (consistent with
+  Command Center and Org Overview). Row 0 reflowed to 5 scalars
+  (Active Devices · Approved Patches · Manual Approval · Delayed
+  Patches · Failed Patches).
+
+### Changed
+- Terminology pass for consistency across all 6 dashboards:
+  - **Patching Status** (overloaded as both a dashboard name and a
+    card title for the patch_facts.status pie) → the pie card title
+    is now **Current Patch State** everywhere. The PCOV dashboard
+    keeps "Patching Status" as the dashboard concept.
+  - **Patch Activity** (PCOV dashboard column + filter + card
+    titles) → **Patching Status**. Card titles are now "Patching
+    Status by Device Type / OS / Organization".
+  - Device-state triple uses unambiguous device-focused labels:
+    **Patching Devices / Stalled Devices / Never-Patched Devices**
+    (previously "Recent Patch Activity / Stale Patching / Never
+    Patched" — which read as patch states, not device states).
+  - **Delayed Install** → **Delayed Patches** (parallels Approved /
+    Failed / Manual).
+  - **Approved Windows Devices** (Patching Status total) → **Active
+    Devices** (consistent with Fleet and Org).
+  - SQL aliases, viz dimension references, dropdown values, and
+    click-behavior column keys all renamed in lockstep so dashboards
+    keep working.
+- `_set_dashboard_layout` now accepts an optional `nav_markdown` and
+  shifts every card down by `NAV_HEIGHT` rows when present. Card
+  specs keep their natural row numbers (0, 4, 8…) — the helper
+  inserts the offset.
+- `run_bootstrap` restructured into three passes: cards+dashboards
+  first, then layouts (with nav bar) once all dashboard IDs are
+  known, then click behaviors.
+
 ## [0.10.2] — 2026-06-03
 
 ### Fixed

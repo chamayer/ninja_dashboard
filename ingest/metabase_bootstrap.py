@@ -80,9 +80,9 @@ END
 
 PATCH_ACTIVITY_LABEL_SQL = """
 CASE {expr}
-    WHEN 'active_patching' THEN 'Recent Patch Activity'
-    WHEN 'stale_patch_data' THEN 'Stale Patching'
-    WHEN 'no_patch_data' THEN 'Never Patched'
+    WHEN 'active_patching' THEN 'Patching Devices'
+    WHEN 'stale_patch_data' THEN 'Stalled Devices'
+    WHEN 'no_patch_data' THEN 'Never-Patched Devices'
     ELSE 'Unknown'
 END
 """
@@ -182,7 +182,7 @@ WHERE status = 'FAILED'
     },
     {
         "key":     "cmd_delayed",
-        "name":    "Delayed Install",
+        "name":    "Delayed Patches",
         "display": "scalar",
         "row": 4, "col": 0, "size_x": 6, "size_y": 4,
         "click_behavior": {"target": DASH_DETAIL, "preset": {"status": "DELAYED"}},
@@ -200,10 +200,10 @@ WHERE status = 'DELAYED'
     },
     {
         "key":     "cmd_stale",
-        "name":    "Stale Patching",
+        "name":    "Stalled Devices",
         "display": "scalar",
         "row": 4, "col": 6, "size_x": 6, "size_y": 4,
-        "click_behavior": {"target": DASH_PCOV, "preset": {"pcov_status": "Stale Patching"}},
+        "click_behavior": {"target": DASH_PCOV, "preset": {"pcov_status": "Stalled Devices"}},
         "query": f"""
 WITH last_install AS (
     SELECT device_id, MAX(installed_at) AS last_install_at
@@ -222,10 +222,10 @@ WHERE d.approval_status = 'APPROVED'
     },
     {
         "key":     "cmd_never",
-        "name":    "Never Patched",
+        "name":    "Never-Patched Devices",
         "display": "scalar",
         "row": 4, "col": 12, "size_x": 6, "size_y": 4,
-        "click_behavior": {"target": DASH_PCOV, "preset": {"pcov_status": "Never Patched"}},
+        "click_behavior": {"target": DASH_PCOV, "preset": {"pcov_status": "Never-Patched Devices"}},
         "query": """
 SELECT COUNT(*) AS devices
 FROM ninja_core.devices d
@@ -303,8 +303,8 @@ SELECT
     COUNT(*) FILTER (WHERE lio.status = 'FAILED') AS "Failed Patches",
     COUNT(*) FILTER (WHERE cs.status = 'MANUAL') AS "Manual Approval Patches",
     COUNT(*) FILTER (WHERE cs.status = 'DELAYED') AS "Delayed Install Patches",
-    COUNT(DISTINCT ds.id) FILTER (WHERE ds.patch_activity = 'stale') AS "Stale Devices",
-    COUNT(DISTINCT ds.id) FILTER (WHERE ds.patch_activity = 'never') AS "Never Patched Devices",
+    COUNT(DISTINCT ds.id) FILTER (WHERE ds.patch_activity = 'stale') AS "Stalled Devices",
+    COUNT(DISTINCT ds.id) FILTER (WHERE ds.patch_activity = 'never') AS "Never-Patched Devices",
     COUNT(DISTINCT d.id) FILTER (WHERE d.needs_reboot = TRUE) AS "Devices Needing Reboot"
 FROM ninja_core.v_active_devices d
 JOIN ninja_core.organizations o ON o.id = d.organization_id
@@ -322,8 +322,8 @@ ORDER BY
     "Failed Patches" DESC,
     "Manual Approval Patches" DESC,
     "Delayed Install Patches" DESC,
-    "Stale Devices" DESC,
-    "Never Patched Devices" DESC,
+    "Stalled Devices" DESC,
+    "Never-Patched Devices" DESC,
     organization
 LIMIT 50
 """,
@@ -380,7 +380,7 @@ LIMIT 100
         "column_click_behaviors": {
             "Organization": {"target": DASH_ORG,       "params": {"p_org": "Organization"}},
             "Device":       {"target": DASH_DRILLDOWN, "params": {"p_device": "Device"}},
-            "Patching Status": {"target": DASH_DETAIL, "params": {"p_status": "Patching Status"}},
+            "Current Patch State": {"target": DASH_DETAIL, "params": {"p_status": "Current Patch State"}},
             "KB Number":    {"target": DASH_DETAIL,    "params": {"p_kb": "KB Number"}},
         },
         "query": """
@@ -395,7 +395,7 @@ WITH current_state AS (
 SELECT
     o.name AS "Organization",
     d.system_name AS "Device",
-    cs.status AS "Patching Status",
+    cs.status AS "Current Patch State",
     COALESCE(NULLIF(cs.kb_number, ''), '(none)') AS "KB Number",
     cs.patch_name AS "Patch",
     cs.severity AS "Severity",
@@ -414,13 +414,13 @@ LIMIT 100
     },
     {
         "key":     "cmd_patch_activity_queue",
-        "name":    "Devices with Stale Patching",
+        "name":    "Stalled Devices",
         "display": "table",
         "row": 28, "col": 12, "size_x": 12, "size_y": 10,
         "column_click_behaviors": {
             "Organization": {"target": DASH_ORG,       "params": {"p_org": "Organization"}},
             "Device":       {"target": DASH_DRILLDOWN, "params": {"p_device": "Device"}},
-            "Patch Activity": {"target": DASH_PCOV,    "params": {"p_pcov_status": "Patch Activity"}},
+            "Patching Status": {"target": DASH_PCOV,    "params": {"p_pcov_status": "Patching Status"}},
         },
         "query": f"""
 WITH last_install AS (
@@ -451,7 +451,7 @@ classified AS (
 SELECT
     o.name AS "Organization",
     c.system_name AS "Device",
-    {PATCH_ACTIVITY_LABEL_C} AS "Patch Activity",
+    {PATCH_ACTIVITY_LABEL_C} AS "Patching Status",
     c.last_install_at AS "Last Install Attempt",
     CASE WHEN c.last_install_at IS NULL THEN NULL
          ELSE ROUND(EXTRACT(EPOCH FROM (NOW() - c.last_install_at)) / 86400)
@@ -480,7 +480,7 @@ OVERVIEW_CARDS: list[dict[str, Any]] = [
         "key":        "active_devices",
         "name":       "Active Devices",
         "display":    "scalar",
-        "row": 0, "col": 0, "size_x": 6, "size_y": 4,
+        "row": 0, "col": 0, "size_x": 4, "size_y": 4,
         # Click → Detail (no status filter — see all patches for the
         # active fleet).
         "click_behavior": {"target": DASH_DETAIL, "preset": {}},
@@ -493,7 +493,7 @@ FROM ninja_core.v_active_devices
         "key":        "patches_ready",
         "name":       "Approved Patches",
         "display":    "scalar",
-        "row": 0, "col": 6, "size_x": 6, "size_y": 4,
+        "row": 0, "col": 4, "size_x": 5, "size_y": 4,
         "click_behavior": {"target": DASH_DETAIL, "preset": {"status": "APPROVED"}},
         "query": """
 WITH current_state AS (
@@ -508,11 +508,9 @@ FROM current_state WHERE status = 'APPROVED'
     },
     {
         "key":        "patches_manual",
-        "name":       "Manual / Delayed",
+        "name":       "Manual Approval",
         "display":    "scalar",
-        "row": 0, "col": 12, "size_x": 6, "size_y": 4,
-        # Status filter on Detail accepts one value; pick MANUAL —
-        # operator can add DELAYED via the dropdown.
+        "row": 0, "col": 9, "size_x": 5, "size_y": 4,
         "click_behavior": {"target": DASH_DETAIL, "preset": {"status": "MANUAL"}},
         "query": """
 WITH current_state AS (
@@ -521,15 +519,32 @@ WITH current_state AS (
     WHERE fact_type = 'patch_state'
     ORDER BY device_id, patch_uid, last_observed_at DESC
 )
-SELECT COUNT(*) AS needs_attention
-FROM current_state WHERE status IN ('MANUAL', 'DELAYED')
+SELECT COUNT(*) AS manual
+FROM current_state WHERE status = 'MANUAL'
+""",
+    },
+    {
+        "key":        "patches_delayed",
+        "name":       "Delayed Patches",
+        "display":    "scalar",
+        "row": 0, "col": 14, "size_x": 5, "size_y": 4,
+        "click_behavior": {"target": DASH_DETAIL, "preset": {"status": "DELAYED"}},
+        "query": """
+WITH current_state AS (
+    SELECT DISTINCT ON (device_id, patch_uid) status
+    FROM ninja_patches.patch_facts
+    WHERE fact_type = 'patch_state'
+    ORDER BY device_id, patch_uid, last_observed_at DESC
+)
+SELECT COUNT(*) AS delayed
+FROM current_state WHERE status = 'DELAYED'
 """,
     },
     {
         "key":        "patches_failed",
         "name":       "Failed Patches",
         "display":    "scalar",
-        "row": 0, "col": 18, "size_x": 6, "size_y": 4,
+        "row": 0, "col": 19, "size_x": 5, "size_y": 4,
         "click_behavior": {
             "target": DASH_DETAIL,
             "preset": {"install_outcome": "FAILED"},
@@ -555,12 +570,12 @@ WHERE status = 'FAILED'
     },
     {
         "key":     "ov_pcov_active",
-        "name":    "Recent Patch Activity",
+        "name":    "Patching Devices",
         "display": "scalar",
         "row": 4, "col": 0, "size_x": 8, "size_y": 4,
         "click_behavior": {
             "target": DASH_PCOV,
-            "preset": {"pcov_status": "Recent Patch Activity"},
+            "preset": {"pcov_status": "Patching Devices"},
         },
         "query": f"""
 WITH dps AS (
@@ -579,12 +594,12 @@ WHERE d.approval_status = 'APPROVED'
     },
     {
         "key":     "ov_pcov_stale",
-        "name":    "Stale Patching",
+        "name":    "Stalled Devices",
         "display": "scalar",
         "row": 4, "col": 8, "size_x": 8, "size_y": 4,
         "click_behavior": {
             "target": DASH_PCOV,
-            "preset": {"pcov_status": "Stale Patching"},
+            "preset": {"pcov_status": "Stalled Devices"},
         },
         "query": f"""
 WITH dps AS (
@@ -603,12 +618,12 @@ WHERE d.approval_status = 'APPROVED'
     },
     {
         "key":     "ov_pcov_none",
-        "name":    "Never Patched",
+        "name":    "Never-Patched Devices",
         "display": "scalar",
         "row": 4, "col": 16, "size_x": 8, "size_y": 4,
         "click_behavior": {
             "target": DASH_PCOV,
-            "preset": {"pcov_status": "Never Patched"},
+            "preset": {"pcov_status": "Never-Patched Devices"},
         },
         "query": """
 SELECT COUNT(*) AS no_data
@@ -623,11 +638,11 @@ WHERE d.approval_status = 'APPROVED'
     },
     {
         "key":        "patch_state_donut",
-        "name":       "Patching Status",
+        "name":       "Current Patch State",
         "display":    "pie",
         "row": 8, "col": 0, "size_x": 12, "size_y": 8,
         "viz_settings": {
-            "pie.dimension":       "Patching Status",
+            "pie.dimension":       "Current Patch State",
             "pie.metric":          "Patches",
             # 0 = show every slice; default 2.5 buckets small ones into "Other"
             "pie.slice_threshold": 0,
@@ -637,7 +652,7 @@ WHERE d.approval_status = 'APPROVED'
         # Click a status slice → open Detail filtered to that status.
         "click_behavior": {
             "target": DASH_DETAIL,
-            "params": {"p_status": "Patching Status"},
+            "params": {"p_status": "Current Patch State"},
         },
         "query": """
 WITH current_state AS (
@@ -646,7 +661,7 @@ WITH current_state AS (
     WHERE fact_type = 'patch_state'
     ORDER BY device_id, patch_uid, last_observed_at DESC
 )
-SELECT status AS "Patching Status", COUNT(*) AS "Patches"
+SELECT status AS "Current Patch State", COUNT(*) AS "Patches"
 FROM current_state
 GROUP BY status
 ORDER BY "Patches" DESC
@@ -1024,7 +1039,7 @@ def build_detail_parameters(
     return [
         _param_dropdown(PARAM_ORG,    "Organization", "org",        org_names),
         _param_dropdown(PARAM_DEVICE, "Device",       "device",     device_names),
-        _param_dropdown(PARAM_STATUS, "Patching Status", "status",  _STATUS_OPTIONS),
+        _param_dropdown(PARAM_STATUS, "Current Patch State", "status",  _STATUS_OPTIONS),
         _param_dropdown(PARAM_CLASS,  "Device Type",  "node_class", _NODE_CLASS_OPTIONS,
                         default="Windows Workstation"),
         _param_dropdown(PARAM_SEV,    "Severity",     "severity",   _SEVERITY_OPTIONS),
@@ -1040,7 +1055,7 @@ def build_detail_parameters(
 # parameters onto them.
 _FILTER_TAGS = {
     "org":        {"id": "tt_org",        "name": "org",        "display-name": "Organization", "type": "text"},
-    "status":     {"id": "tt_status",     "name": "status",     "display-name": "Patching Status", "type": "text"},
+    "status":     {"id": "tt_status",     "name": "status",     "display-name": "Current Patch State", "type": "text"},
     "node_class": {"id": "tt_node_class", "name": "node_class", "display-name": "Device Type",  "type": "text"},
     "severity":   {"id": "tt_severity",   "name": "severity",   "display-name": "Severity",     "type": "text"},
     "install_outcome": {
@@ -1118,11 +1133,11 @@ _FILTER_PREDICATES = f"""
 DETAIL_CARDS = [
     {
         "key":            "detail_status_donut",
-        "name":           "Patching Status",
+        "name":           "Current Patch State",
         "display":        "pie",
         "row": 0, "col": 0, "size_x": 8, "size_y": 6,
         "viz_settings":   {
-            "pie.dimension":       "Patching Status",
+            "pie.dimension":       "Current Patch State",
             "pie.metric":          "Patches",
             "pie.slice_threshold": 0,
             "pie.show_legend":     True,
@@ -1130,10 +1145,10 @@ DETAIL_CARDS = [
         },
         "template_tags":  _FILTER_TAGS,
         "param_mappings": _FILTER_PARAM_MAPPINGS,
-        "click_behavior": {"target": "self", "params": {"p_status": "Patching Status"}},
+        "click_behavior": {"target": "self", "params": {"p_status": "Current Patch State"}},
         "query": f"""
 {_CTE_CURRENT_STATE}
-SELECT cs.status AS "Patching Status", COUNT(*) AS "Patches"
+SELECT cs.status AS "Current Patch State", COUNT(*) AS "Patches"
 FROM current_state cs
 LEFT JOIN latest_install_outcome lio
   ON lio.device_id = cs.device_id AND lio.patch_uid = cs.patch_uid
@@ -1323,7 +1338,7 @@ ORDER BY "Patches" DESC
             "Device":       {"target": DASH_DRILLDOWN, "params": {"p_device": "Device"}},
             "Organization": {"target": "self", "params": {"p_org":      "Organization"}},
             "Device Type": {"target": "self", "params": {"p_class":    "Device Type"}},
-            "Patching Status": {"target": "self", "params": {"p_status": "Patching Status"}},
+            "Current Patch State": {"target": "self", "params": {"p_status": "Current Patch State"}},
             "Install Results": {
                 "target": "self", "params": {"p_install_outcome": "Install Results"},
             },
@@ -1338,7 +1353,7 @@ SELECT
     {DEVICE_TYPE_D} AS "Device Type",
     cs.kb_number AS "KB Number",
     cs.patch_name AS "Patch",
-    cs.status AS "Patching Status",
+    cs.status AS "Current Patch State",
     lio.status AS "Install Results",
     cs.severity AS "Severity",
     lio.installed_at AS "Last Install Attempt",
@@ -1438,11 +1453,11 @@ LIMIT 100
     },
     {
         "key":            "device_state_pie",
-        "name":           "Patching Status",
+        "name":           "Current Patch State",
         "display":        "pie",
         "row": 6, "col": 0, "size_x": 8, "size_y": 8,
         "viz_settings":   {
-            "pie.dimension":       "Patching Status",
+            "pie.dimension":       "Current Patch State",
             "pie.metric":          "Patches",
             "pie.slice_threshold": 0,
             "pie.show_legend":     True,
@@ -1452,7 +1467,7 @@ LIMIT 100
         "param_mappings": DEVICE_PARAM_MAPPINGS,
         "query": f"""
 {_CTE_CURRENT_STATE}
-SELECT cs.status AS "Patching Status", COUNT(*) AS "Patches"
+SELECT cs.status AS "Current Patch State", COUNT(*) AS "Patches"
 FROM current_state cs
 JOIN ninja_core.devices d ON d.id = cs.device_id
 WHERE d.approval_status = 'APPROVED'
@@ -1529,7 +1544,7 @@ SELECT
     d.system_name        AS "Device",
     ao.kb_number         AS "KB Number",
     ao.patch_name        AS "Patch",
-    ao.status            AS "Patching Status",
+    ao.status            AS "Current Patch State",
     ao.severity          AS "Severity",
     ao.installed_at      AS "Install Time",
     ao.first_observed_at AS "First Seen in This State",
@@ -1564,7 +1579,7 @@ PARAM_PCOV_OS     = "p_pcov_os"
 PARAM_PCOV_STATUS = "p_pcov_status"
 PARAM_PCOV_DAYS   = "p_pcov_days"
 
-_PCOV_STATUS_OPTIONS = ["Recent Patch Activity", "Stale Patching", "Never Patched"]
+_PCOV_STATUS_OPTIONS = ["Patching Devices", "Stalled Devices", "Never-Patched Devices"]
 
 
 def _param_number(pid: str, name: str, slug: str, default: int) -> dict:
@@ -1584,7 +1599,7 @@ def build_pcov_parameters(org_names: list[str], os_families: list[str]) -> list[
         _param_dropdown(PARAM_PCOV_CLASS,  "Device Type",   "pcov_node_class", _NODE_CLASS_OPTIONS,
                         default="Windows Workstation"),
         _param_dropdown(PARAM_PCOV_OS,     "Operating System Family", "pcov_os", os_families),
-        _param_dropdown(PARAM_PCOV_STATUS, "Patch Activity", "pcov_status",    _PCOV_STATUS_OPTIONS),
+        _param_dropdown(PARAM_PCOV_STATUS, "Patching Status", "pcov_status",    _PCOV_STATUS_OPTIONS),
         _param_number(  PARAM_PCOV_DAYS,   "Stale threshold (days)", "pcov_days", DEFAULT_STALE_PATCH_DAYS),
     ]
 
@@ -1593,7 +1608,7 @@ _PCOV_TAGS = {
     "pcov_org":         {"id": "tt_pcov_org",    "name": "pcov_org",        "display-name": "Organization", "type": "text"},
     "pcov_node_class":  {"id": "tt_pcov_class",  "name": "pcov_node_class", "display-name": "Device Type",  "type": "text"},
     "pcov_os":          {"id": "tt_pcov_os",     "name": "pcov_os",         "display-name": "Operating System Family", "type": "text"},
-    "pcov_status":      {"id": "tt_pcov_status", "name": "pcov_status",     "display-name": "Patch Activity", "type": "text"},
+    "pcov_status":      {"id": "tt_pcov_status", "name": "pcov_status",     "display-name": "Patching Status", "type": "text"},
     "pcov_days":        {
         "id": "tt_pcov_days", "name": "pcov_days",
         "display-name": "Stale threshold (days)",
@@ -1652,7 +1667,7 @@ _PCOV_FILTERS = f"""
 PCOV_CARDS = [
     {
         "key":     "pcov_active",
-        "name":    "Actively Patching",
+        "name":    "Patching Devices",
         "display": "scalar",
         "row": 0, "col": 0, "size_x": 6, "size_y": 4,
         "template_tags":  _PCOV_TAGS,
@@ -1660,7 +1675,7 @@ PCOV_CARDS = [
         # Click → narrow this dashboard to recently active devices.
         "click_behavior": {
             "target": DASH_PCOV,
-            "preset": {"pcov_status": "Recent Patch Activity"},
+            "preset": {"pcov_status": "Patching Devices"},
         },
         "query": f"""
 {_PCOV_CTE}
@@ -1673,14 +1688,14 @@ WHERE c.patch_status = 'active_patching'
     },
     {
         "key":     "pcov_stale",
-        "name":    "Stale Patching",
+        "name":    "Stalled Devices",
         "display": "scalar",
         "row": 0, "col": 6, "size_x": 6, "size_y": 4,
         "template_tags":  _PCOV_TAGS,
         "param_mappings": _PCOV_PARAM_MAPPINGS,
         "click_behavior": {
             "target": DASH_PCOV,
-            "preset": {"pcov_status": "Stale Patching"},
+            "preset": {"pcov_status": "Stalled Devices"},
         },
         "query": f"""
 {_PCOV_CTE}
@@ -1693,14 +1708,14 @@ WHERE c.patch_status = 'stale_patch_data'
     },
     {
         "key":     "pcov_none",
-        "name":    "Never Patched",
+        "name":    "Never-Patched Devices",
         "display": "scalar",
         "row": 0, "col": 12, "size_x": 6, "size_y": 4,
         "template_tags":  _PCOV_TAGS,
         "param_mappings": _PCOV_PARAM_MAPPINGS,
         "click_behavior": {
             "target": DASH_PCOV,
-            "preset": {"pcov_status": "Never Patched"},
+            "preset": {"pcov_status": "Never-Patched Devices"},
         },
         "query": f"""
 {_PCOV_CTE}
@@ -1713,7 +1728,7 @@ WHERE c.patch_status = 'no_patch_data'
     },
     {
         "key":     "pcov_total",
-        "name":    "Approved Windows Devices",
+        "name":    "Active Devices",
         "display": "scalar",
         "row": 0, "col": 18, "size_x": 6, "size_y": 4,
         "template_tags":  _PCOV_TAGS,
@@ -1729,12 +1744,12 @@ WHERE 1=1
     },
     {
         "key":     "pcov_status_pie",
-        "name":    "Patch Activity",
+        "name":    "Patching Status",
         "display": "pie",
         "row": 4, "col": 0, "size_x": 8, "size_y": 8,
-        "click_behavior": {"target": "self", "params": {"p_pcov_status": "Patch Activity"}},
+        "click_behavior": {"target": "self", "params": {"p_pcov_status": "Patching Status"}},
         "viz_settings": {
-            "pie.dimension":       "Patch Activity",
+            "pie.dimension":       "Patching Status",
             "pie.metric":          "devices",
             "pie.slice_threshold": 0,
             "pie.show_legend":     True,
@@ -1744,7 +1759,7 @@ WHERE 1=1
         "param_mappings": _PCOV_PARAM_MAPPINGS,
         "query": f"""
 {_PCOV_CTE}
-SELECT {PATCH_ACTIVITY_LABEL_C} AS "Patch Activity", COUNT(*) AS devices
+SELECT {PATCH_ACTIVITY_LABEL_C} AS "Patching Status", COUNT(*) AS devices
 FROM classified c
 JOIN ninja_core.organizations o ON o.id = c.organization_id
 WHERE 1=1
@@ -1755,7 +1770,7 @@ ORDER BY devices DESC
     },
     {
         "key":     "pcov_class_pie",
-        "name":    "Patch Activity by Device Type",
+        "name":    "Patching Status by Device Type",
         "display": "pie",
         "row": 4, "col": 8, "size_x": 8, "size_y": 8,
         "click_behavior": {"target": "self", "params": {"p_pcov_class": "Device Type"}},
@@ -1781,16 +1796,16 @@ ORDER BY devices DESC
     },
     {
         "key":     "pcov_os_stacked",
-        "name":    "Patch Activity by Operating System",
+        "name":    "Patching Status by Operating System",
         "display": "bar",
         "row": 4, "col": 16, "size_x": 8, "size_y": 8,
         "click_behavior": {"target": "self", "params": {"p_pcov_os": "Operating System Family"}},
         "viz_settings": {
             "graph.dimensions":      ["Operating System Family"],
             "graph.metrics":         [
-                "Recent Activity Devices",
-                "Stale Devices",
-                "Never Patched Devices",
+                "Patching Devices",
+                "Stalled Devices",
+                "Never-Patched Devices",
             ],
             "stackable.stack_type":  "stacked",
             "graph.show_values":     False,
@@ -1801,9 +1816,9 @@ ORDER BY devices DESC
 {_PCOV_CTE}
 SELECT
     {OS_FAMILY_C} AS "Operating System Family",
-    COUNT(*) FILTER (WHERE c.patch_status = 'active_patching')  AS "Recent Activity Devices",
-    COUNT(*) FILTER (WHERE c.patch_status = 'stale_patch_data') AS "Stale Devices",
-    COUNT(*) FILTER (WHERE c.patch_status = 'no_patch_data')    AS "Never Patched Devices"
+    COUNT(*) FILTER (WHERE c.patch_status = 'active_patching')  AS "Patching Devices",
+    COUNT(*) FILTER (WHERE c.patch_status = 'stale_patch_data') AS "Stalled Devices",
+    COUNT(*) FILTER (WHERE c.patch_status = 'no_patch_data')    AS "Never-Patched Devices"
 FROM classified c
 JOIN ninja_core.organizations o ON o.id = c.organization_id
 WHERE 1=1
@@ -1815,7 +1830,7 @@ LIMIT 20
     },
     {
         "key":     "pcov_by_org",
-        "name":    "Patch Activity by Organization",
+        "name":    "Patching Status by Organization",
         "display": "table",
         "row": 12, "col": 0, "size_x": 24, "size_y": 8,
         "column_click_behaviors": {
@@ -1827,25 +1842,25 @@ LIMIT 20
 {_PCOV_CTE}
 SELECT
     o.name AS "Organization",
-    COUNT(*) FILTER (WHERE c.patch_status = 'active_patching')  AS "Recent Activity Devices",
-    COUNT(*) FILTER (WHERE c.patch_status = 'stale_patch_data') AS "Stale Devices",
-    COUNT(*) FILTER (WHERE c.patch_status = 'no_patch_data')    AS "Never Patched Devices",
+    COUNT(*) FILTER (WHERE c.patch_status = 'active_patching')  AS "Patching Devices",
+    COUNT(*) FILTER (WHERE c.patch_status = 'stale_patch_data') AS "Stalled Devices",
+    COUNT(*) FILTER (WHERE c.patch_status = 'no_patch_data')    AS "Never-Patched Devices",
     COUNT(*)                                                    AS "Total Devices",
     ROUND(
         COUNT(*) FILTER (WHERE c.patch_status = 'active_patching') * 100.0
         / NULLIF(COUNT(*), 0), 1
-    ) AS "Recent Activity %"
+    ) AS "Patching %"
 FROM classified c
 JOIN ninja_core.organizations o ON o.id = c.organization_id
 WHERE 1=1
 {_PCOV_FILTERS}
 GROUP BY o.name
-ORDER BY "Recent Activity %" ASC, "Total Devices" DESC
+ORDER BY "Patching %" ASC, "Total Devices" DESC
 """,
     },
     {
         "key":     "pcov_all_devices",
-        "name":    "All Devices by Patch Activity",
+        "name":    "All Devices by Patching Status",
         "display": "table",
         "row": 20, "col": 0, "size_x": 24, "size_y": 14,
         "column_click_behaviors": {
@@ -1853,7 +1868,7 @@ ORDER BY "Recent Activity %" ASC, "Total Devices" DESC
             "Organization": {"target": "self",         "params": {"p_pcov_org":    "Organization"}},
             "Device Type":  {"target": "self",         "params": {"p_pcov_class":  "Device Type"}},
             "Operating System Family": {"target": "self", "params": {"p_pcov_os": "Operating System Family"}},
-            "Patch Activity": {"target": "self",      "params": {"p_pcov_status": "Patch Activity"}},
+            "Patching Status": {"target": "self",      "params": {"p_pcov_status": "Patching Status"}},
         },
         "template_tags":  _PCOV_TAGS,
         "param_mappings": _PCOV_PARAM_MAPPINGS,
@@ -1870,7 +1885,7 @@ SELECT
     o.name AS "Organization",
     {DEVICE_TYPE_C} AS "Device Type",
     {OS_FAMILY_C} AS "Operating System Family",
-    {PATCH_ACTIVITY_LABEL_C} AS "Patch Activity",
+    {PATCH_ACTIVITY_LABEL_C} AS "Patching Status",
     c.last_seen_at AS "Last Install Attempt",
     lc.last_contact AS "Last Contact",
     CASE WHEN c.last_seen_at IS NULL THEN NULL
@@ -2030,7 +2045,7 @@ WHERE cs.status = 'MANUAL'
     },
     {
         "key":     "org_delayed",
-        "name":    "Delayed Install",
+        "name":    "Delayed Patches",
         "display": "scalar",
         "row": 4, "col": 6, "size_x": 6, "size_y": 4,
         "template_tags":  _ORG_TAGS,
@@ -2052,7 +2067,7 @@ WHERE cs.status = 'DELAYED'
     },
     {
         "key":     "org_stale",
-        "name":    "Stale Patching",
+        "name":    "Stalled Devices",
         "display": "scalar",
         "row": 4, "col": 12, "size_x": 6, "size_y": 4,
         "template_tags":  _ORG_TAGS,
@@ -2077,7 +2092,7 @@ WHERE d.approval_status = 'APPROVED'
     },
     {
         "key":     "org_never",
-        "name":    "Never Patched",
+        "name":    "Never-Patched Devices",
         "display": "scalar",
         "row": 4, "col": 18, "size_x": 6, "size_y": 4,
         "template_tags":  _ORG_TAGS,
@@ -2098,11 +2113,11 @@ WHERE d.approval_status = 'APPROVED'
     },
     {
         "key":     "org_status",
-        "name":    "Patching Status",
+        "name":    "Current Patch State",
         "display": "pie",
         "row": 8, "col": 0, "size_x": 8, "size_y": 8,
         "viz_settings": {
-            "pie.dimension": "Patching Status",
+            "pie.dimension": "Current Patch State",
             "pie.metric": "Patches",
             "pie.slice_threshold": 0,
             "pie.show_legend": True,
@@ -2110,7 +2125,7 @@ WHERE d.approval_status = 'APPROVED'
         },
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS,
-        "click_behavior": {"target": DASH_DETAIL, "params": {"p_org": "Organization", "p_status": "Patching Status"}},
+        "click_behavior": {"target": DASH_DETAIL, "params": {"p_org": "Organization", "p_status": "Current Patch State"}},
         "query": """
 WITH current_state AS (
     SELECT DISTINCT ON (device_id, patch_uid) device_id, patch_uid, status
@@ -2120,7 +2135,7 @@ WITH current_state AS (
 )
 SELECT
     o.name AS "Organization",
-    cs.status AS "Patching Status",
+    cs.status AS "Current Patch State",
     COUNT(*) AS "Patches"
 FROM current_state cs
 JOIN ninja_core.v_active_devices d ON d.id = cs.device_id
@@ -2246,7 +2261,7 @@ LIMIT 100
         "column_click_behaviors": {
             "Organization": {"target": "self",         "params": {"p_org": "Organization"}},
             "Device":       {"target": DASH_DRILLDOWN, "params": {"p_device": "Device"}},
-            "Patching Status": {"target": DASH_DETAIL, "params": {"p_org": "Organization", "p_status": "Patching Status"}},
+            "Current Patch State": {"target": DASH_DETAIL, "params": {"p_org": "Organization", "p_status": "Current Patch State"}},
             "KB Number":    {"target": DASH_DETAIL,    "params": {"p_org": "Organization", "p_kb": "KB Number"}},
         },
         "query": """
@@ -2261,7 +2276,7 @@ WITH current_state AS (
 SELECT
     o.name AS "Organization",
     d.system_name AS "Device",
-    cs.status AS "Patching Status",
+    cs.status AS "Current Patch State",
     COALESCE(NULLIF(cs.kb_number, ''), '(none)') AS "KB Number",
     cs.patch_name AS "Patch",
     cs.severity AS "Severity",
@@ -2280,7 +2295,7 @@ LIMIT 100
     },
     {
         "key":     "org_patch_activity",
-        "name":    "Devices with Stale Patching",
+        "name":    "Stalled Devices",
         "display": "table",
         "row": 26, "col": 12, "size_x": 12, "size_y": 10,
         "template_tags":  _ORG_TAGS,
@@ -2288,7 +2303,7 @@ LIMIT 100
         "column_click_behaviors": {
             "Organization": {"target": "self",         "params": {"p_org": "Organization"}},
             "Device":       {"target": DASH_DRILLDOWN, "params": {"p_device": "Device"}},
-            "Patch Activity": {"target": DASH_PCOV,    "params": {"p_pcov_org": "Organization", "p_pcov_status": "Patch Activity"}},
+            "Patching Status": {"target": DASH_PCOV,    "params": {"p_pcov_org": "Organization", "p_pcov_status": "Patching Status"}},
         },
         "query": f"""
 WITH last_install AS (
@@ -2319,7 +2334,7 @@ classified AS (
 SELECT
     o.name AS "Organization",
     c.system_name AS "Device",
-    {PATCH_ACTIVITY_LABEL_C} AS "Patch Activity",
+    {PATCH_ACTIVITY_LABEL_C} AS "Patching Status",
     c.last_install_at AS "Last Install Attempt",
     CASE WHEN c.last_install_at IS NULL THEN NULL
          ELSE ROUND(EXTRACT(EPOCH FROM (NOW() - c.last_install_at)) / 86400)
@@ -2553,16 +2568,81 @@ def _upsert_dashboard(
     return dash
 
 
+NAV_HEIGHT = 2  # rows reserved at top of every dashboard for the nav bar
+NAV_ORDER = [DASH_COMMAND, DASH_OVERVIEW, DASH_ORG, DASH_PCOV, DASH_DETAIL, DASH_DRILLDOWN]
+NAV_DISPLAY_NAMES = {
+    DASH_COMMAND:   "Command Center",
+    DASH_OVERVIEW:  "Fleet Overview",
+    DASH_ORG:       "Org Overview",
+    DASH_PCOV:      "Patching Status",
+    DASH_DETAIL:    "Patch Detail",
+    DASH_DRILLDOWN: "Device Drilldown",
+}
+
+
+def _build_nav_markdown(
+    current_dash_name: str, dash_id_by_name: dict[str, int],
+) -> str:
+    """Build the markdown for the nav bar on `current_dash_name`. The
+    current dashboard is shown in bold without a link; siblings link
+    out. Dashboards we couldn't resolve to an id are silently skipped
+    (first-run race avoided)."""
+    parts: list[str] = []
+    for name in NAV_ORDER:
+        label = NAV_DISPLAY_NAMES.get(name, name)
+        if name == current_dash_name:
+            parts.append(f"**{label}**")
+            continue
+        did = dash_id_by_name.get(name)
+        if did is None:
+            continue
+        parts.append(f"[{label}](/dashboard/{did})")
+    return "**Navigate:** " + " · ".join(parts)
+
+
+def _nav_dashcard(text: str) -> dict:
+    """Build the virtual (card_id=null) text dashcard for the nav bar.
+    Metabase treats dashcards with card_id=null as text/heading panels
+    when visualization_settings.virtual_card.display is set."""
+    return {
+        "id":                     -1,
+        "card_id":                None,
+        "row":                    0,
+        "col":                    0,
+        "size_x":                 24,
+        "size_y":                 NAV_HEIGHT,
+        "parameter_mappings":     [],
+        "visualization_settings": {
+            "virtual_card": {
+                "display":       "text",
+                "name":          None,
+                "archived":      False,
+                "dataset_query": {},
+            },
+            "text": text,
+        },
+    }
+
+
 def _set_dashboard_layout(
     client: httpx.Client, dashboard: dict, specs: list[dict],
-    card_ids: dict[str, int],
+    card_ids: dict[str, int], nav_markdown: str | None = None,
 ) -> None:
     """Replace the dashboard's dashcards with our layout. Uses PUT
     /api/dashboard/:id with a full `dashcards` array — modern
     Metabase replaces dashcards atomically. Each dashcard's
     parameter_mappings wire dashboard filters into the card's
-    template tags."""
+    template tags.
+
+    When `nav_markdown` is provided, a virtual text dashcard is
+    prepended at row 0 and every other dashcard is shifted down by
+    NAV_HEIGHT — so card specs can keep their natural row numbers
+    (0, 4, 8...) without baking in nav-bar offsets."""
     dashcards = []
+    row_offset = 0
+    if nav_markdown is not None:
+        dashcards.append(_nav_dashcard(nav_markdown))
+        row_offset = NAV_HEIGHT
     for i, spec in enumerate(specs):
         card_id = card_ids[spec["key"]]
         param_mappings = [
@@ -2570,9 +2650,9 @@ def _set_dashboard_layout(
             for pid, target in spec.get("param_mappings", {}).items()
         ]
         dashcards.append({
-            "id":                     -(i + 1),  # negative = new dashcard
+            "id":                     -(i + 2),  # -1 reserved for nav
             "card_id":                card_id,
-            "row":                    spec["row"],
+            "row":                    spec["row"] + row_offset,
             "col":                    spec["col"],
             "size_x":                 spec["size_x"],
             "size_y":                 spec["size_y"],
@@ -2584,7 +2664,8 @@ def _set_dashboard_layout(
         json={"dashcards": dashcards},
     )
     r.raise_for_status()
-    log.info("Set dashboard layout: %d cards", len(dashcards))
+    log.info("Set dashboard layout: %d cards%s",
+             len(dashcards), " (with nav)" if nav_markdown else "")
 
 
 # ── Entry point ─────────────────────────────────────────────────────
@@ -2626,16 +2707,19 @@ def _resolve_password(args: argparse.Namespace) -> str:
 def run_bootstrap(
     url: str, user: str, password: str, db_name: str = "Ninja",
 ) -> list[str]:
-    """Provision all dashboards in Metabase. Two passes:
-      1. Create / update cards, dashboards, layouts.
-      2. Once all dashboard IDs are known, apply click_behavior
-         (cross-dashboard drill-through and crossfilter).
+    """Provision all dashboards in Metabase. Three passes:
+      1a. Upsert cards and dashboards; collect IDs.
+      1b. Set dashboard layouts with nav bar (needs all dashboard IDs
+          so cross-links resolve).
+      2.  Apply click_behavior (cross-dashboard drill-through and
+          crossfilter — also needs IDs).
     Raises on auth / API errors."""
     org_names, os_families, device_names = _fetch_dropdown_sources()
     dashboards = build_dashboards(org_names, os_families, device_names)
 
     urls: list[str] = []
     dash_id_by_name: dict[str, int] = {}
+    dash_obj_by_name: dict[str, dict] = {}
     card_ids_by_dash: dict[str, dict[str, int]] = {}
 
     with httpx.Client(base_url=url, timeout=60) as client:
@@ -2646,7 +2730,7 @@ def run_bootstrap(
         col_id = _upsert_collection(client, COLLECTION_NAME)
         existing_cards = _list_cards_in_collection(client, col_id)
 
-        # Pass 1 — cards, dashboards, layouts.
+        # Pass 1a — cards + dashboards (no layout yet).
         for dash_spec in dashboards:
             log.info("── Provisioning dashboard: %s ──", dash_spec["name"])
             card_ids: dict[str, int] = {}
@@ -2658,14 +2742,24 @@ def run_bootstrap(
                 client, dash_spec["name"], col_id,
                 parameters=dash_spec.get("parameters"),
             )
-            _set_dashboard_layout(
-                client, dashboard, dash_spec["cards"], card_ids,
-            )
             dash_id_by_name[dash_spec["name"]] = int(dashboard["id"])
+            dash_obj_by_name[dash_spec["name"]] = dashboard
             card_ids_by_dash[dash_spec["name"]] = card_ids
             urls.append(f"{url}/dashboard/{dashboard['id']}  ({dash_spec['name']})")
 
-        # Pass 2 — click behaviors (need dashboard IDs from pass 1).
+        # Pass 1b — set layouts (with nav bar) now that IDs are known.
+        log.info("── Setting dashboard layouts with nav bar ──")
+        for dash_spec in dashboards:
+            nav_md = _build_nav_markdown(dash_spec["name"], dash_id_by_name)
+            _set_dashboard_layout(
+                client,
+                dash_obj_by_name[dash_spec["name"]],
+                dash_spec["cards"],
+                card_ids_by_dash[dash_spec["name"]],
+                nav_markdown=nav_md,
+            )
+
+        # Pass 2 — click behaviors.
         log.info("── Applying click behaviors ──")
         _apply_click_behaviors(client, dashboards, card_ids_by_dash, dash_id_by_name)
 
