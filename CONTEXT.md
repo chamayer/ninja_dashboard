@@ -115,6 +115,22 @@ See `REQUIREMENTS.md` §4 for the full schema.
   state-transition history (PENDING → APPROVED → INSTALLED) per
   natural key without snapshot bloat. Current value reads use
   `DISTINCT ON (...) ORDER BY last_observed_at DESC`.
+
+## Patch status glossary
+
+`patch_facts.status` values as they apply in this org's Ninja config:
+
+- **MANUAL** — needs an admin to approve before install. Sits
+  indefinitely until someone acts. High count = admin queue backlog.
+- **DELAYED** — will be auto-approved once it reaches the org's
+  auto-approval threshold of **30 days after patch release**. Normal
+  for the first month after Patch Tuesday — not an alarm signal.
+- **APPROVED** — queued for install.
+- **FAILED** — install attempted and failed.
+- **INSTALLED** — moved out of `patch_facts` into `patch_installs`.
+
+Dashboards should split MANUAL from DELAYED, not lump them — they
+mean very different things operationally.
 - **Plain append snapshots** for `device_snapshots` only — its
   volatile fields (`last_contact`) change every minute, so hash-dedup
   would never match. History pruned by a retention job.
