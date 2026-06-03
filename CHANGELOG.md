@@ -2,6 +2,29 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.3.1] — 2026-06-03
+
+### Added
+- Overview gains a "Patch Coverage" summary row: Active (last 7d) /
+  Stale (>7d) / No Data Ever — three numbers above the existing
+  pie/compliance row. Subsequent rows shifted down accordingly.
+- Patch Coverage dashboard:
+  - **Stale threshold (days)** dashboard parameter — operator picks
+    the cutoff at the top, default 7. CTE uses it dynamically.
+  - **Node Class pie** — breakdown of devices in the current filter
+    set by node_class.
+  - **OS stacked bar** (top 20 OSes) — for each OS, active vs stale
+    vs no_data counts. Best way to see if a particular Windows /
+    Linux / Mac flavor has a coverage problem.
+- Detail dashboard: **Timeline window (days)** parameter, default 90.
+  Only the install-timeline card maps it; others ignore.
+- Drilldown dashboard: **Timeline window (days)** parameter, default
+  180. Same pattern.
+
+### Process
+- VERSION bumped to 0.3.1 (additive features + UX polish, no breaking
+  changes).
+
 ## [0.3.0] — 2026-06-03
 
 Dashboards stage. Stack now ships three Metabase dashboards

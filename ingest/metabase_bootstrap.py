@@ -115,10 +115,57 @@ FROM current_state WHERE status = 'FAILED'
 """,
     },
     {
+        "key":     "ov_pcov_active",
+        "name":    "Patching Active (last 7d)",
+        "display": "scalar",
+        "row": 4, "col": 0, "size_x": 8, "size_y": 4,
+        "query": """
+WITH dps AS (
+    SELECT device_id, MAX(last_observed_at) AS last_seen_at
+    FROM ninja_patches.patch_facts GROUP BY device_id
+)
+SELECT COUNT(*) AS active
+FROM ninja_core.devices d
+JOIN dps ON dps.device_id = d.id
+WHERE d.approval_status = 'APPROVED'
+  AND dps.last_seen_at > NOW() - INTERVAL '7 days'
+""",
+    },
+    {
+        "key":     "ov_pcov_stale",
+        "name":    "Patching Stale (>7d)",
+        "display": "scalar",
+        "row": 4, "col": 8, "size_x": 8, "size_y": 4,
+        "query": """
+WITH dps AS (
+    SELECT device_id, MAX(last_observed_at) AS last_seen_at
+    FROM ninja_patches.patch_facts GROUP BY device_id
+)
+SELECT COUNT(*) AS stale
+FROM ninja_core.devices d
+JOIN dps ON dps.device_id = d.id
+WHERE d.approval_status = 'APPROVED'
+  AND dps.last_seen_at <= NOW() - INTERVAL '7 days'
+""",
+    },
+    {
+        "key":     "ov_pcov_none",
+        "name":    "No Patch Data Ever",
+        "display": "scalar",
+        "row": 4, "col": 16, "size_x": 8, "size_y": 4,
+        "query": """
+SELECT COUNT(*) AS no_data
+FROM ninja_core.devices d
+LEFT JOIN ninja_patches.patch_facts pf ON pf.device_id = d.id
+WHERE d.approval_status = 'APPROVED'
+  AND pf.device_id IS NULL
+""",
+    },
+    {
         "key":        "patch_state_donut",
         "name":       "Patch State Breakdown",
         "display":    "pie",
-        "row": 4, "col": 0, "size_x": 12, "size_y": 8,
+        "row": 8, "col": 0, "size_x": 12, "size_y": 8,
         "viz_settings": {
             "pie.dimension":       "status",
             "pie.metric":          "patches",
@@ -143,7 +190,7 @@ ORDER BY n DESC
         "key":        "compliance_worst",
         "name":       "Worst-Compliant Orgs (bottom 15)",
         "display":    "row",
-        "row": 4, "col": 12, "size_x": 12, "size_y": 8,
+        "row": 8, "col": 12, "size_x": 12, "size_y": 8,
         "viz_settings": {
             "graph.dimensions": ["organization"],
             "graph.metrics":    ["pct_installed"],
@@ -177,7 +224,7 @@ LIMIT 15
         "key":        "compliance_all",
         "name":       "All Orgs Compliance",
         "display":    "table",
-        "row": 12, "col": 0, "size_x": 24, "size_y": 10,
+        "row": 16, "col": 0, "size_x": 24, "size_y": 10,
         "query": """
 WITH current_state AS (
     SELECT DISTINCT ON (device_id, patch_uid)
@@ -211,7 +258,7 @@ ORDER BY pct_installed ASC, total_patches DESC
         "key":        "needs_reboot",
         "name":       "Devices Needing Reboot",
         "display":    "table",
-        "row": 22, "col": 0, "size_x": 24, "size_y": 8,
+        "row": 26, "col": 0, "size_x": 24, "size_y": 8,
         "query": """
 WITH latest_snap AS (
     SELECT DISTINCT ON (device_id) *
@@ -236,7 +283,7 @@ ORDER BY ls.last_contact DESC
         "key":        "ingest_health",
         "name":       "Ingest Health (last 24h)",
         "display":    "table",
-        "row": 30, "col": 0, "size_x": 24, "size_y": 8,
+        "row": 34, "col": 0, "size_x": 24, "size_y": 8,
         "query": """
 SELECT
     domain,
@@ -271,6 +318,7 @@ PARAM_CLASS   = "p_class"
 PARAM_SEV     = "p_severity"
 PARAM_OS      = "p_os"
 PARAM_KB      = "p_kb"
+PARAM_DAYS    = "p_days"
 
 # Static dropdown options for known small enums. Dynamic ones (orgs, OS
 # names) are populated from the DB in build_detail_parameters().
@@ -321,6 +369,7 @@ def build_detail_parameters(org_names: list[str], os_names: list[str]) -> list[d
         _param_dropdown(PARAM_SEV,    "Severity",     "severity",   _SEVERITY_OPTIONS),
         _param_dropdown(PARAM_OS,     "OS Name",      "os",         os_names),
         _param_text(    PARAM_KB,     "KB Number",    "kb"),
+        _param_number(  PARAM_DAYS,   "Timeline window (days)", "days", 90),
     ]
 
 
@@ -335,6 +384,16 @@ _FILTER_TAGS = {
     "kb":         {"id": "tt_kb",         "name": "kb",         "display-name": "KB Number",    "type": "text"},
 }
 
+# Timeline-only template tag (only the install-timeline card maps the
+# days parameter; the other Detail cards don't care about a window).
+_DAYS_TAG = {
+    "days": {
+        "id": "tt_days", "name": "days",
+        "display-name": "Timeline window (days)",
+        "type": "number", "default": "90", "required": True,
+    },
+}
+
 _FILTER_PARAM_MAPPINGS = {
     PARAM_ORG:    ["variable", ["template-tag", "org"]],
     PARAM_STATUS: ["variable", ["template-tag", "status"]],
@@ -342,6 +401,11 @@ _FILTER_PARAM_MAPPINGS = {
     PARAM_SEV:    ["variable", ["template-tag", "severity"]],
     PARAM_OS:     ["variable", ["template-tag", "os"]],
     PARAM_KB:     ["variable", ["template-tag", "kb"]],
+}
+
+_TIMELINE_PARAM_MAPPINGS = {
+    **_FILTER_PARAM_MAPPINGS,
+    PARAM_DAYS: ["variable", ["template-tag", "days"]],
 }
 
 # Reused SQL fragments. Filter predicates include the new OS + KB filters.
@@ -459,12 +523,12 @@ LIMIT 20
     },
     {
         "key":            "detail_installs_timeline",
-        "name":           "Installs over time (last 90 days, filtered)",
+        "name":           "Installs over time (filtered)",
         "display":        "line",
         "row": 6, "col": 12, "size_x": 12, "size_y": 8,
         "viz_settings":   {"graph.dimensions": ["day"], "graph.metrics": ["installs"]},
-        "template_tags":  _FILTER_TAGS,
-        "param_mappings": _FILTER_PARAM_MAPPINGS,
+        "template_tags":  {**_FILTER_TAGS, **_DAYS_TAG},
+        "param_mappings": _TIMELINE_PARAM_MAPPINGS,
         "query": f"""
 SELECT
     DATE_TRUNC('day', pf.installed_at)::date AS day,
@@ -473,7 +537,7 @@ FROM ninja_patches.patch_facts pf
 JOIN ninja_core.devices d        ON d.id = pf.device_id
 JOIN ninja_core.organizations o  ON o.id = d.organization_id
 WHERE pf.installed_at IS NOT NULL
-  AND pf.installed_at > NOW() - INTERVAL '90 days'
+  AND pf.installed_at > NOW() - (INTERVAL '1 day' * {{{{days}}}})
   AND d.approval_status = 'APPROVED'
   [[AND o.name = {{{{org}}}}]]
   [[AND pf.status = {{{{status}}}}]]
@@ -573,22 +637,40 @@ LIMIT 1000
 # Type a substring like "CL-35" or "DESKTOP-B1" to pull the device's
 # full history.
 
-PARAM_DEVICE = "p_device"
+PARAM_DEVICE      = "p_device"
+PARAM_DEVICE_DAYS = "p_device_days"
 
 DEVICE_TAGS = {
     "device": {"id": "tt_device", "name": "device", "display-name": "Device", "type": "text"},
+}
+
+DEVICE_TIMELINE_TAGS = {
+    "device": {"id": "tt_device", "name": "device", "display-name": "Device", "type": "text"},
+    "days": {
+        "id": "tt_device_days", "name": "days",
+        "display-name": "Timeline window (days)",
+        "type": "number", "default": "180", "required": True,
+    },
 }
 
 DEVICE_PARAM_MAPPINGS = {
     PARAM_DEVICE: ["variable", ["template-tag", "device"]],
 }
 
+DEVICE_TIMELINE_PARAM_MAPPINGS = {
+    PARAM_DEVICE:      ["variable", ["template-tag", "device"]],
+    PARAM_DEVICE_DAYS: ["variable", ["template-tag", "days"]],
+}
+
 _DEVICE_FILTER = "[[AND (d.system_name ILIKE '%' || {{device}} || '%' OR d.display_name ILIKE '%' || {{device}} || '%' OR d.dns_name ILIKE '%' || {{device}} || '%')]]"
 
 
 def build_device_parameters() -> list[dict]:
-    """Just one parameter — the device search text box."""
-    return [_param_text(PARAM_DEVICE, "Device (name/substring)", "device")]
+    """Device search + timeline window."""
+    return [
+        _param_text(  PARAM_DEVICE,      "Device (name/substring)", "device"),
+        _param_number(PARAM_DEVICE_DAYS, "Timeline window (days)",  "device_days", 180),
+    ]
 
 
 DEVICE_CARDS = [
@@ -656,12 +738,12 @@ ORDER BY patches DESC
     },
     {
         "key":            "device_install_timeline",
-        "name":           "Installs Over Time (Selected Device(s), last 180 days)",
+        "name":           "Installs Over Time (Selected Device(s))",
         "display":        "line",
         "row": 6, "col": 8, "size_x": 16, "size_y": 8,
         "viz_settings":   {"graph.dimensions": ["day"], "graph.metrics": ["installs"]},
-        "template_tags":  DEVICE_TAGS,
-        "param_mappings": DEVICE_PARAM_MAPPINGS,
+        "template_tags":  DEVICE_TIMELINE_TAGS,
+        "param_mappings": DEVICE_TIMELINE_PARAM_MAPPINGS,
         "query": f"""
 SELECT
     DATE_TRUNC('day', pf.installed_at)::date AS day,
@@ -669,7 +751,7 @@ SELECT
 FROM ninja_patches.patch_facts pf
 JOIN ninja_core.devices d ON d.id = pf.device_id
 WHERE pf.installed_at IS NOT NULL
-  AND pf.installed_at > NOW() - INTERVAL '180 days'
+  AND pf.installed_at > NOW() - (INTERVAL '1 day' * {{{{days}}}})
   AND d.approval_status = 'APPROVED'
   {_DEVICE_FILTER.replace('{{device}}', '{{{{device}}}}')}
 GROUP BY 1
@@ -728,8 +810,20 @@ PARAM_PCOV_ORG    = "p_pcov_org"
 PARAM_PCOV_CLASS  = "p_pcov_class"
 PARAM_PCOV_OS     = "p_pcov_os"
 PARAM_PCOV_STATUS = "p_pcov_status"
+PARAM_PCOV_DAYS   = "p_pcov_days"
 
 _PCOV_STATUS_OPTIONS = ["active_patching", "stale_patch_data", "no_patch_data"]
+
+
+def _param_number(pid: str, name: str, slug: str, default: int) -> dict:
+    """Numeric dashboard parameter with a default value."""
+    return {
+        "id":      pid,
+        "name":    name,
+        "slug":    slug,
+        "type":    "number/=",
+        "default": default,
+    }
 
 
 def build_pcov_parameters(org_names: list[str], os_names: list[str]) -> list[dict]:
@@ -738,6 +832,7 @@ def build_pcov_parameters(org_names: list[str], os_names: list[str]) -> list[dic
         _param_dropdown(PARAM_PCOV_CLASS,  "Node Class",    "pcov_node_class", _NODE_CLASS_OPTIONS),
         _param_dropdown(PARAM_PCOV_OS,     "OS Name",       "pcov_os",         os_names),
         _param_dropdown(PARAM_PCOV_STATUS, "Patch Status",  "pcov_status",     _PCOV_STATUS_OPTIONS),
+        _param_number(  PARAM_PCOV_DAYS,   "Stale threshold (days)", "pcov_days", 7),
     ]
 
 
@@ -746,6 +841,11 @@ _PCOV_TAGS = {
     "pcov_node_class":  {"id": "tt_pcov_class",  "name": "pcov_node_class", "display-name": "Node Class",   "type": "text"},
     "pcov_os":          {"id": "tt_pcov_os",     "name": "pcov_os",         "display-name": "OS Name",      "type": "text"},
     "pcov_status":      {"id": "tt_pcov_status", "name": "pcov_status",     "display-name": "Patch Status", "type": "text"},
+    "pcov_days":        {
+        "id": "tt_pcov_days", "name": "pcov_days",
+        "display-name": "Stale threshold (days)",
+        "type": "number", "default": "7", "required": True,
+    },
 }
 
 _PCOV_PARAM_MAPPINGS = {
@@ -753,9 +853,13 @@ _PCOV_PARAM_MAPPINGS = {
     PARAM_PCOV_CLASS:  ["variable", ["template-tag", "pcov_node_class"]],
     PARAM_PCOV_OS:     ["variable", ["template-tag", "pcov_os"]],
     PARAM_PCOV_STATUS: ["variable", ["template-tag", "pcov_status"]],
+    PARAM_PCOV_DAYS:   ["variable", ["template-tag", "pcov_days"]],
 }
 
 # Reused: classify every active device by its latest patch_facts signal.
+# Threshold is configurable via the dashboard's "Stale threshold (days)"
+# parameter; template tag default keeps queries valid even before the
+# operator sets a value.
 _PCOV_CTE = """
 WITH device_patch_signal AS (
     SELECT device_id, MAX(last_observed_at) AS last_seen_at
@@ -773,7 +877,7 @@ classified AS (
         dps.last_seen_at,
         CASE
             WHEN dps.last_seen_at IS NULL THEN 'no_patch_data'
-            WHEN dps.last_seen_at < NOW() - INTERVAL '7 days' THEN 'stale_patch_data'
+            WHEN dps.last_seen_at < NOW() - (INTERVAL '1 day' * {{pcov_days}}) THEN 'stale_patch_data'
             ELSE 'active_patching'
         END AS patch_status
     FROM ninja_core.devices d
@@ -856,9 +960,9 @@ WHERE 1=1
     },
     {
         "key":     "pcov_status_pie",
-        "name":    "Patch Coverage Breakdown",
+        "name":    "Patch Coverage Breakdown (by status)",
         "display": "pie",
-        "row": 4, "col": 0, "size_x": 12, "size_y": 8,
+        "row": 4, "col": 0, "size_x": 8, "size_y": 8,
         "viz_settings": {
             "pie.dimension":       "patch_status",
             "pie.metric":          "devices",
@@ -880,10 +984,64 @@ ORDER BY devices DESC
 """,
     },
     {
+        "key":     "pcov_class_pie",
+        "name":    "Coverage by Node Class",
+        "display": "pie",
+        "row": 4, "col": 8, "size_x": 8, "size_y": 8,
+        "viz_settings": {
+            "pie.dimension":       "node_class",
+            "pie.metric":          "devices",
+            "pie.slice_threshold": 0,
+            "pie.show_legend":     True,
+            "pie.show_total":      True,
+        },
+        "template_tags":  _PCOV_TAGS,
+        "param_mappings": _PCOV_PARAM_MAPPINGS,
+        "query": f"""
+{_PCOV_CTE}
+SELECT c.node_class, COUNT(*) AS devices
+FROM classified c
+JOIN ninja_core.organizations o ON o.id = c.organization_id
+WHERE 1=1
+{_PCOV_FILTERS}
+GROUP BY c.node_class
+ORDER BY devices DESC
+""",
+    },
+    {
+        "key":     "pcov_os_stacked",
+        "name":    "Patch Coverage by OS (top 20)",
+        "display": "bar",
+        "row": 4, "col": 16, "size_x": 8, "size_y": 8,
+        "viz_settings": {
+            "graph.dimensions":      ["os_name"],
+            "graph.metrics":         ["active", "stale", "no_data"],
+            "stackable.stack_type":  "stacked",
+            "graph.show_values":     False,
+        },
+        "template_tags":  _PCOV_TAGS,
+        "param_mappings": _PCOV_PARAM_MAPPINGS,
+        "query": f"""
+{_PCOV_CTE}
+SELECT
+    COALESCE(NULLIF(c.os_name, ''), '(unknown)') AS os_name,
+    COUNT(*) FILTER (WHERE c.patch_status = 'active_patching')  AS active,
+    COUNT(*) FILTER (WHERE c.patch_status = 'stale_patch_data') AS stale,
+    COUNT(*) FILTER (WHERE c.patch_status = 'no_patch_data')    AS no_data
+FROM classified c
+JOIN ninja_core.organizations o ON o.id = c.organization_id
+WHERE 1=1
+{_PCOV_FILTERS}
+GROUP BY 1
+ORDER BY (active + stale + no_data) DESC
+LIMIT 20
+""",
+    },
+    {
         "key":     "pcov_by_org",
         "name":    "Coverage by Organization",
         "display": "table",
-        "row": 4, "col": 12, "size_x": 12, "size_y": 8,
+        "row": 12, "col": 0, "size_x": 24, "size_y": 8,
         "template_tags":  _PCOV_TAGS,
         "param_mappings": _PCOV_PARAM_MAPPINGS,
         "query": f"""
@@ -910,7 +1068,7 @@ ORDER BY pct_active ASC, total DESC
         "key":     "pcov_all_devices",
         "name":    "All Devices with Patch Status",
         "display": "table",
-        "row": 12, "col": 0, "size_x": 24, "size_y": 14,
+        "row": 20, "col": 0, "size_x": 24, "size_y": 14,
         "template_tags":  _PCOV_TAGS,
         "param_mappings": _PCOV_PARAM_MAPPINGS,
         "query": f"""
