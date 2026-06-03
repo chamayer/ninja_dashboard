@@ -2,6 +2,21 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.8.1] — 2026-06-03
+
+### Fixed
+- Split dashboard patch semantics into **current patch state** and
+  **latest install outcome**. A patch can currently be `APPROVED`
+  while its most recent install attempt is `FAILED`; the old
+  current-state-only queries hid those failed installs.
+- Fleet and Org **Failed Installs** cards now count the latest
+  `FAILED` install outcome per `(device_id, patch_uid)`.
+- Patch Detail now has an **Install Outcome** filter separate from
+  the current-state **Status** filter, and the detail table shows both
+  `current_status` and `last_install_outcome`.
+- Org Top Problem Patches now prioritizes latest failed install
+  outcomes while still showing current queued states.
+
 ## [0.8.0] — 2026-06-03
 
 ### Added

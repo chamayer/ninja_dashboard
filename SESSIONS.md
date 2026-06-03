@@ -5,6 +5,38 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-03 — v0.8.1 current state vs install outcome
+
+**Done:**
+- Investigated a real Postgres example where the same
+  `(device_id, patch_uid)` had:
+  - current patch state row: `APPROVED`
+  - latest install outcome row: `FAILED`
+- Confirmed the old dashboard SQL was counting only the latest mixed
+  `patch_facts` row, so a newer `APPROVED` state hid the failed
+  install attempt.
+- Added a separate latest-install-outcome CTE to the Metabase
+  bootstrap SQL, ordered deterministically by `installed_at`,
+  `ninja_observed_at`, `last_observed_at`, then `id`.
+- Updated Fleet and Org **Failed Installs** cards to count latest
+  install outcome, not current state.
+- Added an **Install Outcome** filter to Patch Detail and kept
+  **Status** as the current patch-state filter.
+- Updated Patch Detail table to show both `current_status` and
+  `last_install_outcome`, plus `last_install_at`.
+- Updated Org Top Problem Patches to prioritize latest failed install
+  outcomes while still surfacing current queued patches.
+
+**Validation:**
+- `python -m compileall ingest` passes.
+- Live Metabase bootstrap still needs to be re-run to apply the SQL
+  changes to cards.
+
+**Decision:**
+- Dashboard labels now intentionally distinguish state from outcome:
+  `APPROVED`, `MANUAL`, `DELAYED` are current patch states;
+  `FAILED` and `INSTALLED` are install outcomes.
+
 ## 2026-06-03 — v0.8.0 Org Overview + patching status model
 
 **Done:**

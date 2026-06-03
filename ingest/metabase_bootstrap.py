@@ -125,15 +125,27 @@ FROM current_state WHERE status IN ('MANUAL', 'DELAYED')
         "name":       "Failed Installs",
         "display":    "scalar",
         "row": 0, "col": 18, "size_x": 6, "size_y": 4,
-        "click_behavior": {"target": DASH_DETAIL, "preset": {"status": "FAILED"}},
+        "click_behavior": {
+            "target": DASH_DETAIL,
+            "preset": {"install_outcome": "FAILED"},
+        },
         "query": """
-WITH current_state AS (
-    SELECT DISTINCT ON (device_id, patch_uid) status
+WITH latest_install_outcome AS (
+    SELECT DISTINCT ON (device_id, patch_uid)
+        device_id, patch_uid, status
     FROM ninja_patches.patch_facts
-    ORDER BY device_id, patch_uid, last_observed_at DESC
+    WHERE status IN ('INSTALLED', 'FAILED')
+    ORDER BY
+        device_id,
+        patch_uid,
+        installed_at DESC NULLS LAST,
+        ninja_observed_at DESC NULLS LAST,
+        last_observed_at DESC,
+        id DESC
 )
 SELECT COUNT(*) AS failed
-FROM current_state WHERE status = 'FAILED'
+FROM latest_install_outcome
+WHERE status = 'FAILED'
 """,
     },
     {
@@ -280,7 +292,20 @@ WITH current_state AS (
     SELECT DISTINCT ON (device_id, patch_uid)
         device_id, patch_uid, status
     FROM ninja_patches.patch_facts
-    ORDER BY device_id, patch_uid, last_observed_at DESC
+    ORDER BY device_id, patch_uid, last_observed_at DESC, id DESC
+),
+latest_install_outcome AS (
+    SELECT DISTINCT ON (device_id, patch_uid)
+        device_id, patch_uid, status
+    FROM ninja_patches.patch_facts
+    WHERE status IN ('INSTALLED', 'FAILED')
+    ORDER BY
+        device_id,
+        patch_uid,
+        installed_at DESC NULLS LAST,
+        ninja_observed_at DESC NULLS LAST,
+        last_observed_at DESC,
+        id DESC
 )
 SELECT
     o.name AS organization,
@@ -291,11 +316,13 @@ SELECT
     ) AS pct_installed,
     COUNT(*) FILTER (WHERE cs.status = 'INSTALLED')                          AS installed,
     COUNT(*) FILTER (WHERE cs.status IN ('APPROVED','MANUAL','DELAYED'))     AS queued,
-    COUNT(*) FILTER (WHERE cs.status = 'FAILED')                             AS failed,
+    COUNT(*) FILTER (WHERE lio.status = 'FAILED')                            AS failed_installs,
     COUNT(*) FILTER (WHERE cs.status = 'REJECTED')                           AS rejected,
     COUNT(*)                                                                 AS total_patches,
     COUNT(DISTINCT cs.device_id)                                             AS devices
 FROM current_state cs
+LEFT JOIN latest_install_outcome lio
+  ON lio.device_id = cs.device_id AND lio.patch_uid = cs.patch_uid
 JOIN ninja_core.v_active_devices d ON d.id = cs.device_id
 JOIN ninja_core.organizations o  ON o.id = d.organization_id
 WHERE d.approval_status = 'APPROVED'
@@ -522,6 +549,7 @@ PARAM_SEV     = "p_severity"
 PARAM_OS      = "p_os"
 PARAM_KB      = "p_kb"
 PARAM_DAYS    = "p_days"
+PARAM_OUTCOME = "p_install_outcome"
 PARAM_DEVICE      = "p_device"
 PARAM_DEVICE_DAYS = "p_device_days"
 
@@ -532,6 +560,7 @@ _STATUS_OPTIONS = [
 ]
 _NODE_CLASS_OPTIONS = ["WINDOWS_WORKSTATION", "WINDOWS_SERVER"]
 _SEVERITY_OPTIONS = ["CRITICAL", "IMPORTANT", "OPTIONAL", "MODERATE", "LOW", "NONE"]
+_OUTCOME_OPTIONS = ["FAILED", "INSTALLED"]
 
 
 def _param_dropdown(
@@ -580,6 +609,8 @@ def build_detail_parameters(
         _param_dropdown(PARAM_CLASS,  "Node Class",   "node_class", _NODE_CLASS_OPTIONS,
                         default="WINDOWS_WORKSTATION"),
         _param_dropdown(PARAM_SEV,    "Severity",     "severity",   _SEVERITY_OPTIONS),
+        _param_dropdown(PARAM_OUTCOME, "Install Outcome", "install_outcome",
+                        _OUTCOME_OPTIONS),
         _param_dropdown(PARAM_OS,     "OS Name",      "os",         os_names),
         _param_text(    PARAM_KB,     "KB Number",    "kb"),
         _param_number(  PARAM_DAYS,   "Timeline window (days)", "days", 90),
@@ -593,6 +624,10 @@ _FILTER_TAGS = {
     "status":     {"id": "tt_status",     "name": "status",     "display-name": "Status",       "type": "text"},
     "node_class": {"id": "tt_node_class", "name": "node_class", "display-name": "Node Class",   "type": "text"},
     "severity":   {"id": "tt_severity",   "name": "severity",   "display-name": "Severity",     "type": "text"},
+    "install_outcome": {
+        "id": "tt_install_outcome", "name": "install_outcome",
+        "display-name": "Install Outcome", "type": "text",
+    },
     "os":         {"id": "tt_os",         "name": "os",         "display-name": "OS Name",      "type": "text"},
     "kb":         {"id": "tt_kb",         "name": "kb",         "display-name": "KB Number",    "type": "text"},
     "device":     {"id": "tt_device",     "name": "device",     "display-name": "Device",       "type": "text"},
@@ -613,6 +648,7 @@ _FILTER_PARAM_MAPPINGS = {
     PARAM_STATUS: ["variable", ["template-tag", "status"]],
     PARAM_CLASS:  ["variable", ["template-tag", "node_class"]],
     PARAM_SEV:    ["variable", ["template-tag", "severity"]],
+    PARAM_OUTCOME: ["variable", ["template-tag", "install_outcome"]],
     PARAM_OS:     ["variable", ["template-tag", "os"]],
     PARAM_KB:     ["variable", ["template-tag", "kb"]],
     PARAM_DEVICE: ["variable", ["template-tag", "device"]],
@@ -631,7 +667,21 @@ WITH current_state AS (
         pf.name AS patch_name, pf.kb_number, pf.installed_at,
         pf.last_observed_at
     FROM ninja_patches.patch_facts pf
-    ORDER BY pf.device_id, pf.patch_uid, pf.last_observed_at DESC
+    ORDER BY pf.device_id, pf.patch_uid, pf.last_observed_at DESC, pf.id DESC
+),
+latest_install_outcome AS (
+    SELECT DISTINCT ON (device_id, patch_uid)
+        device_id, patch_uid, status, severity,
+        name AS patch_name, kb_number, installed_at, ninja_observed_at
+    FROM ninja_patches.patch_facts
+    WHERE status IN ('INSTALLED', 'FAILED')
+    ORDER BY
+        device_id,
+        patch_uid,
+        installed_at DESC NULLS LAST,
+        ninja_observed_at DESC NULLS LAST,
+        last_observed_at DESC,
+        id DESC
 )
 """
 _FILTER_PREDICATES = """
@@ -639,6 +689,7 @@ _FILTER_PREDICATES = """
   [[AND cs.status = {{status}}]]
   [[AND d.node_class = {{node_class}}]]
   [[AND cs.severity = {{severity}}]]
+  [[AND lio.status = {{install_outcome}}]]
   [[AND d.os_name = {{os}}]]
   [[AND cs.kb_number = {{kb}}]]
   [[AND d.system_name = {{device}}]]
@@ -664,6 +715,8 @@ DETAIL_CARDS = [
 {_CTE_CURRENT_STATE}
 SELECT cs.status, COUNT(*) AS patches
 FROM current_state cs
+LEFT JOIN latest_install_outcome lio
+  ON lio.device_id = cs.device_id AND lio.patch_uid = cs.patch_uid
 JOIN ninja_core.v_active_devices d ON d.id = cs.device_id
 JOIN ninja_core.organizations o  ON o.id = d.organization_id
 WHERE d.approval_status = 'APPROVED'
@@ -685,6 +738,8 @@ ORDER BY patches DESC
 {_CTE_CURRENT_STATE}
 SELECT COALESCE(NULLIF(cs.severity, ''), 'NONE') AS severity, COUNT(*) AS patches
 FROM current_state cs
+LEFT JOIN latest_install_outcome lio
+  ON lio.device_id = cs.device_id AND lio.patch_uid = cs.patch_uid
 JOIN ninja_core.v_active_devices d ON d.id = cs.device_id
 JOIN ninja_core.organizations o  ON o.id = d.organization_id
 WHERE d.approval_status = 'APPROVED'
@@ -708,6 +763,8 @@ SELECT
     d.system_name AS device,
     COUNT(*) AS patches
 FROM current_state cs
+LEFT JOIN latest_install_outcome lio
+  ON lio.device_id = cs.device_id AND lio.patch_uid = cs.patch_uid
 JOIN ninja_core.v_active_devices d ON d.id = cs.device_id
 JOIN ninja_core.organizations o  ON o.id = d.organization_id
 WHERE d.approval_status = 'APPROVED'
@@ -732,6 +789,8 @@ SELECT
     COALESCE(NULLIF(cs.kb_number, ''), '(none)') AS kb_number,
     COUNT(*) AS patches
 FROM current_state cs
+LEFT JOIN latest_install_outcome lio
+  ON lio.device_id = cs.device_id AND lio.patch_uid = cs.patch_uid
 JOIN ninja_core.v_active_devices d ON d.id = cs.device_id
 JOIN ninja_core.organizations o  ON o.id = d.organization_id
 WHERE d.approval_status = 'APPROVED'
@@ -743,28 +802,32 @@ LIMIT 20
     },
     {
         "key":            "detail_installs_timeline",
-        "name":           "Installs over time (filtered)",
+        "name":           "Install Outcomes over time (filtered)",
         "display":        "line",
         "row": 6, "col": 12, "size_x": 12, "size_y": 8,
-        "viz_settings":   {"graph.dimensions": ["day"], "graph.metrics": ["installs"]},
+        "viz_settings":   {"graph.dimensions": ["day"], "graph.metrics": ["install_outcomes"]},
         "template_tags":  {**_FILTER_TAGS, **_DAYS_TAG},
         "param_mappings": _TIMELINE_PARAM_MAPPINGS,
         "query": f"""
+{_CTE_CURRENT_STATE}
 SELECT
-    DATE_TRUNC('day', pf.installed_at)::date AS day,
-    COUNT(*) AS installs
-FROM ninja_patches.patch_facts pf
-JOIN ninja_core.v_active_devices d ON d.id = pf.device_id
+    DATE_TRUNC('day', lio.installed_at)::date AS day,
+    COUNT(*) AS install_outcomes
+FROM current_state cs
+JOIN latest_install_outcome lio
+  ON lio.device_id = cs.device_id AND lio.patch_uid = cs.patch_uid
+JOIN ninja_core.v_active_devices d ON d.id = cs.device_id
 JOIN ninja_core.organizations o  ON o.id = d.organization_id
-WHERE pf.installed_at IS NOT NULL
-  AND pf.installed_at > NOW() - (INTERVAL '1 day' * {{{{days}}}})
+WHERE lio.installed_at IS NOT NULL
+  AND lio.installed_at > NOW() - (INTERVAL '1 day' * {{{{days}}}})
   AND d.approval_status = 'APPROVED'
   [[AND o.name = {{{{org}}}}]]
-  [[AND pf.status = {{{{status}}}}]]
+  [[AND cs.status = {{{{status}}}}]]
+  [[AND lio.status = {{{{install_outcome}}}}]]
   [[AND d.node_class = {{{{node_class}}}}]]
-  [[AND pf.severity = {{{{severity}}}}]]
+  [[AND cs.severity = {{{{severity}}}}]]
   [[AND d.os_name = {{{{os}}}}]]
-  [[AND pf.kb_number = {{{{kb}}}}]]
+  [[AND cs.kb_number = {{{{kb}}}}]]
   [[AND d.system_name = {{{{device}}}}]]
 GROUP BY 1
 ORDER BY 1
@@ -790,6 +853,8 @@ SELECT
     d.node_class,
     COUNT(*)             AS patches
 FROM current_state cs
+LEFT JOIN latest_install_outcome lio
+  ON lio.device_id = cs.device_id AND lio.patch_uid = cs.patch_uid
 JOIN ninja_core.v_active_devices d ON d.id = cs.device_id
 JOIN ninja_core.organizations o  ON o.id = d.organization_id
 WHERE d.approval_status = 'APPROVED'
@@ -817,6 +882,8 @@ SELECT
     COUNT(DISTINCT cs.device_id) AS devices,
     COUNT(*)                     AS patches
 FROM current_state cs
+LEFT JOIN latest_install_outcome lio
+  ON lio.device_id = cs.device_id AND lio.patch_uid = cs.patch_uid
 JOIN ninja_core.v_active_devices d ON d.id = cs.device_id
 JOIN ninja_core.organizations o  ON o.id = d.organization_id
 WHERE d.approval_status = 'APPROVED'
@@ -836,7 +903,10 @@ ORDER BY patches DESC
             "device":       {"target": DASH_DRILLDOWN, "params": {"p_device": "device"}},
             "organization": {"target": "self", "params": {"p_org":      "organization"}},
             "node_class":   {"target": "self", "params": {"p_class":    "node_class"}},
-            "status":       {"target": "self", "params": {"p_status":   "status"}},
+            "current_status": {"target": "self", "params": {"p_status": "current_status"}},
+            "last_install_outcome": {
+                "target": "self", "params": {"p_install_outcome": "last_install_outcome"},
+            },
             "severity":     {"target": "self", "params": {"p_severity": "severity"}},
             "kb_number":    {"target": "self", "params": {"p_kb":       "kb_number"}},
         },
@@ -848,19 +918,22 @@ SELECT
     d.node_class,
     cs.kb_number,
     cs.patch_name,
-    cs.status,
+    cs.status AS current_status,
+    lio.status AS last_install_outcome,
     cs.severity,
-    cs.installed_at,
-    CASE WHEN cs.installed_at IS NULL THEN NULL
-         ELSE ROUND(EXTRACT(EPOCH FROM (NOW() - cs.installed_at)) / 86400)
-    END AS days_since_install,
+    lio.installed_at AS last_install_at,
+    CASE WHEN lio.installed_at IS NULL THEN NULL
+         ELSE ROUND(EXTRACT(EPOCH FROM (NOW() - lio.installed_at)) / 86400)
+    END AS days_since_install_attempt,
     cs.last_observed_at
 FROM current_state cs
+LEFT JOIN latest_install_outcome lio
+  ON lio.device_id = cs.device_id AND lio.patch_uid = cs.patch_uid
 JOIN ninja_core.v_active_devices d ON d.id = cs.device_id
 JOIN ninja_core.organizations o  ON o.id = d.organization_id
 WHERE d.approval_status = 'APPROVED'
 {_FILTER_PREDICATES}
-ORDER BY cs.last_observed_at DESC, cs.installed_at DESC NULLS LAST
+ORDER BY cs.last_observed_at DESC, lio.installed_at DESC NULLS LAST
 LIMIT 1000
 """,
     },
@@ -1482,18 +1555,32 @@ GROUP BY o.name
         "row": 0, "col": 18, "size_x": 6, "size_y": 4,
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS,
-        "click_behavior": {"target": DASH_DETAIL, "params": {"p_org": "organization"}},
+        "click_behavior": {
+            "target": DASH_DETAIL,
+            "params": {
+                "p_org": "organization",
+                "p_install_outcome": "install_outcome",
+            },
+        },
         "query": """
-WITH current_state AS (
-    SELECT DISTINCT ON (device_id, patch_uid) device_id, patch_uid, status
+WITH latest_install_outcome AS (
+    SELECT DISTINCT ON (device_id, patch_uid)
+        device_id, patch_uid, status
     FROM ninja_patches.patch_facts
-    ORDER BY device_id, patch_uid, last_observed_at DESC
+    WHERE status IN ('INSTALLED', 'FAILED')
+    ORDER BY
+        device_id,
+        patch_uid,
+        installed_at DESC NULLS LAST,
+        ninja_observed_at DESC NULLS LAST,
+        last_observed_at DESC,
+        id DESC
 )
-SELECT o.name AS organization, COUNT(*) AS failed
-FROM current_state cs
-JOIN ninja_core.v_active_devices d ON d.id = cs.device_id
+SELECT o.name AS organization, 'FAILED' AS install_outcome, COUNT(*) AS failed
+FROM latest_install_outcome lio
+JOIN ninja_core.v_active_devices d ON d.id = lio.device_id
 JOIN ninja_core.organizations o ON o.id = d.organization_id
-WHERE cs.status = 'FAILED'
+WHERE lio.status = 'FAILED'
   [[AND o.name = {{org}}]]
 GROUP BY o.name
 """,
@@ -1648,7 +1735,20 @@ WITH current_state AS (
     SELECT DISTINCT ON (device_id, patch_uid)
         device_id, patch_uid, status, severity, kb_number, name AS patch_name
     FROM ninja_patches.patch_facts
-    ORDER BY device_id, patch_uid, last_observed_at DESC
+    ORDER BY device_id, patch_uid, last_observed_at DESC, id DESC
+),
+latest_install_outcome AS (
+    SELECT DISTINCT ON (device_id, patch_uid)
+        device_id, patch_uid, status, installed_at
+    FROM ninja_patches.patch_facts
+    WHERE status IN ('INSTALLED', 'FAILED')
+    ORDER BY
+        device_id,
+        patch_uid,
+        installed_at DESC NULLS LAST,
+        ninja_observed_at DESC NULLS LAST,
+        last_observed_at DESC,
+        id DESC
 )
 SELECT
     o.name AS organization,
@@ -1656,15 +1756,20 @@ SELECT
     cs.patch_name,
     cs.severity,
     COUNT(DISTINCT cs.device_id) AS devices_affected,
-    COUNT(*) FILTER (WHERE cs.status = 'FAILED') AS failed,
+    COUNT(*) FILTER (WHERE lio.status = 'FAILED') AS failed_installs,
     COUNT(*) FILTER (WHERE cs.status IN ('MANUAL','DELAYED','APPROVED')) AS queued
 FROM current_state cs
+LEFT JOIN latest_install_outcome lio
+  ON lio.device_id = cs.device_id AND lio.patch_uid = cs.patch_uid
 JOIN ninja_core.v_active_devices d ON d.id = cs.device_id
 JOIN ninja_core.organizations o ON o.id = d.organization_id
-WHERE cs.status IN ('FAILED', 'MANUAL', 'DELAYED', 'APPROVED')
+WHERE (
+    cs.status IN ('MANUAL', 'DELAYED', 'APPROVED')
+    OR lio.status = 'FAILED'
+)
   [[AND o.name = {{org}}]]
 GROUP BY o.name, 2, cs.patch_name, cs.severity
-ORDER BY failed DESC, queued DESC, devices_affected DESC
+ORDER BY failed_installs DESC, queued DESC, devices_affected DESC
 LIMIT 20
 """,
     },
