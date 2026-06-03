@@ -356,9 +356,9 @@ LIMIT 50
         "display": "table",
         "row": 18, "col": 0, "size_x": 24, "size_y": 10,
         "column_click_behaviors": {
-            "Organization": {"target": DASH_ORG,       "params": {"p_org": "Organization"}},
-            "Device":       {"target": DASH_DRILLDOWN, "params": {"p_device": "Device"}},
-            "KB Number":    {"target": DASH_DETAIL,    "params": {"p_kb": "KB Number"}},
+            "organization": {"target": DASH_ORG,       "params": {"p_org": "organization"}},
+            "device":       {"target": DASH_DRILLDOWN, "params": {"p_device": "device"}},
+            "kb_number":    {"target": DASH_DETAIL,    "params": {"p_kb": "kb_number"}},
         },
         "query": """
 WITH latest_install_result AS (
@@ -376,9 +376,9 @@ WITH latest_install_result AS (
         id DESC
 )
 SELECT
-    o.name AS "Organization",
-    d.system_name AS "Device",
-    COALESCE(NULLIF(lir.kb_number, ''), '(none)') AS "KB Number",
+    o.name AS organization,
+    d.system_name AS device,
+    COALESCE(NULLIF(lir.kb_number, ''), '(none)') AS kb_number,
     lir.patch_name AS "Patch",
     lir.severity AS "Severity",
     lir.status AS "Install Results",
@@ -400,10 +400,10 @@ LIMIT 100
         "display": "table",
         "row": 28, "col": 0, "size_x": 12, "size_y": 10,
         "column_click_behaviors": {
-            "Organization": {"target": DASH_ORG,       "params": {"p_org": "Organization"}},
-            "Device":       {"target": DASH_DRILLDOWN, "params": {"p_device": "Device"}},
-            "Current Patch State": {"target": DASH_DETAIL, "params": {"p_status": "Current Patch State"}},
-            "KB Number":    {"target": DASH_DETAIL,    "params": {"p_kb": "KB Number"}},
+            "organization":        {"target": DASH_ORG,    "params": {"p_org": "organization"}},
+            "device":              {"target": DASH_DRILLDOWN, "params": {"p_device": "device"}},
+            "current_patch_state": {"target": DASH_DETAIL, "params": {"p_status": "current_patch_state"}},
+            "kb_number":           {"target": DASH_DETAIL, "params": {"p_kb": "kb_number"}},
         },
         "query": """
 WITH current_state AS (
@@ -415,10 +415,10 @@ WITH current_state AS (
     ORDER BY device_id, patch_uid, last_observed_at DESC, id DESC
 )
 SELECT
-    o.name AS "Organization",
-    d.system_name AS "Device",
-    cs.status AS "Current Patch State",
-    COALESCE(NULLIF(cs.kb_number, ''), '(none)') AS "KB Number",
+    o.name AS organization,
+    d.system_name AS device,
+    cs.status AS current_patch_state,
+    COALESCE(NULLIF(cs.kb_number, ''), '(none)') AS kb_number,
     cs.patch_name AS "Patch",
     cs.severity AS "Severity",
     cs.last_observed_at AS "Last Seen"
@@ -440,9 +440,9 @@ LIMIT 100
         "display": "table",
         "row": 28, "col": 12, "size_x": 12, "size_y": 10,
         "column_click_behaviors": {
-            "Organization": {"target": DASH_ORG,       "params": {"p_org": "Organization"}},
-            "Device":       {"target": DASH_DRILLDOWN, "params": {"p_device": "Device"}},
-            "Patching Status": {"target": DASH_PCOV,    "params": {"p_pcov_status": "Patching Status"}},
+            "organization":    {"target": DASH_ORG,       "params": {"p_org": "organization"}},
+            "device":          {"target": DASH_DRILLDOWN, "params": {"p_device": "device"}},
+            "patching_status": {"target": DASH_PCOV,      "params": {"p_pcov_status": "patching_status"}},
         },
         "query": f"""
 WITH last_install AS (
@@ -471,9 +471,9 @@ classified AS (
       AND d.node_class IN ('WINDOWS_WORKSTATION', 'WINDOWS_SERVER')
 )
 SELECT
-    o.name AS "Organization",
-    c.system_name AS "Device",
-    {PATCH_ACTIVITY_LABEL_C} AS "Patching Status",
+    o.name AS organization,
+    c.system_name AS device,
+    {PATCH_ACTIVITY_LABEL_C} AS patching_status,
     c.last_install_at AS "Last Install Attempt",
     CASE WHEN c.last_install_at IS NULL THEN NULL
          ELSE ROUND(EXTRACT(EPOCH FROM (NOW() - c.last_install_at)) / 86400)
@@ -1323,16 +1323,16 @@ ORDER BY 1
         "template_tags":  _FILTER_TAGS,
         "param_mappings": _FILTER_PARAM_MAPPINGS,
         "column_click_behaviors": {
-            "Device":       {"target": DASH_DRILLDOWN, "params": {"p_device": "Device"}},
-            "Organization": {"target": "self",         "params": {"p_org": "Organization"}},
-            "Device Type":  {"target": "self",         "params": {"p_class": "Device Type"}},
+            "device":       {"target": DASH_DRILLDOWN, "params": {"p_device": "device"}},
+            "organization": {"target": "self",         "params": {"p_org": "organization"}},
+            "device_type":  {"target": "self",         "params": {"p_class": "device_type"}},
         },
         "query": f"""
 {_CTE_CURRENT_STATE}
 SELECT
-    d.system_name        AS "Device",
-    o.name               AS "Organization",
-    {DEVICE_TYPE_D} AS "Device Type",
+    d.system_name        AS device,
+    o.name               AS organization,
+    {DEVICE_TYPE_D} AS device_type,
     COUNT(*)             AS "Patches"
 FROM current_state cs
 LEFT JOIN latest_install_outcome lio
@@ -1341,7 +1341,7 @@ JOIN ninja_core.v_active_devices d ON d.id = cs.device_id
 JOIN ninja_core.organizations o  ON o.id = d.organization_id
 WHERE d.approval_status = 'APPROVED'
 {_FILTER_PREDICATES}
-GROUP BY d.system_name, o.name, "Device Type"
+GROUP BY d.system_name, o.name, device_type
 ORDER BY "Patches" DESC
 """,
     },
@@ -1353,12 +1353,12 @@ ORDER BY "Patches" DESC
         "template_tags":  _FILTER_TAGS,
         "param_mappings": _FILTER_PARAM_MAPPINGS,
         "column_click_behaviors": {
-            "KB Number": {"target": "self", "params": {"p_kb": "KB Number"}},
+            "kb_number": {"target": "self", "params": {"p_kb": "kb_number"}},
         },
         "query": f"""
 {_CTE_CURRENT_STATE}
 SELECT
-    COALESCE(NULLIF(cs.kb_number, ''), '(none)') AS "KB Number",
+    COALESCE(NULLIF(cs.kb_number, ''), '(none)') AS kb_number,
     cs.patch_name AS "Patch",
     cs.severity AS "Severity",
     COUNT(DISTINCT cs.device_id) AS "Devices",
@@ -1382,27 +1382,25 @@ ORDER BY "Patches" DESC
         "template_tags":  _FILTER_TAGS,
         "param_mappings": _FILTER_PARAM_MAPPINGS,
         "column_click_behaviors": {
-            "Device":       {"target": DASH_DRILLDOWN, "params": {"p_device": "Device"}},
-            "Organization": {"target": "self", "params": {"p_org":      "Organization"}},
-            "Device Type": {"target": "self", "params": {"p_class":    "Device Type"}},
-            "Current Patch State": {"target": "self", "params": {"p_status": "Current Patch State"}},
-            "Install Results": {
-                "target": "self", "params": {"p_install_outcome": "Install Results"},
-            },
-            "Severity":     {"target": "self", "params": {"p_severity": "Severity"}},
-            "KB Number":    {"target": "self", "params": {"p_kb":       "KB Number"}},
+            "device":              {"target": DASH_DRILLDOWN, "params": {"p_device": "device"}},
+            "organization":        {"target": "self",         "params": {"p_org":      "organization"}},
+            "device_type":         {"target": "self",         "params": {"p_class":    "device_type"}},
+            "current_patch_state": {"target": "self",         "params": {"p_status":   "current_patch_state"}},
+            "install_results":     {"target": "self",         "params": {"p_install_outcome": "install_results"}},
+            "severity":            {"target": "self",         "params": {"p_severity": "severity"}},
+            "kb_number":           {"target": "self",         "params": {"p_kb":       "kb_number"}},
         },
         "query": f"""
 {_CTE_CURRENT_STATE}
 SELECT
-    o.name           AS "Organization",
-    d.system_name    AS "Device",
-    {DEVICE_TYPE_D} AS "Device Type",
-    cs.kb_number AS "KB Number",
+    o.name           AS organization,
+    d.system_name    AS device,
+    {DEVICE_TYPE_D} AS device_type,
+    cs.kb_number AS kb_number,
     cs.patch_name AS "Patch",
-    cs.status AS "Current Patch State",
-    lio.status AS "Install Results",
-    cs.severity AS "Severity",
+    cs.status AS current_patch_state,
+    lio.status AS install_results,
+    cs.severity AS severity,
     lio.installed_at AS "Last Install Attempt",
     CASE WHEN lio.installed_at IS NULL THEN NULL
          ELSE ROUND(EXTRACT(EPOCH FROM (NOW() - lio.installed_at)) / 86400)
@@ -1577,7 +1575,7 @@ LIMIT 200
         "template_tags":  DEVICE_TAGS,
         "param_mappings": DEVICE_PARAM_MAPPINGS,
         "column_click_behaviors": {
-            "KB Number": {"target": DASH_DETAIL, "params": {"p_kb": "KB Number"}},
+            "kb_number": {"target": DASH_DETAIL, "params": {"p_kb": "kb_number"}},
         },
         "query": f"""
 WITH all_observations AS (
@@ -1589,7 +1587,7 @@ WITH all_observations AS (
 )
 SELECT
     d.system_name        AS "Device",
-    ao.kb_number         AS "KB Number",
+    ao.kb_number         AS kb_number,
     ao.patch_name        AS "Patch",
     ao.status            AS "Current Patch State",
     ao.severity          AS "Severity",
@@ -1881,14 +1879,14 @@ LIMIT 20
         "display": "table",
         "row": 12, "col": 0, "size_x": 24, "size_y": 8,
         "column_click_behaviors": {
-            "Organization": {"target": "self", "params": {"p_pcov_org": "Organization"}},
+            "organization": {"target": "self", "params": {"p_pcov_org": "organization"}},
         },
         "template_tags":  _PCOV_TAGS,
         "param_mappings": _PCOV_PARAM_MAPPINGS,
         "query": f"""
 {_PCOV_CTE}
 SELECT
-    o.name AS "Organization",
+    o.name AS organization,
     COUNT(*) FILTER (WHERE c.patch_status = 'active_patching')  AS "Patching Devices",
     COUNT(*) FILTER (WHERE c.patch_status = 'stale_patch_data') AS "Stalled Devices",
     COUNT(*) FILTER (WHERE c.patch_status = 'no_patch_data')    AS "Never-Patched Devices",
@@ -1911,11 +1909,11 @@ ORDER BY "Patching %" ASC, "Total Devices" DESC
         "display": "table",
         "row": 20, "col": 0, "size_x": 24, "size_y": 14,
         "column_click_behaviors": {
-            "Device":       {"target": DASH_DRILLDOWN, "params": {"p_device":      "Device"}},
-            "Organization": {"target": "self",         "params": {"p_pcov_org":    "Organization"}},
-            "Device Type":  {"target": "self",         "params": {"p_pcov_class":  "Device Type"}},
-            "Operating System Family": {"target": "self", "params": {"p_pcov_os": "Operating System Family"}},
-            "Patching Status": {"target": "self",      "params": {"p_pcov_status": "Patching Status"}},
+            "device":                  {"target": DASH_DRILLDOWN, "params": {"p_device":      "device"}},
+            "organization":            {"target": "self",         "params": {"p_pcov_org":    "organization"}},
+            "device_type":             {"target": "self",         "params": {"p_pcov_class":  "device_type"}},
+            "operating_system_family": {"target": "self",         "params": {"p_pcov_os":     "operating_system_family"}},
+            "patching_status":         {"target": "self",         "params": {"p_pcov_status": "patching_status"}},
         },
         "template_tags":  _PCOV_TAGS,
         "param_mappings": _PCOV_PARAM_MAPPINGS,
@@ -1928,11 +1926,11 @@ latest_contact AS (
 )
 SELECT
     c.device_id AS "Device ID",
-    c.system_name AS "Device",
-    o.name AS "Organization",
-    {DEVICE_TYPE_C} AS "Device Type",
-    {OS_FAMILY_C} AS "Operating System Family",
-    {PATCH_ACTIVITY_LABEL_C} AS "Patching Status",
+    c.system_name AS device,
+    o.name AS organization,
+    {DEVICE_TYPE_C} AS device_type,
+    {OS_FAMILY_C} AS operating_system_family,
+    {PATCH_ACTIVITY_LABEL_C} AS patching_status,
     c.last_seen_at AS "Last Install Attempt",
     lc.last_contact AS "Last Contact",
     CASE WHEN c.last_seen_at IS NULL THEN NULL
@@ -2268,9 +2266,9 @@ ORDER BY "Patch Compliance" ASC
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS,
         "column_click_behaviors": {
-            "Organization": {"target": "self",         "params": {"p_org": "Organization"}},
-            "Device":       {"target": DASH_DRILLDOWN, "params": {"p_device": "Device"}},
-            "KB Number":    {"target": DASH_DETAIL,    "params": {"p_org": "Organization", "p_kb": "KB Number"}},
+            "organization": {"target": "self",         "params": {"p_org": "organization"}},
+            "device":       {"target": DASH_DRILLDOWN, "params": {"p_device": "device"}},
+            "kb_number":    {"target": DASH_DETAIL,    "params": {"p_org": "organization", "p_kb": "kb_number"}},
         },
         "query": """
 WITH latest_install_result AS (
@@ -2288,9 +2286,9 @@ WITH latest_install_result AS (
         id DESC
 )
 SELECT
-    o.name AS "Organization",
-    d.system_name AS "Device",
-    COALESCE(NULLIF(lir.kb_number, ''), '(none)') AS "KB Number",
+    o.name AS organization,
+    d.system_name AS device,
+    COALESCE(NULLIF(lir.kb_number, ''), '(none)') AS kb_number,
     lir.patch_name AS "Patch",
     lir.severity AS "Severity",
     lir.status AS "Install Results",
@@ -2311,14 +2309,14 @@ LIMIT 100
         "key":     "org_action_queue",
         "name":    "Manual and Delayed Patches",
         "display": "table",
-        "row": 26, "col": 0, "size_x": 12, "size_y": 10,
+        "row": 26, "col": 0, "size_x": 24, "size_y": 10,
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS,
         "column_click_behaviors": {
-            "Organization": {"target": "self",         "params": {"p_org": "Organization"}},
-            "Device":       {"target": DASH_DRILLDOWN, "params": {"p_device": "Device"}},
-            "Current Patch State": {"target": DASH_DETAIL, "params": {"p_org": "Organization", "p_status": "Current Patch State"}},
-            "KB Number":    {"target": DASH_DETAIL,    "params": {"p_org": "Organization", "p_kb": "KB Number"}},
+            "organization":        {"target": "self",      "params": {"p_org": "organization"}},
+            "device":              {"target": DASH_DRILLDOWN, "params": {"p_device": "device"}},
+            "current_patch_state": {"target": DASH_DETAIL, "params": {"p_org": "organization", "p_status": "current_patch_state"}},
+            "kb_number":           {"target": DASH_DETAIL, "params": {"p_org": "organization", "p_kb": "kb_number"}},
         },
         "query": """
 WITH current_state AS (
@@ -2330,10 +2328,10 @@ WITH current_state AS (
     ORDER BY device_id, patch_uid, last_observed_at DESC, id DESC
 )
 SELECT
-    o.name AS "Organization",
-    d.system_name AS "Device",
-    cs.status AS "Current Patch State",
-    COALESCE(NULLIF(cs.kb_number, ''), '(none)') AS "KB Number",
+    o.name AS organization,
+    d.system_name AS device,
+    cs.status AS current_patch_state,
+    COALESCE(NULLIF(cs.kb_number, ''), '(none)') AS kb_number,
     cs.patch_name AS "Patch",
     cs.severity AS "Severity",
     cs.last_observed_at AS "Last Seen"
@@ -2346,65 +2344,6 @@ ORDER BY
     CASE cs.status WHEN 'MANUAL' THEN 0 ELSE 1 END,
     cs.last_observed_at DESC,
     d.system_name
-LIMIT 100
-""",
-    },
-    {
-        "key":     "org_patch_activity",
-        "name":    "Stalled Devices",
-        "display": "table",
-        "row": 26, "col": 12, "size_x": 12, "size_y": 10,
-        "template_tags":  _ORG_TAGS,
-        "param_mappings": _ORG_PARAM_MAPPINGS,
-        "column_click_behaviors": {
-            "Organization": {"target": "self",         "params": {"p_org": "Organization"}},
-            "Device":       {"target": DASH_DRILLDOWN, "params": {"p_device": "Device"}},
-            "Patching Status": {"target": DASH_PCOV,    "params": {"p_pcov_org": "Organization", "p_pcov_status": "Patching Status"}},
-        },
-        "query": f"""
-WITH last_install AS (
-    SELECT device_id, MAX(installed_at) AS last_install_at
-    FROM ninja_patches.patch_facts
-    WHERE fact_type = 'install_outcome'
-      AND installed_at IS NOT NULL
-    GROUP BY device_id
-),
-classified AS (
-    SELECT
-        d.id,
-        d.system_name,
-        d.organization_id,
-        d.node_class,
-        d.os_name,
-        li.last_install_at,
-        CASE
-            WHEN li.last_install_at IS NULL THEN 'no_patch_data'
-            WHEN li.last_install_at < NOW() - (INTERVAL '1 day' * {DEFAULT_STALE_PATCH_DAYS}) THEN 'stale_patch_data'
-            ELSE 'active_patching'
-        END AS patch_status
-    FROM ninja_core.devices d
-    LEFT JOIN last_install li ON li.device_id = d.id
-    WHERE d.approval_status = 'APPROVED'
-      AND d.node_class IN ('WINDOWS_WORKSTATION', 'WINDOWS_SERVER')
-)
-SELECT
-    o.name AS "Organization",
-    c.system_name AS "Device",
-    {PATCH_ACTIVITY_LABEL_C} AS "Patching Status",
-    c.last_install_at AS "Last Install Attempt",
-    CASE WHEN c.last_install_at IS NULL THEN NULL
-         ELSE ROUND(EXTRACT(EPOCH FROM (NOW() - c.last_install_at)) / 86400)
-    END AS "Days Since Attempt",
-    {DEVICE_TYPE_C} AS "Device Type",
-    {OS_FAMILY_C} AS "Operating System Family"
-FROM classified c
-JOIN ninja_core.organizations o ON o.id = c.organization_id
-WHERE c.patch_status IN ('stale_patch_data', 'no_patch_data')
-  [[AND o.name = {{{{org}}}}]]
-ORDER BY
-    CASE c.patch_status WHEN 'no_patch_data' THEN 0 ELSE 1 END,
-    c.last_install_at ASC NULLS FIRST,
-    c.system_name
 LIMIT 100
 """,
     },

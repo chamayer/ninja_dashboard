@@ -5,6 +5,24 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-03 — v0.11.4 full click-thru audit + Org Overview cleanup
+
+**Done:**
+- Audit pass: 11 remaining tables converted from quoted-display-
+  alias click_behavior pattern to lowercase-snake_case unquoted.
+  Per the v0.10.2/v0.11.3 lesson, Metabase reliably matches
+  per-column click_behaviors only when the key string matches a
+  stable unquoted column identifier in the SQL output.
+- Removed orphan `org_patch_activity` table (Stalled Devices on
+  Org Overview).
+- `org_action_queue` (Manual and Delayed Patches on Org Overview)
+  reflowed to full width.
+
+**Validation:**
+- `python -m py_compile` passes.
+- Grep for `"[A-Z]\w*":\s*\{"target"` in `column_click_behaviors`
+  returns zero — no leftover capitalized keys.
+
 ## 2026-06-03 — v0.11.3 needs_reboot click misalignment
 
 **Why:** After v0.11.2, user retested. Most click-thrus now work:

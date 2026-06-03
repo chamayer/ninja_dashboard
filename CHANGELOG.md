@@ -2,6 +2,28 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.11.4] — 2026-06-03
+
+### Fixed
+- **Full click-thru audit.** Applied the v0.10.2/v0.11.3 lesson
+  (lowercase snake_case SQL aliases for click-source columns) to
+  every remaining table that still used the capitalized quoted
+  pattern: `cmd_failed_queue`, `cmd_approval_queue`,
+  `cmd_patch_activity_queue`, `detail_all_devices`, `detail_all_kbs`,
+  `detail_table`, `device_patch_history`, `pcov_by_org`,
+  `pcov_all_devices`, `org_failed_queue`, `org_action_queue`. Every
+  click-source column is now an unquoted snake_case alias with its
+  `column_click_behavior` key matching exactly.
+
+### Changed
+- **Org Overview reflowed.** Removed the `Stalled Devices` table
+  (`org_patch_activity`) that lived as a half-width card next to
+  `Manual and Delayed Patches`. The stale/never-patched populations
+  are already exposed by the org_stale / org_never scalars and the
+  Devices Needing Reboot table — the orphan table was redundant.
+- `Manual and Delayed Patches` table (`org_action_queue`) now spans
+  full width (size_x 24).
+
 ## [0.11.3] — 2026-06-03
 
 ### Fixed
