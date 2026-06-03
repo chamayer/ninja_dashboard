@@ -2,6 +2,10 @@
 
 Run from inside the container:
     docker exec -it ninja-ingest python -m ingest.probe_activities
+
+Each test is wrapped in try/except — a single 400 / 500 won't abort
+the rest. Output marks what worked (✓), what didn't (✗), what was
+silently ignored (~).
 """
 
 from __future__ import annotations
@@ -9,9 +13,27 @@ from __future__ import annotations
 import json
 import logging
 import sys
+from typing import Any
+
+import httpx
 
 from ingest.config import settings
 from ingest.ninja_client import NinjaClient
+
+
+def _safe_get(c: NinjaClient, params: dict[str, Any]) -> tuple[list[dict] | None, str]:
+    """Return (activities, status_text). activities=None on error."""
+    try:
+        r = c.get("/activities", params)
+        return r.get("activities", []), "ok"
+    except httpx.HTTPStatusError as e:
+        return None, f"HTTP {e.response.status_code}"
+    except Exception as e:
+        return None, f"err {type(e).__name__}: {e}"
+
+
+def _ids(records: list[dict] | None) -> list[int]:
+    return [r["id"] for r in (records or [])]
 
 
 def main() -> int:
@@ -26,54 +48,93 @@ def main() -> int:
     ) as c:
 
         print("\n=== Latest 5 activities (no filter) ===")
-        r = c.get("/activities", {"pageSize": 5})
-        print("count:", len(r.get("activities", [])))
-        if r.get("activities"):
-            sample = r["activities"][0]
-            print("First record keys:", sorted(sample.keys()))
-            print("First record:")
-            print(json.dumps(sample, indent=2, default=str)[:1500])
+        records, status = _safe_get(c, {"pageSize": 5})
+        print(f"status: {status}, count: {len(records or [])}")
+        if records:
+            sample = records[0]
+            print(f"keys: {sorted(sample.keys())}")
+            print(f"sample: {json.dumps(sample, default=str)[:400]}")
+            anchor_id = records[-1]["id"]
+        else:
+            print("aborting — endpoint didn't return")
+            return 1
 
-        print("\n=== Filter activityType=PATCH_MANAGEMENT ===")
-        r = c.get("/activities", {"pageSize": 5, "activityType": "PATCH_MANAGEMENT"})
-        print("count:", len(r.get("activities", [])))
-        if r.get("activities"):
-            print("First sample:")
-            print(json.dumps(r["activities"][0], indent=2, default=str)[:1500])
+        # ── Filter variants ────────────────────────────────────────
+        print("\n=== Filter variants ===")
+        print("(✓ = filter worked, returned different/fewer records;"
+              " ~ = silently ignored, returned same as no filter;"
+              " ✗ = rejected)")
 
-        print("\n=== Filter class=PATCH_MANAGEMENT ===")
-        r = c.get("/activities", {"pageSize": 5, "class": "PATCH_MANAGEMENT"})
-        print("count:", len(r.get("activities", [])))
+        baseline = set(_ids(records))
 
+        filter_tests = [
+            {"activityType": "PATCH_MANAGEMENT"},
+            {"activityType": "SYSTEM"},
+            {"activityType": "ALERT"},
+            {"type": "Monitor"},
+            {"type": "PATCH_MANAGEMENT"},
+            {"statusCode": "PATCH_MANAGEMENT_APPLY_PATCH_COMPLETED"},
+            {"statusCode": "USER_LOGGED_IN"},
+            {"status": "Software Updated"},
+            {"nodeId": records[0]["deviceId"]},
+            {"deviceId": records[0]["deviceId"]},
+            {"sourceConfigUid": "PATCH_MANAGEMENT"},
+            {"seriesUid": "PATCH_MANAGEMENT"},
+            {"lang": "en"},  # sanity — should be ignored, not crash
+        ]
+        for params in filter_tests:
+            params_with_size = {**params, "pageSize": 5}
+            recs, status = _safe_get(c, params_with_size)
+            tag = "?"
+            if recs is None:
+                tag = "✗"
+            elif not recs:
+                tag = "✓(empty)"
+            elif set(_ids(recs)) == baseline:
+                tag = "~"
+            else:
+                tag = "✓"
+            print(f"  {tag} {params}: status={status} count={len(recs or [])} ids={_ids(recs)[:3]}")
+
+        # ── Pagination variants ────────────────────────────────────
         print("\n=== Pagination tests ===")
-        r1 = c.get("/activities", {"pageSize": 3})
-        ids1 = [a["id"] for a in r1.get("activities", [])]
-        print(f"latest 3: {ids1}")
-        if not ids1:
-            print("(no activities returned, can't test pagination)")
-            return 0
+        print(f"anchor (last id in latest 5): {anchor_id}")
 
-        anchor = ids1[-1]
-        # Walk OLDER — try various param names
-        for param in ("before", "older", "olderThan", "olderTan"):
-            try:
-                r = c.get("/activities", {"pageSize": 3, param: anchor})
-                ids = [a["id"] for a in r.get("activities", [])]
-                marker = "  (older✓)" if ids and ids[0] < anchor else ""
-                print(f"  {param}={anchor}: {ids}{marker}")
-            except Exception as e:
-                print(f"  {param}={anchor}: ERROR {e}")
+        # Walk OLDER
+        for param in ("before", "older", "olderThan", "to"):
+            recs, status = _safe_get(c, {"pageSize": 3, param: anchor_id})
+            ids = _ids(recs)
+            tag = ("✓ older" if ids and all(i < anchor_id for i in ids)
+                   else "~ same" if ids and set(ids) == {anchor_id - i for i in range(3)} else "?")
+            if recs is None:
+                tag = "✗"
+            elif ids and all(i < anchor_id for i in ids):
+                tag = "✓ (walks older)"
+            elif not ids:
+                tag = "✓(empty)"
+            elif set(ids) == baseline:
+                tag = "~ ignored"
+            else:
+                tag = "? "
+            print(f"  {tag}  {param}={anchor_id}: status={status} ids={ids}")
 
-        # Walk NEWER — for incremental ingest
-        target = anchor - 100
-        for param in ("after", "newer", "newerThan"):
-            try:
-                r = c.get("/activities", {"pageSize": 10, param: target})
-                ids = [a["id"] for a in r.get("activities", [])]
-                marker = "  (newer✓)" if ids and ids[0] > target else ""
-                print(f"  {param}={target}: {ids}{marker}")
-            except Exception as e:
-                print(f"  {param}={target}: ERROR {e}")
+        # Walk NEWER (this is the one we need for incremental ingest)
+        target = anchor_id - 200
+        print(f"\nlooking for activities NEWER than {target}:")
+        for param in ("after", "newer", "newerThan", "from"):
+            recs, status = _safe_get(c, {"pageSize": 10, param: target})
+            ids = _ids(recs)
+            if recs is None:
+                tag = "✗"
+            elif not ids:
+                tag = "✓(empty)"
+            elif ids and all(i > target for i in ids):
+                tag = "✓ (walks newer)"
+            elif set(ids) == baseline:
+                tag = "~ ignored"
+            else:
+                tag = "?"
+            print(f"  {tag}  {param}={target}: status={status} ids={ids[:5]}")
 
         print("\n=== Done ===")
     return 0
