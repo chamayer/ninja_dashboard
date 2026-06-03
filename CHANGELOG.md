@@ -2,6 +2,32 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.12.0] — 2026-06-03
+
+### Changed
+- **Dashboard renames** to disambiguate the two "status" views:
+    - "Ninja — Overview" → **"Ninja — Overall Patching Status"**
+      (fleet-wide rollup of compliance + state breakdowns)
+    - "Ninja — Patching Status" → **"Ninja — Device Patching Status"**
+      (per-device classification: Patching / Stalled / Never-Patched)
+  Bootstrap renames each in place if the legacy name is found, so
+  existing dashboard IDs (and Metabase favorites / shared links)
+  survive.
+- Nav bar labels condensed to **"Overall Status"** and **"Device
+  Status"** to fit the strip.
+- **Device Patching Status row 0** reordered so **Active Devices**
+  is leftmost, consistent with every other dashboard. Order is now
+  Active · Patching · Stalled · Never-Patched.
+
+### Added
+- **Patch Command Center is now the Metabase default homepage.**
+  Bootstrap PUTs `custom-homepage=true` +
+  `custom-homepage-dashboard=<command_center_id>` so operators
+  land there instead of the generic Metabase home. Best-effort —
+  on API rejection (older Metabase versions), the bootstrap logs a
+  warning and continues; operator can set it manually via Admin →
+  Settings → General → Custom Homepage.
+
 ## [0.11.4] — 2026-06-03
 
 ### Fixed

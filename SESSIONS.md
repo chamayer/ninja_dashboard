@@ -5,6 +5,34 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-03 — v0.12.0 dashboard renames + Command Center homepage
+
+**Done:**
+- Renamed Fleet Overview → "Overall Patching Status" (it's a
+  fleet-wide rollup of compliance + state breakdowns).
+- Renamed PCOV "Patching Status" → "Device Patching Status" (it's a
+  per-device classification). The "Patching Status" name was
+  overloaded and operator-confusing.
+- Both renames use the existing legacy_names rename-in-place
+  mechanism, so dashboard IDs survive the rename. Nav bar labels
+  shortened to "Overall Status" / "Device Status".
+- Active Devices moved to leftmost position on Device Patching
+  Status row 0 for visual consistency with the other dashboards.
+- Bootstrap now sets Patch Command Center as Metabase's
+  instance-wide custom homepage via /api/setting/custom-homepage
+  + /api/setting/custom-homepage-dashboard. Best-effort: warns and
+  continues on Metabase API rejection.
+
+**Deferred to v0.12.1:**
+- Org Overview filter additions (Device Type, OS Family, Severity)
+  with all org cards rewired to honor them.
+- Card grouping pass (device cards together, patch cards together,
+  section header markdown cards).
+- Patch Compliance placement as a top-level KPI on Fleet/Org.
+
+**Validation:**
+- `python -m py_compile` passes.
+
 ## 2026-06-03 — v0.11.4 full click-thru audit + Org Overview cleanup
 
 **Done:**

@@ -60,11 +60,11 @@ COLLECTION_NAME = "Ninja"
 # Dashboard names — defined early so card-spec click_behaviors below
 # can reference them. Don't rename without updating drill targets.
 DASH_COMMAND     = "Ninja — Patch Command Center"
-DASH_OVERVIEW    = "Ninja — Overview"
+DASH_OVERVIEW    = "Ninja — Overall Patching Status"
 DASH_ORG         = "Ninja — Org Overview"
 DASH_DETAIL      = "Ninja — Patch Detail (Filterable)"
 DASH_DRILLDOWN   = "Ninja — Device Drilldown"
-DASH_PCOV        = "Ninja — Patching Status"
+DASH_PCOV        = "Ninja — Device Patching Status"
 
 DEFAULT_STALE_PATCH_DAYS = 35
 
@@ -1710,14 +1710,32 @@ _PCOV_FILTERS = f"""
 """
 
 PCOV_CARDS = [
+    # Active Devices first (leftmost) for consistency with every other
+    # dashboard's row 0; the three patching-status breakdown scalars
+    # follow.
     {
-        "key":     "pcov_active",
-        "name":    "Patching Devices",
+        "key":     "pcov_total",
+        "name":    "Active Devices",
         "display": "scalar",
         "row": 0, "col": 0, "size_x": 6, "size_y": 4,
         "template_tags":  _PCOV_TAGS,
         "param_mappings": _PCOV_PARAM_MAPPINGS,
-        # Click → narrow this dashboard to recently active devices.
+        "query": f"""
+{_PCOV_CTE}
+SELECT COUNT(*) AS devices
+FROM classified c
+JOIN ninja_core.organizations o ON o.id = c.organization_id
+WHERE 1=1
+{_PCOV_FILTERS}
+""",
+    },
+    {
+        "key":     "pcov_active",
+        "name":    "Patching Devices",
+        "display": "scalar",
+        "row": 0, "col": 6, "size_x": 6, "size_y": 4,
+        "template_tags":  _PCOV_TAGS,
+        "param_mappings": _PCOV_PARAM_MAPPINGS,
         "click_behavior": {
             "target": DASH_PCOV,
             "preset": {"pcov_status": "Patching Devices"},
@@ -1735,7 +1753,7 @@ WHERE c.patch_status = 'active_patching'
         "key":     "pcov_stale",
         "name":    "Stalled Devices",
         "display": "scalar",
-        "row": 0, "col": 6, "size_x": 6, "size_y": 4,
+        "row": 0, "col": 12, "size_x": 6, "size_y": 4,
         "template_tags":  _PCOV_TAGS,
         "param_mappings": _PCOV_PARAM_MAPPINGS,
         "click_behavior": {
@@ -1755,7 +1773,7 @@ WHERE c.patch_status = 'stale_patch_data'
         "key":     "pcov_none",
         "name":    "Never-Patched Devices",
         "display": "scalar",
-        "row": 0, "col": 12, "size_x": 6, "size_y": 4,
+        "row": 0, "col": 18, "size_x": 6, "size_y": 4,
         "template_tags":  _PCOV_TAGS,
         "param_mappings": _PCOV_PARAM_MAPPINGS,
         "click_behavior": {
@@ -1768,22 +1786,6 @@ SELECT COUNT(*) AS no_data
 FROM classified c
 JOIN ninja_core.organizations o ON o.id = c.organization_id
 WHERE c.patch_status = 'no_patch_data'
-{_PCOV_FILTERS}
-""",
-    },
-    {
-        "key":     "pcov_total",
-        "name":    "Active Devices",
-        "display": "scalar",
-        "row": 0, "col": 18, "size_x": 6, "size_y": 4,
-        "template_tags":  _PCOV_TAGS,
-        "param_mappings": _PCOV_PARAM_MAPPINGS,
-        "query": f"""
-{_PCOV_CTE}
-SELECT COUNT(*) AS devices
-FROM classified c
-JOIN ninja_core.organizations o ON o.id = c.organization_id
-WHERE 1=1
 {_PCOV_FILTERS}
 """,
     },
@@ -2392,7 +2394,7 @@ def build_dashboards(
             "cards":      COMMAND_CARDS,
         },
         {
-            "name":       "Ninja — Overview",
+            "name":       DASH_OVERVIEW,
             "parameters": [],
             "cards":      OVERVIEW_CARDS,
         },
@@ -2528,7 +2530,11 @@ def _upsert_dashboard(
     r.raise_for_status()
     existing = None
     legacy_names = {
-        DASH_PCOV: ["Ninja — Patch Coverage"],
+        # Order matters: most-recent legacy name first so it's matched
+        # ahead of older names. The bootstrap renames in place if a
+        # legacy name is found.
+        DASH_PCOV:     ["Ninja — Patching Status", "Ninja — Patch Coverage"],
+        DASH_OVERVIEW: ["Ninja — Overview"],
     }
     for d in r.json():
         names = [name, *legacy_names.get(name, [])]
@@ -2570,9 +2576,9 @@ NAV_HEIGHT = 2  # rows reserved at top of every dashboard for the nav bar
 NAV_ORDER = [DASH_COMMAND, DASH_OVERVIEW, DASH_ORG, DASH_PCOV, DASH_DETAIL, DASH_DRILLDOWN]
 NAV_DISPLAY_NAMES = {
     DASH_COMMAND:   "Command Center",
-    DASH_OVERVIEW:  "Fleet Overview",
+    DASH_OVERVIEW:  "Overall Status",
     DASH_ORG:       "Org Overview",
-    DASH_PCOV:      "Patching Status",
+    DASH_PCOV:      "Device Status",
     DASH_DETAIL:    "Patch Detail",
     DASH_DRILLDOWN: "Device Drilldown",
 }
@@ -2800,7 +2806,43 @@ def run_bootstrap(
         log.info("── Applying click behaviors ──")
         _apply_click_behaviors(client, dashboards, card_ids_by_dash, dash_id_by_name)
 
+        # Pass 3 — make Patch Command Center the Metabase-wide custom
+        # homepage so operators land there instead of the generic
+        # Metabase home. Two settings work together:
+        # `custom-homepage` enables the feature; `custom-homepage-
+        # dashboard` points to the dashboard id. Best-effort: warn
+        # and continue if the setting endpoint rejects (older Metabase
+        # versions exposed these differently).
+        _set_custom_homepage(client, dash_id_by_name.get(DASH_COMMAND))
+
     return urls
+
+
+def _set_custom_homepage(client: httpx.Client, dashboard_id: int | None) -> None:
+    """Configure Metabase's instance-wide custom homepage to point at
+    `dashboard_id`. Best-effort — logs and continues on failure so a
+    Metabase version mismatch doesn't fail the whole bootstrap."""
+    if dashboard_id is None:
+        log.warning("Custom homepage: dashboard id unknown, skipping")
+        return
+    try:
+        r = client.put(
+            "/api/setting/custom-homepage",
+            json={"value": True},
+        )
+        r.raise_for_status()
+        r = client.put(
+            "/api/setting/custom-homepage-dashboard",
+            json={"value": dashboard_id},
+        )
+        r.raise_for_status()
+        log.info("Set custom homepage → dashboard id=%d", dashboard_id)
+    except httpx.HTTPStatusError as e:
+        log.warning(
+            "Custom homepage PUT failed (%s) — operator can set manually "
+            "via Admin → Settings → General → Custom Homepage",
+            e.response.status_code,
+        )
 
 
 def main() -> int:
