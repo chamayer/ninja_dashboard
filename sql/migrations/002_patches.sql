@@ -3,7 +3,7 @@
 -- Creates ninja_patches schema. Sources both
 -- /v2/queries/os-patch-installs (INSTALLED, FAILED) and
 -- /v2/queries/os-patches (PENDING, APPROVED, REJECTED) into one fact
--- table, distinguished by `status`.
+-- table, distinguished by `fact_type`.
 --
 -- SCD-2 pattern: a (device, patch) pair's status changes over time
 -- (e.g. PENDING → APPROVED → INSTALLED). We insert a new row only when
@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS ninja_patches.patch_facts (
     patch_uid           uuid NOT NULL,            -- Ninja's patch `id`
     kb_number           text,
     name                text,
+    fact_type           text NOT NULL DEFAULT 'patch_state',
     status              text NOT NULL,            -- INSTALLED | FAILED | PENDING | APPROVED | REJECTED
     severity            text,
     type                text,
@@ -36,6 +37,8 @@ CREATE INDEX IF NOT EXISTS patch_facts_device_idx
     ON ninja_patches.patch_facts (device_id);
 CREATE INDEX IF NOT EXISTS patch_facts_status_idx
     ON ninja_patches.patch_facts (status);
+CREATE INDEX IF NOT EXISTS patch_facts_fact_type_idx
+    ON ninja_patches.patch_facts (fact_type);
 CREATE INDEX IF NOT EXISTS patch_facts_first_observed_idx
     ON ninja_patches.patch_facts (first_observed_at);
 CREATE INDEX IF NOT EXISTS patch_facts_last_observed_idx

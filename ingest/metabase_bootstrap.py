@@ -96,6 +96,7 @@ FROM ninja_core.v_active_devices
 WITH current_state AS (
     SELECT DISTINCT ON (device_id, patch_uid) status
     FROM ninja_patches.patch_facts
+    WHERE fact_type = 'patch_state'
     ORDER BY device_id, patch_uid, last_observed_at DESC
 )
 SELECT COUNT(*) AS approved_queued
@@ -114,6 +115,7 @@ FROM current_state WHERE status = 'APPROVED'
 WITH current_state AS (
     SELECT DISTINCT ON (device_id, patch_uid) status
     FROM ninja_patches.patch_facts
+    WHERE fact_type = 'patch_state'
     ORDER BY device_id, patch_uid, last_observed_at DESC
 )
 SELECT COUNT(*) AS needs_attention
@@ -134,7 +136,7 @@ WITH latest_install_outcome AS (
     SELECT DISTINCT ON (device_id, patch_uid)
         device_id, patch_uid, status
     FROM ninja_patches.patch_facts
-    WHERE status IN ('INSTALLED', 'FAILED')
+    WHERE fact_type = 'install_outcome'
     ORDER BY
         device_id,
         patch_uid,
@@ -159,8 +161,11 @@ WHERE status = 'FAILED'
         },
         "query": """
 WITH dps AS (
-    SELECT device_id, MAX(last_observed_at) AS last_seen_at
-    FROM ninja_patches.patch_facts GROUP BY device_id
+    SELECT device_id, MAX(installed_at) AS last_seen_at
+    FROM ninja_patches.patch_facts
+    WHERE fact_type = 'install_outcome'
+      AND installed_at IS NOT NULL
+    GROUP BY device_id
 )
 SELECT COUNT(*) AS active
 FROM ninja_core.devices d
@@ -180,8 +185,11 @@ WHERE d.approval_status = 'APPROVED'
         },
         "query": """
 WITH dps AS (
-    SELECT device_id, MAX(last_observed_at) AS last_seen_at
-    FROM ninja_patches.patch_facts GROUP BY device_id
+    SELECT device_id, MAX(installed_at) AS last_seen_at
+    FROM ninja_patches.patch_facts
+    WHERE fact_type = 'install_outcome'
+      AND installed_at IS NOT NULL
+    GROUP BY device_id
 )
 SELECT COUNT(*) AS stale
 FROM ninja_core.devices d
@@ -202,7 +210,10 @@ WHERE d.approval_status = 'APPROVED'
         "query": """
 SELECT COUNT(*) AS no_data
 FROM ninja_core.devices d
-LEFT JOIN ninja_patches.patch_facts pf ON pf.device_id = d.id
+LEFT JOIN ninja_patches.patch_facts pf
+  ON pf.device_id = d.id
+ AND pf.fact_type = 'install_outcome'
+ AND pf.installed_at IS NOT NULL
 WHERE d.approval_status = 'APPROVED'
   AND pf.device_id IS NULL
 """,
@@ -229,6 +240,7 @@ WHERE d.approval_status = 'APPROVED'
 WITH current_state AS (
     SELECT DISTINCT ON (device_id, patch_uid) status
     FROM ninja_patches.patch_facts
+    WHERE fact_type = 'patch_state'
     ORDER BY device_id, patch_uid, last_observed_at DESC
 )
 SELECT status, COUNT(*) AS patches
@@ -298,7 +310,7 @@ latest_install_outcome AS (
     SELECT DISTINCT ON (device_id, patch_uid)
         device_id, patch_uid, status
     FROM ninja_patches.patch_facts
-    WHERE status IN ('INSTALLED', 'FAILED')
+    WHERE fact_type = 'install_outcome'
     ORDER BY
         device_id,
         patch_uid,
@@ -667,6 +679,7 @@ WITH current_state AS (
         pf.name AS patch_name, pf.kb_number, pf.installed_at,
         pf.last_observed_at
     FROM ninja_patches.patch_facts pf
+    WHERE pf.fact_type = 'patch_state'
     ORDER BY pf.device_id, pf.patch_uid, pf.last_observed_at DESC, pf.id DESC
 ),
 latest_install_outcome AS (
@@ -674,7 +687,7 @@ latest_install_outcome AS (
         device_id, patch_uid, status, severity,
         name AS patch_name, kb_number, installed_at, ninja_observed_at
     FROM ninja_patches.patch_facts
-    WHERE status IN ('INSTALLED', 'FAILED')
+    WHERE fact_type = 'install_outcome'
     ORDER BY
         device_id,
         patch_uid,
@@ -1130,10 +1143,10 @@ LIMIT 5000
 # ── Patching Status dashboard ───────────────────────────────────────
 #
 # Ninja's API doesn't return a "patch management enabled" flag on
-# devices, so we infer status from observed patch_facts activity:
-#   - active_patching  : MAX(last_observed_at) within last 7 days
-#   - stale_patch_data : has rows but all older than 7 days
-#   - no_patch_data    : no rows in patch_facts at all
+# devices, so we infer status from install-outcome activity:
+#   - active_patching  : MAX(installed_at) within the threshold
+#   - stale_patch_data : install outcome exists but is older than threshold
+#   - no_patch_data    : no install outcome with installed_at at all
 # This catches devices the patch agent isn't reaching, regardless of
 # whether the cause is config, agent failure, or decommissioning.
 
@@ -1188,14 +1201,16 @@ _PCOV_PARAM_MAPPINGS = {
     PARAM_PCOV_DAYS:   ["variable", ["template-tag", "pcov_days"]],
 }
 
-# Reused: classify every active device by its latest patch_facts signal.
+# Reused: classify every active device by its latest Ninja patch signal.
 # Threshold is configurable via the dashboard's "Stale threshold (days)"
 # parameter; template tag default keeps queries valid even before the
 # operator sets a value.
 _PCOV_CTE = """
 WITH device_patch_signal AS (
-    SELECT device_id, MAX(last_observed_at) AS last_seen_at
+    SELECT device_id, MAX(installed_at) AS last_seen_at
     FROM ninja_patches.patch_facts
+    WHERE fact_type = 'install_outcome'
+      AND installed_at IS NOT NULL
     GROUP BY device_id
 ),
 classified AS (
@@ -1540,7 +1555,10 @@ WHERE 1=1
 SELECT o.name AS organization, COUNT(*) AS devices
 FROM ninja_core.devices d
 JOIN ninja_core.organizations o ON o.id = d.organization_id
-LEFT JOIN ninja_patches.patch_facts pf ON pf.device_id = d.id
+LEFT JOIN ninja_patches.patch_facts pf
+  ON pf.device_id = d.id
+ AND pf.fact_type = 'install_outcome'
+ AND pf.installed_at IS NOT NULL
 WHERE d.approval_status = 'APPROVED'
   AND d.node_class IN ('WINDOWS_WORKSTATION', 'WINDOWS_SERVER')
   AND pf.device_id IS NULL
@@ -1567,7 +1585,7 @@ WITH latest_install_outcome AS (
     SELECT DISTINCT ON (device_id, patch_uid)
         device_id, patch_uid, status
     FROM ninja_patches.patch_facts
-    WHERE status IN ('INSTALLED', 'FAILED')
+    WHERE fact_type = 'install_outcome'
     ORDER BY
         device_id,
         patch_uid,
@@ -1597,6 +1615,7 @@ GROUP BY o.name
 WITH current_state AS (
     SELECT DISTINCT ON (device_id, patch_uid) device_id, patch_uid, status
     FROM ninja_patches.patch_facts
+    WHERE fact_type = 'patch_state'
     ORDER BY device_id, patch_uid, last_observed_at DESC
 )
 SELECT o.name AS organization, COUNT(*) AS approved_queued
@@ -1620,6 +1639,7 @@ GROUP BY o.name
 WITH current_state AS (
     SELECT DISTINCT ON (device_id, patch_uid) device_id, patch_uid, status
     FROM ninja_patches.patch_facts
+    WHERE fact_type = 'patch_state'
     ORDER BY device_id, patch_uid, last_observed_at DESC
 )
 SELECT o.name AS organization, COUNT(*) AS needs_attention
@@ -1741,7 +1761,7 @@ latest_install_outcome AS (
     SELECT DISTINCT ON (device_id, patch_uid)
         device_id, patch_uid, status, installed_at
     FROM ninja_patches.patch_facts
-    WHERE status IN ('INSTALLED', 'FAILED')
+    WHERE fact_type = 'install_outcome'
     ORDER BY
         device_id,
         patch_uid,

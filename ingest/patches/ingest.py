@@ -13,7 +13,8 @@ Two endpoints, two ingest strategies:
       timestamp (admin re-approves a REJECTED patch, schedule moves,
       etc.) and the set isn't huge (~50k records).
 
-Both feed ninja_patches.patch_facts; `status` distinguishes the source.
+Both feed ninja_patches.patch_facts; `fact_type` distinguishes state
+rows from install-outcome rows.
 
 SCD-2: insert new row on content_hash change, otherwise advance
 last_observed_at on the existing row. content_hash excludes Ninja's
@@ -67,7 +68,7 @@ def run(client: NinjaClient, snapshot_at: datetime) -> tuple[int, int]:
         for rec in client.paginate_cursor(
             "/queries/os-patch-installs", params=installs_params,
         ):
-            batch.append(_to_row(rec, snapshot_at))
+            batch.append(_to_row(rec, snapshot_at, "install_outcome"))
             total_observed += 1
             installs_count += 1
             if len(batch) >= _BATCH_SIZE:
@@ -85,7 +86,7 @@ def run(client: NinjaClient, snapshot_at: datetime) -> tuple[int, int]:
         log.info("os-patches (state): full pull")
         pending_count = 0
         for rec in client.paginate_cursor("/queries/os-patches"):
-            batch.append(_to_row(rec, snapshot_at))
+            batch.append(_to_row(rec, snapshot_at, "patch_state"))
             total_observed += 1
             pending_count += 1
             if len(batch) >= _BATCH_SIZE:
@@ -109,7 +110,8 @@ def _get_last_installed_at() -> datetime | None:
     with db.transaction() as cur:
         cur.execute(
             "SELECT MAX(installed_at) FROM ninja_patches.patch_facts "
-            "WHERE installed_at IS NOT NULL"
+            "WHERE fact_type = 'install_outcome' "
+            "AND installed_at IS NOT NULL"
         )
         row = cur.fetchone()
         return row[0] if row and row[0] else None
@@ -122,11 +124,11 @@ def _flush(rows: list[dict[str, Any]]) -> int:
             "ninja_patches.patch_facts",
             rows,
             conflict_keys=["device_id", "patch_uid", "content_hash"],
-            update_cols=["last_observed_at", "ninja_observed_at", "data"],
+            update_cols=["fact_type", "last_observed_at", "ninja_observed_at", "data"],
         )
 
 
-def _to_row(rec: dict[str, Any], snapshot_at: datetime) -> dict[str, Any]:
+def _to_row(rec: dict[str, Any], snapshot_at: datetime, fact_type: str) -> dict[str, Any]:
     installed_at = ninja_epoch_to_dt(rec.get("installedAt"))
     h = content_hash(
         rec.get("status"),
@@ -141,6 +143,7 @@ def _to_row(rec: dict[str, Any], snapshot_at: datetime) -> dict[str, Any]:
         "patch_uid":         rec["id"],
         "kb_number":         rec.get("kbNumber"),
         "name":              rec.get("name"),
+        "fact_type":         fact_type,
         "status":            rec["status"],
         "severity":          rec.get("severity"),
         "type":              rec.get("type"),

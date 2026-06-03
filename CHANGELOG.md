@@ -2,6 +2,23 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.9.0] — 2026-06-03
+
+### Added
+- `ninja_patches.patch_facts.fact_type` now explicitly marks rows as
+  `patch_state` (`/queries/os-patches`) or `install_outcome`
+  (`/queries/os-patch-installs`). Migration
+  `006_patch_fact_type.sql` backfills existing rows by status.
+
+### Changed
+- Patching Status stale/active classification now uses the latest
+  available install/attempt timestamp (`MAX(installed_at)`) from
+  `install_outcome` rows. The `Stale threshold (days)` dashboard
+  filter continues to control the active/stale split.
+- Dashboard SQL that needs install outcomes now filters by
+  `fact_type = 'install_outcome'` instead of inferring source from
+  status values.
+
 ## [0.8.1] — 2026-06-03
 
 ### Fixed

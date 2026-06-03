@@ -5,6 +5,36 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-03 — v0.9.0 patch fact typing + stale timeframe
+
+**Done:**
+- Investigated why **Stale Patch Data** could show `0`.
+- Agreed that Patching Status should be based on the latest available
+  install/attempt time for a device, not Ninja's observation timestamp
+  and not our ingest timestamp.
+- Added `patch_facts.fact_type` to distinguish
+  `/queries/os-patches` state rows from `/queries/os-patch-installs`
+  install-outcome rows. Historical rows are backfilled by status in
+  migration `006_patch_fact_type.sql`; future ingest stamps source
+  semantics directly.
+- Changed Patching Status classification to use
+  `MAX(installed_at)` from `fact_type = 'install_outcome'` rows.
+- Kept the existing `Stale threshold (days)` dashboard filter as the
+  timeframe control for active vs stale patching status.
+- Updated failed-install and no-patch-data dashboard queries to use
+  `fact_type = 'install_outcome'` instead of inferring source from
+  status values.
+
+**Validation:**
+- `python -m compileall ingest` passes.
+- Live Metabase bootstrap still needs to be re-run to apply the card
+  SQL update.
+
+**Process:**
+- Updated `Development/DEVELOPMENT.md` to require explicit approval
+  before significant rewrites unless the user overrides that rule for
+  the current task.
+
 ## 2026-06-03 — v0.8.1 current state vs install outcome
 
 **Done:**
