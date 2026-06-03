@@ -11,9 +11,22 @@ Prerequisites (one-time, in the Metabase UI):
      (default "Ninja"). Host: postgres, Port: 5432, DB: ninja, user:
      ninja, password from the host .env.
 
-Then from the host:
+Then from the host. Three ways to provide the password, in priority
+order:
+
+  # Interactive prompt (recommended — nothing in shell history)
   docker exec -it ninja-ingest python -m ingest.metabase_bootstrap \\
-      --user you@example.com --password 'YourMetabasePassword'
+      --user you@example.com
+
+  # From an environment variable
+  METABASE_PASSWORD='...' docker exec -i \\
+      -e METABASE_PASSWORD ninja-ingest \\
+      python -m ingest.metabase_bootstrap --user you@example.com
+
+  # From a file on the host (mounted into the container)
+  docker exec -i ninja-ingest python -m ingest.metabase_bootstrap \\
+      --user you@example.com \\
+      --password-file /app/.env  # if you put MB_ADMIN_PASS=... there
 
 Re-runs are safe — find cards/dashboards by name, update vs. create.
 
@@ -27,8 +40,11 @@ Layout uses Metabase's 24-column grid:
 from __future__ import annotations
 
 import argparse
+import getpass
 import logging
+import os
 import sys
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -325,12 +341,51 @@ def _set_dashboard_layout(
 
 # ── Entry point ─────────────────────────────────────────────────────
 
+def _resolve_password(args: argparse.Namespace) -> str:
+    """Priority: --password flag > --password-file > METABASE_PASSWORD env >
+    interactive prompt. Last option is the recommended one."""
+    if args.password:
+        return args.password
+    if args.password_file:
+        text = Path(args.password_file).read_text(encoding="utf-8")
+        # Allow plain "<password>" OR a .env-style "KEY=value" line where
+        # KEY is configurable via --password-file-key (default MB_ADMIN_PASS).
+        for line in text.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if "=" in line:
+                k, v = line.split("=", 1)
+                if k.strip() == args.password_file_key:
+                    return v.strip().strip('"').strip("'")
+            else:
+                return line
+        raise SystemExit(
+            f"No password found in {args.password_file} "
+            f"(looking for key {args.password_file_key}=... or first non-comment line)"
+        )
+    env_pw = os.environ.get("METABASE_PASSWORD")
+    if env_pw:
+        return env_pw
+    if not sys.stdin.isatty():
+        raise SystemExit(
+            "No password provided. Use --password, --password-file, "
+            "METABASE_PASSWORD env var, or run interactively for a prompt."
+        )
+    return getpass.getpass("Metabase password: ")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Bootstrap the Ninja Overview dashboard in Metabase")
     parser.add_argument("--url", default="http://metabase:3000",
                         help="Metabase base URL (default: http://metabase:3000)")
     parser.add_argument("--user", required=True, help="Metabase admin email")
-    parser.add_argument("--password", required=True, help="Metabase admin password")
+    parser.add_argument("--password",
+                        help="Metabase admin password (avoid — visible in process list)")
+    parser.add_argument("--password-file",
+                        help="Read password from file. Plain content OR a .env-style line")
+    parser.add_argument("--password-file-key", default="MB_ADMIN_PASS",
+                        help="Env-var key to read in --password-file (default: MB_ADMIN_PASS)")
     parser.add_argument("--db-name", default="Ninja",
                         help="Display name of the Postgres data source in Metabase (default: Ninja)")
     args = parser.parse_args()
@@ -339,8 +394,10 @@ def main() -> int:
         level="INFO", format="%(asctime)s %(levelname)s %(message)s",
     )
 
+    password = _resolve_password(args)
+
     with httpx.Client(base_url=args.url, timeout=60) as client:
-        _authenticate(client, args.user, args.password)
+        _authenticate(client, args.user, password)
         db_id = _find_database(client, args.db_name)
         log.info("Using database: %s (id=%d)", args.db_name, db_id)
 
