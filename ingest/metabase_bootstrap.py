@@ -305,14 +305,14 @@ ORDER BY pct_installed ASC, total_patches DESC
         "display":    "table",
         "row": 26, "col": 0, "size_x": 24, "size_y": 8,
         "column_click_behaviors": {
-            "system_name": {
-                "target": DASH_DRILLDOWN,
-                "params": {"p_device": "system_name"},
-            },
-            "organization": {
-                "target": DASH_DETAIL,
-                "params": {"p_org": "organization"},
-            },
+            # Meaningful drills
+            "system_name":  {"target": DASH_DRILLDOWN, "params": {"p_device": "system_name"}},
+            "organization": {"target": DASH_DETAIL,    "params": {"p_org":    "organization"}},
+            "node_class":   {"target": DASH_DETAIL,    "params": {"p_class":  "node_class"}},
+            # Inert columns: suppress the default drill menu with a
+            # no-op self-link.
+            "last_contact": {"target": "self", "preset": {}},
+            "reported_at":  {"target": "self", "preset": {}},
         },
         "query": """
 SELECT
@@ -345,6 +345,18 @@ FROM ninja_core.run_log
 WHERE started_at > NOW() - INTERVAL '24 hours'
 ORDER BY started_at DESC, run_id DESC
 """,
+        # Purely diagnostic table — no meaningful drill destination.
+        # Self-link with empty preset suppresses Metabase's default
+        # "filter by this value" prompt on every cell.
+        "column_click_behaviors": {
+            "domain":      {"target": "self", "preset": {}},
+            "status":      {"target": "self", "preset": {}},
+            "started_at":  {"target": "self", "preset": {}},
+            "duration_ms": {"target": "self", "preset": {}},
+            "inserted":    {"target": "self", "preset": {}},
+            "upserted":    {"target": "self", "preset": {}},
+            "error":       {"target": "self", "preset": {}},
+        },
     },
 ]
 
@@ -381,31 +393,37 @@ def _build_param_mapping(params: dict[str, str]) -> dict[str, dict]:
 
 def _build_click_behavior_json(
     spec: dict, dash_id_by_name: dict[str, int],
+    current_dash_id: int | None = None,
 ) -> dict | None:
-    """Two shapes:
+    """Three shapes, in priority order:
 
-    A. preset (for scalar/number cards): URL navigation to a target
-       dashboard with pre-set filter values via query string.
-           spec = {"target": <dash name>, "preset": {<slug>: <value>}}
-       → Metabase click_behavior = {linkType:url, linkTemplate:/dashboard/N?slug=val}
+    A. preset (for scalar/number cards or inert table cells): URL
+       navigation. target="self" resolves to the current dashboard,
+       empty preset {} produces a no-op self-link that visually
+       suppresses Metabase's default drill menu on that cell.
+           spec = {"target": <dash name>|"self", "preset": {<slug>: <value>}}
+       → linkTemplate = /dashboard/<id>[?slug=val&...]
 
-       The dashboard slug must match the target dashboard's parameter
-       slug. For Detail/Drilldown/Coverage that's "status", "org",
-       "pcov_status", etc.
+    B. params with target="self": crossfilter the current dashboard.
+           spec = {"target": "self", "params": {<param_id>: <col>}}
 
-    B. params (for charts/tables with source columns):
-           spec = {"target": "self" OR <dash name>, "params": {<param_id>: <col>}}
-       → crossfilter (self) or dashboard-link with parameterMapping
-       reading values from the result row's columns.
+    C. params with target=<dash name>: cross-dashboard link with
+       parameterMapping reading from the row's columns.
     """
     target = spec.get("target")
     preset = spec.get("preset")
 
     if preset is not None:
-        target_id = dash_id_by_name.get(target)
-        if target_id is None:
-            log.warning("Click behavior: unknown target dashboard %r", target)
-            return None
+        if target == "self":
+            if current_dash_id is None:
+                log.warning("click_behavior target='self' but current_dash_id unknown")
+                return None
+            target_id = current_dash_id
+        else:
+            target_id = dash_id_by_name.get(target)
+            if target_id is None:
+                log.warning("Click behavior: unknown target dashboard %r", target)
+                return None
         path = f"/dashboard/{target_id}"
         if preset:
             qs = "&".join(f"{k}={v}" for k, v in preset.items())
@@ -443,18 +461,21 @@ def _apply_click_behaviors(
     visualization_settings now that dashboard IDs are resolved."""
     for dash_spec in dashboards:
         card_ids = card_ids_by_dash[dash_spec["name"]]
+        current_dash_id = dash_id_by_name.get(dash_spec["name"])
         for card_spec in dash_spec["cards"]:
             extra: dict[str, Any] = {}
 
             if "click_behavior" in card_spec:
-                cb = _build_click_behavior_json(card_spec["click_behavior"], dash_id_by_name)
+                cb = _build_click_behavior_json(
+                    card_spec["click_behavior"], dash_id_by_name, current_dash_id,
+                )
                 if cb:
                     extra["click_behavior"] = cb
 
             if "column_click_behaviors" in card_spec:
                 column_settings: dict[str, dict] = {}
                 for col, ccb in card_spec["column_click_behaviors"].items():
-                    cb = _build_click_behavior_json(ccb, dash_id_by_name)
+                    cb = _build_click_behavior_json(ccb, dash_id_by_name, current_dash_id)
                     if cb:
                         # Metabase keys column_settings by JSON-encoded
                         # ["name", "<col>"] arrays.

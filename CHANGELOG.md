@@ -2,6 +2,25 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.7.4] — 2026-06-03
+
+### Changed
+- **Consistent table click behavior.** Previously, table cells with a
+  configured drill (colored link) navigated as expected, but cells in
+  unconfigured columns showed Metabase's default "filter by this
+  value" drill-through prompt — which is meaningless on tables that
+  have no logical filter destination. Each table now declares every
+  column's behavior explicitly: meaningful columns navigate; purely
+  informational columns (timestamps, durations, status text on
+  diagnostic tables) get a self-link with empty preset to suppress
+  the prompt.
+    - `needs_reboot`: `last_contact`, `reported_at` → inert.
+    - `ingest_health`: all 7 columns → inert (it's diagnostic; no
+      drill destination makes sense).
+- `_build_click_behavior_json` now accepts `current_dash_id` and
+  resolves `target: "self"` in the preset path to a URL pointing at
+  the current dashboard (empty preset = no-op self-link).
+
 ## [0.7.3] — 2026-06-03
 
 ### Added
