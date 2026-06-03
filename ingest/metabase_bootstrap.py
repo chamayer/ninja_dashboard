@@ -32,9 +32,10 @@ Re-runs are safe — find cards/dashboards by name, update vs. create.
 
 Layout uses Metabase's 24-column grid:
   Row 0 (y=0)  : 4 number cards, 6 cols each
-  Row 1 (y=4)  : pie (12 cols) + horizontal bar (12 cols)
-  Row 2 (y=12) : reboot table (full 24 cols)
-  Row 3 (y=20) : run-log table (full 24 cols)
+  Row 1 (y=4)  : pie (12 cols) + worst-15 horizontal bar (12 cols)
+  Row 2 (y=12) : all-orgs compliance table (full 24 cols)
+  Row 3 (y=22) : devices-needing-reboot table (full 24 cols)
+  Row 4 (y=30) : run-log table (full 24 cols)
 """
 
 from __future__ import annotations
@@ -166,10 +167,44 @@ LIMIT 15
 """,
     },
     {
+        "key":        "compliance_all",
+        "name":       "All Orgs Compliance",
+        "display":    "table",
+        "row": 12, "col": 0, "size_x": 24, "size_y": 10,
+        "query": """
+WITH current_state AS (
+    SELECT DISTINCT ON (device_id, patch_uid)
+        device_id, patch_uid, status
+    FROM ninja_patches.patch_facts
+    ORDER BY device_id, patch_uid, last_observed_at DESC
+)
+SELECT
+    o.name AS organization,
+    ROUND(
+      COUNT(*) FILTER (WHERE cs.status = 'INSTALLED') * 100.0
+      / NULLIF(COUNT(*), 0),
+      1
+    ) AS pct_installed,
+    COUNT(*) FILTER (WHERE cs.status = 'INSTALLED')                          AS installed,
+    COUNT(*) FILTER (WHERE cs.status IN ('APPROVED','MANUAL','DELAYED'))     AS queued,
+    COUNT(*) FILTER (WHERE cs.status = 'FAILED')                             AS failed,
+    COUNT(*) FILTER (WHERE cs.status = 'REJECTED')                           AS rejected,
+    COUNT(*)                                                                 AS total_patches,
+    COUNT(DISTINCT cs.device_id)                                             AS devices
+FROM current_state cs
+JOIN ninja_core.devices d        ON d.id = cs.device_id
+JOIN ninja_core.organizations o  ON o.id = d.organization_id
+WHERE d.approval_status = 'APPROVED'
+GROUP BY o.name
+HAVING COUNT(*) >= 10
+ORDER BY pct_installed ASC, total_patches DESC
+""",
+    },
+    {
         "key":        "needs_reboot",
         "name":       "Devices Needing Reboot",
         "display":    "table",
-        "row": 12, "col": 0, "size_x": 24, "size_y": 8,
+        "row": 22, "col": 0, "size_x": 24, "size_y": 8,
         "query": """
 WITH latest_snap AS (
     SELECT DISTINCT ON (device_id) *
@@ -194,7 +229,7 @@ ORDER BY ls.last_contact DESC
         "key":        "ingest_health",
         "name":       "Ingest Health (last 24h)",
         "display":    "table",
-        "row": 20, "col": 0, "size_x": 24, "size_y": 8,
+        "row": 30, "col": 0, "size_x": 24, "size_y": 8,
         "query": """
 SELECT
     domain,
