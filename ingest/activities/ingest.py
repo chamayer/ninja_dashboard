@@ -53,28 +53,57 @@ _MAX_PAGES_PER_SOURCE = 200  # safety cap: 200 * 500 = 100k records / source / r
 
 
 def run(client: NinjaClient) -> int:
-    """Fetch new activities for each configured source since the cursor.
-    Returns rows inserted (post-filter, post-dedup)."""
+    """Fetch new activities since the cursor. Returns rows inserted.
+
+    Preferred strategy: iterate by `statusCode=<code>` for each entry
+    in INGEST_ACTIVITY_TYPES_INCLUDE. Server-side filter returns only
+    that exact event type, regardless of which `type` bucket
+    (PATCH_MANAGEMENT / MONITOR / SYSTEM / etc.) Ninja files it under.
+
+    Fallback (empty allowlist): iterate by `type=<source>` for each
+    entry in INGEST_ACTIVITY_SOURCES, with no client-side filter.
+    Less precise, more API cost — set the allowlist instead."""
     with run_log("activities") as stats:
         last_id_str = _get_last_id()
-        sources = settings.activity_sources
-        statuscode_allowlist = settings.activity_types_include
-
         if last_id_str is None:
             return _first_run(client)
-
         last_id = int(last_id_str)
+
+        statuscode_allowlist = settings.activity_types_include
+        sources = settings.activity_sources
         known_device_ids = _fetch_known_device_ids()
         all_rows: list[dict[str, Any]] = []
         max_id = last_id
         total_fetched = 0
 
-        for source in sources:
-            fetched_for_source, max_id = _pull_source(
-                client, source, last_id, max_id,
-                statuscode_allowlist, known_device_ids, all_rows,
+        if statuscode_allowlist:
+            log.info(
+                "activities: filtering server-side by %d statusCode(s)",
+                len(statuscode_allowlist),
             )
-            total_fetched += fetched_for_source
+            for code in sorted(statuscode_allowlist):
+                fetched, max_id = _pull_one(
+                    client, {"statusCode": code}, code,
+                    last_id, max_id, known_device_ids, all_rows,
+                )
+                total_fetched += fetched
+        elif sources:
+            log.warning(
+                "INGEST_ACTIVITY_TYPES_INCLUDE not set — falling back to "
+                "type-based pull for %d source(s) (less precise)",
+                len(sources),
+            )
+            for source in sources:
+                fetched, max_id = _pull_one(
+                    client, {"type": source}, source,
+                    last_id, max_id, known_device_ids, all_rows,
+                )
+                total_fetched += fetched
+        else:
+            log.warning(
+                "Neither INGEST_ACTIVITY_TYPES_INCLUDE nor "
+                "INGEST_ACTIVITY_SOURCES is set — skipping activities"
+            )
 
         inserted = 0
         if all_rows:
@@ -95,24 +124,25 @@ def run(client: NinjaClient) -> int:
         return inserted
 
 
-def _pull_source(
+def _pull_one(
     client: NinjaClient,
-    source: str,
+    filter_params: dict[str, Any],
+    label: str,
     last_id: int,
     max_id: int,
-    statuscode_allowlist: set[str],
     known_device_ids: set[int],
     out_rows: list[dict],
 ) -> tuple[int, int]:
-    """Walk back from latest for this source until we cross last_id.
-    Appends matching rows to out_rows, returns (fetched, new_max_id)."""
-    log.info("Pulling activities for type=%s (last_id=%d)", source, last_id)
+    """Walk back from latest with the given server-side filter, until
+    we cross last_id. Server-side filter means everything returned is
+    kept (no client-side rejection). Returns (fetched, new_max_id)."""
+    log.info("Pulling activities for %s (last_id=%d)", label, last_id)
     cursor: int | None = None
     fetched = 0
-    kept_for_source = 0
+    kept = 0
 
     for page_num in range(1, _MAX_PAGES_PER_SOURCE + 1):
-        params: dict[str, Any] = {"pageSize": _PAGE_SIZE, "type": source}
+        params: dict[str, Any] = {"pageSize": _PAGE_SIZE, **filter_params}
         if cursor is not None:
             params["olderThan"] = cursor
 
@@ -134,39 +164,30 @@ def _pull_source(
                 stop = True
                 break
 
-            if statuscode_allowlist and rec.get("statusCode") not in statuscode_allowlist:
-                continue
-
             out_rows.append(_to_row(rec, known_device_ids))
-            kept_for_source += 1
+            kept += 1
             if rec_id > max_id:
                 max_id = rec_id
 
         if stop:
             log.info(
-                "  reached last_id (%d), stopping for %s — fetched %d, kept %d",
-                last_id, source, fetched, kept_for_source,
+                "  reached last_id (%d), stopping %s — fetched %d, kept %d",
+                last_id, label, fetched, kept,
             )
             break
 
-        # Defensive: if olderThan didn't advance, bail.
         if cursor is not None and oldest_seen is not None and oldest_seen >= cursor:
-            log.warning(
-                "  cursor didn't advance (%d -> %d), stopping for %s",
-                cursor, oldest_seen, source,
-            )
+            log.warning("  cursor didn't advance for %s, stopping", label)
             break
         cursor = oldest_seen
 
         if page_num % 10 == 0:
-            log.info(
-                "  %s: page %d, %d fetched, %d kept",
-                source, page_num, fetched, kept_for_source,
-            )
+            log.info("  %s: page %d, %d fetched", label, page_num, fetched)
     else:
-        log.warning("Hit %d-page cap for source %s", _MAX_PAGES_PER_SOURCE, source)
+        log.warning("Hit %d-page cap for %s", _MAX_PAGES_PER_SOURCE, label)
 
-    log.info("  %s done: fetched %d, kept %d", source, fetched, kept_for_source)
+    if fetched > 0:
+        log.info("  %s done: fetched %d, kept %d", label, fetched, kept)
     return fetched, max_id
 
 

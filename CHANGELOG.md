@@ -2,6 +2,25 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.7.1] — 2026-06-03
+
+### Fixed
+- Activities ingest now filters server-side by `statusCode=<code>`
+  (one call per allowlist entry) instead of `type=<source>` with
+  client-side filtering. This:
+    - Catches SYSTEM_REBOOTED reliably regardless of which Ninja
+      `type` bucket it lives in. (`type=SYSTEM` we'd been using
+      returns Ninja platform audit events — admin logins, node
+      access grants — NOT device reboots.)
+    - Reduces API surface: 10 small targeted calls instead of pulling
+      whole MONITOR / PATCH_MANAGEMENT / SYSTEM buckets and dropping
+      most records.
+    - No more risk of silently missing relevant events because they
+      happen to be filed under a different bucket.
+- Empty `INGEST_ACTIVITY_TYPES_INCLUDE` falls back to old
+  `type=<source>` behavior (backward compat) with a WARN log
+  encouraging operator to set the allowlist.
+
 ## [0.7.0] — 2026-06-03
 
 ### Performance
