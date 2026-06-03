@@ -18,8 +18,10 @@ import http.server
 import logging
 import socketserver
 import threading
+import time
 from datetime import datetime, timedelta, timezone
 
+import httpx
 from apscheduler.schedulers.background import BackgroundScheduler
 
 from ingest import db, migrations
@@ -64,6 +66,76 @@ def _safe(name: str, func, *args) -> None:
         log.exception("%s ingest failed; continuing with next module", name)
 
 
+# ── Metabase auto-bootstrap ─────────────────────────────────────────
+
+def _wait_for_metabase(url: str, timeout: int = 300) -> bool:
+    """Poll /api/health every 5s until reachable or timeout (seconds)."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            r = httpx.get(f"{url.rstrip('/')}/api/health", timeout=5)
+            if r.status_code == 200:
+                return True
+        except Exception:
+            pass
+        time.sleep(5)
+    return False
+
+
+def _metabase_setup_complete(url: str) -> bool:
+    """True if Metabase's first-run wizard has been completed."""
+    try:
+        r = httpx.get(f"{url.rstrip('/')}/api/session/properties", timeout=10)
+        if r.status_code != 200:
+            return False
+        return bool(r.json().get("has-user-setup"))
+    except Exception:
+        return False
+
+
+def bootstrap_metabase() -> None:
+    """Provision dashboards in Metabase via API. Tolerates Metabase
+    being down, not yet set up, or credentials missing — logs and
+    returns rather than raising."""
+    user = settings.MB_BOOTSTRAP_USER
+    password = settings.MB_BOOTSTRAP_PASS.get_secret_value()
+    url = settings.MB_BOOTSTRAP_URL
+
+    if not user or not password:
+        log.info(
+            "Metabase auto-bootstrap disabled "
+            "(MB_BOOTSTRAP_USER / MB_BOOTSTRAP_PASS not set in .env)"
+        )
+        return
+
+    log.info("Waiting for Metabase at %s", url)
+    if not _wait_for_metabase(url, timeout=300):
+        log.warning("Metabase not reachable after 5 min — skipping bootstrap")
+        return
+
+    if not _metabase_setup_complete(url):
+        log.info(
+            "Metabase first-run wizard not yet complete — skipping bootstrap "
+            "(create admin user + Postgres data source in the UI, then "
+            "restart ingest or hit POST /bootstrap-metabase)"
+        )
+        return
+
+    log.info("Running Metabase dashboard bootstrap")
+    try:
+        from ingest.metabase_bootstrap import run_bootstrap
+        urls = run_bootstrap(
+            url=url,
+            user=user,
+            password=password,
+            db_name=settings.MB_BOOTSTRAP_DB_NAME,
+        )
+        for u in urls:
+            log.info("Dashboard ready: %s", u)
+    except Exception:
+        log.exception("Metabase bootstrap failed (will not retry; trigger via /bootstrap-metabase)")
+
+
 def last_successful_run_at() -> datetime | None:
     with db.transaction() as cur:
         cur.execute(
@@ -98,6 +170,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         if self.path == "/run":
             threading.Thread(target=run_once, daemon=True).start()
             self._respond(202, b"run scheduled\n")
+        elif self.path == "/bootstrap-metabase":
+            threading.Thread(target=bootstrap_metabase, daemon=True).start()
+            self._respond(202, b"metabase bootstrap scheduled\n")
         else:
             self.send_error(404)
 
@@ -148,8 +223,15 @@ def main() -> None:
     else:
         log.info("No catch-up needed (fresh install or recent run)")
 
+    # Kick off Metabase bootstrap in the background — won't block
+    # startup if Metabase isn't ready or creds aren't set.
+    threading.Thread(target=bootstrap_metabase, daemon=True).start()
+
     addr = ("0.0.0.0", settings.INGEST_HTTP_PORT)
-    log.info("HTTP server listening on %s:%d (/healthz, /run)", *addr)
+    log.info(
+        "HTTP server listening on %s:%d (/healthz, /run, /bootstrap-metabase)",
+        *addr,
+    )
     with _ThreadingServer(addr, _Handler) as httpd:
         httpd.serve_forever()
 

@@ -48,6 +48,17 @@ class Settings(BaseSettings):
     # Cap on value_text length per cell (rebootReason etc. can be 20k+).
     INGEST_CUSTOM_FIELDS_MAX_TEXT: int = 4000
 
+    # ── Metabase auto-bootstrap (optional) ───────────────────────────
+    # If MB_BOOTSTRAP_USER and MB_BOOTSTRAP_PASS are both set, ingest
+    # runs the dashboard bootstrap script on startup in a background
+    # thread. Failures are logged but don't crash ingest. Empty values
+    # disable the auto-run (script can still be triggered manually via
+    # `docker exec ninja-ingest python -m ingest.metabase_bootstrap`).
+    MB_BOOTSTRAP_URL: str = "http://metabase:3000"
+    MB_BOOTSTRAP_USER: str = ""
+    MB_BOOTSTRAP_PASS: SecretStr = SecretStr("")
+    MB_BOOTSTRAP_DB_NAME: str = "Ninja"
+
     @property
     def activity_sources(self) -> list[str]:
         return [s.strip() for s in self.INGEST_ACTIVITY_SOURCES.split(",") if s.strip()]

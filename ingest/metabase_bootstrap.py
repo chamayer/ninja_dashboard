@@ -740,6 +740,42 @@ def _resolve_password(args: argparse.Namespace) -> str:
     return getpass.getpass("Metabase password: ")
 
 
+def run_bootstrap(
+    url: str, user: str, password: str, db_name: str = "Ninja",
+) -> list[str]:
+    """Provision all dashboards in Metabase. Returns list of dashboard
+    URLs. Raises on auth / API errors so callers can decide whether to
+    fail loudly or swallow."""
+    org_names, os_names = _fetch_dropdown_sources()
+    dashboards = build_dashboards(org_names, os_names)
+
+    urls: list[str] = []
+    with httpx.Client(base_url=url, timeout=60) as client:
+        _authenticate(client, user, password)
+        db_id = _find_database(client, db_name)
+        log.info("Using database: %s (id=%d)", db_name, db_id)
+
+        col_id = _upsert_collection(client, COLLECTION_NAME)
+        existing_cards = _list_cards_in_collection(client, col_id)
+
+        for dash_spec in dashboards:
+            log.info("── Provisioning dashboard: %s ──", dash_spec["name"])
+            card_ids: dict[str, int] = {}
+            for card_spec in dash_spec["cards"]:
+                card_ids[card_spec["key"]] = _upsert_card(
+                    client, card_spec, db_id, col_id, existing_cards,
+                )
+            dashboard = _upsert_dashboard(
+                client, dash_spec["name"], col_id,
+                parameters=dash_spec.get("parameters"),
+            )
+            _set_dashboard_layout(
+                client, dashboard, dash_spec["cards"], card_ids,
+            )
+            urls.append(f"{url}/dashboard/{dashboard['id']}  ({dash_spec['name']})")
+    return urls
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Bootstrap the Ninja Overview dashboard in Metabase")
     parser.add_argument("--url", default="http://metabase:3000",
@@ -760,41 +796,12 @@ def main() -> int:
     )
 
     password = _resolve_password(args)
-
-    org_names, os_names = _fetch_dropdown_sources()
-    dashboards = build_dashboards(org_names, os_names)
-
-    with httpx.Client(base_url=args.url, timeout=60) as client:
-        _authenticate(client, args.user, password)
-        db_id = _find_database(client, args.db_name)
-        log.info("Using database: %s (id=%d)", args.db_name, db_id)
-
-        col_id = _upsert_collection(client, COLLECTION_NAME)
-        existing_cards = _list_cards_in_collection(client, col_id)
-
-        urls: list[str] = []
-        for dash_spec in dashboards:
-            log.info("── Provisioning dashboard: %s ──", dash_spec["name"])
-            card_ids: dict[str, int] = {}
-            for card_spec in dash_spec["cards"]:
-                card_ids[card_spec["key"]] = _upsert_card(
-                    client, card_spec, db_id, col_id, existing_cards,
-                )
-            dashboard = _upsert_dashboard(
-                client, dash_spec["name"], col_id,
-                parameters=dash_spec.get("parameters"),
-            )
-            _set_dashboard_layout(
-                client, dashboard, dash_spec["cards"], card_ids,
-            )
-            urls.append(f"{args.url}/dashboard/{dashboard['id']}  ({dash_spec['name']})")
-
-        print()
-        print("✓ Dashboards ready:")
-        for url in urls:
-            print(f"  - {url}")
-        print()
-
+    urls = run_bootstrap(args.url, args.user, password, args.db_name)
+    print()
+    print("✓ Dashboards ready:")
+    for url in urls:
+        print(f"  - {url}")
+    print()
     return 0
 
 
