@@ -247,7 +247,223 @@ ORDER BY started_at DESC, run_id DESC
 ]
 
 COLLECTION_NAME = "Ninja"
-DASHBOARD_NAME  = "Ninja — Overview"
+
+
+# ── Filterable Detail dashboard ─────────────────────────────────────
+#
+# Dashboard-level filters wire to card template tags via parameter
+# mappings. The shape we use here:
+#   - Card SQL has [[AND col = {{tag}}]] optional clauses
+#   - Card.dataset_query.native["template-tags"] declares each tag
+#   - Dashboard.parameters declares each filter (UI widget)
+#   - Each dashcard.parameter_mappings ties dashboard param -> card tag
+
+PARAM_ORG     = "p_org"
+PARAM_STATUS  = "p_status"
+PARAM_CLASS   = "p_class"
+PARAM_SEV     = "p_severity"
+
+DETAIL_PARAMETERS = [
+    {"id": PARAM_ORG,    "name": "Organization", "slug": "org",        "type": "category"},
+    {"id": PARAM_STATUS, "name": "Status",       "slug": "status",     "type": "category"},
+    {"id": PARAM_CLASS,  "name": "Node Class",   "slug": "node_class", "type": "category"},
+    {"id": PARAM_SEV,    "name": "Severity",     "slug": "severity",   "type": "category"},
+]
+
+# Each filtered card declares the same template tags + maps the dashboard
+# parameters onto them.
+_FILTER_TAGS = {
+    "org":        {"id": "tt_org",        "name": "org",        "display-name": "Organization", "type": "text"},
+    "status":     {"id": "tt_status",     "name": "status",     "display-name": "Status",       "type": "text"},
+    "node_class": {"id": "tt_node_class", "name": "node_class", "display-name": "Node Class",   "type": "text"},
+    "severity":   {"id": "tt_severity",   "name": "severity",   "display-name": "Severity",     "type": "text"},
+}
+
+_FILTER_PARAM_MAPPINGS = {
+    PARAM_ORG:    ["variable", ["template-tag", "org"]],
+    PARAM_STATUS: ["variable", ["template-tag", "status"]],
+    PARAM_CLASS:  ["variable", ["template-tag", "node_class"]],
+    PARAM_SEV:    ["variable", ["template-tag", "severity"]],
+}
+
+# Reused SQL fragments
+_CTE_CURRENT_STATE = """
+WITH current_state AS (
+    SELECT DISTINCT ON (pf.device_id, pf.patch_uid)
+        pf.device_id, pf.patch_uid, pf.status, pf.severity,
+        pf.name AS patch_name, pf.kb_number, pf.installed_at,
+        pf.last_observed_at
+    FROM ninja_patches.patch_facts pf
+    ORDER BY pf.device_id, pf.patch_uid, pf.last_observed_at DESC
+)
+"""
+_FILTER_PREDICATES = """
+  [[AND o.name = {{org}}]]
+  [[AND cs.status = {{status}}]]
+  [[AND d.node_class = {{node_class}}]]
+  [[AND cs.severity = {{severity}}]]
+"""
+
+DETAIL_CARDS = [
+    {
+        "key":            "detail_status_donut",
+        "name":           "Patch Status (filtered)",
+        "display":        "pie",
+        "row": 0, "col": 0, "size_x": 8, "size_y": 6,
+        "viz_settings":   {"pie.dimension": "status", "pie.metric": "n"},
+        "template_tags":  _FILTER_TAGS,
+        "param_mappings": _FILTER_PARAM_MAPPINGS,
+        "query": f"""
+{_CTE_CURRENT_STATE}
+SELECT cs.status, COUNT(*) AS n
+FROM current_state cs
+JOIN ninja_core.devices d        ON d.id = cs.device_id
+JOIN ninja_core.organizations o  ON o.id = d.organization_id
+WHERE d.approval_status = 'APPROVED'
+{_FILTER_PREDICATES}
+GROUP BY cs.status
+ORDER BY n DESC
+""",
+    },
+    {
+        "key":            "detail_severity_bar",
+        "name":           "Severity Breakdown (filtered)",
+        "display":        "bar",
+        "row": 0, "col": 8, "size_x": 8, "size_y": 6,
+        "viz_settings":   {"graph.dimensions": ["severity"], "graph.metrics": ["n"]},
+        "template_tags":  _FILTER_TAGS,
+        "param_mappings": _FILTER_PARAM_MAPPINGS,
+        "query": f"""
+{_CTE_CURRENT_STATE}
+SELECT COALESCE(NULLIF(cs.severity, ''), 'NONE') AS severity, COUNT(*) AS n
+FROM current_state cs
+JOIN ninja_core.devices d        ON d.id = cs.device_id
+JOIN ninja_core.organizations o  ON o.id = d.organization_id
+WHERE d.approval_status = 'APPROVED'
+{_FILTER_PREDICATES}
+GROUP BY 1
+ORDER BY n DESC
+""",
+    },
+    {
+        "key":            "detail_top_devices",
+        "name":           "Top 15 Devices (filtered)",
+        "display":        "row",
+        "row": 0, "col": 16, "size_x": 8, "size_y": 6,
+        "viz_settings":   {"graph.dimensions": ["device"], "graph.metrics": ["n"]},
+        "template_tags":  _FILTER_TAGS,
+        "param_mappings": _FILTER_PARAM_MAPPINGS,
+        "query": f"""
+{_CTE_CURRENT_STATE}
+SELECT
+    d.system_name AS device,
+    COUNT(*) AS n
+FROM current_state cs
+JOIN ninja_core.devices d        ON d.id = cs.device_id
+JOIN ninja_core.organizations o  ON o.id = d.organization_id
+WHERE d.approval_status = 'APPROVED'
+{_FILTER_PREDICATES}
+GROUP BY d.system_name
+ORDER BY n DESC
+LIMIT 15
+""",
+    },
+    {
+        "key":            "detail_top_kbs",
+        "name":           "Top 20 KBs (filtered)",
+        "display":        "row",
+        "row": 6, "col": 0, "size_x": 12, "size_y": 8,
+        "viz_settings":   {"graph.dimensions": ["kb_number"], "graph.metrics": ["n"]},
+        "template_tags":  _FILTER_TAGS,
+        "param_mappings": _FILTER_PARAM_MAPPINGS,
+        "query": f"""
+{_CTE_CURRENT_STATE}
+SELECT
+    COALESCE(NULLIF(cs.kb_number, ''), '(none)') AS kb_number,
+    COUNT(*) AS n
+FROM current_state cs
+JOIN ninja_core.devices d        ON d.id = cs.device_id
+JOIN ninja_core.organizations o  ON o.id = d.organization_id
+WHERE d.approval_status = 'APPROVED'
+{_FILTER_PREDICATES}
+GROUP BY kb_number
+ORDER BY n DESC
+LIMIT 20
+""",
+    },
+    {
+        "key":            "detail_installs_timeline",
+        "name":           "Installs over time (last 90 days, filtered)",
+        "display":        "line",
+        "row": 6, "col": 12, "size_x": 12, "size_y": 8,
+        "viz_settings":   {"graph.dimensions": ["day"], "graph.metrics": ["installs"]},
+        "template_tags":  _FILTER_TAGS,
+        "param_mappings": _FILTER_PARAM_MAPPINGS,
+        "query": f"""
+SELECT
+    DATE_TRUNC('day', pf.installed_at)::date AS day,
+    COUNT(*) AS installs
+FROM ninja_patches.patch_facts pf
+JOIN ninja_core.devices d        ON d.id = pf.device_id
+JOIN ninja_core.organizations o  ON o.id = d.organization_id
+WHERE pf.installed_at IS NOT NULL
+  AND pf.installed_at > NOW() - INTERVAL '90 days'
+  AND d.approval_status = 'APPROVED'
+  [[AND o.name = {{{{org}}}}]]
+  [[AND pf.status = {{{{status}}}}]]
+  [[AND d.node_class = {{{{node_class}}}}]]
+  [[AND pf.severity = {{{{severity}}}}]]
+GROUP BY 1
+ORDER BY 1
+""",
+    },
+    {
+        "key":            "detail_table",
+        "name":           "Patch Detail Table (filtered)",
+        "display":        "table",
+        "row": 14, "col": 0, "size_x": 24, "size_y": 14,
+        "template_tags":  _FILTER_TAGS,
+        "param_mappings": _FILTER_PARAM_MAPPINGS,
+        "query": f"""
+{_CTE_CURRENT_STATE}
+SELECT
+    o.name           AS organization,
+    d.system_name    AS device,
+    d.node_class,
+    cs.kb_number,
+    cs.patch_name,
+    cs.status,
+    cs.severity,
+    cs.installed_at,
+    CASE WHEN cs.installed_at IS NULL THEN NULL
+         ELSE ROUND(EXTRACT(EPOCH FROM (NOW() - cs.installed_at)) / 86400)
+    END AS days_since_install,
+    cs.last_observed_at
+FROM current_state cs
+JOIN ninja_core.devices d        ON d.id = cs.device_id
+JOIN ninja_core.organizations o  ON o.id = d.organization_id
+WHERE d.approval_status = 'APPROVED'
+{_FILTER_PREDICATES}
+ORDER BY cs.last_observed_at DESC, cs.installed_at DESC NULLS LAST
+LIMIT 1000
+""",
+    },
+]
+
+
+# All dashboards this script provisions
+DASHBOARDS = [
+    {
+        "name":       "Ninja — Overview",
+        "parameters": [],
+        "cards":      OVERVIEW_CARDS,
+    },
+    {
+        "name":       "Ninja — Patch Detail (Filterable)",
+        "parameters": DETAIL_PARAMETERS,
+        "cards":      DETAIL_CARDS,
+    },
+]
 
 
 # ── HTTP helpers ────────────────────────────────────────────────────
@@ -303,6 +519,9 @@ def _upsert_card(
     client: httpx.Client, spec: dict, db_id: int, collection_id: int,
     existing_by_name: dict[str, dict],
 ) -> int:
+    native: dict[str, Any] = {"query": spec["query"].strip()}
+    if "template_tags" in spec:
+        native["template-tags"] = spec["template_tags"]
     body = {
         "name":                   spec["name"],
         "display":                spec["display"],
@@ -311,7 +530,7 @@ def _upsert_card(
         "dataset_query": {
             "type":     "native",
             "database": db_id,
-            "native":   {"query": spec["query"].strip()},
+            "native":   native,
         },
     }
     existing = existing_by_name.get(spec["name"])
@@ -330,21 +549,38 @@ def _upsert_card(
 
 def _upsert_dashboard(
     client: httpx.Client, name: str, collection_id: int,
+    parameters: list[dict] | None = None,
 ) -> dict[str, Any]:
     r = client.get("/api/dashboard")
     r.raise_for_status()
+    existing = None
     for d in r.json():
         if d.get("name") == name and d.get("collection_id") == collection_id:
-            r = client.get(f"/api/dashboard/{d['id']}")
-            r.raise_for_status()
-            log.info("Using existing dashboard: %s (id=%s)", name, d["id"])
-            return r.json()
-    r = client.post("/api/dashboard", json={
-        "name": name, "collection_id": collection_id,
-    })
-    r.raise_for_status()
-    log.info("Created dashboard: %s (id=%d)", name, r.json()["id"])
-    return r.json()
+            existing = d
+            break
+
+    if existing is None:
+        r = client.post("/api/dashboard", json={
+            "name": name, "collection_id": collection_id,
+        })
+        r.raise_for_status()
+        dash = r.json()
+        log.info("Created dashboard: %s (id=%d)", name, dash["id"])
+    else:
+        r = client.get(f"/api/dashboard/{existing['id']}")
+        r.raise_for_status()
+        dash = r.json()
+        log.info("Using existing dashboard: %s (id=%s)", name, dash["id"])
+
+    if parameters is not None:
+        # Update parameters (dashboard-level filter widgets).
+        r = client.put(
+            f"/api/dashboard/{dash['id']}",
+            json={"parameters": parameters},
+        )
+        r.raise_for_status()
+        dash = r.json()
+    return dash
 
 
 def _set_dashboard_layout(
@@ -353,17 +589,24 @@ def _set_dashboard_layout(
 ) -> None:
     """Replace the dashboard's dashcards with our layout. Uses PUT
     /api/dashboard/:id with a full `dashcards` array — modern
-    Metabase replaces dashcards atomically."""
+    Metabase replaces dashcards atomically. Each dashcard's
+    parameter_mappings wire dashboard filters into the card's
+    template tags."""
     dashcards = []
     for i, spec in enumerate(specs):
+        card_id = card_ids[spec["key"]]
+        param_mappings = [
+            {"parameter_id": pid, "card_id": card_id, "target": target}
+            for pid, target in spec.get("param_mappings", {}).items()
+        ]
         dashcards.append({
             "id":                     -(i + 1),  # negative = new dashcard
-            "card_id":                card_ids[spec["key"]],
+            "card_id":                card_id,
             "row":                    spec["row"],
             "col":                    spec["col"],
             "size_x":                 spec["size_x"],
             "size_y":                 spec["size_y"],
-            "parameter_mappings":     [],
+            "parameter_mappings":     param_mappings,
             "visualization_settings": {},
         })
     r = client.put(
@@ -438,17 +681,28 @@ def main() -> int:
 
         col_id = _upsert_collection(client, COLLECTION_NAME)
         existing_cards = _list_cards_in_collection(client, col_id)
-        card_ids: dict[str, int] = {}
-        for spec in OVERVIEW_CARDS:
-            card_ids[spec["key"]] = _upsert_card(
-                client, spec, db_id, col_id, existing_cards,
-            )
 
-        dashboard = _upsert_dashboard(client, DASHBOARD_NAME, col_id)
-        _set_dashboard_layout(client, dashboard, OVERVIEW_CARDS, card_ids)
+        urls: list[str] = []
+        for dash_spec in DASHBOARDS:
+            log.info("── Provisioning dashboard: %s ──", dash_spec["name"])
+            card_ids: dict[str, int] = {}
+            for card_spec in dash_spec["cards"]:
+                card_ids[card_spec["key"]] = _upsert_card(
+                    client, card_spec, db_id, col_id, existing_cards,
+                )
+            dashboard = _upsert_dashboard(
+                client, dash_spec["name"], col_id,
+                parameters=dash_spec.get("parameters"),
+            )
+            _set_dashboard_layout(
+                client, dashboard, dash_spec["cards"], card_ids,
+            )
+            urls.append(f"{args.url}/dashboard/{dashboard['id']}  ({dash_spec['name']})")
 
         print()
-        print(f"✓ Dashboard ready: {args.url}/dashboard/{dashboard['id']}")
+        print("✓ Dashboards ready:")
+        for url in urls:
+            print(f"  - {url}")
         print()
 
     return 0
