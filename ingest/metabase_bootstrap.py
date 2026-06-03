@@ -714,9 +714,238 @@ LIMIT 5000
 ]
 
 
+# ── Patch Coverage dashboard ────────────────────────────────────────
+#
+# Ninja's API doesn't return a "patch management enabled" flag on
+# devices, so we infer status from observed patch_facts activity:
+#   - active_patching  : MAX(last_observed_at) within last 7 days
+#   - stale_patch_data : has rows but all older than 7 days
+#   - no_patch_data    : no rows in patch_facts at all
+# This catches devices the patch agent isn't reaching, regardless of
+# whether the cause is config, agent failure, or decommissioning.
+
+PARAM_PCOV_ORG    = "p_pcov_org"
+PARAM_PCOV_CLASS  = "p_pcov_class"
+PARAM_PCOV_OS     = "p_pcov_os"
+PARAM_PCOV_STATUS = "p_pcov_status"
+
+_PCOV_STATUS_OPTIONS = ["active_patching", "stale_patch_data", "no_patch_data"]
+
+
+def build_pcov_parameters(org_names: list[str], os_names: list[str]) -> list[dict]:
+    return [
+        _param_dropdown(PARAM_PCOV_ORG,    "Organization",  "pcov_org",        org_names),
+        _param_dropdown(PARAM_PCOV_CLASS,  "Node Class",    "pcov_node_class", _NODE_CLASS_OPTIONS),
+        _param_dropdown(PARAM_PCOV_OS,     "OS Name",       "pcov_os",         os_names),
+        _param_dropdown(PARAM_PCOV_STATUS, "Patch Status",  "pcov_status",     _PCOV_STATUS_OPTIONS),
+    ]
+
+
+_PCOV_TAGS = {
+    "pcov_org":         {"id": "tt_pcov_org",    "name": "pcov_org",        "display-name": "Organization", "type": "text"},
+    "pcov_node_class":  {"id": "tt_pcov_class",  "name": "pcov_node_class", "display-name": "Node Class",   "type": "text"},
+    "pcov_os":          {"id": "tt_pcov_os",     "name": "pcov_os",         "display-name": "OS Name",      "type": "text"},
+    "pcov_status":      {"id": "tt_pcov_status", "name": "pcov_status",     "display-name": "Patch Status", "type": "text"},
+}
+
+_PCOV_PARAM_MAPPINGS = {
+    PARAM_PCOV_ORG:    ["variable", ["template-tag", "pcov_org"]],
+    PARAM_PCOV_CLASS:  ["variable", ["template-tag", "pcov_node_class"]],
+    PARAM_PCOV_OS:     ["variable", ["template-tag", "pcov_os"]],
+    PARAM_PCOV_STATUS: ["variable", ["template-tag", "pcov_status"]],
+}
+
+# Reused: classify every active device by its latest patch_facts signal.
+_PCOV_CTE = """
+WITH device_patch_signal AS (
+    SELECT device_id, MAX(last_observed_at) AS last_seen_at
+    FROM ninja_patches.patch_facts
+    GROUP BY device_id
+),
+classified AS (
+    SELECT
+        d.id              AS device_id,
+        d.system_name,
+        d.display_name,
+        d.organization_id,
+        d.node_class,
+        d.os_name,
+        dps.last_seen_at,
+        CASE
+            WHEN dps.last_seen_at IS NULL THEN 'no_patch_data'
+            WHEN dps.last_seen_at < NOW() - INTERVAL '7 days' THEN 'stale_patch_data'
+            ELSE 'active_patching'
+        END AS patch_status
+    FROM ninja_core.devices d
+    LEFT JOIN device_patch_signal dps ON dps.device_id = d.id
+    WHERE d.approval_status = 'APPROVED'
+)
+"""
+
+_PCOV_FILTERS = """
+  [[AND o.name = {{pcov_org}}]]
+  [[AND c.node_class = {{pcov_node_class}}]]
+  [[AND c.os_name = {{pcov_os}}]]
+  [[AND c.patch_status = {{pcov_status}}]]
+"""
+
+PCOV_CARDS = [
+    {
+        "key":     "pcov_active",
+        "name":    "Actively Patching",
+        "display": "scalar",
+        "row": 0, "col": 0, "size_x": 6, "size_y": 4,
+        "template_tags":  _PCOV_TAGS,
+        "param_mappings": _PCOV_PARAM_MAPPINGS,
+        "query": f"""
+{_PCOV_CTE}
+SELECT COUNT(*) AS active
+FROM classified c
+JOIN ninja_core.organizations o ON o.id = c.organization_id
+WHERE c.patch_status = 'active_patching'
+{_PCOV_FILTERS}
+""",
+    },
+    {
+        "key":     "pcov_stale",
+        "name":    "Stale Patch Data (no observation in 7d)",
+        "display": "scalar",
+        "row": 0, "col": 6, "size_x": 6, "size_y": 4,
+        "template_tags":  _PCOV_TAGS,
+        "param_mappings": _PCOV_PARAM_MAPPINGS,
+        "query": f"""
+{_PCOV_CTE}
+SELECT COUNT(*) AS stale
+FROM classified c
+JOIN ninja_core.organizations o ON o.id = c.organization_id
+WHERE c.patch_status = 'stale_patch_data'
+{_PCOV_FILTERS}
+""",
+    },
+    {
+        "key":     "pcov_none",
+        "name":    "No Patch Data Ever",
+        "display": "scalar",
+        "row": 0, "col": 12, "size_x": 6, "size_y": 4,
+        "template_tags":  _PCOV_TAGS,
+        "param_mappings": _PCOV_PARAM_MAPPINGS,
+        "query": f"""
+{_PCOV_CTE}
+SELECT COUNT(*) AS no_data
+FROM classified c
+JOIN ninja_core.organizations o ON o.id = c.organization_id
+WHERE c.patch_status = 'no_patch_data'
+{_PCOV_FILTERS}
+""",
+    },
+    {
+        "key":     "pcov_total",
+        "name":    "Total Approved Devices",
+        "display": "scalar",
+        "row": 0, "col": 18, "size_x": 6, "size_y": 4,
+        "template_tags":  _PCOV_TAGS,
+        "param_mappings": _PCOV_PARAM_MAPPINGS,
+        "query": f"""
+{_PCOV_CTE}
+SELECT COUNT(*) AS devices
+FROM classified c
+JOIN ninja_core.organizations o ON o.id = c.organization_id
+WHERE 1=1
+{_PCOV_FILTERS}
+""",
+    },
+    {
+        "key":     "pcov_status_pie",
+        "name":    "Patch Coverage Breakdown",
+        "display": "pie",
+        "row": 4, "col": 0, "size_x": 12, "size_y": 8,
+        "viz_settings": {
+            "pie.dimension":       "patch_status",
+            "pie.metric":          "devices",
+            "pie.slice_threshold": 0,
+            "pie.show_legend":     True,
+            "pie.show_total":      True,
+        },
+        "template_tags":  _PCOV_TAGS,
+        "param_mappings": _PCOV_PARAM_MAPPINGS,
+        "query": f"""
+{_PCOV_CTE}
+SELECT c.patch_status, COUNT(*) AS devices
+FROM classified c
+JOIN ninja_core.organizations o ON o.id = c.organization_id
+WHERE 1=1
+{_PCOV_FILTERS}
+GROUP BY c.patch_status
+ORDER BY devices DESC
+""",
+    },
+    {
+        "key":     "pcov_by_org",
+        "name":    "Coverage by Organization",
+        "display": "table",
+        "row": 4, "col": 12, "size_x": 12, "size_y": 8,
+        "template_tags":  _PCOV_TAGS,
+        "param_mappings": _PCOV_PARAM_MAPPINGS,
+        "query": f"""
+{_PCOV_CTE}
+SELECT
+    o.name AS organization,
+    COUNT(*) FILTER (WHERE c.patch_status = 'active_patching')  AS active,
+    COUNT(*) FILTER (WHERE c.patch_status = 'stale_patch_data') AS stale,
+    COUNT(*) FILTER (WHERE c.patch_status = 'no_patch_data')    AS no_data,
+    COUNT(*)                                                    AS total,
+    ROUND(
+        COUNT(*) FILTER (WHERE c.patch_status = 'active_patching') * 100.0
+        / NULLIF(COUNT(*), 0), 1
+    ) AS pct_active
+FROM classified c
+JOIN ninja_core.organizations o ON o.id = c.organization_id
+WHERE 1=1
+{_PCOV_FILTERS}
+GROUP BY o.name
+ORDER BY pct_active ASC, total DESC
+""",
+    },
+    {
+        "key":     "pcov_all_devices",
+        "name":    "All Devices with Patch Status",
+        "display": "table",
+        "row": 12, "col": 0, "size_x": 24, "size_y": 14,
+        "template_tags":  _PCOV_TAGS,
+        "param_mappings": _PCOV_PARAM_MAPPINGS,
+        "query": f"""
+{_PCOV_CTE}
+SELECT
+    c.device_id,
+    c.system_name,
+    o.name AS organization,
+    c.node_class,
+    c.os_name,
+    c.patch_status,
+    c.last_seen_at,
+    CASE WHEN c.last_seen_at IS NULL THEN NULL
+         ELSE EXTRACT(DAY FROM (NOW() - c.last_seen_at))::int
+    END AS days_since_seen
+FROM classified c
+JOIN ninja_core.organizations o ON o.id = c.organization_id
+WHERE 1=1
+{_PCOV_FILTERS}
+ORDER BY
+    CASE c.patch_status
+        WHEN 'no_patch_data' THEN 0
+        WHEN 'stale_patch_data' THEN 1
+        ELSE 2
+    END,
+    c.last_seen_at ASC NULLS FIRST,
+    o.name, c.system_name
+""",
+    },
+]
+
+
 def build_dashboards(org_names: list[str], os_names: list[str]) -> list[dict]:
-    """All dashboards this script provisions. Detail dropdowns are
-    populated from the live data passed in."""
+    """All dashboards this script provisions. Detail / Patch Coverage
+    dropdowns are populated from the live data passed in."""
     return [
         {
             "name":       "Ninja — Overview",
@@ -732,6 +961,11 @@ def build_dashboards(org_names: list[str], os_names: list[str]) -> list[dict]:
             "name":       "Ninja — Device Drilldown",
             "parameters": build_device_parameters(),
             "cards":      DEVICE_CARDS,
+        },
+        {
+            "name":       "Ninja — Patch Coverage",
+            "parameters": build_pcov_parameters(org_names, os_names),
+            "cards":      PCOV_CARDS,
         },
     ]
 

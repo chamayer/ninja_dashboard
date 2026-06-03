@@ -2,6 +2,58 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.3.0] — 2026-06-03
+
+Dashboards stage. Stack now ships three Metabase dashboards
+auto-provisioned on container startup; bootstrap script is
+operator-set-and-forget.
+
+### Added
+- `ingest/metabase_bootstrap.py` — idempotent CLI + library that
+  provisions Metabase collections, cards, dashboards, layouts via
+  REST API. Supports template-tag-based dashboard filters with
+  dropdown sources populated from live Postgres data.
+- Auto-bootstrap on ingest container startup, gated on
+  `MB_BOOTSTRAP_USER` / `MB_BOOTSTRAP_PASS` env vars. Waits up to
+  5 min for Metabase to come up, checks first-run wizard is
+  complete, tolerates all failures (logged, not raised).
+- `POST /bootstrap-metabase` HTTP endpoint for manual re-provision
+  without container restart.
+- Dashboard: **Ninja — Overview** — 9 cards: active devices,
+  patches ready / manual+delayed / failed (numbers); patch state
+  donut; worst-15 + all-orgs compliance; reboot table; ingest
+  health.
+- Dashboard: **Ninja — Patch Detail (Filterable)** — 8 cards behind
+  6 dashboard filters (Org dropdown, Status, Node Class, Severity,
+  OS Name, KB Number). Status donut, severity bar, top-15 + all
+  devices, top-20 + all KBs, install timeline, full patch table.
+- Dashboard: **Ninja — Device Drilldown** — per-device deep dive
+  via free-text name search. Device info, patch state pie, 180-day
+  install timeline, full patch history table (every SCD-2 row).
+- Dashboard: **Ninja — Patch Coverage** — operational gap analysis.
+  Classifies each approved device as active_patching /
+  stale_patch_data / no_patch_data based on the most recent
+  observation in patch_facts. Filters by Org / Node Class / OS /
+  Patch Status. Useful for finding devices the patch agent is no
+  longer reaching.
+- `ingest/probe.py` + `ingest/probe_fields.py` — diagnostic CLIs
+  for walking unknown Ninja endpoints and surveying custom-field
+  shape before writing ingest code.
+
+### Fixed
+- `paginate_cursor` was infinite-looping on Ninja's `/queries/*`
+  endpoints because cursor.name stays constant across pages.
+  Termination now driven by `cursor.offset + len(results) >=
+  cursor.count`.
+- All pie charts show every slice (`pie.slice_threshold: 0`); the
+  default 2.5% threshold was hiding small statuses as "Other".
+- COUNT columns renamed from `n` to `patches` so tooltips read
+  "patches: 47" instead of "n: 47".
+
+### Process
+- Going forward, VERSION bumps on each feature/fix commit; tags
+  cut at milestones. CHANGELOG.md updated per commit.
+
 ## [0.2.0] — 2026-06-03
 
 End-to-end ingest pipeline running against a live Ninja instance.
