@@ -184,7 +184,7 @@ WHERE status = 'FAILED'
         "key":     "cmd_delayed",
         "name":    "Delayed Patches",
         "display": "scalar",
-        "row": 4, "col": 0, "size_x": 6, "size_y": 4,
+        "row": 4, "col": 0, "size_x": 5, "size_y": 4,
         "click_behavior": {"target": DASH_DETAIL, "preset": {"status": "DELAYED"}},
         "query": """
 WITH current_state AS (
@@ -199,10 +199,32 @@ WHERE status = 'DELAYED'
 """,
     },
     {
+        "key":     "cmd_patching",
+        "name":    "Patching Devices",
+        "display": "scalar",
+        "row": 4, "col": 5, "size_x": 5, "size_y": 4,
+        "click_behavior": {"target": DASH_PCOV, "preset": {"pcov_status": "Patching Devices"}},
+        "query": f"""
+WITH last_install AS (
+    SELECT device_id, MAX(installed_at) AS last_install_at
+    FROM ninja_patches.patch_facts
+    WHERE fact_type = 'install_outcome'
+      AND installed_at IS NOT NULL
+    GROUP BY device_id
+)
+SELECT COUNT(*) AS devices
+FROM ninja_core.devices d
+JOIN last_install li ON li.device_id = d.id
+WHERE d.approval_status = 'APPROVED'
+  AND d.node_class IN ('WINDOWS_WORKSTATION', 'WINDOWS_SERVER')
+  AND li.last_install_at >= NOW() - (INTERVAL '1 day' * {DEFAULT_STALE_PATCH_DAYS})
+""",
+    },
+    {
         "key":     "cmd_stale",
         "name":    "Stalled Devices",
         "display": "scalar",
-        "row": 4, "col": 6, "size_x": 6, "size_y": 4,
+        "row": 4, "col": 10, "size_x": 5, "size_y": 4,
         "click_behavior": {"target": DASH_PCOV, "preset": {"pcov_status": "Stalled Devices"}},
         "query": f"""
 WITH last_install AS (
@@ -224,7 +246,7 @@ WHERE d.approval_status = 'APPROVED'
         "key":     "cmd_never",
         "name":    "Never-Patched Devices",
         "display": "scalar",
-        "row": 4, "col": 12, "size_x": 6, "size_y": 4,
+        "row": 4, "col": 15, "size_x": 5, "size_y": 4,
         "click_behavior": {"target": DASH_PCOV, "preset": {"pcov_status": "Never-Patched Devices"}},
         "query": """
 SELECT COUNT(*) AS devices
@@ -242,7 +264,7 @@ WHERE d.approval_status = 'APPROVED'
         "key":     "cmd_reboot",
         "name":    "Needs Reboot",
         "display": "scalar",
-        "row": 4, "col": 18, "size_x": 6, "size_y": 4,
+        "row": 4, "col": 20, "size_x": 4, "size_y": 4,
         "query": """
 SELECT COUNT(*) AS devices
 FROM ninja_core.v_active_devices
@@ -673,33 +695,41 @@ ORDER BY "Patches" DESC
         "display":    "row",
         "row": 8, "col": 12, "size_x": 12, "size_y": 8,
         "viz_settings": {
-            "graph.dimensions": ["Organization"],
+            "graph.dimensions": ["organization"],
             "graph.metrics":    ["Patch Compliance"],
         },
         # Click an org bar → open Org Overview filtered to that org.
         "click_behavior": {
             "target": DASH_ORG,
-            "params": {"p_org": "Organization"},
+            "params": {"p_org": "organization"},
         },
+        # Compliance = (device, patch) pairs with a successful install
+        # divided by the universe of (device, patch) pairs we know
+        # about. INSTALLED rows live in fact_type='install_outcome'; the
+        # old query filtered to fact_type='patch_state' and so could
+        # never count any installs — every org showed 0 %.
         "query": """
-WITH current_state AS (
-    SELECT DISTINCT ON (device_id, patch_uid)
-        device_id, patch_uid, status
+WITH all_patches AS (
+    SELECT DISTINCT device_id, patch_uid
     FROM ninja_patches.patch_facts
-    WHERE fact_type = 'patch_state'
-    ORDER BY device_id, patch_uid, last_observed_at DESC
+),
+installed_patches AS (
+    SELECT DISTINCT device_id, patch_uid
+    FROM ninja_patches.patch_facts
+    WHERE fact_type = 'install_outcome' AND status = 'INSTALLED'
 )
 SELECT
-    o.name AS "Organization",
+    o.name AS organization,
     ROUND(
-      COUNT(*) FILTER (WHERE cs.status = 'INSTALLED') * 100.0
+      COUNT(*) FILTER (WHERE ip.device_id IS NOT NULL) * 100.0
       / NULLIF(COUNT(*), 0),
       1
     ) AS "Patch Compliance",
     COUNT(*) AS "Total Patches"
-FROM current_state cs
-JOIN ninja_core.v_active_devices d ON d.id = cs.device_id
-JOIN ninja_core.organizations o  ON o.id = d.organization_id
+FROM all_patches ap
+LEFT JOIN installed_patches ip USING (device_id, patch_uid)
+JOIN ninja_core.v_active_devices d ON d.id = ap.device_id
+JOIN ninja_core.organizations o   ON o.id = d.organization_id
 WHERE d.approval_status = 'APPROVED'
 GROUP BY o.name
 HAVING COUNT(*) >= 50
@@ -713,11 +743,15 @@ LIMIT 15
         "display":    "table",
         "row": 16, "col": 0, "size_x": 24, "size_y": 10,
         "column_click_behaviors": {
-            "Organization": {
+            "organization": {
                 "target": DASH_ORG,
-                "params": {"p_org": "Organization"},
+                "params": {"p_org": "organization"},
             },
         },
+        # Same compliance bug as compliance_worst: pulling from
+        # patch_state only never captures INSTALLED rows. Fixed by
+        # using the install_outcome side for both the "Installed" count
+        # and the numerator of "Patch Compliance".
         "query": """
 WITH current_state AS (
     SELECT DISTINCT ON (device_id, patch_uid)
@@ -738,26 +772,39 @@ latest_install_outcome AS (
         ninja_observed_at DESC NULLS LAST,
         last_observed_at DESC,
         id DESC
+),
+all_patches AS (
+    SELECT DISTINCT device_id, patch_uid
+    FROM ninja_patches.patch_facts
+),
+installed_patches AS (
+    SELECT DISTINCT device_id, patch_uid
+    FROM ninja_patches.patch_facts
+    WHERE fact_type = 'install_outcome' AND status = 'INSTALLED'
 )
 SELECT
-    o.name AS "Organization",
+    o.name AS organization,
     ROUND(
-      COUNT(*) FILTER (WHERE cs.status = 'INSTALLED') * 100.0
+      COUNT(*) FILTER (WHERE ip.device_id IS NOT NULL) * 100.0
       / NULLIF(COUNT(*), 0),
       1
     ) AS "Patch Compliance",
-    COUNT(*) FILTER (WHERE cs.status = 'INSTALLED')                          AS "Installed",
+    COUNT(*) FILTER (WHERE ip.device_id IS NOT NULL)                         AS "Installed",
     COUNT(*) FILTER (WHERE cs.status = 'APPROVED')                           AS "Approved Patches",
     COUNT(*) FILTER (WHERE cs.status = 'MANUAL')                             AS "Manual Approval Patches",
     COUNT(*) FILTER (WHERE cs.status = 'DELAYED')                            AS "Delayed Install Patches",
     COUNT(*) FILTER (WHERE lio.status = 'FAILED')                            AS "Failed Patches",
     COUNT(*) FILTER (WHERE cs.status = 'REJECTED')                           AS "Rejected",
     COUNT(*)                                                                 AS "Total Patches",
-    COUNT(DISTINCT cs.device_id)                                             AS "Devices"
-FROM current_state cs
+    COUNT(DISTINCT ap.device_id)                                             AS "Devices"
+FROM all_patches ap
+LEFT JOIN current_state cs
+  ON cs.device_id = ap.device_id AND cs.patch_uid = ap.patch_uid
 LEFT JOIN latest_install_outcome lio
-  ON lio.device_id = cs.device_id AND lio.patch_uid = cs.patch_uid
-JOIN ninja_core.v_active_devices d ON d.id = cs.device_id
+  ON lio.device_id = ap.device_id AND lio.patch_uid = ap.patch_uid
+LEFT JOIN installed_patches ip
+  ON ip.device_id = ap.device_id AND ip.patch_uid = ap.patch_uid
+JOIN ninja_core.v_active_devices d ON d.id = ap.device_id
 JOIN ninja_core.organizations o  ON o.id = d.organization_id
 WHERE d.approval_status = 'APPROVED'
 GROUP BY o.name
@@ -770,11 +817,14 @@ ORDER BY "Patch Compliance" ASC, "Total Patches" DESC
         "name":       "Devices Needing Reboot",
         "display":    "table",
         "row": 26, "col": 0, "size_x": 24, "size_y": 8,
+        # Click-source columns use stable lowercase identifiers per the
+        # v0.10.2 lesson — Metabase per-column click_behavior is more
+        # reliable referencing unquoted snake_case SQL aliases than
+        # quoted display strings with spaces/capitalization.
         "column_click_behaviors": {
-            # Meaningful drills
-            "Device":       {"target": DASH_DRILLDOWN, "params": {"p_device": "Device"}},
-            "Organization": {"target": DASH_ORG,       "params": {"p_org":    "Organization"}},
-            "Device Type":  {"target": DASH_DETAIL,    "params": {"p_class":  "Device Type"}},
+            "device":       {"target": DASH_DRILLDOWN, "params": {"p_device": "device"}},
+            "organization": {"target": DASH_ORG,       "params": {"p_org":    "organization"}},
+            "device_type":  {"target": DASH_DETAIL,    "params": {"p_class":  "device_type"}},
             # Inert columns: suppress the default drill menu with a
             # no-op self-link.
             "last_contact": {"target": "self", "preset": {}},
@@ -782,9 +832,9 @@ ORDER BY "Patch Compliance" ASC, "Total Patches" DESC
         },
         "query": f"""
 SELECT
-    d.system_name AS "Device",
-    o.name AS "Organization",
-    {DEVICE_TYPE_D} AS "Device Type",
+    d.system_name AS device,
+    o.name AS organization,
+    {DEVICE_TYPE_D} AS device_type,
     d.last_contact,
     d.last_snapshot_at AS reported_at
 FROM ninja_core.v_active_devices d
@@ -1952,22 +2002,31 @@ WHERE 1=1
         "row": 0, "col": 6, "size_x": 6, "size_y": 4,
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS,
+        # Same compliance bug as Fleet Overview's compliance cards:
+        # INSTALLED lives in fact_type='install_outcome', not
+        # 'patch_state'. Compute installed from install_outcome over
+        # the universe of all (device, patch) we know about.
         "query": """
-WITH current_state AS (
-    SELECT DISTINCT ON (device_id, patch_uid) device_id, patch_uid, status
+WITH all_patches AS (
+    SELECT DISTINCT pf.device_id, pf.patch_uid, d.organization_id
+    FROM ninja_patches.patch_facts pf
+    JOIN ninja_core.v_active_devices d ON d.id = pf.device_id
+    WHERE d.approval_status = 'APPROVED'
+),
+installed_patches AS (
+    SELECT DISTINCT device_id, patch_uid
     FROM ninja_patches.patch_facts
-    WHERE fact_type = 'patch_state'
-    ORDER BY device_id, patch_uid, last_observed_at DESC, id DESC
+    WHERE fact_type = 'install_outcome' AND status = 'INSTALLED'
 )
 SELECT ROUND(
-    COUNT(*) FILTER (WHERE cs.status = 'INSTALLED') * 100.0
+    COUNT(*) FILTER (WHERE ip.device_id IS NOT NULL) * 100.0
     / NULLIF(COUNT(*), 0),
     1
 ) AS percent_installed
-FROM current_state cs
-JOIN ninja_core.v_active_devices d ON d.id = cs.device_id
-JOIN ninja_core.organizations o ON o.id = d.organization_id
-WHERE d.approval_status = 'APPROVED'
+FROM all_patches ap
+LEFT JOIN installed_patches ip USING (device_id, patch_uid)
+JOIN ninja_core.organizations o ON o.id = ap.organization_id
+WHERE 1=1
   [[AND o.name = {{org}}]]
 """,
     },

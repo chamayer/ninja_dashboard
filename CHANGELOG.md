@@ -2,6 +2,34 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.11.1] — 2026-06-03
+
+### Fixed
+- **Patch Compliance always 0.** Fleet Overview's `Clients with
+  Lowest Patch Compliance` chart, `Client Patch Compliance` table,
+  and Org Overview's `Patch Compliance` scalar all reported 0 % for
+  every client. The compliance numerator counted
+  `WHERE status='INSTALLED'` against a CTE filtered to
+  `fact_type='patch_state'`, but per the v0.9.0 split, INSTALLED
+  rows live in `fact_type='install_outcome'`. The patch_state side
+  never contained any installs, so the numerator was always 0.
+  Compliance now computes installed = distinct (device, patch) with
+  any install_outcome=INSTALLED row over the universe of all
+  (device, patch) pairs we know about.
+- **Fleet Overview table click-thrus didn't navigate.** Per the
+  v0.10.2 lesson, Metabase per-column click_behavior is more
+  reliable referencing stable lowercase snake_case SQL aliases than
+  quoted display strings (`"Organization"`, `"Device"`, etc.).
+  `Client Patch Compliance` and `Devices Needing Reboot` both used
+  the quoted-display pattern; they now use `organization`,
+  `device`, `device_type` aliases with click keys to match.
+
+### Added
+- **Patching Devices** scalar on Patch Command Center — completes
+  the device-state triple (Patching / Stalled / Never-Patched) that
+  was already on Fleet Overview but missing here. Row 4 reflowed to
+  5 scalars at widths 5+5+5+5+4.
+
 ## [0.11.0] — 2026-06-03
 
 ### Added

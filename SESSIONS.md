@@ -5,6 +5,43 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-03 — v0.11.1 compliance + click-thru fixes
+
+**Done:**
+- Fixed compliance numbers showing 0 % everywhere. Root cause:
+  `current_state` CTEs filtered to `fact_type='patch_state'` (the
+  pending/failed side); INSTALLED rows live in
+  `fact_type='install_outcome'`. The query never had any rows to
+  count as installed, so the numerator was always 0. Rewrote
+  `compliance_worst`, `compliance_all`, and `org_compliance` to
+  compute installed count from install_outcome over the universe
+  of all (device, patch) pairs.
+- Fixed Fleet Overview table click-thrus by applying the v0.10.2
+  source-alias lesson (lowercase, snake_case, unquoted) to
+  `Client Patch Compliance` and `Devices Needing Reboot`. Both
+  tables had been built with `o.name AS "Organization"` /
+  `d.system_name AS "Device"` / `{DEVICE_TYPE_D} AS "Device Type"`
+  with column_click_behaviors keyed on the same quoted strings —
+  Metabase's per-column click_behavior is fussy about this.
+- Added the missing `Patching Devices` scalar to Patch Command
+  Center so the device-state triple is consistent with Fleet
+  Overview.
+
+**Pending diagnosis:**
+- User reported that the `Clients Needing Attention` org-name
+  click on Command Center doesn't navigate. cmd_clients already
+  uses the v0.10.2 lowercase pattern, so v0.11.1 shouldn't change
+  its behavior. Awaiting post-deploy retest — if it's still
+  broken after the Portainer rebuild picks up the bootstrap pass,
+  we'll inspect the live Metabase parameterMapping JSON.
+
+**Validation:**
+- `python -m py_compile ingest/metabase_bootstrap.py` passes.
+- Spot-checked the three rewritten compliance queries: numerator
+  references `installed_patches.device_id` (which only contains
+  install_outcome=INSTALLED), denominator from `all_patches`
+  (DISTINCT over the entire patch_facts table).
+
 ## 2026-06-03 — v0.11.0 nav bar + terminology consolidation
 
 **Done:**
