@@ -1196,7 +1196,7 @@ JOIN ninja_core.organizations o ON o.id = c.organization_id
 WHERE 1=1
 {_PCOV_FILTERS}
 GROUP BY 1
-ORDER BY (active + stale + no_data) DESC
+ORDER BY COUNT(*) DESC
 LIMIT 20
 """,
     },

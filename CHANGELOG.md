@@ -2,6 +2,14 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.5.1] — 2026-06-03
+
+### Fixed
+- Patch Coverage by OS card: `ORDER BY (active + stale + no_data)`
+  referenced column aliases inside arithmetic — Postgres doesn't
+  allow that at the same SELECT level. Switched to `ORDER BY
+  COUNT(*) DESC` (same result, valid SQL).
+
 ## [0.5.0] — 2026-06-03
 
 ### Added — interactive dashboards
