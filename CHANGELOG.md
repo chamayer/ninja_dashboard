@@ -2,6 +2,32 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.10.0] — 2026-06-03
+
+### Added
+- New **Ninja — Patch Command Center** dashboard as the operator
+  landing page. It surfaces fleet-wide action queues for clients
+  needing attention, failed patches, manual/delayed patches, stale
+  patching, never-patched devices, and reboot work.
+- Operating-system dashboard filters now use stable OS families:
+  `Windows 11`, `Windows 10`, `Windows Server`, `Other Windows`, and
+  `Unknown`.
+
+### Changed
+- Rebuilt **Ninja — Org Overview** as an actionable client patching
+  view instead of a mostly decorative summary page. It now has
+  org-scoped KPIs plus queues for failed patches, manual/delayed
+  patches, stale/never-patched devices, and reboot attention.
+- Dashboard labels and visible table columns now use operator-facing
+  terminology: `Active Windows Devices`, `Approved Patches`, `Manual
+  Approval`, `Delayed Install`, `Failed Patches`, `Recent Patch
+  Activity`, `Stale Patching`, `Never Patched`, `Device Type`,
+  `Operating System`, `Patching Status`, and `Install Results`.
+- Device Type filters now use readable values (`Windows Workstation`,
+  `Windows Server`) instead of raw Ninja node-class codes.
+- Query-string drill links now URL-encode preset filter values so
+  dashboard links work with labels containing spaces.
+
 ## [0.9.0] — 2026-06-03
 
 ### Added

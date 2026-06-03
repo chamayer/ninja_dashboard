@@ -5,6 +5,50 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-03 — v0.10.0 Patch Command Center + dashboard terminology
+
+**Done:**
+- Added **Ninja — Patch Command Center** as the top-level workflow
+  dashboard for patch operators. It brings together the fleet-wide
+  work queues: clients needing attention, failed patch queue,
+  manual/delayed patches, stale patching, never-patched devices, and
+  reboot attention.
+- Rebuilt **Ninja — Org Overview** from a summary-style dashboard into
+  an org-scoped action page. It now answers what is happening for one
+  client and what needs work next, with direct drills to Device
+  Drilldown, Patch Detail, and Patching Status.
+- Reviewed dashboard terminology and replaced raw/technical labels
+  with operator-facing terms:
+  `Active Windows Devices`, `Approved Patches`, `Manual Approval`,
+  `Delayed Install`, `Failed Patches`, `Recent Patch Activity`,
+  `Stale Patching`, `Never Patched`, `Device Type`,
+  `Operating System`, `Patching Status`, and `Install Results`.
+- Changed OS filters from exact OS names to OS-family choices:
+  `Windows 11`, `Windows 10`, `Windows Server`, `Other Windows`, and
+  `Unknown`. Detail/drilldown tables still show the exact operating
+  system string where that level of detail is useful.
+- Changed Device Type filters to readable values (`Windows
+  Workstation`, `Windows Server`) while keeping the underlying Ninja
+  node-class values internal.
+- URL-encoded scalar-card drill link presets so human labels with
+  spaces work as dashboard filter values.
+
+**Validation:**
+- `python -m compileall ingest` passes.
+- Dashboard definitions build to six dashboards with expected card
+  counts when dependency modules are stubbed:
+  Command Center 12, Overview 12, Org Overview 15, Patch Detail 8,
+  Device Drilldown 5, Patching Status 9.
+- A direct import check in the workstation Python failed because
+  `httpx` is not installed locally; the stubbed build check validated
+  the dashboard specs without installing dependencies.
+- Live Metabase bootstrap still needs to run in the deployed ingest
+  container to apply the dashboard updates.
+
+**Process:**
+- This was treated as a significant dashboard rebuild and was
+  implemented only after explicit user approval.
+
 ## 2026-06-03 — v0.9.0 patch fact typing + stale timeframe
 
 **Done:**

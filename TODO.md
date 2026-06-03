@@ -74,9 +74,12 @@ _(empty — drop free-form items here)_
 - [ ] Configure Metabase data source: read-only Postgres user.
 - [x] Overview dashboard: total devices, pending, failed, compliance %,
       status donut, by-org bar, by-OS bar, offline > 7d, needs reboot.
-- [x] Org Overview dashboard: org-scoped compliance, active Windows
-      devices, patching status, Windows class/OS breakdown, problem
-      patches, and reboot attention.
+- [x] Patch Command Center: top-level operator workflow with client,
+      failed patch, manual/delayed, stale patching, never-patched, and
+      reboot queues.
+- [x] Org Overview dashboard: org-scoped action page with client KPIs,
+      failed patch queue, manual/delayed queue, stale/never-patched
+      device queue, OS-family rollups, and reboot attention.
 - [ ] Filterable Detail dashboard: patch table + per-org +
       per-device drilldown. Filters include custom-field columns from
       the pivoted views. Per-device drilldown shows activity log
@@ -168,6 +171,19 @@ _(empty — drop free-form items here)_
 ---
 
 ## Completed
+
+### v0.10.0 — 2026-06-03
+
+- [x] Added **Ninja — Patch Command Center** as the top-level patch
+      operator landing dashboard.
+- [x] Rebuilt **Ninja — Org Overview** into an actionable client page
+      instead of a decorative summary.
+- [x] Changed OS dashboard filters to OS families:
+      Windows 11, Windows 10, Windows Server, Other Windows, Unknown.
+- [x] Replaced visible technical labels with operator-facing
+      terminology such as Device Type, Operating System, Patching
+      Status, Install Results, Failed Patches, Stale Patching, and
+      Never Patched.
 
 ### v0.1.0 — 2026-06-02
 
