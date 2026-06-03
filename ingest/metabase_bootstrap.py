@@ -109,11 +109,13 @@ END
 # ── Card specs ──────────────────────────────────────────────────────
 
 COMMAND_CARDS: list[dict[str, Any]] = [
+    # Row 0 — Devices (canonical order: Active, Patching, Stalled,
+    # Never-Patched, Needs Reboot). Sizes: 5+5+5+5+4 = 24.
     {
         "key":     "cmd_active_devices",
         "name":    "Active Devices",
         "display": "scalar",
-        "row": 0, "col": 0, "size_x": 6, "size_y": 4,
+        "row": 0, "col": 0, "size_x": 5, "size_y": 4,
         "click_behavior": {"target": DASH_DETAIL, "preset": {}},
         "query": """
 SELECT COUNT(*) AS devices
@@ -121,88 +123,10 @@ FROM ninja_core.v_active_devices
 """,
     },
     {
-        "key":     "cmd_approved",
-        "name":    "Approved Patches",
-        "display": "scalar",
-        "row": 0, "col": 6, "size_x": 6, "size_y": 4,
-        "click_behavior": {"target": DASH_DETAIL, "preset": {"status": "APPROVED"}},
-        "query": """
-WITH current_state AS (
-    SELECT DISTINCT ON (device_id, patch_uid) status
-    FROM ninja_patches.patch_facts
-    WHERE fact_type = 'patch_state'
-    ORDER BY device_id, patch_uid, last_observed_at DESC, id DESC
-)
-SELECT COUNT(*) AS patches
-FROM current_state
-WHERE status = 'APPROVED'
-""",
-    },
-    {
-        "key":     "cmd_manual",
-        "name":    "Manual Approval",
-        "display": "scalar",
-        "row": 0, "col": 12, "size_x": 6, "size_y": 4,
-        "click_behavior": {"target": DASH_DETAIL, "preset": {"status": "MANUAL"}},
-        "query": """
-WITH current_state AS (
-    SELECT DISTINCT ON (device_id, patch_uid) status
-    FROM ninja_patches.patch_facts
-    WHERE fact_type = 'patch_state'
-    ORDER BY device_id, patch_uid, last_observed_at DESC, id DESC
-)
-SELECT COUNT(*) AS patches
-FROM current_state
-WHERE status = 'MANUAL'
-""",
-    },
-    {
-        "key":     "cmd_failed",
-        "name":    "Failed Patches",
-        "display": "scalar",
-        "row": 0, "col": 18, "size_x": 6, "size_y": 4,
-        "click_behavior": {"target": DASH_DETAIL, "preset": {"install_outcome": "FAILED"}},
-        "query": """
-WITH latest_install_result AS (
-    SELECT DISTINCT ON (device_id, patch_uid) status
-    FROM ninja_patches.patch_facts
-    WHERE fact_type = 'install_outcome'
-    ORDER BY
-        device_id,
-        patch_uid,
-        installed_at DESC NULLS LAST,
-        ninja_observed_at DESC NULLS LAST,
-        last_observed_at DESC,
-        id DESC
-)
-SELECT COUNT(*) AS patches
-FROM latest_install_result
-WHERE status = 'FAILED'
-""",
-    },
-    {
-        "key":     "cmd_delayed",
-        "name":    "Delayed Patches",
-        "display": "scalar",
-        "row": 4, "col": 0, "size_x": 5, "size_y": 4,
-        "click_behavior": {"target": DASH_DETAIL, "preset": {"status": "DELAYED"}},
-        "query": """
-WITH current_state AS (
-    SELECT DISTINCT ON (device_id, patch_uid) status
-    FROM ninja_patches.patch_facts
-    WHERE fact_type = 'patch_state'
-    ORDER BY device_id, patch_uid, last_observed_at DESC, id DESC
-)
-SELECT COUNT(*) AS patches
-FROM current_state
-WHERE status = 'DELAYED'
-""",
-    },
-    {
         "key":     "cmd_patching",
         "name":    "Patching Devices",
         "display": "scalar",
-        "row": 4, "col": 5, "size_x": 5, "size_y": 4,
+        "row": 0, "col": 5, "size_x": 5, "size_y": 4,
         "click_behavior": {"target": DASH_PCOV, "preset": {"pcov_status": "Patching Devices"}},
         "query": f"""
 WITH last_install AS (
@@ -224,7 +148,7 @@ WHERE d.approval_status = 'APPROVED'
         "key":     "cmd_stale",
         "name":    "Stalled Devices",
         "display": "scalar",
-        "row": 4, "col": 10, "size_x": 5, "size_y": 4,
+        "row": 0, "col": 10, "size_x": 5, "size_y": 4,
         "click_behavior": {"target": DASH_PCOV, "preset": {"pcov_status": "Stalled Devices"}},
         "query": f"""
 WITH last_install AS (
@@ -246,7 +170,7 @@ WHERE d.approval_status = 'APPROVED'
         "key":     "cmd_never",
         "name":    "Never-Patched Devices",
         "display": "scalar",
-        "row": 4, "col": 15, "size_x": 5, "size_y": 4,
+        "row": 0, "col": 15, "size_x": 5, "size_y": 4,
         "click_behavior": {"target": DASH_PCOV, "preset": {"pcov_status": "Never-Patched Devices"}},
         "query": """
 SELECT COUNT(*) AS devices
@@ -264,11 +188,91 @@ WHERE d.approval_status = 'APPROVED'
         "key":     "cmd_reboot",
         "name":    "Needs Reboot",
         "display": "scalar",
-        "row": 4, "col": 20, "size_x": 4, "size_y": 4,
+        "row": 0, "col": 20, "size_x": 4, "size_y": 4,
         "query": """
 SELECT COUNT(*) AS devices
 FROM ninja_core.v_active_devices
 WHERE needs_reboot = TRUE
+""",
+    },
+    # Row 4 — Patches (canonical order: Approved, Manual, Delayed,
+    # Failed). Sizes: 6+6+6+6 = 24.
+    {
+        "key":     "cmd_approved",
+        "name":    "Approved Patches",
+        "display": "scalar",
+        "row": 4, "col": 0, "size_x": 6, "size_y": 4,
+        "click_behavior": {"target": DASH_DETAIL, "preset": {"status": "APPROVED"}},
+        "query": """
+WITH current_state AS (
+    SELECT DISTINCT ON (device_id, patch_uid) status
+    FROM ninja_patches.patch_facts
+    WHERE fact_type = 'patch_state'
+    ORDER BY device_id, patch_uid, last_observed_at DESC, id DESC
+)
+SELECT COUNT(*) AS patches
+FROM current_state
+WHERE status = 'APPROVED'
+""",
+    },
+    {
+        "key":     "cmd_manual",
+        "name":    "Manual Approval",
+        "display": "scalar",
+        "row": 4, "col": 6, "size_x": 6, "size_y": 4,
+        "click_behavior": {"target": DASH_DETAIL, "preset": {"status": "MANUAL"}},
+        "query": """
+WITH current_state AS (
+    SELECT DISTINCT ON (device_id, patch_uid) status
+    FROM ninja_patches.patch_facts
+    WHERE fact_type = 'patch_state'
+    ORDER BY device_id, patch_uid, last_observed_at DESC, id DESC
+)
+SELECT COUNT(*) AS patches
+FROM current_state
+WHERE status = 'MANUAL'
+""",
+    },
+    {
+        "key":     "cmd_delayed",
+        "name":    "Delayed Patches",
+        "display": "scalar",
+        "row": 4, "col": 12, "size_x": 6, "size_y": 4,
+        "click_behavior": {"target": DASH_DETAIL, "preset": {"status": "DELAYED"}},
+        "query": """
+WITH current_state AS (
+    SELECT DISTINCT ON (device_id, patch_uid) status
+    FROM ninja_patches.patch_facts
+    WHERE fact_type = 'patch_state'
+    ORDER BY device_id, patch_uid, last_observed_at DESC, id DESC
+)
+SELECT COUNT(*) AS patches
+FROM current_state
+WHERE status = 'DELAYED'
+""",
+    },
+    {
+        "key":     "cmd_failed",
+        "name":    "Failed Patches",
+        "display": "scalar",
+        "row": 4, "col": 18, "size_x": 6, "size_y": 4,
+        "click_behavior": {"target": DASH_DETAIL, "preset": {"install_outcome": "FAILED"}},
+        "query": """
+WITH latest_install_result AS (
+    SELECT DISTINCT ON (device_id, patch_uid) status
+    FROM ninja_patches.patch_facts
+    WHERE fact_type = 'install_outcome'
+    ORDER BY
+        device_id,
+        patch_uid,
+        installed_at DESC NULLS LAST,
+        ninja_observed_at DESC NULLS LAST,
+        last_observed_at DESC,
+        id DESC
+)
+SELECT COUNT(*) AS patches
+FROM latest_install_result
+WHERE status = 'FAILED'
 """,
     },
     {
@@ -498,24 +502,56 @@ LIMIT 100
 ]
 
 OVERVIEW_CARDS: list[dict[str, Any]] = [
+    # Row 0 — Compliance headline (single full-width scalar).
+    {
+        "key":        "overall_compliance",
+        "name":       "Patch Compliance",
+        "display":    "scalar",
+        "row": 0, "col": 0, "size_x": 24, "size_y": 4,
+        # Fleet-wide compliance %: installed (device, patch) pairs over
+        # the universe of all known (device, patch) on active Windows
+        # devices.
+        "query": """
+WITH all_patches AS (
+    SELECT DISTINCT pf.device_id, pf.patch_uid
+    FROM ninja_patches.patch_facts pf
+    JOIN ninja_core.v_active_devices d ON d.id = pf.device_id
+    WHERE d.approval_status = 'APPROVED'
+),
+installed_patches AS (
+    SELECT DISTINCT device_id, patch_uid
+    FROM ninja_patches.patch_facts
+    WHERE fact_type = 'install_outcome' AND status = 'INSTALLED'
+)
+SELECT ROUND(
+    COUNT(*) FILTER (WHERE ip.device_id IS NOT NULL) * 100.0
+    / NULLIF(COUNT(*), 0),
+    1
+) AS percent_installed
+FROM all_patches ap
+LEFT JOIN installed_patches ip USING (device_id, patch_uid)
+""",
+    },
+    # Row 4 — Devices (canonical order: Active, Patching, Stalled,
+    # Never-Patched). 4 scalars at size 6 each = 24.
     {
         "key":        "active_devices",
         "name":       "Active Devices",
         "display":    "scalar",
-        "row": 0, "col": 0, "size_x": 4, "size_y": 4,
-        # Click → Detail (no status filter — see all patches for the
-        # active fleet).
+        "row": 4, "col": 0, "size_x": 6, "size_y": 4,
         "click_behavior": {"target": DASH_DETAIL, "preset": {}},
         "query": """
 SELECT COUNT(*) AS devices
 FROM ninja_core.v_active_devices
 """,
     },
+    # Row 8 — Patches (canonical order: Approved, Manual, Delayed,
+    # Failed). 4 scalars at size 6 each = 24.
     {
         "key":        "patches_ready",
         "name":       "Approved Patches",
         "display":    "scalar",
-        "row": 0, "col": 4, "size_x": 5, "size_y": 4,
+        "row": 8, "col": 0, "size_x": 6, "size_y": 4,
         "click_behavior": {"target": DASH_DETAIL, "preset": {"status": "APPROVED"}},
         "query": """
 WITH current_state AS (
@@ -532,7 +568,7 @@ FROM current_state WHERE status = 'APPROVED'
         "key":        "patches_manual",
         "name":       "Manual Approval",
         "display":    "scalar",
-        "row": 0, "col": 9, "size_x": 5, "size_y": 4,
+        "row": 8, "col": 6, "size_x": 6, "size_y": 4,
         "click_behavior": {"target": DASH_DETAIL, "preset": {"status": "MANUAL"}},
         "query": """
 WITH current_state AS (
@@ -549,7 +585,7 @@ FROM current_state WHERE status = 'MANUAL'
         "key":        "patches_delayed",
         "name":       "Delayed Patches",
         "display":    "scalar",
-        "row": 0, "col": 14, "size_x": 5, "size_y": 4,
+        "row": 8, "col": 12, "size_x": 6, "size_y": 4,
         "click_behavior": {"target": DASH_DETAIL, "preset": {"status": "DELAYED"}},
         "query": """
 WITH current_state AS (
@@ -566,7 +602,7 @@ FROM current_state WHERE status = 'DELAYED'
         "key":        "patches_failed",
         "name":       "Failed Patches",
         "display":    "scalar",
-        "row": 0, "col": 19, "size_x": 5, "size_y": 4,
+        "row": 8, "col": 18, "size_x": 6, "size_y": 4,
         "click_behavior": {
             "target": DASH_DETAIL,
             "preset": {"install_outcome": "FAILED"},
@@ -590,11 +626,14 @@ FROM latest_install_outcome
 WHERE status = 'FAILED'
 """,
     },
+    # Row 4 — Devices group continuation: Patching, Stalled, Never-
+    # Patched sit alongside active_devices (col 0) for the canonical
+    # device row. 4 scalars at size 6 each.
     {
         "key":     "ov_pcov_active",
         "name":    "Patching Devices",
         "display": "scalar",
-        "row": 4, "col": 0, "size_x": 8, "size_y": 4,
+        "row": 4, "col": 6, "size_x": 6, "size_y": 4,
         "click_behavior": {
             "target": DASH_PCOV,
             "preset": {"pcov_status": "Patching Devices"},
@@ -618,7 +657,7 @@ WHERE d.approval_status = 'APPROVED'
         "key":     "ov_pcov_stale",
         "name":    "Stalled Devices",
         "display": "scalar",
-        "row": 4, "col": 8, "size_x": 8, "size_y": 4,
+        "row": 4, "col": 12, "size_x": 6, "size_y": 4,
         "click_behavior": {
             "target": DASH_PCOV,
             "preset": {"pcov_status": "Stalled Devices"},
@@ -642,7 +681,7 @@ WHERE d.approval_status = 'APPROVED'
         "key":     "ov_pcov_none",
         "name":    "Never-Patched Devices",
         "display": "scalar",
-        "row": 4, "col": 16, "size_x": 8, "size_y": 4,
+        "row": 4, "col": 18, "size_x": 6, "size_y": 4,
         "click_behavior": {
             "target": DASH_PCOV,
             "preset": {"pcov_status": "Never-Patched Devices"},
@@ -658,11 +697,12 @@ WHERE d.approval_status = 'APPROVED'
   AND pf.device_id IS NULL
 """,
     },
+    # Row 12 — Charts: Current Patch State pie + Worst Compliance bar.
     {
         "key":        "patch_state_donut",
         "name":       "Current Patch State",
         "display":    "pie",
-        "row": 8, "col": 0, "size_x": 12, "size_y": 8,
+        "row": 12, "col": 0, "size_x": 12, "size_y": 8,
         "viz_settings": {
             "pie.dimension":       "Current Patch State",
             "pie.metric":          "Patches",
@@ -693,7 +733,7 @@ ORDER BY "Patches" DESC
         "key":        "compliance_worst",
         "name":       "Clients with Lowest Patch Compliance",
         "display":    "row",
-        "row": 8, "col": 12, "size_x": 12, "size_y": 8,
+        "row": 12, "col": 12, "size_x": 12, "size_y": 8,
         "viz_settings": {
             "graph.dimensions": ["organization"],
             "graph.metrics":    ["Patch Compliance"],
@@ -741,7 +781,7 @@ LIMIT 15
         "key":        "compliance_all",
         "name":       "Client Patch Compliance",
         "display":    "table",
-        "row": 16, "col": 0, "size_x": 24, "size_y": 10,
+        "row": 20, "col": 0, "size_x": 24, "size_y": 10,
         "column_click_behaviors": {
             "organization": {
                 "target": DASH_ORG,
@@ -816,7 +856,7 @@ ORDER BY "Patch Compliance" ASC, "Total Patches" DESC
         "key":        "needs_reboot",
         "name":       "Devices Needing Reboot",
         "display":    "table",
-        "row": 26, "col": 0, "size_x": 24, "size_y": 8,
+        "row": 30, "col": 0, "size_x": 24, "size_y": 8,
         # Stable lowercase aliases on every column. Inert self-link
         # placeholders on last_contact / reported_at were removed —
         # they were the v0.7.4 "suppress drill popup" experiment but
@@ -844,7 +884,7 @@ ORDER BY d.last_contact DESC
         "key":        "ingest_health",
         "name":       "Ingest Health (last 24h)",
         "display":    "table",
-        "row": 34, "col": 0, "size_x": 24, "size_y": 8,
+        "row": 38, "col": 0, "size_x": 24, "size_y": 8,
         "query": """
 SELECT
     domain,
@@ -1962,17 +2002,63 @@ ORDER BY
 # ── Org Overview dashboard ──────────────────────────────────────────
 
 _ORG_TAGS = {
-    "org": {"id": "tt_org_overview_org", "name": "org", "display-name": "Organization", "type": "text"},
+    "org":         {"id": "tt_org_overview_org",         "name": "org",         "display-name": "Organization", "type": "text"},
+    "device_type": {"id": "tt_org_overview_device_type", "name": "device_type", "display-name": "Device Type",  "type": "text"},
+    "os_family":   {"id": "tt_org_overview_os_family",   "name": "os_family",   "display-name": "OS Family",    "type": "text"},
+    "severity":    {"id": "tt_org_overview_severity",    "name": "severity",    "display-name": "Severity",     "type": "text"},
 }
 
+# Param mapping for cards that only have the patch dimensions (no
+# severity — device-count cards skip severity entirely).
 _ORG_PARAM_MAPPINGS = {
-    PARAM_ORG: ["variable", ["template-tag", "org"]],
+    PARAM_ORG:   ["variable", ["template-tag", "org"]],
+    PARAM_CLASS: ["variable", ["template-tag", "device_type"]],
+    PARAM_OS:    ["variable", ["template-tag", "os_family"]],
 }
+
+# Param mapping for patch-context cards that also honor severity.
+_ORG_PARAM_MAPPINGS_FULL = {
+    **_ORG_PARAM_MAPPINGS,
+    PARAM_SEV:   ["variable", ["template-tag", "severity"]],
+}
+
+# SQL predicate fragments for Org Overview filters. Each ends with a
+# trailing newline so cards can append them directly after their own
+# WHERE/AND lines. Device-only cards use the DEVICE variant; patch-
+# context cards use PATCH_CS (cs.severity alias) or PATCH_LIR
+# (lir.severity alias).
+_ORG_FILTER_ORG         = "  [[AND o.name = {{org}}]]\n"
+_ORG_FILTER_DEVICE_TYPE = f"  [[AND {DEVICE_TYPE_D} = {{{{device_type}}}}]]\n"
+_ORG_FILTER_OS_FAMILY   = f"  [[AND {OS_FAMILY_D} = {{{{os_family}}}}]]\n"
+_ORG_FILTER_SEV_CS      = "  [[AND cs.severity = {{severity}}]]\n"
+_ORG_FILTER_SEV_LIR     = "  [[AND lir.severity = {{severity}}]]\n"
+
+# Device-count cards (no severity context).
+_ORG_FILTERS_DEVICE = (
+    _ORG_FILTER_ORG + _ORG_FILTER_DEVICE_TYPE + _ORG_FILTER_OS_FAMILY
+)
+# Patch cards using `cs.severity` (current_state alias).
+_ORG_FILTERS_PATCH_CS = _ORG_FILTERS_DEVICE + _ORG_FILTER_SEV_CS
+# Patch cards using `lir.severity` (latest_install_result alias).
+_ORG_FILTERS_PATCH_LIR = _ORG_FILTERS_DEVICE + _ORG_FILTER_SEV_LIR
+# Cross-org-only filters (for the per-device-type / per-OS-family
+# charts where the X dimension is itself the filter we'd otherwise
+# constrain). Patch-context with severity but skipping one of the
+# device dimensions.
+_ORG_FILTERS_PATCH_CS_NO_CLASS = (
+    _ORG_FILTER_ORG + _ORG_FILTER_OS_FAMILY + _ORG_FILTER_SEV_CS
+)
+_ORG_FILTERS_PATCH_CS_NO_OS = (
+    _ORG_FILTER_ORG + _ORG_FILTER_DEVICE_TYPE + _ORG_FILTER_SEV_CS
+)
 
 
 def build_org_parameters(org_names: list[str]) -> list[dict]:
     return [
-        _param_dropdown(PARAM_ORG, "Organization", "org", org_names),
+        _param_dropdown(PARAM_ORG,   "Organization", "org",         org_names),
+        _param_dropdown(PARAM_CLASS, "Device Type",  "device_type", _NODE_CLASS_OPTIONS),
+        _param_dropdown(PARAM_OS,    "OS Family",    "os_family",   _OS_FAMILY_OPTIONS),
+        _param_dropdown(PARAM_SEV,   "Severity",     "severity",    _SEVERITY_OPTIONS),
     ]
 
 
@@ -1981,7 +2067,7 @@ ORG_OVERVIEW_CARDS = [
         "key":     "org_active_devices",
         "name":    "Active Devices",
         "display": "scalar",
-        "row": 0, "col": 0, "size_x": 6, "size_y": 4,
+        "row": 4, "col": 0, "size_x": 8, "size_y": 4,
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS,
         "query": """
@@ -1996,7 +2082,7 @@ WHERE 1=1
         "key":     "org_compliance",
         "name":    "Patch Compliance",
         "display": "scalar",
-        "row": 0, "col": 6, "size_x": 6, "size_y": 4,
+        "row": 0, "col": 0, "size_x": 24, "size_y": 4,
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS,
         # Same compliance bug as Fleet Overview's compliance cards:
@@ -2031,7 +2117,7 @@ WHERE 1=1
         "key":     "org_failed",
         "name":    "Failed Patches",
         "display": "scalar",
-        "row": 0, "col": 12, "size_x": 6, "size_y": 4,
+        "row": 8, "col": 18, "size_x": 6, "size_y": 4,
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS,
         "query": """
@@ -2059,7 +2145,7 @@ WHERE lir.status = 'FAILED'
         "key":     "org_approved",
         "name":    "Approved Patches",
         "display": "scalar",
-        "row": 0, "col": 18, "size_x": 6, "size_y": 4,
+        "row": 8, "col": 0, "size_x": 6, "size_y": 4,
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS,
         "query": """
@@ -2081,7 +2167,7 @@ WHERE cs.status = 'APPROVED'
         "key":     "org_manual",
         "name":    "Manual Approval",
         "display": "scalar",
-        "row": 4, "col": 0, "size_x": 6, "size_y": 4,
+        "row": 8, "col": 6, "size_x": 6, "size_y": 4,
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS,
         "query": """
@@ -2103,7 +2189,7 @@ WHERE cs.status = 'MANUAL'
         "key":     "org_delayed",
         "name":    "Delayed Patches",
         "display": "scalar",
-        "row": 4, "col": 6, "size_x": 6, "size_y": 4,
+        "row": 8, "col": 12, "size_x": 6, "size_y": 4,
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS,
         "query": """
@@ -2125,7 +2211,7 @@ WHERE cs.status = 'DELAYED'
         "key":     "org_stale",
         "name":    "Stalled Devices",
         "display": "scalar",
-        "row": 4, "col": 12, "size_x": 6, "size_y": 4,
+        "row": 4, "col": 8, "size_x": 8, "size_y": 4,
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS,
         "query": f"""
@@ -2150,7 +2236,7 @@ WHERE d.approval_status = 'APPROVED'
         "key":     "org_never",
         "name":    "Never-Patched Devices",
         "display": "scalar",
-        "row": 4, "col": 18, "size_x": 6, "size_y": 4,
+        "row": 4, "col": 16, "size_x": 8, "size_y": 4,
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS,
         "query": """
@@ -2171,7 +2257,7 @@ WHERE d.approval_status = 'APPROVED'
         "key":     "org_status",
         "name":    "Current Patch State",
         "display": "pie",
-        "row": 8, "col": 0, "size_x": 8, "size_y": 8,
+        "row": 12, "col": 0, "size_x": 8, "size_y": 8,
         "viz_settings": {
             "pie.dimension": "Current Patch State",
             "pie.metric": "Patches",
@@ -2206,7 +2292,7 @@ ORDER BY "Patches" DESC
         "key":     "org_device_type",
         "name":    "Patch Compliance by Device Type",
         "display": "bar",
-        "row": 8, "col": 8, "size_x": 8, "size_y": 8,
+        "row": 12, "col": 8, "size_x": 8, "size_y": 8,
         "viz_settings": {"graph.dimensions": ["Device Type"], "graph.metrics": ["Patch Compliance"]},
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS,
@@ -2235,7 +2321,7 @@ ORDER BY "Patch Compliance" ASC
         "key":     "org_os_family",
         "name":    "Patch Compliance by Operating System",
         "display": "bar",
-        "row": 8, "col": 16, "size_x": 8, "size_y": 8,
+        "row": 12, "col": 16, "size_x": 8, "size_y": 8,
         "viz_settings": {"graph.dimensions": ["Operating System Family"], "graph.metrics": ["Patch Compliance"]},
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS,
@@ -2264,7 +2350,7 @@ ORDER BY "Patch Compliance" ASC
         "key":     "org_failed_queue",
         "name":    "Failed Patch Queue",
         "display": "table",
-        "row": 16, "col": 0, "size_x": 24, "size_y": 10,
+        "row": 20, "col": 0, "size_x": 24, "size_y": 10,
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS,
         "column_click_behaviors": {
@@ -2311,7 +2397,7 @@ LIMIT 100
         "key":     "org_action_queue",
         "name":    "Manual and Delayed Patches",
         "display": "table",
-        "row": 26, "col": 0, "size_x": 24, "size_y": 10,
+        "row": 30, "col": 0, "size_x": 24, "size_y": 10,
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS,
         "column_click_behaviors": {
@@ -2353,7 +2439,7 @@ LIMIT 100
         "key":     "org_reboot_devices",
         "name":    "Devices Needing Reboot",
         "display": "table",
-        "row": 36, "col": 0, "size_x": 24, "size_y": 8,
+        "row": 40, "col": 0, "size_x": 24, "size_y": 8,
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS,
         # Lowercase snake_case aliases on every clickable column.

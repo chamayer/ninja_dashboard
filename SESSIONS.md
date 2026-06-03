@@ -5,6 +5,34 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-03 — v0.12.1 card grouping + Org filter scaffolding
+
+**Done:**
+- Reordered scalars on Command Center, Overall Patching Status, and
+  Org Overview into the canonical groupings:
+    - Devices row: Active · Patching · Stalled · Never-Patched
+      (+ Needs Reboot on Command Center).
+    - Patches row: Approved · Manual · Delayed · Failed.
+- Added a full-width Patch Compliance headline scalar to Overall
+  Patching Status. Moved Org Overview's existing Patch Compliance
+  scalar to full-width at row 0 for visual prominence.
+- Defined Org Overview filter widgets (Device Type, OS Family,
+  Severity) and SQL predicate helpers (`_ORG_FILTERS_DEVICE`,
+  `_ORG_FILTERS_PATCH_CS`, `_ORG_FILTERS_PATCH_LIR`, and "no_class"
+  / "no_os" variants for the per-axis charts).
+
+**Deferred to v0.12.2:**
+- Per-Org-card SQL wiring to the new filters. The dropdowns appear
+  but cards still query unfiltered data.
+- Section header markdown cards between groups.
+- Color coding.
+- Adding Patching Devices scalar to Org Overview and Needs Reboot
+  scalar to Overall Status / Org Overview to fully match the
+  canonical scalar set.
+
+**Validation:**
+- `python -m py_compile` passes.
+
 ## 2026-06-03 — v0.12.0 dashboard renames + Command Center homepage
 
 **Done:**

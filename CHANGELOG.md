@@ -2,6 +2,42 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.12.1] — 2026-06-03
+
+### Changed
+- **Consistent card grouping across Command Center, Overall Patching
+  Status, and Org Overview.** Each of the three dashboards now uses
+  the same row structure for top-of-page scalars:
+    - *Devices* row: Active · Patching · Stalled · Never-Patched
+      (Command Center also includes Needs Reboot here — see notes).
+    - *Patches* row: Approved · Manual · Delayed · Failed.
+  Cards reordered in code to match this canonical order; charts and
+  tables shifted to higher row numbers to make room.
+- **Overall Patching Status now has a full-width Patch Compliance
+  headline scalar** at row 0. Compliance is neither a device nor a
+  patch metric — it's a top-level KPI and lives at the top of the
+  page now.
+- **Org Overview Patch Compliance scalar** moved from row 0 col 6 (a
+  small tile next to Active Devices) to row 0 col 0 size 24
+  (full-width headline) — same prominence as Overall Patching Status.
+
+### Added
+- **Org Overview dashboard filters:** Device Type, OS Family, and
+  Severity dropdowns alongside the existing Organization filter.
+  Filter helpers (`_ORG_FILTERS_DEVICE`, `_ORG_FILTERS_PATCH_CS`,
+  etc.) defined for use across the Org cards.
+
+### Notes / deferred
+- **Per-card SQL wiring to the new Org filters is not yet
+  applied** — the dropdowns are defined and visible but every Org
+  card still queries the full org dataset. Wiring each card's SQL
+  to use `[[AND ...]]` predicates is queued for v0.12.2.
+- **Section header markdown cards** ("Devices" / "Patches" /
+  "Compliance" subheadings between groups) are deferred — the
+  visual grouping by row is in place, but explicit headers are
+  not yet added.
+- **Color coding** (green/amber/red) deferred to v0.12.2.
+
 ## [0.12.0] — 2026-06-03
 
 ### Changed
