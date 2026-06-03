@@ -40,24 +40,35 @@ def _truncate(s: str, limit: int = 800) -> str:
 
 def _print_dict_response(resp: dict[str, Any], full: bool) -> str | None:
     """Print a dict response. Returns the next cursor name (or None)."""
-    results = resp.get("results") or []
     cursor_obj = resp.get("cursor") or {}
     print(f"  Type: dict")
     print(f"  Top-level keys: {list(resp.keys())}")
-    print(f"  Results count: {len(results)}")
+
+    # Show sizes of all top-level array values — catches Ninja's
+    # endpoint-specific data-key naming (results, activities, data, etc.)
+    array_keys = [k for k, v in resp.items() if isinstance(v, list)]
+    if array_keys:
+        print("  Top-level arrays:")
+        for k in array_keys:
+            print(f"    - {k}: {len(resp[k])} items")
+
     if cursor_obj:
         print(f"  Cursor: {json.dumps(cursor_obj)}")
     else:
         print(f"  Cursor: <none>")
+
+    # Pick the most-populated array as the "results" surface for sampling.
+    biggest_arr = max(array_keys, key=lambda k: len(resp[k])) if array_keys else None
+    results = resp.get(biggest_arr) if biggest_arr else []
     if results:
         first = results[0]
         if isinstance(first, dict):
-            print(f"  First-result keys: {list(first.keys())}")
+            print(f"  First {biggest_arr} item keys: {list(first.keys())}")
         if full:
-            print("  Results sample (first 3):")
+            print(f"  {biggest_arr} sample (first 3):")
             print(_truncate(json.dumps(results[:3], indent=2, default=str), 4000))
         else:
-            print(f"  First result: {_truncate(json.dumps(first, indent=2, default=str))}")
+            print(f"  First {biggest_arr}: {_truncate(json.dumps(first, indent=2, default=str))}")
     return cursor_obj.get("name") if isinstance(cursor_obj, dict) else None
 
 
