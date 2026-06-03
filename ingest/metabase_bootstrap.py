@@ -66,6 +66,8 @@ DASH_DETAIL      = "Ninja — Patch Detail (Filterable)"
 DASH_DRILLDOWN   = "Ninja — Device Drilldown"
 DASH_PCOV        = "Ninja — Patching Status"
 
+DEFAULT_STALE_PATCH_DAYS = 35
+
 OS_FAMILY_SQL = """
 CASE
     WHEN {alias}.os_name ILIKE '%Windows 11%' THEN 'Windows 11'
@@ -202,7 +204,7 @@ WHERE status = 'DELAYED'
         "display": "scalar",
         "row": 4, "col": 6, "size_x": 6, "size_y": 4,
         "click_behavior": {"target": DASH_PCOV, "preset": {"pcov_status": "Stale Patching"}},
-        "query": """
+        "query": f"""
 WITH last_install AS (
     SELECT device_id, MAX(installed_at) AS last_install_at
     FROM ninja_patches.patch_facts
@@ -215,7 +217,7 @@ FROM ninja_core.devices d
 JOIN last_install li ON li.device_id = d.id
 WHERE d.approval_status = 'APPROVED'
   AND d.node_class IN ('WINDOWS_WORKSTATION', 'WINDOWS_SERVER')
-  AND li.last_install_at < NOW() - INTERVAL '7 days'
+  AND li.last_install_at < NOW() - (INTERVAL '1 day' * {DEFAULT_STALE_PATCH_DAYS})
 """,
     },
     {
@@ -255,7 +257,7 @@ WHERE needs_reboot = TRUE
         "column_click_behaviors": {
             "Organization": {"target": DASH_ORG, "params": {"p_org": "Organization"}},
         },
-        "query": """
+        "query": f"""
 WITH current_state AS (
     SELECT DISTINCT ON (device_id, patch_uid) device_id, patch_uid, status
     FROM ninja_patches.patch_facts
@@ -287,7 +289,7 @@ device_status AS (
         d.organization_id,
         CASE
             WHEN li.last_install_at IS NULL THEN 'never'
-            WHEN li.last_install_at < NOW() - INTERVAL '7 days' THEN 'stale'
+            WHEN li.last_install_at < NOW() - (INTERVAL '1 day' * {DEFAULT_STALE_PATCH_DAYS}) THEN 'stale'
             ELSE 'recent'
         END AS patch_activity
     FROM ninja_core.devices d
@@ -438,7 +440,7 @@ classified AS (
         li.last_install_at,
         CASE
             WHEN li.last_install_at IS NULL THEN 'no_patch_data'
-            WHEN li.last_install_at < NOW() - INTERVAL '7 days' THEN 'stale_patch_data'
+            WHEN li.last_install_at < NOW() - (INTERVAL '1 day' * {DEFAULT_STALE_PATCH_DAYS}) THEN 'stale_patch_data'
             ELSE 'active_patching'
         END AS patch_status
     FROM ninja_core.devices d
@@ -560,7 +562,7 @@ WHERE status = 'FAILED'
             "target": DASH_PCOV,
             "preset": {"pcov_status": "Recent Patch Activity"},
         },
-        "query": """
+        "query": f"""
 WITH dps AS (
     SELECT device_id, MAX(installed_at) AS last_seen_at
     FROM ninja_patches.patch_facts
@@ -572,7 +574,7 @@ SELECT COUNT(*) AS active
 FROM ninja_core.devices d
 JOIN dps ON dps.device_id = d.id
 WHERE d.approval_status = 'APPROVED'
-  AND dps.last_seen_at > NOW() - INTERVAL '7 days'
+  AND dps.last_seen_at > NOW() - (INTERVAL '1 day' * {DEFAULT_STALE_PATCH_DAYS})
 """,
     },
     {
@@ -584,7 +586,7 @@ WHERE d.approval_status = 'APPROVED'
             "target": DASH_PCOV,
             "preset": {"pcov_status": "Stale Patching"},
         },
-        "query": """
+        "query": f"""
 WITH dps AS (
     SELECT device_id, MAX(installed_at) AS last_seen_at
     FROM ninja_patches.patch_facts
@@ -596,7 +598,7 @@ SELECT COUNT(*) AS stale
 FROM ninja_core.devices d
 JOIN dps ON dps.device_id = d.id
 WHERE d.approval_status = 'APPROVED'
-  AND dps.last_seen_at <= NOW() - INTERVAL '7 days'
+  AND dps.last_seen_at <= NOW() - (INTERVAL '1 day' * {DEFAULT_STALE_PATCH_DAYS})
 """,
     },
     {
@@ -1583,7 +1585,7 @@ def build_pcov_parameters(org_names: list[str], os_families: list[str]) -> list[
                         default="Windows Workstation"),
         _param_dropdown(PARAM_PCOV_OS,     "Operating System Family", "pcov_os", os_families),
         _param_dropdown(PARAM_PCOV_STATUS, "Patch Activity", "pcov_status",    _PCOV_STATUS_OPTIONS),
-        _param_number(  PARAM_PCOV_DAYS,   "Stale threshold (days)", "pcov_days", 7),
+        _param_number(  PARAM_PCOV_DAYS,   "Stale threshold (days)", "pcov_days", DEFAULT_STALE_PATCH_DAYS),
     ]
 
 
@@ -1595,7 +1597,7 @@ _PCOV_TAGS = {
     "pcov_days":        {
         "id": "tt_pcov_days", "name": "pcov_days",
         "display-name": "Stale threshold (days)",
-        "type": "number", "default": "7", "required": True,
+        "type": "number", "default": "35", "required": True,
     },
 }
 
@@ -2051,7 +2053,7 @@ WHERE cs.status = 'DELAYED'
         "row": 4, "col": 12, "size_x": 6, "size_y": 4,
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS,
-        "query": """
+        "query": f"""
 WITH last_install AS (
     SELECT device_id, MAX(installed_at) AS last_install_at
     FROM ninja_patches.patch_facts
@@ -2065,8 +2067,8 @@ JOIN ninja_core.organizations o ON o.id = d.organization_id
 JOIN last_install li ON li.device_id = d.id
 WHERE d.approval_status = 'APPROVED'
   AND d.node_class IN ('WINDOWS_WORKSTATION', 'WINDOWS_SERVER')
-  AND li.last_install_at < NOW() - INTERVAL '7 days'
-  [[AND o.name = {{org}}]]
+  AND li.last_install_at < NOW() - (INTERVAL '1 day' * {DEFAULT_STALE_PATCH_DAYS})
+  [[AND o.name = {{{{org}}}}]]
 """,
     },
     {
@@ -2302,7 +2304,7 @@ classified AS (
         li.last_install_at,
         CASE
             WHEN li.last_install_at IS NULL THEN 'no_patch_data'
-            WHEN li.last_install_at < NOW() - INTERVAL '7 days' THEN 'stale_patch_data'
+            WHEN li.last_install_at < NOW() - (INTERVAL '1 day' * {DEFAULT_STALE_PATCH_DAYS}) THEN 'stale_patch_data'
             ELSE 'active_patching'
         END AS patch_status
     FROM ninja_core.devices d

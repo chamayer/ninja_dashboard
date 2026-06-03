@@ -5,6 +5,24 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-03 — v0.10.1 stale patching threshold
+
+**Done:**
+- Clarified that **Stale Patching** is a device count: devices with at
+  least one install/attempt timestamp, but whose latest install/attempt
+  is older than the stale threshold.
+- Changed the stale threshold default from 7 days to 35 days because
+  patching commonly runs weekly at best and often monthly.
+- Replaced hard-coded 7-day thresholds in Command Center, Overview, and
+  Org Overview with the shared `DEFAULT_STALE_PATCH_DAYS = 35`.
+- Updated **Ninja — Patching Status** so the dashboard-level `Stale
+  threshold (days)` filter also defaults to 35 while remaining
+  operator-changeable.
+
+**Validation:**
+- Built dashboard definitions and confirmed no emitted SQL contains
+  `INTERVAL '7 days'` or the literal Python constant name.
+
 ## 2026-06-03 — v0.10.0 Patch Command Center + dashboard terminology
 
 **Done:**

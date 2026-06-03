@@ -2,6 +2,18 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.10.1] — 2026-06-03
+
+### Fixed
+- Changed the default stale-patching threshold from 7 days to 35 days
+  to match real MSP patch cadence, where devices may patch weekly or
+  monthly.
+- Centralized the non-filter dashboard stale threshold as
+  `DEFAULT_STALE_PATCH_DAYS` so Command Center, Overview, and Org
+  Overview do not drift from each other.
+- Kept **Ninja — Patching Status** configurable via the dashboard
+  `Stale threshold (days)` filter, now defaulting to 35.
+
 ## [0.10.0] — 2026-06-03
 
 ### Added
