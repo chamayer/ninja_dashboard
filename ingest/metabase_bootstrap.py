@@ -50,6 +50,9 @@ from typing import Any
 
 import httpx
 
+from ingest import db
+from ingest.config import settings
+
 log = logging.getLogger("metabase_bootstrap")
 
 # ── Card specs ──────────────────────────────────────────────────────
@@ -117,8 +120,12 @@ FROM current_state WHERE status = 'FAILED'
         "display":    "pie",
         "row": 4, "col": 0, "size_x": 12, "size_y": 8,
         "viz_settings": {
-            "pie.dimension": "status",
-            "pie.metric":    "n",
+            "pie.dimension":       "status",
+            "pie.metric":          "n",
+            # 0 = show every slice; default 2.5 buckets small ones into "Other"
+            "pie.slice_threshold": 0,
+            "pie.show_legend":     True,
+            "pie.show_total":      True,
         },
         "query": """
 WITH current_state AS (
@@ -262,13 +269,60 @@ PARAM_ORG     = "p_org"
 PARAM_STATUS  = "p_status"
 PARAM_CLASS   = "p_class"
 PARAM_SEV     = "p_severity"
+PARAM_OS      = "p_os"
+PARAM_KB      = "p_kb"
 
-DETAIL_PARAMETERS = [
-    {"id": PARAM_ORG,    "name": "Organization", "slug": "org",        "type": "category"},
-    {"id": PARAM_STATUS, "name": "Status",       "slug": "status",     "type": "category"},
-    {"id": PARAM_CLASS,  "name": "Node Class",   "slug": "node_class", "type": "category"},
-    {"id": PARAM_SEV,    "name": "Severity",     "slug": "severity",   "type": "category"},
+# Static dropdown options for known small enums. Dynamic ones (orgs, OS
+# names) are populated from the DB in build_detail_parameters().
+_STATUS_OPTIONS = [
+    "INSTALLED", "FAILED", "APPROVED", "PENDING", "REJECTED", "DELAYED", "MANUAL",
 ]
+_NODE_CLASS_OPTIONS = [
+    "WINDOWS_WORKSTATION", "WINDOWS_SERVER",
+    "MAC", "MAC_SERVER",
+    "LINUX_WORKSTATION", "LINUX_SERVER",
+    "NMS_SWITCH", "NMS_ROUTER", "NMS_FIREWALL", "NMS_PRINTER", "NMS_OTHER",
+    "VMWARE_VM_HOST", "VMWARE_VM_GUEST", "HYPERV_VMM_HOST", "HYPERV_VMM_GUEST",
+]
+_SEVERITY_OPTIONS = ["CRITICAL", "IMPORTANT", "OPTIONAL", "MODERATE", "LOW", "NONE"]
+
+
+def _param_dropdown(pid: str, name: str, slug: str, values: list[str]) -> dict:
+    """Build a Metabase dashboard parameter with a static-list dropdown."""
+    return {
+        "id":                  pid,
+        "name":                name,
+        "slug":                slug,
+        "type":                "category",
+        "values_query_type":   "list",
+        "values_source_type":  "static-list",
+        "values_source_config": {"values": [[v] for v in values]},
+    }
+
+
+def _param_text(pid: str, name: str, slug: str) -> dict:
+    """Build a free-text dashboard parameter (no dropdown)."""
+    return {
+        "id":   pid,
+        "name": name,
+        "slug": slug,
+        "type": "category",
+    }
+
+
+def build_detail_parameters(org_names: list[str], os_names: list[str]) -> list[dict]:
+    """Construct the dashboard's parameter widgets. Dropdown values for
+    Org and OS are populated from live data; Status/NodeClass/Severity
+    use built-in enums; KB is a free-text search."""
+    return [
+        _param_dropdown(PARAM_ORG,    "Organization", "org",        org_names),
+        _param_dropdown(PARAM_STATUS, "Status",       "status",     _STATUS_OPTIONS),
+        _param_dropdown(PARAM_CLASS,  "Node Class",   "node_class", _NODE_CLASS_OPTIONS),
+        _param_dropdown(PARAM_SEV,    "Severity",     "severity",   _SEVERITY_OPTIONS),
+        _param_dropdown(PARAM_OS,     "OS Name",      "os",         os_names),
+        _param_text(    PARAM_KB,     "KB Number",    "kb"),
+    ]
+
 
 # Each filtered card declares the same template tags + maps the dashboard
 # parameters onto them.
@@ -277,6 +331,8 @@ _FILTER_TAGS = {
     "status":     {"id": "tt_status",     "name": "status",     "display-name": "Status",       "type": "text"},
     "node_class": {"id": "tt_node_class", "name": "node_class", "display-name": "Node Class",   "type": "text"},
     "severity":   {"id": "tt_severity",   "name": "severity",   "display-name": "Severity",     "type": "text"},
+    "os":         {"id": "tt_os",         "name": "os",         "display-name": "OS Name",      "type": "text"},
+    "kb":         {"id": "tt_kb",         "name": "kb",         "display-name": "KB Number",    "type": "text"},
 }
 
 _FILTER_PARAM_MAPPINGS = {
@@ -284,9 +340,11 @@ _FILTER_PARAM_MAPPINGS = {
     PARAM_STATUS: ["variable", ["template-tag", "status"]],
     PARAM_CLASS:  ["variable", ["template-tag", "node_class"]],
     PARAM_SEV:    ["variable", ["template-tag", "severity"]],
+    PARAM_OS:     ["variable", ["template-tag", "os"]],
+    PARAM_KB:     ["variable", ["template-tag", "kb"]],
 }
 
-# Reused SQL fragments
+# Reused SQL fragments. Filter predicates include the new OS + KB filters.
 _CTE_CURRENT_STATE = """
 WITH current_state AS (
     SELECT DISTINCT ON (pf.device_id, pf.patch_uid)
@@ -302,6 +360,8 @@ _FILTER_PREDICATES = """
   [[AND cs.status = {{status}}]]
   [[AND d.node_class = {{node_class}}]]
   [[AND cs.severity = {{severity}}]]
+  [[AND d.os_name = {{os}}]]
+  [[AND cs.kb_number = {{kb}}]]
 """
 
 DETAIL_CARDS = [
@@ -310,7 +370,13 @@ DETAIL_CARDS = [
         "name":           "Patch Status (filtered)",
         "display":        "pie",
         "row": 0, "col": 0, "size_x": 8, "size_y": 6,
-        "viz_settings":   {"pie.dimension": "status", "pie.metric": "n"},
+        "viz_settings":   {
+            "pie.dimension":       "status",
+            "pie.metric":          "n",
+            "pie.slice_threshold": 0,
+            "pie.show_legend":     True,
+            "pie.show_total":      True,
+        },
         "template_tags":  _FILTER_TAGS,
         "param_mappings": _FILTER_PARAM_MAPPINGS,
         "query": f"""
@@ -413,6 +479,8 @@ WHERE pf.installed_at IS NOT NULL
   [[AND pf.status = {{{{status}}}}]]
   [[AND d.node_class = {{{{node_class}}}}]]
   [[AND pf.severity = {{{{severity}}}}]]
+  [[AND d.os_name = {{{{os}}}}]]
+  [[AND pf.kb_number = {{{{kb}}}}]]
 GROUP BY 1
 ORDER BY 1
 """,
@@ -451,19 +519,38 @@ LIMIT 1000
 ]
 
 
-# All dashboards this script provisions
-DASHBOARDS = [
-    {
-        "name":       "Ninja — Overview",
-        "parameters": [],
-        "cards":      OVERVIEW_CARDS,
-    },
-    {
-        "name":       "Ninja — Patch Detail (Filterable)",
-        "parameters": DETAIL_PARAMETERS,
-        "cards":      DETAIL_CARDS,
-    },
-]
+def build_dashboards(org_names: list[str], os_names: list[str]) -> list[dict]:
+    """All dashboards this script provisions. Detail dropdowns are
+    populated from the live data passed in."""
+    return [
+        {
+            "name":       "Ninja — Overview",
+            "parameters": [],
+            "cards":      OVERVIEW_CARDS,
+        },
+        {
+            "name":       "Ninja — Patch Detail (Filterable)",
+            "parameters": build_detail_parameters(org_names, os_names),
+            "cards":      DETAIL_CARDS,
+        },
+    ]
+
+
+def _fetch_dropdown_sources() -> tuple[list[str], list[str]]:
+    """Query Postgres for the current orgs and distinct OS names.
+    Returns (org_names, os_names), each sorted alphabetically."""
+    db.init(settings.postgres_dsn)
+    with db.transaction() as cur:
+        cur.execute("SELECT name FROM ninja_core.organizations ORDER BY name")
+        org_names = [r[0] for r in cur.fetchall() if r[0]]
+        cur.execute(
+            "SELECT DISTINCT os_name FROM ninja_core.devices "
+            "WHERE os_name IS NOT NULL AND os_name <> '' "
+            "ORDER BY os_name"
+        )
+        os_names = [r[0] for r in cur.fetchall() if r[0]]
+    log.info("Dropdown sources: %d orgs, %d OS names", len(org_names), len(os_names))
+    return org_names, os_names
 
 
 # ── HTTP helpers ────────────────────────────────────────────────────
@@ -674,6 +761,9 @@ def main() -> int:
 
     password = _resolve_password(args)
 
+    org_names, os_names = _fetch_dropdown_sources()
+    dashboards = build_dashboards(org_names, os_names)
+
     with httpx.Client(base_url=args.url, timeout=60) as client:
         _authenticate(client, args.user, password)
         db_id = _find_database(client, args.db_name)
@@ -683,7 +773,7 @@ def main() -> int:
         existing_cards = _list_cards_in_collection(client, col_id)
 
         urls: list[str] = []
-        for dash_spec in DASHBOARDS:
+        for dash_spec in dashboards:
             log.info("── Provisioning dashboard: %s ──", dash_spec["name"])
             card_ids: dict[str, int] = {}
             for card_spec in dash_spec["cards"]:
