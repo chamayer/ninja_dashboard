@@ -41,11 +41,15 @@ _(empty — drop free-form items here)_
 
 ### Follow-ups exposed during v1 ingest landing
 
-- [ ] **Confirm custom_fields API shape against real data.**
-      `_fetch_values` handles two common Ninja shapes defensively, but
-      if the live response is something else (e.g. one record per
-      device with values inlined under raw key names), the mapping
-      needs adjustment.
+- [ ] **Two-endpoint custom_fields rewrite (parked from v0.2)** —
+      `/v2/custom-fields` returns 118 definitions including their
+      `apiPermission`; `/queries/scoped-custom-fields-detailed`
+      returns values for the ~19 fields with API permission != NONE.
+      Wire both, populate `custom_field_definitions`, expose
+      `api_permission` so operators can see which Ninja fields need
+      their permission changed to flow through. Requires migration
+      `004_custom_field_defs_v2.sql` (new schema, `(entity_type,
+      name)` as PK instead of an integer id Ninja doesn't return).
 - [ ] **Backfill script for activities.** Operator-triggered one-shot
       that walks `/activities?olderThan=<id>` (or similar) backward
       from the current cursor to populate history. Useful right after

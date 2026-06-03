@@ -2,6 +2,67 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.2.0] — 2026-06-03
+
+End-to-end ingest pipeline running against a live Ninja instance.
+Stack is deployed on `am-ch-01` via Portainer git auto-update.
+
+### Added
+- Full ingest of organizations / locations / policies / devices /
+  device_snapshots / custom_field_values / patch_facts / activities
+  from `amrose.rmmservice.com`.
+- `ingest/runlog.py` — reusable context manager that opens and
+  closes a `ninja_core.run_log` row per module.
+- `ingest/main.py` — APScheduler + threading HTTP server (`/healthz`,
+  `/run`) wired through `_safe()` so a module crash doesn't kill the
+  rest of the cycle.
+- `ingest/util.py` — `ninja_epoch_to_dt`, `content_hash`.
+- `ingest/probe.py` + `ingest/probe_fields.py` — diagnostic CLIs for
+  walking endpoints and discovering custom field schemas without
+  writing to the DB.
+- `ingest/db.insert_ignore` — bulk INSERT ... ON CONFLICT DO NOTHING
+  for immutable-event tables (`ninja_activities.activities`).
+- `db.upsert(..., update_cols=...)` — column-scoped UPDATE for SCD-2
+  tables that must preserve `first_observed_at`.
+- Custom fields allowlist + value-size cap
+  (`INGEST_CUSTOM_FIELDS_INCLUDE`, `INGEST_CUSTOM_FIELDS_MAX_TEXT`)
+  so we don't ingest 20k-char HTML reboot reports into typed cells.
+- Patches: batched upserts (5000 rows at a time) for memory bounded
+  ingest of 376k+ patch records.
+
+### Fixed
+- `migrations.py` was importing `pool` directly from `ingest.db`,
+  capturing the pre-init sentinel; switched to module reference.
+- `paginate_cursor` was infinite-looping because Ninja keeps the
+  cursor name constant across pages on `/queries/*` endpoints.
+  Termination is now driven by `cursor.offset + len(results) >=
+  cursor.count`, with stalled-offset detection as a guard.
+- Postgres healthcheck was generating `FATAL role "root"` spam every
+  10s — switched to socket-based `pg_isready -h /var/run/postgresql`
+  so it bypasses `pg_hba` host rules.
+- Init script renamed from bash to sh — `postgres:16-alpine` doesn't
+  ship bash.
+- `postgres.Dockerfile` bakes the init script into a custom image
+  because Portainer Repository-mode doesn't extract repo files for
+  runtime bind-mounts.
+- `postgres-data` and `metabase-data` moved from host bind-mounts to
+  named docker volumes — eliminates chown/wipe foot-guns.
+- Compose env handling settled on bind-mount + entrypoint wrapper
+  (`set -a; . /etc/secrets.env; set +a; exec ...`) since neither
+  `${VAR}` substitution nor `env_file:` work in Portainer
+  Repository-mode.
+
+### Known limitations
+- `custom_field_definitions` table is unpopulated; the live API has
+  118 defined fields but only the 19 with `apiPermission != NONE`
+  return values via `/queries/custom-fields`. Switching to a
+  two-endpoint (`/v2/custom-fields` definitions + `/queries/
+  scoped-custom-fields-detailed` values) parked for v0.3.
+- Activities first run sets the cursor but doesn't backfill — only
+  events newer than the cursor flow in. Backfill script is TODO.
+- `needs_reboot_reasons` is captured as NULL on `device_snapshots`;
+  need to confirm where Ninja exposes Windows reboot reasons.
+
 ## [0.1.0] — 2026-06-02
 
 Initial scaffold. No working ingest yet — package layout, Docker
