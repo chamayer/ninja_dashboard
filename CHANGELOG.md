@@ -2,6 +2,25 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.11.2] — 2026-06-03
+
+### Fixed
+- **Per-column table click-thrus still showed Metabase's default
+  "filter by this value" popup** after v0.11.1, even though
+  whole-card click_behavior (e.g., bar charts) was working fine on
+  the same dashboards. Root cause: Metabase silently ignores
+  per-column `click_behavior` set in the **card**'s
+  visualization_settings; it only honors it when set on the
+  **dashcard**'s visualization_settings. The bootstrap was writing
+  both whole-card and per-column behaviors to the card; the latter
+  had no effect. Fix: per-column click behaviors are now written
+  during dashboard layout (pass 1b) into each dashcard's own
+  `visualization_settings.column_settings`. Whole-card
+  `click_behavior` stays at the card level (it works there). Affects
+  Command Center "Clients Needing Attention", Fleet Overview
+  "Client Patch Compliance" / "Devices Needing Reboot", Org
+  Overview tables, Patch Detail / Drilldown / Patching Status tables.
+
 ## [0.11.1] — 2026-06-03
 
 ### Fixed

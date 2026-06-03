@@ -5,6 +5,35 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-03 — v0.11.2 per-column click_behavior moved to dashcard
+
+**Why:** After v0.11.1, user tested and reported:
+- Compliance numbers fixed ✓
+- Whole-card bar chart click works (compliance_worst) ✓
+- All per-column table clicks STILL show the default filter popup ✗
+  (compliance_all, needs_reboot, cmd_clients)
+
+**Diagnosis:** Whole-card click_behavior at the card level works;
+per-column click_behavior at the card level is silently ignored by
+this Metabase version. Per-column behaviors only take effect when
+written to the **dashcard's** visualization_settings.
+
+**Done:**
+- Extracted `_build_column_settings_for_dashcard` helper that
+  computes the column_settings dict from a card spec.
+- Modified `_set_dashboard_layout` to accept `dash_id_by_name` and,
+  when provided, build per-card column_settings and inline them into
+  each dashcard's `visualization_settings`.
+- Pass 1b now passes `dash_id_by_name` to layout, so click target
+  IDs resolve correctly during the dashboard PUT.
+- Pass 2 (apply_click_behaviors at card level) is unchanged. The
+  per-column writes there are now harmless no-ops; left in place so
+  card-level whole-card click_behavior continues to work.
+
+**Validation:**
+- `python -m py_compile` passes.
+- Pending operator verify after Portainer rebuild.
+
 ## 2026-06-03 — v0.11.1 compliance + click-thru fixes
 
 **Done:**

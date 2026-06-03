@@ -2683,9 +2683,32 @@ def _nav_dashcard(text: str) -> dict:
     }
 
 
+def _build_column_settings_for_dashcard(
+    spec: dict, dash_id_by_name: dict[str, int], current_dash_id: int | None,
+) -> dict[str, dict]:
+    """Build the column_settings dict (click_behavior per column) for a
+    table card. Per Metabase behavior we observed, per-column click
+    behaviors must live on the *dashcard*'s visualization_settings,
+    not the card's — card-level column_settings.click_behavior is
+    silently ignored (the operator sees the default 'filter by this
+    value' drill prompt). Whole-card click_behavior still works at
+    the card level (and stays there)."""
+    column_settings: dict[str, dict] = {}
+    for col, ccb in spec.get("column_click_behaviors", {}).items():
+        cb = _build_click_behavior_json(ccb, dash_id_by_name, current_dash_id)
+        if cb:
+            # Metabase keys column_settings by JSON-encoded
+            # ["name", "<col>"] arrays.
+            key = f'["name","{col}"]'
+            column_settings[key] = {"click_behavior": cb}
+    return column_settings
+
+
 def _set_dashboard_layout(
     client: httpx.Client, dashboard: dict, specs: list[dict],
-    card_ids: dict[str, int], nav_markdown: str | None = None,
+    card_ids: dict[str, int],
+    dash_id_by_name: dict[str, int] | None = None,
+    nav_markdown: str | None = None,
 ) -> None:
     """Replace the dashboard's dashcards with our layout. Uses PUT
     /api/dashboard/:id with a full `dashcards` array — modern
@@ -2696,9 +2719,15 @@ def _set_dashboard_layout(
     When `nav_markdown` is provided, a virtual text dashcard is
     prepended at row 0 and every other dashcard is shifted down by
     NAV_HEIGHT — so card specs can keep their natural row numbers
-    (0, 4, 8...) without baking in nav-bar offsets."""
+    (0, 4, 8...) without baking in nav-bar offsets.
+
+    When `dash_id_by_name` is provided, per-column click_behaviors
+    from card specs are resolved and written into each dashcard's
+    visualization_settings.column_settings (where Metabase actually
+    honors them)."""
     dashcards = []
     row_offset = 0
+    current_dash_id = int(dashboard["id"])
     if nav_markdown is not None:
         dashcards.append(_nav_dashcard(nav_markdown))
         row_offset = NAV_HEIGHT
@@ -2708,6 +2737,13 @@ def _set_dashboard_layout(
             {"parameter_id": pid, "card_id": card_id, "target": target}
             for pid, target in spec.get("param_mappings", {}).items()
         ]
+        dashcard_viz: dict[str, Any] = {}
+        if dash_id_by_name is not None:
+            col_settings = _build_column_settings_for_dashcard(
+                spec, dash_id_by_name, current_dash_id,
+            )
+            if col_settings:
+                dashcard_viz["column_settings"] = col_settings
         dashcards.append({
             "id":                     -(i + 2),  # -1 reserved for nav
             "card_id":                card_id,
@@ -2716,7 +2752,7 @@ def _set_dashboard_layout(
             "size_x":                 spec["size_x"],
             "size_y":                 spec["size_y"],
             "parameter_mappings":     param_mappings,
-            "visualization_settings": {},
+            "visualization_settings": dashcard_viz,
         })
     r = client.put(
         f"/api/dashboard/{dashboard['id']}",
@@ -2806,7 +2842,9 @@ def run_bootstrap(
             card_ids_by_dash[dash_spec["name"]] = card_ids
             urls.append(f"{url}/dashboard/{dashboard['id']}  ({dash_spec['name']})")
 
-        # Pass 1b — set layouts (with nav bar) now that IDs are known.
+        # Pass 1b — set layouts (with nav bar AND per-column click
+        # behaviors at the dashcard level — that's where Metabase
+        # actually honors them) now that IDs are known.
         log.info("── Setting dashboard layouts with nav bar ──")
         for dash_spec in dashboards:
             nav_md = _build_nav_markdown(dash_spec["name"], dash_id_by_name)
@@ -2815,6 +2853,7 @@ def run_bootstrap(
                 dash_obj_by_name[dash_spec["name"]],
                 dash_spec["cards"],
                 card_ids_by_dash[dash_spec["name"]],
+                dash_id_by_name=dash_id_by_name,
                 nav_markdown=nav_md,
             )
 
