@@ -55,6 +55,16 @@ from ingest.config import settings
 
 log = logging.getLogger("metabase_bootstrap")
 
+COLLECTION_NAME = "Ninja"
+
+# Dashboard names — defined early so card-spec click_behaviors below
+# can reference them. Don't rename without updating drill targets.
+DASH_OVERVIEW    = "Ninja — Overview"
+DASH_DETAIL      = "Ninja — Patch Detail (Filterable)"
+DASH_DRILLDOWN   = "Ninja — Device Drilldown"
+DASH_PCOV        = "Ninja — Patch Coverage"
+
+
 # ── Card specs ──────────────────────────────────────────────────────
 
 OVERVIEW_CARDS: list[dict[str, Any]] = [
@@ -317,17 +327,6 @@ ORDER BY started_at DESC, run_id DESC
 """,
     },
 ]
-
-COLLECTION_NAME = "Ninja"
-
-# Dashboard names — referenced by click_behavior specs for
-# cross-dashboard drill-through. Keep these as constants so a rename
-# doesn't break drill links silently.
-DASH_OVERVIEW    = "Ninja — Overview"
-DASH_DETAIL      = "Ninja — Patch Detail (Filterable)"
-DASH_DRILLDOWN   = "Ninja — Device Drilldown"
-DASH_PCOV        = "Ninja — Patch Coverage"
-
 
 # ── Click behavior infrastructure ───────────────────────────────────
 #

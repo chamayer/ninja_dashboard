@@ -2,6 +2,24 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.7.2] — 2026-06-03
+
+### Fixed
+- **Metabase bootstrap was crashing silently** with
+  `NameError: name 'DASH_DETAIL' is not defined` at module import.
+  The four dashboard-name constants (DASH_OVERVIEW / DASH_DETAIL /
+  DASH_DRILLDOWN / DASH_PCOV) were defined ~300 lines below the
+  card specs that referenced them — Python tries to resolve those
+  names at module-load time, fails. Constants moved to the top of
+  the file, before any card definitions.
+- **Impact:** since v0.5.0 the auto-bootstrap has been throwing
+  this NameError on every container start (logged but not raised
+  by `bootstrap_metabase`'s try/except). All dashboard changes
+  shipped between v0.5.0 and v0.7.2 — patch coverage tunings, OS
+  bar fix, active-devices view, click behaviors, workstation
+  default — haven't actually been applied to your Metabase.
+  This commit unblocks all of those at once.
+
 ## [0.7.1] — 2026-06-03
 
 ### Fixed
