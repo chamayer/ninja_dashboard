@@ -95,7 +95,7 @@ WITH current_state AS (
     FROM ninja_patches.patch_facts
     ORDER BY device_id, patch_uid, last_observed_at DESC
 )
-SELECT COUNT(*) AS needs_attention
+SELECT COUNT(*) AS patcheseeds_attention
 FROM current_state WHERE status IN ('MANUAL', 'DELAYED')
 """,
     },
@@ -121,7 +121,7 @@ FROM current_state WHERE status = 'FAILED'
         "row": 4, "col": 0, "size_x": 12, "size_y": 8,
         "viz_settings": {
             "pie.dimension":       "status",
-            "pie.metric":          "n",
+            "pie.metric":          "patches",
             # 0 = show every slice; default 2.5 buckets small ones into "Other"
             "pie.slice_threshold": 0,
             "pie.show_legend":     True,
@@ -133,7 +133,7 @@ WITH current_state AS (
     FROM ninja_patches.patch_facts
     ORDER BY device_id, patch_uid, last_observed_at DESC
 )
-SELECT status, COUNT(*) AS n
+SELECT status, COUNT(*) AS patches
 FROM current_state
 GROUP BY status
 ORDER BY n DESC
@@ -372,7 +372,7 @@ DETAIL_CARDS = [
         "row": 0, "col": 0, "size_x": 8, "size_y": 6,
         "viz_settings":   {
             "pie.dimension":       "status",
-            "pie.metric":          "n",
+            "pie.metric":          "patches",
             "pie.slice_threshold": 0,
             "pie.show_legend":     True,
             "pie.show_total":      True,
@@ -381,7 +381,7 @@ DETAIL_CARDS = [
         "param_mappings": _FILTER_PARAM_MAPPINGS,
         "query": f"""
 {_CTE_CURRENT_STATE}
-SELECT cs.status, COUNT(*) AS n
+SELECT cs.status, COUNT(*) AS patches
 FROM current_state cs
 JOIN ninja_core.devices d        ON d.id = cs.device_id
 JOIN ninja_core.organizations o  ON o.id = d.organization_id
@@ -396,12 +396,12 @@ ORDER BY n DESC
         "name":           "Severity Breakdown (filtered)",
         "display":        "bar",
         "row": 0, "col": 8, "size_x": 8, "size_y": 6,
-        "viz_settings":   {"graph.dimensions": ["severity"], "graph.metrics": ["n"]},
+        "viz_settings":   {"graph.dimensions": ["severity"], "graph.metrics": ["patches"]},
         "template_tags":  _FILTER_TAGS,
         "param_mappings": _FILTER_PARAM_MAPPINGS,
         "query": f"""
 {_CTE_CURRENT_STATE}
-SELECT COALESCE(NULLIF(cs.severity, ''), 'NONE') AS severity, COUNT(*) AS n
+SELECT COALESCE(NULLIF(cs.severity, ''), 'NONE') AS severity, COUNT(*) AS patches
 FROM current_state cs
 JOIN ninja_core.devices d        ON d.id = cs.device_id
 JOIN ninja_core.organizations o  ON o.id = d.organization_id
@@ -416,14 +416,14 @@ ORDER BY n DESC
         "name":           "Top 15 Devices (filtered)",
         "display":        "row",
         "row": 0, "col": 16, "size_x": 8, "size_y": 6,
-        "viz_settings":   {"graph.dimensions": ["device"], "graph.metrics": ["n"]},
+        "viz_settings":   {"graph.dimensions": ["device"], "graph.metrics": ["patches"]},
         "template_tags":  _FILTER_TAGS,
         "param_mappings": _FILTER_PARAM_MAPPINGS,
         "query": f"""
 {_CTE_CURRENT_STATE}
 SELECT
     d.system_name AS device,
-    COUNT(*) AS n
+    COUNT(*) AS patches
 FROM current_state cs
 JOIN ninja_core.devices d        ON d.id = cs.device_id
 JOIN ninja_core.organizations o  ON o.id = d.organization_id
@@ -439,14 +439,14 @@ LIMIT 15
         "name":           "Top 20 KBs (filtered)",
         "display":        "row",
         "row": 6, "col": 0, "size_x": 12, "size_y": 8,
-        "viz_settings":   {"graph.dimensions": ["kb_number"], "graph.metrics": ["n"]},
+        "viz_settings":   {"graph.dimensions": ["kb_number"], "graph.metrics": ["patches"]},
         "template_tags":  _FILTER_TAGS,
         "param_mappings": _FILTER_PARAM_MAPPINGS,
         "query": f"""
 {_CTE_CURRENT_STATE}
 SELECT
     COALESCE(NULLIF(cs.kb_number, ''), '(none)') AS kb_number,
-    COUNT(*) AS n
+    COUNT(*) AS patches
 FROM current_state cs
 JOIN ninja_core.devices d        ON d.id = cs.device_id
 JOIN ninja_core.organizations o  ON o.id = d.organization_id
@@ -486,10 +486,57 @@ ORDER BY 1
 """,
     },
     {
+        "key":            "detail_all_devices",
+        "name":           "All Devices by Patch Count (filtered)",
+        "display":        "table",
+        "row": 14, "col": 0, "size_x": 12, "size_y": 10,
+        "template_tags":  _FILTER_TAGS,
+        "param_mappings": _FILTER_PARAM_MAPPINGS,
+        "query": f"""
+{_CTE_CURRENT_STATE}
+SELECT
+    d.system_name        AS device,
+    o.name               AS organization,
+    d.node_class,
+    COUNT(*)             AS patches
+FROM current_state cs
+JOIN ninja_core.devices d        ON d.id = cs.device_id
+JOIN ninja_core.organizations o  ON o.id = d.organization_id
+WHERE d.approval_status = 'APPROVED'
+{_FILTER_PREDICATES}
+GROUP BY d.system_name, o.name, d.node_class
+ORDER BY patches DESC
+""",
+    },
+    {
+        "key":            "detail_all_kbs",
+        "name":           "All KBs by Count (filtered)",
+        "display":        "table",
+        "row": 14, "col": 12, "size_x": 12, "size_y": 10,
+        "template_tags":  _FILTER_TAGS,
+        "param_mappings": _FILTER_PARAM_MAPPINGS,
+        "query": f"""
+{_CTE_CURRENT_STATE}
+SELECT
+    COALESCE(NULLIF(cs.kb_number, ''), '(none)') AS kb_number,
+    cs.patch_name,
+    cs.severity,
+    COUNT(DISTINCT cs.device_id) AS devices,
+    COUNT(*)                     AS patches
+FROM current_state cs
+JOIN ninja_core.devices d        ON d.id = cs.device_id
+JOIN ninja_core.organizations o  ON o.id = d.organization_id
+WHERE d.approval_status = 'APPROVED'
+{_FILTER_PREDICATES}
+GROUP BY 1, cs.patch_name, cs.severity
+ORDER BY patches DESC
+""",
+    },
+    {
         "key":            "detail_table",
         "name":           "Patch Detail Table (filtered)",
         "display":        "table",
-        "row": 14, "col": 0, "size_x": 24, "size_y": 14,
+        "row": 24, "col": 0, "size_x": 24, "size_y": 14,
         "template_tags":  _FILTER_TAGS,
         "param_mappings": _FILTER_PARAM_MAPPINGS,
         "query": f"""
@@ -519,6 +566,154 @@ LIMIT 1000
 ]
 
 
+# ── Device Drilldown dashboard ──────────────────────────────────────
+#
+# Per-device deep dive. Filter is a free-text device name (matches
+# system_name / display_name / dns_name case-insensitively, contains).
+# Type a substring like "CL-35" or "DESKTOP-B1" to pull the device's
+# full history.
+
+PARAM_DEVICE = "p_device"
+
+DEVICE_TAGS = {
+    "device": {"id": "tt_device", "name": "device", "display-name": "Device", "type": "text"},
+}
+
+DEVICE_PARAM_MAPPINGS = {
+    PARAM_DEVICE: ["variable", ["template-tag", "device"]],
+}
+
+_DEVICE_FILTER = "[[AND (d.system_name ILIKE '%' || {{device}} || '%' OR d.display_name ILIKE '%' || {{device}} || '%' OR d.dns_name ILIKE '%' || {{device}} || '%')]]"
+
+
+def build_device_parameters() -> list[dict]:
+    """Just one parameter — the device search text box."""
+    return [_param_text(PARAM_DEVICE, "Device (name/substring)", "device")]
+
+
+DEVICE_CARDS = [
+    {
+        "key":            "device_info",
+        "name":           "Device(s) Matching Filter",
+        "display":        "table",
+        "row": 0, "col": 0, "size_x": 24, "size_y": 6,
+        "template_tags":  DEVICE_TAGS,
+        "param_mappings": DEVICE_PARAM_MAPPINGS,
+        "query": f"""
+WITH latest_snap AS (
+    SELECT DISTINCT ON (device_id) *
+    FROM ninja_core.device_snapshots
+    ORDER BY device_id, snapshot_at DESC
+)
+SELECT
+    d.id                   AS device_id,
+    d.system_name,
+    d.display_name,
+    o.name                 AS organization,
+    d.node_class,
+    d.os_name,
+    d.os_release_id,
+    d.serial_number,
+    d.manufacturer,
+    d.model,
+    ls.last_contact,
+    ls.last_boot,
+    ls.needs_reboot,
+    ls.maintenance_status
+FROM ninja_core.devices d
+JOIN ninja_core.organizations o ON o.id = d.organization_id
+LEFT JOIN latest_snap ls ON ls.device_id = d.id
+WHERE d.approval_status = 'APPROVED'
+{_DEVICE_FILTER}
+ORDER BY d.system_name
+LIMIT 100
+""",
+    },
+    {
+        "key":            "device_state_pie",
+        "name":           "Patch State for Selected Device(s)",
+        "display":        "pie",
+        "row": 6, "col": 0, "size_x": 8, "size_y": 8,
+        "viz_settings":   {
+            "pie.dimension":       "status",
+            "pie.metric":          "patches",
+            "pie.slice_threshold": 0,
+            "pie.show_legend":     True,
+            "pie.show_total":      True,
+        },
+        "template_tags":  DEVICE_TAGS,
+        "param_mappings": DEVICE_PARAM_MAPPINGS,
+        "query": f"""
+{_CTE_CURRENT_STATE}
+SELECT cs.status, COUNT(*) AS patches
+FROM current_state cs
+JOIN ninja_core.devices d ON d.id = cs.device_id
+WHERE d.approval_status = 'APPROVED'
+{_DEVICE_FILTER}
+GROUP BY cs.status
+ORDER BY patches DESC
+""",
+    },
+    {
+        "key":            "device_install_timeline",
+        "name":           "Installs Over Time (Selected Device(s), last 180 days)",
+        "display":        "line",
+        "row": 6, "col": 8, "size_x": 16, "size_y": 8,
+        "viz_settings":   {"graph.dimensions": ["day"], "graph.metrics": ["installs"]},
+        "template_tags":  DEVICE_TAGS,
+        "param_mappings": DEVICE_PARAM_MAPPINGS,
+        "query": f"""
+SELECT
+    DATE_TRUNC('day', pf.installed_at)::date AS day,
+    COUNT(*) AS installs
+FROM ninja_patches.patch_facts pf
+JOIN ninja_core.devices d ON d.id = pf.device_id
+WHERE pf.installed_at IS NOT NULL
+  AND pf.installed_at > NOW() - INTERVAL '180 days'
+  AND d.approval_status = 'APPROVED'
+  {_DEVICE_FILTER.replace('{{device}}', '{{{{device}}}}')}
+GROUP BY 1
+ORDER BY 1
+""",
+    },
+    {
+        "key":            "device_patch_history",
+        "name":           "Full Patch History for Selected Device(s)",
+        "display":        "table",
+        "row": 14, "col": 0, "size_x": 24, "size_y": 14,
+        "template_tags":  DEVICE_TAGS,
+        "param_mappings": DEVICE_PARAM_MAPPINGS,
+        "query": f"""
+WITH all_observations AS (
+    SELECT
+        pf.device_id, pf.patch_uid, pf.status, pf.severity,
+        pf.kb_number, pf.name AS patch_name, pf.installed_at,
+        pf.first_observed_at, pf.last_observed_at
+    FROM ninja_patches.patch_facts pf
+)
+SELECT
+    d.system_name        AS device,
+    ao.kb_number,
+    ao.patch_name,
+    ao.status,
+    ao.severity,
+    ao.installed_at,
+    ao.first_observed_at AS first_seen_in_this_state,
+    ao.last_observed_at  AS last_seen_in_this_state
+FROM all_observations ao
+JOIN ninja_core.devices d ON d.id = ao.device_id
+WHERE d.approval_status = 'APPROVED'
+{_DEVICE_FILTER}
+ORDER BY
+    d.system_name,
+    ao.patch_uid,
+    ao.last_observed_at DESC
+LIMIT 5000
+""",
+    },
+]
+
+
 def build_dashboards(org_names: list[str], os_names: list[str]) -> list[dict]:
     """All dashboards this script provisions. Detail dropdowns are
     populated from the live data passed in."""
@@ -532,6 +727,11 @@ def build_dashboards(org_names: list[str], os_names: list[str]) -> list[dict]:
             "name":       "Ninja — Patch Detail (Filterable)",
             "parameters": build_detail_parameters(org_names, os_names),
             "cards":      DETAIL_CARDS,
+        },
+        {
+            "name":       "Ninja — Device Drilldown",
+            "parameters": build_device_parameters(),
+            "cards":      DEVICE_CARDS,
         },
     ]
 
