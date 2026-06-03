@@ -915,10 +915,34 @@ ORDER BY 1
 """,
     },
     {
+        "key":            "device_activities",
+        "name":           "Recent Activities (selected device, last 200)",
+        "display":        "table",
+        "row": 14, "col": 0, "size_x": 24, "size_y": 10,
+        "template_tags":  DEVICE_TAGS,
+        "param_mappings": DEVICE_PARAM_MAPPINGS,
+        "query": f"""
+SELECT
+    a.activity_time,
+    a.activity_type        AS event_code,
+    a.subject              AS event,
+    a.message,
+    a.user_id              AS triggered_by_user_id,
+    a.source_name          AS category,
+    a.id                   AS activity_id
+FROM ninja_activities.activities a
+JOIN ninja_core.devices d ON d.id = a.device_id
+WHERE 1=1
+{_DEVICE_FILTER}
+ORDER BY a.activity_time DESC
+LIMIT 200
+""",
+    },
+    {
         "key":            "device_patch_history",
         "name":           "Full Patch History for Selected Device(s)",
         "display":        "table",
-        "row": 14, "col": 0, "size_x": 24, "size_y": 14,
+        "row": 24, "col": 0, "size_x": 24, "size_y": 14,
         "template_tags":  DEVICE_TAGS,
         "param_mappings": DEVICE_PARAM_MAPPINGS,
         "column_click_behaviors": {

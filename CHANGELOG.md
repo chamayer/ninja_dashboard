@@ -2,6 +2,45 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.6.0] — 2026-06-03
+
+### Added
+- **Activities ingest is now working** end-to-end against the live
+  Ninja instance. Findings from `probe_activities.py`:
+    - Server-side filter param is `type=<source>` (NOT `activityType`
+      — that one is silently ignored).
+    - Pagination back: `olderThan=<id>` walks to older records.
+    - Pagination forward: `after`/`newer`/`newerThan`/`from` all work
+      equivalently (we use the high-water mark approach: walk back
+      with `olderThan` from latest, stop when we cross our cursor).
+  Per source (PATCH_MANAGEMENT, SYSTEM, etc.), iterate older pages
+  until cross last_id, filter by statusCode allowlist, insert with
+  ON CONFLICT DO NOTHING (id is PK).
+- Activity records are joined to `ninja_core.devices` via
+  `deviceId`. If Ninja reports activity for a device we don't ingest
+  (PENDING / DECOMMISSIONED), `device_id` is NULL'd (activity still
+  recorded, just without device link).
+- **Device Drilldown** gains a "Recent Activities" table showing
+  the last 200 activities for the searched device — event code,
+  human label, message, the **userId who triggered it**, and the
+  activity category. That's the "by whom" surface for events that
+  carry it (login, software install, etc.).
+
+### Field mapping (Ninja API → our schema)
+  `id`           → `id`
+  `activityTime` → `activity_time`
+  `deviceId`     → `device_id` (NULL if device not in our table)
+  `userId`       → `user_id` (the user who TRIGGERED the activity)
+  `activityType` → `source_name` (broad bucket: MONITOR, PATCH_MANAGEMENT...)
+  `type`         → `source_type` (friendly name)
+  `statusCode`   → `activity_type` (specific event code)
+  `status`       → `subject` (human label)
+  `message`      → `message`
+
+### Process
+- VERSION 0.6.0. Activities is a new functional capability (not just
+  a bugfix); first time we're surfacing Ninja's event log.
+
 ## [0.5.1] — 2026-06-03
 
 ### Fixed
