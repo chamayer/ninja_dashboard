@@ -173,6 +173,11 @@ WHERE d.approval_status = 'APPROVED'
             "pie.show_legend":     True,
             "pie.show_total":      True,
         },
+        # Click a status slice → open Detail filtered to that status.
+        "click_behavior": {
+            "target": DASH_DETAIL,
+            "params": {"p_status": "status"},
+        },
         "query": """
 WITH current_state AS (
     SELECT DISTINCT ON (device_id, patch_uid) status
@@ -193,6 +198,11 @@ ORDER BY n DESC
         "viz_settings": {
             "graph.dimensions": ["organization"],
             "graph.metrics":    ["pct_installed"],
+        },
+        # Click an org bar → open Detail filtered to that org.
+        "click_behavior": {
+            "target": DASH_DETAIL,
+            "params": {"p_org": "organization"},
         },
         "query": """
 WITH current_state AS (
@@ -224,6 +234,12 @@ LIMIT 15
         "name":       "All Orgs Compliance",
         "display":    "table",
         "row": 16, "col": 0, "size_x": 24, "size_y": 10,
+        "column_click_behaviors": {
+            "organization": {
+                "target": DASH_DETAIL,
+                "params": {"p_org": "organization"},
+            },
+        },
         "query": """
 WITH current_state AS (
     SELECT DISTINCT ON (device_id, patch_uid)
@@ -258,6 +274,16 @@ ORDER BY pct_installed ASC, total_patches DESC
         "name":       "Devices Needing Reboot",
         "display":    "table",
         "row": 26, "col": 0, "size_x": 24, "size_y": 8,
+        "column_click_behaviors": {
+            "system_name": {
+                "target": DASH_DRILLDOWN,
+                "params": {"p_device": "system_name"},
+            },
+            "organization": {
+                "target": DASH_DETAIL,
+                "params": {"p_org": "organization"},
+            },
+        },
         "query": """
 SELECT
     d.system_name,
@@ -294,6 +320,113 @@ ORDER BY started_at DESC, run_id DESC
 
 COLLECTION_NAME = "Ninja"
 
+# Dashboard names — referenced by click_behavior specs for
+# cross-dashboard drill-through. Keep these as constants so a rename
+# doesn't break drill links silently.
+DASH_OVERVIEW    = "Ninja — Overview"
+DASH_DETAIL      = "Ninja — Patch Detail (Filterable)"
+DASH_DRILLDOWN   = "Ninja — Device Drilldown"
+DASH_PCOV        = "Ninja — Patch Coverage"
+
+
+# ── Click behavior infrastructure ───────────────────────────────────
+#
+# Cards declare click_behavior in a friendly form; the second pass of
+# run_bootstrap resolves dashboard names to IDs and writes the actual
+# Metabase JSON into visualization_settings.
+#
+# Card spec gains:
+#   "click_behavior": {           # whole-card (charts)
+#       "target": "self" OR "<dashboard name>",
+#       "params": {<dashboard_param_id>: <source_column_name>},
+#   }
+#   "column_click_behaviors": {   # per-column (tables)
+#       "<column>": { "target": ..., "params": {...} },
+#   }
+#
+# target="self" → crossfilter (set parameters on the current dashboard)
+# target=<name> → link to that dashboard with parameters pre-set
+
+
+def _build_param_mapping(params: dict[str, str]) -> dict[str, dict]:
+    """Turn {param_id: source_column} into Metabase's parameterMapping JSON."""
+    return {
+        pid: {
+            "id":     pid,
+            "source": {"type": "column", "id": src, "name": src},
+            "target": {"type": "parameter", "id": pid},
+        }
+        for pid, src in params.items()
+    }
+
+
+def _build_click_behavior_json(
+    spec: dict, dash_id_by_name: dict[str, int],
+) -> dict | None:
+    target = spec.get("target")
+    if target == "self":
+        return {
+            "type":             "crossfilter",
+            "parameterMapping": _build_param_mapping(spec.get("params", {})),
+        }
+    target_id = dash_id_by_name.get(target)
+    if target_id is None:
+        log.warning("Click behavior: unknown target dashboard %r", target)
+        return None
+    return {
+        "type":             "link",
+        "linkType":         "dashboard",
+        "targetId":         target_id,
+        "parameterMapping": _build_param_mapping(spec.get("params", {})),
+    }
+
+
+def _apply_click_behaviors(
+    client: httpx.Client,
+    dashboards: list[dict],
+    card_ids_by_dash: dict[str, dict[str, int]],
+    dash_id_by_name: dict[str, int],
+) -> None:
+    """Second pass: merge click_behavior into each card's
+    visualization_settings now that dashboard IDs are resolved."""
+    for dash_spec in dashboards:
+        card_ids = card_ids_by_dash[dash_spec["name"]]
+        for card_spec in dash_spec["cards"]:
+            extra: dict[str, Any] = {}
+
+            if "click_behavior" in card_spec:
+                cb = _build_click_behavior_json(card_spec["click_behavior"], dash_id_by_name)
+                if cb:
+                    extra["click_behavior"] = cb
+
+            if "column_click_behaviors" in card_spec:
+                column_settings: dict[str, dict] = {}
+                for col, ccb in card_spec["column_click_behaviors"].items():
+                    cb = _build_click_behavior_json(ccb, dash_id_by_name)
+                    if cb:
+                        # Metabase keys column_settings by JSON-encoded
+                        # ["name", "<col>"] arrays.
+                        key = f'["name","{col}"]'
+                        column_settings[key] = {"click_behavior": cb}
+                if column_settings:
+                    extra["column_settings"] = column_settings
+
+            if not extra:
+                continue
+
+            card_id = card_ids[card_spec["key"]]
+            # Fetch current viz_settings so we don't clobber chart config.
+            r = client.get(f"/api/card/{card_id}")
+            r.raise_for_status()
+            current = r.json().get("visualization_settings") or {}
+            current.update(extra)
+            r = client.put(
+                f"/api/card/{card_id}",
+                json={"visualization_settings": current},
+            )
+            r.raise_for_status()
+            log.info("Click behaviors applied to: %s", card_spec["name"])
+
 
 # ── Filterable Detail dashboard ─────────────────────────────────────
 #
@@ -327,9 +460,12 @@ _NODE_CLASS_OPTIONS = [
 _SEVERITY_OPTIONS = ["CRITICAL", "IMPORTANT", "OPTIONAL", "MODERATE", "LOW", "NONE"]
 
 
-def _param_dropdown(pid: str, name: str, slug: str, values: list[str]) -> dict:
+def _param_dropdown(
+    pid: str, name: str, slug: str, values: list[str],
+    default: Any = None,
+) -> dict:
     """Build a Metabase dashboard parameter with a static-list dropdown."""
-    return {
+    p = {
         "id":                  pid,
         "name":                name,
         "slug":                slug,
@@ -338,6 +474,9 @@ def _param_dropdown(pid: str, name: str, slug: str, values: list[str]) -> dict:
         "values_source_type":  "static-list",
         "values_source_config": {"values": [[v] for v in values]},
     }
+    if default is not None:
+        p["default"] = default
+    return p
 
 
 def _param_text(pid: str, name: str, slug: str) -> dict:
@@ -353,11 +492,16 @@ def _param_text(pid: str, name: str, slug: str) -> dict:
 def build_detail_parameters(org_names: list[str], os_names: list[str]) -> list[dict]:
     """Construct the dashboard's parameter widgets. Dropdown values for
     Org and OS are populated from live data; Status/NodeClass/Severity
-    use built-in enums; KB is a free-text search."""
+    use built-in enums; KB is a free-text search.
+
+    Node Class defaults to WINDOWS_WORKSTATION so the MSP workflow
+    "patch workstations across all clients first" is the default view.
+    Operator picks WINDOWS_SERVER etc. from the dropdown when ready."""
     return [
         _param_dropdown(PARAM_ORG,    "Organization", "org",        org_names),
         _param_dropdown(PARAM_STATUS, "Status",       "status",     _STATUS_OPTIONS),
-        _param_dropdown(PARAM_CLASS,  "Node Class",   "node_class", _NODE_CLASS_OPTIONS),
+        _param_dropdown(PARAM_CLASS,  "Node Class",   "node_class", _NODE_CLASS_OPTIONS,
+                        default="WINDOWS_WORKSTATION"),
         _param_dropdown(PARAM_SEV,    "Severity",     "severity",   _SEVERITY_OPTIONS),
         _param_dropdown(PARAM_OS,     "OS Name",      "os",         os_names),
         _param_text(    PARAM_KB,     "KB Number",    "kb"),
@@ -435,6 +579,7 @@ DETAIL_CARDS = [
         },
         "template_tags":  _FILTER_TAGS,
         "param_mappings": _FILTER_PARAM_MAPPINGS,
+        "click_behavior": {"target": "self", "params": {"p_status": "status"}},
         "query": f"""
 {_CTE_CURRENT_STATE}
 SELECT cs.status, COUNT(*) AS patches
@@ -455,6 +600,7 @@ ORDER BY n DESC
         "viz_settings":   {"graph.dimensions": ["severity"], "graph.metrics": ["patches"]},
         "template_tags":  _FILTER_TAGS,
         "param_mappings": _FILTER_PARAM_MAPPINGS,
+        "click_behavior": {"target": "self", "params": {"p_severity": "severity"}},
         "query": f"""
 {_CTE_CURRENT_STATE}
 SELECT COALESCE(NULLIF(cs.severity, ''), 'NONE') AS severity, COUNT(*) AS patches
@@ -475,6 +621,7 @@ ORDER BY n DESC
         "viz_settings":   {"graph.dimensions": ["device"], "graph.metrics": ["patches"]},
         "template_tags":  _FILTER_TAGS,
         "param_mappings": _FILTER_PARAM_MAPPINGS,
+        "click_behavior": {"target": DASH_DRILLDOWN, "params": {"p_device": "device"}},
         "query": f"""
 {_CTE_CURRENT_STATE}
 SELECT
@@ -498,6 +645,7 @@ LIMIT 15
         "viz_settings":   {"graph.dimensions": ["kb_number"], "graph.metrics": ["patches"]},
         "template_tags":  _FILTER_TAGS,
         "param_mappings": _FILTER_PARAM_MAPPINGS,
+        "click_behavior": {"target": "self", "params": {"p_kb": "kb_number"}},
         "query": f"""
 {_CTE_CURRENT_STATE}
 SELECT
@@ -548,6 +696,11 @@ ORDER BY 1
         "row": 14, "col": 0, "size_x": 12, "size_y": 10,
         "template_tags":  _FILTER_TAGS,
         "param_mappings": _FILTER_PARAM_MAPPINGS,
+        "column_click_behaviors": {
+            "device":       {"target": DASH_DRILLDOWN, "params": {"p_device": "device"}},
+            "organization": {"target": "self",         "params": {"p_org": "organization"}},
+            "node_class":   {"target": "self",         "params": {"p_class": "node_class"}},
+        },
         "query": f"""
 {_CTE_CURRENT_STATE}
 SELECT
@@ -571,6 +724,9 @@ ORDER BY patches DESC
         "row": 14, "col": 12, "size_x": 12, "size_y": 10,
         "template_tags":  _FILTER_TAGS,
         "param_mappings": _FILTER_PARAM_MAPPINGS,
+        "column_click_behaviors": {
+            "kb_number": {"target": "self", "params": {"p_kb": "kb_number"}},
+        },
         "query": f"""
 {_CTE_CURRENT_STATE}
 SELECT
@@ -595,6 +751,14 @@ ORDER BY patches DESC
         "row": 24, "col": 0, "size_x": 24, "size_y": 14,
         "template_tags":  _FILTER_TAGS,
         "param_mappings": _FILTER_PARAM_MAPPINGS,
+        "column_click_behaviors": {
+            "device":       {"target": DASH_DRILLDOWN, "params": {"p_device": "device"}},
+            "organization": {"target": "self", "params": {"p_org":      "organization"}},
+            "node_class":   {"target": "self", "params": {"p_class":    "node_class"}},
+            "status":       {"target": "self", "params": {"p_status":   "status"}},
+            "severity":     {"target": "self", "params": {"p_severity": "severity"}},
+            "kb_number":    {"target": "self", "params": {"p_kb":       "kb_number"}},
+        },
         "query": f"""
 {_CTE_CURRENT_STATE}
 SELECT
@@ -757,6 +921,9 @@ ORDER BY 1
         "row": 14, "col": 0, "size_x": 24, "size_y": 14,
         "template_tags":  DEVICE_TAGS,
         "param_mappings": DEVICE_PARAM_MAPPINGS,
+        "column_click_behaviors": {
+            "kb_number": {"target": DASH_DETAIL, "params": {"p_kb": "kb_number"}},
+        },
         "query": f"""
 WITH all_observations AS (
     SELECT
@@ -821,7 +988,8 @@ def _param_number(pid: str, name: str, slug: str, default: int) -> dict:
 def build_pcov_parameters(org_names: list[str], os_names: list[str]) -> list[dict]:
     return [
         _param_dropdown(PARAM_PCOV_ORG,    "Organization",  "pcov_org",        org_names),
-        _param_dropdown(PARAM_PCOV_CLASS,  "Node Class",    "pcov_node_class", _NODE_CLASS_OPTIONS),
+        _param_dropdown(PARAM_PCOV_CLASS,  "Node Class",    "pcov_node_class", _NODE_CLASS_OPTIONS,
+                        default="WINDOWS_WORKSTATION"),
         _param_dropdown(PARAM_PCOV_OS,     "OS Name",       "pcov_os",         os_names),
         _param_dropdown(PARAM_PCOV_STATUS, "Patch Status",  "pcov_status",     _PCOV_STATUS_OPTIONS),
         _param_number(  PARAM_PCOV_DAYS,   "Stale threshold (days)", "pcov_days", 7),
@@ -955,6 +1123,7 @@ WHERE 1=1
         "name":    "Patch Coverage Breakdown (by status)",
         "display": "pie",
         "row": 4, "col": 0, "size_x": 8, "size_y": 8,
+        "click_behavior": {"target": "self", "params": {"p_pcov_status": "patch_status"}},
         "viz_settings": {
             "pie.dimension":       "patch_status",
             "pie.metric":          "devices",
@@ -980,6 +1149,7 @@ ORDER BY devices DESC
         "name":    "Coverage by Node Class",
         "display": "pie",
         "row": 4, "col": 8, "size_x": 8, "size_y": 8,
+        "click_behavior": {"target": "self", "params": {"p_pcov_class": "node_class"}},
         "viz_settings": {
             "pie.dimension":       "node_class",
             "pie.metric":          "devices",
@@ -1005,6 +1175,7 @@ ORDER BY devices DESC
         "name":    "Patch Coverage by OS (top 20)",
         "display": "bar",
         "row": 4, "col": 16, "size_x": 8, "size_y": 8,
+        "click_behavior": {"target": "self", "params": {"p_pcov_os": "os_name"}},
         "viz_settings": {
             "graph.dimensions":      ["os_name"],
             "graph.metrics":         ["active", "stale", "no_data"],
@@ -1034,6 +1205,9 @@ LIMIT 20
         "name":    "Coverage by Organization",
         "display": "table",
         "row": 12, "col": 0, "size_x": 24, "size_y": 8,
+        "column_click_behaviors": {
+            "organization": {"target": "self", "params": {"p_pcov_org": "organization"}},
+        },
         "template_tags":  _PCOV_TAGS,
         "param_mappings": _PCOV_PARAM_MAPPINGS,
         "query": f"""
@@ -1061,6 +1235,13 @@ ORDER BY pct_active ASC, total DESC
         "name":    "All Devices with Patch Status",
         "display": "table",
         "row": 20, "col": 0, "size_x": 24, "size_y": 14,
+        "column_click_behaviors": {
+            "system_name":  {"target": DASH_DRILLDOWN, "params": {"p_device":      "system_name"}},
+            "organization": {"target": "self",         "params": {"p_pcov_org":    "organization"}},
+            "node_class":   {"target": "self",         "params": {"p_pcov_class":  "node_class"}},
+            "os_name":      {"target": "self",         "params": {"p_pcov_os":     "os_name"}},
+            "patch_status": {"target": "self",         "params": {"p_pcov_status": "patch_status"}},
+        },
         "template_tags":  _PCOV_TAGS,
         "param_mappings": _PCOV_PARAM_MAPPINGS,
         "query": f"""
@@ -1337,13 +1518,18 @@ def _resolve_password(args: argparse.Namespace) -> str:
 def run_bootstrap(
     url: str, user: str, password: str, db_name: str = "Ninja",
 ) -> list[str]:
-    """Provision all dashboards in Metabase. Returns list of dashboard
-    URLs. Raises on auth / API errors so callers can decide whether to
-    fail loudly or swallow."""
+    """Provision all dashboards in Metabase. Two passes:
+      1. Create / update cards, dashboards, layouts.
+      2. Once all dashboard IDs are known, apply click_behavior
+         (cross-dashboard drill-through and crossfilter).
+    Raises on auth / API errors."""
     org_names, os_names = _fetch_dropdown_sources()
     dashboards = build_dashboards(org_names, os_names)
 
     urls: list[str] = []
+    dash_id_by_name: dict[str, int] = {}
+    card_ids_by_dash: dict[str, dict[str, int]] = {}
+
     with httpx.Client(base_url=url, timeout=60) as client:
         _authenticate(client, user, password)
         db_id = _find_database(client, db_name)
@@ -1352,6 +1538,7 @@ def run_bootstrap(
         col_id = _upsert_collection(client, COLLECTION_NAME)
         existing_cards = _list_cards_in_collection(client, col_id)
 
+        # Pass 1 — cards, dashboards, layouts.
         for dash_spec in dashboards:
             log.info("── Provisioning dashboard: %s ──", dash_spec["name"])
             card_ids: dict[str, int] = {}
@@ -1366,7 +1553,14 @@ def run_bootstrap(
             _set_dashboard_layout(
                 client, dashboard, dash_spec["cards"], card_ids,
             )
+            dash_id_by_name[dash_spec["name"]] = int(dashboard["id"])
+            card_ids_by_dash[dash_spec["name"]] = card_ids
             urls.append(f"{url}/dashboard/{dashboard['id']}  ({dash_spec['name']})")
+
+        # Pass 2 — click behaviors (need dashboard IDs from pass 1).
+        log.info("── Applying click behaviors ──")
+        _apply_click_behaviors(client, dashboards, card_ids_by_dash, dash_id_by_name)
+
     return urls
 
 

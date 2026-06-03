@@ -2,6 +2,47 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.5.0] — 2026-06-03
+
+### Added — interactive dashboards
+
+Click-behavior wired across charts and tables, enabled by a new
+two-pass provisioning model: pass 1 creates cards / dashboards /
+layouts, pass 2 applies `click_behavior` (needs dashboard IDs from
+pass 1 for cross-dashboard drill-through).
+
+  - **Charts**: click a slice / bar to filter. Pies, severity bars,
+    top-N bars all wired. Cross-filter (same dashboard) or drill-link
+    (other dashboard) depending on which makes sense.
+  - **Table columns**: per-column click behavior in all major tables.
+    Click a Device cell → opens Device Drilldown for that device.
+    Click an Org / Status / KB / Node Class cell → cross-filters the
+    current dashboard.
+
+Specific wires:
+
+  - Overview pie → opens Detail filtered by status
+  - Overview compliance bar → opens Detail filtered by org
+  - Overview compliance table (org column) → opens Detail by org
+  - Overview reboot table (device col) → Drilldown; (org col) → Detail
+  - Detail pies/bars → self-filter the Detail dashboard
+  - Detail tables (device col) → Drilldown
+  - Detail top-devices bar → Drilldown for the clicked device
+  - Drilldown patch history (kb col) → Detail filtered by KB
+  - Patch Coverage pies/bars → self-filter the Coverage dashboard
+  - Patch Coverage device col → Drilldown
+
+### Changed
+
+- Node Class filter defaults to `WINDOWS_WORKSTATION` on Detail and
+  Patch Coverage. MSP "workstations first" workflow now is the
+  default view; pick `WINDOWS_SERVER` / others from the dropdown.
+
+### Process
+
+- VERSION 0.5.0. Two-pass provisioning is a meaningful architecture
+  change to the bootstrap script (worth tracking).
+
 ## [0.4.0] — 2026-06-03
 
 ### Added

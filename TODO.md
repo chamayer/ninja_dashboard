@@ -90,6 +90,24 @@ _(empty — drop free-form items here)_
 
 ### Ops / hardening
 
+- [ ] **Activities ingest fix (priority next)** — `/v2/activities`
+      returns a `{lastActivityId, activities}` shape (not the cursor
+      model the `/queries/*` endpoints use). Needs a dedicated
+      paginator using `?olderThan=<id>` (confirm with probe). Once
+      working, unlocks SYSTEM_REBOOTED events + "what happened
+      around this patch" enrichment for Device Drilldown.
+- [ ] **Move dashboard definitions out of Python into YAML** —
+      `dashboards/*.yaml` with a small loader. Defer until either
+      more contributors are editing dashboards or we have >10
+      dashboards. Single contributor + 4 dashboards doesn't justify
+      the refactor today.
+- [ ] **Split `metabase_bootstrap.py`** — approaching 1500 lines.
+      `metabase_bootstrap/{cards,dashboards,client,clickbehavior}.py`.
+      Pure refactor, no behavior change.
+- [ ] **Stale-data banner** — if `v_active_devices` returns 0 (because
+      ingest broke), dashboards look empty. A markdown card at the
+      top of Overview showing `MAX(last_observed_at)` from run_log
+      would tell the operator at a glance.
 - [ ] Promote `postgres-data` (and possibly `metabase-data`) to
       `external: true` named volumes once there's real data worth
       protecting. Today they're auto-managed — survive normal stack
