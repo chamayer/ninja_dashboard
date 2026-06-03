@@ -2,6 +2,25 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.11.3] — 2026-06-03
+
+### Fixed
+- **`Devices Needing Reboot` click misalignment** (Fleet + Org).
+  After v0.11.2 enabled per-column click_behavior at the dashcard
+  level, the device + device_type columns drilled correctly but
+  organization clicks did nothing and last_contact wrongly
+  navigated to Org Overview. Two corrections:
+    1. Removed the `target: "self", preset: {}` inert placeholders
+       on info columns (last_contact, reported_at, "Last Contact").
+       They were the v0.7.4 "suppress the default drill popup"
+       experiment and were misaligning real click_behaviors to the
+       wrong columns. Trade-off: info columns now show the default
+       Metabase drill popup; the meaningful drills work cleanly.
+    2. Gave every column an explicit lowercase `AS` alias and
+       converted `org_reboot_devices` (Org Overview) from
+       capitalized-quoted aliases to the same lowercase pattern
+       Fleet's `needs_reboot` now uses.
+
 ## [0.11.2] — 2026-06-03
 
 ### Fixed

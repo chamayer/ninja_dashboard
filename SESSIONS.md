@@ -5,6 +5,45 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-03 — v0.11.3 needs_reboot click misalignment
+
+**Why:** After v0.11.2, user retested. Most click-thrus now work:
+- compliance_all org click → Org Overview ✓
+- cmd_clients org click → Org Overview ✓
+- needs_reboot device → Drilldown ✓
+- needs_reboot device_type → Detail ✓
+
+BUT:
+- needs_reboot org click → does nothing
+- needs_reboot last_contact → navigates to Org Overview (wrong)
+
+**Hypothesis:** Pattern fingerprint = click_behaviors misaligned
+to columns. last_contact's inert self-link (which should reload the
+current dashboard) is somehow getting the organization-column
+behavior, while organization gets the inert. Root cause likely two
+overlapping factors:
+- `d.last_contact` had no explicit `AS` alias, so Metabase may
+  identify the column differently than its sibling columns and
+  fall out of sync with our `["name","last_contact"]` key.
+- Inert self-link placeholders on info columns were the v0.7.4
+  experiment to suppress the default drill popup; turns out they
+  cause more confusion than they prevent.
+
+**Done:**
+- Removed inert placeholders from `needs_reboot` (Fleet) and
+  `org_reboot_devices` (Org). Info columns now show the default
+  Metabase drill popup again — that's the lesser evil compared to
+  click_behaviors getting reassigned to wrong columns.
+- Gave every column on those tables an explicit lowercase `AS`
+  alias.
+- `org_reboot_devices` had also been left with the capitalized
+  quoted alias pattern from v0.10.0 humanization; converted to the
+  same lowercase-snake_case pattern as `needs_reboot`.
+
+**Validation:**
+- `python -m py_compile` passes.
+- Operator retest after Portainer rebuild will confirm.
+
 ## 2026-06-03 — v0.11.2 per-column click_behavior moved to dashcard
 
 **Why:** After v0.11.1, user tested and reported:

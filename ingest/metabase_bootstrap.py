@@ -817,25 +817,22 @@ ORDER BY "Patch Compliance" ASC, "Total Patches" DESC
         "name":       "Devices Needing Reboot",
         "display":    "table",
         "row": 26, "col": 0, "size_x": 24, "size_y": 8,
-        # Click-source columns use stable lowercase identifiers per the
-        # v0.10.2 lesson — Metabase per-column click_behavior is more
-        # reliable referencing unquoted snake_case SQL aliases than
-        # quoted display strings with spaces/capitalization.
+        # Stable lowercase aliases on every column. Inert self-link
+        # placeholders on last_contact / reported_at were removed —
+        # they were the v0.7.4 "suppress drill popup" experiment but
+        # were misaligning click_behaviors to the wrong columns. The
+        # drill popup on info columns is the lesser evil.
         "column_click_behaviors": {
             "device":       {"target": DASH_DRILLDOWN, "params": {"p_device": "device"}},
             "organization": {"target": DASH_ORG,       "params": {"p_org":    "organization"}},
             "device_type":  {"target": DASH_DETAIL,    "params": {"p_class":  "device_type"}},
-            # Inert columns: suppress the default drill menu with a
-            # no-op self-link.
-            "last_contact": {"target": "self", "preset": {}},
-            "reported_at":  {"target": "self", "preset": {}},
         },
         "query": f"""
 SELECT
     d.system_name AS device,
     o.name AS organization,
     {DEVICE_TYPE_D} AS device_type,
-    d.last_contact,
+    d.last_contact AS last_contact,
     d.last_snapshot_at AS reported_at
 FROM ninja_core.v_active_devices d
 JOIN ninja_core.organizations o ON o.id = d.organization_id
@@ -2418,19 +2415,22 @@ LIMIT 100
         "row": 36, "col": 0, "size_x": 24, "size_y": 8,
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS,
+        # Lowercase snake_case aliases on every clickable column.
+        # Inert "Last Contact" placeholder removed — same v0.11.3
+        # lesson as Fleet Overview's needs_reboot (inerts misaligned
+        # click_behaviors to the wrong columns).
         "column_click_behaviors": {
-            "Organization": {"target": "self",         "params": {"p_org": "Organization"}},
-            "Device":       {"target": DASH_DRILLDOWN, "params": {"p_device": "Device"}},
-            "Device Type":  {"target": DASH_DETAIL,    "params": {"p_org": "Organization", "p_class": "Device Type"}},
-            "Last Contact": {"target": "self", "preset": {}},
+            "organization": {"target": "self",         "params": {"p_org": "organization"}},
+            "device":       {"target": DASH_DRILLDOWN, "params": {"p_device": "device"}},
+            "device_type":  {"target": DASH_DETAIL,    "params": {"p_org": "organization", "p_class": "device_type"}},
         },
         "query": f"""
 SELECT
-    o.name AS "Organization",
-    d.system_name AS "Device",
-    {DEVICE_TYPE_D} AS "Device Type",
-    {OS_FAMILY_D} AS "Operating System Family",
-    d.last_contact AS "Last Contact"
+    o.name AS organization,
+    d.system_name AS device,
+    {DEVICE_TYPE_D} AS device_type,
+    {OS_FAMILY_D} AS operating_system_family,
+    d.last_contact AS last_contact
 FROM ninja_core.v_active_devices d
 JOIN ninja_core.organizations o ON o.id = d.organization_id
 WHERE d.needs_reboot = TRUE
