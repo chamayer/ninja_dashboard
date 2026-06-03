@@ -111,7 +111,7 @@ END
 COMMAND_CARDS: list[dict[str, Any]] = [
     {
         "key":     "cmd_active_devices",
-        "name":    "Active Windows Devices",
+        "name":    "Active Devices",
         "display": "scalar",
         "row": 0, "col": 0, "size_x": 6, "size_y": 4,
         "click_behavior": {"target": DASH_DETAIL, "preset": {}},
@@ -255,7 +255,7 @@ WHERE needs_reboot = TRUE
         "display": "table",
         "row": 8, "col": 0, "size_x": 24, "size_y": 10,
         "column_click_behaviors": {
-            "Organization": {"target": DASH_ORG, "params": {"p_org": "Organization"}},
+            "organization": {"target": DASH_ORG, "params": {"p_org": "organization"}},
         },
         "query": f"""
 WITH current_state AS (
@@ -298,14 +298,14 @@ device_status AS (
       AND d.node_class IN ('WINDOWS_WORKSTATION', 'WINDOWS_SERVER')
 )
 SELECT
-    o.name AS "Organization",
-    COUNT(DISTINCT d.id) AS "Active Windows Devices",
+    o.name AS organization,
+    COUNT(DISTINCT d.id) AS "Active Devices",
     COUNT(*) FILTER (WHERE lio.status = 'FAILED') AS "Failed Patches",
-    COUNT(*) FILTER (WHERE cs.status = 'MANUAL') AS "Manual Approval",
-    COUNT(*) FILTER (WHERE cs.status = 'DELAYED') AS "Delayed Install",
-    COUNT(DISTINCT ds.id) FILTER (WHERE ds.patch_activity = 'stale') AS "Stale Patching",
-    COUNT(DISTINCT ds.id) FILTER (WHERE ds.patch_activity = 'never') AS "Never Patched",
-    COUNT(DISTINCT d.id) FILTER (WHERE d.needs_reboot = TRUE) AS "Needs Reboot"
+    COUNT(*) FILTER (WHERE cs.status = 'MANUAL') AS "Manual Approval Patches",
+    COUNT(*) FILTER (WHERE cs.status = 'DELAYED') AS "Delayed Install Patches",
+    COUNT(DISTINCT ds.id) FILTER (WHERE ds.patch_activity = 'stale') AS "Stale Devices",
+    COUNT(DISTINCT ds.id) FILTER (WHERE ds.patch_activity = 'never') AS "Never Patched Devices",
+    COUNT(DISTINCT d.id) FILTER (WHERE d.needs_reboot = TRUE) AS "Devices Needing Reboot"
 FROM ninja_core.v_active_devices d
 JOIN ninja_core.organizations o ON o.id = d.organization_id
 LEFT JOIN current_state cs ON cs.device_id = d.id
@@ -320,11 +320,11 @@ HAVING
     OR COUNT(DISTINCT d.id) FILTER (WHERE d.needs_reboot = TRUE) > 0
 ORDER BY
     "Failed Patches" DESC,
-    "Manual Approval" DESC,
-    "Delayed Install" DESC,
-    "Stale Patching" DESC,
-    "Never Patched" DESC,
-    "Organization"
+    "Manual Approval Patches" DESC,
+    "Delayed Install Patches" DESC,
+    "Stale Devices" DESC,
+    "Never Patched Devices" DESC,
+    organization
 LIMIT 50
 """,
     },
@@ -478,7 +478,7 @@ LIMIT 100
 OVERVIEW_CARDS: list[dict[str, Any]] = [
     {
         "key":        "active_devices",
-        "name":       "Active Windows Devices",
+        "name":       "Active Devices",
         "display":    "scalar",
         "row": 0, "col": 0, "size_x": 6, "size_y": 4,
         # Click → Detail (no status filter — see all patches for the
@@ -733,8 +733,8 @@ SELECT
     ) AS "Patch Compliance",
     COUNT(*) FILTER (WHERE cs.status = 'INSTALLED')                          AS "Installed",
     COUNT(*) FILTER (WHERE cs.status = 'APPROVED')                           AS "Approved Patches",
-    COUNT(*) FILTER (WHERE cs.status = 'MANUAL')                             AS "Manual Approval",
-    COUNT(*) FILTER (WHERE cs.status = 'DELAYED')                            AS "Delayed Install",
+    COUNT(*) FILTER (WHERE cs.status = 'MANUAL')                             AS "Manual Approval Patches",
+    COUNT(*) FILTER (WHERE cs.status = 'DELAYED')                            AS "Delayed Install Patches",
     COUNT(*) FILTER (WHERE lio.status = 'FAILED')                            AS "Failed Patches",
     COUNT(*) FILTER (WHERE cs.status = 'REJECTED')                           AS "Rejected",
     COUNT(*)                                                                 AS "Total Patches",
@@ -1787,7 +1787,11 @@ ORDER BY devices DESC
         "click_behavior": {"target": "self", "params": {"p_pcov_os": "Operating System Family"}},
         "viz_settings": {
             "graph.dimensions":      ["Operating System Family"],
-            "graph.metrics":         ["Recent Patch Activity", "Stale Patching", "Never Patched"],
+            "graph.metrics":         [
+                "Recent Activity Devices",
+                "Stale Devices",
+                "Never Patched Devices",
+            ],
             "stackable.stack_type":  "stacked",
             "graph.show_values":     False,
         },
@@ -1797,9 +1801,9 @@ ORDER BY devices DESC
 {_PCOV_CTE}
 SELECT
     {OS_FAMILY_C} AS "Operating System Family",
-    COUNT(*) FILTER (WHERE c.patch_status = 'active_patching')  AS "Recent Patch Activity",
-    COUNT(*) FILTER (WHERE c.patch_status = 'stale_patch_data') AS "Stale Patching",
-    COUNT(*) FILTER (WHERE c.patch_status = 'no_patch_data')    AS "Never Patched"
+    COUNT(*) FILTER (WHERE c.patch_status = 'active_patching')  AS "Recent Activity Devices",
+    COUNT(*) FILTER (WHERE c.patch_status = 'stale_patch_data') AS "Stale Devices",
+    COUNT(*) FILTER (WHERE c.patch_status = 'no_patch_data')    AS "Never Patched Devices"
 FROM classified c
 JOIN ninja_core.organizations o ON o.id = c.organization_id
 WHERE 1=1
@@ -1823,9 +1827,9 @@ LIMIT 20
 {_PCOV_CTE}
 SELECT
     o.name AS "Organization",
-    COUNT(*) FILTER (WHERE c.patch_status = 'active_patching')  AS "Recent Patch Activity",
-    COUNT(*) FILTER (WHERE c.patch_status = 'stale_patch_data') AS "Stale Patching",
-    COUNT(*) FILTER (WHERE c.patch_status = 'no_patch_data')    AS "Never Patched",
+    COUNT(*) FILTER (WHERE c.patch_status = 'active_patching')  AS "Recent Activity Devices",
+    COUNT(*) FILTER (WHERE c.patch_status = 'stale_patch_data') AS "Stale Devices",
+    COUNT(*) FILTER (WHERE c.patch_status = 'no_patch_data')    AS "Never Patched Devices",
     COUNT(*)                                                    AS "Total Devices",
     ROUND(
         COUNT(*) FILTER (WHERE c.patch_status = 'active_patching') * 100.0
@@ -1913,7 +1917,7 @@ def build_org_parameters(org_names: list[str]) -> list[dict]:
 ORG_OVERVIEW_CARDS = [
     {
         "key":     "org_active_devices",
-        "name":    "Active Windows Devices",
+        "name":    "Active Devices",
         "display": "scalar",
         "row": 0, "col": 0, "size_x": 6, "size_y": 4,
         "template_tags":  _ORG_TAGS,

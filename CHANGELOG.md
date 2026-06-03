@@ -2,6 +2,15 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.10.2] — 2026-06-03
+
+### Fixed
+- Fixed the **Clients Needing Attention** organization click on
+  **Ninja — Patch Command Center** by restoring a stable lowercase
+  `organization` SQL alias for Metabase's table-column click behavior.
+- Clarified mixed-unit table columns so patch counts say `Patches`
+  and device counts say `Devices`.
+
 ## [0.10.1] — 2026-06-03
 
 ### Fixed
@@ -31,7 +40,7 @@ All notable changes to this project follow [Semantic Versioning](https://semver.
   org-scoped KPIs plus queues for failed patches, manual/delayed
   patches, stale/never-patched devices, and reboot attention.
 - Dashboard labels and visible table columns now use operator-facing
-  terminology: `Active Windows Devices`, `Approved Patches`, `Manual
+  terminology: `Active Devices`, `Approved Patches`, `Manual
   Approval`, `Delayed Install`, `Failed Patches`, `Recent Patch
   Activity`, `Stale Patching`, `Never Patched`, `Device Type`,
   `Operating System`, `Patching Status`, and `Install Results`.

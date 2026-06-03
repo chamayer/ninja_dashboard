@@ -5,6 +5,26 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-03 — v0.10.2 Command Center org click fix
+
+**Done:**
+- Investigated **Clients Needing Attention** on **Ninja — Patch
+  Command Center** where clicking a client name did nothing.
+- Restored the stable lowercase `organization` SQL alias and click
+  source for that table. Metabase's per-column click behavior is more
+  reliable with stable source column names than with quoted display
+  aliases containing spaces/capitalization.
+- Clarified mixed-unit columns in attention/status tables: patch counts
+  now say `Patches`, and device counts now say `Devices`.
+- Shortened the visible dashboard label from `Active Windows Devices`
+  to `Active Devices`; the underlying dashboard population remains
+  Windows-only.
+
+**Validation:**
+- `python -m compileall ingest` passes.
+- Dashboard definition check confirms the card maps the
+  `organization` column to **Ninja — Org Overview** with `p_org`.
+
 ## 2026-06-03 — v0.10.1 stale patching threshold
 
 **Done:**
@@ -37,7 +57,7 @@ were made, what's pending. Useful for resuming interrupted work.
   Drilldown, Patch Detail, and Patching Status.
 - Reviewed dashboard terminology and replaced raw/technical labels
   with operator-facing terms:
-  `Active Windows Devices`, `Approved Patches`, `Manual Approval`,
+  `Active Devices`, `Approved Patches`, `Manual Approval`,
   `Delayed Install`, `Failed Patches`, `Recent Patch Activity`,
   `Stale Patching`, `Never Patched`, `Device Type`,
   `Operating System`, `Patching Status`, and `Install Results`.
