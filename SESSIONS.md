@@ -5,6 +5,24 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-04 — v0.13.1 Trends dashboard
+
+**Done:**
+- New DASH_TRENDS = "Ninja — Trends" dashboard with 5 time-series
+  cards: installs/day, failures/day, reboots/day, active devices/
+  day (line), and currently-MANUAL patches by age week.
+- Trends placed in nav order between Device Status and Patch
+  Detail.
+- All cards take a single "Timeline window (days)" parameter
+  defaulting to 90 (except the MANUAL-age card which is a
+  snapshot of current state).
+- No schema changes — every metric is derived from existing
+  timestamps (installed_at, activity_time, snapshot_at,
+  first_observed_at).
+
+**Validation:**
+- `python -m py_compile` passes.
+
 ## 2026-06-04 — v0.13.0 Command Center: awaiting-reboot + fleet activity feed
 
 **Done:**

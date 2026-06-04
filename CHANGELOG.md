@@ -2,6 +2,22 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.13.1] — 2026-06-04
+
+### Added
+- **New Ninja — Trends dashboard.** Time-series rollups derived
+  from the timestamps we already capture (no schema changes). Five
+  cards:
+    - Patch Installs per Day (bar, last N days)
+    - Failed Install Attempts per Day (bar, red)
+    - System Reboots per Day (bar)
+    - Active Devices Seen per Day (line, from device_snapshots)
+    - Currently-MANUAL Patches by Age (bar by week
+      first_observed_at — shows how stale the admin queue is)
+  Single "Timeline window (days)" filter, default 90.
+- **Trends added to the nav bar** between Device Status and Patch
+  Detail.
+
 ## [0.13.0] — 2026-06-04
 
 ### Added

@@ -65,6 +65,7 @@ DASH_ORG         = "Ninja — Org Overview"
 DASH_DETAIL      = "Ninja — Patch Detail (Filterable)"
 DASH_DRILLDOWN   = "Ninja — Device Drilldown"
 DASH_PCOV        = "Ninja — Device Patching Status"
+DASH_TRENDS      = "Ninja — Trends"
 
 DEFAULT_STALE_PATCH_DAYS = 35
 
@@ -2711,6 +2712,172 @@ ORDER BY d.last_contact DESC
 ]
 
 
+# ── Trends dashboard ────────────────────────────────────────────────
+# Time-series rollups derived from the historical timestamps we
+# already capture: install_outcome.installed_at (per install attempt),
+# activities.activity_time (per event), device_snapshots.snapshot_at
+# (hourly device check-in record). No new schema needed.
+
+PARAM_TRENDS_DAYS = "p_trends_days"
+
+_TRENDS_TAGS = {
+    "days": {
+        "id": "tt_trends_days", "name": "days",
+        "display-name": "Timeline window (days)",
+        "type": "number", "default": "90", "required": True,
+    },
+}
+
+_TRENDS_PARAM_MAPPINGS = {
+    PARAM_TRENDS_DAYS: ["variable", ["template-tag", "days"]],
+}
+
+
+def build_trends_parameters() -> list[dict]:
+    return [
+        _param_number(PARAM_TRENDS_DAYS, "Timeline window (days)", "days", 90),
+    ]
+
+
+TRENDS_CARDS = [
+    {
+        "key":     "trends_installs_daily",
+        "name":    "Patch Installs per Day",
+        "display": "bar",
+        "row": 0, "col": 0, "size_x": 12, "size_y": 8,
+        "viz_settings": {
+            "graph.dimensions": ["Day"],
+            "graph.metrics":    ["Installs"],
+            "graph.show_values": False,
+        },
+        "template_tags":  _TRENDS_TAGS,
+        "param_mappings": _TRENDS_PARAM_MAPPINGS,
+        "query": """
+SELECT
+    DATE_TRUNC('day', installed_at)::date AS "Day",
+    COUNT(*)                              AS "Installs"
+FROM ninja_patches.patch_facts
+WHERE fact_type = 'install_outcome'
+  AND status    = 'INSTALLED'
+  AND installed_at IS NOT NULL
+  AND installed_at > NOW() - (INTERVAL '1 day' * {{days}})
+GROUP BY 1
+ORDER BY 1
+""",
+    },
+    {
+        "key":     "trends_failures_daily",
+        "name":    "Failed Install Attempts per Day",
+        "display": "bar",
+        "row": 0, "col": 12, "size_x": 12, "size_y": 8,
+        "viz_settings": {
+            "graph.dimensions": ["Day"],
+            "graph.metrics":    ["Failures"],
+            "graph.show_values": False,
+            "series_settings": {
+                "Failures": {"color": "#c62828"},
+            },
+        },
+        "template_tags":  _TRENDS_TAGS,
+        "param_mappings": _TRENDS_PARAM_MAPPINGS,
+        "query": """
+SELECT
+    DATE_TRUNC('day', installed_at)::date AS "Day",
+    COUNT(*)                              AS "Failures"
+FROM ninja_patches.patch_facts
+WHERE fact_type = 'install_outcome'
+  AND status    = 'FAILED'
+  AND installed_at IS NOT NULL
+  AND installed_at > NOW() - (INTERVAL '1 day' * {{days}})
+GROUP BY 1
+ORDER BY 1
+""",
+    },
+    {
+        "key":     "trends_reboots_daily",
+        "name":    "System Reboots per Day",
+        "display": "bar",
+        "row": 8, "col": 0, "size_x": 12, "size_y": 8,
+        "viz_settings": {
+            "graph.dimensions": ["Day"],
+            "graph.metrics":    ["Reboots"],
+            "graph.show_values": False,
+        },
+        "template_tags":  _TRENDS_TAGS,
+        "param_mappings": _TRENDS_PARAM_MAPPINGS,
+        "query": """
+SELECT
+    DATE_TRUNC('day', activity_time)::date AS "Day",
+    COUNT(*)                               AS "Reboots"
+FROM ninja_activities.activities
+WHERE activity_type = 'SYSTEM_REBOOTED'
+  AND activity_time > NOW() - (INTERVAL '1 day' * {{days}})
+GROUP BY 1
+ORDER BY 1
+""",
+    },
+    {
+        "key":     "trends_active_devices",
+        "name":    "Active Devices Seen per Day",
+        "display": "line",
+        "row": 8, "col": 12, "size_x": 12, "size_y": 8,
+        "viz_settings": {
+            "graph.dimensions": ["Day"],
+            "graph.metrics":    ["Active Devices"],
+            "graph.show_values": False,
+        },
+        "template_tags":  _TRENDS_TAGS,
+        "param_mappings": _TRENDS_PARAM_MAPPINGS,
+        # Daily distinct device count from device_snapshots — answers
+        # "how many devices were checking in on day D?". Useful for
+        # spotting fleet drops (e.g. agent rollout regression).
+        "query": """
+SELECT
+    DATE_TRUNC('day', snapshot_at)::date AS "Day",
+    COUNT(DISTINCT device_id)            AS "Active Devices"
+FROM ninja_core.device_snapshots
+WHERE snapshot_at > NOW() - (INTERVAL '1 day' * {{days}})
+GROUP BY 1
+ORDER BY 1
+""",
+    },
+    {
+        "key":     "trends_manual_age",
+        "name":    "Currently-MANUAL Patches by Age",
+        "display": "bar",
+        "row": 16, "col": 0, "size_x": 24, "size_y": 8,
+        "viz_settings": {
+            "graph.dimensions": ["Week First Seen"],
+            "graph.metrics":    ["MANUAL Patches"],
+            "graph.show_values": False,
+            "series_settings": {
+                "MANUAL Patches": {"color": "#f9a825"},
+            },
+        },
+        # No filter on the days param — this is a snapshot of the
+        # current MANUAL backlog grouped by when each patch first
+        # showed up in MANUAL state. Shows how stale the admin queue
+        # is. Older bars = patches admins have been ignoring longer.
+        "query": """
+WITH current_state AS (
+    SELECT DISTINCT ON (device_id, patch_uid)
+        device_id, patch_uid, status, first_observed_at
+    FROM ninja_patches.patch_facts
+    WHERE fact_type = 'patch_state'
+    ORDER BY device_id, patch_uid, last_observed_at DESC, id DESC
+)
+SELECT
+    DATE_TRUNC('week', first_observed_at)::date AS "Week First Seen",
+    COUNT(*)                                    AS "MANUAL Patches"
+FROM current_state
+WHERE status = 'MANUAL'
+GROUP BY 1
+ORDER BY 1
+""",
+    },
+]
+
+
 def build_dashboards(
     org_names: list[str], os_families: list[str], device_names: list[str],
 ) -> list[dict]:
@@ -2765,6 +2932,11 @@ def build_dashboards(
             "name":       DASH_PCOV,
             "parameters": build_pcov_parameters(org_names, os_families),
             "cards":      PCOV_CARDS,
+        },
+        {
+            "name":       DASH_TRENDS,
+            "parameters": build_trends_parameters(),
+            "cards":      TRENDS_CARDS,
         },
     ]
 
@@ -2922,12 +3094,16 @@ def _upsert_dashboard(
 
 NAV_HEIGHT = 2  # rows reserved at top of every dashboard for the nav bar
 SECTION_HEADER_HEIGHT = 1  # rows each section header markdown card occupies
-NAV_ORDER = [DASH_COMMAND, DASH_OVERVIEW, DASH_ORG, DASH_PCOV, DASH_DETAIL, DASH_DRILLDOWN]
+NAV_ORDER = [
+    DASH_COMMAND, DASH_OVERVIEW, DASH_ORG, DASH_PCOV,
+    DASH_TRENDS, DASH_DETAIL, DASH_DRILLDOWN,
+]
 NAV_DISPLAY_NAMES = {
     DASH_COMMAND:   "Command Center",
     DASH_OVERVIEW:  "Overall Status",
     DASH_ORG:       "Org Overview",
     DASH_PCOV:      "Device Status",
+    DASH_TRENDS:    "Trends",
     DASH_DETAIL:    "Patch Detail",
     DASH_DRILLDOWN: "Device Drilldown",
 }
