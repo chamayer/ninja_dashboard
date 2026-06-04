@@ -5,6 +5,30 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-04 — v0.13.3 scalar alert coloring
+
+**Done:**
+- New `_alert_color()` helper builds the column_formatting JSON
+  for a single threshold rule.
+- `_SCALAR_ALERT_RULES` dict declares which card keys get which
+  color rules (red for failed/never-patched, amber for
+  stalled/manual/reboot).
+- `_apply_scalar_alerts()` post-process step walks each card list
+  after definition and merges the rules into each card's
+  viz_settings.column_settings.
+
+**Honest caveat:**
+- First time provisioning Metabase `column_formatting` via API in
+  this codebase. JSON shape from docs; varies by Metabase version.
+  If a scalar shows no color after rebuild, that's where to look.
+
+**Deferred:**
+- Patch Compliance range coloring (red < 80% / amber 80-95% /
+  green ≥ 95%) — start with simple "non-zero = alert" first.
+
+**Validation:**
+- `python -m py_compile` passes.
+
 ## 2026-06-04 — v0.13.2 backfill CLI + dashboard JSON export
 
 **Done:**

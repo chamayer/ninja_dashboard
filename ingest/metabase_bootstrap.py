@@ -130,6 +130,42 @@ _DRILLDOWN_ACTIVITY_CODES_SQL = ", ".join(
     f"'{c}'" for c in _DRILLDOWN_ACTIVITY_CODES
 )
 
+
+def _alert_color(
+    col: str, operator: str, value: float, color: str,
+) -> dict:
+    """Build a viz_settings.column_settings entry that paints a scalar
+    cell `color` when the column's value satisfies the threshold.
+    Metabase's `column_formatting` rule, the same shape used for table
+    conditional formatting — it also takes effect on single-value
+    scalar cards.
+
+    Honest caveat: this is the first time we're shipping
+    column_formatting via API in this codebase. The JSON shape comes
+    from Metabase docs and community examples; varies slightly by
+    version. If a scalar card shows no color, that's the first thing
+    to check."""
+    return {
+        f'["name","{col}"]': {
+            "column_formatting": [
+                {
+                    "columns":       [col],
+                    "type":          "single",
+                    "operator":      operator,
+                    "value":         value,
+                    "color":         color,
+                    "highlight_row": False,
+                }
+            ],
+        },
+    }
+
+
+# Standard alert colors.
+COLOR_ALERT_RED   = "#c62828"
+COLOR_ALERT_AMBER = "#f9a825"
+COLOR_OK_GREEN    = "#2e7d32"
+
 OS_FAMILY_D = OS_FAMILY_SQL.format(alias="d").strip()
 OS_FAMILY_C = OS_FAMILY_SQL.format(alias="c").strip()
 PATCH_ACTIVITY_LABEL_C = PATCH_ACTIVITY_LABEL_SQL.format(expr="c.patch_status").strip()
@@ -2876,6 +2912,57 @@ ORDER BY 1
 """,
     },
 ]
+
+
+# ── Scalar alert coloring (post-process) ────────────────────────────
+# Rather than baking column_formatting into each of the ~17 attention
+# scalars one by one, declare alert rules in a single table and mutate
+# the card specs in place. Keyed by card key so the rules are obvious.
+# Each rule = (SQL output column name, operator, threshold, hex color).
+
+_SCALAR_ALERT_RULES: dict[str, tuple[str, str, float, str]] = {
+    # Red alerts — actionable failures / silent devices.
+    "cmd_failed":      ("patches", ">", 0, COLOR_ALERT_RED),
+    "patches_failed":  ("failed",  ">", 0, COLOR_ALERT_RED),
+    "org_failed":      ("patches", ">", 0, COLOR_ALERT_RED),
+    "cmd_never":       ("devices", ">", 0, COLOR_ALERT_RED),
+    "ov_pcov_none":    ("no_data", ">", 0, COLOR_ALERT_RED),
+    "org_never":       ("devices", ">", 0, COLOR_ALERT_RED),
+    "pcov_none":       ("no_data", ">", 0, COLOR_ALERT_RED),
+    # Amber alerts — attention soon.
+    "cmd_stale":       ("devices", ">", 0, COLOR_ALERT_AMBER),
+    "ov_pcov_stale":   ("stale",   ">", 0, COLOR_ALERT_AMBER),
+    "org_stale":       ("devices", ">", 0, COLOR_ALERT_AMBER),
+    "pcov_stale":      ("stale",   ">", 0, COLOR_ALERT_AMBER),
+    "cmd_manual":      ("patches", ">", 0, COLOR_ALERT_AMBER),
+    "patches_manual":  ("manual",  ">", 0, COLOR_ALERT_AMBER),
+    "org_manual":      ("patches", ">", 0, COLOR_ALERT_AMBER),
+    "cmd_reboot":      ("devices", ">", 0, COLOR_ALERT_AMBER),
+    "overall_reboot":  ("devices", ">", 0, COLOR_ALERT_AMBER),
+    "org_reboot":      ("devices", ">", 0, COLOR_ALERT_AMBER),
+}
+
+
+def _apply_scalar_alerts(*card_lists: list[dict]) -> None:
+    """Walk each card list, find scalars matching a rule by key, and
+    merge an `_alert_color` column_settings entry into their
+    viz_settings dict. Idempotent — re-running replaces the rule."""
+    for cards in card_lists:
+        for card in cards:
+            rule = _SCALAR_ALERT_RULES.get(card.get("key"))
+            if rule is None:
+                continue
+            col, op, val, color = rule
+            viz = dict(card.get("viz_settings") or {})
+            col_settings = dict(viz.get("column_settings") or {})
+            col_settings.update(_alert_color(col, op, val, color))
+            viz["column_settings"] = col_settings
+            card["viz_settings"] = viz
+
+
+_apply_scalar_alerts(
+    COMMAND_CARDS, OVERVIEW_CARDS, ORG_OVERVIEW_CARDS, PCOV_CARDS,
+)
 
 
 def build_dashboards(

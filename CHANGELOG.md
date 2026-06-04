@@ -2,6 +2,29 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.13.3] — 2026-06-04
+
+### Added
+- **Scalar background coloring** on attention-required tiles. Red
+  if non-zero on: Failed Patches (all 3), Never-Patched Devices
+  (all 4). Amber if non-zero on: Stalled Devices (all 4), Manual
+  Approval (all 3), Needs Reboot (all 3).
+- Implemented as a post-process step (`_apply_scalar_alerts`) over
+  the existing card lists — declares rules in a single dict keyed
+  by card key, then mutates each matching card's
+  `viz_settings.column_settings.column_formatting`. Single source
+  of truth for which scalars are alert-colored; easy to extend.
+
+### Notes / honest caveats
+- First time this codebase ships `column_formatting` JSON via the
+  Metabase API. JSON shape from Metabase docs + community
+  examples; varies slightly by version. If a scalar card shows no
+  color post-deploy, that's the first thing to check.
+- Patch Compliance ranges (green / amber / red by threshold) not
+  yet added — wanted to start with the simpler "non-zero = alert"
+  pattern. Can extend the rules table to support range coloring
+  next.
+
 ## [0.13.2] — 2026-06-04
 
 ### Added
