@@ -176,7 +176,7 @@ _(empty — drop free-form items here)_
 
 - [x] Split the operator dashboard KPIs into `Actively patching %`
       and `Fully patched devices %`, while keeping the Command Center
-      count cards. Commit `TBD`.
+      count cards. Commit `52c22e6`.
 
 ### v0.14.6 — 2026-06-04
 

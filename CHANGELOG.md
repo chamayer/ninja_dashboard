@@ -15,7 +15,7 @@ All notable changes to this project follow [Semantic Versioning](https://semver.
 - **Trend cards were realigned to the same operator split.**
   Trends now show `Fully patched devices % per Day` and `Patching
   Devices per Day` instead of the old compliance/progress wording.
-- Commit: `TBD`
+- Commit: `52c22e6`
 
 ## [0.14.6] — 2026-06-04
 

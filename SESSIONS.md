@@ -21,7 +21,8 @@ active devices are patching, and how many are fully patched.
 - `CONTEXT.md` terminology updated to match the new operator split.
 
 **Validation:**
-- Pending compile-check after the edit.
+- `python -m py_compile ingest/metabase_bootstrap.py` passes.
+- Commit `52c22e6` created for the operator KPI split.
 
 ## 2026-06-04 — v0.14.6 split device compliance from patch progress
 
