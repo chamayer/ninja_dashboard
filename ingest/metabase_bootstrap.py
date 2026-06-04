@@ -658,6 +658,7 @@ END
 PARAM_CMD_ORG   = "p_cmd_org"
 PARAM_CMD_CLASS = "p_cmd_class"
 PARAM_CMD_SEV   = "p_cmd_sev"
+PARAM_PATCHING_SCOPE = "p_patching_scope"
 
 _CMD_TAGS = {
     "org":         {"id": "tt_cmd_org",         "name": "org",         "display-name": "Organization", "type": "text"},
@@ -670,6 +671,8 @@ _CMD_TAGS = {
     },
     "severity":    {"id": "tt_cmd_severity",    "name": "severity",    "display-name": "Severity",     "type": "text"},
 }
+
+_PATCHING_SCOPE_OPTIONS = ["Included", "Excluded"]
 
 # Mapping used by device-context cards (no patch severity available).
 _CMD_PARAM_MAPPINGS = {
@@ -1858,7 +1861,6 @@ PARAM_CLASS   = "p_class"
 PARAM_SEV     = "p_severity"
 PARAM_OS      = "p_os"
 PARAM_KB      = "p_kb"
-PARAM_PATCHING_SCOPE = "p_patching_scope"
 PARAM_DAYS    = "p_days"
 PARAM_OUTCOME = "p_install_outcome"
 PARAM_DEVICE      = "p_device"
@@ -1873,7 +1875,6 @@ _NODE_CLASS_OPTIONS = ["Windows Workstation", "Windows Server"]
 _SEVERITY_OPTIONS = ["CRITICAL", "IMPORTANT", "OPTIONAL", "MODERATE", "LOW", "NONE"]
 _OUTCOME_OPTIONS = ["FAILED", "INSTALLED"]
 _OS_FAMILY_OPTIONS = ["Windows 11", "Windows 10", "Windows Server", "Other Windows", "Unknown"]
-_PATCHING_SCOPE_OPTIONS = ["Included", "Excluded"]
 
 
 def _param_dropdown(
