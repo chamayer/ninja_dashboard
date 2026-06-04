@@ -5,6 +5,31 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-04 — v0.14.3 fix device-card filters via mapping/tag parity
+
+**Why:** User reported Command Center / Overall / Org device
+cards don't honor filters even after v0.14.1 + v0.14.2 wired them.
+
+**Diagnosis:** Compared declared template tags vs
+`parameter_mappings` per card. Patch Detail (which works) has 8
+tags and 8 mappings — exact parity. CC / Overall / Org Overview /
+Trends device cards declared the FULL tag set but mapped only a
+subset (skipping severity). Pattern: mismatched cards silently
+break ALL filter binding, not just the missing one.
+
+**Fix:**
+- Replaced `_*_PARAM_MAPPINGS` with `_*_PARAM_MAPPINGS_FULL` on
+  every card on the four affected dashboards via four `replace_all`
+  edits.
+
+**Open:**
+- PCOV reports the same symptom but its tags == mappings == 5
+  already. Need to inspect actual Metabase API response if v0.14.3
+  doesn't resolve PCOV too. Will be v0.14.4 if necessary.
+
+**Validation:**
+- `python -m py_compile` passes.
+
 ## 2026-06-04 — v0.14.2 Overall + Trends filter expansion + Org multi-select
 
 **Done:**

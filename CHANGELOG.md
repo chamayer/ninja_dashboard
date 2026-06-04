@@ -2,6 +2,32 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.14.3] — 2026-06-04
+
+### Fixed
+- **Device-card filters now reach every card on Command Center,
+  Overall Patching Status, Org Overview, and Trends.** Bug pattern:
+  cards declared more template tags than their dashcard
+  `parameter_mappings` covered, and Metabase silently broke the
+  binding for the mapped parameters too. Patch Detail (which has
+  tags == mappings = 8) worked fine; the other dashboards' device
+  cards declared the FULL tag set but mapped only a subset
+  (skipping severity).
+- Resolution: every card on these four dashboards now uses the
+  `_*_PARAM_MAPPINGS_FULL` variant. Device cards have a severity
+  mapping declared even though their SQL never references
+  `{{severity}}` — Metabase handles that fine; the mapping exists
+  but does nothing.
+
+### Notes
+- Per the blueprint-first rule: `BLUEPRINT.md` written with audit
+  table comparing tags vs mappings per dashboard. Hypothesis
+  confirmed by the pattern: every dashboard with a mismatch had
+  the symptom; Patch Detail (matched) worked.
+- Device Patching Status (PCOV) tags and mappings already match
+  (5/5) yet user reports the same symptom. That's a separate
+  investigation in v0.14.4 if this fix doesn't resolve it.
+
 ## [0.14.2] — 2026-06-04
 
 ### Added

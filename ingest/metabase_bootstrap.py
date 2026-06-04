@@ -289,7 +289,7 @@ COMMAND_CARDS: list[dict[str, Any]] = [
         "display":        "scalar",
         "row": 0, "col": 0, "size_x": 6, "size_y": 4,
         "template_tags":  _CMD_TAGS,
-        "param_mappings": _CMD_PARAM_MAPPINGS,
+        "param_mappings": _CMD_PARAM_MAPPINGS_FULL,
         "click_behavior": {"target": DASH_DETAIL, "preset": {}},
         "query": f"""
 SELECT COUNT(*) AS devices
@@ -305,7 +305,7 @@ WHERE 1=1
         "display":        "scalar",
         "row": 0, "col": 6, "size_x": 6, "size_y": 4,
         "template_tags":  _CMD_TAGS,
-        "param_mappings": _CMD_PARAM_MAPPINGS,
+        "param_mappings": _CMD_PARAM_MAPPINGS_FULL,
         "click_behavior": {"target": DASH_PCOV, "preset": {"pcov_status": "Patching Devices"}},
         "query": f"""
 WITH last_install AS (
@@ -331,7 +331,7 @@ WHERE d.approval_status = 'APPROVED'
         "display":        "scalar",
         "row": 0, "col": 12, "size_x": 6, "size_y": 4,
         "template_tags":  _CMD_TAGS,
-        "param_mappings": _CMD_PARAM_MAPPINGS,
+        "param_mappings": _CMD_PARAM_MAPPINGS_FULL,
         "click_behavior": {"target": DASH_PCOV, "preset": {"pcov_status": "Stalled Devices"}},
         "query": f"""
 WITH last_install AS (
@@ -357,7 +357,7 @@ WHERE d.approval_status = 'APPROVED'
         "display":        "scalar",
         "row": 0, "col": 18, "size_x": 6, "size_y": 4,
         "template_tags":  _CMD_TAGS,
-        "param_mappings": _CMD_PARAM_MAPPINGS,
+        "param_mappings": _CMD_PARAM_MAPPINGS_FULL,
         "click_behavior": {"target": DASH_PCOV, "preset": {"pcov_status": "Never-Patched Devices"}},
         "query": f"""
 SELECT COUNT(*) AS devices
@@ -663,7 +663,7 @@ LIMIT 100
         "display":        "table",
         "row": 38, "col": 0, "size_x": 24, "size_y": 10,
         "template_tags":  _CMD_TAGS,
-        "param_mappings": _CMD_PARAM_MAPPINGS,
+        "param_mappings": _CMD_PARAM_MAPPINGS_FULL,
         "column_click_behaviors": {
             "organization": {"target": DASH_ORG,       "params": {"p_org": "organization"}},
             "device":       {"target": DASH_DRILLDOWN, "params": {"p_device": "device"}},
@@ -714,7 +714,7 @@ LIMIT 100
         "display":        "table",
         "row": 48, "col": 0, "size_x": 24, "size_y": 10,
         "template_tags":  _CMD_TAGS,
-        "param_mappings": _CMD_PARAM_MAPPINGS,
+        "param_mappings": _CMD_PARAM_MAPPINGS_FULL,
         "column_click_behaviors": {
             "organization": {"target": DASH_ORG,       "params": {"p_org": "organization"}},
             "device":       {"target": DASH_DRILLDOWN, "params": {"p_device": "device"}},
@@ -793,7 +793,7 @@ OVERVIEW_CARDS: list[dict[str, Any]] = [
         "display":        "scalar",
         "row": 0, "col": 0, "size_x": 18, "size_y": 4,
         "template_tags":  _OVERALL_TAGS,
-        "param_mappings": _OVERALL_PARAM_MAPPINGS,
+        "param_mappings": _OVERALL_PARAM_MAPPINGS_FULL,
         # Compliance formula (single source of truth — see
         # COMPLIANCE_MISSING_STATES at module top). REJECTED and
         # DELAYED excluded from both numerator and denominator.
@@ -850,7 +850,7 @@ FROM (
         "display":        "scalar",
         "row": 4, "col": 0, "size_x": 6, "size_y": 4,
         "template_tags":  _OVERALL_TAGS,
-        "param_mappings": _OVERALL_PARAM_MAPPINGS,
+        "param_mappings": _OVERALL_PARAM_MAPPINGS_FULL,
         "click_behavior": {"target": DASH_DETAIL, "preset": {}},
         "query": f"""
 SELECT COUNT(*) AS devices
@@ -975,7 +975,7 @@ WHERE lir.status = 'FAILED'
         "display":        "scalar",
         "row": 4, "col": 6, "size_x": 6, "size_y": 4,
         "template_tags":  _OVERALL_TAGS,
-        "param_mappings": _OVERALL_PARAM_MAPPINGS,
+        "param_mappings": _OVERALL_PARAM_MAPPINGS_FULL,
         "click_behavior": {
             "target": DASH_PCOV,
             "preset": {"pcov_status": "Patching Devices"},
@@ -1003,7 +1003,7 @@ WHERE d.approval_status = 'APPROVED'
         "display":        "scalar",
         "row": 4, "col": 12, "size_x": 6, "size_y": 4,
         "template_tags":  _OVERALL_TAGS,
-        "param_mappings": _OVERALL_PARAM_MAPPINGS,
+        "param_mappings": _OVERALL_PARAM_MAPPINGS_FULL,
         "click_behavior": {
             "target": DASH_PCOV,
             "preset": {"pcov_status": "Stalled Devices"},
@@ -1031,7 +1031,7 @@ WHERE d.approval_status = 'APPROVED'
         "display":         "scalar",
         "row": 4, "col": 18, "size_x": 6, "size_y": 4,
         "template_tags":  _OVERALL_TAGS,
-        "param_mappings": _OVERALL_PARAM_MAPPINGS,
+        "param_mappings": _OVERALL_PARAM_MAPPINGS_FULL,
         "click_behavior": {
             "target": DASH_PCOV,
             "preset": {"pcov_status": "Never-Patched Devices"},
@@ -1103,7 +1103,7 @@ ORDER BY "Patches" DESC
             "params": {"p_org": "organization"},
         },
         "template_tags":  _OVERALL_TAGS,
-        "param_mappings": _OVERALL_PARAM_MAPPINGS,
+        "param_mappings": _OVERALL_PARAM_MAPPINGS_FULL,
         # Compliance formula — see COMPLIANCE_MISSING_STATES at
         # module top. REJECTED/DELAYED excluded.
         "query": f"""
@@ -1140,7 +1140,7 @@ LIMIT 15
             },
         },
         "template_tags":  _OVERALL_TAGS,
-        "param_mappings": _OVERALL_PARAM_MAPPINGS,
+        "param_mappings": _OVERALL_PARAM_MAPPINGS_FULL,
         # "Patch Compliance" uses the canonical formula (see
         # COMPLIANCE_MISSING_STATES). The breakdown columns
         # (Approved / Manual / Delayed / Failed / Rejected) count
@@ -1206,7 +1206,7 @@ ORDER BY "Patch Compliance" ASC, "Total Patches" DESC
         "display":        "table",
         "row": 30, "col": 0, "size_x": 24, "size_y": 8,
         "template_tags":  _OVERALL_TAGS,
-        "param_mappings": _OVERALL_PARAM_MAPPINGS,
+        "param_mappings": _OVERALL_PARAM_MAPPINGS_FULL,
         "column_click_behaviors": {
             "device":       {"target": DASH_DRILLDOWN, "params": {"p_device": "device"}},
             "organization": {"target": DASH_ORG,       "params": {"p_org":    "organization"}},
@@ -2464,7 +2464,7 @@ ORG_OVERVIEW_CARDS = [
         "display": "scalar",
         "row": 4, "col": 0, "size_x": 6, "size_y": 4,
         "template_tags":  _ORG_TAGS,
-        "param_mappings": _ORG_PARAM_MAPPINGS,
+        "param_mappings": _ORG_PARAM_MAPPINGS_FULL,
         "query": f"""
 SELECT COUNT(*) AS devices
 FROM ninja_core.v_active_devices d
@@ -2479,7 +2479,7 @@ WHERE 1=1
         "display": "scalar",
         "row": 0, "col": 0, "size_x": 24, "size_y": 4,
         "template_tags":  _ORG_TAGS,
-        "param_mappings": _ORG_PARAM_MAPPINGS,
+        "param_mappings": _ORG_PARAM_MAPPINGS_FULL,
         # Canonical compliance formula (see COMPLIANCE_MISSING_STATES
         # at module top). REJECTED/DELAYED excluded.
         "query": f"""
@@ -2597,7 +2597,7 @@ WHERE cs.status = 'DELAYED'
         "display": "scalar",
         "row": 4, "col": 12, "size_x": 6, "size_y": 4,
         "template_tags":  _ORG_TAGS,
-        "param_mappings": _ORG_PARAM_MAPPINGS,
+        "param_mappings": _ORG_PARAM_MAPPINGS_FULL,
         "query": f"""
 WITH last_install AS (
     SELECT device_id, MAX(installed_at) AS last_install_at
@@ -2622,7 +2622,7 @@ WHERE d.approval_status = 'APPROVED'
         "display": "scalar",
         "row": 4, "col": 18, "size_x": 6, "size_y": 4,
         "template_tags":  _ORG_TAGS,
-        "param_mappings": _ORG_PARAM_MAPPINGS,
+        "param_mappings": _ORG_PARAM_MAPPINGS_FULL,
         "query": f"""
 SELECT COUNT(*) AS devices
 FROM ninja_core.devices d
@@ -2643,7 +2643,7 @@ WHERE d.approval_status = 'APPROVED'
         "display": "scalar",
         "row": 4, "col": 6, "size_x": 6, "size_y": 4,
         "template_tags":  _ORG_TAGS,
-        "param_mappings": _ORG_PARAM_MAPPINGS,
+        "param_mappings": _ORG_PARAM_MAPPINGS_FULL,
         "query": f"""
 WITH last_install AS (
     SELECT device_id, MAX(installed_at) AS last_install_at
@@ -2708,7 +2708,7 @@ ORDER BY "Patches" DESC
         "row": 12, "col": 8, "size_x": 8, "size_y": 8,
         "viz_settings": {"graph.dimensions": ["Device Type"], "graph.metrics": ["Patch Compliance"]},
         "template_tags":  _ORG_TAGS,
-        "param_mappings": _ORG_PARAM_MAPPINGS,
+        "param_mappings": _ORG_PARAM_MAPPINGS_FULL,
         "click_behavior": {"target": DASH_DETAIL, "params": {"p_class": "Device Type"}},
         # Canonical compliance formula (see COMPLIANCE_MISSING_STATES).
         "query": f"""
@@ -2736,7 +2736,7 @@ ORDER BY "Patch Compliance" ASC
         "row": 12, "col": 16, "size_x": 8, "size_y": 8,
         "viz_settings": {"graph.dimensions": ["Operating System Family"], "graph.metrics": ["Patch Compliance"]},
         "template_tags":  _ORG_TAGS,
-        "param_mappings": _ORG_PARAM_MAPPINGS,
+        "param_mappings": _ORG_PARAM_MAPPINGS_FULL,
         "click_behavior": {"target": DASH_DETAIL, "params": {"p_os": "Operating System Family"}},
         # Canonical compliance formula (see COMPLIANCE_MISSING_STATES).
         "query": f"""
@@ -2852,7 +2852,7 @@ LIMIT 100
         "display": "table",
         "row": 40, "col": 0, "size_x": 24, "size_y": 8,
         "template_tags":  _ORG_TAGS,
-        "param_mappings": _ORG_PARAM_MAPPINGS,
+        "param_mappings": _ORG_PARAM_MAPPINGS_FULL,
         # Lowercase snake_case aliases on every clickable column.
         # Inert "Last Contact" placeholder removed — same v0.11.3
         # lesson as Fleet Overview's needs_reboot (inerts misaligned
@@ -3004,7 +3004,7 @@ ORDER BY 1
             "graph.show_values": False,
         },
         "template_tags":  _TRENDS_TAGS,
-        "param_mappings": _TRENDS_PARAM_MAPPINGS,
+        "param_mappings": _TRENDS_PARAM_MAPPINGS_FULL,
         "query": f"""
 SELECT
     DATE_TRUNC('day', a.activity_time)::date AS "Day",
@@ -3030,7 +3030,7 @@ ORDER BY 1
             "graph.show_values": False,
         },
         "template_tags":  _TRENDS_TAGS,
-        "param_mappings": _TRENDS_PARAM_MAPPINGS,
+        "param_mappings": _TRENDS_PARAM_MAPPINGS_FULL,
         # Daily distinct device count from device_snapshots — answers
         # "how many devices were checking in on day D?". Useful for
         # spotting fleet drops (e.g. agent rollout regression).
