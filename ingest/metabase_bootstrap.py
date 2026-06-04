@@ -1880,6 +1880,11 @@ SELECT
     d.manufacturer         AS "Manufacturer",
     d.model                AS "Model",
     ls.last_contact        AS "Last Contact",
+    CASE
+        WHEN ls.offline IS NULL THEN 'Unknown'
+        WHEN ls.offline THEN 'No'
+        ELSE 'Yes'
+    END AS "Online?",
     ls.last_boot           AS "Last Boot",
     ls.needs_reboot        AS "Needs Reboot",
     ls.maintenance_status  AS "Maintenance Status"

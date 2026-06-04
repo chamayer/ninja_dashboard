@@ -2,6 +2,15 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.14.5] — 2026-06-04
+
+### Added
+- **Device Summary now shows current reachability next to `Last Contact`.**
+  Added an `Online?` column derived from the latest snapshot's
+  `offline` flag, rendered as `Yes` / `No` / `Unknown`. This makes the
+  difference between "recently contacted" and "currently reachable"
+  explicit in the device detail view.
+
 ## [0.14.4] — 2026-06-04
 
 ### Fixed

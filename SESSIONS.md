@@ -5,6 +5,20 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-04 — v0.14.5 add device reachability to Device Summary
+
+**Why:** User wanted current up/down state surfaced next to `Last
+Contact` in the Device Summary table so the difference between
+freshness and reachability is visible at a glance.
+
+**Done:**
+- Added `Online?` to the Device Summary table in Device Drilldown.
+- Value is derived from the latest snapshot's `offline` flag and
+  rendered as `Yes` / `No` / `Unknown`.
+
+**Validation:**
+- Pending compile-check after the edit.
+
 ## 2026-06-04 — v0.14.4 stop Metabase card reuse by title
 
 **Why:** v0.14.3 fixed the visible tag/mapping mismatch, but the

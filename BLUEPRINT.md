@@ -7,63 +7,48 @@
 
 ## Goal
 
-Stop Metabase card reuse across dashboards so each dashboard keeps
-its own card SQL, template tags, and filter wiring.
+Add current device reachability to the Device Summary table as an
+`Online?` column next to `Last Contact`.
 
 ## Why
 
-Operator-reported. v0.14.3 fixed the obvious tag/mapping parity
-mismatch, but the real issue appears to be shared Metabase cards:
-cards are currently upserted by display name, and multiple dashboards
-reuse titles like `Active Devices` / `Current Patch State`. That lets
-later dashboards overwrite earlier card definitions.
+Operator requested it after clarifying that `Active Devices` is based
+on last contact, not the current up/down signal. The device summary
+table already shows `Last Contact`; surfacing reachability alongside
+it makes the distinction obvious.
 
 ## Investigation
 
-Confirmed duplicate card titles across dashboards:
-
-- `Active Devices`
-- `Current Patch State`
-- `Patching Devices`
-- `Stalled Devices`
-- `Never-Patched Devices`
-- `Failed Patches`
-
-That means title-based upserts can reuse the wrong Metabase card and
-leave a dashboard pointing at stale SQL / tag wiring.
+`ninja_core.v_active_devices` already carries the latest snapshot's
+`offline` flag, so the SQL can derive an `Online?` display without a
+schema change.
 
 ## Scope
 
 **In:**
-- Add a hidden stable card identity and use it for Metabase card
-  upserts.
-- Keep visible card titles unchanged.
-- Update release docs for the new fix.
+- Add `Online?` to Device Summary.
+- Use a clear yes/no/unknown display derived from `offline`.
+- Update release docs.
 
 **Out / separate investigation:**
-- Any live Metabase cleanup of already-orphaned duplicate cards.
+- Any broader rollout to other tables unless the user asks.
 
 ## Files to change
 
 - `ingest/metabase_bootstrap.py`
-    - Add a stable hidden card UID and make `_upsert_card()` use it
-      instead of title-only matching.
-    - Include the UID in card `description` so future runs can find
-      the right Metabase object.
-- `VERSION`
-    - Bump to `0.14.4`.
+    - Add the `Online?` column to the Device Summary query.
 - `CHANGELOG.md`
-    - Document the card-identity fix.
+    - Document the new reachability column.
 - `SESSIONS.md`
-    - Record the diagnosis and fix.
+    - Record the dashboard change.
 
 ## Steps
 
-1. Patch Metabase bootstrap card identity and lookup logic.
+1. Patch the Device Summary SQL.
 2. Compile-check.
-3. Bump VERSION → 0.14.4, update CHANGELOG / SESSIONS.
+3. Update CHANGELOG / SESSIONS.
 4. Commit and push, then report the short hash.
 
 ## Status
 
-done — committed as 2779967
+in progress
