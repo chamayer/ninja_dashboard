@@ -10,6 +10,7 @@ All notable changes to this project follow [Semantic Versioning](https://semver.
   `offline` flag, rendered as `Yes` / `No` / `Unknown`. This makes the
   difference between "recently contacted" and "currently reachable"
   explicit in the device detail view.
+- Commit: `fdaca32`
 
 ## [0.14.4] — 2026-06-04
 

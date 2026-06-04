@@ -36,6 +36,7 @@ dashboards could overwrite earlier cards.
 
 **Validation:**
 - `python -m py_compile` passes.
+- Commit `fdaca32` created for the Device Summary change.
 - Commit `2779967` pushed to `origin` and `a-m-rose`.
 
 ## 2026-06-04 — v0.14.3 fix device-card filters via mapping/tag parity
