@@ -2371,10 +2371,9 @@ SELECT
     ls.last_boot           AS "Last Boot",
     ls.needs_reboot        AS "Needs Reboot",
     ls.maintenance_status  AS "Maintenance Status"
-FROM ninja_core.devices d
+FROM ninja_core.v_active_devices d
 JOIN ninja_core.organizations o ON o.id = d.organization_id
 LEFT JOIN latest_snap ls ON ls.device_id = d.id
-WHERE d.approval_status = 'APPROVED'
 {_DEVICE_FILTER}
 ORDER BY d.system_name
 LIMIT 100
