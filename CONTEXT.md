@@ -135,6 +135,48 @@ See `REQUIREMENTS.md` §4 for the full schema.
 
 Dashboards should split MANUAL from DELAYED, not lump them — they
 mean very different things operationally.
+
+## Patch Compliance formula
+
+Single source of truth for every "Patch Compliance" card across
+all dashboards:
+
+```
+Patch Compliance = installed / (installed + missing)
+```
+
+where:
+
+- **installed** = distinct `(device, patch)` pairs that have at
+  least one `fact_type='install_outcome' AND status='INSTALLED'`
+  row in `ninja_patches.patch_facts`.
+- **missing** = distinct `(device, patch)` whose current
+  `patch_state` is one of `APPROVED`, `MANUAL`, `FAILED`, `PENDING`.
+
+**REJECTED** and **DELAYED** are **excluded** from both numerator
+and denominator:
+
+- `REJECTED` — explicit opt-out per Ninja policy. "We chose not to
+  install this on this device" is not a compliance gap.
+- `DELAYED` — sitting in the org's configured 30-day auto-approval
+  window. Not yet eligible to install. Counting it as missing
+  would punish the operator for the policy they intentionally
+  configured.
+
+Counted as missing rather than excluded:
+
+- `APPROVED` — queued; should install on the next window. The
+  reason it hasn't yet is operational, not policy.
+- `MANUAL` — needs admin attention. Counts against the MSP.
+- `FAILED` — install attempted and failed. Counts against the MSP.
+- `PENDING` — known about, no decision yet. Counts as missing
+  until it moves to one of the resolved states.
+
+Implementation: the reusable `_COMPLIANCE_CTES` block at the top
+of `ingest/metabase_bootstrap.py` defines `installed_patches`,
+`missing_patches`, and `universe` CTEs that every compliance card
+joins onto. Changing the formula = editing
+`COMPLIANCE_MISSING_STATES` in one place.
 - **Plain append snapshots** for `device_snapshots` only — its
   volatile fields (`last_contact`) change every minute, so hash-dedup
   would never match. History pruned by a retention job.

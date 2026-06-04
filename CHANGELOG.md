@@ -2,6 +2,41 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.13.7] — 2026-06-04
+
+### Changed
+- **Patch Compliance formula clarified and centralized.** REJECTED
+  and DELAYED patches are now **excluded** from both numerator and
+  denominator on every compliance card. REJECTED is an explicit
+  opt-out from policy; DELAYED is sitting in the org's configured
+  30-day auto-approval window — both are conscious decisions, not
+  coverage gaps.
+- New single source of truth in `metabase_bootstrap.py`:
+  `COMPLIANCE_MISSING_STATES = ("APPROVED", "MANUAL", "FAILED",
+  "PENDING")` + `_COMPLIANCE_CTES` reusable SQL fragment. All 6
+  compliance cards (`overall_compliance`, `org_compliance`,
+  `compliance_worst`, `compliance_all`, `org_device_type`,
+  `org_os_family`) now use the same formula via the same CTE
+  block.
+- `compliance_all` table gained a "Compliance-Scope Patches" column
+  showing the denominator (installed + missing) alongside the
+  existing "Total Patches" (every (device, patch) we've ever seen,
+  including REJECTED/DELAYED). The difference between the two
+  columns is the count of REJECTED + DELAYED rows — operator can
+  audit at a glance.
+
+### Documentation
+- New "Patch Compliance formula" section in `CONTEXT.md` explains
+  the formula, what counts as missing vs excluded, and where the
+  implementation lives.
+
+### Process
+- **New `BLUEPRINT.md` per project.** Per the new Agent Work Rule
+  #5 added to `Development/DEVELOPMENT.md`, every non-trivial task
+  starts with a blueprint written to `BLUEPRINT.md` at the project
+  root (overwritten per task). Lets interrupted sessions resume
+  cold. This commit is the first one to follow the rule.
+
 ## [0.13.6] — 2026-06-04
 
 ### Added

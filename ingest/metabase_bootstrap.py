@@ -166,6 +166,53 @@ COLOR_ALERT_RED   = "#c62828"
 COLOR_ALERT_AMBER = "#f9a825"
 COLOR_OK_GREEN    = "#2e7d32"
 
+
+# ── Patch Compliance formula (single source of truth) ──────────────
+# Patch Compliance = installed / (installed + missing)
+#
+# installed = distinct (device, patch) with at least one
+#             fact_type='install_outcome' AND status='INSTALLED'.
+# missing   = distinct (device, patch) whose current patch_state is
+#             in COMPLIANCE_MISSING_STATES.
+#
+# REJECTED and DELAYED are CONSCIOUS DECISIONS (REJECTED = explicit
+# opt-out from Ninja policy; DELAYED = sitting in the org's
+# configured 30-day auto-approval window per the patch status
+# glossary) and are EXCLUDED from both numerator and denominator.
+# Counting them would understate how well the MSP is doing.
+#
+# Every "Patch Compliance" card across all dashboards uses the
+# universe CTE pattern below (see _COMPLIANCE_CTES) so the formula
+# stays consistent.
+COMPLIANCE_MISSING_STATES = ("APPROVED", "MANUAL", "FAILED", "PENDING")
+COMPLIANCE_MISSING_SQL = ", ".join(
+    f"'{s}'" for s in COMPLIANCE_MISSING_STATES
+)
+
+_COMPLIANCE_CTES = f"""
+WITH installed_patches AS (
+    SELECT DISTINCT device_id, patch_uid
+    FROM ninja_patches.patch_facts
+    WHERE fact_type = 'install_outcome' AND status = 'INSTALLED'
+),
+current_patch_state AS (
+    SELECT DISTINCT ON (device_id, patch_uid) device_id, patch_uid, status
+    FROM ninja_patches.patch_facts
+    WHERE fact_type = 'patch_state'
+    ORDER BY device_id, patch_uid, last_observed_at DESC, id DESC
+),
+missing_patches AS (
+    SELECT device_id, patch_uid
+    FROM current_patch_state
+    WHERE status IN ({COMPLIANCE_MISSING_SQL})
+),
+universe AS (
+    SELECT device_id, patch_uid FROM installed_patches
+    UNION
+    SELECT device_id, patch_uid FROM missing_patches
+)
+"""
+
 OS_FAMILY_D = OS_FAMILY_SQL.format(alias="d").strip()
 OS_FAMILY_C = OS_FAMILY_SQL.format(alias="c").strip()
 PATCH_ACTIVITY_LABEL_C = PATCH_ACTIVITY_LABEL_SQL.format(expr="c.patch_status").strip()
@@ -702,31 +749,20 @@ OVERVIEW_CARDS: list[dict[str, Any]] = [
         "row": 0, "col": 0, "size_x": 18, "size_y": 4,
         "template_tags":  _OVERALL_TAGS,
         "param_mappings": _OVERALL_PARAM_MAPPINGS,
-        # Fleet-wide compliance %: installed (device, patch) pairs over
-        # the universe of all known (device, patch) on active Windows
-        # devices. all_patches pulls node_class so the dashboard's
-        # Device Type filter can scope.
+        # Compliance formula (single source of truth — see
+        # COMPLIANCE_MISSING_STATES at module top). REJECTED and
+        # DELAYED excluded from both numerator and denominator.
         "query": f"""
-WITH all_patches AS (
-    SELECT DISTINCT pf.device_id, pf.patch_uid,
-                    d.node_class, d.os_name
-    FROM ninja_patches.patch_facts pf
-    JOIN ninja_core.v_active_devices d ON d.id = pf.device_id
-    WHERE d.approval_status = 'APPROVED'
-),
-installed_patches AS (
-    SELECT DISTINCT device_id, patch_uid
-    FROM ninja_patches.patch_facts
-    WHERE fact_type = 'install_outcome' AND status = 'INSTALLED'
-)
+{_COMPLIANCE_CTES}
 SELECT ROUND(
     COUNT(*) FILTER (WHERE ip.device_id IS NOT NULL) * 100.0
     / NULLIF(COUNT(*), 0),
     1
 ) AS percent_installed
-FROM all_patches d
+FROM universe u
 LEFT JOIN installed_patches ip USING (device_id, patch_uid)
-WHERE 1=1
+JOIN ninja_core.v_active_devices d ON d.id = u.device_id
+WHERE d.approval_status = 'APPROVED'
 {_OVERALL_DEVICE_TYPE_FILTER}
 """,
     },
@@ -1025,21 +1061,10 @@ ORDER BY "Patches" DESC
         },
         "template_tags":  _OVERALL_TAGS,
         "param_mappings": _OVERALL_PARAM_MAPPINGS,
-        # Compliance = (device, patch) pairs with a successful install
-        # divided by the universe of (device, patch) pairs we know
-        # about. INSTALLED rows live in fact_type='install_outcome'; the
-        # old query filtered to fact_type='patch_state' and so could
-        # never count any installs — every org showed 0 %.
+        # Compliance formula — see COMPLIANCE_MISSING_STATES at
+        # module top. REJECTED/DELAYED excluded.
         "query": f"""
-WITH all_patches AS (
-    SELECT DISTINCT device_id, patch_uid
-    FROM ninja_patches.patch_facts
-),
-installed_patches AS (
-    SELECT DISTINCT device_id, patch_uid
-    FROM ninja_patches.patch_facts
-    WHERE fact_type = 'install_outcome' AND status = 'INSTALLED'
-)
+{_COMPLIANCE_CTES}
 SELECT
     o.name AS organization,
     ROUND(
@@ -1048,9 +1073,9 @@ SELECT
       1
     ) AS "Patch Compliance",
     COUNT(*) AS "Total Patches"
-FROM all_patches ap
+FROM universe u
 LEFT JOIN installed_patches ip USING (device_id, patch_uid)
-JOIN ninja_core.v_active_devices d ON d.id = ap.device_id
+JOIN ninja_core.v_active_devices d ON d.id = u.device_id
 JOIN ninja_core.organizations o   ON o.id = d.organization_id
 WHERE d.approval_status = 'APPROVED'
 {_OVERALL_DEVICE_TYPE_FILTER}
@@ -1073,63 +1098,57 @@ LIMIT 15
         },
         "template_tags":  _OVERALL_TAGS,
         "param_mappings": _OVERALL_PARAM_MAPPINGS,
-        # Same compliance bug as compliance_worst: pulling from
-        # patch_state only never captures INSTALLED rows. Fixed by
-        # using the install_outcome side for both the "Installed" count
-        # and the numerator of "Patch Compliance".
+        # "Patch Compliance" uses the canonical formula (see
+        # COMPLIANCE_MISSING_STATES). The breakdown columns
+        # (Approved / Manual / Delayed / Failed / Rejected) count
+        # from ALL known patch states for operator context — they
+        # don't feed into the compliance % but they explain the
+        # population. The all_known CTE pulls every (device, patch)
+        # we've ever seen so the breakdown counts can include states
+        # excluded from the compliance formula.
         "query": f"""
-WITH current_state AS (
-    SELECT DISTINCT ON (device_id, patch_uid)
-        device_id, patch_uid, status
-    FROM ninja_patches.patch_facts
-    WHERE fact_type = 'patch_state'
-    ORDER BY device_id, patch_uid, last_observed_at DESC, id DESC
-),
+{_COMPLIANCE_CTES},
 latest_install_outcome AS (
-    SELECT DISTINCT ON (device_id, patch_uid)
-        device_id, patch_uid, status
+    SELECT DISTINCT ON (device_id, patch_uid) device_id, patch_uid, status
     FROM ninja_patches.patch_facts
     WHERE fact_type = 'install_outcome'
     ORDER BY
-        device_id,
-        patch_uid,
+        device_id, patch_uid,
         installed_at DESC NULLS LAST,
         ninja_observed_at DESC NULLS LAST,
         last_observed_at DESC,
         id DESC
 ),
-all_patches AS (
+all_known AS (
     SELECT DISTINCT device_id, patch_uid
     FROM ninja_patches.patch_facts
-),
-installed_patches AS (
-    SELECT DISTINCT device_id, patch_uid
-    FROM ninja_patches.patch_facts
-    WHERE fact_type = 'install_outcome' AND status = 'INSTALLED'
 )
 SELECT
     o.name AS organization,
     ROUND(
-      COUNT(*) FILTER (WHERE ip.device_id IS NOT NULL) * 100.0
-      / NULLIF(COUNT(*), 0),
+      COUNT(*) FILTER (WHERE u.device_id IS NOT NULL AND ip.device_id IS NOT NULL) * 100.0
+      / NULLIF(COUNT(*) FILTER (WHERE u.device_id IS NOT NULL), 0),
       1
-    ) AS "Patch Compliance",
-    COUNT(*) FILTER (WHERE ip.device_id IS NOT NULL)                         AS "Installed",
-    COUNT(*) FILTER (WHERE cs.status = 'APPROVED')                           AS "Approved Patches",
-    COUNT(*) FILTER (WHERE cs.status = 'MANUAL')                             AS "Manual Approval Patches",
-    COUNT(*) FILTER (WHERE cs.status = 'DELAYED')                            AS "Delayed Install Patches",
-    COUNT(*) FILTER (WHERE lio.status = 'FAILED')                            AS "Failed Patches",
-    COUNT(*) FILTER (WHERE cs.status = 'REJECTED')                           AS "Rejected",
-    COUNT(*)                                                                 AS "Total Patches",
-    COUNT(DISTINCT ap.device_id)                                             AS "Devices"
-FROM all_patches ap
-LEFT JOIN current_state cs
-  ON cs.device_id = ap.device_id AND cs.patch_uid = ap.patch_uid
+    )                                                                            AS "Patch Compliance",
+    COUNT(*) FILTER (WHERE ip.device_id IS NOT NULL)                              AS "Installed",
+    COUNT(*) FILTER (WHERE cps.status = 'APPROVED')                               AS "Approved Patches",
+    COUNT(*) FILTER (WHERE cps.status = 'MANUAL')                                 AS "Manual Approval Patches",
+    COUNT(*) FILTER (WHERE cps.status = 'DELAYED')                                AS "Delayed Install Patches",
+    COUNT(*) FILTER (WHERE lio.status = 'FAILED')                                 AS "Failed Patches",
+    COUNT(*) FILTER (WHERE cps.status = 'REJECTED')                               AS "Rejected",
+    COUNT(*) FILTER (WHERE u.device_id IS NOT NULL)                               AS "Compliance-Scope Patches",
+    COUNT(*)                                                                      AS "Total Patches",
+    COUNT(DISTINCT ak.device_id)                                                  AS "Devices"
+FROM all_known ak
+LEFT JOIN universe u
+  ON u.device_id = ak.device_id AND u.patch_uid = ak.patch_uid
+LEFT JOIN current_patch_state cps
+  ON cps.device_id = ak.device_id AND cps.patch_uid = ak.patch_uid
 LEFT JOIN latest_install_outcome lio
-  ON lio.device_id = ap.device_id AND lio.patch_uid = ap.patch_uid
+  ON lio.device_id = ak.device_id AND lio.patch_uid = ak.patch_uid
 LEFT JOIN installed_patches ip
-  ON ip.device_id = ap.device_id AND ip.patch_uid = ap.patch_uid
-JOIN ninja_core.v_active_devices d ON d.id = ap.device_id
+  ON ip.device_id = ak.device_id AND ip.patch_uid = ak.patch_uid
+JOIN ninja_core.v_active_devices d ON d.id = ak.device_id
 JOIN ninja_core.organizations o  ON o.id = d.organization_id
 WHERE d.approval_status = 'APPROVED'
 {_OVERALL_DEVICE_TYPE_FILTER}
@@ -2409,34 +2428,20 @@ WHERE 1=1
         "row": 0, "col": 0, "size_x": 24, "size_y": 4,
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS,
-        # Same compliance bug as Fleet Overview's compliance cards:
-        # INSTALLED lives in fact_type='install_outcome', not
-        # 'patch_state'. Compute installed from install_outcome over
-        # the universe of all (device, patch) we know about. The
-        # all_patches CTE also pulls node_class + os_name so the
-        # dashboard's device_type / os_family filters can scope.
+        # Canonical compliance formula (see COMPLIANCE_MISSING_STATES
+        # at module top). REJECTED/DELAYED excluded.
         "query": f"""
-WITH all_patches AS (
-    SELECT DISTINCT pf.device_id, pf.patch_uid, d.organization_id,
-                    d.node_class, d.os_name
-    FROM ninja_patches.patch_facts pf
-    JOIN ninja_core.v_active_devices d ON d.id = pf.device_id
-    WHERE d.approval_status = 'APPROVED'
-),
-installed_patches AS (
-    SELECT DISTINCT device_id, patch_uid
-    FROM ninja_patches.patch_facts
-    WHERE fact_type = 'install_outcome' AND status = 'INSTALLED'
-)
+{_COMPLIANCE_CTES}
 SELECT ROUND(
     COUNT(*) FILTER (WHERE ip.device_id IS NOT NULL) * 100.0
     / NULLIF(COUNT(*), 0),
     1
 ) AS percent_installed
-FROM all_patches d
+FROM universe u
 LEFT JOIN installed_patches ip USING (device_id, patch_uid)
+JOIN ninja_core.v_active_devices d ON d.id = u.device_id
 JOIN ninja_core.organizations o ON o.id = d.organization_id
-WHERE 1=1
+WHERE d.approval_status = 'APPROVED'
 {_ORG_FILTERS_DEVICE}
 """,
     },
@@ -2668,36 +2673,20 @@ ORDER BY "Patches" DESC
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS,
         "click_behavior": {"target": DASH_DETAIL, "params": {"p_class": "Device Type"}},
-        # Two bugs fixed: (1) compliance numerator pulled INSTALLED
-        # from patch_state CTE (which never contains INSTALLED) — same
-        # bug class as v0.11.1; rewrote to use install_outcome.
-        # (2) GROUP BY o.name AND Device Type produced one row per
-        # (org, type), so the bar chart got multiple rows for each
-        # bar — fine when org is filtered to one, blank when not.
-        # Removed o.name from SELECT/GROUP BY.
+        # Canonical compliance formula (see COMPLIANCE_MISSING_STATES).
         "query": f"""
-WITH all_patches AS (
-    SELECT DISTINCT pf.device_id, pf.patch_uid
-    FROM ninja_patches.patch_facts pf
-    JOIN ninja_core.v_active_devices d ON d.id = pf.device_id
-    WHERE d.approval_status = 'APPROVED'
-),
-installed_patches AS (
-    SELECT DISTINCT device_id, patch_uid
-    FROM ninja_patches.patch_facts
-    WHERE fact_type = 'install_outcome' AND status = 'INSTALLED'
-)
+{_COMPLIANCE_CTES}
 SELECT
     {DEVICE_TYPE_D} AS "Device Type",
     ROUND(
       COUNT(*) FILTER (WHERE ip.device_id IS NOT NULL) * 100.0
       / NULLIF(COUNT(*), 0), 1
     ) AS "Patch Compliance"
-FROM all_patches ap
+FROM universe u
 LEFT JOIN installed_patches ip USING (device_id, patch_uid)
-JOIN ninja_core.v_active_devices d ON d.id = ap.device_id
+JOIN ninja_core.v_active_devices d ON d.id = u.device_id
 JOIN ninja_core.organizations o ON o.id = d.organization_id
-WHERE 1=1
+WHERE d.approval_status = 'APPROVED'
 {_ORG_FILTERS_DEVICE}
 GROUP BY "Device Type"
 ORDER BY "Patch Compliance" ASC
@@ -2712,32 +2701,20 @@ ORDER BY "Patch Compliance" ASC
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS,
         "click_behavior": {"target": DASH_DETAIL, "params": {"p_os": "Operating System Family"}},
-        # Same two-bug fix as org_device_type: install_outcome math,
-        # and drop o.name from SELECT/GROUP BY so the chart renders
-        # with or without an org filter selected.
+        # Canonical compliance formula (see COMPLIANCE_MISSING_STATES).
         "query": f"""
-WITH all_patches AS (
-    SELECT DISTINCT pf.device_id, pf.patch_uid
-    FROM ninja_patches.patch_facts pf
-    JOIN ninja_core.v_active_devices d ON d.id = pf.device_id
-    WHERE d.approval_status = 'APPROVED'
-),
-installed_patches AS (
-    SELECT DISTINCT device_id, patch_uid
-    FROM ninja_patches.patch_facts
-    WHERE fact_type = 'install_outcome' AND status = 'INSTALLED'
-)
+{_COMPLIANCE_CTES}
 SELECT
     {OS_FAMILY_D} AS "Operating System Family",
     ROUND(
       COUNT(*) FILTER (WHERE ip.device_id IS NOT NULL) * 100.0
       / NULLIF(COUNT(*), 0), 1
     ) AS "Patch Compliance"
-FROM all_patches ap
+FROM universe u
 LEFT JOIN installed_patches ip USING (device_id, patch_uid)
-JOIN ninja_core.v_active_devices d ON d.id = ap.device_id
+JOIN ninja_core.v_active_devices d ON d.id = u.device_id
 JOIN ninja_core.organizations o ON o.id = d.organization_id
-WHERE 1=1
+WHERE d.approval_status = 'APPROVED'
 {_ORG_FILTERS_DEVICE}
 GROUP BY "Operating System Family"
 ORDER BY "Patch Compliance" ASC

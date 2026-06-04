@@ -5,6 +5,30 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-04 — v0.13.7 compliance formula clarified + BLUEPRINT.md process
+
+**Process change:**
+- Updated `Development/DEVELOPMENT.md` with Agent Work Rule #5:
+  blueprint before building. Non-trivial tasks must start with a
+  `BLUEPRINT.md` at the project root. Used this task as the first
+  to follow the rule.
+
+**Done:**
+- Defined the Patch Compliance formula in code (constants +
+  `_COMPLIANCE_CTES` block) and in `CONTEXT.md` (glossary
+  section). Single source of truth.
+- REJECTED and DELAYED now excluded from both numerator and
+  denominator on every compliance card. APPROVED / MANUAL /
+  FAILED / PENDING counted as missing.
+- Rewrote 6 compliance cards: overall_compliance, org_compliance,
+  compliance_worst, compliance_all, org_device_type, org_os_family.
+- compliance_all gained a "Compliance-Scope Patches" column so
+  operator can see the denominator alongside the full "Total
+  Patches" (including excluded REJECTED/DELAYED).
+
+**Validation:**
+- `python -m py_compile` passes.
+
 ## 2026-06-04 — v0.13.6 Device Type filter on Command Center, Overall, Trends
 
 **Done:**
