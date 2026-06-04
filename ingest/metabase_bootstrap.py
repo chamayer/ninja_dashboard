@@ -1523,6 +1523,7 @@ latest_install_outcome AS (
 """
 _FILTER_PREDICATES = f"""
   [[AND o.name = {{{{org}}}}]]
+  [[AND d.system_name = {{{{device}}}}]]
   [[AND cs.status IN ({{{{status}}}})]]
   [[AND {DEVICE_TYPE_D} IN ({{{{node_class}}}})]]
   [[AND cs.severity IN ({{{{severity}}}})]]
@@ -1645,6 +1646,10 @@ LIMIT 20
         "viz_settings":   {"graph.dimensions": ["Day"], "graph.metrics": ["Install Results"]},
         "template_tags":  {**_FILTER_TAGS, **_DAYS_TAG},
         "param_mappings": _TIMELINE_PARAM_MAPPINGS,
+        # Uses the shared _FILTER_PREDICATES so multi-select on
+        # Status / Device Type / Severity / Install Results / OS
+        # behaves identically to every other Detail card. The days
+        # window is appended separately (it's specific to this card).
         "query": f"""
 {_CTE_CURRENT_STATE}
 SELECT
@@ -1658,14 +1663,7 @@ JOIN ninja_core.organizations o  ON o.id = d.organization_id
 WHERE lio.installed_at IS NOT NULL
   AND lio.installed_at > NOW() - (INTERVAL '1 day' * {{{{days}}}})
   AND d.approval_status = 'APPROVED'
-  [[AND o.name = {{{{org}}}}]]
-  [[AND cs.status = {{{{status}}}}]]
-  [[AND lio.status = {{{{install_outcome}}}}]]
-  [[AND {DEVICE_TYPE_D} = {{{{node_class}}}}]]
-  [[AND cs.severity = {{{{severity}}}}]]
-  [[AND {OS_FAMILY_D} = {{{{os}}}}]]
-  [[AND cs.kb_number = {{{{kb}}}}]]
-  [[AND d.system_name = {{{{device}}}}]]
+{_FILTER_PREDICATES}
 GROUP BY 1
 ORDER BY 1
 """,

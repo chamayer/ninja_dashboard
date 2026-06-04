@@ -5,6 +5,31 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-04 — v0.13.9 Patch Detail filters reach every card
+
+**Why:** Operator noticed that on Patch Detail not every card
+narrowed when filters changed. Patch Detail is *the* filterable
+workhorse — every card on it must honor every filter.
+
+**Diagnosis:**
+1. `_FILTER_PREDICATES` declared every filter except Device. So
+   the Device dropdown was wired at the parameter level but never
+   reached any card's SQL.
+2. `detail_installs_timeline` inlined its filter predicates
+   instead of using `_FILTER_PREDICATES`. The inlined version
+   still used `= {{var}}` syntax, so v0.13.8's multi-select
+   conversion missed it.
+
+**Done:**
+- Added `[[AND d.system_name = {{device}}]]` to
+  `_FILTER_PREDICATES`.
+- Replaced the inlined predicate block in
+  `detail_installs_timeline` with `{_FILTER_PREDICATES}` so the
+  timeline benefits from future filter changes automatically.
+
+**Validation:**
+- `python -m py_compile` passes.
+
 ## 2026-06-04 — v0.13.8 multi-select filters + REJECTED audit note
 
 **Why:** Operator wanted multi-select dropdowns ("show me MANUAL +

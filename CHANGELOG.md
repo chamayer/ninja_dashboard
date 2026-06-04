@@ -2,6 +2,24 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.13.9] — 2026-06-04
+
+### Fixed
+- **Patch Detail filters now apply to every card.** Two gaps
+  closed:
+  1. **Device filter wasn't reaching any card.** The shared
+     `_FILTER_PREDICATES` fragment declared all the other
+     filters but not the Device one. Adding
+     `[[AND d.system_name = {{device}}]]` so picking a device
+     narrows the donut / severity bar / KB chart / tables.
+  2. **`detail_installs_timeline` used the old single-select
+     `= {{var}}` syntax.** It inlined its predicates instead of
+     using `_FILTER_PREDICATES`, so it didn't pick up the v0.13.8
+     multi-select conversion. Replaced the inlined block with
+     `{_FILTER_PREDICATES}` + the days predicate. Multi-select on
+     Status / Device Type / Severity / Install Results / OS now
+     works on the timeline too.
+
 ## [0.13.8] — 2026-06-04
 
 ### Changed
