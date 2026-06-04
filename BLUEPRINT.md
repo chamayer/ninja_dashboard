@@ -7,39 +7,47 @@
 
 ## Goal
 
-Fix the Device Drilldown timeline parameter so changing the days
-filter does not break the chart.
+Fix the dashboard org filter UX, add the missing Device Drilldown org
+filter, and add compact count cards for the active-patching KPIs.
 
 ## Why
 
-The `Install Results Over Time` card loads initially, but changing the
-timeline window causes the query to fail in Metabase.
+The operator keeps needing the same host, ingest, Metabase, Postgres,
+and probe commands. A single reference file makes the workflow faster
+and reduces drift from memory.
 
 ## Scope
 
 **In:**
-- Fix the Device Drilldown timeline query parameter casting.
-- Keep the dashboard wiring and defaults unchanged.
-- Compile-check the bootstrap after the edit.
+- Convert the broken Organization dropdowns on the affected dashboards
+  into real text search boxes.
+- Add an Organization filter to Device Drilldown.
+- Add compact count cards for the active-patching KPI pages without
+  bloating the layouts.
 
 **Out / separate investigation:**
-- Any other dashboard parameter cleanup.
-- Adding new Device Drilldown filters.
+- Any offline-device cleanup.
 - Offline-device cleanup.
+- Reworking existing docs beyond the new reference file.
 
 ## Files to change
 
+- `HANDY_COMMANDS.md`
+  - Keep the new reference file in the repo.
 - `ingest/metabase_bootstrap.py`
-  - Cast the Device Drilldown `days` parameter explicitly in the
-    timeline query.
+  - Update org filters, Device Drilldown, and compact KPI counts.
 - `BLUEPRINT.md`
   - Track this task while it is in progress.
+- `SESSIONS.md`
+  - Record the dashboard update once it is done.
 
 ## Steps
 
-1. Update the Device Drilldown timeline SQL to cast `days` safely.
-2. Compile-check `ingest/metabase_bootstrap.py`.
-3. Commit and push after approval.
+1. Patch the bootstrap for org search, Device Drilldown org filter,
+   and count cards.
+2. Compile-check the bootstrap.
+3. Update the session log.
+4. Commit and push after approval.
 
 ## Open questions
 

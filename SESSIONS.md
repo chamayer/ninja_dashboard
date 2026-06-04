@@ -5,6 +5,21 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-04 — handy commands reference added
+
+**Why:** The same host, ingest, Metabase, Postgres, probe, and SQL
+commands kept recurring across sessions. A single reference file makes
+the operational workflow easier to recover without rereading the whole
+history.
+
+**Done:**
+- Added `HANDY_COMMANDS.md` at the repo root.
+- Collected the recurring commands from the repo history and existing
+  operator docs.
+
+**Validation:**
+- Documentation-only change. No code paths changed.
+
 ## 2026-06-04 — custom-fields ingest moved to scoped feed
 
 **Why:** Device-only custom-field ingest was missing organization and
@@ -1083,3 +1098,14 @@ list):**
 - Build Overview + Filterable Detail dashboards in Metabase.
 - Decide snapshot retention (90 days full → daily downsample?).
 - Rotate Ninja API credentials once Python ingest is live.
+
+**Current dashboard pass:**
+- Patch-scope derivation now includes location-level custom-field
+  inheritance in `v_active_devices`.
+- Added compact count cards for `Actively patching` / `Fully patched`
+  alongside the existing percentage KPIs.
+- Reflowed the top-level dashboard rows so the new cards do not
+  overlap the existing tiles.
+- Optimized the Device Patching Status scope filter by carrying
+  `patching_scope` into the classified device CTE instead of re-checking
+  the active-device view row-by-row.

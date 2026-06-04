@@ -233,6 +233,15 @@ organization_custom_fields AS (
         patchingnotes AS org_patching_notes
     FROM ninja_core.v_organization_custom_fields
 ),
+location_custom_fields AS (
+    SELECT
+        entity_id AS location_id,
+        patchingdisabled AS location_patching_disabled,
+        serverpatchingdisabled AS location_server_patching_disabled,
+        workstationpatchingdisabled AS location_workstation_patching_disabled,
+        patchingnotes AS location_patching_notes
+    FROM ninja_core.v_location_custom_fields
+),
 scoped_devices AS (
     SELECT
         d.id AS device_id,
@@ -252,22 +261,46 @@ scoped_devices AS (
             ELSE 'Unknown'
         END AS operating_system_family,
         CASE
-            WHEN COALESCE(dcf.device_patching_disabled, ocf.org_patching_disabled, FALSE) THEN 'Excluded'
+            WHEN COALESCE(
+                dcf.device_patching_disabled,
+                ocf.org_patching_disabled,
+                lcf.location_patching_disabled,
+                FALSE
+            ) THEN 'Excluded'
             WHEN d.node_class = 'WINDOWS_SERVER'
-                AND COALESCE(dcf.device_server_patching_disabled, ocf.org_server_patching_disabled, FALSE) THEN 'Excluded'
+                AND COALESCE(
+                    dcf.device_server_patching_disabled,
+                    ocf.org_server_patching_disabled,
+                    lcf.location_server_patching_disabled,
+                    FALSE
+                ) THEN 'Excluded'
             WHEN d.node_class = 'WINDOWS_WORKSTATION'
-                AND COALESCE(dcf.device_workstation_patching_disabled, ocf.org_workstation_patching_disabled, FALSE) THEN 'Excluded'
+                AND COALESCE(
+                    dcf.device_workstation_patching_disabled,
+                    ocf.org_workstation_patching_disabled,
+                    lcf.location_workstation_patching_disabled,
+                    FALSE
+                ) THEN 'Excluded'
             ELSE 'Included'
         END AS patching_scope,
         CASE
-            WHEN COALESCE(NULLIF(dcf.device_patching_notes, ''), NULLIF(ocf.org_patching_notes, '')) IS NOT NULL
-                THEN COALESCE(NULLIF(dcf.device_patching_notes, ''), NULLIF(ocf.org_patching_notes, ''))
+            WHEN COALESCE(
+                NULLIF(dcf.device_patching_notes, ''),
+                NULLIF(ocf.org_patching_notes, ''),
+                NULLIF(lcf.location_patching_notes, '')
+            ) IS NOT NULL
+                THEN COALESCE(
+                    NULLIF(dcf.device_patching_notes, ''),
+                    NULLIF(ocf.org_patching_notes, ''),
+                    NULLIF(lcf.location_patching_notes, '')
+                )
             ELSE NULL
         END AS patching_notes
     FROM ninja_core.v_active_devices d
     JOIN ninja_core.organizations o ON o.id = d.organization_id
     LEFT JOIN device_custom_fields dcf ON dcf.device_id = d.id
     LEFT JOIN organization_custom_fields ocf ON ocf.organization_id = d.organization_id
+    LEFT JOIN location_custom_fields lcf ON lcf.location_id = d.location_id
     WHERE d.approval_status = 'APPROVED'
 )
 """
@@ -405,6 +438,112 @@ SELECT ROUND(
     / NULLIF(COUNT(*) FILTER (WHERE c.patch_status = 'active_patching'), 0),
     1
 ) AS percent_installed
+FROM classified c
+LEFT JOIN device_rollup dr ON dr.device_id = c.device_id
+JOIN ninja_core.v_active_devices d ON d.id = c.device_id
+JOIN ninja_core.organizations o ON o.id = c.organization_id
+WHERE d.approval_status = 'APPROVED'
+{filters}
+"""
+
+
+def _active_patching_count_query(filters: str) -> str:
+    """Count of actively patching devices in the scoped fleet."""
+    return f"""
+WITH device_patch_signal AS (
+    SELECT device_id, MAX(installed_at) AS last_seen_at
+    FROM ninja_patches.patch_facts
+    WHERE fact_type = 'install_outcome'
+      AND installed_at IS NOT NULL
+    GROUP BY device_id
+),
+classified AS (
+    SELECT
+        d.id              AS device_id,
+        d.organization_id,
+        d.node_class,
+        d.os_name,
+        dps.last_seen_at,
+        CASE
+            WHEN dps.last_seen_at IS NULL THEN 'no_patch_data'
+            WHEN dps.last_seen_at < NOW() - (INTERVAL '1 day' * {DEFAULT_STALE_PATCH_DAYS}) THEN 'stale_patch_data'
+            ELSE 'active_patching'
+        END AS patch_status
+    FROM ninja_core.v_active_devices d
+    LEFT JOIN device_patch_signal dps ON dps.device_id = d.id
+    WHERE d.approval_status = 'APPROVED'
+      AND d.node_class IN ('WINDOWS_WORKSTATION', 'WINDOWS_SERVER')
+)
+SELECT COUNT(*) FILTER (WHERE c.patch_status = 'active_patching') AS devices
+FROM classified c
+JOIN ninja_core.v_active_devices d ON d.id = c.device_id
+JOIN ninja_core.organizations o ON o.id = c.organization_id
+WHERE d.approval_status = 'APPROVED'
+{filters}
+"""
+
+
+def _patching_device_compliance_count_query(filters: str) -> str:
+    """Count of fully patched devices among the actively patching subset."""
+    return f"""
+WITH device_patch_signal AS (
+    SELECT device_id, MAX(installed_at) AS last_seen_at
+    FROM ninja_patches.patch_facts
+    WHERE fact_type = 'install_outcome'
+      AND installed_at IS NOT NULL
+    GROUP BY device_id
+),
+classified AS (
+    SELECT
+        d.id              AS device_id,
+        d.organization_id,
+        d.node_class,
+        d.os_name,
+        dps.last_seen_at,
+        CASE
+            WHEN dps.last_seen_at IS NULL THEN 'no_patch_data'
+            WHEN dps.last_seen_at < NOW() - (INTERVAL '1 day' * {DEFAULT_STALE_PATCH_DAYS}) THEN 'stale_patch_data'
+            ELSE 'active_patching'
+        END AS patch_status
+    FROM ninja_core.v_active_devices d
+    LEFT JOIN device_patch_signal dps ON dps.device_id = d.id
+    WHERE d.approval_status = 'APPROVED'
+      AND d.node_class IN ('WINDOWS_WORKSTATION', 'WINDOWS_SERVER')
+),
+installed_patches AS (
+    SELECT DISTINCT device_id, patch_uid
+    FROM ninja_patches.patch_facts
+    WHERE fact_type = 'install_outcome' AND status = 'INSTALLED'
+),
+current_patch_state AS (
+    SELECT DISTINCT ON (device_id, patch_uid) device_id, patch_uid, status
+    FROM ninja_patches.patch_facts
+    WHERE fact_type = 'patch_state'
+    ORDER BY device_id, patch_uid, last_observed_at DESC, id DESC
+),
+missing_patches AS (
+    SELECT device_id, patch_uid
+    FROM current_patch_state
+    WHERE status IN ({COMPLIANCE_MISSING_SQL})
+),
+universe AS (
+    SELECT device_id, patch_uid FROM installed_patches
+    UNION
+    SELECT device_id, patch_uid FROM missing_patches
+),
+device_rollup AS (
+    SELECT
+        u.device_id,
+        COUNT(*) FILTER (WHERE mp.device_id IS NOT NULL) AS missing_count
+    FROM universe u
+    LEFT JOIN missing_patches mp USING (device_id, patch_uid)
+    GROUP BY u.device_id
+)
+SELECT COUNT(*) FILTER (
+    WHERE c.patch_status = 'active_patching'
+      AND dr.device_id IS NOT NULL
+      AND dr.missing_count = 0
+) AS devices
 FROM classified c
 LEFT JOIN device_rollup dr ON dr.device_id = c.device_id
 JOIN ninja_core.v_active_devices d ON d.id = c.device_id
@@ -687,7 +826,7 @@ _CMD_PARAM_MAPPINGS_FULL = {
 }
 
 # Filter fragments — appended after WHERE / before GROUP BY.
-_CMD_FILTER_ORG         = "  [[AND o.name IN ({{org}})]]\n"
+_CMD_FILTER_ORG         = "  [[AND o.name ILIKE '%' || {{org}} || '%']]\n"
 _CMD_FILTER_DEVICE_TYPE = f"  [[AND {DEVICE_TYPE_D} IN ({{{{device_type}}}})]]\n"
 _CMD_FILTER_PATCHING_SCOPE = (
     "  [[AND EXISTS (SELECT 1 FROM ninja_core.v_active_devices vad "
@@ -707,7 +846,7 @@ _CMD_DEVICE_TYPE_FILTER   = _CMD_FILTER_DEVICE_TYPE
 
 def build_command_parameters(org_names: list[str]) -> list[dict]:
     return [
-        _param_multiselect(PARAM_CMD_ORG,   "Organization", "org",         org_names),
+        _param_text(      PARAM_CMD_ORG,   "Organization", "org"),
         _param_multiselect(PARAM_CMD_CLASS, "Device Type",  "device_type", _NODE_CLASS_OPTIONS),
         _param_multiselect(PARAM_PATCHING_SCOPE, "Patching Scope", "patching_scope", _PATCHING_SCOPE_OPTIONS, default="Included"),
         _param_multiselect(PARAM_CMD_SEV,   "Severity",     "severity",    _SEVERITY_OPTIONS),
@@ -826,7 +965,7 @@ WHERE d.approval_status = 'APPROVED'
         "key":            "cmd_approved",
         "name":           "Approved Patches",
         "display":        "scalar",
-        "row": 4, "col": 0, "size_x": 6, "size_y": 4,
+        "row": 6, "col": 0, "size_x": 6, "size_y": 4,
         "template_tags":  _CMD_TAGS,
         "param_mappings": _CMD_PARAM_MAPPINGS_FULL,
         "click_behavior": {"target": DASH_DETAIL, "preset": {"status": "APPROVED"}},
@@ -1212,7 +1351,7 @@ _OVERALL_PARAM_MAPPINGS_FULL = {
     PARAM_OVERALL_SEV: ["variable", ["template-tag", "severity"]],
 }
 
-_OVERALL_FILTER_ORG         = "  [[AND o.name IN ({{org}})]]\n"
+_OVERALL_FILTER_ORG         = "  [[AND o.name ILIKE '%' || {{org}} || '%']]\n"
 _OVERALL_FILTER_DEVICE_TYPE = f"  [[AND {DEVICE_TYPE_D} IN ({{{{device_type}}}})]]\n"
 _OVERALL_FILTER_OS_FAMILY   = f"  [[AND {OS_FAMILY_D} IN ({{{{os_family}}}})]]\n"
 _OVERALL_FILTER_PATCHING_SCOPE = (
@@ -1238,7 +1377,7 @@ _OVERALL_DEVICE_TYPE_FILTER = _OVERALL_FILTER_DEVICE_TYPE
 
 def build_overall_parameters(org_names: list[str], os_families: list[str]) -> list[dict]:
     return [
-        _param_multiselect(PARAM_OVERALL_ORG,   "Organization",            "org",         org_names),
+        _param_text(      PARAM_OVERALL_ORG,   "Organization",            "org"),
         _param_multiselect(PARAM_OVERALL_CLASS, "Device Type",             "device_type", _NODE_CLASS_OPTIONS),
         _param_multiselect(PARAM_OVERALL_OS,    "Operating System Family", "os_family",   os_families),
         _param_multiselect(PARAM_PATCHING_SCOPE, "Patching Scope",         "patching_scope", _PATCHING_SCOPE_OPTIONS, default="Included"),
@@ -1265,6 +1404,40 @@ OVERVIEW_CARDS: list[dict[str, Any]] = [
         "template_tags":  _OVERALL_TAGS,
         "param_mappings": _OVERALL_PARAM_MAPPINGS_FULL,
         "query": _patching_device_compliance_scalar_query(_OVERALL_FILTERS_DEVICE),
+    },
+    {
+        "key":            "overall_active_count",
+        "name":           "Actively patching",
+        "display":        "scalar",
+        "row": 4, "col": 0, "size_x": 8, "size_y": 3,
+        "template_tags":  _OVERALL_TAGS,
+        "param_mappings": _OVERALL_PARAM_MAPPINGS_FULL,
+        "query": _active_patching_count_query(_OVERALL_FILTERS_DEVICE),
+    },
+    {
+        "key":            "overall_progress_count",
+        "name":           "Fully patched",
+        "display":        "scalar",
+        "row": 4, "col": 8, "size_x": 8, "size_y": 3,
+        "template_tags":  _OVERALL_TAGS,
+        "param_mappings": _OVERALL_PARAM_MAPPINGS_FULL,
+        "query": _patching_device_compliance_count_query(_OVERALL_FILTERS_DEVICE),
+    },
+    {
+        "key":            "active_devices",
+        "name":           "Active Devices",
+        "display":        "scalar",
+        "row": 4, "col": 16, "size_x": 8, "size_y": 4,
+        "template_tags":  _OVERALL_TAGS,
+        "param_mappings": _OVERALL_PARAM_MAPPINGS_FULL,
+        "click_behavior": {"target": DASH_DETAIL, "preset": {}},
+        "query": f"""
+SELECT COUNT(*) AS devices
+FROM ninja_core.v_active_devices d
+JOIN ninja_core.organizations o ON o.id = d.organization_id
+WHERE 1=1
+{_OVERALL_FILTERS_DEVICE}
+""",
     },
     {
         # Data freshness indicator. If ingest is broken, every other
@@ -1294,26 +1467,6 @@ FROM (
 ) latest
 """,
     },
-    # Row 4 — Devices (canonical order: Active, Patching, Stalled,
-    # Never-Patched). 4 scalars at size 6 each = 24. Needs Reboot
-    # demoted to the Devices Needing Reboot table (v0.14.0) — it's
-    # an action queue, not a top-level patch KPI.
-    {
-        "key":            "active_devices",
-        "name":           "Active Devices",
-        "display":        "scalar",
-        "row": 4, "col": 0, "size_x": 6, "size_y": 4,
-        "template_tags":  _OVERALL_TAGS,
-        "param_mappings": _OVERALL_PARAM_MAPPINGS_FULL,
-        "click_behavior": {"target": DASH_DETAIL, "preset": {}},
-        "query": f"""
-SELECT COUNT(*) AS devices
-FROM ninja_core.v_active_devices d
-JOIN ninja_core.organizations o ON o.id = d.organization_id
-WHERE 1=1
-{_OVERALL_FILTERS_DEVICE}
-""",
-    },
     # Row 8 — Patches (canonical order: Approved, Manual, Delayed,
     # Failed). 4 scalars at size 6 each = 24. Each CTE now selects
     # device_id and the outer SELECT joins ninja_core.devices so the
@@ -1322,7 +1475,7 @@ WHERE 1=1
         "key":            "patches_ready",
         "name":           "Approved Patches",
         "display":        "scalar",
-        "row": 8, "col": 0, "size_x": 6, "size_y": 4,
+        "row": 10, "col": 0, "size_x": 6, "size_y": 4,
         "template_tags":  _OVERALL_TAGS,
         "param_mappings": _OVERALL_PARAM_MAPPINGS_FULL,
         "click_behavior": {"target": DASH_DETAIL, "preset": {"status": "APPROVED"}},
@@ -1345,7 +1498,7 @@ WHERE cs.status = 'APPROVED'
         "key":            "patches_manual",
         "name":           "Manual Approval",
         "display":        "scalar",
-        "row": 8, "col": 6, "size_x": 6, "size_y": 4,
+        "row": 10, "col": 6, "size_x": 6, "size_y": 4,
         "template_tags":  _OVERALL_TAGS,
         "param_mappings": _OVERALL_PARAM_MAPPINGS_FULL,
         "click_behavior": {"target": DASH_DETAIL, "preset": {"status": "MANUAL"}},
@@ -1368,7 +1521,7 @@ WHERE cs.status = 'MANUAL'
         "key":            "patches_delayed",
         "name":           "Delayed Patches",
         "display":        "scalar",
-        "row": 8, "col": 12, "size_x": 6, "size_y": 4,
+        "row": 10, "col": 12, "size_x": 6, "size_y": 4,
         "template_tags":  _OVERALL_TAGS,
         "param_mappings": _OVERALL_PARAM_MAPPINGS_FULL,
         "click_behavior": {"target": DASH_DETAIL, "preset": {"status": "DELAYED"}},
@@ -1391,7 +1544,7 @@ WHERE cs.status = 'DELAYED'
         "key":            "patches_failed",
         "name":           "Failed Patches",
         "display":        "scalar",
-        "row": 8, "col": 18, "size_x": 6, "size_y": 4,
+        "row": 10, "col": 18, "size_x": 6, "size_y": 4,
         "template_tags":  _OVERALL_TAGS,
         "param_mappings": _OVERALL_PARAM_MAPPINGS_FULL,
         "click_behavior": {
@@ -1427,7 +1580,7 @@ WHERE lir.status = 'FAILED'
         "key":            "ov_pcov_active",
         "name":           "Patching Devices",
         "display":        "scalar",
-        "row": 4, "col": 6, "size_x": 6, "size_y": 4,
+        "row": 6, "col": 6, "size_x": 6, "size_y": 4,
         "template_tags":  _OVERALL_TAGS,
         "param_mappings": _OVERALL_PARAM_MAPPINGS_FULL,
         "click_behavior": {
@@ -1455,7 +1608,7 @@ WHERE d.approval_status = 'APPROVED'
         "key":            "ov_pcov_stale",
         "name":           "Stalled Devices",
         "display":        "scalar",
-        "row": 4, "col": 12, "size_x": 6, "size_y": 4,
+        "row": 6, "col": 12, "size_x": 6, "size_y": 4,
         "template_tags":  _OVERALL_TAGS,
         "param_mappings": _OVERALL_PARAM_MAPPINGS_FULL,
         "click_behavior": {
@@ -1483,7 +1636,7 @@ WHERE d.approval_status = 'APPROVED'
         "key":            "ov_pcov_none",
         "name":            "Never-Patched Devices",
         "display":         "scalar",
-        "row": 4, "col": 18, "size_x": 6, "size_y": 4,
+        "row": 6, "col": 18, "size_x": 6, "size_y": 4,
         "template_tags":  _OVERALL_TAGS,
         "param_mappings": _OVERALL_PARAM_MAPPINGS_FULL,
         "click_behavior": {
@@ -1508,7 +1661,7 @@ WHERE d.approval_status = 'APPROVED'
         "key":        "patch_state_donut",
         "name":       "Current Patch State",
         "display":    "pie",
-        "row": 12, "col": 0, "size_x": 12, "size_y": 8,
+        "row": 14, "col": 0, "size_x": 12, "size_y": 8,
         "viz_settings": {
             "pie.dimension":       "Current Patch State",
             "pie.metric":          "Patches",
@@ -1546,7 +1699,7 @@ ORDER BY "Patches" DESC
         "key":        "compliance_worst",
         "name":       "Clients with Lowest Fully Patched Devices %",
         "display":    "row",
-        "row": 12, "col": 12, "size_x": 12, "size_y": 8,
+        "row": 14, "col": 12, "size_x": 12, "size_y": 8,
         "viz_settings": {
             "graph.dimensions": ["organization"],
             "graph.metrics":    ["Fully patched devices %"],
@@ -1584,7 +1737,7 @@ LIMIT 15
         "key":        "compliance_all",
         "name":       "Client Fully Patched Devices",
         "display":    "table",
-        "row": 20, "col": 0, "size_x": 24, "size_y": 10,
+        "row": 22, "col": 0, "size_x": 24, "size_y": 10,
         "column_click_behaviors": {
             "organization": {
                 "target": DASH_ORG,
@@ -1656,7 +1809,7 @@ ORDER BY "Fully patched devices %" ASC, "Total Patches" DESC
         "key":            "needs_reboot",
         "name":           "Devices Needing Reboot",
         "display":        "table",
-        "row": 30, "col": 0, "size_x": 24, "size_y": 8,
+        "row": 32, "col": 0, "size_x": 24, "size_y": 8,
         "template_tags":  _OVERALL_TAGS,
         "param_mappings": _OVERALL_PARAM_MAPPINGS_FULL,
         "column_click_behaviors": {
@@ -1935,7 +2088,7 @@ def build_detail_parameters(
     workstations across all clients first" is the default view.
     """
     return [
-        _param_multiselect(PARAM_ORG,     "Organization",            "org",             org_names),
+        _param_text(       PARAM_ORG,     "Organization",            "org"),
         _param_dropdown(   PARAM_DEVICE,  "Device",                  "device",          device_names),
         _param_multiselect(PARAM_STATUS,  "Current Patch State",     "status",          _STATUS_OPTIONS),
         _param_multiselect(PARAM_CLASS,   "Device Type",             "node_class",      _NODE_CLASS_OPTIONS,
@@ -2284,6 +2437,7 @@ LIMIT 1000
 # the active Windows fleet.
 
 DEVICE_TAGS = {
+    "org": {"id": "tt_org", "name": "org", "display-name": "Organization", "type": "text"},
     "device": {"id": "tt_device", "name": "device", "display-name": "Device", "type": "text"},
     "patching_scope": {
         "id": "tt_device_patching_scope",
@@ -2294,6 +2448,7 @@ DEVICE_TAGS = {
 }
 
 DEVICE_TIMELINE_TAGS = {
+    "org": {"id": "tt_org", "name": "org", "display-name": "Organization", "type": "text"},
     "device": {"id": "tt_device", "name": "device", "display-name": "Device", "type": "text"},
     "patching_scope": {
         "id": "tt_device_timeline_patching_scope",
@@ -2309,17 +2464,21 @@ DEVICE_TIMELINE_TAGS = {
 }
 
 DEVICE_PARAM_MAPPINGS = {
+    PARAM_ORG: ["variable", ["template-tag", "org"]],
     PARAM_DEVICE: ["variable", ["template-tag", "device"]],
     PARAM_PATCHING_SCOPE: ["variable", ["template-tag", "patching_scope"]],
 }
 
 DEVICE_TIMELINE_PARAM_MAPPINGS = {
+    PARAM_ORG:      ["variable", ["template-tag", "org"]],
     PARAM_DEVICE:      ["variable", ["template-tag", "device"]],
     PARAM_PATCHING_SCOPE: ["variable", ["template-tag", "patching_scope"]],
     PARAM_DEVICE_DAYS: ["variable", ["template-tag", "days"]],
 }
 
 _DEVICE_FILTER = (
+    "[[AND EXISTS (SELECT 1 FROM ninja_core.organizations o "
+    "WHERE o.id = d.organization_id AND o.name ILIKE '%' || {{org}} || '%')]]\n"
     "[[AND d.system_name = {{device}}]]\n"
     "[[AND EXISTS (SELECT 1 FROM ninja_core.v_active_devices vad "
     "WHERE vad.id = d.id AND vad.patching_scope IN ({{patching_scope}}))]]"
@@ -2329,6 +2488,7 @@ _DEVICE_FILTER = (
 def build_device_parameters(device_names: list[str]) -> list[dict]:
     """Device selector + timeline window."""
     return [
+        _param_text(      PARAM_ORG,      "Organization", "org"),
         _param_dropdown(PARAM_DEVICE,      "Device", "device", device_names),
         _param_multiselect(PARAM_PATCHING_SCOPE, "Patching Scope", "patching_scope", _PATCHING_SCOPE_OPTIONS, default="Included"),
         _param_number(  PARAM_DEVICE_DAYS, "Timeline window (days)", "device_days", 180),
@@ -2609,6 +2769,7 @@ classified AS (
         d.organization_id,
         d.node_class,
         d.os_name,
+        COALESCE(vad.patching_scope, 'Included') AS patching_scope,
         dps.last_seen_at,
         CASE
             WHEN dps.last_seen_at IS NULL THEN 'no_patch_data'
@@ -2617,6 +2778,7 @@ classified AS (
         END AS patch_status
     FROM ninja_core.devices d
     LEFT JOIN device_patch_signal dps ON dps.device_id = d.id
+    LEFT JOIN ninja_core.v_active_devices vad ON vad.id = d.id
     WHERE d.approval_status = 'APPROVED'
       AND d.node_class IN ('WINDOWS_WORKSTATION', 'WINDOWS_SERVER')
 )
@@ -2626,7 +2788,7 @@ _PCOV_FILTERS = f"""
   [[AND o.name IN ({{{{pcov_org}}}})]]
   [[AND {DEVICE_TYPE_C} IN ({{{{pcov_node_class}}}})]]
   [[AND {OS_FAMILY_C} IN ({{{{pcov_os}}}})]]
-  [[AND EXISTS (SELECT 1 FROM ninja_core.v_active_devices vad WHERE vad.id = c.device_id AND vad.patching_scope IN ({{{{patching_scope}}}}))]]
+  [[AND c.patching_scope IN ({{{{patching_scope}}}})]]
   [[AND {PATCH_ACTIVITY_LABEL_C} IN ({{{{pcov_status}}}})]]
 """
 
@@ -2921,7 +3083,7 @@ _ORG_PARAM_MAPPINGS_FULL = {
 # WHERE/AND lines. Device-only cards use the DEVICE variant; patch-
 # context cards use PATCH_CS (cs.severity alias) or PATCH_LIR
 # (lir.severity alias).
-_ORG_FILTER_ORG         = "  [[AND o.name IN ({{org}})]]\n"
+_ORG_FILTER_ORG         = "  [[AND o.name ILIKE '%' || {{org}} || '%']]\n"
 _ORG_FILTER_DEVICE_TYPE = f"  [[AND {DEVICE_TYPE_D} IN ({{{{device_type}}}})]]\n"
 _ORG_FILTER_OS_FAMILY   = f"  [[AND {OS_FAMILY_D} IN ({{{{os_family}}}})]]\n"
 _ORG_FILTER_PATCHING_SCOPE = (
@@ -2956,7 +3118,7 @@ _ORG_FILTERS_PATCH_CS_NO_OS = (
 
 def build_org_parameters(org_names: list[str]) -> list[dict]:
     return [
-        _param_multiselect(PARAM_ORG,   "Organization", "org",         org_names),
+        _param_text(      PARAM_ORG,   "Organization", "org"),
         _param_multiselect(PARAM_CLASS, "Device Type",  "device_type", _NODE_CLASS_OPTIONS),
         _param_multiselect(PARAM_OS,    "OS Family",    "os_family",   _OS_FAMILY_OPTIONS),
         _param_multiselect(PARAM_PATCHING_SCOPE, "Patching Scope", "patching_scope", _PATCHING_SCOPE_OPTIONS, default="Included"),
@@ -2969,7 +3131,7 @@ ORG_OVERVIEW_CARDS = [
         "key":     "org_active_devices",
         "name":    "Active Devices",
         "display": "scalar",
-        "row": 4, "col": 0, "size_x": 6, "size_y": 4,
+        "row": 4, "col": 16, "size_x": 8, "size_y": 4,
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS_FULL,
         "query": f"""
@@ -2999,10 +3161,28 @@ WHERE 1=1
         "query": _patching_device_compliance_scalar_query(_ORG_FILTERS_DEVICE),
     },
     {
+        "key":     "org_active_count",
+        "name":    "Actively patching",
+        "display": "scalar",
+        "row": 4, "col": 0, "size_x": 8, "size_y": 3,
+        "template_tags":  _ORG_TAGS,
+        "param_mappings": _ORG_PARAM_MAPPINGS_FULL,
+        "query": _active_patching_count_query(_ORG_FILTERS_DEVICE),
+    },
+    {
+        "key":     "org_progress_count",
+        "name":    "Fully patched",
+        "display": "scalar",
+        "row": 4, "col": 8, "size_x": 8, "size_y": 3,
+        "template_tags":  _ORG_TAGS,
+        "param_mappings": _ORG_PARAM_MAPPINGS_FULL,
+        "query": _patching_device_compliance_count_query(_ORG_FILTERS_DEVICE),
+    },
+    {
         "key":     "org_failed",
         "name":    "Failed Patches",
         "display": "scalar",
-        "row": 8, "col": 18, "size_x": 6, "size_y": 4,
+        "row": 12, "col": 18, "size_x": 6, "size_y": 4,
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS_FULL,
         "query": f"""
@@ -3030,7 +3210,7 @@ WHERE lir.status = 'FAILED'
         "key":     "org_approved",
         "name":    "Approved Patches",
         "display": "scalar",
-        "row": 8, "col": 0, "size_x": 6, "size_y": 4,
+        "row": 12, "col": 0, "size_x": 6, "size_y": 4,
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS_FULL,
         "query": f"""
@@ -3052,7 +3232,7 @@ WHERE cs.status = 'APPROVED'
         "key":     "org_manual",
         "name":    "Manual Approval",
         "display": "scalar",
-        "row": 8, "col": 6, "size_x": 6, "size_y": 4,
+        "row": 12, "col": 6, "size_x": 6, "size_y": 4,
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS_FULL,
         "query": f"""
@@ -3074,7 +3254,7 @@ WHERE cs.status = 'MANUAL'
         "key":     "org_delayed",
         "name":    "Delayed Patches",
         "display": "scalar",
-        "row": 8, "col": 12, "size_x": 6, "size_y": 4,
+        "row": 12, "col": 12, "size_x": 6, "size_y": 4,
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS_FULL,
         "query": f"""
@@ -3096,7 +3276,7 @@ WHERE cs.status = 'DELAYED'
         "key":     "org_stale",
         "name":    "Stalled Devices",
         "display": "scalar",
-        "row": 4, "col": 12, "size_x": 6, "size_y": 4,
+        "row": 8, "col": 12, "size_x": 6, "size_y": 4,
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS_FULL,
         "query": f"""
@@ -3121,7 +3301,7 @@ WHERE d.approval_status = 'APPROVED'
         "key":     "org_never",
         "name":    "Never-Patched Devices",
         "display": "scalar",
-        "row": 4, "col": 18, "size_x": 6, "size_y": 4,
+        "row": 8, "col": 18, "size_x": 6, "size_y": 4,
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS_FULL,
         "query": f"""
@@ -3142,7 +3322,7 @@ WHERE d.approval_status = 'APPROVED'
         "key":     "org_patching",
         "name":    "Patching Devices",
         "display": "scalar",
-        "row": 4, "col": 6, "size_x": 6, "size_y": 4,
+        "row": 8, "col": 6, "size_x": 6, "size_y": 4,
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS_FULL,
         "query": f"""
@@ -3167,7 +3347,7 @@ WHERE d.approval_status = 'APPROVED'
         "key":     "org_status",
         "name":    "Current Patch State",
         "display": "pie",
-        "row": 12, "col": 0, "size_x": 8, "size_y": 8,
+        "row": 16, "col": 0, "size_x": 8, "size_y": 8,
         "viz_settings": {
             "pie.dimension": "Current Patch State",
             "pie.metric": "Patches",
@@ -3206,7 +3386,7 @@ ORDER BY "Patches" DESC
         "key":     "org_device_type",
         "name":    "Fully patched % (patching devices) by Device Type",
         "display": "bar",
-        "row": 12, "col": 8, "size_x": 8, "size_y": 8,
+        "row": 16, "col": 8, "size_x": 8, "size_y": 8,
         "viz_settings": {"graph.dimensions": ["Device Type"], "graph.metrics": ["Fully patched % (patching devices)"]},
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS_FULL,
@@ -3233,7 +3413,7 @@ ORDER BY "Fully patched % (patching devices)" ASC
         "key":     "org_os_family",
         "name":    "Fully patched % (patching devices) by Operating System",
         "display": "bar",
-        "row": 12, "col": 16, "size_x": 8, "size_y": 8,
+        "row": 16, "col": 16, "size_x": 8, "size_y": 8,
         "viz_settings": {"graph.dimensions": ["Operating System Family"], "graph.metrics": ["Fully patched % (patching devices)"]},
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS_FULL,
@@ -3260,7 +3440,7 @@ ORDER BY "Fully patched % (patching devices)" ASC
         "key":     "org_failed_queue",
         "name":    "Failed Patch Queue",
         "display": "table",
-        "row": 20, "col": 0, "size_x": 24, "size_y": 10,
+        "row": 24, "col": 0, "size_x": 24, "size_y": 10,
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS_FULL,
         "column_click_behaviors": {
@@ -3307,7 +3487,7 @@ LIMIT 100
         "key":     "org_action_queue",
         "name":    "Manual and Delayed Patches",
         "display": "table",
-        "row": 30, "col": 0, "size_x": 24, "size_y": 10,
+        "row": 34, "col": 0, "size_x": 24, "size_y": 10,
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS_FULL,
         "column_click_behaviors": {
@@ -3349,7 +3529,7 @@ LIMIT 100
         "key":     "org_reboot_devices",
         "name":    "Devices Needing Reboot",
         "display": "table",
-        "row": 40, "col": 0, "size_x": 24, "size_y": 8,
+        "row": 44, "col": 0, "size_x": 24, "size_y": 8,
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS_FULL,
         # Lowercase snake_case aliases on every clickable column.
@@ -3417,7 +3597,7 @@ _TRENDS_PARAM_MAPPINGS_FULL = {
     PARAM_TRENDS_SEV: ["variable", ["template-tag", "severity"]],
 }
 
-_TRENDS_FILTER_ORG         = "  [[AND o.name IN ({{org}})]]\n"
+_TRENDS_FILTER_ORG         = "  [[AND o.name ILIKE '%' || {{org}} || '%']]\n"
 _TRENDS_FILTER_DEVICE_TYPE = f"  [[AND {DEVICE_TYPE_D} IN ({{{{device_type}}}})]]\n"
 _TRENDS_FILTER_PATCHING_SCOPE = (
     "  [[AND EXISTS (SELECT 1 FROM ninja_core.v_active_devices vad "
@@ -3439,7 +3619,7 @@ _TRENDS_DEVICE_TYPE_FILTER = _TRENDS_FILTER_DEVICE_TYPE
 def build_trends_parameters(org_names: list[str]) -> list[dict]:
     return [
         _param_number(     PARAM_TRENDS_DAYS,  "Timeline window (days)", "days",        90),
-        _param_multiselect(PARAM_TRENDS_ORG,   "Organization",           "org",         org_names),
+        _param_text(      PARAM_TRENDS_ORG,   "Organization",           "org"),
         _param_multiselect(PARAM_TRENDS_CLASS, "Device Type",            "device_type", _NODE_CLASS_OPTIONS),
         _param_multiselect(PARAM_PATCHING_SCOPE, "Patching Scope",       "patching_scope", _PATCHING_SCOPE_OPTIONS, default="Included"),
         _param_multiselect(PARAM_TRENDS_SEV,   "Severity",               "severity",    _SEVERITY_OPTIONS),
