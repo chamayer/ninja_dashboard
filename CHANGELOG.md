@@ -17,6 +17,7 @@ All notable changes to this project follow [Semantic Versioning](https://semver.
 - **Trends dashboard gained the same KPI pair.** Added daily trend
   cards for `Devices Compliant %` and `Patch Progress %` so operators
   can see direction, not just a single static score.
+- Commit: `fafe234`
 
 ## [0.14.5] — 2026-06-04
 

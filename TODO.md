@@ -172,6 +172,13 @@ _(empty — drop free-form items here)_
 
 ## Completed
 
+### v0.14.6 — 2026-06-04
+
+- [x] Split the dashboard compliance story into
+      `Devices Compliant %` and `Patch Progress %` across Command
+      Center, Overall Status, Org Overview, and Trends.
+      Commit `fafe234`.
+
 ### v0.14.4 — 2026-06-04
 
 - [x] Metabase card reuse stopped by moving bootstrap identity from

@@ -22,7 +22,7 @@ right now?" from "how much patch work has been installed so far?"
 
 **Validation:**
 - `python -m py_compile ingest/metabase_bootstrap.py` passes.
-- Commit hash pending until the release push is finalized.
+- Commit `fafe234` created for the dashboard split.
 
 ## 2026-06-04 — v0.14.5 add device reachability to Device Summary
 
