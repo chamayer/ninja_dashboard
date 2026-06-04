@@ -5,6 +5,27 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-04 — v0.12.6 Drilldown activity feed allowlist
+
+**Why:** User reported the Device Drilldown's "Recent Activity"
+card was showing non-patch / non-reboot rows. The card had no
+SQL-side filter — it trusted the ingest's TYPES_INCLUDE.
+
+**Done:**
+- Defined `_DRILLDOWN_ACTIVITY_CODES` = the canonical patch-
+  lifecycle codes + `SYSTEM_REBOOTED`.
+  `PATCH_MANAGEMENT_MESSAGE` deliberately excluded (noisy info).
+- Added `WHERE a.activity_type IN (...)` to the device activity
+  card's SQL.
+- Renamed the card to "Recent Patch & Reboot Activity" so the
+  scope is obvious.
+- Ingest unchanged — broader rows still land in
+  `ninja_activities.activities`; the dashboard just filters
+  what it shows.
+
+**Validation:**
+- `python -m py_compile` passes.
+
 ## 2026-06-04 — v0.12.5 section header dividers
 
 **Done:**

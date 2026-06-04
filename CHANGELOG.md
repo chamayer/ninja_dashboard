@@ -2,6 +2,29 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.12.6] — 2026-06-04
+
+### Changed
+- **Device Drilldown activity feed cleaned up.** The "Recent
+  Activity" table was showing every activity the ingest collected
+  for the device, including non-patch / non-reboot rows when the
+  ingest's `INGEST_ACTIVITY_TYPES_INCLUDE` was broader than the
+  dashboard's purpose. Added a SQL-side allowlist
+  (`_DRILLDOWN_ACTIVITY_CODES`) so the card now only shows the
+  patch-lifecycle codes plus `SYSTEM_REBOOTED`.
+- Card renamed: "Recent Activity" → **"Recent Patch & Reboot
+  Activity"** so the operator knows what to expect.
+- `PATCH_MANAGEMENT_MESSAGE` is intentionally excluded from the
+  card's allowlist (noisy generic info code). Operator can edit
+  `_DRILLDOWN_ACTIVITY_CODES` to tweak.
+
+### Notes
+- This is a dashboard-side filter only. The ingest is unchanged —
+  if `INGEST_ACTIVITY_TYPES_INCLUDE` is permissive, the rows still
+  land in `ninja_activities.activities`; the Drilldown just doesn't
+  show them. Other tools / future cards can still query the full
+  set.
+
 ## [0.12.5] — 2026-06-04
 
 ### Added

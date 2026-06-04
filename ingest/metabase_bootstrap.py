@@ -1522,6 +1522,26 @@ DEVICE_TIMELINE_PARAM_MAPPINGS = {
 
 _DEVICE_FILTER = "[[AND d.system_name = {{device}}]]"
 
+# Canonical patch-lifecycle and reboot activity codes for the
+# Drilldown "Recent Patch & Reboot Activity" card. Restricting at the
+# dashboard layer means the card stays focused even if the ingest
+# TYPES_INCLUDE has broader codes. PATCH_MANAGEMENT_MESSAGE is left
+# OUT — it's the noisy generic info message code.
+_DRILLDOWN_ACTIVITY_CODES = (
+    "PATCH_MANAGEMENT_APPLY_PATCH_STARTED",
+    "PATCH_MANAGEMENT_APPLY_PATCH_COMPLETED",
+    "PATCH_MANAGEMENT_FAILURE",
+    "PATCH_MANAGEMENT_ROLLBACK_PATCH_REQUESTED",
+    "PATCH_MANAGEMENT_ROLLBACK_PATCH_STARTED",
+    "PATCH_MANAGEMENT_ROLLBACK_PATCH_COMPLETED",
+    "PATCH_MANAGEMENT_PATCH_APPROVED",
+    "PATCH_MANAGEMENT_PATCH_REJECTED",
+    "SYSTEM_REBOOTED",
+)
+_DRILLDOWN_ACTIVITY_CODES_SQL = ", ".join(
+    f"'{c}'" for c in _DRILLDOWN_ACTIVITY_CODES
+)
+
 
 def build_device_parameters(device_names: list[str]) -> list[dict]:
     """Device selector + timeline window."""
@@ -1619,11 +1639,17 @@ ORDER BY 1
     },
     {
         "key":            "device_activities",
-        "name":           "Recent Activity",
+        "name":           "Recent Patch & Reboot Activity",
         "display":        "table",
         "row": 14, "col": 0, "size_x": 24, "size_y": 10,
         "template_tags":  DEVICE_TAGS,
         "param_mappings": DEVICE_PARAM_MAPPINGS,
+        # Defense-in-depth: even if the ingest TYPES_INCLUDE has
+        # broader codes set, the dashboard card only shows patch-
+        # lifecycle and reboot events. Operator can edit
+        # _DRILLDOWN_ACTIVITY_CODES to tweak the allowlist.
+        # PATCH_MANAGEMENT_MESSAGE is intentionally excluded — it's
+        # the noisy generic info code.
         "query": f"""
 SELECT
     a.activity_time        AS "Activity Time",
@@ -1634,7 +1660,7 @@ SELECT
     a.id                   AS "Activity ID"
 FROM ninja_activities.activities a
 JOIN ninja_core.devices d ON d.id = a.device_id
-WHERE 1=1
+WHERE a.activity_type IN ({_DRILLDOWN_ACTIVITY_CODES_SQL})
 {_DEVICE_FILTER}
 ORDER BY a.activity_time DESC
 LIMIT 200
