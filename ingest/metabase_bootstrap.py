@@ -214,6 +214,157 @@ universe AS (
 )
 """
 
+
+def _patch_progress_scalar_query(filters: str) -> str:
+    """Patch-progress percent = installed / (installed + missing)."""
+    return f"""
+{_COMPLIANCE_CTES}
+SELECT ROUND(
+    COUNT(*) FILTER (WHERE ip.device_id IS NOT NULL) * 100.0
+    / NULLIF(COUNT(*), 0),
+    1
+) AS percent_installed
+FROM universe u
+LEFT JOIN installed_patches ip USING (device_id, patch_uid)
+JOIN ninja_core.v_active_devices d ON d.id = u.device_id
+JOIN ninja_core.organizations o ON o.id = d.organization_id
+WHERE d.approval_status = 'APPROVED'
+{filters}
+"""
+
+
+def _device_compliance_scalar_query(filters: str) -> str:
+    """Device-compliant percent = fully patched devices / scoped devices."""
+    return f"""
+{_COMPLIANCE_CTES},
+device_rollup AS (
+    SELECT
+        u.device_id,
+        COUNT(*) FILTER (WHERE mp.device_id IS NOT NULL) AS missing_count
+    FROM universe u
+    LEFT JOIN missing_patches mp USING (device_id, patch_uid)
+    GROUP BY u.device_id
+)
+SELECT ROUND(
+    COUNT(*) FILTER (WHERE dr.missing_count = 0) * 100.0
+    / NULLIF(COUNT(*), 0),
+    1
+) AS percent_installed
+FROM device_rollup dr
+JOIN ninja_core.v_active_devices d ON d.id = dr.device_id
+JOIN ninja_core.organizations o ON o.id = d.organization_id
+WHERE d.approval_status = 'APPROVED'
+{filters}
+"""
+
+
+def _daily_compliance_ctes() -> str:
+    return f"""
+WITH days AS (
+    SELECT generate_series(
+        (date_trunc('day', NOW())::date - (INTERVAL '1 day' * ({{{{days}}}} - 1))),
+        date_trunc('day', NOW())::date,
+        INTERVAL '1 day'
+    )::date AS day
+),
+installed_patches AS (
+    SELECT DISTINCT ON (days.day, pf.device_id, pf.patch_uid)
+        days.day,
+        pf.device_id,
+        pf.patch_uid
+    FROM days
+    JOIN ninja_patches.patch_facts pf
+      ON pf.fact_type = 'install_outcome'
+     AND pf.status = 'INSTALLED'
+     AND pf.installed_at < days.day + INTERVAL '1 day'
+    ORDER BY
+        days.day,
+        pf.device_id,
+        pf.patch_uid,
+        pf.installed_at DESC NULLS LAST,
+        pf.last_observed_at DESC NULLS LAST,
+        pf.id DESC
+),
+current_patch_state AS (
+    SELECT DISTINCT ON (days.day, pf.device_id, pf.patch_uid)
+        days.day,
+        pf.device_id,
+        pf.patch_uid,
+        pf.status
+    FROM days
+    JOIN ninja_patches.patch_facts pf
+      ON pf.fact_type = 'patch_state'
+     AND pf.first_observed_at < days.day + INTERVAL '1 day'
+    ORDER BY
+        days.day,
+        pf.device_id,
+        pf.patch_uid,
+        pf.first_observed_at DESC NULLS LAST,
+        pf.last_observed_at DESC NULLS LAST,
+        pf.id DESC
+),
+missing_patches AS (
+    SELECT day, device_id, patch_uid
+    FROM current_patch_state
+    WHERE status IN ({COMPLIANCE_MISSING_SQL})
+),
+universe AS (
+    SELECT day, device_id, patch_uid FROM installed_patches
+    UNION
+    SELECT day, device_id, patch_uid FROM missing_patches
+),
+device_rollup AS (
+    SELECT
+        u.day,
+        u.device_id,
+        COUNT(*) FILTER (WHERE mp.device_id IS NOT NULL) AS missing_count
+    FROM universe u
+    LEFT JOIN missing_patches mp USING (day, device_id, patch_uid)
+    GROUP BY u.day, u.device_id
+)
+"""
+
+
+def _daily_device_compliance_query(filters: str) -> str:
+    return f"""
+{_daily_compliance_ctes()}
+SELECT
+    dr.day AS "Day",
+    ROUND(
+        COUNT(*) FILTER (WHERE dr.missing_count = 0) * 100.0
+        / NULLIF(COUNT(*), 0),
+        1
+    ) AS "Devices Compliant %"
+FROM device_rollup dr
+JOIN ninja_core.v_active_devices d ON d.id = dr.device_id
+JOIN ninja_core.organizations o ON o.id = d.organization_id
+WHERE d.approval_status = 'APPROVED'
+{filters}
+GROUP BY dr.day
+ORDER BY dr.day
+"""
+
+
+def _daily_patch_progress_query(filters: str) -> str:
+    return f"""
+{_daily_compliance_ctes()}
+SELECT
+    u.day AS "Day",
+    ROUND(
+        COUNT(*) FILTER (WHERE ip.device_id IS NOT NULL) * 100.0
+        / NULLIF(COUNT(*), 0),
+        1
+    ) AS "Patch Progress %"
+FROM universe u
+LEFT JOIN installed_patches ip USING (day, device_id, patch_uid)
+JOIN ninja_core.v_active_devices d ON d.id = u.device_id
+JOIN ninja_core.organizations o ON o.id = d.organization_id
+WHERE d.approval_status = 'APPROVED'
+{filters}
+GROUP BY u.day
+ORDER BY u.day
+"""
+
 OS_FAMILY_D = OS_FAMILY_SQL.format(alias="d").strip()
 OS_FAMILY_C = OS_FAMILY_SQL.format(alias="c").strip()
 PATCH_ACTIVITY_LABEL_C = PATCH_ACTIVITY_LABEL_SQL.format(expr="c.patch_status").strip()
@@ -281,19 +432,20 @@ def build_command_parameters(org_names: list[str]) -> list[dict]:
 
 COMMAND_CARDS: list[dict[str, Any]] = [
     # Row 0 — Devices (canonical order: Active, Patching, Stalled,
-    # Never-Patched). 4 scalars at size 6 each = 24. Needs Reboot
-    # was demoted from a top-row KPI in v0.14.0 — it belongs in the
-    # action-queue tables, not as a high-level patch-management KPI.
+    # Never-Patched, Devices Compliant). 4 scalars at size 5 each
+    # plus one 4-wide compliance tile = 24. Needs Reboot was demoted
+    # from a top-row KPI in v0.14.0 — it belongs in the action-queue
+    # tables, not as a high-level patch-management KPI.
     {
         "key":            "cmd_active_devices",
         "name":           "Active Devices",
         "display":        "scalar",
-        "row": 0, "col": 0, "size_x": 6, "size_y": 4,
+        "row": 0, "col": 0, "size_x": 5, "size_y": 4,
         "template_tags":  _CMD_TAGS,
         "param_mappings": _CMD_PARAM_MAPPINGS_FULL,
         "click_behavior": {"target": DASH_DETAIL, "preset": {}},
         "query": f"""
-SELECT COUNT(*) AS devices
+        SELECT COUNT(*) AS devices
 FROM ninja_core.v_active_devices d
 JOIN ninja_core.organizations o ON o.id = d.organization_id
 WHERE 1=1
@@ -304,12 +456,12 @@ WHERE 1=1
         "key":            "cmd_patching",
         "name":           "Patching Devices",
         "display":        "scalar",
-        "row": 0, "col": 6, "size_x": 6, "size_y": 4,
+        "row": 0, "col": 5, "size_x": 5, "size_y": 4,
         "template_tags":  _CMD_TAGS,
         "param_mappings": _CMD_PARAM_MAPPINGS_FULL,
         "click_behavior": {"target": DASH_PCOV, "preset": {"pcov_status": "Patching Devices"}},
         "query": f"""
-WITH last_install AS (
+        WITH last_install AS (
     SELECT device_id, MAX(installed_at) AS last_install_at
     FROM ninja_patches.patch_facts
     WHERE fact_type = 'install_outcome'
@@ -330,12 +482,12 @@ WHERE d.approval_status = 'APPROVED'
         "key":            "cmd_stale",
         "name":           "Stalled Devices",
         "display":        "scalar",
-        "row": 0, "col": 12, "size_x": 6, "size_y": 4,
+        "row": 0, "col": 10, "size_x": 5, "size_y": 4,
         "template_tags":  _CMD_TAGS,
         "param_mappings": _CMD_PARAM_MAPPINGS_FULL,
         "click_behavior": {"target": DASH_PCOV, "preset": {"pcov_status": "Stalled Devices"}},
         "query": f"""
-WITH last_install AS (
+        WITH last_install AS (
     SELECT device_id, MAX(installed_at) AS last_install_at
     FROM ninja_patches.patch_facts
     WHERE fact_type = 'install_outcome'
@@ -356,12 +508,12 @@ WHERE d.approval_status = 'APPROVED'
         "key":            "cmd_never",
         "name":           "Never-Patched Devices",
         "display":        "scalar",
-        "row": 0, "col": 18, "size_x": 6, "size_y": 4,
+        "row": 0, "col": 15, "size_x": 5, "size_y": 4,
         "template_tags":  _CMD_TAGS,
         "param_mappings": _CMD_PARAM_MAPPINGS_FULL,
         "click_behavior": {"target": DASH_PCOV, "preset": {"pcov_status": "Never-Patched Devices"}},
         "query": f"""
-SELECT COUNT(*) AS devices
+        SELECT COUNT(*) AS devices
 FROM ninja_core.devices d
 JOIN ninja_core.organizations o ON o.id = d.organization_id
 LEFT JOIN ninja_patches.patch_facts pf
@@ -369,10 +521,19 @@ LEFT JOIN ninja_patches.patch_facts pf
  AND pf.fact_type = 'install_outcome'
  AND pf.installed_at IS NOT NULL
 WHERE d.approval_status = 'APPROVED'
-  AND d.node_class IN ('WINDOWS_WORKSTATION', 'WINDOWS_SERVER')
-  AND pf.device_id IS NULL
-{_CMD_FILTERS_DEVICE}
+        AND d.node_class IN ('WINDOWS_WORKSTATION', 'WINDOWS_SERVER')
+        AND pf.device_id IS NULL
+        {_CMD_FILTERS_DEVICE}
 """,
+    },
+    {
+        "key":            "cmd_compliance",
+        "name":           "Devices Compliant %",
+        "display":        "scalar",
+        "row": 0, "col": 20, "size_x": 4, "size_y": 4,
+        "template_tags":  _CMD_TAGS,
+        "param_mappings": _CMD_PARAM_MAPPINGS_FULL,
+        "query": _device_compliance_scalar_query(_CMD_FILTERS_DEVICE),
     },
     # Row 4 — Patches (canonical order: Approved, Manual, Delayed,
     # Failed). Sizes: 6+6+6+6 = 24. Each CTE now selects device_id so
@@ -787,31 +948,24 @@ def build_overall_parameters(org_names: list[str], os_families: list[str]) -> li
 
 
 OVERVIEW_CARDS: list[dict[str, Any]] = [
-    # Row 0 — Compliance headline + Data Freshness sidekick.
+    # Row 0 — Compliance headline, patch progress, and data freshness.
     {
         "key":            "overall_compliance",
-        "name":           "Patch Compliance",
+        "name":           "Devices Compliant %",
         "display":        "scalar",
-        "row": 0, "col": 0, "size_x": 18, "size_y": 4,
+        "row": 0, "col": 0, "size_x": 8, "size_y": 4,
         "template_tags":  _OVERALL_TAGS,
         "param_mappings": _OVERALL_PARAM_MAPPINGS_FULL,
-        # Compliance formula (single source of truth — see
-        # COMPLIANCE_MISSING_STATES at module top). REJECTED and
-        # DELAYED excluded from both numerator and denominator.
-        "query": f"""
-{_COMPLIANCE_CTES}
-SELECT ROUND(
-    COUNT(*) FILTER (WHERE ip.device_id IS NOT NULL) * 100.0
-    / NULLIF(COUNT(*), 0),
-    1
-) AS percent_installed
-FROM universe u
-LEFT JOIN installed_patches ip USING (device_id, patch_uid)
-JOIN ninja_core.v_active_devices d ON d.id = u.device_id
-JOIN ninja_core.organizations o ON o.id = d.organization_id
-WHERE d.approval_status = 'APPROVED'
-{_OVERALL_FILTERS_DEVICE}
-""",
+        "query": _device_compliance_scalar_query(_OVERALL_FILTERS_DEVICE),
+    },
+    {
+        "key":            "overall_progress",
+        "name":           "Patch Progress %",
+        "display":        "scalar",
+        "row": 0, "col": 8, "size_x": 8, "size_y": 4,
+        "template_tags":  _OVERALL_TAGS,
+        "param_mappings": _OVERALL_PARAM_MAPPINGS_FULL,
+        "query": _patch_progress_scalar_query(_OVERALL_FILTERS_DEVICE),
     },
     {
         # Data freshness indicator. If ingest is broken, every other
@@ -821,7 +975,7 @@ WHERE d.approval_status = 'APPROVED'
         "key":     "overall_data_freshness",
         "name":    "Data Freshness",
         "display": "scalar",
-        "row": 0, "col": 18, "size_x": 6, "size_y": 4,
+        "row": 0, "col": 16, "size_x": 8, "size_y": 4,
         "query": """
 SELECT
     CASE
@@ -1050,7 +1204,7 @@ WHERE d.approval_status = 'APPROVED'
 {_OVERALL_FILTERS_DEVICE}
 """,
     },
-    # Row 12 — Charts: Current Patch State pie + Worst Compliance bar.
+    # Row 12 — Charts: Current Patch State pie + lowest patch progress bar.
     {
         "key":        "patch_state_donut",
         "name":       "Current Patch State",
@@ -1091,12 +1245,12 @@ ORDER BY "Patches" DESC
     },
     {
         "key":        "compliance_worst",
-        "name":       "Clients with Lowest Patch Compliance",
+        "name":       "Clients with Lowest Patch Progress",
         "display":    "row",
         "row": 12, "col": 12, "size_x": 12, "size_y": 8,
         "viz_settings": {
             "graph.dimensions": ["organization"],
-            "graph.metrics":    ["Patch Compliance"],
+            "graph.metrics":    ["Patch Progress %"],
         },
         # Click an org bar → open Org Overview filtered to that org.
         "click_behavior": {
@@ -1105,8 +1259,6 @@ ORDER BY "Patches" DESC
         },
         "template_tags":  _OVERALL_TAGS,
         "param_mappings": _OVERALL_PARAM_MAPPINGS_FULL,
-        # Compliance formula — see COMPLIANCE_MISSING_STATES at
-        # module top. REJECTED/DELAYED excluded.
         "query": f"""
 {_COMPLIANCE_CTES}
 SELECT
@@ -1115,7 +1267,7 @@ SELECT
       COUNT(*) FILTER (WHERE ip.device_id IS NOT NULL) * 100.0
       / NULLIF(COUNT(*), 0),
       1
-    ) AS "Patch Compliance",
+    ) AS "Patch Progress %",
     COUNT(*) AS "Total Patches"
 FROM universe u
 LEFT JOIN installed_patches ip USING (device_id, patch_uid)
@@ -1125,13 +1277,13 @@ WHERE d.approval_status = 'APPROVED'
 {_OVERALL_FILTERS_DEVICE}
 GROUP BY o.name
 HAVING COUNT(*) >= 50
-ORDER BY "Patch Compliance" ASC
+ORDER BY "Patch Progress %" ASC
 LIMIT 15
 """,
     },
     {
         "key":        "compliance_all",
-        "name":       "Client Patch Compliance",
+        "name":       "Client Patch Progress",
         "display":    "table",
         "row": 20, "col": 0, "size_x": 24, "size_y": 10,
         "column_click_behaviors": {
@@ -1142,14 +1294,14 @@ LIMIT 15
         },
         "template_tags":  _OVERALL_TAGS,
         "param_mappings": _OVERALL_PARAM_MAPPINGS_FULL,
-        # "Patch Compliance" uses the canonical formula (see
+        # "Patch Progress %" uses the canonical formula (see
         # COMPLIANCE_MISSING_STATES). The breakdown columns
         # (Approved / Manual / Delayed / Failed / Rejected) count
         # from ALL known patch states for operator context — they
-        # don't feed into the compliance % but they explain the
+        # don't feed into the progress % but they explain the
         # population. The all_known CTE pulls every (device, patch)
         # we've ever seen so the breakdown counts can include states
-        # excluded from the compliance formula.
+        # excluded from the progress formula.
         "query": f"""
 {_COMPLIANCE_CTES},
 latest_install_outcome AS (
@@ -1173,14 +1325,14 @@ SELECT
       COUNT(*) FILTER (WHERE u.device_id IS NOT NULL AND ip.device_id IS NOT NULL) * 100.0
       / NULLIF(COUNT(*) FILTER (WHERE u.device_id IS NOT NULL), 0),
       1
-    )                                                                            AS "Patch Compliance",
+    )                                                                            AS "Patch Progress %",
     COUNT(*) FILTER (WHERE ip.device_id IS NOT NULL)                              AS "Installed",
     COUNT(*) FILTER (WHERE cps.status = 'APPROVED')                               AS "Approved Patches",
     COUNT(*) FILTER (WHERE cps.status = 'MANUAL')                                 AS "Manual Approval Patches",
     COUNT(*) FILTER (WHERE cps.status = 'DELAYED')                                AS "Delayed Install Patches",
     COUNT(*) FILTER (WHERE lio.status = 'FAILED')                                 AS "Failed Patches",
     COUNT(*) FILTER (WHERE cps.status = 'REJECTED')                               AS "Rejected",
-    COUNT(*) FILTER (WHERE u.device_id IS NOT NULL)                               AS "Compliance-Scope Patches",
+    COUNT(*) FILTER (WHERE u.device_id IS NOT NULL)                               AS "Patches in Scope",
     COUNT(*)                                                                      AS "Total Patches",
     COUNT(DISTINCT ak.device_id)                                                  AS "Devices"
 FROM all_known ak
@@ -1198,7 +1350,7 @@ WHERE d.approval_status = 'APPROVED'
 {_OVERALL_FILTERS_DEVICE}
 GROUP BY o.name
 HAVING COUNT(*) >= 10
-ORDER BY "Patch Compliance" ASC, "Total Patches" DESC
+ORDER BY "Patch Progress %" ASC, "Total Patches" DESC
 """,
     },
     {
@@ -2481,27 +2633,21 @@ WHERE 1=1
     },
     {
         "key":     "org_compliance",
-        "name":    "Patch Compliance",
+        "name":    "Devices Compliant %",
         "display": "scalar",
-        "row": 0, "col": 0, "size_x": 24, "size_y": 4,
+        "row": 0, "col": 0, "size_x": 12, "size_y": 4,
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS_FULL,
-        # Canonical compliance formula (see COMPLIANCE_MISSING_STATES
-        # at module top). REJECTED/DELAYED excluded.
-        "query": f"""
-{_COMPLIANCE_CTES}
-SELECT ROUND(
-    COUNT(*) FILTER (WHERE ip.device_id IS NOT NULL) * 100.0
-    / NULLIF(COUNT(*), 0),
-    1
-) AS percent_installed
-FROM universe u
-LEFT JOIN installed_patches ip USING (device_id, patch_uid)
-JOIN ninja_core.v_active_devices d ON d.id = u.device_id
-JOIN ninja_core.organizations o ON o.id = d.organization_id
-WHERE d.approval_status = 'APPROVED'
-{_ORG_FILTERS_DEVICE}
-""",
+        "query": _device_compliance_scalar_query(_ORG_FILTERS_DEVICE),
+    },
+    {
+        "key":     "org_progress",
+        "name":    "Patch Progress %",
+        "display": "scalar",
+        "row": 0, "col": 12, "size_x": 12, "size_y": 4,
+        "template_tags":  _ORG_TAGS,
+        "param_mappings": _ORG_PARAM_MAPPINGS_FULL,
+        "query": _patch_progress_scalar_query(_ORG_FILTERS_DEVICE),
     },
     {
         "key":     "org_failed",
@@ -2709,14 +2855,13 @@ ORDER BY "Patches" DESC
     },
     {
         "key":     "org_device_type",
-        "name":    "Patch Compliance by Device Type",
+        "name":    "Patch Progress by Device Type",
         "display": "bar",
         "row": 12, "col": 8, "size_x": 8, "size_y": 8,
-        "viz_settings": {"graph.dimensions": ["Device Type"], "graph.metrics": ["Patch Compliance"]},
+        "viz_settings": {"graph.dimensions": ["Device Type"], "graph.metrics": ["Patch Progress %"]},
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS_FULL,
         "click_behavior": {"target": DASH_DETAIL, "params": {"p_class": "Device Type"}},
-        # Canonical compliance formula (see COMPLIANCE_MISSING_STATES).
         "query": f"""
 {_COMPLIANCE_CTES}
 SELECT
@@ -2724,7 +2869,7 @@ SELECT
     ROUND(
       COUNT(*) FILTER (WHERE ip.device_id IS NOT NULL) * 100.0
       / NULLIF(COUNT(*), 0), 1
-    ) AS "Patch Compliance"
+    ) AS "Patch Progress %"
 FROM universe u
 LEFT JOIN installed_patches ip USING (device_id, patch_uid)
 JOIN ninja_core.v_active_devices d ON d.id = u.device_id
@@ -2732,19 +2877,18 @@ JOIN ninja_core.organizations o ON o.id = d.organization_id
 WHERE d.approval_status = 'APPROVED'
 {_ORG_FILTERS_DEVICE}
 GROUP BY "Device Type"
-ORDER BY "Patch Compliance" ASC
+ORDER BY "Patch Progress %" ASC
 """,
     },
     {
         "key":     "org_os_family",
-        "name":    "Patch Compliance by Operating System",
+        "name":    "Patch Progress by Operating System",
         "display": "bar",
         "row": 12, "col": 16, "size_x": 8, "size_y": 8,
-        "viz_settings": {"graph.dimensions": ["Operating System Family"], "graph.metrics": ["Patch Compliance"]},
+        "viz_settings": {"graph.dimensions": ["Operating System Family"], "graph.metrics": ["Patch Progress %"]},
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS_FULL,
         "click_behavior": {"target": DASH_DETAIL, "params": {"p_os": "Operating System Family"}},
-        # Canonical compliance formula (see COMPLIANCE_MISSING_STATES).
         "query": f"""
 {_COMPLIANCE_CTES}
 SELECT
@@ -2752,7 +2896,7 @@ SELECT
     ROUND(
       COUNT(*) FILTER (WHERE ip.device_id IS NOT NULL) * 100.0
       / NULLIF(COUNT(*), 0), 1
-    ) AS "Patch Compliance"
+    ) AS "Patch Progress %"
 FROM universe u
 LEFT JOIN installed_patches ip USING (device_id, patch_uid)
 JOIN ninja_core.v_active_devices d ON d.id = u.device_id
@@ -2760,7 +2904,7 @@ JOIN ninja_core.organizations o ON o.id = d.organization_id
 WHERE d.approval_status = 'APPROVED'
 {_ORG_FILTERS_DEVICE}
 GROUP BY "Operating System Family"
-ORDER BY "Patch Compliance" ASC
+ORDER BY "Patch Progress %" ASC
 """,
     },
     {
@@ -3054,10 +3198,38 @@ ORDER BY 1
 """,
     },
     {
+        "key":     "trends_devices_compliant",
+        "name":    "Devices Compliant % per Day",
+        "display": "line",
+        "row": 16, "col": 0, "size_x": 12, "size_y": 8,
+        "viz_settings": {
+            "graph.dimensions": ["Day"],
+            "graph.metrics":    ["Devices Compliant %"],
+            "graph.show_values": False,
+        },
+        "template_tags":  _TRENDS_TAGS,
+        "param_mappings": _TRENDS_PARAM_MAPPINGS_FULL,
+        "query": _daily_device_compliance_query(_TRENDS_FILTERS_DEVICE),
+    },
+    {
+        "key":     "trends_patch_progress",
+        "name":    "Patch Progress % per Day",
+        "display": "line",
+        "row": 16, "col": 12, "size_x": 12, "size_y": 8,
+        "viz_settings": {
+            "graph.dimensions": ["Day"],
+            "graph.metrics":    ["Patch Progress %"],
+            "graph.show_values": False,
+        },
+        "template_tags":  _TRENDS_TAGS,
+        "param_mappings": _TRENDS_PARAM_MAPPINGS_FULL,
+        "query": _daily_patch_progress_query(_TRENDS_FILTERS_DEVICE),
+    },
+    {
         "key":     "trends_manual_age",
         "name":    "Currently-MANUAL Patches by Age",
         "display": "bar",
-        "row": 16, "col": 0, "size_x": 24, "size_y": 8,
+        "row": 24, "col": 0, "size_x": 24, "size_y": 8,
         "viz_settings": {
             "graph.dimensions": ["Week First Seen"],
             "graph.metrics":    ["MANUAL Patches"],
@@ -3108,7 +3280,10 @@ ORDER BY 1
 _SCALAR_SUFFIX_RULES: dict[str, tuple[str, str]] = {
     # key            (column, suffix)
     "overall_compliance": ("percent_installed", "%"),
+    "overall_progress":   ("percent_installed", "%"),
     "org_compliance":     ("percent_installed", "%"),
+    "org_progress":       ("percent_installed", "%"),
+    "cmd_compliance":     ("percent_installed", "%"),
 }
 
 

@@ -5,6 +5,25 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-04 — v0.14.6 split device compliance from patch progress
+
+**Why:** The old `Patch Compliance` label was ambiguous for an MSP
+operator. The dashboards needed to separate "are devices fully patched
+right now?" from "how much patch work has been installed so far?"
+
+**Done:**
+- Command Center now shows a single `Devices Compliant %` KPI.
+- Overall Status and Org Overview now split into `Devices Compliant %`
+  and `Patch Progress %`.
+- Detailed org cards now use `Patch Progress` wording instead of
+  `Patch Compliance`.
+- Trends gained daily KPI cards for `Devices Compliant %` and `Patch
+  Progress %`.
+
+**Validation:**
+- `python -m py_compile ingest/metabase_bootstrap.py` passes.
+- Commit hash pending until the release push is finalized.
+
 ## 2026-06-04 — v0.14.5 add device reachability to Device Summary
 
 **Why:** User wanted current up/down state surfaced next to `Last

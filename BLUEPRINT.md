@@ -7,48 +7,58 @@
 
 ## Goal
 
-Add current device reachability to the Device Summary table as an
-`Online?` column next to `Last Contact`.
+Rename the patch KPI cards so the dashboards distinguish device
+compliance from patch progress, and add those headline trend views to
+the Trends dashboard.
 
 ## Why
 
-Operator requested it after clarifying that `Active Devices` is based
-on last contact, not the current up/down signal. The device summary
-table already shows `Last Contact`; surfacing reachability alongside
-it makes the distinction obvious.
-
-## Investigation
-
-`ninja_core.v_active_devices` already carries the latest snapshot's
-`offline` flag, so the SQL can derive an `Online?` display without a
-schema change.
+The current `Patch Compliance` label is ambiguous for an MSP operator.
+The landing page should answer "are devices fully patched right now?"
+with one at-a-glance score, while the status dashboards should show the
+broader patch progress context alongside it.
 
 ## Scope
 
 **In:**
-- Add `Online?` to Device Summary.
-- Use a clear yes/no/unknown display derived from `offline`.
-- Update release docs.
+- Rename the command-center headline KPI to `Devices Compliant %`.
+- Split Overall Status and Org Overview into `Devices Compliant %` and
+  `Patch Progress %` cards.
+- Add trend cards for the same two metrics.
+- Update release docs and versioning.
 
 **Out / separate investigation:**
-- Any broader rollout to other tables unless the user asks.
+- Reworking the underlying patch-compliance formula.
+- Adding new data sources or schema changes.
 
 ## Files to change
 
 - `ingest/metabase_bootstrap.py`
-    - Add the `Online?` column to the Device Summary query.
+    - Rename the existing compliance cards and add trend KPIs.
+- `CONTEXT.md`
+    - Update the dashboard / metric terminology if needed.
+- `VERSION`
+    - Bump for the dashboard update.
 - `CHANGELOG.md`
-    - Document the new reachability column.
+    - Document the renamed KPI cards and trend additions.
 - `SESSIONS.md`
-    - Record the dashboard change.
+    - Record the dashboard rework and rationale.
+- `TODO.md`
+    - Move any deferred follow-up into Backlog if one appears.
 
 ## Steps
 
-1. Patch the Device Summary SQL.
-2. Compile-check.
-3. Update CHANGELOG / SESSIONS.
-4. Commit and push, then report the short hash.
+1. Rename the relevant card titles and SQL aliases.
+2. Add the trend cards for devices-compliant and patch-progress.
+3. Compile-check the bootstrap.
+4. Update docs and version.
+5. Commit and push, then report the short hash.
+
+## Open questions
+
+- Whether the new status-dashboard cards should keep the old
+  compliance formula or expose a new patch-progress denominator.
 
 ## Status
 
-done — committed as fdaca32
+in progress

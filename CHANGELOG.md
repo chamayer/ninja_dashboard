@@ -2,6 +2,22 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.14.6] — 2026-06-04
+
+### Changed
+- **Patch KPI wording split into operator-facing labels.** Command
+  Center now shows a single `Devices Compliant %` headline KPI.
+  Overall Status and Org Overview now split the story into `Devices
+  Compliant %` on the left and `Patch Progress %` on the right.
+- **Detailed patch-progress cards renamed for clarity.** The
+  highest-level org breakdowns now read `Clients with Lowest Patch
+  Progress`, `Patch Progress by Device Type`, `Patch Progress by
+  Operating System`, and `Client Patch Progress` instead of the
+  ambiguous `Patch Compliance` wording.
+- **Trends dashboard gained the same KPI pair.** Added daily trend
+  cards for `Devices Compliant %` and `Patch Progress %` so operators
+  can see direction, not just a single static score.
+
 ## [0.14.5] — 2026-06-04
 
 ### Added

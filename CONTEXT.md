@@ -178,6 +178,16 @@ of `ingest/metabase_bootstrap.py` defines `installed_patches`,
 joins onto. Changing the formula = editing
 `COMPLIANCE_MISSING_STATES` in one place.
 
+Dashboard labels split the story into two operator-facing metrics:
+
+- `Devices Compliant %` = how many scoped devices are fully patched
+  right now.
+- `Patch Progress %` = how much of the scoped patch work has been
+  installed so far.
+
+Command Center shows the first one as the single headline KPI.
+Overall Status and Org Overview show both side by side.
+
 ### Where to find REJECTED patches
 
 REJECTED patches are excluded from the compliance score but still
@@ -191,7 +201,7 @@ fully visible:
   `REJECTED` (multi-select supported — combine with others).
 - **`compliance_all` table** (Overall Status): the "Rejected"
   column shows the per-org count. Comparing "Total Patches"
-  to "Compliance-Scope Patches" gives the count of
+  to "Patches in Scope" gives the count of
   REJECTED + DELAYED for that org.
 - **Plain append snapshots** for `device_snapshots` only — its
   volatile fields (`last_contact`) change every minute, so hash-dedup
