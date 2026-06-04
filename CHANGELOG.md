@@ -9,7 +9,7 @@ All notable changes to this project follow [Semantic Versioning](https://semver.
   The new `Actively patching %` helper now carries its own device
   classification CTE instead of referencing `_PCOV_CTE` before that
   symbol is defined.
-- Commit: `TBD`
+- Commit: `ba55729`
 
 ## [0.14.7] — 2026-06-04
 

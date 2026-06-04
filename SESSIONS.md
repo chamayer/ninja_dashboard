@@ -17,7 +17,7 @@ before that symbol existed at import time, which prevented
 - Verified `python -m py_compile ingest/metabase_bootstrap.py` passes.
 
 **Validation:**
-- Pending commit hash update after the fix is committed.
+- Commit `ba55729` created for the import fix.
 
 ## 2026-06-04 — v0.14.7 split patch KPIs into active-patching + fully-patched
 

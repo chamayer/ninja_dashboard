@@ -176,7 +176,7 @@ _(empty — drop free-form items here)_
 
 - [x] Fixed the active-patching KPI bootstrap so
       `ingest/metabase_bootstrap.py` imports cleanly again.
-      Commit `TBD`.
+      Commit `ba55729`.
 
 ### v0.14.7 — 2026-06-04
 
