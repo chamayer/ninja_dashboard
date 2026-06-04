@@ -5,6 +5,35 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-04 — v0.12.2 Patch History split + Org filter wiring
+
+**Done:**
+- Replaced `device_patch_history` (Device Drilldown) with two
+  separate tables: `device_patch_state_history` (Patch State
+  History) and `device_install_history` (Install History). Resolves
+  the v0.12.1-reported commingling — the old table mixed
+  `fact_type='patch_state'` and `fact_type='install_outcome'`
+  rows under a single "Current Patch State" column header that
+  meant different things on different rows.
+- Wired every Org Overview card's SQL to honor Organization +
+  Device Type + OS Family filters via `_ORG_FILTERS_DEVICE`.
+  Severity additionally honored on the two patch tables
+  (`org_failed_queue`, `org_action_queue`) via
+  `_ORG_FILTERS_PATCH_LIR` / `_ORG_FILTERS_PATCH_CS`.
+- Converted relevant Org card queries from plain triple-quote
+  strings to f-strings so the filter helpers interpolate.
+
+**Validation:**
+- `python -m py_compile` passes.
+
+**Still deferred:**
+- Section header markdown cards between scalar groups.
+- Color coding.
+- Adding Patching Devices scalar to Org Overview, Needs Reboot
+  scalar to Overall Status / Org Overview.
+- Severity filter wired on remaining patch scalars (requires CTE
+  rewrites).
+
 ## 2026-06-03 — v0.12.1 card grouping + Org filter scaffolding
 
 **Done:**

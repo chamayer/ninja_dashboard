@@ -2,6 +2,39 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.12.2] — 2026-06-04
+
+### Changed
+- **Device Drilldown's `Patch History` table split into two tables.**
+  The old single table commingled `fact_type='patch_state'` rows
+  (current state of pending patches) and `fact_type='install_outcome'`
+  rows (install attempts). One column called "Current Patch State"
+  meant different things on different rows. Now:
+    - **Patch State History** (`device_patch_state_history`) — only
+      `fact_type='patch_state'` rows. Columns: Device · KB · Patch ·
+      Patch State · Severity · First Seen in This State · Last Seen.
+    - **Install History** (`device_install_history`) — only
+      `fact_type='install_outcome'` rows. Columns: Device · KB ·
+      Patch · Install Outcome · Severity · Install Attempt Time ·
+      Last Seen.
+- **Org Overview cards now honor the dashboard filters.** Every Org
+  card's SQL was updated to apply Organization + Device Type + OS
+  Family filter predicates via the `_ORG_FILTERS_DEVICE` helper. The
+  two patch-context tables (`org_failed_queue`, `org_action_queue`)
+  additionally honor the Severity filter via `_ORG_FILTERS_PATCH_LIR`
+  / `_ORG_FILTERS_PATCH_CS` helpers.
+
+### Notes / deferred
+- Severity filter only wired to the two patch-context tables.
+  Adding it to other patch cards requires CTE rewrites to expose
+  severity to the FROM/WHERE clauses; deferred.
+- Section header markdown cards between scalar groups: still not
+  added — visual row-grouping is in place, explicit headers are
+  not.
+- Color coding (green/amber/red): still deferred.
+- Patching Devices scalar on Org Overview and Needs Reboot scalar
+  on Overall Status / Org Overview: still not added.
+
 ## [0.12.1] — 2026-06-03
 
 ### Changed

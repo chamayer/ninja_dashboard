@@ -1607,41 +1607,69 @@ ORDER BY a.activity_time DESC
 LIMIT 200
 """,
     },
+    # Split the old "Patch History" table into two — the two
+    # fact_type values are conceptually different and should not share
+    # a row. patch_state shows where pending patches sit right now;
+    # install_outcome shows what's been tried and the result.
     {
-        "key":            "device_patch_history",
-        "name":           "Patch History",
+        "key":            "device_patch_state_history",
+        "name":           "Patch State History",
         "display":        "table",
-        "row": 24, "col": 0, "size_x": 24, "size_y": 14,
+        "row": 24, "col": 0, "size_x": 24, "size_y": 12,
         "template_tags":  DEVICE_TAGS,
         "param_mappings": DEVICE_PARAM_MAPPINGS,
         "column_click_behaviors": {
             "kb_number": {"target": DASH_DETAIL, "params": {"p_kb": "kb_number"}},
         },
         "query": f"""
-WITH all_observations AS (
-    SELECT
-        pf.device_id, pf.patch_uid, pf.status, pf.severity,
-        pf.kb_number, pf.name AS patch_name, pf.installed_at,
-        pf.first_observed_at, pf.last_observed_at
-    FROM ninja_patches.patch_facts pf
-)
 SELECT
     d.system_name        AS "Device",
-    ao.kb_number         AS kb_number,
-    ao.patch_name        AS "Patch",
-    ao.status            AS "Current Patch State",
-    ao.severity          AS "Severity",
-    ao.installed_at      AS "Install Time",
-    ao.first_observed_at AS "First Seen in This State",
-    ao.last_observed_at  AS "Last Seen in This State"
-FROM all_observations ao
-JOIN ninja_core.devices d ON d.id = ao.device_id
-WHERE d.approval_status = 'APPROVED'
+    pf.kb_number         AS kb_number,
+    pf.name              AS "Patch",
+    pf.status            AS "Patch State",
+    pf.severity          AS "Severity",
+    pf.first_observed_at AS "First Seen in This State",
+    pf.last_observed_at  AS "Last Seen in This State"
+FROM ninja_patches.patch_facts pf
+JOIN ninja_core.devices d ON d.id = pf.device_id
+WHERE pf.fact_type = 'patch_state'
+  AND d.approval_status = 'APPROVED'
 {_DEVICE_FILTER}
 ORDER BY
     d.system_name,
-    ao.patch_uid,
-    ao.last_observed_at DESC
+    pf.last_observed_at DESC,
+    pf.patch_uid
+LIMIT 5000
+""",
+    },
+    {
+        "key":            "device_install_history",
+        "name":           "Install History",
+        "display":        "table",
+        "row": 36, "col": 0, "size_x": 24, "size_y": 12,
+        "template_tags":  DEVICE_TAGS,
+        "param_mappings": DEVICE_PARAM_MAPPINGS,
+        "column_click_behaviors": {
+            "kb_number": {"target": DASH_DETAIL, "params": {"p_kb": "kb_number"}},
+        },
+        "query": f"""
+SELECT
+    d.system_name   AS "Device",
+    pf.kb_number    AS kb_number,
+    pf.name         AS "Patch",
+    pf.status       AS "Install Outcome",
+    pf.severity     AS "Severity",
+    pf.installed_at AS "Install Attempt Time",
+    pf.last_observed_at AS "Last Seen"
+FROM ninja_patches.patch_facts pf
+JOIN ninja_core.devices d ON d.id = pf.device_id
+WHERE pf.fact_type = 'install_outcome'
+  AND d.approval_status = 'APPROVED'
+{_DEVICE_FILTER}
+ORDER BY
+    d.system_name,
+    pf.installed_at DESC NULLS LAST,
+    pf.last_observed_at DESC
 LIMIT 5000
 """,
     },
@@ -2070,12 +2098,12 @@ ORG_OVERVIEW_CARDS = [
         "row": 4, "col": 0, "size_x": 8, "size_y": 4,
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS,
-        "query": """
+        "query": f"""
 SELECT COUNT(*) AS devices
 FROM ninja_core.v_active_devices d
 JOIN ninja_core.organizations o ON o.id = d.organization_id
 WHERE 1=1
-  [[AND o.name = {{org}}]]
+{_ORG_FILTERS_DEVICE}
 """,
     },
     {
@@ -2088,10 +2116,13 @@ WHERE 1=1
         # Same compliance bug as Fleet Overview's compliance cards:
         # INSTALLED lives in fact_type='install_outcome', not
         # 'patch_state'. Compute installed from install_outcome over
-        # the universe of all (device, patch) we know about.
-        "query": """
+        # the universe of all (device, patch) we know about. The
+        # all_patches CTE also pulls node_class + os_name so the
+        # dashboard's device_type / os_family filters can scope.
+        "query": f"""
 WITH all_patches AS (
-    SELECT DISTINCT pf.device_id, pf.patch_uid, d.organization_id
+    SELECT DISTINCT pf.device_id, pf.patch_uid, d.organization_id,
+                    d.node_class, d.os_name
     FROM ninja_patches.patch_facts pf
     JOIN ninja_core.v_active_devices d ON d.id = pf.device_id
     WHERE d.approval_status = 'APPROVED'
@@ -2106,11 +2137,11 @@ SELECT ROUND(
     / NULLIF(COUNT(*), 0),
     1
 ) AS percent_installed
-FROM all_patches ap
+FROM all_patches d
 LEFT JOIN installed_patches ip USING (device_id, patch_uid)
-JOIN ninja_core.organizations o ON o.id = ap.organization_id
+JOIN ninja_core.organizations o ON o.id = d.organization_id
 WHERE 1=1
-  [[AND o.name = {{org}}]]
+{_ORG_FILTERS_DEVICE}
 """,
     },
     {
@@ -2120,7 +2151,7 @@ WHERE 1=1
         "row": 8, "col": 18, "size_x": 6, "size_y": 4,
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS,
-        "query": """
+        "query": f"""
 WITH latest_install_result AS (
     SELECT DISTINCT ON (device_id, patch_uid) device_id, patch_uid, status
     FROM ninja_patches.patch_facts
@@ -2138,7 +2169,7 @@ FROM latest_install_result lir
 JOIN ninja_core.v_active_devices d ON d.id = lir.device_id
 JOIN ninja_core.organizations o ON o.id = d.organization_id
 WHERE lir.status = 'FAILED'
-  [[AND o.name = {{org}}]]
+{_ORG_FILTERS_DEVICE}
 """,
     },
     {
@@ -2148,7 +2179,7 @@ WHERE lir.status = 'FAILED'
         "row": 8, "col": 0, "size_x": 6, "size_y": 4,
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS,
-        "query": """
+        "query": f"""
 WITH current_state AS (
     SELECT DISTINCT ON (device_id, patch_uid) device_id, patch_uid, status
     FROM ninja_patches.patch_facts
@@ -2160,7 +2191,7 @@ FROM current_state cs
 JOIN ninja_core.v_active_devices d ON d.id = cs.device_id
 JOIN ninja_core.organizations o ON o.id = d.organization_id
 WHERE cs.status = 'APPROVED'
-  [[AND o.name = {{org}}]]
+{_ORG_FILTERS_DEVICE}
 """,
     },
     {
@@ -2170,7 +2201,7 @@ WHERE cs.status = 'APPROVED'
         "row": 8, "col": 6, "size_x": 6, "size_y": 4,
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS,
-        "query": """
+        "query": f"""
 WITH current_state AS (
     SELECT DISTINCT ON (device_id, patch_uid) device_id, patch_uid, status
     FROM ninja_patches.patch_facts
@@ -2182,7 +2213,7 @@ FROM current_state cs
 JOIN ninja_core.v_active_devices d ON d.id = cs.device_id
 JOIN ninja_core.organizations o ON o.id = d.organization_id
 WHERE cs.status = 'MANUAL'
-  [[AND o.name = {{org}}]]
+{_ORG_FILTERS_DEVICE}
 """,
     },
     {
@@ -2192,7 +2223,7 @@ WHERE cs.status = 'MANUAL'
         "row": 8, "col": 12, "size_x": 6, "size_y": 4,
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS,
-        "query": """
+        "query": f"""
 WITH current_state AS (
     SELECT DISTINCT ON (device_id, patch_uid) device_id, patch_uid, status
     FROM ninja_patches.patch_facts
@@ -2204,7 +2235,7 @@ FROM current_state cs
 JOIN ninja_core.v_active_devices d ON d.id = cs.device_id
 JOIN ninja_core.organizations o ON o.id = d.organization_id
 WHERE cs.status = 'DELAYED'
-  [[AND o.name = {{org}}]]
+{_ORG_FILTERS_DEVICE}
 """,
     },
     {
@@ -2229,7 +2260,7 @@ JOIN last_install li ON li.device_id = d.id
 WHERE d.approval_status = 'APPROVED'
   AND d.node_class IN ('WINDOWS_WORKSTATION', 'WINDOWS_SERVER')
   AND li.last_install_at < NOW() - (INTERVAL '1 day' * {DEFAULT_STALE_PATCH_DAYS})
-  [[AND o.name = {{{{org}}}}]]
+{_ORG_FILTERS_DEVICE}
 """,
     },
     {
@@ -2239,7 +2270,7 @@ WHERE d.approval_status = 'APPROVED'
         "row": 4, "col": 16, "size_x": 8, "size_y": 4,
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS,
-        "query": """
+        "query": f"""
 SELECT COUNT(*) AS devices
 FROM ninja_core.devices d
 JOIN ninja_core.organizations o ON o.id = d.organization_id
@@ -2250,7 +2281,7 @@ LEFT JOIN ninja_patches.patch_facts pf
 WHERE d.approval_status = 'APPROVED'
   AND d.node_class IN ('WINDOWS_WORKSTATION', 'WINDOWS_SERVER')
   AND pf.device_id IS NULL
-  [[AND o.name = {{org}}]]
+{_ORG_FILTERS_DEVICE}
 """,
     },
     {
@@ -2268,7 +2299,7 @@ WHERE d.approval_status = 'APPROVED'
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS,
         "click_behavior": {"target": DASH_DETAIL, "params": {"p_org": "Organization", "p_status": "Current Patch State"}},
-        "query": """
+        "query": f"""
 WITH current_state AS (
     SELECT DISTINCT ON (device_id, patch_uid) device_id, patch_uid, status
     FROM ninja_patches.patch_facts
@@ -2283,7 +2314,7 @@ FROM current_state cs
 JOIN ninja_core.v_active_devices d ON d.id = cs.device_id
 JOIN ninja_core.organizations o ON o.id = d.organization_id
 WHERE 1=1
-  [[AND o.name = {{org}}]]
+{_ORG_FILTERS_DEVICE}
 GROUP BY o.name, cs.status
 ORDER BY "Patches" DESC
 """,
@@ -2312,7 +2343,7 @@ FROM current_state cs
 JOIN ninja_core.v_active_devices d ON d.id = cs.device_id
 JOIN ninja_core.organizations o ON o.id = d.organization_id
 WHERE 1=1
-  [[AND o.name = {{{{org}}}}]]
+{_ORG_FILTERS_DEVICE}
 GROUP BY o.name, "Device Type"
 ORDER BY "Patch Compliance" ASC
 """,
@@ -2341,7 +2372,7 @@ FROM current_state cs
 JOIN ninja_core.v_active_devices d ON d.id = cs.device_id
 JOIN ninja_core.organizations o ON o.id = d.organization_id
 WHERE 1=1
-  [[AND o.name = {{{{org}}}}]]
+{_ORG_FILTERS_DEVICE}
 GROUP BY o.name, "Operating System Family"
 ORDER BY "Patch Compliance" ASC
 """,
@@ -2352,13 +2383,13 @@ ORDER BY "Patch Compliance" ASC
         "display": "table",
         "row": 20, "col": 0, "size_x": 24, "size_y": 10,
         "template_tags":  _ORG_TAGS,
-        "param_mappings": _ORG_PARAM_MAPPINGS,
+        "param_mappings": _ORG_PARAM_MAPPINGS_FULL,
         "column_click_behaviors": {
             "organization": {"target": "self",         "params": {"p_org": "organization"}},
             "device":       {"target": DASH_DRILLDOWN, "params": {"p_device": "device"}},
             "kb_number":    {"target": DASH_DETAIL,    "params": {"p_org": "organization", "p_kb": "kb_number"}},
         },
-        "query": """
+        "query": f"""
 WITH latest_install_result AS (
     SELECT DISTINCT ON (device_id, patch_uid)
         device_id, patch_uid, status, severity, kb_number, name AS patch_name,
@@ -2388,7 +2419,7 @@ FROM latest_install_result lir
 JOIN ninja_core.v_active_devices d ON d.id = lir.device_id
 JOIN ninja_core.organizations o ON o.id = d.organization_id
 WHERE lir.status = 'FAILED'
-  [[AND o.name = {{org}}]]
+{_ORG_FILTERS_PATCH_LIR}
 ORDER BY lir.installed_at DESC NULLS LAST, d.system_name
 LIMIT 100
 """,
@@ -2399,14 +2430,14 @@ LIMIT 100
         "display": "table",
         "row": 30, "col": 0, "size_x": 24, "size_y": 10,
         "template_tags":  _ORG_TAGS,
-        "param_mappings": _ORG_PARAM_MAPPINGS,
+        "param_mappings": _ORG_PARAM_MAPPINGS_FULL,
         "column_click_behaviors": {
             "organization":        {"target": "self",      "params": {"p_org": "organization"}},
             "device":              {"target": DASH_DRILLDOWN, "params": {"p_device": "device"}},
             "current_patch_state": {"target": DASH_DETAIL, "params": {"p_org": "organization", "p_status": "current_patch_state"}},
             "kb_number":           {"target": DASH_DETAIL, "params": {"p_org": "organization", "p_kb": "kb_number"}},
         },
-        "query": """
+        "query": f"""
 WITH current_state AS (
     SELECT DISTINCT ON (device_id, patch_uid)
         device_id, patch_uid, status, severity, kb_number, name AS patch_name,
@@ -2427,7 +2458,7 @@ FROM current_state cs
 JOIN ninja_core.v_active_devices d ON d.id = cs.device_id
 JOIN ninja_core.organizations o ON o.id = d.organization_id
 WHERE cs.status IN ('MANUAL', 'DELAYED')
-  [[AND o.name = {{org}}]]
+{_ORG_FILTERS_PATCH_CS}
 ORDER BY
     CASE cs.status WHEN 'MANUAL' THEN 0 ELSE 1 END,
     cs.last_observed_at DESC,
@@ -2461,7 +2492,7 @@ SELECT
 FROM ninja_core.v_active_devices d
 JOIN ninja_core.organizations o ON o.id = d.organization_id
 WHERE d.needs_reboot = TRUE
-  [[AND o.name = {{{{org}}}}]]
+{_ORG_FILTERS_DEVICE}
 ORDER BY d.last_contact DESC
 """,
     },
