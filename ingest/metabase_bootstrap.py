@@ -627,7 +627,7 @@ JOIN ninja_core.devices d ON d.id = pf.device_id
 JOIN ninja_core.organizations o ON o.id = d.organization_id
 WHERE pf.fact_type = 'install_outcome'
   AND pf.installed_at IS NOT NULL
-  AND pf.installed_at > NOW() - (INTERVAL '1 day' * {{{{days}}}})
+  AND pf.installed_at > NOW() - (INTERVAL '1 day' * CAST({{{{days}}}} AS integer))
   AND d.approval_status = 'APPROVED'
 {filters}
 GROUP BY 1
