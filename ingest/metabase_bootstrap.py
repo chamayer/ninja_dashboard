@@ -43,6 +43,7 @@ import argparse
 import getpass
 import logging
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -3295,24 +3296,33 @@ def _upsert_collection(client: httpx.Client, name: str) -> int:
     return cid
 
 
-def _list_cards_in_collection(client: httpx.Client, collection_id: int) -> dict[str, dict]:
-    """Return {card_name: card_dict} for cards in the collection."""
+def _list_cards_in_collection(client: httpx.Client, collection_id: int) -> list[dict]:
+    """Return all cards in the collection."""
     r = client.get(f"/api/collection/{collection_id}/items", params={"models": "card"})
     r.raise_for_status()
     payload = r.json()
     items = payload["data"] if isinstance(payload, dict) and "data" in payload else payload
-    return {c["name"]: c for c in items if c.get("model") == "card"}
+    return [c for c in items if c.get("model") == "card"]
+
+
+def _card_uid(dashboard_name: str, card_key: str) -> str:
+    """Stable hidden identity for a card across bootstrap runs."""
+    dash_slug = re.sub(r"[^a-z0-9]+", "-", dashboard_name.lower()).strip("-")
+    return f"ninja-dashboard:{dash_slug}:{card_key}"
 
 
 def _upsert_card(
     client: httpx.Client, spec: dict, db_id: int, collection_id: int,
-    existing_by_name: dict[str, dict],
+    dashboard_name: str,
+    existing_cards: list[dict],
 ) -> int:
+    uid = _card_uid(dashboard_name, spec["key"])
     native: dict[str, Any] = {"query": spec["query"].strip()}
     if "template_tags" in spec:
         native["template-tags"] = spec["template_tags"]
     body = {
         "name":                   spec["name"],
+        "description":            uid,
         "display":                spec["display"],
         "visualization_settings": spec.get("viz_settings", {}),
         "collection_id":          collection_id,
@@ -3322,7 +3332,13 @@ def _upsert_card(
             "native":   native,
         },
     }
-    existing = existing_by_name.get(spec["name"])
+    existing = next(
+        (
+            card for card in existing_cards
+            if card.get("description") == uid
+        ),
+        None,
+    )
     if existing:
         cid = int(existing["id"])
         r = client.put(f"/api/card/{cid}", json=body)
@@ -3651,7 +3667,7 @@ def run_bootstrap(
             card_ids: dict[str, int] = {}
             for card_spec in dash_spec["cards"]:
                 card_ids[card_spec["key"]] = _upsert_card(
-                    client, card_spec, db_id, col_id, existing_cards,
+                    client, card_spec, db_id, col_id, dash_spec["name"], existing_cards,
                 )
             dashboard = _upsert_dashboard(
                 client, dash_spec["name"], col_id,

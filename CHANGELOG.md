@@ -2,6 +2,20 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.14.4] — 2026-06-04
+
+### Fixed
+- **Metabase cards now get a stable hidden identity instead of being
+  matched by title alone.** The bootstrap was reusing cards by display
+  name, and multiple dashboards intentionally share titles like
+  `Active Devices`, `Current Patch State`, `Patching Devices`, and
+  `Failed Patches`. That let later dashboards overwrite earlier card
+  SQL / template-tag wiring.
+- Resolution: each card now carries a hidden stable UID in
+  `description` and `_upsert_card()` matches on that UID. Existing
+  duplicate-title cards in Metabase are left alone; new bootstraps
+  create or update the correct per-dashboard card object.
+
 ## [0.14.3] — 2026-06-04
 
 ### Fixed

@@ -5,6 +5,24 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-04 — v0.14.4 stop Metabase card reuse by title
+
+**Why:** v0.14.3 fixed the visible tag/mapping mismatch, but the
+operator-reported behavior still pointed to stale card wiring. The
+bootstrap was upserting cards by display name, and multiple dashboards
+reuse titles like `Active Devices` / `Current Patch State`, so later
+dashboards could overwrite earlier cards.
+
+**Fix:**
+- Added a hidden stable card UID (`ninja-dashboard:<dashboard>:<key>`)
+  and wrote it into card `description`.
+- `_upsert_card()` now matches on that UID instead of title.
+- Existing duplicate-title cards in Metabase are left alone; future
+  bootstraps create/update the correct card object for each dashboard.
+
+**Validation:**
+- `python -m py_compile` passes.
+
 ## 2026-06-04 — v0.14.3 fix device-card filters via mapping/tag parity
 
 **Why:** User reported Command Center / Overall / Org device
