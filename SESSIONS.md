@@ -5,6 +5,31 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-04 — v0.12.4 pie / bar color coding
+
+**Done:**
+- Defined two shared palettes near the top of the bootstrap:
+  `PATCH_STATE_COLORS` and `PATCH_ACTIVITY_COLORS`.
+- Applied `pie.colors` to all 4 Current Patch State pies (Overall
+  Status, Patch Detail, Drilldown, Org Overview) and to the PCOV
+  Patching Status pie.
+- Applied `series_settings.<series>.color` to the PCOV stacked OS
+  bar so all three series (Patching / Stalled / Never-Patched
+  Devices) render in green / amber / red consistently.
+
+**Deferred:**
+- Section header markdown dividers — programmatic row-shift
+  refactor pending.
+- Scalar background coloring — Metabase conditional-formatting
+  JSON shape varies by version; would test live first.
+
+**Up next:** v0.12.5 will attempt section headers (in a separate
+commit since the JSON shape is risky). Then the activity-feed
+cleanup user just asked about.
+
+**Validation:**
+- `python -m py_compile` passes.
+
 ## 2026-06-04 — v0.12.3 canonical scalar set + Org severity
 
 **Done:**

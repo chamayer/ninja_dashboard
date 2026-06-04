@@ -87,6 +87,27 @@ CASE {expr}
 END
 """
 
+# Shared color palettes for pie / bar / series viz_settings. Green =
+# good, amber = attention, red = critical. Used in pie.colors and
+# series_settings.<series>.color.
+PATCH_STATE_COLORS = {
+    "INSTALLED": "#2e7d32",   # green — done
+    "APPROVED":  "#1976d2",   # blue — queued for install
+    "DELAYED":   "#1565c0",   # darker blue — auto-approval pending
+    "MANUAL":    "#f9a825",   # amber — admin action required
+    "FAILED":    "#c62828",   # red — install failed
+    "REJECTED":  "#757575",   # grey — rejected by policy
+    "PENDING":   "#9e9e9e",   # light grey
+    "Unknown":   "#bdbdbd",
+}
+
+PATCH_ACTIVITY_COLORS = {
+    "Patching Devices":      "#2e7d32",  # green
+    "Stalled Devices":       "#f9a825",  # amber
+    "Never-Patched Devices": "#c62828",  # red
+    "Unknown":               "#bdbdbd",
+}
+
 OS_FAMILY_D = OS_FAMILY_SQL.format(alias="d").strip()
 OS_FAMILY_C = OS_FAMILY_SQL.format(alias="c").strip()
 PATCH_ACTIVITY_LABEL_C = PATCH_ACTIVITY_LABEL_SQL.format(expr="c.patch_status").strip()
@@ -721,6 +742,7 @@ WHERE needs_reboot = TRUE
             "pie.slice_threshold": 0,
             "pie.show_legend":     True,
             "pie.show_total":      True,
+            "pie.colors":          PATCH_STATE_COLORS,
         },
         # Click a status slice → open Detail filtered to that status.
         "click_behavior": {
@@ -1880,6 +1902,7 @@ WHERE c.patch_status = 'no_patch_data'
             "pie.slice_threshold": 0,
             "pie.show_legend":     True,
             "pie.show_total":      True,
+            "pie.colors":          PATCH_ACTIVITY_COLORS,
         },
         "template_tags":  _PCOV_TAGS,
         "param_mappings": _PCOV_PARAM_MAPPINGS,
@@ -1935,6 +1958,11 @@ ORDER BY devices DESC
             ],
             "stackable.stack_type":  "stacked",
             "graph.show_values":     False,
+            "series_settings": {
+                "Patching Devices":      {"color": PATCH_ACTIVITY_COLORS["Patching Devices"]},
+                "Stalled Devices":       {"color": PATCH_ACTIVITY_COLORS["Stalled Devices"]},
+                "Never-Patched Devices": {"color": PATCH_ACTIVITY_COLORS["Never-Patched Devices"]},
+            },
         },
         "template_tags":  _PCOV_TAGS,
         "param_mappings": _PCOV_PARAM_MAPPINGS,
@@ -2346,6 +2374,7 @@ WHERE d.needs_reboot = TRUE
             "pie.slice_threshold": 0,
             "pie.show_legend": True,
             "pie.show_total": True,
+            "pie.colors": PATCH_STATE_COLORS,
         },
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS_FULL,

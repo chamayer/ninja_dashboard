@@ -2,6 +2,29 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.12.4] — 2026-06-04
+
+### Added
+- **Pie / bar color coding (green / amber / red).** Two shared
+  palettes baked into the bootstrap:
+    - `PATCH_STATE_COLORS` — by patch_facts.status value. INSTALLED
+      green, APPROVED/DELAYED blue, MANUAL amber, FAILED red,
+      REJECTED grey.
+    - `PATCH_ACTIVITY_COLORS` — by device patching state. Patching
+      Devices green, Stalled Devices amber, Never-Patched Devices
+      red.
+  Applied to: Current Patch State pies on Overall Status, Patch
+  Detail, Device Drilldown, and Org Overview; Patching Status pie
+  + Operating-System stacked bar on Device Patching Status.
+
+### Notes
+- Section header markdown dividers between scalar groups still
+  deferred — needs a layout-shift refactor to insert virtual
+  cards between existing rows.
+- Scalar background coloring also deferred — Metabase
+  column_formatting JSON shape varies by version and would need
+  live verification first.
+
 ## [0.12.3] — 2026-06-04
 
 ### Added
