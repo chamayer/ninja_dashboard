@@ -176,7 +176,7 @@ _(empty — drop free-form items here)_
 
 - [x] Renamed the second patch KPI to
       `Fully patched % (patching devices)` and updated the formula to
-      use the patching-device subset. Commit `TBD`.
+      use the patching-device subset. Commit `148de4e`.
 
 ### v0.14.8 — 2026-06-04
 

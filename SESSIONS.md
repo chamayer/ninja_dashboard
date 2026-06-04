@@ -17,7 +17,8 @@ though the intended denominator is the actively patching subset.
 - Updated `CONTEXT.md` to make the denominator explicit.
 
 **Validation:**
-- Pending compile-check after the edit.
+- `python -m py_compile ingest/metabase_bootstrap.py` passes.
+- Commit `148de4e` created for the KPI clarification.
 
 ## 2026-06-04 — v0.14.8 fix bootstrap import error for active-patching KPI
 
