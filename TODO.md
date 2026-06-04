@@ -172,6 +172,12 @@ _(empty — drop free-form items here)_
 
 ## Completed
 
+### v0.14.8 — 2026-06-04
+
+- [x] Fixed the active-patching KPI bootstrap so
+      `ingest/metabase_bootstrap.py` imports cleanly again.
+      Commit `TBD`.
+
 ### v0.14.7 — 2026-06-04
 
 - [x] Split the operator dashboard KPIs into `Actively patching %`

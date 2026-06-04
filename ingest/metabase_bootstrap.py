@@ -218,7 +218,32 @@ universe AS (
 def _active_patching_scalar_query(filters: str) -> str:
     """Active-patching percent = actively patching devices / scoped devices."""
     return f"""
-{_PCOV_CTE}
+WITH device_patch_signal AS (
+    SELECT device_id, MAX(installed_at) AS last_seen_at
+    FROM ninja_patches.patch_facts
+    WHERE fact_type = 'install_outcome'
+      AND installed_at IS NOT NULL
+    GROUP BY device_id
+),
+classified AS (
+    SELECT
+        d.id              AS device_id,
+        d.system_name,
+        d.display_name,
+        d.organization_id,
+        d.node_class,
+        d.os_name,
+        dps.last_seen_at,
+        CASE
+            WHEN dps.last_seen_at IS NULL THEN 'no_patch_data'
+            WHEN dps.last_seen_at < NOW() - (INTERVAL '1 day' * {DEFAULT_STALE_PATCH_DAYS}) THEN 'stale_patch_data'
+            ELSE 'active_patching'
+        END AS patch_status
+    FROM ninja_core.devices d
+    LEFT JOIN device_patch_signal dps ON dps.device_id = d.id
+    WHERE d.approval_status = 'APPROVED'
+      AND d.node_class IN ('WINDOWS_WORKSTATION', 'WINDOWS_SERVER')
+)
 SELECT ROUND(
     COUNT(*) FILTER (WHERE c.patch_status = 'active_patching') * 100.0
     / NULLIF(COUNT(*), 0),

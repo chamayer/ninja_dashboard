@@ -5,6 +5,20 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-04 — v0.14.8 fix bootstrap import error for active-patching KPI
+
+**Why:** The `Actively patching %` helper was calling `_PCOV_CTE`
+before that symbol existed at import time, which prevented
+`ingest.metabase_bootstrap` from loading.
+
+**Done:**
+- Inlined the device-classification CTE into
+  `_active_patching_scalar_query()`.
+- Verified `python -m py_compile ingest/metabase_bootstrap.py` passes.
+
+**Validation:**
+- Pending commit hash update after the fix is committed.
+
 ## 2026-06-04 — v0.14.7 split patch KPIs into active-patching + fully-patched
 
 **Why:** The prior dashboard wording still mixed the operator's scope

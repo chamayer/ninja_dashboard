@@ -2,6 +2,15 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.14.8] — 2026-06-04
+
+### Fixed
+- **Command Center KPI bootstrap no longer crashes at import time.**
+  The new `Actively patching %` helper now carries its own device
+  classification CTE instead of referencing `_PCOV_CTE` before that
+  symbol is defined.
+- Commit: `TBD`
+
 ## [0.14.7] — 2026-06-04
 
 ### Changed
