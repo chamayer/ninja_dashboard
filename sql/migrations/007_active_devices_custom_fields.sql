@@ -57,9 +57,9 @@ organization_fields AS (
 device_cf AS (
     SELECT
         entity_id AS device_id,
-        MAX(value_bool) FILTER (WHERE field_name = 'patchingDisabled') AS device_patching_disabled,
-        MAX(value_bool) FILTER (WHERE field_name = 'serverPatchingDisabled') AS device_server_patching_disabled,
-        MAX(value_bool) FILTER (WHERE field_name = 'workstationPatchingDisabled') AS device_workstation_patching_disabled,
+        bool_or(value_bool) FILTER (WHERE field_name = 'patchingDisabled') AS device_patching_disabled,
+        bool_or(value_bool) FILTER (WHERE field_name = 'serverPatchingDisabled') AS device_server_patching_disabled,
+        bool_or(value_bool) FILTER (WHERE field_name = 'workstationPatchingDisabled') AS device_workstation_patching_disabled,
         MAX(value_text) FILTER (WHERE field_name = 'patchingNotes') AS device_patching_notes
     FROM device_fields
     GROUP BY entity_id
@@ -67,9 +67,9 @@ device_cf AS (
 organization_cf AS (
     SELECT
         entity_id AS organization_id,
-        MAX(value_bool) FILTER (WHERE field_name = 'patchingDisabled') AS org_patching_disabled,
-        MAX(value_bool) FILTER (WHERE field_name = 'serverPatchingDisabled') AS org_server_patching_disabled,
-        MAX(value_bool) FILTER (WHERE field_name = 'workstationPatchingDisabled') AS org_workstation_patching_disabled,
+        bool_or(value_bool) FILTER (WHERE field_name = 'patchingDisabled') AS org_patching_disabled,
+        bool_or(value_bool) FILTER (WHERE field_name = 'serverPatchingDisabled') AS org_server_patching_disabled,
+        bool_or(value_bool) FILTER (WHERE field_name = 'workstationPatchingDisabled') AS org_workstation_patching_disabled,
         MAX(value_text) FILTER (WHERE field_name = 'patchingNotes') AS org_patching_notes
     FROM organization_fields
     GROUP BY entity_id
