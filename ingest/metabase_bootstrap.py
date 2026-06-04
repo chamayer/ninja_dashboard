@@ -2626,7 +2626,7 @@ _PCOV_FILTERS = f"""
   [[AND o.name IN ({{{{pcov_org}}}})]]
   [[AND {DEVICE_TYPE_C} IN ({{{{pcov_node_class}}}})]]
   [[AND {OS_FAMILY_C} IN ({{{{pcov_os}}}})]]
-  [[AND EXISTS (SELECT 1 FROM ninja_core.v_active_devices vad WHERE vad.id = d.id AND vad.patching_scope IN ({{{{patching_scope}}}}))]]
+  [[AND EXISTS (SELECT 1 FROM ninja_core.v_active_devices vad WHERE vad.id = c.device_id AND vad.patching_scope IN ({{{{patching_scope}}}}))]]
   [[AND {PATCH_ACTIVITY_LABEL_C} IN ({{{{pcov_status}}}})]]
 """
 
