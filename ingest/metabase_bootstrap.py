@@ -689,7 +689,10 @@ _CMD_PARAM_MAPPINGS_FULL = {
 # Filter fragments — appended after WHERE / before GROUP BY.
 _CMD_FILTER_ORG         = "  [[AND o.name IN ({{org}})]]\n"
 _CMD_FILTER_DEVICE_TYPE = f"  [[AND {DEVICE_TYPE_D} IN ({{{{device_type}}}})]]\n"
-_CMD_FILTER_PATCHING_SCOPE = "  [[AND d.patching_scope IN ({{patching_scope}})]]\n"
+_CMD_FILTER_PATCHING_SCOPE = (
+    "  [[AND EXISTS (SELECT 1 FROM ninja_core.v_active_devices vad "
+    "WHERE vad.id = d.id AND vad.patching_scope IN ({{patching_scope}}))]]\n"
+)
 _CMD_FILTER_SEV_CS      = "  [[AND cs.severity IN ({{severity}})]]\n"
 _CMD_FILTER_SEV_LIR     = "  [[AND lir.severity IN ({{severity}})]]\n"
 
@@ -1212,7 +1215,10 @@ _OVERALL_PARAM_MAPPINGS_FULL = {
 _OVERALL_FILTER_ORG         = "  [[AND o.name IN ({{org}})]]\n"
 _OVERALL_FILTER_DEVICE_TYPE = f"  [[AND {DEVICE_TYPE_D} IN ({{{{device_type}}}})]]\n"
 _OVERALL_FILTER_OS_FAMILY   = f"  [[AND {OS_FAMILY_D} IN ({{{{os_family}}}})]]\n"
-_OVERALL_FILTER_PATCHING_SCOPE = "  [[AND d.patching_scope IN ({{patching_scope}})]]\n"
+_OVERALL_FILTER_PATCHING_SCOPE = (
+    "  [[AND EXISTS (SELECT 1 FROM ninja_core.v_active_devices vad "
+    "WHERE vad.id = d.id AND vad.patching_scope IN ({{patching_scope}}))]]\n"
+)
 _OVERALL_FILTER_SEV_CS      = "  [[AND cs.severity IN ({{severity}})]]\n"
 _OVERALL_FILTER_SEV_LIR     = "  [[AND lir.severity IN ({{severity}})]]\n"
 
@@ -2026,7 +2032,7 @@ _FILTER_PREDICATES = f"""
   [[AND cs.severity IN ({{{{severity}}}})]]
   [[AND lio.status IN ({{{{install_outcome}}}})]]
   [[AND {OS_FAMILY_D} IN ({{{{os}}}})]]
-  [[AND d.patching_scope IN ({{{{patching_scope}}}})]]
+  [[AND EXISTS (SELECT 1 FROM ninja_core.v_active_devices vad WHERE vad.id = d.id AND vad.patching_scope IN ({{{{patching_scope}}}}))]]
   [[AND cs.kb_number = {{{{kb}}}}]]
 """
 
@@ -2315,7 +2321,8 @@ DEVICE_TIMELINE_PARAM_MAPPINGS = {
 
 _DEVICE_FILTER = (
     "[[AND d.system_name = {{device}}]]\n"
-    "[[AND d.patching_scope IN ({{patching_scope}})]]"
+    "[[AND EXISTS (SELECT 1 FROM ninja_core.v_active_devices vad "
+    "WHERE vad.id = d.id AND vad.patching_scope IN ({{patching_scope}}))]]"
 )
 
 
@@ -2620,7 +2627,7 @@ _PCOV_FILTERS = f"""
   [[AND o.name IN ({{{{pcov_org}}}})]]
   [[AND {DEVICE_TYPE_C} IN ({{{{pcov_node_class}}}})]]
   [[AND {OS_FAMILY_C} IN ({{{{pcov_os}}}})]]
-  [[AND d.patching_scope IN ({{{{patching_scope}}}})]]
+  [[AND EXISTS (SELECT 1 FROM ninja_core.v_active_devices vad WHERE vad.id = d.id AND vad.patching_scope IN ({{{{patching_scope}}}}))]]
   [[AND {PATCH_ACTIVITY_LABEL_C} IN ({{{{pcov_status}}}})]]
 """
 
@@ -2918,7 +2925,10 @@ _ORG_PARAM_MAPPINGS_FULL = {
 _ORG_FILTER_ORG         = "  [[AND o.name IN ({{org}})]]\n"
 _ORG_FILTER_DEVICE_TYPE = f"  [[AND {DEVICE_TYPE_D} IN ({{{{device_type}}}})]]\n"
 _ORG_FILTER_OS_FAMILY   = f"  [[AND {OS_FAMILY_D} IN ({{{{os_family}}}})]]\n"
-_ORG_FILTER_PATCHING_SCOPE = "  [[AND d.patching_scope IN ({{patching_scope}})]]\n"
+_ORG_FILTER_PATCHING_SCOPE = (
+    "  [[AND EXISTS (SELECT 1 FROM ninja_core.v_active_devices vad "
+    "WHERE vad.id = d.id AND vad.patching_scope IN ({{patching_scope}}))]]\n"
+)
 _ORG_FILTER_SEV_CS      = "  [[AND cs.severity IN ({{severity}})]]\n"
 _ORG_FILTER_SEV_LIR     = "  [[AND lir.severity IN ({{severity}})]]\n"
 
@@ -3410,7 +3420,10 @@ _TRENDS_PARAM_MAPPINGS_FULL = {
 
 _TRENDS_FILTER_ORG         = "  [[AND o.name IN ({{org}})]]\n"
 _TRENDS_FILTER_DEVICE_TYPE = f"  [[AND {DEVICE_TYPE_D} IN ({{{{device_type}}}})]]\n"
-_TRENDS_FILTER_PATCHING_SCOPE = "  [[AND d.patching_scope IN ({{patching_scope}})]]\n"
+_TRENDS_FILTER_PATCHING_SCOPE = (
+    "  [[AND EXISTS (SELECT 1 FROM ninja_core.v_active_devices vad "
+    "WHERE vad.id = d.id AND vad.patching_scope IN ({{patching_scope}}))]]\n"
+)
 _TRENDS_FILTER_SEV_PF      = "  [[AND pf.severity IN ({{severity}})]]\n"
 _TRENDS_FILTER_SEV_CS      = "  [[AND cs.severity IN ({{severity}})]]\n"
 
