@@ -2583,22 +2583,41 @@ def build_dashboards(
     org_names: list[str], os_families: list[str], device_names: list[str],
 ) -> list[dict]:
     """All dashboards this script provisions. Detail / Patching Status
-    dropdowns are populated from the live data passed in."""
+    dropdowns are populated from the live data passed in.
+
+    `section_headers` (optional per dashboard): list of
+    `{"row": <orig_row>, "text": <markdown>}` entries. Inserted as
+    virtual text dashcards in pass 1b; every card at row >= the
+    header's row is shifted down by SECTION_HEADER_HEIGHT."""
     return [
         {
             "name":       DASH_COMMAND,
             "parameters": [],
             "cards":      COMMAND_CARDS,
+            "section_headers": [
+                {"row": 0, "text": "### Devices"},
+                {"row": 4, "text": "### Patches"},
+            ],
         },
         {
             "name":       DASH_OVERVIEW,
             "parameters": [],
             "cards":      OVERVIEW_CARDS,
+            "section_headers": [
+                {"row": 0, "text": "### Compliance"},
+                {"row": 4, "text": "### Devices"},
+                {"row": 8, "text": "### Patches"},
+            ],
         },
         {
             "name":       DASH_ORG,
             "parameters": build_org_parameters(org_names),
             "cards":      ORG_OVERVIEW_CARDS,
+            "section_headers": [
+                {"row": 0, "text": "### Compliance"},
+                {"row": 4, "text": "### Devices"},
+                {"row": 8, "text": "### Patches"},
+            ],
         },
         {
             "name":       "Ninja — Patch Detail (Filterable)",
@@ -2770,6 +2789,7 @@ def _upsert_dashboard(
 
 
 NAV_HEIGHT = 2  # rows reserved at top of every dashboard for the nav bar
+SECTION_HEADER_HEIGHT = 1  # rows each section header markdown card occupies
 NAV_ORDER = [DASH_COMMAND, DASH_OVERVIEW, DASH_ORG, DASH_PCOV, DASH_DETAIL, DASH_DRILLDOWN]
 NAV_DISPLAY_NAMES = {
     DASH_COMMAND:   "Command Center",
@@ -2799,6 +2819,31 @@ def _build_nav_markdown(
             continue
         parts.append(f"[{label}](/dashboard/{did})")
     return "**Navigate:** " + " · ".join(parts)
+
+
+def _section_header_dashcard(text: str, row: int, idx: int) -> dict:
+    """Build a virtual text dashcard that acts as a section divider
+    between scalar groups. Uses Metabase's `display: "text"` virtual
+    card with markdown content so a single bold/heading line styles
+    the divider."""
+    return {
+        "id":                     -(idx + 100),
+        "card_id":                None,
+        "row":                    row,
+        "col":                    0,
+        "size_x":                 24,
+        "size_y":                 SECTION_HEADER_HEIGHT,
+        "parameter_mappings":     [],
+        "visualization_settings": {
+            "virtual_card": {
+                "display":       "text",
+                "name":          None,
+                "archived":      False,
+                "dataset_query": {},
+            },
+            "text": text,
+        },
+    }
 
 
 def _nav_dashcard(text: str) -> dict:
@@ -2851,6 +2896,7 @@ def _set_dashboard_layout(
     card_ids: dict[str, int],
     dash_id_by_name: dict[str, int] | None = None,
     nav_markdown: str | None = None,
+    section_headers: list[dict] | None = None,
 ) -> None:
     """Replace the dashboard's dashcards with our layout. Uses PUT
     /api/dashboard/:id with a full `dashcards` array — modern
@@ -2866,13 +2912,40 @@ def _set_dashboard_layout(
     When `dash_id_by_name` is provided, per-column click_behaviors
     from card specs are resolved and written into each dashcard's
     visualization_settings.column_settings (where Metabase actually
-    honors them)."""
+    honors them).
+
+    When `section_headers` is provided (a list of
+    `{"row": <orig_row>, "text": <markdown>}`), virtual text
+    dashcards are inserted at those original row positions and every
+    card at or below each header's row is shifted down by
+    SECTION_HEADER_HEIGHT. Headers are sorted by row before
+    applying."""
     dashcards = []
     row_offset = 0
     current_dash_id = int(dashboard["id"])
     if nav_markdown is not None:
         dashcards.append(_nav_dashcard(nav_markdown))
         row_offset = NAV_HEIGHT
+
+    headers = sorted(section_headers or [], key=lambda h: h["row"])
+
+    def shift(orig_row: int) -> int:
+        """Add SECTION_HEADER_HEIGHT for every header whose original
+        row is <= orig_row (the header pushes everything at or below
+        it down)."""
+        return orig_row + sum(
+            SECTION_HEADER_HEIGHT for h in headers if h["row"] <= orig_row
+        )
+
+    # Insert each section header at its position (orig_row + the count
+    # of prior headers, since each earlier header pushes this one down).
+    for i, h in enumerate(headers):
+        prior = sum(1 for hh in headers if hh["row"] < h["row"])
+        header_row = h["row"] + prior * SECTION_HEADER_HEIGHT
+        dashcards.append(
+            _section_header_dashcard(h["text"], header_row + row_offset, i)
+        )
+
     for i, spec in enumerate(specs):
         card_id = card_ids[spec["key"]]
         param_mappings = [
@@ -2889,7 +2962,7 @@ def _set_dashboard_layout(
         dashcards.append({
             "id":                     -(i + 2),  # -1 reserved for nav
             "card_id":                card_id,
-            "row":                    spec["row"] + row_offset,
+            "row":                    shift(spec["row"]) + row_offset,
             "col":                    spec["col"],
             "size_x":                 spec["size_x"],
             "size_y":                 spec["size_y"],
@@ -2901,8 +2974,11 @@ def _set_dashboard_layout(
         json={"dashcards": dashcards},
     )
     r.raise_for_status()
-    log.info("Set dashboard layout: %d cards%s",
-             len(dashcards), " (with nav)" if nav_markdown else "")
+    log.info(
+        "Set dashboard layout: %d dashcards (%d cards + %d headers)%s",
+        len(dashcards), len(specs), len(headers),
+        " + nav" if nav_markdown else "",
+    )
 
 
 # ── Entry point ─────────────────────────────────────────────────────
@@ -2984,9 +3060,9 @@ def run_bootstrap(
             card_ids_by_dash[dash_spec["name"]] = card_ids
             urls.append(f"{url}/dashboard/{dashboard['id']}  ({dash_spec['name']})")
 
-        # Pass 1b — set layouts (with nav bar AND per-column click
-        # behaviors at the dashcard level — that's where Metabase
-        # actually honors them) now that IDs are known.
+        # Pass 1b — set layouts (with nav bar, per-column click
+        # behaviors at the dashcard level, AND section headers if
+        # the dashboard spec declares them) now that IDs are known.
         log.info("── Setting dashboard layouts with nav bar ──")
         for dash_spec in dashboards:
             nav_md = _build_nav_markdown(dash_spec["name"], dash_id_by_name)
@@ -2997,6 +3073,7 @@ def run_bootstrap(
                 card_ids_by_dash[dash_spec["name"]],
                 dash_id_by_name=dash_id_by_name,
                 nav_markdown=nav_md,
+                section_headers=dash_spec.get("section_headers"),
             )
 
         # Pass 2 — click behaviors.

@@ -2,6 +2,37 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.12.5] — 2026-06-04
+
+### Added
+- **Section header dividers between scalar groups.** Virtual text
+  dashcards now mark the boundaries between groups on the three
+  main dashboards:
+    - Patch Command Center → **Devices** / **Patches**
+    - Overall Patching Status → **Compliance** / **Devices** /
+      **Patches**
+    - Org Overview → **Compliance** / **Devices** / **Patches**
+  Each header is a markdown `### Title` rendered via a Metabase
+  virtual text card (single row, full width).
+
+### Changed
+- `_set_dashboard_layout` accepts an optional `section_headers`
+  list and shifts cards at/below each header's original row down by
+  `SECTION_HEADER_HEIGHT` to make room. Card specs keep their
+  natural row numbers (0, 4, 8…); the layout helper computes the
+  offset.
+- `build_dashboards` now declares `section_headers` per dashboard
+  alongside `cards` / `parameters`.
+
+### Notes
+- Drilldown, Patch Detail, and Device Patching Status didn't
+  receive headers — they don't have the device/patch/compliance
+  scalar grouping pattern.
+- If Metabase's virtual text dashcard rejects this exact JSON
+  shape, the dashboard PUT will 4xx — should fall back cleanly
+  since pass 1a still creates the dashboards (just without the
+  layout) and pass 2 click_behaviors don't touch dashcards.
+
 ## [0.12.4] — 2026-06-04
 
 ### Added

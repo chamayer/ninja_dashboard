@@ -5,6 +5,34 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-04 — v0.12.5 section header dividers
+
+**Done:**
+- Added `SECTION_HEADER_HEIGHT = 1` constant and
+  `_section_header_dashcard` helper (Metabase virtual text
+  dashcard with markdown content).
+- Extended `_set_dashboard_layout` with an optional
+  `section_headers` parameter. The shift() closure walks the
+  sorted headers and bumps every card at or below each header's
+  row down by `SECTION_HEADER_HEIGHT`. Header cards land at their
+  own shifted positions (orig_row + count of prior headers).
+- `build_dashboards` declares headers per dashboard; pass 1b
+  threads them through.
+- Applied to Command Center, Overall Patching Status, Org
+  Overview — the three dashboards that follow the canonical
+  Compliance / Devices / Patches grouping. Drilldown, Patch
+  Detail, Device Patching Status didn't receive headers; they
+  don't have the scalar grouping pattern.
+
+**Honest caveat:**
+- First time provisioning Metabase virtual text dashcards in the
+  middle of a layout (nav bar was the first; that's at the top).
+  JSON shape mirrors the nav bar's, so high confidence. If the
+  layout PUT 4xx's, check the bootstrap logs.
+
+**Validation:**
+- `python -m py_compile` passes.
+
 ## 2026-06-04 — v0.12.4 pie / bar color coding
 
 **Done:**
