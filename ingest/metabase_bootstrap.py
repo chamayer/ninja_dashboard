@@ -282,6 +282,80 @@ WHERE d.approval_status = 'APPROVED'
 """
 
 
+def _patching_device_compliance_scalar_query(filters: str) -> str:
+    """Fully patched among actively patching devices."""
+    return f"""
+WITH device_patch_signal AS (
+    SELECT device_id, MAX(installed_at) AS last_seen_at
+    FROM ninja_patches.patch_facts
+    WHERE fact_type = 'install_outcome'
+      AND installed_at IS NOT NULL
+    GROUP BY device_id
+),
+classified AS (
+    SELECT
+        d.id              AS device_id,
+        d.organization_id,
+        d.node_class,
+        d.os_name,
+        dps.last_seen_at,
+        CASE
+            WHEN dps.last_seen_at IS NULL THEN 'no_patch_data'
+            WHEN dps.last_seen_at < NOW() - (INTERVAL '1 day' * {DEFAULT_STALE_PATCH_DAYS}) THEN 'stale_patch_data'
+            ELSE 'active_patching'
+        END AS patch_status
+    FROM ninja_core.v_active_devices d
+    LEFT JOIN device_patch_signal dps ON dps.device_id = d.id
+    WHERE d.approval_status = 'APPROVED'
+      AND d.node_class IN ('WINDOWS_WORKSTATION', 'WINDOWS_SERVER')
+),
+installed_patches AS (
+    SELECT DISTINCT device_id, patch_uid
+    FROM ninja_patches.patch_facts
+    WHERE fact_type = 'install_outcome' AND status = 'INSTALLED'
+),
+current_patch_state AS (
+    SELECT DISTINCT ON (device_id, patch_uid) device_id, patch_uid, status
+    FROM ninja_patches.patch_facts
+    WHERE fact_type = 'patch_state'
+    ORDER BY device_id, patch_uid, last_observed_at DESC, id DESC
+),
+missing_patches AS (
+    SELECT device_id, patch_uid
+    FROM current_patch_state
+    WHERE status IN ({COMPLIANCE_MISSING_SQL})
+),
+universe AS (
+    SELECT device_id, patch_uid FROM installed_patches
+    UNION
+    SELECT device_id, patch_uid FROM missing_patches
+),
+device_rollup AS (
+    SELECT
+        u.device_id,
+        COUNT(*) FILTER (WHERE mp.device_id IS NOT NULL) AS missing_count
+    FROM universe u
+    LEFT JOIN missing_patches mp USING (device_id, patch_uid)
+    GROUP BY u.device_id
+)
+SELECT ROUND(
+    COUNT(*) FILTER (
+        WHERE c.patch_status = 'active_patching'
+          AND dr.device_id IS NOT NULL
+          AND dr.missing_count = 0
+    ) * 100.0
+    / NULLIF(COUNT(*) FILTER (WHERE c.patch_status = 'active_patching'), 0),
+    1
+) AS percent_installed
+FROM classified c
+LEFT JOIN device_rollup dr ON dr.device_id = c.device_id
+JOIN ninja_core.v_active_devices d ON d.id = c.device_id
+JOIN ninja_core.organizations o ON o.id = c.organization_id
+WHERE d.approval_status = 'APPROVED'
+{filters}
+"""
+
+
 def _daily_compliance_ctes() -> str:
     return f"""
 WITH days AS (
@@ -981,12 +1055,12 @@ OVERVIEW_CARDS: list[dict[str, Any]] = [
     },
     {
         "key":            "overall_progress",
-        "name":           "Fully patched devices %",
+        "name":           "Fully patched % (patching devices)",
         "display":        "scalar",
         "row": 0, "col": 8, "size_x": 8, "size_y": 4,
         "template_tags":  _OVERALL_TAGS,
         "param_mappings": _OVERALL_PARAM_MAPPINGS_FULL,
-        "query": _device_compliance_scalar_query(_OVERALL_FILTERS_DEVICE),
+        "query": _patching_device_compliance_scalar_query(_OVERALL_FILTERS_DEVICE),
     },
     {
         # Data freshness indicator. If ingest is broken, every other
@@ -2663,12 +2737,12 @@ WHERE 1=1
     },
     {
         "key":     "org_progress",
-        "name":    "Fully patched devices %",
+        "name":    "Fully patched % (patching devices)",
         "display": "scalar",
         "row": 0, "col": 12, "size_x": 12, "size_y": 4,
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS_FULL,
-        "query": _device_compliance_scalar_query(_ORG_FILTERS_DEVICE),
+        "query": _patching_device_compliance_scalar_query(_ORG_FILTERS_DEVICE),
     },
     {
         "key":     "org_failed",

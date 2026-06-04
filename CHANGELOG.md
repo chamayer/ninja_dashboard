@@ -2,6 +2,15 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.14.9] — 2026-06-04
+
+### Changed
+- **The fully-patched KPI now states its real denominator.** The
+  second operator KPI is now `Fully patched % (patching devices)`,
+  which matches the formula: among devices that are actively
+  patching, how many have no open missing patches.
+- Commit: `TBD`
+
 ## [0.14.8] — 2026-06-04
 
 ### Fixed

@@ -172,6 +172,12 @@ _(empty — drop free-form items here)_
 
 ## Completed
 
+### v0.14.9 — 2026-06-04
+
+- [x] Renamed the second patch KPI to
+      `Fully patched % (patching devices)` and updated the formula to
+      use the patching-device subset. Commit `TBD`.
+
 ### v0.14.8 — 2026-06-04
 
 - [x] Fixed the active-patching KPI bootstrap so

@@ -5,6 +5,20 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-04 — v0.14.9 clarify fully-patched KPI as patching-device subset
+
+**Why:** The second KPI title looked like fleet-wide compliance even
+though the intended denominator is the actively patching subset.
+
+**Done:**
+- Renamed the visible card to `Fully patched % (patching devices)`.
+- Rewired the card formula so it measures fully patched among devices
+  that are actively patching.
+- Updated `CONTEXT.md` to make the denominator explicit.
+
+**Validation:**
+- Pending compile-check after the edit.
+
 ## 2026-06-04 — v0.14.8 fix bootstrap import error for active-patching KPI
 
 **Why:** The `Actively patching %` helper was calling `_PCOV_CTE`

@@ -182,8 +182,8 @@ Dashboard labels now split the story into two operator-facing metrics:
 
 - `Actively patching %` = how many scoped devices are actively
   patching right now.
-- `Fully patched devices %` = how many scoped devices are fully
-  patched right now.
+- `Fully patched % (patching devices)` = among devices that are
+  actively patching, how many have no open missing patches.
 
 Command Center shows the first one as the single headline KPI and
 keeps the raw count cards. Overall Status, Org Overview, and Trends

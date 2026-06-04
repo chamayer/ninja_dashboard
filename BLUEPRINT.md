@@ -7,26 +7,25 @@
 
 ## Goal
 
-Refocus the patch KPIs around the MSP operator question: what share of
-active devices are currently patching, and what share are fully
-patched.
+Make the second patch KPI explicit: it should mean fully patched among
+patching devices, not fully patched across the whole active fleet.
 
 ## Why
 
-The current cards mix device counts, patch-work completion, and device
-outcome. The command center should keep the raw count cards, but the
-headline KPI should answer "are devices actively patching right now?"
-and the status/detail pages should pair that with the fully-patched
-share.
+The current `Fully patched devices %` wording reads like a percent of
+all devices, but the intended denominator is the actively patching
+subset. The formula and title need to agree so operators do not read
+the card as fleet-wide compliance.
 
 ## Scope
 
 **In:**
 - Keep the Command Center count cards.
 - Rename the Command Center headline KPI to `Actively patching %`.
-- Show `Actively patching %` and `Fully patched devices %` on Overall
-  Status and Org Overview.
-- Update the Trends dashboard to show both rates.
+- Recompute the second KPI as fully patched within the patching-device
+  subset.
+- Rename the second KPI to `Fully patched % (patching devices)`.
+- Keep the existing filters intact on the affected dashboards.
 - Update release docs and versioning.
 
 **Out / separate investigation:**
@@ -36,8 +35,8 @@ share.
 ## Files to change
 
 - `ingest/metabase_bootstrap.py`
-    - Rename the KPI cards, add the new active-patching percentage,
-      and align trend labels.
+    - Adjust the second KPI formula and rename the visible card
+      labels.
 - `CONTEXT.md`
     - Update the operator-facing metric definitions.
 - `VERSION`
@@ -52,10 +51,10 @@ share.
 ## Steps
 
 1. Rename the relevant card titles and SQL aliases.
-2. Keep the count cards on Command Center and swap in the new
-   headline percentage.
-3. Update Overall Status, Org Overview, and Trends to show the two
-   operator KPIs.
+2. Keep the count cards on Command Center and preserve the active
+   patching headline.
+3. Update the fully-patched KPI formula and label everywhere it is
+   shown.
 4. Compile-check the bootstrap.
 5. Update docs and version.
 6. Commit and push, then report the short hash.
@@ -66,4 +65,4 @@ share.
 
 ## Status
 
-done — committed as ba55729
+in progress
