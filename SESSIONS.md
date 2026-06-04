@@ -5,6 +5,31 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-04 — v0.12.3 canonical scalar set + Org severity
+
+**Done:**
+- Added Needs Reboot scalar to Overall Patching Status.
+- Added Patching Devices and Needs Reboot scalars to Org Overview.
+- Wired severity filter to the 5 remaining Org Overview patch
+  scalars (failed, approved, manual, delayed, status pie) by
+  adding `severity` to each CTE and swapping their predicate from
+  `_ORG_FILTERS_DEVICE` to `_ORG_FILTERS_PATCH_CS` /
+  `_ORG_FILTERS_PATCH_LIR`. param_mappings updated to
+  `_ORG_PARAM_MAPPINGS_FULL`.
+- Row 4 layouts on Overall + Org reflowed to 5 tiles at
+  5+5+5+5+4 to match Command Center.
+
+**Still deferred to v0.12.4:**
+- Section header markdown cards between scalar groups.
+- Color coding.
+- Severity wiring on org_compliance / org_device_type /
+  org_os_family — those compute compliance % across a population;
+  severity filtering there changes semantic (it'd be "% installed
+  among critical patches"). Skipping unless requested.
+
+**Validation:**
+- `python -m py_compile` passes.
+
 ## 2026-06-04 — v0.12.2 Patch History split + Org filter wiring
 
 **Done:**

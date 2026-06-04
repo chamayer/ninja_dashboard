@@ -2,6 +2,27 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.12.3] — 2026-06-04
+
+### Added
+- **Needs Reboot** scalar on Overall Patching Status (Fleet) — was
+  only on Command Center; now both dashboards expose it as the
+  fifth tile in the Devices row.
+- **Patching Devices** and **Needs Reboot** scalars on Org Overview
+  — Org now has the full canonical Devices row: Active · Patching ·
+  Stalled · Never-Patched · Needs Reboot.
+- **Severity filter wiring** on the remaining 5 Org Overview patch
+  scalars (Failed Patches, Approved Patches, Manual Approval,
+  Delayed Patches, Current Patch State pie). Each CTE now selects
+  `severity`, and `_ORG_FILTERS_PATCH_CS` / `_ORG_FILTERS_PATCH_LIR`
+  applies the predicate. Every Org dashboard filter now narrows
+  every applicable card.
+
+### Changed
+- Overall Patching Status and Org Overview row-4 layouts reflowed
+  from 3–4 scalars at size 6/8 to **5 scalars at sizes 5+5+5+5+4**
+  to match Command Center.
+
 ## [0.12.2] — 2026-06-04
 
 ### Changed
