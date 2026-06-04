@@ -66,4 +66,4 @@ leave a dashboard pointing at stale SQL / tag wiring.
 
 ## Status
 
-in progress
+done — committed as 2779967

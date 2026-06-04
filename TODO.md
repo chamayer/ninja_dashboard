@@ -172,6 +172,12 @@ _(empty — drop free-form items here)_
 
 ## Completed
 
+### v0.14.4 — 2026-06-04
+
+- [x] Metabase card reuse stopped by moving bootstrap identity from
+      visible title to hidden stable UID in card `description`.
+      Commit `2779967`.
+
 ### v0.10.0 — 2026-06-03
 
 - [x] Added **Ninja — Patch Command Center** as the top-level patch

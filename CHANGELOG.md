@@ -15,6 +15,7 @@ All notable changes to this project follow [Semantic Versioning](https://semver.
   `description` and `_upsert_card()` matches on that UID. Existing
   duplicate-title cards in Metabase are left alone; new bootstraps
   create or update the correct per-dashboard card object.
+- Commit: `2779967`
 
 ## [0.14.3] — 2026-06-04
 
