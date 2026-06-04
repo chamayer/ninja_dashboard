@@ -161,6 +161,5 @@ the standard Metabase UX and operators are accustomed to it.
 
 ## Status
 
-*in progress* — Command Center landed in v0.14.1.
-Remaining: Overall + Trends filter expansion, Org multi-select on
-existing dashboards. Will ship as v0.14.2 (and possibly v0.14.3).
+*done* — v0.14.1 (Command Center) and v0.14.2 (Overall + Trends +
+Org multi-select on Detail/Org/PCOV).

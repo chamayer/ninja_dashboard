@@ -5,6 +5,29 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-04 — v0.14.2 Overall + Trends filter expansion + Org multi-select
+
+**Done:**
+- Overall Patching Status: Org + OS Family + Severity added
+  (multi-select); every card re-wired with org JOIN + appropriate
+  filter fragment.
+- Trends: Org + Severity added; every card joined to
+  organizations; patch-counting cards honor severity, device-
+  population cards skip it.
+- Org dropdown converted to multi-select on Detail, Org Overview,
+  PCOV. SQL predicates rewritten from `o.name = {{var}}` to
+  `o.name IN ({{var}})`.
+
+**Decision documented:**
+- Compliance scalars (overall_compliance, compliance_worst,
+  compliance_all) honor Org + Device Type + OS Family but skip
+  Severity. Compliance is the fleet-wide coverage number;
+  scoping by severity would change its semantic to "% of
+  Critical installed". Defer until requested.
+
+**Validation:**
+- `python -m py_compile` passes.
+
 ## 2026-06-04 — v0.14.1 Patch Command Center filter set expanded
 
 **Why:** User reported "cards on Command Center don't follow

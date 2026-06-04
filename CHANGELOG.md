@@ -2,6 +2,40 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.14.2] — 2026-06-04
+
+### Added
+- **Overall Patching Status filter set expanded** to Org · Device
+  Type · OS Family · Severity (all multi-select). Previously only
+  Device Type. Every Overall scalar / chart / table now honors
+  every applicable filter.
+- **Trends filter set expanded** to Days · Org · Device Type ·
+  Severity (all multi-select except Days). Time-series cards
+  narrow per the active scope.
+- **Org dropdown converted to multi-select** on Patch Detail,
+  Org Overview, and Device Patching Status. Operator can compare
+  2-3 clients at once.
+
+### Changed
+- All Overall cards have a `JOIN ninja_core.organizations o`
+  added where missing. Patch-context CTEs select `severity`.
+- All Trends cards JOIN organizations. Patch-counting cards
+  (installs/day, failures/day, manual-age) honor severity;
+  device-population cards (reboots/day, active-devices/day) don't.
+- Org SQL predicates everywhere changed from `o.name = {{var}}`
+  to `o.name IN ({{var}})` so the multi-select substitution
+  works.
+- `build_overall_parameters` and `build_trends_parameters` now
+  take `org_names` (Overall also takes `os_families`).
+
+### Notes
+- Compliance scalars on Overall (overall_compliance,
+  compliance_worst, compliance_all) honor Org + Device Type + OS
+  Family but NOT Severity. Compliance is intended to be the fleet-
+  wide coverage number; scoping by severity would change its
+  meaning to "% of Critical patches installed", which is a
+  different metric. Defer until operator asks.
+
 ## [0.14.1] — 2026-06-04
 
 ### Added
