@@ -2,6 +2,26 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.13.2] — 2026-06-04
+
+### Added
+- **Activities backfill CLI** (`ingest/activities/backfill.py`) —
+  operator-triggered one-shot that walks `/v2/activities` backward
+  from the oldest record in DB via `olderThan=<id>` pagination.
+  Uses the same allowlist as the forward ingest. Stops at the
+  `--days` cutoff (default 90), `--max-pages` cap (default 500), or
+  Ctrl-C. Idempotent — inserts are dedup'd on the activity-id PK.
+  Does NOT touch the forward-ingest cursor in `ingest_state`.
+  Run with: `docker exec ninja-ingest python -m ingest.activities.backfill --days 90`
+- **Dashboard JSON export tool** (`ingest/metabase_export.py`) —
+  fetches each provisioned dashboard via the Metabase API and
+  writes pretty-printed JSON to `metabase/dashboards/<slug>.json`.
+  For version-controlled snapshots of operator-side tweaks
+  (column widths, custom filter values) that don't otherwise live
+  in code. Reuses the bootstrap's auth + password-resolution
+  helpers. Run with:
+  `docker exec ninja-ingest python -m ingest.metabase_export --user X --password-file Y`.
+
 ## [0.13.1] — 2026-06-04
 
 ### Added

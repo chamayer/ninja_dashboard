@@ -5,6 +5,22 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-04 — v0.13.2 backfill CLI + dashboard JSON export
+
+**Done:**
+- `ingest/activities/backfill.py` — one-shot CLI to walk
+  /v2/activities backward via olderThan from the oldest id in DB.
+  Filters via the same TYPES_INCLUDE / SOURCES env vars as the
+  forward ingest. Stops at --days cutoff, --max-pages, or SIGINT.
+  Idempotent inserts.
+- `ingest/metabase_export.py` — CLI to fetch each Ninja-collection
+  dashboard's JSON via /api/dashboard/<id> and write pretty-printed
+  to metabase/dashboards/<slug>.json. Reuses the bootstrap's auth
+  + password helpers.
+
+**Validation:**
+- `python -m py_compile` passes on both new modules.
+
 ## 2026-06-04 — v0.13.1 Trends dashboard
 
 **Done:**
