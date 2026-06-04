@@ -2,6 +2,24 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.12.7] — 2026-06-04
+
+### Added
+- **Data Freshness scalar** on Overall Patching Status (top-right,
+  next to Patch Compliance). Reads `MAX(started_at)` from
+  `ninja_core.run_log WHERE status='ok'` and reports either "N min
+  ago" or, if > 3 hours, "STALE — last ok run N h ago". Surfaces
+  ingest failures explicitly instead of silently showing stale
+  numbers.
+
+### Notes / partial
+- Patch Compliance scalar size shrunk from full-width (24) to
+  size 18 to make room for Data Freshness (size 6) on the same row.
+- This is item 10 of the backlog. The other queued items
+  (awaiting-reboot panel, fleet-wide activity feed, trends
+  dashboard, scalar coloring, backfill script, JSON export) are
+  still pending.
+
 ## [0.12.6] — 2026-06-04
 
 ### Changed

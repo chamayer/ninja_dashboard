@@ -5,6 +5,26 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-04 — v0.12.7 stale-data banner on Overall Status
+
+**Done:**
+- Added Data Freshness scalar on Overall Patching Status. Shows
+  minutes since last successful run, switching to "STALE — N h"
+  format past a 3-hour threshold.
+- Patch Compliance scalar shrunk from full-width (24) to size 18
+  to make room.
+
+**Validation:**
+- `python -m py_compile` passes.
+
+**Still queued (this batch was paused mid-stream):**
+- "Patches installed awaiting reboot" panel on Command Center.
+- Fleet-wide "Recent Patch Activity" feed on Command Center.
+- Trends dashboard (whole new dashboard).
+- Scalar background coloring.
+- Activities backfill CLI.
+- Dashboard JSON export tool.
+
 ## 2026-06-04 — v0.12.6 Drilldown activity feed allowlist
 
 **Why:** User reported the Device Drilldown's "Recent Activity"

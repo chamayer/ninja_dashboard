@@ -523,12 +523,12 @@ LIMIT 100
 ]
 
 OVERVIEW_CARDS: list[dict[str, Any]] = [
-    # Row 0 — Compliance headline (single full-width scalar).
+    # Row 0 — Compliance headline + Data Freshness sidekick.
     {
         "key":        "overall_compliance",
         "name":       "Patch Compliance",
         "display":    "scalar",
-        "row": 0, "col": 0, "size_x": 24, "size_y": 4,
+        "row": 0, "col": 0, "size_x": 18, "size_y": 4,
         # Fleet-wide compliance %: installed (device, patch) pairs over
         # the universe of all known (device, patch) on active Windows
         # devices.
@@ -551,6 +551,34 @@ SELECT ROUND(
 ) AS percent_installed
 FROM all_patches ap
 LEFT JOIN installed_patches ip USING (device_id, patch_uid)
+""",
+    },
+    {
+        # Data freshness indicator. If ingest is broken, every other
+        # number on the dashboard is stale — this card surfaces that
+        # explicitly. Reads the most recent successful run from
+        # run_log. Bold if older than the warning threshold.
+        "key":     "overall_data_freshness",
+        "name":    "Data Freshness",
+        "display": "scalar",
+        "row": 0, "col": 18, "size_x": 6, "size_y": 4,
+        "query": """
+SELECT
+    CASE
+        WHEN max_ts IS NULL THEN 'no ingest yet'
+        WHEN max_ts < NOW() - INTERVAL '3 hours' THEN
+            'STALE — last ok run ' ||
+            ROUND(EXTRACT(EPOCH FROM (NOW() - max_ts)) / 3600)::text ||
+            ' h ago'
+        ELSE
+            ROUND(EXTRACT(EPOCH FROM (NOW() - max_ts)) / 60)::text ||
+            ' min ago'
+    END AS data_freshness
+FROM (
+    SELECT MAX(started_at) AS max_ts
+    FROM ninja_core.run_log
+    WHERE status = 'ok'
+) latest
 """,
     },
     # Row 4 — Devices (canonical order: Active, Patching, Stalled,
