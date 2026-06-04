@@ -5,6 +5,32 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-04 — custom-fields ingest moved to scoped feed
+
+**Why:** Device-only custom-field ingest was missing organization and
+location values, and the operator now wants a small allowlisted set of
+patching-exception fields plus the earlier enrichment fields.
+
+**In progress:**
+- Switched `ingest/core/custom_fields.py` to
+  `/queries/scoped-custom-fields`.
+- Passed `INGEST_CUSTOM_FIELDS_INCLUDE` through to the API as the
+  `fields` filter.
+- Kept device / organization / location pivoted views in sync.
+- Updated `probe_fields.py` to inspect the scoped feed instead of the
+  legacy device-only report.
+
+**Validation so far:**
+- Probe confirmed `scope=ORGANIZATION` and `scope=NODE` records are
+  returned from `/queries/scoped-custom-fields`.
+- Probe confirmed the new exclusion fields come through on both org
+  and device records.
+
+**Pending:**
+- Update the release docs and commit hash once the code is finalized.
+- UI/dashboard wiring for the new custom-field filters is still a
+  separate pass.
+
 ## 2026-06-04 — v0.14.10 align Org + Trends visible labels to patching-device KPI
 
 **Why:** The Org Overview bars and Trends line still showed the old

@@ -7,62 +7,65 @@
 
 ## Goal
 
-Make the second patch KPI explicit: it should mean fully patched among
-patching devices, not fully patched across the whole active fleet.
+Switch custom-field ingest to the scoped Ninja API feed and keep only
+the allowlisted field names from `.env`.
 
 ## Why
 
-The current `Fully patched devices %` wording reads like a percent of
-all devices, but the intended denominator is the actively patching
-subset. The formula and title need to agree so operators do not read
-the card as fleet-wide compliance.
+The current ingest path only walks `/queries/custom-fields`, which is
+device-centric. We now know the scoped endpoint returns organization
+and device records in one feed, so the ingest can collect both without
+fan-out by org or per-device inheritance calls.
 
 ## Scope
 
 **In:**
-- Keep the Command Center count cards.
-- Rename the Command Center headline KPI to `Actively patching %`.
-- Recompute the second KPI as fully patched within the patching-device
-  subset.
-- Rename the second KPI to `Fully patched % (patching devices)`.
-- Keep the existing filters intact on the affected dashboards.
-- Update release docs and versioning.
+- Use `/queries/scoped-custom-fields` as the custom-fields ingest
+  source.
+- Honor `INGEST_CUSTOM_FIELDS_INCLUDE` as the field allowlist feed.
+- Keep device, organization, and location scopes in the ingest path.
+- Preserve pivoted `v_<entity>_custom_fields` views.
+- Update docs so the source-of-truth / behavior is clear.
 
 **Out / separate investigation:**
-- Reworking the underlying patch-state classifier.
-- Adding new data sources or schema changes.
+- Dashboard UI wiring for the new custom-field columns.
+- New custom-field definitions metadata model.
+- Changing the semantic meaning of the fields the user created.
 
 ## Files to change
 
-- `ingest/metabase_bootstrap.py`
-    - Adjust the second KPI formula and rename the visible card
-      labels.
+- `ingest/core/custom_fields.py`
+  - Switch the fetch path, add scoped-query params, keep allowlist
+    filtering, preserve pivot generation.
+- `ingest/probe_fields.py`
+  - Optional follow-up if needed to inspect the scoped feed instead of
+    only the legacy device-centric feed.
 - `CONTEXT.md`
-    - Update the operator-facing metric definitions.
-- `VERSION`
-    - Bump for the dashboard update.
+  - Update the custom-fields ingest description to match the scoped
+    feed.
 - `CHANGELOG.md`
-    - Document the KPI split and label changes.
+  - Record the ingest-source change.
 - `SESSIONS.md`
-    - Record the dashboard rework and rationale.
+  - Note the reasoning and what was verified.
 - `TODO.md`
-    - Move any deferred follow-up into Backlog if one appears.
+  - Move any deferred dashboard wiring into Backlog if it appears.
+- `VERSION`
+  - Bump for the ingest behavior change.
 
 ## Steps
 
-1. Rename the relevant card titles and SQL aliases.
-2. Keep the count cards on Command Center and preserve the active
-   patching headline.
-3. Update the fully-patched KPI formula and label everywhere it is
-   shown.
-4. Compile-check the bootstrap.
+1. Update the ingest module to read from scoped custom-fields.
+2. Keep the env allowlist as the field feed and pass it to the API.
+3. Verify the regenerated device/org/location views still work.
+4. Compile-check the Python module.
 5. Update docs and version.
-6. Commit and push, then report the short hash.
+6. Commit and push after approval.
 
 ## Open questions
 
-- None.
+- None for the ingest change itself; dashboard wiring remains a
+  separate follow-up if needed.
 
 ## Status
 
-done — committed as be63e7e
+in progress

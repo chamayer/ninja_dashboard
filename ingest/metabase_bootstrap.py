@@ -214,6 +214,64 @@ universe AS (
 )
 """
 
+_PATCH_SCOPE_CTE = """
+WITH device_custom_fields AS (
+    SELECT
+        entity_id AS device_id,
+        patchingdisabled AS device_patching_disabled,
+        serverpatchingdisabled AS device_server_patching_disabled,
+        workstationpatchingdisabled AS device_workstation_patching_disabled,
+        patchingnotes AS device_patching_notes
+    FROM ninja_core.v_device_custom_fields
+),
+organization_custom_fields AS (
+    SELECT
+        entity_id AS organization_id,
+        patchingdisabled AS org_patching_disabled,
+        serverpatchingdisabled AS org_server_patching_disabled,
+        workstationpatchingdisabled AS org_workstation_patching_disabled,
+        patchingnotes AS org_patching_notes
+    FROM ninja_core.v_organization_custom_fields
+),
+scoped_devices AS (
+    SELECT
+        d.id AS device_id,
+        d.system_name AS device,
+        d.organization_id,
+        o.name AS organization,
+        CASE
+            WHEN d.node_class = 'WINDOWS_SERVER' THEN 'Windows Server'
+            WHEN d.node_class = 'WINDOWS_WORKSTATION' THEN 'Windows Workstation'
+            ELSE d.node_class
+        END AS device_type,
+        CASE
+            WHEN d.os_name ILIKE '%Windows 11%' THEN 'Windows 11'
+            WHEN d.os_name ILIKE '%Windows 10%' THEN 'Windows 10'
+            WHEN d.os_name ILIKE '%Windows Server%' THEN 'Windows Server'
+            WHEN d.os_name ILIKE '%Windows%' THEN 'Other Windows'
+            ELSE 'Unknown'
+        END AS operating_system_family,
+        CASE
+            WHEN COALESCE(dcf.device_patching_disabled, ocf.org_patching_disabled, FALSE) THEN 'Excluded'
+            WHEN d.node_class = 'WINDOWS_SERVER'
+                AND COALESCE(dcf.device_server_patching_disabled, ocf.org_server_patching_disabled, FALSE) THEN 'Excluded'
+            WHEN d.node_class = 'WINDOWS_WORKSTATION'
+                AND COALESCE(dcf.device_workstation_patching_disabled, ocf.org_workstation_patching_disabled, FALSE) THEN 'Excluded'
+            ELSE 'Included'
+        END AS patching_scope,
+        CASE
+            WHEN COALESCE(NULLIF(dcf.device_patching_notes, ''), NULLIF(ocf.org_patching_notes, '')) IS NOT NULL
+                THEN COALESCE(NULLIF(dcf.device_patching_notes, ''), NULLIF(ocf.org_patching_notes, ''))
+            ELSE NULL
+        END AS patching_notes
+    FROM ninja_core.v_active_devices d
+    JOIN ninja_core.organizations o ON o.id = d.organization_id
+    LEFT JOIN device_custom_fields dcf ON dcf.device_id = d.id
+    LEFT JOIN organization_custom_fields ocf ON ocf.organization_id = d.organization_id
+    WHERE d.approval_status = 'APPROVED'
+)
+"""
+
 
 def _active_patching_scalar_query(filters: str) -> str:
     """Active-patching percent = actively patching devices / scoped devices."""
@@ -604,6 +662,12 @@ PARAM_CMD_SEV   = "p_cmd_sev"
 _CMD_TAGS = {
     "org":         {"id": "tt_cmd_org",         "name": "org",         "display-name": "Organization", "type": "text"},
     "device_type": {"id": "tt_cmd_device_type", "name": "device_type", "display-name": "Device Type",  "type": "text"},
+    "patching_scope": {
+        "id": "tt_cmd_patching_scope",
+        "name": "patching_scope",
+        "display-name": "Patching Scope",
+        "type": "text",
+    },
     "severity":    {"id": "tt_cmd_severity",    "name": "severity",    "display-name": "Severity",     "type": "text"},
 }
 
@@ -611,6 +675,7 @@ _CMD_TAGS = {
 _CMD_PARAM_MAPPINGS = {
     PARAM_CMD_ORG:   ["variable", ["template-tag", "org"]],
     PARAM_CMD_CLASS: ["variable", ["template-tag", "device_type"]],
+    PARAM_PATCHING_SCOPE: ["variable", ["template-tag", "patching_scope"]],
 }
 # Mapping used by patch-context cards (severity wires through cs / lir).
 _CMD_PARAM_MAPPINGS_FULL = {
@@ -621,10 +686,11 @@ _CMD_PARAM_MAPPINGS_FULL = {
 # Filter fragments — appended after WHERE / before GROUP BY.
 _CMD_FILTER_ORG         = "  [[AND o.name IN ({{org}})]]\n"
 _CMD_FILTER_DEVICE_TYPE = f"  [[AND {DEVICE_TYPE_D} IN ({{{{device_type}}}})]]\n"
+_CMD_FILTER_PATCHING_SCOPE = "  [[AND d.patching_scope IN ({{patching_scope}})]]\n"
 _CMD_FILTER_SEV_CS      = "  [[AND cs.severity IN ({{severity}})]]\n"
 _CMD_FILTER_SEV_LIR     = "  [[AND lir.severity IN ({{severity}})]]\n"
 
-_CMD_FILTERS_DEVICE       = _CMD_FILTER_ORG + _CMD_FILTER_DEVICE_TYPE
+_CMD_FILTERS_DEVICE       = _CMD_FILTER_ORG + _CMD_FILTER_DEVICE_TYPE + _CMD_FILTER_PATCHING_SCOPE
 _CMD_FILTERS_PATCH_CS     = _CMD_FILTERS_DEVICE + _CMD_FILTER_SEV_CS
 _CMD_FILTERS_PATCH_LIR    = _CMD_FILTERS_DEVICE + _CMD_FILTER_SEV_LIR
 
@@ -637,6 +703,7 @@ def build_command_parameters(org_names: list[str]) -> list[dict]:
     return [
         _param_multiselect(PARAM_CMD_ORG,   "Organization", "org",         org_names),
         _param_multiselect(PARAM_CMD_CLASS, "Device Type",  "device_type", _NODE_CLASS_OPTIONS),
+        _param_multiselect(PARAM_PATCHING_SCOPE, "Patching Scope", "patching_scope", _PATCHING_SCOPE_OPTIONS, default="Included"),
         _param_multiselect(PARAM_CMD_SEV,   "Severity",     "severity",    _SEVERITY_OPTIONS),
     ]
 
@@ -1120,12 +1187,19 @@ _OVERALL_TAGS = {
     "org":         {"id": "tt_overall_org",         "name": "org",         "display-name": "Organization",            "type": "text"},
     "device_type": {"id": "tt_overall_device_type", "name": "device_type", "display-name": "Device Type",             "type": "text"},
     "os_family":   {"id": "tt_overall_os_family",   "name": "os_family",   "display-name": "Operating System Family", "type": "text"},
+    "patching_scope": {
+        "id": "tt_overall_patching_scope",
+        "name": "patching_scope",
+        "display-name": "Patching Scope",
+        "type": "text",
+    },
     "severity":    {"id": "tt_overall_severity",    "name": "severity",    "display-name": "Severity",                "type": "text"},
 }
 _OVERALL_PARAM_MAPPINGS = {
     PARAM_OVERALL_ORG:   ["variable", ["template-tag", "org"]],
     PARAM_OVERALL_CLASS: ["variable", ["template-tag", "device_type"]],
     PARAM_OVERALL_OS:    ["variable", ["template-tag", "os_family"]],
+    PARAM_PATCHING_SCOPE:["variable", ["template-tag", "patching_scope"]],
 }
 _OVERALL_PARAM_MAPPINGS_FULL = {
     **_OVERALL_PARAM_MAPPINGS,
@@ -1135,12 +1209,16 @@ _OVERALL_PARAM_MAPPINGS_FULL = {
 _OVERALL_FILTER_ORG         = "  [[AND o.name IN ({{org}})]]\n"
 _OVERALL_FILTER_DEVICE_TYPE = f"  [[AND {DEVICE_TYPE_D} IN ({{{{device_type}}}})]]\n"
 _OVERALL_FILTER_OS_FAMILY   = f"  [[AND {OS_FAMILY_D} IN ({{{{os_family}}}})]]\n"
+_OVERALL_FILTER_PATCHING_SCOPE = "  [[AND d.patching_scope IN ({{patching_scope}})]]\n"
 _OVERALL_FILTER_SEV_CS      = "  [[AND cs.severity IN ({{severity}})]]\n"
 _OVERALL_FILTER_SEV_LIR     = "  [[AND lir.severity IN ({{severity}})]]\n"
 
 # Device-context cards: Org + Device Type + OS Family (no severity).
 _OVERALL_FILTERS_DEVICE   = (
-    _OVERALL_FILTER_ORG + _OVERALL_FILTER_DEVICE_TYPE + _OVERALL_FILTER_OS_FAMILY
+    _OVERALL_FILTER_ORG
+    + _OVERALL_FILTER_DEVICE_TYPE
+    + _OVERALL_FILTER_OS_FAMILY
+    + _OVERALL_FILTER_PATCHING_SCOPE
 )
 _OVERALL_FILTERS_PATCH_CS  = _OVERALL_FILTERS_DEVICE + _OVERALL_FILTER_SEV_CS
 _OVERALL_FILTERS_PATCH_LIR = _OVERALL_FILTERS_DEVICE + _OVERALL_FILTER_SEV_LIR
@@ -1154,6 +1232,7 @@ def build_overall_parameters(org_names: list[str], os_families: list[str]) -> li
         _param_multiselect(PARAM_OVERALL_ORG,   "Organization",            "org",         org_names),
         _param_multiselect(PARAM_OVERALL_CLASS, "Device Type",             "device_type", _NODE_CLASS_OPTIONS),
         _param_multiselect(PARAM_OVERALL_OS,    "Operating System Family", "os_family",   os_families),
+        _param_multiselect(PARAM_PATCHING_SCOPE, "Patching Scope",         "patching_scope", _PATCHING_SCOPE_OPTIONS, default="Included"),
         _param_multiselect(PARAM_OVERALL_SEV,   "Severity",                "severity",    _SEVERITY_OPTIONS),
     ]
 
@@ -1779,6 +1858,7 @@ PARAM_CLASS   = "p_class"
 PARAM_SEV     = "p_severity"
 PARAM_OS      = "p_os"
 PARAM_KB      = "p_kb"
+PARAM_PATCHING_SCOPE = "p_patching_scope"
 PARAM_DAYS    = "p_days"
 PARAM_OUTCOME = "p_install_outcome"
 PARAM_DEVICE      = "p_device"
@@ -1793,6 +1873,7 @@ _NODE_CLASS_OPTIONS = ["Windows Workstation", "Windows Server"]
 _SEVERITY_OPTIONS = ["CRITICAL", "IMPORTANT", "OPTIONAL", "MODERATE", "LOW", "NONE"]
 _OUTCOME_OPTIONS = ["FAILED", "INSTALLED"]
 _OS_FAMILY_OPTIONS = ["Windows 11", "Windows 10", "Windows Server", "Other Windows", "Unknown"]
+_PATCHING_SCOPE_OPTIONS = ["Included", "Excluded"]
 
 
 def _param_dropdown(
@@ -1855,6 +1936,7 @@ def build_detail_parameters(
         _param_multiselect(PARAM_SEV,     "Severity",                "severity",        _SEVERITY_OPTIONS),
         _param_multiselect(PARAM_OUTCOME, "Install Results",         "install_outcome", _OUTCOME_OPTIONS),
         _param_multiselect(PARAM_OS,      "Operating System Family", "os",              os_families),
+        _param_multiselect(PARAM_PATCHING_SCOPE, "Patching Scope",   "patching_scope",  _PATCHING_SCOPE_OPTIONS, default="Included"),
         _param_text(       PARAM_KB,      "KB Number",               "kb"),
         _param_number(     PARAM_DAYS,    "Timeline window (days)",  "days",            90),
     ]
@@ -1874,6 +1956,12 @@ _FILTER_TAGS = {
     "os":         {"id": "tt_os",         "name": "os",         "display-name": "Operating System Family", "type": "text"},
     "kb":         {"id": "tt_kb",         "name": "kb",         "display-name": "KB Number",    "type": "text"},
     "device":     {"id": "tt_device",     "name": "device",     "display-name": "Device",       "type": "text"},
+    "patching_scope": {
+        "id": "tt_patching_scope",
+        "name": "patching_scope",
+        "display-name": "Patching Scope",
+        "type": "text",
+    },
 }
 
 # Timeline-only template tag (only the install-timeline card maps the
@@ -1893,6 +1981,7 @@ _FILTER_PARAM_MAPPINGS = {
     PARAM_SEV:    ["variable", ["template-tag", "severity"]],
     PARAM_OUTCOME: ["variable", ["template-tag", "install_outcome"]],
     PARAM_OS:     ["variable", ["template-tag", "os"]],
+    PARAM_PATCHING_SCOPE: ["variable", ["template-tag", "patching_scope"]],
     PARAM_KB:     ["variable", ["template-tag", "kb"]],
     PARAM_DEVICE: ["variable", ["template-tag", "device"]],
 }
@@ -1936,6 +2025,7 @@ _FILTER_PREDICATES = f"""
   [[AND cs.severity IN ({{{{severity}}}})]]
   [[AND lio.status IN ({{{{install_outcome}}}})]]
   [[AND {OS_FAMILY_D} IN ({{{{os}}}})]]
+  [[AND d.patching_scope IN ({{{{patching_scope}}}})]]
   [[AND cs.kb_number = {{{{kb}}}}]]
 """
 
@@ -2092,6 +2182,8 @@ SELECT
     d.system_name        AS device,
     o.name               AS organization,
     {DEVICE_TYPE_D} AS device_type,
+    d.patching_scope     AS "Patching Scope",
+    d.patching_notes     AS "Patching Notes",
     COUNT(*)             AS "Patches"
 FROM current_state cs
 LEFT JOIN latest_install_outcome lio
@@ -2100,7 +2192,7 @@ JOIN ninja_core.v_active_devices d ON d.id = cs.device_id
 JOIN ninja_core.organizations o  ON o.id = d.organization_id
 WHERE d.approval_status = 'APPROVED'
 {_FILTER_PREDICATES}
-GROUP BY d.system_name, o.name, device_type
+GROUP BY d.system_name, o.name, device_type, d.patching_scope, d.patching_notes
 ORDER BY "Patches" DESC
 """,
     },
@@ -2186,10 +2278,22 @@ LIMIT 1000
 
 DEVICE_TAGS = {
     "device": {"id": "tt_device", "name": "device", "display-name": "Device", "type": "text"},
+    "patching_scope": {
+        "id": "tt_device_patching_scope",
+        "name": "patching_scope",
+        "display-name": "Patching Scope",
+        "type": "text",
+    },
 }
 
 DEVICE_TIMELINE_TAGS = {
     "device": {"id": "tt_device", "name": "device", "display-name": "Device", "type": "text"},
+    "patching_scope": {
+        "id": "tt_device_timeline_patching_scope",
+        "name": "patching_scope",
+        "display-name": "Patching Scope",
+        "type": "text",
+    },
     "days": {
         "id": "tt_device_days", "name": "days",
         "display-name": "Timeline window (days)",
@@ -2199,20 +2303,26 @@ DEVICE_TIMELINE_TAGS = {
 
 DEVICE_PARAM_MAPPINGS = {
     PARAM_DEVICE: ["variable", ["template-tag", "device"]],
+    PARAM_PATCHING_SCOPE: ["variable", ["template-tag", "patching_scope"]],
 }
 
 DEVICE_TIMELINE_PARAM_MAPPINGS = {
     PARAM_DEVICE:      ["variable", ["template-tag", "device"]],
+    PARAM_PATCHING_SCOPE: ["variable", ["template-tag", "patching_scope"]],
     PARAM_DEVICE_DAYS: ["variable", ["template-tag", "days"]],
 }
 
-_DEVICE_FILTER = "[[AND d.system_name = {{device}}]]"
+_DEVICE_FILTER = (
+    "[[AND d.system_name = {{device}}]]\n"
+    "[[AND d.patching_scope IN ({{patching_scope}})]]"
+)
 
 
 def build_device_parameters(device_names: list[str]) -> list[dict]:
     """Device selector + timeline window."""
     return [
         _param_dropdown(PARAM_DEVICE,      "Device", "device", device_names),
+        _param_multiselect(PARAM_PATCHING_SCOPE, "Patching Scope", "patching_scope", _PATCHING_SCOPE_OPTIONS, default="Included"),
         _param_number(  PARAM_DEVICE_DAYS, "Timeline window (days)", "device_days", 180),
     ]
 
@@ -2236,6 +2346,8 @@ SELECT
     d.system_name          AS "Device",
     d.display_name         AS "Display Name",
     o.name                 AS "Organization",
+    d.patching_scope       AS "Patching Scope",
+    d.patching_notes       AS "Patching Notes",
     {DEVICE_TYPE_D}        AS "Device Type",
     d.os_name              AS "Operating System",
     d.os_release_id        AS "OS Release",
@@ -2442,6 +2554,7 @@ def build_pcov_parameters(org_names: list[str], os_families: list[str]) -> list[
         _param_multiselect(PARAM_PCOV_CLASS,  "Device Type",             "pcov_node_class", _NODE_CLASS_OPTIONS,
                            default="Windows Workstation"),
         _param_multiselect(PARAM_PCOV_OS,     "Operating System Family", "pcov_os",         os_families),
+        _param_multiselect(PARAM_PATCHING_SCOPE, "Patching Scope",       "patching_scope",  _PATCHING_SCOPE_OPTIONS, default="Included"),
         _param_multiselect(PARAM_PCOV_STATUS, "Patching Status",         "pcov_status",     _PCOV_STATUS_OPTIONS),
         _param_number(     PARAM_PCOV_DAYS,   "Stale threshold (days)",  "pcov_days",       DEFAULT_STALE_PATCH_DAYS),
     ]
@@ -2451,6 +2564,7 @@ _PCOV_TAGS = {
     "pcov_org":         {"id": "tt_pcov_org",    "name": "pcov_org",        "display-name": "Organization", "type": "text"},
     "pcov_node_class":  {"id": "tt_pcov_class",  "name": "pcov_node_class", "display-name": "Device Type",  "type": "text"},
     "pcov_os":          {"id": "tt_pcov_os",     "name": "pcov_os",         "display-name": "Operating System Family", "type": "text"},
+    "patching_scope":   {"id": "tt_pcov_patching_scope", "name": "patching_scope", "display-name": "Patching Scope", "type": "text"},
     "pcov_status":      {"id": "tt_pcov_status", "name": "pcov_status",     "display-name": "Patching Status", "type": "text"},
     "pcov_days":        {
         "id": "tt_pcov_days", "name": "pcov_days",
@@ -2463,6 +2577,7 @@ _PCOV_PARAM_MAPPINGS = {
     PARAM_PCOV_ORG:    ["variable", ["template-tag", "pcov_org"]],
     PARAM_PCOV_CLASS:  ["variable", ["template-tag", "pcov_node_class"]],
     PARAM_PCOV_OS:     ["variable", ["template-tag", "pcov_os"]],
+    PARAM_PATCHING_SCOPE: ["variable", ["template-tag", "patching_scope"]],
     PARAM_PCOV_STATUS: ["variable", ["template-tag", "pcov_status"]],
     PARAM_PCOV_DAYS:   ["variable", ["template-tag", "pcov_days"]],
 }
@@ -2504,6 +2619,7 @@ _PCOV_FILTERS = f"""
   [[AND o.name IN ({{{{pcov_org}}}})]]
   [[AND {DEVICE_TYPE_C} IN ({{{{pcov_node_class}}}})]]
   [[AND {OS_FAMILY_C} IN ({{{{pcov_os}}}})]]
+  [[AND d.patching_scope IN ({{{{patching_scope}}}})]]
   [[AND {PATCH_ACTIVITY_LABEL_C} IN ({{{{pcov_status}}}})]]
 """
 
@@ -2769,6 +2885,12 @@ _ORG_TAGS = {
     "org":         {"id": "tt_org_overview_org",         "name": "org",         "display-name": "Organization", "type": "text"},
     "device_type": {"id": "tt_org_overview_device_type", "name": "device_type", "display-name": "Device Type",  "type": "text"},
     "os_family":   {"id": "tt_org_overview_os_family",   "name": "os_family",   "display-name": "OS Family",    "type": "text"},
+    "patching_scope": {
+        "id": "tt_org_overview_patching_scope",
+        "name": "patching_scope",
+        "display-name": "Patching Scope",
+        "type": "text",
+    },
     "severity":    {"id": "tt_org_overview_severity",    "name": "severity",    "display-name": "Severity",     "type": "text"},
 }
 
@@ -2778,6 +2900,7 @@ _ORG_PARAM_MAPPINGS = {
     PARAM_ORG:   ["variable", ["template-tag", "org"]],
     PARAM_CLASS: ["variable", ["template-tag", "device_type"]],
     PARAM_OS:    ["variable", ["template-tag", "os_family"]],
+    PARAM_PATCHING_SCOPE:["variable", ["template-tag", "patching_scope"]],
 }
 
 # Param mapping for patch-context cards that also honor severity.
@@ -2794,12 +2917,16 @@ _ORG_PARAM_MAPPINGS_FULL = {
 _ORG_FILTER_ORG         = "  [[AND o.name IN ({{org}})]]\n"
 _ORG_FILTER_DEVICE_TYPE = f"  [[AND {DEVICE_TYPE_D} IN ({{{{device_type}}}})]]\n"
 _ORG_FILTER_OS_FAMILY   = f"  [[AND {OS_FAMILY_D} IN ({{{{os_family}}}})]]\n"
+_ORG_FILTER_PATCHING_SCOPE = "  [[AND d.patching_scope IN ({{patching_scope}})]]\n"
 _ORG_FILTER_SEV_CS      = "  [[AND cs.severity IN ({{severity}})]]\n"
 _ORG_FILTER_SEV_LIR     = "  [[AND lir.severity IN ({{severity}})]]\n"
 
 # Device-count cards (no severity context).
 _ORG_FILTERS_DEVICE = (
-    _ORG_FILTER_ORG + _ORG_FILTER_DEVICE_TYPE + _ORG_FILTER_OS_FAMILY
+    _ORG_FILTER_ORG
+    + _ORG_FILTER_DEVICE_TYPE
+    + _ORG_FILTER_OS_FAMILY
+    + _ORG_FILTER_PATCHING_SCOPE
 )
 # Patch cards using `cs.severity` (current_state alias).
 _ORG_FILTERS_PATCH_CS = _ORG_FILTERS_DEVICE + _ORG_FILTER_SEV_CS
@@ -2822,6 +2949,7 @@ def build_org_parameters(org_names: list[str]) -> list[dict]:
         _param_multiselect(PARAM_ORG,   "Organization", "org",         org_names),
         _param_multiselect(PARAM_CLASS, "Device Type",  "device_type", _NODE_CLASS_OPTIONS),
         _param_multiselect(PARAM_OS,    "OS Family",    "os_family",   _OS_FAMILY_OPTIONS),
+        _param_multiselect(PARAM_PATCHING_SCOPE, "Patching Scope", "patching_scope", _PATCHING_SCOPE_OPTIONS, default="Included"),
         _param_multiselect(PARAM_SEV,   "Severity",     "severity",    _SEVERITY_OPTIONS),
     ]
 
@@ -3259,6 +3387,12 @@ _TRENDS_TAGS = {
     },
     "org":         {"id": "tt_trends_org",         "name": "org",         "display-name": "Organization", "type": "text"},
     "device_type": {"id": "tt_trends_device_type", "name": "device_type", "display-name": "Device Type",  "type": "text"},
+    "patching_scope": {
+        "id": "tt_trends_patching_scope",
+        "name": "patching_scope",
+        "display-name": "Patching Scope",
+        "type": "text",
+    },
     "severity":    {"id": "tt_trends_severity",    "name": "severity",    "display-name": "Severity",     "type": "text"},
 }
 
@@ -3266,6 +3400,7 @@ _TRENDS_PARAM_MAPPINGS = {
     PARAM_TRENDS_DAYS:  ["variable", ["template-tag", "days"]],
     PARAM_TRENDS_ORG:   ["variable", ["template-tag", "org"]],
     PARAM_TRENDS_CLASS: ["variable", ["template-tag", "device_type"]],
+    PARAM_PATCHING_SCOPE:["variable", ["template-tag", "patching_scope"]],
 }
 _TRENDS_PARAM_MAPPINGS_FULL = {
     **_TRENDS_PARAM_MAPPINGS,
@@ -3274,10 +3409,13 @@ _TRENDS_PARAM_MAPPINGS_FULL = {
 
 _TRENDS_FILTER_ORG         = "  [[AND o.name IN ({{org}})]]\n"
 _TRENDS_FILTER_DEVICE_TYPE = f"  [[AND {DEVICE_TYPE_D} IN ({{{{device_type}}}})]]\n"
+_TRENDS_FILTER_PATCHING_SCOPE = "  [[AND d.patching_scope IN ({{patching_scope}})]]\n"
 _TRENDS_FILTER_SEV_PF      = "  [[AND pf.severity IN ({{severity}})]]\n"
 _TRENDS_FILTER_SEV_CS      = "  [[AND cs.severity IN ({{severity}})]]\n"
 
-_TRENDS_FILTERS_DEVICE     = _TRENDS_FILTER_ORG + _TRENDS_FILTER_DEVICE_TYPE
+_TRENDS_FILTERS_DEVICE     = (
+    _TRENDS_FILTER_ORG + _TRENDS_FILTER_DEVICE_TYPE + _TRENDS_FILTER_PATCHING_SCOPE
+)
 _TRENDS_FILTERS_PATCH_PF   = _TRENDS_FILTERS_DEVICE + _TRENDS_FILTER_SEV_PF
 _TRENDS_FILTERS_PATCH_CS   = _TRENDS_FILTERS_DEVICE + _TRENDS_FILTER_SEV_CS
 
@@ -3290,6 +3428,7 @@ def build_trends_parameters(org_names: list[str]) -> list[dict]:
         _param_number(     PARAM_TRENDS_DAYS,  "Timeline window (days)", "days",        90),
         _param_multiselect(PARAM_TRENDS_ORG,   "Organization",           "org",         org_names),
         _param_multiselect(PARAM_TRENDS_CLASS, "Device Type",            "device_type", _NODE_CLASS_OPTIONS),
+        _param_multiselect(PARAM_PATCHING_SCOPE, "Patching Scope",       "patching_scope", _PATCHING_SCOPE_OPTIONS, default="Included"),
         _param_multiselect(PARAM_TRENDS_SEV,   "Severity",               "severity",    _SEVERITY_OPTIONS),
     ]
 

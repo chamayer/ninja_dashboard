@@ -26,11 +26,11 @@ _(empty — drop free-form items here)_
       into `ninja_core.devices`, write `device_snapshots` row per
       device per run. `needs_reboot_reasons` left NULL — confirm
       where it lives (`/v2/queries/device-health`?) and wire later.
-- [x] `ingest/core/custom_fields.py` — fetch definitions + values,
-      upsert defs, SCD-2 values, regenerate
-      `v_<entity>_custom_fields` pivoted views. **Response shape was
-      best-guess** — verify against real Ninja data and fix mapping
-      if needed.
+- [x] `ingest/core/custom_fields.py` — fetch scoped values from
+      `/queries/scoped-custom-fields`, filter by
+      `INGEST_CUSTOM_FIELDS_INCLUDE`, SCD-2 upsert values, regenerate
+      `v_<entity>_custom_fields` pivoted views for device / org /
+      location scopes.
 - [x] `ingest/patches/ingest.py` — both endpoints, SCD-2 / hash-dedup.
 - [x] `ingest/activities/ingest.py` — server-side `sourceName` +
       `after` cursor, client-side allowlist, ingest_state for cursor.
@@ -85,6 +85,11 @@ _(empty — drop free-form items here)_
       the pivoted views. Per-device drilldown shows activity log
       sidebar (joined `ninja_activities.activities` by `device_id`,
       time-windowed).
+- [ ] Custom-field exception wiring: surface
+      `patchingDisabled`, `serverPatchingDisabled`,
+      `workstationPatchingDisabled`, and `patchingNotes` in the detail
+      dashboards and filters with device-over-org precedence. Ingest
+      is now wired; UI wiring remains.
 - [ ] "Patches installed awaiting reboot" panel — join
       `patch_facts` (INSTALLED) with latest
       `device_snapshots.needs_reboot=true` and absence of

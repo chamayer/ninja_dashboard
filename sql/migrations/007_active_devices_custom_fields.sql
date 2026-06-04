@@ -1,0 +1,81 @@
+-- =============================================================================
+-- 007_active_devices_custom_fields.sql
+-- Extends v_active_devices with the resolved patching-scope fields from
+-- the custom-field pivoted views so dashboards can display and filter
+-- device/org exception state in one place.
+-- =============================================================================
+
+CREATE OR REPLACE VIEW ninja_core.v_active_devices AS
+WITH latest_snap AS (
+    SELECT DISTINCT ON (device_id)
+        device_id,
+        snapshot_at,
+        last_contact,
+        last_boot,
+        needs_reboot,
+        needs_reboot_reasons,
+        offline,
+        last_user,
+        maintenance_status,
+        maintenance_start,
+        maintenance_end
+    FROM ninja_core.device_snapshots
+    ORDER BY device_id, snapshot_at DESC
+),
+device_cf AS (
+    SELECT
+        entity_id AS device_id,
+        patchingdisabled AS device_patching_disabled,
+        serverpatchingdisabled AS device_server_patching_disabled,
+        workstationpatchingdisabled AS device_workstation_patching_disabled,
+        patchingnotes AS device_patching_notes
+    FROM ninja_core.v_device_custom_fields
+),
+organization_cf AS (
+    SELECT
+        entity_id AS organization_id,
+        patchingdisabled AS org_patching_disabled,
+        serverpatchingdisabled AS org_server_patching_disabled,
+        workstationpatchingdisabled AS org_workstation_patching_disabled,
+        patchingnotes AS org_patching_notes
+    FROM ninja_core.v_organization_custom_fields
+)
+SELECT
+    d.*,
+    ls.snapshot_at         AS last_snapshot_at,
+    ls.last_contact,
+    ls.last_boot,
+    ls.needs_reboot,
+    ls.needs_reboot_reasons,
+    ls.offline,
+    ls.last_user,
+    ls.maintenance_status,
+    ls.maintenance_start,
+    ls.maintenance_end,
+    CASE
+        WHEN COALESCE(dcf.device_patching_disabled, ocf.org_patching_disabled, FALSE) THEN TRUE
+        WHEN d.node_class = 'WINDOWS_SERVER'
+            AND COALESCE(dcf.device_server_patching_disabled, ocf.org_server_patching_disabled, FALSE) THEN TRUE
+        WHEN d.node_class = 'WINDOWS_WORKSTATION'
+            AND COALESCE(dcf.device_workstation_patching_disabled, ocf.org_workstation_patching_disabled, FALSE) THEN TRUE
+        ELSE FALSE
+    END AS patching_disabled,
+    CASE
+        WHEN COALESCE(dcf.device_patching_disabled, ocf.org_patching_disabled, FALSE) THEN 'Excluded'
+        WHEN d.node_class = 'WINDOWS_SERVER'
+            AND COALESCE(dcf.device_server_patching_disabled, ocf.org_server_patching_disabled, FALSE) THEN 'Excluded'
+        WHEN d.node_class = 'WINDOWS_WORKSTATION'
+            AND COALESCE(dcf.device_workstation_patching_disabled, ocf.org_workstation_patching_disabled, FALSE) THEN 'Excluded'
+        ELSE 'Included'
+    END AS patching_scope,
+    COALESCE(
+        NULLIF(dcf.device_patching_notes, ''),
+        NULLIF(ocf.org_patching_notes, '')
+    ) AS patching_notes
+FROM ninja_core.devices d
+INNER JOIN latest_snap ls ON ls.device_id = d.id
+LEFT JOIN device_cf dcf ON dcf.device_id = d.id
+LEFT JOIN organization_cf ocf ON ocf.organization_id = d.organization_id
+WHERE d.approval_status = 'APPROVED'
+  AND d.node_class IN ('WINDOWS_WORKSTATION', 'WINDOWS_SERVER')
+  AND ls.last_contact > NOW() - INTERVAL '30 days';

@@ -110,9 +110,11 @@ See `REQUIREMENTS.md` §4 for the full schema.
   require local storage. See `REQUIREMENTS.md` §3.1.
 - **`data jsonb` column on every table.** Raw API payload kept
   alongside parsed columns. New fields surface without migrations.
-- **Custom fields as EAV + auto-pivoted views.** Definitions and
-  values in EAV tables; ingest regenerates pivoted views so each
-  custom field appears as a real column in Metabase.
+- **Custom fields as EAV + auto-pivoted views.** Scoped custom-field
+  values are ingested from `/queries/scoped-custom-fields`, filtered
+  by `INGEST_CUSTOM_FIELDS_INCLUDE`, and regenerated into pivoted
+  device / organization / location views so each selected field
+  appears as a real column in Metabase.
 - **SCD-2 with content hash** for `patch_facts` and
   `custom_field_values`. New row only when content changes; otherwise
   `last_observed_at` advances on the existing row. Gives full

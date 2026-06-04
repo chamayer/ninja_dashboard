@@ -1,8 +1,9 @@
 """Summarize Ninja custom fields — distinct names, value preview, size.
 
-Walks /queries/custom-fields, aggregates by field name, prints a table
-showing how big the values typically get. Useful to pick a sane
-INGEST_CUSTOM_FIELDS_INCLUDE allowlist.
+Walks /queries/scoped-custom-fields, aggregates by field name, prints a
+table showing how big the values typically get. Useful to pick a sane
+INGEST_CUSTOM_FIELDS_INCLUDE allowlist across device, organization, and
+location scopes.
 
 Usage:
     docker exec -it ninja-ingest python -m ingest.probe_fields
@@ -36,6 +37,11 @@ def main() -> int:
     parser.add_argument("--records", type=int, default=1000)
     parser.add_argument("--page-size", type=int, default=100)
     parser.add_argument("--preview", type=int, default=10)
+    parser.add_argument(
+        "--scopes",
+        default="NODE,ORGANIZATION,LOCATION",
+        help="Comma-separated custom-field scopes to query",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(level="WARNING", format="%(levelname)s %(name)s %(message)s")
@@ -52,7 +58,9 @@ def main() -> int:
         scope=settings.NINJA_SCOPE,
     ) as client:
         for rec in client.paginate_cursor(
-            "/queries/custom-fields", page_size=args.page_size,
+            "/queries/scoped-custom-fields",
+            page_size=args.page_size,
+            params={"scopes": args.scopes},
         ):
             records_seen += 1
             for fname, fval in (rec.get("fields") or {}).items():
@@ -80,7 +88,10 @@ def main() -> int:
         print("No custom fields found.")
         return 0
 
-    print(f"\nScanned {records_seen} device records, found {len(fields)} distinct fields:\n")
+    print(
+        f"\nScanned {records_seen} scoped custom-field records, "
+        f"found {len(fields)} distinct fields:\n"
+    )
     name_w = max(20, max(len(n) for n in fields))
     prev_w = max(args.preview, 7)
     print(

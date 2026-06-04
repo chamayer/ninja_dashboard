@@ -1,26 +1,19 @@
 """Custom fields ingest.
 
-Source: GET /v2/queries/custom-fields  (paginate_cursor)
+Source: GET /v2/queries/scoped-custom-fields (paginate_cursor)
 
-The actual Ninja response is per-device records of the shape:
-    {"deviceId": 123, "entityType": "DEVICE",
+The scoped Ninja response returns entity records of the shape:
+    {"scope": "NODE|ORGANIZATION|LOCATION",
+     "entityId": 123,
      "fields": {"warrantyExpiration": "...", "department": "..."}}
 
-NOT separate definitions/values endpoints. We derive definitions from
-the field names observed in the values, then regenerate pivoted views
-per entity type so Metabase sees real columns (`warranty_expiration`,
-`department`, ...) on `ninja_core.v_device_custom_fields`.
-
-Targets:
-  - ninja_core.custom_field_values  (SCD-2 — insert on hash change,
-    advance last_observed_at on duplicate)
-  - ninja_core.v_<entity>_custom_fields  (pivoted views, regenerated)
-
-The custom_field_definitions table is NOT populated in v0.1 — its
-columns need source data (id, label, type) that the /custom-fields
-endpoint doesn't return at this depth. Tracked in TODO as a
-follow-up (probably needs /custom-fields-detailed once we know its
-real shape, or a different endpoint).
+We keep the allowlisted field names only, upsert them into
+`ninja_core.custom_field_values`, and regenerate pivoted views per
+entity type so Metabase sees real columns
+(`warranty_expiration`, `department`, ...) on
+`ninja_core.v_device_custom_fields`,
+`ninja_core.v_organization_custom_fields`, and
+`ninja_core.v_location_custom_fields`.
 """
 
 from __future__ import annotations
@@ -47,6 +40,8 @@ _ENTITY_TYPE_BY_SCOPE = {
     "LOCATION":     "LOCATION",
 }
 
+_SCOPES = "NODE,ORGANIZATION,LOCATION"
+
 
 def run(client: NinjaClient, snapshot_at: datetime) -> tuple[int, int]:
     """Returns (values_observed, distinct_fields_seen)."""
@@ -62,20 +57,23 @@ def run(client: NinjaClient, snapshot_at: datetime) -> tuple[int, int]:
         else:
             log.info("Allowlist: %s", sorted(allowlist))
 
+        query_params: dict[str, Any] = {"scopes": _SCOPES}
+        if allowlist:
+            query_params["fields"] = ",".join(sorted(allowlist))
+
         value_rows: list[dict[str, Any]] = []
         observed: dict[tuple[str, str], dict[str, Any]] = {}
-        skipped_by_allowlist = 0
 
-        for rec in client.paginate_cursor("/queries/custom-fields"):
-            entity_id = (
-                rec.get("deviceId")
-                or rec.get("nodeId")
-                or rec.get("entityId")
-            )
+        for rec in client.paginate_cursor(
+            "/queries/scoped-custom-fields",
+            params=query_params,
+        ):
+            entity_id = rec.get("entityId")
             entity_type = _ENTITY_TYPE_BY_SCOPE.get(
-                str(rec.get("entityType") or rec.get("scope") or "DEVICE").upper(),
-                "DEVICE",
+                str(rec.get("entityType") or rec.get("scope") or "DEVICE").upper()
             )
+            if entity_type is None:
+                continue
             if entity_id is None:
                 continue
 
@@ -84,10 +82,6 @@ def run(client: NinjaClient, snapshot_at: datetime) -> tuple[int, int]:
                 continue
 
             for fname, fvalue in fields.items():
-                if allowlist and fname not in allowlist:
-                    skipped_by_allowlist += 1
-                    continue
-
                 # Some Ninja endpoints wrap values; tolerate either shape.
                 if isinstance(fvalue, dict) and "value" in fvalue:
                     actual_value = fvalue.get("value")
@@ -105,9 +99,8 @@ def run(client: NinjaClient, snapshot_at: datetime) -> tuple[int, int]:
                 })
 
         log.info(
-            "Custom fields: %d values kept across %d distinct fields "
-            "(%d field-occurrences skipped by allowlist)",
-            len(value_rows), len(observed), skipped_by_allowlist,
+            "Custom fields: %d values kept across %d distinct fields",
+            len(value_rows), len(observed),
         )
 
         with db.transaction() as cur:
@@ -183,21 +176,23 @@ def _split_value(value: Any) -> tuple[str | None, Decimal | None]:
 
 
 def _regenerate_pivoted_views(cur: Any, defs: list[dict[str, Any]]) -> None:
-    """DROP + CREATE v_<entity>_custom_fields per scope. Each known
-    field becomes a column via DISTINCT ON (entity, field) ordered by
-    last_observed_at DESC. All columns currently `value_text` since
-    we don't have type info from this endpoint."""
+    """DROP + CREATE v_<entity>_custom_fields per scope.
+
+    Each known field becomes a column via MAX(value_text) FILTER (...)
+    over the SCD-2 history. If a scope has no fields in the current
+    allowlist, keep the view present with just `entity_id` so Metabase
+    relationships do not disappear.
+    """
     by_scope: dict[str, list[dict[str, Any]]] = {}
     for d in defs:
         by_scope.setdefault(d["scope"], []).append(d)
 
-    for entity_type, fields in by_scope.items():
+    for entity_type in ("DEVICE", "ORGANIZATION", "LOCATION"):
         view_name = f"v_{entity_type.lower()}_custom_fields"
         cur.execute(f"DROP VIEW IF EXISTS ninja_core.{view_name}")
-        if not fields:
-            continue
 
         select_parts = ["entity_id"]
+        fields = by_scope.get(entity_type, [])
         for d in fields:
             col_name = _safe_col_name(d["name"])
             field_name = d["name"].replace("'", "''")

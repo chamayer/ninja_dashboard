@@ -2,6 +2,20 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.14.11] — 2026-06-04
+
+### Changed
+- **Custom-field ingest now uses Ninja's scoped values feed.** The
+  ingest switched from the legacy device-centric report to
+  `/queries/scoped-custom-fields`, so organization and location
+  custom fields now flow through the same pipeline as device fields.
+- **The `.env` allowlist now feeds the API query itself.** If
+  `INGEST_CUSTOM_FIELDS_INCLUDE` is set, the ingest passes that field
+  list to Ninja and only stores the selected names. Pivoted
+  `v_device_custom_fields`, `v_organization_custom_fields`, and
+  `v_location_custom_fields` are regenerated from the scoped feed.
+- Commit: `TBD`
+
 ## [0.14.10] — 2026-06-04
 
 ### Changed
