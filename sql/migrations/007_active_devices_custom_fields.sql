@@ -1,7 +1,7 @@
 -- =============================================================================
 -- 007_active_devices_custom_fields.sql
 -- Extends v_active_devices with the resolved patching-scope fields from
--- the custom-field pivoted views so dashboards can display and filter
+-- the raw custom-field values table so dashboards can display and filter
 -- device/org exception state in one place.
 -- =============================================================================
 
@@ -22,23 +22,57 @@ WITH latest_snap AS (
     FROM ninja_core.device_snapshots
     ORDER BY device_id, snapshot_at DESC
 ),
+device_fields AS (
+    SELECT DISTINCT ON (entity_id, field_name)
+        entity_id,
+        field_name,
+        value_bool,
+        value_text
+    FROM ninja_core.custom_field_values
+    WHERE entity_type = 'DEVICE'
+      AND field_name IN (
+          'patchingDisabled',
+          'serverPatchingDisabled',
+          'workstationPatchingDisabled',
+          'patchingNotes'
+      )
+    ORDER BY entity_id, field_name, last_observed_at DESC, first_observed_at DESC
+),
+organization_fields AS (
+    SELECT DISTINCT ON (entity_id, field_name)
+        entity_id,
+        field_name,
+        value_bool,
+        value_text
+    FROM ninja_core.custom_field_values
+    WHERE entity_type = 'ORGANIZATION'
+      AND field_name IN (
+          'patchingDisabled',
+          'serverPatchingDisabled',
+          'workstationPatchingDisabled',
+          'patchingNotes'
+      )
+    ORDER BY entity_id, field_name, last_observed_at DESC, first_observed_at DESC
+),
 device_cf AS (
     SELECT
         entity_id AS device_id,
-        patchingdisabled AS device_patching_disabled,
-        serverpatchingdisabled AS device_server_patching_disabled,
-        workstationpatchingdisabled AS device_workstation_patching_disabled,
-        patchingnotes AS device_patching_notes
-    FROM ninja_core.v_device_custom_fields
+        MAX(value_bool) FILTER (WHERE field_name = 'patchingDisabled') AS device_patching_disabled,
+        MAX(value_bool) FILTER (WHERE field_name = 'serverPatchingDisabled') AS device_server_patching_disabled,
+        MAX(value_bool) FILTER (WHERE field_name = 'workstationPatchingDisabled') AS device_workstation_patching_disabled,
+        MAX(value_text) FILTER (WHERE field_name = 'patchingNotes') AS device_patching_notes
+    FROM device_fields
+    GROUP BY entity_id
 ),
 organization_cf AS (
     SELECT
         entity_id AS organization_id,
-        patchingdisabled AS org_patching_disabled,
-        serverpatchingdisabled AS org_server_patching_disabled,
-        workstationpatchingdisabled AS org_workstation_patching_disabled,
-        patchingnotes AS org_patching_notes
-    FROM ninja_core.v_organization_custom_fields
+        MAX(value_bool) FILTER (WHERE field_name = 'patchingDisabled') AS org_patching_disabled,
+        MAX(value_bool) FILTER (WHERE field_name = 'serverPatchingDisabled') AS org_server_patching_disabled,
+        MAX(value_bool) FILTER (WHERE field_name = 'workstationPatchingDisabled') AS org_workstation_patching_disabled,
+        MAX(value_text) FILTER (WHERE field_name = 'patchingNotes') AS org_patching_notes
+    FROM organization_fields
+    GROUP BY entity_id
 )
 SELECT
     d.*,
