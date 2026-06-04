@@ -2,6 +2,40 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.14.0] — 2026-06-04
+
+### Removed
+- **Needs Reboot scalar** demoted from the top-row Devices group on
+  Patch Command Center, Overall Patching Status, and Org Overview.
+  In a patch-management context Reboot is an action signal, not a
+  high-level KPI — operators look at Failed / Manual / Stalled /
+  Never-Patched first. The `Devices Needing Reboot` *table* on
+  Overall and Org stays — that's the action queue for actually
+  rebooting devices. The `Needs Reboot` column on Command Center's
+  "Clients Needing Attention" table also stays. The Trends
+  dashboard's "System Reboots per Day" chart is unchanged.
+- Devices rows reflowed from 5 tiles (5+5+5+5+4 = 24) to 4 tiles
+  (6+6+6+6 = 24) on all three dashboards.
+- Removed the three reboot keys (`cmd_reboot`, `overall_reboot`,
+  `org_reboot`) from `_SCALAR_ALERT_RULES`.
+
+### Fixed
+- **Filter-reach audit (Shape A + Shape B) clean.** Tags-vs-
+  fragments compared on every dashboard; no parameter declared
+  without a matching SQL predicate (false positives in the audit
+  script were nested dict keys and timeline-window params
+  consumed directly by each card's CTE).
+- Removed a duplicate `[[AND d.system_name = {{device}}]]` line
+  that the v0.13.9 fix had accidentally added to
+  `_FILTER_PREDICATES` (the predicate was already at the bottom
+  of the fragment).
+
+### Process
+- Second task to follow the new blueprint-first rule
+  (`BLUEPRINT.md` written, *planning* → *in progress* → *done*).
+  Audit findings recorded in the blueprint before any code
+  changes.
+
 ## [0.13.9] — 2026-06-04
 
 ### Fixed

@@ -5,6 +5,38 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-04 — v0.14.0 filter audit clean + Needs Reboot demoted
+
+**Why:** Operator wanted (1) confidence the v0.13.9 bug pattern
+wasn't repeated on other dashboards, and (2) Needs Reboot demoted
+from a top-row KPI because in a patch-ops context it's an action
+signal, not a high-level KPI.
+
+**Audit:**
+- Shape A (declared-but-not-filtered): clean across every
+  dashboard. Earlier "MISSING" hits in the audit script were
+  false positives — nested dict keys (`id`, `display-name`) and
+  timeline-window params (`days`, `pcov_days`) that each card
+  consumes via its own CTE rather than the shared fragment.
+- Shape B (inlined `[[AND` outside shared fragments): clean.
+  Every `[[AND` lives in a fragment constant. `_DEVICE_FILTER`
+  for Drilldown is the intentional exception (hard-binds the
+  single selected device).
+- Found one self-inflicted bug from v0.13.9: a duplicate
+  `[[AND d.system_name = {{device}}]]` in `_FILTER_PREDICATES`
+  (added at top without noticing it was already at the bottom).
+  Removed.
+
+**Layout:**
+- Removed `cmd_reboot`, `overall_reboot`, `org_reboot` scalars.
+- Reflowed Devices row on Command Center / Overall / Org from
+  5 tiles at 5+5+5+5+4 to 4 tiles at 6+6+6+6.
+- Removed the three keys from `_SCALAR_ALERT_RULES`.
+- Tables and Trends chart untouched.
+
+**Validation:**
+- `python -m py_compile` passes.
+
 ## 2026-06-04 — v0.13.9 Patch Detail filters reach every card
 
 **Why:** Operator noticed that on Patch Detail not every card

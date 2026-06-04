@@ -260,12 +260,14 @@ def build_command_parameters() -> list[dict]:
 
 COMMAND_CARDS: list[dict[str, Any]] = [
     # Row 0 — Devices (canonical order: Active, Patching, Stalled,
-    # Never-Patched, Needs Reboot). Sizes: 5+5+5+5+4 = 24.
+    # Never-Patched). 4 scalars at size 6 each = 24. Needs Reboot
+    # was demoted from a top-row KPI in v0.14.0 — it belongs in the
+    # action-queue tables, not as a high-level patch-management KPI.
     {
         "key":            "cmd_active_devices",
         "name":           "Active Devices",
         "display":        "scalar",
-        "row": 0, "col": 0, "size_x": 5, "size_y": 4,
+        "row": 0, "col": 0, "size_x": 6, "size_y": 4,
         "template_tags":  _CMD_TAGS,
         "param_mappings": _CMD_PARAM_MAPPINGS,
         "click_behavior": {"target": DASH_DETAIL, "preset": {}},
@@ -280,7 +282,7 @@ WHERE 1=1
         "key":            "cmd_patching",
         "name":           "Patching Devices",
         "display":        "scalar",
-        "row": 0, "col": 5, "size_x": 5, "size_y": 4,
+        "row": 0, "col": 6, "size_x": 6, "size_y": 4,
         "template_tags":  _CMD_TAGS,
         "param_mappings": _CMD_PARAM_MAPPINGS,
         "click_behavior": {"target": DASH_PCOV, "preset": {"pcov_status": "Patching Devices"}},
@@ -305,7 +307,7 @@ WHERE d.approval_status = 'APPROVED'
         "key":            "cmd_stale",
         "name":           "Stalled Devices",
         "display":        "scalar",
-        "row": 0, "col": 10, "size_x": 5, "size_y": 4,
+        "row": 0, "col": 12, "size_x": 6, "size_y": 4,
         "template_tags":  _CMD_TAGS,
         "param_mappings": _CMD_PARAM_MAPPINGS,
         "click_behavior": {"target": DASH_PCOV, "preset": {"pcov_status": "Stalled Devices"}},
@@ -330,7 +332,7 @@ WHERE d.approval_status = 'APPROVED'
         "key":            "cmd_never",
         "name":           "Never-Patched Devices",
         "display":        "scalar",
-        "row": 0, "col": 15, "size_x": 5, "size_y": 4,
+        "row": 0, "col": 18, "size_x": 6, "size_y": 4,
         "template_tags":  _CMD_TAGS,
         "param_mappings": _CMD_PARAM_MAPPINGS,
         "click_behavior": {"target": DASH_PCOV, "preset": {"pcov_status": "Never-Patched Devices"}},
@@ -344,20 +346,6 @@ LEFT JOIN ninja_patches.patch_facts pf
 WHERE d.approval_status = 'APPROVED'
   AND d.node_class IN ('WINDOWS_WORKSTATION', 'WINDOWS_SERVER')
   AND pf.device_id IS NULL
-{_CMD_DEVICE_TYPE_FILTER}
-""",
-    },
-    {
-        "key":            "cmd_reboot",
-        "name":           "Needs Reboot",
-        "display":        "scalar",
-        "row": 0, "col": 20, "size_x": 4, "size_y": 4,
-        "template_tags":  _CMD_TAGS,
-        "param_mappings": _CMD_PARAM_MAPPINGS,
-        "query": f"""
-SELECT COUNT(*) AS devices
-FROM ninja_core.v_active_devices d
-WHERE d.needs_reboot = TRUE
 {_CMD_DEVICE_TYPE_FILTER}
 """,
     },
@@ -795,12 +783,14 @@ FROM (
 """,
     },
     # Row 4 — Devices (canonical order: Active, Patching, Stalled,
-    # Never-Patched, Needs Reboot). 5 scalars at sizes 5+5+5+5+4 = 24.
+    # Never-Patched). 4 scalars at size 6 each = 24. Needs Reboot
+    # demoted to the Devices Needing Reboot table (v0.14.0) — it's
+    # an action queue, not a top-level patch KPI.
     {
         "key":            "active_devices",
         "name":           "Active Devices",
         "display":        "scalar",
-        "row": 4, "col": 0, "size_x": 5, "size_y": 4,
+        "row": 4, "col": 0, "size_x": 6, "size_y": 4,
         "template_tags":  _OVERALL_TAGS,
         "param_mappings": _OVERALL_PARAM_MAPPINGS,
         "click_behavior": {"target": DASH_DETAIL, "preset": {}},
@@ -920,7 +910,7 @@ WHERE lio.status = 'FAILED'
         "key":            "ov_pcov_active",
         "name":           "Patching Devices",
         "display":        "scalar",
-        "row": 4, "col": 5, "size_x": 5, "size_y": 4,
+        "row": 4, "col": 6, "size_x": 6, "size_y": 4,
         "template_tags":  _OVERALL_TAGS,
         "param_mappings": _OVERALL_PARAM_MAPPINGS,
         "click_behavior": {
@@ -947,7 +937,7 @@ WHERE d.approval_status = 'APPROVED'
         "key":            "ov_pcov_stale",
         "name":           "Stalled Devices",
         "display":        "scalar",
-        "row": 4, "col": 10, "size_x": 5, "size_y": 4,
+        "row": 4, "col": 12, "size_x": 6, "size_y": 4,
         "template_tags":  _OVERALL_TAGS,
         "param_mappings": _OVERALL_PARAM_MAPPINGS,
         "click_behavior": {
@@ -974,7 +964,7 @@ WHERE d.approval_status = 'APPROVED'
         "key":            "ov_pcov_none",
         "name":            "Never-Patched Devices",
         "display":         "scalar",
-        "row": 4, "col": 15, "size_x": 5, "size_y": 4,
+        "row": 4, "col": 18, "size_x": 6, "size_y": 4,
         "template_tags":  _OVERALL_TAGS,
         "param_mappings": _OVERALL_PARAM_MAPPINGS,
         "click_behavior": {
@@ -990,20 +980,6 @@ LEFT JOIN ninja_patches.patch_facts pf
  AND pf.installed_at IS NOT NULL
 WHERE d.approval_status = 'APPROVED'
   AND pf.device_id IS NULL
-{_OVERALL_DEVICE_TYPE_FILTER}
-""",
-    },
-    {
-        "key":            "overall_reboot",
-        "name":           "Needs Reboot",
-        "display":        "scalar",
-        "row": 4, "col": 20, "size_x": 4, "size_y": 4,
-        "template_tags":  _OVERALL_TAGS,
-        "param_mappings": _OVERALL_PARAM_MAPPINGS,
-        "query": f"""
-SELECT COUNT(*) AS devices
-FROM ninja_core.v_active_devices d
-WHERE d.needs_reboot = TRUE
 {_OVERALL_DEVICE_TYPE_FILTER}
 """,
     },
@@ -1530,7 +1506,6 @@ _FILTER_PREDICATES = f"""
   [[AND lio.status IN ({{{{install_outcome}}}})]]
   [[AND {OS_FAMILY_D} IN ({{{{os}}}})]]
   [[AND cs.kb_number = {{{{kb}}}}]]
-  [[AND d.system_name = {{{{device}}}}]]
 """
 
 DETAIL_CARDS = [
@@ -2420,7 +2395,7 @@ ORG_OVERVIEW_CARDS = [
         "key":     "org_active_devices",
         "name":    "Active Devices",
         "display": "scalar",
-        "row": 4, "col": 0, "size_x": 5, "size_y": 4,
+        "row": 4, "col": 0, "size_x": 6, "size_y": 4,
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS,
         "query": f"""
@@ -2553,7 +2528,7 @@ WHERE cs.status = 'DELAYED'
         "key":     "org_stale",
         "name":    "Stalled Devices",
         "display": "scalar",
-        "row": 4, "col": 10, "size_x": 5, "size_y": 4,
+        "row": 4, "col": 12, "size_x": 6, "size_y": 4,
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS,
         "query": f"""
@@ -2578,7 +2553,7 @@ WHERE d.approval_status = 'APPROVED'
         "key":     "org_never",
         "name":    "Never-Patched Devices",
         "display": "scalar",
-        "row": 4, "col": 15, "size_x": 5, "size_y": 4,
+        "row": 4, "col": 18, "size_x": 6, "size_y": 4,
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS,
         "query": f"""
@@ -2599,7 +2574,7 @@ WHERE d.approval_status = 'APPROVED'
         "key":     "org_patching",
         "name":    "Patching Devices",
         "display": "scalar",
-        "row": 4, "col": 5, "size_x": 5, "size_y": 4,
+        "row": 4, "col": 6, "size_x": 6, "size_y": 4,
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS,
         "query": f"""
@@ -2617,21 +2592,6 @@ JOIN last_install li ON li.device_id = d.id
 WHERE d.approval_status = 'APPROVED'
   AND d.node_class IN ('WINDOWS_WORKSTATION', 'WINDOWS_SERVER')
   AND li.last_install_at >= NOW() - (INTERVAL '1 day' * {DEFAULT_STALE_PATCH_DAYS})
-{_ORG_FILTERS_DEVICE}
-""",
-    },
-    {
-        "key":     "org_reboot",
-        "name":    "Needs Reboot",
-        "display": "scalar",
-        "row": 4, "col": 20, "size_x": 4, "size_y": 4,
-        "template_tags":  _ORG_TAGS,
-        "param_mappings": _ORG_PARAM_MAPPINGS,
-        "query": f"""
-SELECT COUNT(*) AS devices
-FROM ninja_core.v_active_devices d
-JOIN ninja_core.organizations o ON o.id = d.organization_id
-WHERE d.needs_reboot = TRUE
 {_ORG_FILTERS_DEVICE}
 """,
     },
@@ -3072,9 +3032,6 @@ _SCALAR_ALERT_RULES: dict[str, tuple[str, str, float, str]] = {
     "cmd_manual":      ("patches", ">", 0, COLOR_ALERT_AMBER),
     "patches_manual":  ("manual",  ">", 0, COLOR_ALERT_AMBER),
     "org_manual":      ("patches", ">", 0, COLOR_ALERT_AMBER),
-    "cmd_reboot":      ("devices", ">", 0, COLOR_ALERT_AMBER),
-    "overall_reboot":  ("devices", ">", 0, COLOR_ALERT_AMBER),
-    "org_reboot":      ("devices", ">", 0, COLOR_ALERT_AMBER),
 }
 
 
