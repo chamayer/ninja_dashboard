@@ -5,6 +5,38 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-04 — v0.13.8 multi-select filters + REJECTED audit note
+
+**Why:** Operator wanted multi-select dropdowns ("show me MANUAL +
+DELAYED at once") and a clear answer to "where do I see REJECTED"
+now that v0.13.7 excluded REJECTED/DELAYED from the compliance
+score. Following the new blueprint-first rule.
+
+**Done:**
+- New `_param_multiselect` helper (sets `isMultiSelect: True`).
+- Converted dropdowns on Patch Detail, Org Overview, Device
+  Patching Status, Command Center, Overall, Trends per the
+  blueprint scope. Organization/KB/Device/Days stay single-select.
+- Predicate fragments updated from `= {{var}}` to `IN ({{var}})`
+  across `_FILTER_PREDICATES`, `_PCOV_FILTERS`, the four
+  `_ORG_FILTER_*`, and the three single-dashboard filter snippets.
+- Added "Where to find REJECTED patches" section in CONTEXT.md
+  pointing at the Current Patch State pie click-through, the
+  Patch Detail Status filter, and the compliance_all Rejected
+  column. No new tables or scalars — operator confirmed existing
+  surface is enough.
+
+**Honest caveats:**
+- `isMultiSelect: True` JSON shape varies by Metabase version.
+  Documented but first time used here. If a dropdown still
+  behaves single-select after rebuild, that's the JSON to debug.
+- Substitution semantics for multi-select category type → comma-
+  separated quoted strings in the SQL substitution — documented
+  Metabase behavior, first use here.
+
+**Validation:**
+- `python -m py_compile` passes after every edit.
+
 ## 2026-06-04 — v0.13.7 compliance formula clarified + BLUEPRINT.md process
 
 **Process change:**

@@ -245,13 +245,13 @@ _CMD_PARAM_MAPPINGS = {
     PARAM_CMD_CLASS: ["variable", ["template-tag", "device_type"]],
 }
 _CMD_DEVICE_TYPE_FILTER = (
-    f"  [[AND {DEVICE_TYPE_D} = {{{{device_type}}}}]]\n"
+    f"  [[AND {DEVICE_TYPE_D} IN ({{{{device_type}}}})]]\n"
 )
 
 
 def build_command_parameters() -> list[dict]:
     return [
-        _param_dropdown(
+        _param_multiselect(
             PARAM_CMD_CLASS, "Device Type", "device_type",
             _NODE_CLASS_OPTIONS,
         ),
@@ -727,13 +727,13 @@ _OVERALL_PARAM_MAPPINGS = {
     PARAM_OVERALL_CLASS: ["variable", ["template-tag", "device_type"]],
 }
 _OVERALL_DEVICE_TYPE_FILTER = (
-    f"  [[AND {DEVICE_TYPE_D} = {{{{device_type}}}}]]\n"
+    f"  [[AND {DEVICE_TYPE_D} IN ({{{{device_type}}}})]]\n"
 )
 
 
 def build_overall_parameters() -> list[dict]:
     return [
-        _param_dropdown(
+        _param_multiselect(
             PARAM_OVERALL_CLASS, "Device Type", "device_type",
             _NODE_CLASS_OPTIONS,
         ),
@@ -1407,6 +1407,19 @@ def _param_dropdown(
     return p
 
 
+def _param_multiselect(
+    pid: str, name: str, slug: str, values: list[str],
+    default: Any = None,
+) -> dict:
+    """Multi-select variant of `_param_dropdown`. Operator can pick
+    several values at once; cards using `[[AND col IN ({{tag}})]]`
+    will OR them. Single-value behavior is unchanged (Metabase
+    substitutes one quoted string → `IN ('one')` is valid)."""
+    p = _param_dropdown(pid, name, slug, values, default)
+    p["isMultiSelect"] = True
+    return p
+
+
 def _param_text(pid: str, name: str, slug: str) -> dict:
     """Build a free-text dashboard parameter (no dropdown)."""
     return {
@@ -1427,17 +1440,16 @@ def build_detail_parameters(
     workstations across all clients first" is the default view.
     """
     return [
-        _param_dropdown(PARAM_ORG,    "Organization", "org",        org_names),
-        _param_dropdown(PARAM_DEVICE, "Device",       "device",     device_names),
-        _param_dropdown(PARAM_STATUS, "Current Patch State", "status",  _STATUS_OPTIONS),
-        _param_dropdown(PARAM_CLASS,  "Device Type",  "node_class", _NODE_CLASS_OPTIONS,
-                        default="Windows Workstation"),
-        _param_dropdown(PARAM_SEV,    "Severity",     "severity",   _SEVERITY_OPTIONS),
-        _param_dropdown(PARAM_OUTCOME, "Install Results", "install_outcome",
-                        _OUTCOME_OPTIONS),
-        _param_dropdown(PARAM_OS,     "Operating System Family", "os", os_families),
-        _param_text(    PARAM_KB,     "KB Number",    "kb"),
-        _param_number(  PARAM_DAYS,   "Timeline window (days)", "days", 90),
+        _param_dropdown(   PARAM_ORG,     "Organization",            "org",             org_names),
+        _param_dropdown(   PARAM_DEVICE,  "Device",                  "device",          device_names),
+        _param_multiselect(PARAM_STATUS,  "Current Patch State",     "status",          _STATUS_OPTIONS),
+        _param_multiselect(PARAM_CLASS,   "Device Type",             "node_class",      _NODE_CLASS_OPTIONS,
+                           default="Windows Workstation"),
+        _param_multiselect(PARAM_SEV,     "Severity",                "severity",        _SEVERITY_OPTIONS),
+        _param_multiselect(PARAM_OUTCOME, "Install Results",         "install_outcome", _OUTCOME_OPTIONS),
+        _param_multiselect(PARAM_OS,      "Operating System Family", "os",              os_families),
+        _param_text(       PARAM_KB,      "KB Number",               "kb"),
+        _param_number(     PARAM_DAYS,    "Timeline window (days)",  "days",            90),
     ]
 
 
@@ -1511,11 +1523,11 @@ latest_install_outcome AS (
 """
 _FILTER_PREDICATES = f"""
   [[AND o.name = {{{{org}}}}]]
-  [[AND cs.status = {{{{status}}}}]]
-  [[AND {DEVICE_TYPE_D} = {{{{node_class}}}}]]
-  [[AND cs.severity = {{{{severity}}}}]]
-  [[AND lio.status = {{{{install_outcome}}}}]]
-  [[AND {OS_FAMILY_D} = {{{{os}}}}]]
+  [[AND cs.status IN ({{{{status}}}})]]
+  [[AND {DEVICE_TYPE_D} IN ({{{{node_class}}}})]]
+  [[AND cs.severity IN ({{{{severity}}}})]]
+  [[AND lio.status IN ({{{{install_outcome}}}})]]
+  [[AND {OS_FAMILY_D} IN ({{{{os}}}})]]
   [[AND cs.kb_number = {{{{kb}}}}]]
   [[AND d.system_name = {{{{device}}}}]]
 """
@@ -2017,12 +2029,12 @@ def _param_number(pid: str, name: str, slug: str, default: int) -> dict:
 
 def build_pcov_parameters(org_names: list[str], os_families: list[str]) -> list[dict]:
     return [
-        _param_dropdown(PARAM_PCOV_ORG,    "Organization",  "pcov_org",        org_names),
-        _param_dropdown(PARAM_PCOV_CLASS,  "Device Type",   "pcov_node_class", _NODE_CLASS_OPTIONS,
-                        default="Windows Workstation"),
-        _param_dropdown(PARAM_PCOV_OS,     "Operating System Family", "pcov_os", os_families),
-        _param_dropdown(PARAM_PCOV_STATUS, "Patching Status", "pcov_status",    _PCOV_STATUS_OPTIONS),
-        _param_number(  PARAM_PCOV_DAYS,   "Stale threshold (days)", "pcov_days", DEFAULT_STALE_PATCH_DAYS),
+        _param_dropdown(   PARAM_PCOV_ORG,    "Organization",            "pcov_org",        org_names),
+        _param_multiselect(PARAM_PCOV_CLASS,  "Device Type",             "pcov_node_class", _NODE_CLASS_OPTIONS,
+                           default="Windows Workstation"),
+        _param_multiselect(PARAM_PCOV_OS,     "Operating System Family", "pcov_os",         os_families),
+        _param_multiselect(PARAM_PCOV_STATUS, "Patching Status",         "pcov_status",     _PCOV_STATUS_OPTIONS),
+        _param_number(     PARAM_PCOV_DAYS,   "Stale threshold (days)",  "pcov_days",       DEFAULT_STALE_PATCH_DAYS),
     ]
 
 
@@ -2081,9 +2093,9 @@ classified AS (
 
 _PCOV_FILTERS = f"""
   [[AND o.name = {{{{pcov_org}}}}]]
-  [[AND {DEVICE_TYPE_C} = {{{{pcov_node_class}}}}]]
-  [[AND {OS_FAMILY_C} = {{{{pcov_os}}}}]]
-  [[AND {PATCH_ACTIVITY_LABEL_C} = {{{{pcov_status}}}}]]
+  [[AND {DEVICE_TYPE_C} IN ({{{{pcov_node_class}}}})]]
+  [[AND {OS_FAMILY_C} IN ({{{{pcov_os}}}})]]
+  [[AND {PATCH_ACTIVITY_LABEL_C} IN ({{{{pcov_status}}}})]]
 """
 
 PCOV_CARDS = [
@@ -2371,10 +2383,10 @@ _ORG_PARAM_MAPPINGS_FULL = {
 # context cards use PATCH_CS (cs.severity alias) or PATCH_LIR
 # (lir.severity alias).
 _ORG_FILTER_ORG         = "  [[AND o.name = {{org}}]]\n"
-_ORG_FILTER_DEVICE_TYPE = f"  [[AND {DEVICE_TYPE_D} = {{{{device_type}}}}]]\n"
-_ORG_FILTER_OS_FAMILY   = f"  [[AND {OS_FAMILY_D} = {{{{os_family}}}}]]\n"
-_ORG_FILTER_SEV_CS      = "  [[AND cs.severity = {{severity}}]]\n"
-_ORG_FILTER_SEV_LIR     = "  [[AND lir.severity = {{severity}}]]\n"
+_ORG_FILTER_DEVICE_TYPE = f"  [[AND {DEVICE_TYPE_D} IN ({{{{device_type}}}})]]\n"
+_ORG_FILTER_OS_FAMILY   = f"  [[AND {OS_FAMILY_D} IN ({{{{os_family}}}})]]\n"
+_ORG_FILTER_SEV_CS      = "  [[AND cs.severity IN ({{severity}})]]\n"
+_ORG_FILTER_SEV_LIR     = "  [[AND lir.severity IN ({{severity}})]]\n"
 
 # Device-count cards (no severity context).
 _ORG_FILTERS_DEVICE = (
@@ -2398,10 +2410,10 @@ _ORG_FILTERS_PATCH_CS_NO_OS = (
 
 def build_org_parameters(org_names: list[str]) -> list[dict]:
     return [
-        _param_dropdown(PARAM_ORG,   "Organization", "org",         org_names),
-        _param_dropdown(PARAM_CLASS, "Device Type",  "device_type", _NODE_CLASS_OPTIONS),
-        _param_dropdown(PARAM_OS,    "OS Family",    "os_family",   _OS_FAMILY_OPTIONS),
-        _param_dropdown(PARAM_SEV,   "Severity",     "severity",    _SEVERITY_OPTIONS),
+        _param_dropdown(   PARAM_ORG,   "Organization", "org",         org_names),
+        _param_multiselect(PARAM_CLASS, "Device Type",  "device_type", _NODE_CLASS_OPTIONS),
+        _param_multiselect(PARAM_OS,    "OS Family",    "os_family",   _OS_FAMILY_OPTIONS),
+        _param_multiselect(PARAM_SEV,   "Severity",     "severity",    _SEVERITY_OPTIONS),
     ]
 
 
@@ -2869,13 +2881,13 @@ _TRENDS_PARAM_MAPPINGS = {
 }
 
 # SQL predicate fragment for Trends cards — appended after WHERE.
-_TRENDS_DEVICE_TYPE_FILTER = f"  [[AND {DEVICE_TYPE_D} = {{{{device_type}}}}]]\n"
+_TRENDS_DEVICE_TYPE_FILTER = f"  [[AND {DEVICE_TYPE_D} IN ({{{{device_type}}}})]]\n"
 
 
 def build_trends_parameters() -> list[dict]:
     return [
-        _param_number(  PARAM_TRENDS_DAYS,  "Timeline window (days)", "days",        90),
-        _param_dropdown(PARAM_TRENDS_CLASS, "Device Type",            "device_type", _NODE_CLASS_OPTIONS),
+        _param_number(     PARAM_TRENDS_DAYS,  "Timeline window (days)", "days",        90),
+        _param_multiselect(PARAM_TRENDS_CLASS, "Device Type",            "device_type", _NODE_CLASS_OPTIONS),
     ]
 
 

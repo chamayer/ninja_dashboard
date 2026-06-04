@@ -177,6 +177,22 @@ of `ingest/metabase_bootstrap.py` defines `installed_patches`,
 `missing_patches`, and `universe` CTEs that every compliance card
 joins onto. Changing the formula = editing
 `COMPLIANCE_MISSING_STATES` in one place.
+
+### Where to find REJECTED patches
+
+REJECTED patches are excluded from the compliance score but still
+fully visible:
+
+- **Current Patch State pies** (Overall Status, Patch Detail,
+  Device Drilldown, Org Overview): REJECTED appears as a grey
+  slice. Clicking it navigates to Patch Detail with the Status
+  filter pre-set to REJECTED.
+- **Patch Detail dashboard**: open the Status filter and pick
+  `REJECTED` (multi-select supported — combine with others).
+- **`compliance_all` table** (Overall Status): the "Rejected"
+  column shows the per-org count. Comparing "Total Patches"
+  to "Compliance-Scope Patches" gives the count of
+  REJECTED + DELAYED for that org.
 - **Plain append snapshots** for `device_snapshots` only — its
   volatile fields (`last_contact`) change every minute, so hash-dedup
   would never match. History pruned by a retention job.

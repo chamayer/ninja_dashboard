@@ -2,6 +2,39 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.13.8] — 2026-06-04
+
+### Changed
+- **Multi-select dashboard filters.** Operators can now pick
+  several values at once on the most-used dropdowns. New
+  `_param_multiselect` helper sets `isMultiSelect: True` on top
+  of the existing dropdown shape; SQL predicates updated from
+  `= {{var}}` to `IN ({{var}})` so single-value and multi-value
+  both work. Applied to:
+    - **Patch Detail**: Current Patch State, Device Type,
+      Severity, Install Results, Operating System Family.
+    - **Org Overview**: Device Type, OS Family, Severity.
+    - **Device Patching Status**: Device Type, Operating System
+      Family, Patching Status.
+    - **Patch Command Center / Overall Patching Status /
+      Trends**: Device Type.
+  Organization, KB Number, Device, Days remain single-select
+  (each is naturally a one-value pick).
+
+### Documentation
+- New "Where to find REJECTED patches" section in `CONTEXT.md` —
+  points operators at the Current Patch State pie's grey slice
+  (click-through), the Patch Detail Status filter, and the
+  `compliance_all` Rejected column. Confirms REJECTED is audit-
+  able even though it's excluded from compliance numbers.
+
+### Notes / honest caveats
+- `isMultiSelect` JSON shape is documented in Metabase but varies
+  slightly by version. First time using it in this codebase. If
+  a dropdown still acts single-select after rebuild, the shape
+  needs adjustment — verify the dashboard parameter JSON via the
+  Metabase API.
+
 ## [0.13.7] — 2026-06-04
 
 ### Changed
