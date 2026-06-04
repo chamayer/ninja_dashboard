@@ -2,6 +2,31 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.13.6] — 2026-06-04
+
+### Added
+- **Device Type (Server / Workstation) filter on Patch Command
+  Center, Overall Patching Status, and Trends.** Org Overview, Patch
+  Detail, and Device Patching Status already had it. Drilldown
+  skipped (per-device, irrelevant).
+  Three new per-dashboard parameter declarations
+  (`PARAM_CMD_CLASS`, `PARAM_OVERALL_CLASS`, `PARAM_TRENDS_CLASS`)
+  + matching template tag + mapping + SQL predicate fragment
+  (`_CMD_DEVICE_TYPE_FILTER`, `_OVERALL_DEVICE_TYPE_FILTER`,
+  `_TRENDS_DEVICE_TYPE_FILTER`). Each card on those dashboards now
+  declares `template_tags` + `param_mappings` and its SQL is wired
+  via the predicate fragment. Patch counts that didn't previously
+  expose `device_id` had their CTE updated and a `JOIN
+  ninja_core.devices d` added in the outer SELECT.
+
+### Notes
+- Three separate filter declarations rather than one shared global
+  because Metabase's parameter IDs are dashboard-scoped — the same
+  `param_mapping` shape wouldn't survive sharing.
+- The cards on these dashboards now have `template_tags` even when
+  they previously didn't — this is the trigger that makes the
+  dashboard parameter visible / wired.
+
 ## [0.13.5] — 2026-06-04
 
 ### Removed

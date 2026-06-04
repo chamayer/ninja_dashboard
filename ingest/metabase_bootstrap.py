@@ -187,25 +187,55 @@ END
 
 # ── Card specs ──────────────────────────────────────────────────────
 
+PARAM_CMD_CLASS = "p_cmd_class"
+_CMD_TAGS = {
+    "device_type": {
+        "id": "tt_cmd_device_type", "name": "device_type",
+        "display-name": "Device Type", "type": "text",
+    },
+}
+_CMD_PARAM_MAPPINGS = {
+    PARAM_CMD_CLASS: ["variable", ["template-tag", "device_type"]],
+}
+_CMD_DEVICE_TYPE_FILTER = (
+    f"  [[AND {DEVICE_TYPE_D} = {{{{device_type}}}}]]\n"
+)
+
+
+def build_command_parameters() -> list[dict]:
+    return [
+        _param_dropdown(
+            PARAM_CMD_CLASS, "Device Type", "device_type",
+            _NODE_CLASS_OPTIONS,
+        ),
+    ]
+
+
 COMMAND_CARDS: list[dict[str, Any]] = [
     # Row 0 — Devices (canonical order: Active, Patching, Stalled,
     # Never-Patched, Needs Reboot). Sizes: 5+5+5+5+4 = 24.
     {
-        "key":     "cmd_active_devices",
-        "name":    "Active Devices",
-        "display": "scalar",
+        "key":            "cmd_active_devices",
+        "name":           "Active Devices",
+        "display":        "scalar",
         "row": 0, "col": 0, "size_x": 5, "size_y": 4,
+        "template_tags":  _CMD_TAGS,
+        "param_mappings": _CMD_PARAM_MAPPINGS,
         "click_behavior": {"target": DASH_DETAIL, "preset": {}},
-        "query": """
+        "query": f"""
 SELECT COUNT(*) AS devices
-FROM ninja_core.v_active_devices
+FROM ninja_core.v_active_devices d
+WHERE 1=1
+{_CMD_DEVICE_TYPE_FILTER}
 """,
     },
     {
-        "key":     "cmd_patching",
-        "name":    "Patching Devices",
-        "display": "scalar",
+        "key":            "cmd_patching",
+        "name":           "Patching Devices",
+        "display":        "scalar",
         "row": 0, "col": 5, "size_x": 5, "size_y": 4,
+        "template_tags":  _CMD_TAGS,
+        "param_mappings": _CMD_PARAM_MAPPINGS,
         "click_behavior": {"target": DASH_PCOV, "preset": {"pcov_status": "Patching Devices"}},
         "query": f"""
 WITH last_install AS (
@@ -221,13 +251,16 @@ JOIN last_install li ON li.device_id = d.id
 WHERE d.approval_status = 'APPROVED'
   AND d.node_class IN ('WINDOWS_WORKSTATION', 'WINDOWS_SERVER')
   AND li.last_install_at >= NOW() - (INTERVAL '1 day' * {DEFAULT_STALE_PATCH_DAYS})
+{_CMD_DEVICE_TYPE_FILTER}
 """,
     },
     {
-        "key":     "cmd_stale",
-        "name":    "Stalled Devices",
-        "display": "scalar",
+        "key":            "cmd_stale",
+        "name":           "Stalled Devices",
+        "display":        "scalar",
         "row": 0, "col": 10, "size_x": 5, "size_y": 4,
+        "template_tags":  _CMD_TAGS,
+        "param_mappings": _CMD_PARAM_MAPPINGS,
         "click_behavior": {"target": DASH_PCOV, "preset": {"pcov_status": "Stalled Devices"}},
         "query": f"""
 WITH last_install AS (
@@ -243,15 +276,18 @@ JOIN last_install li ON li.device_id = d.id
 WHERE d.approval_status = 'APPROVED'
   AND d.node_class IN ('WINDOWS_WORKSTATION', 'WINDOWS_SERVER')
   AND li.last_install_at < NOW() - (INTERVAL '1 day' * {DEFAULT_STALE_PATCH_DAYS})
+{_CMD_DEVICE_TYPE_FILTER}
 """,
     },
     {
-        "key":     "cmd_never",
-        "name":    "Never-Patched Devices",
-        "display": "scalar",
+        "key":            "cmd_never",
+        "name":           "Never-Patched Devices",
+        "display":        "scalar",
         "row": 0, "col": 15, "size_x": 5, "size_y": 4,
+        "template_tags":  _CMD_TAGS,
+        "param_mappings": _CMD_PARAM_MAPPINGS,
         "click_behavior": {"target": DASH_PCOV, "preset": {"pcov_status": "Never-Patched Devices"}},
-        "query": """
+        "query": f"""
 SELECT COUNT(*) AS devices
 FROM ninja_core.devices d
 LEFT JOIN ninja_patches.patch_facts pf
@@ -261,84 +297,103 @@ LEFT JOIN ninja_patches.patch_facts pf
 WHERE d.approval_status = 'APPROVED'
   AND d.node_class IN ('WINDOWS_WORKSTATION', 'WINDOWS_SERVER')
   AND pf.device_id IS NULL
+{_CMD_DEVICE_TYPE_FILTER}
 """,
     },
     {
-        "key":     "cmd_reboot",
-        "name":    "Needs Reboot",
-        "display": "scalar",
+        "key":            "cmd_reboot",
+        "name":           "Needs Reboot",
+        "display":        "scalar",
         "row": 0, "col": 20, "size_x": 4, "size_y": 4,
-        "query": """
+        "template_tags":  _CMD_TAGS,
+        "param_mappings": _CMD_PARAM_MAPPINGS,
+        "query": f"""
 SELECT COUNT(*) AS devices
-FROM ninja_core.v_active_devices
-WHERE needs_reboot = TRUE
+FROM ninja_core.v_active_devices d
+WHERE d.needs_reboot = TRUE
+{_CMD_DEVICE_TYPE_FILTER}
 """,
     },
     # Row 4 — Patches (canonical order: Approved, Manual, Delayed,
-    # Failed). Sizes: 6+6+6+6 = 24.
+    # Failed). Sizes: 6+6+6+6 = 24. Each CTE now selects device_id so
+    # the Device Type filter can apply via a join in the outer SELECT.
     {
-        "key":     "cmd_approved",
-        "name":    "Approved Patches",
-        "display": "scalar",
+        "key":            "cmd_approved",
+        "name":           "Approved Patches",
+        "display":        "scalar",
         "row": 4, "col": 0, "size_x": 6, "size_y": 4,
+        "template_tags":  _CMD_TAGS,
+        "param_mappings": _CMD_PARAM_MAPPINGS,
         "click_behavior": {"target": DASH_DETAIL, "preset": {"status": "APPROVED"}},
-        "query": """
+        "query": f"""
 WITH current_state AS (
-    SELECT DISTINCT ON (device_id, patch_uid) status
+    SELECT DISTINCT ON (device_id, patch_uid) device_id, status
     FROM ninja_patches.patch_facts
     WHERE fact_type = 'patch_state'
     ORDER BY device_id, patch_uid, last_observed_at DESC, id DESC
 )
 SELECT COUNT(*) AS patches
-FROM current_state
-WHERE status = 'APPROVED'
+FROM current_state cs
+JOIN ninja_core.devices d ON d.id = cs.device_id
+WHERE cs.status = 'APPROVED'
+{_CMD_DEVICE_TYPE_FILTER}
 """,
     },
     {
-        "key":     "cmd_manual",
-        "name":    "Manual Approval",
-        "display": "scalar",
+        "key":            "cmd_manual",
+        "name":           "Manual Approval",
+        "display":        "scalar",
         "row": 4, "col": 6, "size_x": 6, "size_y": 4,
+        "template_tags":  _CMD_TAGS,
+        "param_mappings": _CMD_PARAM_MAPPINGS,
         "click_behavior": {"target": DASH_DETAIL, "preset": {"status": "MANUAL"}},
-        "query": """
+        "query": f"""
 WITH current_state AS (
-    SELECT DISTINCT ON (device_id, patch_uid) status
+    SELECT DISTINCT ON (device_id, patch_uid) device_id, status
     FROM ninja_patches.patch_facts
     WHERE fact_type = 'patch_state'
     ORDER BY device_id, patch_uid, last_observed_at DESC, id DESC
 )
 SELECT COUNT(*) AS patches
-FROM current_state
-WHERE status = 'MANUAL'
+FROM current_state cs
+JOIN ninja_core.devices d ON d.id = cs.device_id
+WHERE cs.status = 'MANUAL'
+{_CMD_DEVICE_TYPE_FILTER}
 """,
     },
     {
-        "key":     "cmd_delayed",
-        "name":    "Delayed Patches",
-        "display": "scalar",
+        "key":            "cmd_delayed",
+        "name":           "Delayed Patches",
+        "display":        "scalar",
         "row": 4, "col": 12, "size_x": 6, "size_y": 4,
+        "template_tags":  _CMD_TAGS,
+        "param_mappings": _CMD_PARAM_MAPPINGS,
         "click_behavior": {"target": DASH_DETAIL, "preset": {"status": "DELAYED"}},
-        "query": """
+        "query": f"""
 WITH current_state AS (
-    SELECT DISTINCT ON (device_id, patch_uid) status
+    SELECT DISTINCT ON (device_id, patch_uid) device_id, status
     FROM ninja_patches.patch_facts
     WHERE fact_type = 'patch_state'
     ORDER BY device_id, patch_uid, last_observed_at DESC, id DESC
 )
 SELECT COUNT(*) AS patches
-FROM current_state
-WHERE status = 'DELAYED'
+FROM current_state cs
+JOIN ninja_core.devices d ON d.id = cs.device_id
+WHERE cs.status = 'DELAYED'
+{_CMD_DEVICE_TYPE_FILTER}
 """,
     },
     {
-        "key":     "cmd_failed",
-        "name":    "Failed Patches",
-        "display": "scalar",
+        "key":            "cmd_failed",
+        "name":           "Failed Patches",
+        "display":        "scalar",
         "row": 4, "col": 18, "size_x": 6, "size_y": 4,
+        "template_tags":  _CMD_TAGS,
+        "param_mappings": _CMD_PARAM_MAPPINGS,
         "click_behavior": {"target": DASH_DETAIL, "preset": {"install_outcome": "FAILED"}},
-        "query": """
+        "query": f"""
 WITH latest_install_result AS (
-    SELECT DISTINCT ON (device_id, patch_uid) status
+    SELECT DISTINCT ON (device_id, patch_uid) device_id, status
     FROM ninja_patches.patch_facts
     WHERE fact_type = 'install_outcome'
     ORDER BY
@@ -350,15 +405,19 @@ WITH latest_install_result AS (
         id DESC
 )
 SELECT COUNT(*) AS patches
-FROM latest_install_result
-WHERE status = 'FAILED'
+FROM latest_install_result lir
+JOIN ninja_core.devices d ON d.id = lir.device_id
+WHERE lir.status = 'FAILED'
+{_CMD_DEVICE_TYPE_FILTER}
 """,
     },
     {
-        "key":     "cmd_clients",
-        "name":    "Clients Needing Attention",
-        "display": "table",
+        "key":            "cmd_clients",
+        "name":           "Clients Needing Attention",
+        "display":        "table",
         "row": 8, "col": 0, "size_x": 24, "size_y": 10,
+        "template_tags":  _CMD_TAGS,
+        "param_mappings": _CMD_PARAM_MAPPINGS,
         "column_click_behaviors": {
             "organization": {"target": DASH_ORG, "params": {"p_org": "organization"}},
         },
@@ -417,6 +476,8 @@ LEFT JOIN current_state cs ON cs.device_id = d.id
 LEFT JOIN latest_install_result lio
   ON lio.device_id = cs.device_id AND lio.patch_uid = cs.patch_uid
 LEFT JOIN device_status ds ON ds.id = d.id
+WHERE 1=1
+{_CMD_DEVICE_TYPE_FILTER}
 GROUP BY o.name
 HAVING
     COUNT(*) FILTER (WHERE lio.status = 'FAILED') > 0
@@ -434,16 +495,18 @@ LIMIT 50
 """,
     },
     {
-        "key":     "cmd_failed_queue",
-        "name":    "Failed Patch Queue",
-        "display": "table",
+        "key":            "cmd_failed_queue",
+        "name":           "Failed Patch Queue",
+        "display":        "table",
         "row": 18, "col": 0, "size_x": 24, "size_y": 10,
+        "template_tags":  _CMD_TAGS,
+        "param_mappings": _CMD_PARAM_MAPPINGS,
         "column_click_behaviors": {
             "organization": {"target": DASH_ORG,       "params": {"p_org": "organization"}},
             "device":       {"target": DASH_DRILLDOWN, "params": {"p_device": "device"}},
             "kb_number":    {"target": DASH_DETAIL,    "params": {"p_kb": "kb_number"}},
         },
-        "query": """
+        "query": f"""
 WITH latest_install_result AS (
     SELECT DISTINCT ON (device_id, patch_uid)
         device_id, patch_uid, status, severity, kb_number, name AS patch_name,
@@ -473,22 +536,25 @@ FROM latest_install_result lir
 JOIN ninja_core.v_active_devices d ON d.id = lir.device_id
 JOIN ninja_core.organizations o ON o.id = d.organization_id
 WHERE lir.status = 'FAILED'
+{_CMD_DEVICE_TYPE_FILTER}
 ORDER BY lir.installed_at DESC NULLS LAST, o.name, d.system_name
 LIMIT 100
 """,
     },
     {
-        "key":     "cmd_approval_queue",
-        "name":    "Manual and Delayed Patches",
-        "display": "table",
+        "key":            "cmd_approval_queue",
+        "name":           "Manual and Delayed Patches",
+        "display":        "table",
         "row": 28, "col": 0, "size_x": 24, "size_y": 10,
+        "template_tags":  _CMD_TAGS,
+        "param_mappings": _CMD_PARAM_MAPPINGS,
         "column_click_behaviors": {
             "organization":        {"target": DASH_ORG,    "params": {"p_org": "organization"}},
             "device":              {"target": DASH_DRILLDOWN, "params": {"p_device": "device"}},
             "current_patch_state": {"target": DASH_DETAIL, "params": {"p_status": "current_patch_state"}},
             "kb_number":           {"target": DASH_DETAIL, "params": {"p_kb": "kb_number"}},
         },
-        "query": """
+        "query": f"""
 WITH current_state AS (
     SELECT DISTINCT ON (device_id, patch_uid)
         device_id, patch_uid, status, severity, kb_number, name AS patch_name,
@@ -509,6 +575,7 @@ FROM current_state cs
 JOIN ninja_core.v_active_devices d ON d.id = cs.device_id
 JOIN ninja_core.organizations o ON o.id = d.organization_id
 WHERE cs.status IN ('MANUAL', 'DELAYED')
+{_CMD_DEVICE_TYPE_FILTER}
 ORDER BY
     CASE cs.status WHEN 'MANUAL' THEN 0 ELSE 1 END,
     cs.last_observed_at DESC,
@@ -522,15 +589,17 @@ LIMIT 100
     # activity since last install. Common patching-loop gap: install
     # landed, reboot didn't happen, the patch hasn't really "taken".
     {
-        "key":     "cmd_awaiting_reboot",
-        "name":    "Patches Installed Awaiting Reboot",
-        "display": "table",
+        "key":            "cmd_awaiting_reboot",
+        "name":           "Patches Installed Awaiting Reboot",
+        "display":        "table",
         "row": 38, "col": 0, "size_x": 24, "size_y": 10,
+        "template_tags":  _CMD_TAGS,
+        "param_mappings": _CMD_PARAM_MAPPINGS,
         "column_click_behaviors": {
             "organization": {"target": DASH_ORG,       "params": {"p_org": "organization"}},
             "device":       {"target": DASH_DRILLDOWN, "params": {"p_device": "device"}},
         },
-        "query": """
+        "query": f"""
 WITH last_install AS (
     SELECT device_id,
            MAX(installed_at) AS last_install_at,
@@ -562,6 +631,7 @@ JOIN last_install li ON li.device_id = d.id
 LEFT JOIN last_reboot lr ON lr.device_id = d.id
 WHERE d.needs_reboot = TRUE
   AND (lr.last_reboot_at IS NULL OR lr.last_reboot_at < li.last_install_at)
+{_CMD_DEVICE_TYPE_FILTER}
 ORDER BY li.last_install_at DESC
 LIMIT 100
 """,
@@ -570,10 +640,12 @@ LIMIT 100
     # allowlist as the Device Drilldown card so the noise/signal
     # mix matches.
     {
-        "key":     "cmd_recent_activity",
-        "name":    "Recent Patch Activity (Fleet)",
-        "display": "table",
+        "key":            "cmd_recent_activity",
+        "name":           "Recent Patch Activity (Fleet)",
+        "display":        "table",
         "row": 48, "col": 0, "size_x": 24, "size_y": 10,
+        "template_tags":  _CMD_TAGS,
+        "param_mappings": _CMD_PARAM_MAPPINGS,
         "column_click_behaviors": {
             "organization": {"target": DASH_ORG,       "params": {"p_org": "organization"}},
             "device":       {"target": DASH_DRILLDOWN, "params": {"p_device": "device"}},
@@ -590,25 +662,54 @@ FROM ninja_activities.activities a
 JOIN ninja_core.devices d ON d.id = a.device_id
 JOIN ninja_core.organizations o ON o.id = d.organization_id
 WHERE a.activity_type IN ({_DRILLDOWN_ACTIVITY_CODES_SQL})
+{_CMD_DEVICE_TYPE_FILTER}
 ORDER BY a.activity_time DESC
 LIMIT 100
 """,
     },
 ]
 
+PARAM_OVERALL_CLASS = "p_overall_class"
+_OVERALL_TAGS = {
+    "device_type": {
+        "id": "tt_overall_device_type", "name": "device_type",
+        "display-name": "Device Type", "type": "text",
+    },
+}
+_OVERALL_PARAM_MAPPINGS = {
+    PARAM_OVERALL_CLASS: ["variable", ["template-tag", "device_type"]],
+}
+_OVERALL_DEVICE_TYPE_FILTER = (
+    f"  [[AND {DEVICE_TYPE_D} = {{{{device_type}}}}]]\n"
+)
+
+
+def build_overall_parameters() -> list[dict]:
+    return [
+        _param_dropdown(
+            PARAM_OVERALL_CLASS, "Device Type", "device_type",
+            _NODE_CLASS_OPTIONS,
+        ),
+    ]
+
+
 OVERVIEW_CARDS: list[dict[str, Any]] = [
     # Row 0 — Compliance headline + Data Freshness sidekick.
     {
-        "key":        "overall_compliance",
-        "name":       "Patch Compliance",
-        "display":    "scalar",
+        "key":            "overall_compliance",
+        "name":           "Patch Compliance",
+        "display":        "scalar",
         "row": 0, "col": 0, "size_x": 18, "size_y": 4,
+        "template_tags":  _OVERALL_TAGS,
+        "param_mappings": _OVERALL_PARAM_MAPPINGS,
         # Fleet-wide compliance %: installed (device, patch) pairs over
         # the universe of all known (device, patch) on active Windows
-        # devices.
-        "query": """
+        # devices. all_patches pulls node_class so the dashboard's
+        # Device Type filter can scope.
+        "query": f"""
 WITH all_patches AS (
-    SELECT DISTINCT pf.device_id, pf.patch_uid
+    SELECT DISTINCT pf.device_id, pf.patch_uid,
+                    d.node_class, d.os_name
     FROM ninja_patches.patch_facts pf
     JOIN ninja_core.v_active_devices d ON d.id = pf.device_id
     WHERE d.approval_status = 'APPROVED'
@@ -623,8 +724,10 @@ SELECT ROUND(
     / NULLIF(COUNT(*), 0),
     1
 ) AS percent_installed
-FROM all_patches ap
+FROM all_patches d
 LEFT JOIN installed_patches ip USING (device_id, patch_uid)
+WHERE 1=1
+{_OVERALL_DEVICE_TYPE_FILTER}
 """,
     },
     {
@@ -658,79 +761,102 @@ FROM (
     # Row 4 — Devices (canonical order: Active, Patching, Stalled,
     # Never-Patched, Needs Reboot). 5 scalars at sizes 5+5+5+5+4 = 24.
     {
-        "key":        "active_devices",
-        "name":       "Active Devices",
-        "display":    "scalar",
+        "key":            "active_devices",
+        "name":           "Active Devices",
+        "display":        "scalar",
         "row": 4, "col": 0, "size_x": 5, "size_y": 4,
+        "template_tags":  _OVERALL_TAGS,
+        "param_mappings": _OVERALL_PARAM_MAPPINGS,
         "click_behavior": {"target": DASH_DETAIL, "preset": {}},
-        "query": """
+        "query": f"""
 SELECT COUNT(*) AS devices
-FROM ninja_core.v_active_devices
+FROM ninja_core.v_active_devices d
+WHERE 1=1
+{_OVERALL_DEVICE_TYPE_FILTER}
 """,
     },
     # Row 8 — Patches (canonical order: Approved, Manual, Delayed,
-    # Failed). 4 scalars at size 6 each = 24.
+    # Failed). 4 scalars at size 6 each = 24. Each CTE now selects
+    # device_id and the outer SELECT joins ninja_core.devices so the
+    # Device Type filter applies.
     {
-        "key":        "patches_ready",
-        "name":       "Approved Patches",
-        "display":    "scalar",
+        "key":            "patches_ready",
+        "name":           "Approved Patches",
+        "display":        "scalar",
         "row": 8, "col": 0, "size_x": 6, "size_y": 4,
+        "template_tags":  _OVERALL_TAGS,
+        "param_mappings": _OVERALL_PARAM_MAPPINGS,
         "click_behavior": {"target": DASH_DETAIL, "preset": {"status": "APPROVED"}},
-        "query": """
+        "query": f"""
 WITH current_state AS (
-    SELECT DISTINCT ON (device_id, patch_uid) status
+    SELECT DISTINCT ON (device_id, patch_uid) device_id, status
     FROM ninja_patches.patch_facts
     WHERE fact_type = 'patch_state'
     ORDER BY device_id, patch_uid, last_observed_at DESC
 )
 SELECT COUNT(*) AS approved_queued
-FROM current_state WHERE status = 'APPROVED'
+FROM current_state cs
+JOIN ninja_core.devices d ON d.id = cs.device_id
+WHERE cs.status = 'APPROVED'
+{_OVERALL_DEVICE_TYPE_FILTER}
 """,
     },
     {
-        "key":        "patches_manual",
-        "name":       "Manual Approval",
-        "display":    "scalar",
+        "key":            "patches_manual",
+        "name":           "Manual Approval",
+        "display":        "scalar",
         "row": 8, "col": 6, "size_x": 6, "size_y": 4,
+        "template_tags":  _OVERALL_TAGS,
+        "param_mappings": _OVERALL_PARAM_MAPPINGS,
         "click_behavior": {"target": DASH_DETAIL, "preset": {"status": "MANUAL"}},
-        "query": """
+        "query": f"""
 WITH current_state AS (
-    SELECT DISTINCT ON (device_id, patch_uid) status
+    SELECT DISTINCT ON (device_id, patch_uid) device_id, status
     FROM ninja_patches.patch_facts
     WHERE fact_type = 'patch_state'
     ORDER BY device_id, patch_uid, last_observed_at DESC
 )
 SELECT COUNT(*) AS manual
-FROM current_state WHERE status = 'MANUAL'
+FROM current_state cs
+JOIN ninja_core.devices d ON d.id = cs.device_id
+WHERE cs.status = 'MANUAL'
+{_OVERALL_DEVICE_TYPE_FILTER}
 """,
     },
     {
-        "key":        "patches_delayed",
-        "name":       "Delayed Patches",
-        "display":    "scalar",
+        "key":            "patches_delayed",
+        "name":           "Delayed Patches",
+        "display":        "scalar",
         "row": 8, "col": 12, "size_x": 6, "size_y": 4,
+        "template_tags":  _OVERALL_TAGS,
+        "param_mappings": _OVERALL_PARAM_MAPPINGS,
         "click_behavior": {"target": DASH_DETAIL, "preset": {"status": "DELAYED"}},
-        "query": """
+        "query": f"""
 WITH current_state AS (
-    SELECT DISTINCT ON (device_id, patch_uid) status
+    SELECT DISTINCT ON (device_id, patch_uid) device_id, status
     FROM ninja_patches.patch_facts
     WHERE fact_type = 'patch_state'
     ORDER BY device_id, patch_uid, last_observed_at DESC
 )
 SELECT COUNT(*) AS delayed
-FROM current_state WHERE status = 'DELAYED'
+FROM current_state cs
+JOIN ninja_core.devices d ON d.id = cs.device_id
+WHERE cs.status = 'DELAYED'
+{_OVERALL_DEVICE_TYPE_FILTER}
 """,
     },
     {
-        "key":        "patches_failed",
-        "name":       "Failed Patches",
-        "display":    "scalar",
+        "key":            "patches_failed",
+        "name":           "Failed Patches",
+        "display":        "scalar",
         "row": 8, "col": 18, "size_x": 6, "size_y": 4,
+        "template_tags":  _OVERALL_TAGS,
+        "param_mappings": _OVERALL_PARAM_MAPPINGS,
         "click_behavior": {
             "target": DASH_DETAIL,
             "preset": {"install_outcome": "FAILED"},
         },
-        "query": """
+        "query": f"""
 WITH latest_install_outcome AS (
     SELECT DISTINCT ON (device_id, patch_uid)
         device_id, patch_uid, status
@@ -745,18 +871,22 @@ WITH latest_install_outcome AS (
         id DESC
 )
 SELECT COUNT(*) AS failed
-FROM latest_install_outcome
-WHERE status = 'FAILED'
+FROM latest_install_outcome lio
+JOIN ninja_core.devices d ON d.id = lio.device_id
+WHERE lio.status = 'FAILED'
+{_OVERALL_DEVICE_TYPE_FILTER}
 """,
     },
     # Row 4 — Devices group continuation: Patching, Stalled, Never-
     # Patched sit alongside active_devices (col 0) for the canonical
     # device row. 4 scalars at size 6 each.
     {
-        "key":     "ov_pcov_active",
-        "name":    "Patching Devices",
-        "display": "scalar",
+        "key":            "ov_pcov_active",
+        "name":           "Patching Devices",
+        "display":        "scalar",
         "row": 4, "col": 5, "size_x": 5, "size_y": 4,
+        "template_tags":  _OVERALL_TAGS,
+        "param_mappings": _OVERALL_PARAM_MAPPINGS,
         "click_behavior": {
             "target": DASH_PCOV,
             "preset": {"pcov_status": "Patching Devices"},
@@ -774,13 +904,16 @@ FROM ninja_core.devices d
 JOIN dps ON dps.device_id = d.id
 WHERE d.approval_status = 'APPROVED'
   AND dps.last_seen_at > NOW() - (INTERVAL '1 day' * {DEFAULT_STALE_PATCH_DAYS})
+{_OVERALL_DEVICE_TYPE_FILTER}
 """,
     },
     {
-        "key":     "ov_pcov_stale",
-        "name":    "Stalled Devices",
-        "display": "scalar",
+        "key":            "ov_pcov_stale",
+        "name":           "Stalled Devices",
+        "display":        "scalar",
         "row": 4, "col": 10, "size_x": 5, "size_y": 4,
+        "template_tags":  _OVERALL_TAGS,
+        "param_mappings": _OVERALL_PARAM_MAPPINGS,
         "click_behavior": {
             "target": DASH_PCOV,
             "preset": {"pcov_status": "Stalled Devices"},
@@ -798,18 +931,21 @@ FROM ninja_core.devices d
 JOIN dps ON dps.device_id = d.id
 WHERE d.approval_status = 'APPROVED'
   AND dps.last_seen_at <= NOW() - (INTERVAL '1 day' * {DEFAULT_STALE_PATCH_DAYS})
+{_OVERALL_DEVICE_TYPE_FILTER}
 """,
     },
     {
-        "key":     "ov_pcov_none",
-        "name":    "Never-Patched Devices",
-        "display": "scalar",
+        "key":            "ov_pcov_none",
+        "name":            "Never-Patched Devices",
+        "display":         "scalar",
         "row": 4, "col": 15, "size_x": 5, "size_y": 4,
+        "template_tags":  _OVERALL_TAGS,
+        "param_mappings": _OVERALL_PARAM_MAPPINGS,
         "click_behavior": {
             "target": DASH_PCOV,
             "preset": {"pcov_status": "Never-Patched Devices"},
         },
-        "query": """
+        "query": f"""
 SELECT COUNT(*) AS no_data
 FROM ninja_core.devices d
 LEFT JOIN ninja_patches.patch_facts pf
@@ -818,17 +954,21 @@ LEFT JOIN ninja_patches.patch_facts pf
  AND pf.installed_at IS NOT NULL
 WHERE d.approval_status = 'APPROVED'
   AND pf.device_id IS NULL
+{_OVERALL_DEVICE_TYPE_FILTER}
 """,
     },
     {
-        "key":     "overall_reboot",
-        "name":    "Needs Reboot",
-        "display": "scalar",
+        "key":            "overall_reboot",
+        "name":           "Needs Reboot",
+        "display":        "scalar",
         "row": 4, "col": 20, "size_x": 4, "size_y": 4,
-        "query": """
+        "template_tags":  _OVERALL_TAGS,
+        "param_mappings": _OVERALL_PARAM_MAPPINGS,
+        "query": f"""
 SELECT COUNT(*) AS devices
-FROM ninja_core.v_active_devices
-WHERE needs_reboot = TRUE
+FROM ninja_core.v_active_devices d
+WHERE d.needs_reboot = TRUE
+{_OVERALL_DEVICE_TYPE_FILTER}
 """,
     },
     # Row 12 — Charts: Current Patch State pie + Worst Compliance bar.
@@ -851,16 +991,21 @@ WHERE needs_reboot = TRUE
             "target": DASH_DETAIL,
             "params": {"p_status": "Current Patch State"},
         },
-        "query": """
+        "template_tags":  _OVERALL_TAGS,
+        "param_mappings": _OVERALL_PARAM_MAPPINGS,
+        "query": f"""
 WITH current_state AS (
-    SELECT DISTINCT ON (device_id, patch_uid) status
+    SELECT DISTINCT ON (device_id, patch_uid) device_id, status
     FROM ninja_patches.patch_facts
     WHERE fact_type = 'patch_state'
     ORDER BY device_id, patch_uid, last_observed_at DESC
 )
-SELECT status AS "Current Patch State", COUNT(*) AS "Patches"
-FROM current_state
-GROUP BY status
+SELECT cs.status AS "Current Patch State", COUNT(*) AS "Patches"
+FROM current_state cs
+JOIN ninja_core.devices d ON d.id = cs.device_id
+WHERE 1=1
+{_OVERALL_DEVICE_TYPE_FILTER}
+GROUP BY cs.status
 ORDER BY "Patches" DESC
 """,
     },
@@ -878,12 +1023,14 @@ ORDER BY "Patches" DESC
             "target": DASH_ORG,
             "params": {"p_org": "organization"},
         },
+        "template_tags":  _OVERALL_TAGS,
+        "param_mappings": _OVERALL_PARAM_MAPPINGS,
         # Compliance = (device, patch) pairs with a successful install
         # divided by the universe of (device, patch) pairs we know
         # about. INSTALLED rows live in fact_type='install_outcome'; the
         # old query filtered to fact_type='patch_state' and so could
         # never count any installs — every org showed 0 %.
-        "query": """
+        "query": f"""
 WITH all_patches AS (
     SELECT DISTINCT device_id, patch_uid
     FROM ninja_patches.patch_facts
@@ -906,6 +1053,7 @@ LEFT JOIN installed_patches ip USING (device_id, patch_uid)
 JOIN ninja_core.v_active_devices d ON d.id = ap.device_id
 JOIN ninja_core.organizations o   ON o.id = d.organization_id
 WHERE d.approval_status = 'APPROVED'
+{_OVERALL_DEVICE_TYPE_FILTER}
 GROUP BY o.name
 HAVING COUNT(*) >= 50
 ORDER BY "Patch Compliance" ASC
@@ -923,11 +1071,13 @@ LIMIT 15
                 "params": {"p_org": "organization"},
             },
         },
+        "template_tags":  _OVERALL_TAGS,
+        "param_mappings": _OVERALL_PARAM_MAPPINGS,
         # Same compliance bug as compliance_worst: pulling from
         # patch_state only never captures INSTALLED rows. Fixed by
         # using the install_outcome side for both the "Installed" count
         # and the numerator of "Patch Compliance".
-        "query": """
+        "query": f"""
 WITH current_state AS (
     SELECT DISTINCT ON (device_id, patch_uid)
         device_id, patch_uid, status
@@ -982,21 +1132,19 @@ LEFT JOIN installed_patches ip
 JOIN ninja_core.v_active_devices d ON d.id = ap.device_id
 JOIN ninja_core.organizations o  ON o.id = d.organization_id
 WHERE d.approval_status = 'APPROVED'
+{_OVERALL_DEVICE_TYPE_FILTER}
 GROUP BY o.name
 HAVING COUNT(*) >= 10
 ORDER BY "Patch Compliance" ASC, "Total Patches" DESC
 """,
     },
     {
-        "key":        "needs_reboot",
-        "name":       "Devices Needing Reboot",
-        "display":    "table",
+        "key":            "needs_reboot",
+        "name":           "Devices Needing Reboot",
+        "display":        "table",
         "row": 30, "col": 0, "size_x": 24, "size_y": 8,
-        # Stable lowercase aliases on every column. Inert self-link
-        # placeholders on last_contact / reported_at were removed —
-        # they were the v0.7.4 "suppress drill popup" experiment but
-        # were misaligning click_behaviors to the wrong columns. The
-        # drill popup on info columns is the lesser evil.
+        "template_tags":  _OVERALL_TAGS,
+        "param_mappings": _OVERALL_PARAM_MAPPINGS,
         "column_click_behaviors": {
             "device":       {"target": DASH_DRILLDOWN, "params": {"p_device": "device"}},
             "organization": {"target": DASH_ORG,       "params": {"p_org":    "organization"}},
@@ -1012,6 +1160,7 @@ SELECT
 FROM ninja_core.v_active_devices d
 JOIN ninja_core.organizations o ON o.id = d.organization_id
 WHERE d.needs_reboot = TRUE
+{_OVERALL_DEVICE_TYPE_FILTER}
 ORDER BY d.last_contact DESC
 """,
     },
@@ -2722,7 +2871,8 @@ ORDER BY d.last_contact DESC
 # activities.activity_time (per event), device_snapshots.snapshot_at
 # (hourly device check-in record). No new schema needed.
 
-PARAM_TRENDS_DAYS = "p_trends_days"
+PARAM_TRENDS_DAYS  = "p_trends_days"
+PARAM_TRENDS_CLASS = "p_trends_class"
 
 _TRENDS_TAGS = {
     "days": {
@@ -2730,16 +2880,25 @@ _TRENDS_TAGS = {
         "display-name": "Timeline window (days)",
         "type": "number", "default": "90", "required": True,
     },
+    "device_type": {
+        "id": "tt_trends_device_type", "name": "device_type",
+        "display-name": "Device Type", "type": "text",
+    },
 }
 
 _TRENDS_PARAM_MAPPINGS = {
-    PARAM_TRENDS_DAYS: ["variable", ["template-tag", "days"]],
+    PARAM_TRENDS_DAYS:  ["variable", ["template-tag", "days"]],
+    PARAM_TRENDS_CLASS: ["variable", ["template-tag", "device_type"]],
 }
+
+# SQL predicate fragment for Trends cards — appended after WHERE.
+_TRENDS_DEVICE_TYPE_FILTER = f"  [[AND {DEVICE_TYPE_D} = {{{{device_type}}}}]]\n"
 
 
 def build_trends_parameters() -> list[dict]:
     return [
-        _param_number(PARAM_TRENDS_DAYS, "Timeline window (days)", "days", 90),
+        _param_number(  PARAM_TRENDS_DAYS,  "Timeline window (days)", "days",        90),
+        _param_dropdown(PARAM_TRENDS_CLASS, "Device Type",            "device_type", _NODE_CLASS_OPTIONS),
     ]
 
 
@@ -2756,15 +2915,17 @@ TRENDS_CARDS = [
         },
         "template_tags":  _TRENDS_TAGS,
         "param_mappings": _TRENDS_PARAM_MAPPINGS,
-        "query": """
+        "query": f"""
 SELECT
-    DATE_TRUNC('day', installed_at)::date AS "Day",
-    COUNT(*)                              AS "Installs"
-FROM ninja_patches.patch_facts
-WHERE fact_type = 'install_outcome'
-  AND status    = 'INSTALLED'
-  AND installed_at IS NOT NULL
-  AND installed_at > NOW() - (INTERVAL '1 day' * {{days}})
+    DATE_TRUNC('day', pf.installed_at)::date AS "Day",
+    COUNT(*)                                 AS "Installs"
+FROM ninja_patches.patch_facts pf
+JOIN ninja_core.devices d ON d.id = pf.device_id
+WHERE pf.fact_type = 'install_outcome'
+  AND pf.status    = 'INSTALLED'
+  AND pf.installed_at IS NOT NULL
+  AND pf.installed_at > NOW() - (INTERVAL '1 day' * {{{{days}}}})
+{_TRENDS_DEVICE_TYPE_FILTER}
 GROUP BY 1
 ORDER BY 1
 """,
@@ -2784,15 +2945,17 @@ ORDER BY 1
         },
         "template_tags":  _TRENDS_TAGS,
         "param_mappings": _TRENDS_PARAM_MAPPINGS,
-        "query": """
+        "query": f"""
 SELECT
-    DATE_TRUNC('day', installed_at)::date AS "Day",
-    COUNT(*)                              AS "Failures"
-FROM ninja_patches.patch_facts
-WHERE fact_type = 'install_outcome'
-  AND status    = 'FAILED'
-  AND installed_at IS NOT NULL
-  AND installed_at > NOW() - (INTERVAL '1 day' * {{days}})
+    DATE_TRUNC('day', pf.installed_at)::date AS "Day",
+    COUNT(*)                                 AS "Failures"
+FROM ninja_patches.patch_facts pf
+JOIN ninja_core.devices d ON d.id = pf.device_id
+WHERE pf.fact_type = 'install_outcome'
+  AND pf.status    = 'FAILED'
+  AND pf.installed_at IS NOT NULL
+  AND pf.installed_at > NOW() - (INTERVAL '1 day' * {{{{days}}}})
+{_TRENDS_DEVICE_TYPE_FILTER}
 GROUP BY 1
 ORDER BY 1
 """,
@@ -2809,13 +2972,15 @@ ORDER BY 1
         },
         "template_tags":  _TRENDS_TAGS,
         "param_mappings": _TRENDS_PARAM_MAPPINGS,
-        "query": """
+        "query": f"""
 SELECT
-    DATE_TRUNC('day', activity_time)::date AS "Day",
-    COUNT(*)                               AS "Reboots"
-FROM ninja_activities.activities
-WHERE activity_type = 'SYSTEM_REBOOTED'
-  AND activity_time > NOW() - (INTERVAL '1 day' * {{days}})
+    DATE_TRUNC('day', a.activity_time)::date AS "Day",
+    COUNT(*)                                 AS "Reboots"
+FROM ninja_activities.activities a
+JOIN ninja_core.devices d ON d.id = a.device_id
+WHERE a.activity_type = 'SYSTEM_REBOOTED'
+  AND a.activity_time > NOW() - (INTERVAL '1 day' * {{{{days}}}})
+{_TRENDS_DEVICE_TYPE_FILTER}
 GROUP BY 1
 ORDER BY 1
 """,
@@ -2835,12 +3000,14 @@ ORDER BY 1
         # Daily distinct device count from device_snapshots — answers
         # "how many devices were checking in on day D?". Useful for
         # spotting fleet drops (e.g. agent rollout regression).
-        "query": """
+        "query": f"""
 SELECT
-    DATE_TRUNC('day', snapshot_at)::date AS "Day",
-    COUNT(DISTINCT device_id)            AS "Active Devices"
-FROM ninja_core.device_snapshots
-WHERE snapshot_at > NOW() - (INTERVAL '1 day' * {{days}})
+    DATE_TRUNC('day', s.snapshot_at)::date AS "Day",
+    COUNT(DISTINCT s.device_id)            AS "Active Devices"
+FROM ninja_core.device_snapshots s
+JOIN ninja_core.devices d ON d.id = s.device_id
+WHERE s.snapshot_at > NOW() - (INTERVAL '1 day' * {{{{days}}}})
+{_TRENDS_DEVICE_TYPE_FILTER}
 GROUP BY 1
 ORDER BY 1
 """,
@@ -2862,7 +3029,7 @@ ORDER BY 1
         # current MANUAL backlog grouped by when each patch first
         # showed up in MANUAL state. Shows how stale the admin queue
         # is. Older bars = patches admins have been ignoring longer.
-        "query": """
+        "query": f"""
 WITH current_state AS (
     SELECT DISTINCT ON (device_id, patch_uid)
         device_id, patch_uid, status, first_observed_at
@@ -2871,10 +3038,12 @@ WITH current_state AS (
     ORDER BY device_id, patch_uid, last_observed_at DESC, id DESC
 )
 SELECT
-    DATE_TRUNC('week', first_observed_at)::date AS "Week First Seen",
-    COUNT(*)                                    AS "MANUAL Patches"
-FROM current_state
-WHERE status = 'MANUAL'
+    DATE_TRUNC('week', cs.first_observed_at)::date AS "Week First Seen",
+    COUNT(*)                                       AS "MANUAL Patches"
+FROM current_state cs
+JOIN ninja_core.devices d ON d.id = cs.device_id
+WHERE cs.status = 'MANUAL'
+{_TRENDS_DEVICE_TYPE_FILTER}
 GROUP BY 1
 ORDER BY 1
 """,
@@ -2981,7 +3150,7 @@ def build_dashboards(
     return [
         {
             "name":       DASH_COMMAND,
-            "parameters": [],
+            "parameters": build_command_parameters(),
             "cards":      COMMAND_CARDS,
             "section_headers": [
                 {"row": 0, "text": "### Devices"},
@@ -2990,7 +3159,7 @@ def build_dashboards(
         },
         {
             "name":       DASH_OVERVIEW,
-            "parameters": [],
+            "parameters": build_overall_parameters(),
             "cards":      OVERVIEW_CARDS,
             "section_headers": [
                 {"row": 0, "text": "### Compliance"},

@@ -5,6 +5,33 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-04 — v0.13.6 Device Type filter on Command Center, Overall, Trends
+
+**Done:**
+- Added Device Type (Server vs Workstation) filter as a top-of-page
+  dropdown on:
+  - Patch Command Center
+  - Overall Patching Status
+  - Trends
+- Org Overview, Patch Detail, Device Patching Status already had
+  it. Drilldown intentionally skipped.
+- For each new filter: dedicated `PARAM_X_CLASS` + `_X_TAGS` +
+  `_X_PARAM_MAPPINGS` + `_X_DEVICE_TYPE_FILTER` SQL fragment.
+- Each card on the three dashboards updated: `template_tags` +
+  `param_mappings` keys added, SQL predicate fragment appended.
+- Patch-count CTEs that didn't expose device_id (e.g. cmd_approved,
+  cmd_failed) updated to include device_id; outer SELECT joins
+  ninja_core.devices.
+
+**Why three separate filter declarations** rather than one shared:
+Metabase parameter IDs are dashboard-scoped — same `p_*` ID
+shouldn't be reused across dashboards. Keeping them distinct
+avoids parameterMapping collisions on cross-dashboard click_behaviors.
+
+**Validation:**
+- `python -m py_compile` passes on the full module after every
+  edit.
+
 ## 2026-06-04 — v0.13.5 Command Center Stalled Devices orphan removed
 
 **Why:** Same orphan we cleaned up on Org Overview in v0.11.4 was
