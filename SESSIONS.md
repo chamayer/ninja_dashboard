@@ -21,7 +21,7 @@ clarified.
 
 **Validation:**
 - `python -m py_compile ingest/metabase_bootstrap.py` passes.
-- Commit hash pending until the docs follow-up lands.
+- Commit `be63e7e` created for the label alignment.
 
 ## 2026-06-04 — v0.14.9 clarify fully-patched KPI as patching-device subset
 

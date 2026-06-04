@@ -175,7 +175,7 @@ _(empty — drop free-form items here)_
 ### v0.14.10 — 2026-06-04
 
 - [x] Aligned Org Overview and Trends KPI labels to
-      `Fully patched % (patching devices)`. Commit `TBD`.
+      `Fully patched % (patching devices)`. Commit `be63e7e`.
 
 ### v0.14.9 — 2026-06-04
 

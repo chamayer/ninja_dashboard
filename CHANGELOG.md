@@ -9,7 +9,7 @@ All notable changes to this project follow [Semantic Versioning](https://semver.
   the visible KPI titles.** The second operator KPI is now
   `Fully patched % (patching devices)` everywhere it appears on the
   org-facing and trend dashboards.
-- Commit: `TBD`
+- Commit: `be63e7e`
 
 ## [0.14.9] — 2026-06-04
 
