@@ -481,7 +481,7 @@ LIMIT 100
         "key":     "cmd_approval_queue",
         "name":    "Manual and Delayed Patches",
         "display": "table",
-        "row": 28, "col": 0, "size_x": 12, "size_y": 10,
+        "row": 28, "col": 0, "size_x": 24, "size_y": 10,
         "column_click_behaviors": {
             "organization":        {"target": DASH_ORG,    "params": {"p_org": "organization"}},
             "device":              {"target": DASH_DRILLDOWN, "params": {"p_device": "device"}},
@@ -514,67 +514,6 @@ ORDER BY
     cs.last_observed_at DESC,
     o.name,
     d.system_name
-LIMIT 100
-""",
-    },
-    {
-        "key":     "cmd_patch_activity_queue",
-        "name":    "Stalled Devices",
-        "display": "table",
-        "row": 28, "col": 12, "size_x": 12, "size_y": 10,
-        "column_click_behaviors": {
-            "organization":    {"target": DASH_ORG,       "params": {"p_org": "organization"}},
-            "device":          {"target": DASH_DRILLDOWN, "params": {"p_device": "device"}},
-            "patching_status": {"target": DASH_PCOV,      "params": {"p_pcov_status": "patching_status"}},
-        },
-        "query": f"""
-WITH last_install AS (
-    SELECT device_id, MAX(installed_at) AS last_install_at
-    FROM ninja_patches.patch_facts
-    WHERE fact_type = 'install_outcome'
-      AND installed_at IS NOT NULL
-    GROUP BY device_id
-),
-classified AS (
-    SELECT
-        d.id,
-        d.system_name,
-        d.organization_id,
-        d.node_class,
-        d.os_name,
-        li.last_install_at,
-        CASE
-            WHEN li.last_install_at IS NULL THEN 'no_patch_data'
-            WHEN li.last_install_at < NOW() - (INTERVAL '1 day' * {DEFAULT_STALE_PATCH_DAYS}) THEN 'stale_patch_data'
-            ELSE 'active_patching'
-        END AS patch_status
-    FROM ninja_core.devices d
-    LEFT JOIN last_install li ON li.device_id = d.id
-    WHERE d.approval_status = 'APPROVED'
-      AND d.node_class IN ('WINDOWS_WORKSTATION', 'WINDOWS_SERVER')
-)
-SELECT
-    o.name AS organization,
-    c.system_name AS device,
-    {PATCH_ACTIVITY_LABEL_C} AS patching_status,
-    c.last_install_at AS "Last Install Attempt",
-    CASE WHEN c.last_install_at IS NULL THEN NULL
-         ELSE ROUND(EXTRACT(EPOCH FROM (NOW() - c.last_install_at)) / 86400)
-    END AS "Days Since Attempt",
-    CASE c.node_class
-        WHEN 'WINDOWS_WORKSTATION' THEN 'Windows Workstation'
-        WHEN 'WINDOWS_SERVER' THEN 'Windows Server'
-        ELSE c.node_class
-    END AS "Device Type",
-    {OS_FAMILY_C} AS "Operating System Family"
-FROM classified c
-JOIN ninja_core.organizations o ON o.id = c.organization_id
-WHERE c.patch_status IN ('stale_patch_data', 'no_patch_data')
-ORDER BY
-    CASE c.patch_status WHEN 'no_patch_data' THEN 0 ELSE 1 END,
-    c.last_install_at ASC NULLS FIRST,
-    o.name,
-    c.system_name
 LIMIT 100
 """,
     },

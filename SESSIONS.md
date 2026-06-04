@@ -5,6 +5,21 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-04 — v0.13.5 Command Center Stalled Devices orphan removed
+
+**Why:** Same orphan we cleaned up on Org Overview in v0.11.4 was
+still on Command Center — half-width Stalled Devices table next to
+Manual and Delayed Patches. The cmd_stale scalar already covers
+the count, and clicking it drills into Device Patching Status.
+
+**Done:**
+- Removed `cmd_patch_activity_queue` card.
+- `cmd_approval_queue` size_x bumped from 12 to 24 (full width).
+
+**Validation:**
+- `python -m py_compile` passes.
+- Grep confirms `cmd_patch_activity_queue` is no longer in the file.
+
 ## 2026-06-04 — v0.13.4 compliance-by-X chart fixes + % suffix
 
 **Done:**

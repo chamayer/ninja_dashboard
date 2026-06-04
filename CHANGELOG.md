@@ -2,6 +2,21 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.13.5] — 2026-06-04
+
+### Removed
+- **Patch Command Center orphan: `cmd_patch_activity_queue`
+  (Stalled Devices table).** v0.11.4 dropped the Org Overview
+  twin but missed Command Center. Same redundancy — the Stalled
+  Devices scalar already exposes the count, and clicking it
+  drills into Device Patching Status filtered to the stalled
+  bucket.
+
+### Changed
+- `cmd_approval_queue` (Manual and Delayed Patches) now spans
+  full width (size_x 24) — matches the Org Overview pattern
+  established in v0.11.4.
+
 ## [0.13.4] — 2026-06-04
 
 ### Fixed
