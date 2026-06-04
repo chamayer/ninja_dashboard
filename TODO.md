@@ -172,6 +172,12 @@ _(empty — drop free-form items here)_
 
 ## Completed
 
+### v0.14.7 — 2026-06-04
+
+- [x] Split the operator dashboard KPIs into `Actively patching %`
+      and `Fully patched devices %`, while keeping the Command Center
+      count cards. Commit `TBD`.
+
 ### v0.14.6 — 2026-06-04
 
 - [x] Split the dashboard compliance story into

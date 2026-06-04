@@ -2,6 +2,21 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.14.7] — 2026-06-04
+
+### Changed
+- **Command Center now headlines active patching instead of compliance.**
+  Kept the raw count cards, but the top-right KPI now reads
+  `Actively patching %` so the landing page answers whether devices
+  are getting patched right now.
+- **Overall Status and Org Overview now show the two operator rates.**
+  The left KPI is `Actively patching %`; the right KPI is
+  `Fully patched devices %`.
+- **Trend cards were realigned to the same operator split.**
+  Trends now show `Fully patched devices % per Day` and `Patching
+  Devices per Day` instead of the old compliance/progress wording.
+- Commit: `TBD`
+
 ## [0.14.6] — 2026-06-04
 
 ### Changed

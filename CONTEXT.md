@@ -136,13 +136,13 @@ See `REQUIREMENTS.md` §4 for the full schema.
 Dashboards should split MANUAL from DELAYED, not lump them — they
 mean very different things operationally.
 
-## Patch Compliance formula
+## Fully patched devices formula
 
-Single source of truth for every "Patch Compliance" card across
+Single source of truth for every `Fully patched devices %` card across
 all dashboards:
 
 ```
-Patch Compliance = installed / (installed + missing)
+Fully patched devices % = installed / (installed + missing)
 ```
 
 where:
@@ -172,21 +172,22 @@ Counted as missing rather than excluded:
 - `PENDING` — known about, no decision yet. Counts as missing
   until it moves to one of the resolved states.
 
-Implementation: the reusable `_COMPLIANCE_CTES` block at the top
-of `ingest/metabase_bootstrap.py` defines `installed_patches`,
-`missing_patches`, and `universe` CTEs that every compliance card
+Implementation: the reusable `_COMPLIANCE_CTES` block at the top of
+`ingest/metabase_bootstrap.py` defines `installed_patches`,
+`missing_patches`, and `universe` CTEs that every fully-patched card
 joins onto. Changing the formula = editing
 `COMPLIANCE_MISSING_STATES` in one place.
 
-Dashboard labels split the story into two operator-facing metrics:
+Dashboard labels now split the story into two operator-facing metrics:
 
-- `Devices Compliant %` = how many scoped devices are fully patched
-  right now.
-- `Patch Progress %` = how much of the scoped patch work has been
-  installed so far.
+- `Actively patching %` = how many scoped devices are actively
+  patching right now.
+- `Fully patched devices %` = how many scoped devices are fully
+  patched right now.
 
-Command Center shows the first one as the single headline KPI.
-Overall Status and Org Overview show both side by side.
+Command Center shows the first one as the single headline KPI and
+keeps the raw count cards. Overall Status, Org Overview, and Trends
+show the broader split.
 
 ### Where to find REJECTED patches
 

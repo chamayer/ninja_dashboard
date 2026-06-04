@@ -5,6 +5,24 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-04 — v0.14.7 split patch KPIs into active-patching + fully-patched
+
+**Why:** The prior dashboard wording still mixed the operator's scope
+with compliance/progress language. The clearer MSP view is: how many
+active devices are patching, and how many are fully patched.
+
+**Done:**
+- Command Center now headlines `Actively patching %` and keeps the raw
+  count cards.
+- Overall Status and Org Overview now show `Actively patching %` and
+  `Fully patched devices %`.
+- Trends now show `Fully patched devices % per Day` and
+  `Patching Devices per Day`.
+- `CONTEXT.md` terminology updated to match the new operator split.
+
+**Validation:**
+- Pending compile-check after the edit.
+
 ## 2026-06-04 — v0.14.6 split device compliance from patch progress
 
 **Why:** The old `Patch Compliance` label was ambiguous for an MSP

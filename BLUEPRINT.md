@@ -7,40 +7,43 @@
 
 ## Goal
 
-Rename the patch KPI cards so the dashboards distinguish device
-compliance from patch progress, and add those headline trend views to
-the Trends dashboard.
+Refocus the patch KPIs around the MSP operator question: what share of
+active devices are currently patching, and what share are fully
+patched.
 
 ## Why
 
-The current `Patch Compliance` label is ambiguous for an MSP operator.
-The landing page should answer "are devices fully patched right now?"
-with one at-a-glance score, while the status dashboards should show the
-broader patch progress context alongside it.
+The current cards mix device counts, patch-work completion, and device
+outcome. The command center should keep the raw count cards, but the
+headline KPI should answer "are devices actively patching right now?"
+and the status/detail pages should pair that with the fully-patched
+share.
 
 ## Scope
 
 **In:**
-- Rename the command-center headline KPI to `Devices Compliant %`.
-- Split Overall Status and Org Overview into `Devices Compliant %` and
-  `Patch Progress %` cards.
-- Add trend cards for the same two metrics.
+- Keep the Command Center count cards.
+- Rename the Command Center headline KPI to `Actively patching %`.
+- Show `Actively patching %` and `Fully patched devices %` on Overall
+  Status and Org Overview.
+- Update the Trends dashboard to show both rates.
 - Update release docs and versioning.
 
 **Out / separate investigation:**
-- Reworking the underlying patch-compliance formula.
+- Reworking the underlying patch-state classifier.
 - Adding new data sources or schema changes.
 
 ## Files to change
 
 - `ingest/metabase_bootstrap.py`
-    - Rename the existing compliance cards and add trend KPIs.
+    - Rename the KPI cards, add the new active-patching percentage,
+      and align trend labels.
 - `CONTEXT.md`
-    - Update the dashboard / metric terminology if needed.
+    - Update the operator-facing metric definitions.
 - `VERSION`
     - Bump for the dashboard update.
 - `CHANGELOG.md`
-    - Document the renamed KPI cards and trend additions.
+    - Document the KPI split and label changes.
 - `SESSIONS.md`
     - Record the dashboard rework and rationale.
 - `TODO.md`
@@ -49,16 +52,18 @@ broader patch progress context alongside it.
 ## Steps
 
 1. Rename the relevant card titles and SQL aliases.
-2. Add the trend cards for devices-compliant and patch-progress.
-3. Compile-check the bootstrap.
-4. Update docs and version.
-5. Commit and push, then report the short hash.
+2. Keep the count cards on Command Center and swap in the new
+   headline percentage.
+3. Update Overall Status, Org Overview, and Trends to show the two
+   operator KPIs.
+4. Compile-check the bootstrap.
+5. Update docs and version.
+6. Commit and push, then report the short hash.
 
 ## Open questions
 
-- Whether the new status-dashboard cards should keep the old
-  compliance formula or expose a new patch-progress denominator.
+- None.
 
 ## Status
 
-done — committed as fafe234
+in progress
