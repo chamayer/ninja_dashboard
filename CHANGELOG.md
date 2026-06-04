@@ -2,6 +2,31 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.13.4] — 2026-06-04
+
+### Fixed
+- **Org Overview's `Patch Compliance by Device Type` and `…by
+  Operating System` charts were blank when no org was selected**,
+  and showed 0% when one was. Two bugs at once:
+    1. Same compliance bug class as v0.11.1 — the SQL counted
+       `WHERE cs.status = 'INSTALLED'` against a CTE filtered to
+       `fact_type='patch_state'`, which never contains INSTALLED.
+       Rewrote to count from `install_outcome` over the universe
+       of known (device, patch) pairs.
+    2. Both charts had `GROUP BY o.name, <dimension>` — producing
+       one row per (org, type) combination. The bar chart needs
+       one row per type. Dropped `o.name` from SELECT/GROUP BY so
+       the chart renders correctly with or without an org filter.
+- Same `GROUP BY o.name` issue also fixed on Org Overview's
+  Current Patch State pie (`org_status`).
+
+### Added
+- **`%` suffix** on the Patch Compliance scalar via a new
+  `_SCALAR_SUFFIX_RULES` table and `_apply_scalar_suffixes`
+  post-processor. Mirrors the pattern of the alert-color
+  post-processor. Easy to extend with more suffixes later (e.g.
+  " min", " days").
+
 ## [0.13.3] — 2026-06-04
 
 ### Added

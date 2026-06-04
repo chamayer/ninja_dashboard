@@ -5,6 +5,27 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-04 — v0.13.4 compliance-by-X chart fixes + % suffix
+
+**Done:**
+- Fixed Org Overview's "Patch Compliance by Device Type" and
+  "Patch Compliance by Operating System" charts. Two bugs:
+  (a) compliance numerator counted INSTALLED against the
+  patch_state CTE — never matched; (b) GROUP BY o.name produced
+  multi-row groups so the chart was blank when no org filter.
+  Rewrote queries to use install_outcome math and dropped o.name
+  from SELECT/GROUP BY.
+- Same `GROUP BY o.name` fix on the org_status pie.
+- Added `_SCALAR_SUFFIX_RULES` table + `_apply_scalar_suffixes`
+  post-processor — patterned after the alert-color one. Wired
+  "%" suffix onto overall_compliance + org_compliance scalars.
+
+**Validation:**
+- `python -m py_compile` passes.
+
+**Up next:** v0.13.5 Server vs Workstation global filter on
+Command Center, then v0.13.6 the same on Overall Status + Trends.
+
 ## 2026-06-04 — v0.13.3 scalar alert coloring
 
 **Done:**

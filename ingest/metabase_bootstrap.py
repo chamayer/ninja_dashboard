@@ -2547,7 +2547,11 @@ WHERE d.needs_reboot = TRUE
         },
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS_FULL,
-        "click_behavior": {"target": DASH_DETAIL, "params": {"p_org": "Organization", "p_status": "Current Patch State"}},
+        "click_behavior": {"target": DASH_DETAIL, "params": {"p_status": "Current Patch State"}},
+        # Dropped o.name from SELECT / GROUP BY — same issue as the
+        # by-Device-Type and by-OS charts. Pie dimension is the
+        # status code, so the chart needs one row per status, not
+        # one row per (org, status).
         "query": f"""
 WITH current_state AS (
     SELECT DISTINCT ON (device_id, patch_uid) device_id, patch_uid, status, severity
@@ -2556,7 +2560,6 @@ WITH current_state AS (
     ORDER BY device_id, patch_uid, last_observed_at DESC, id DESC
 )
 SELECT
-    o.name AS "Organization",
     cs.status AS "Current Patch State",
     COUNT(*) AS "Patches"
 FROM current_state cs
@@ -2564,7 +2567,7 @@ JOIN ninja_core.v_active_devices d ON d.id = cs.device_id
 JOIN ninja_core.organizations o ON o.id = d.organization_id
 WHERE 1=1
 {_ORG_FILTERS_PATCH_CS}
-GROUP BY o.name, cs.status
+GROUP BY cs.status
 ORDER BY "Patches" DESC
 """,
     },
@@ -2576,24 +2579,39 @@ ORDER BY "Patches" DESC
         "viz_settings": {"graph.dimensions": ["Device Type"], "graph.metrics": ["Patch Compliance"]},
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS,
-        "click_behavior": {"target": DASH_DETAIL, "params": {"p_org": "Organization", "p_class": "Device Type"}},
+        "click_behavior": {"target": DASH_DETAIL, "params": {"p_class": "Device Type"}},
+        # Two bugs fixed: (1) compliance numerator pulled INSTALLED
+        # from patch_state CTE (which never contains INSTALLED) — same
+        # bug class as v0.11.1; rewrote to use install_outcome.
+        # (2) GROUP BY o.name AND Device Type produced one row per
+        # (org, type), so the bar chart got multiple rows for each
+        # bar — fine when org is filtered to one, blank when not.
+        # Removed o.name from SELECT/GROUP BY.
         "query": f"""
-WITH current_state AS (
-    SELECT DISTINCT ON (device_id, patch_uid) device_id, patch_uid, status
+WITH all_patches AS (
+    SELECT DISTINCT pf.device_id, pf.patch_uid
+    FROM ninja_patches.patch_facts pf
+    JOIN ninja_core.v_active_devices d ON d.id = pf.device_id
+    WHERE d.approval_status = 'APPROVED'
+),
+installed_patches AS (
+    SELECT DISTINCT device_id, patch_uid
     FROM ninja_patches.patch_facts
-    WHERE fact_type = 'patch_state'
-    ORDER BY device_id, patch_uid, last_observed_at DESC, id DESC
+    WHERE fact_type = 'install_outcome' AND status = 'INSTALLED'
 )
 SELECT
-    o.name AS "Organization",
     {DEVICE_TYPE_D} AS "Device Type",
-    ROUND(COUNT(*) FILTER (WHERE cs.status = 'INSTALLED') * 100.0 / NULLIF(COUNT(*), 0), 1) AS "Patch Compliance"
-FROM current_state cs
-JOIN ninja_core.v_active_devices d ON d.id = cs.device_id
+    ROUND(
+      COUNT(*) FILTER (WHERE ip.device_id IS NOT NULL) * 100.0
+      / NULLIF(COUNT(*), 0), 1
+    ) AS "Patch Compliance"
+FROM all_patches ap
+LEFT JOIN installed_patches ip USING (device_id, patch_uid)
+JOIN ninja_core.v_active_devices d ON d.id = ap.device_id
 JOIN ninja_core.organizations o ON o.id = d.organization_id
 WHERE 1=1
 {_ORG_FILTERS_DEVICE}
-GROUP BY o.name, "Device Type"
+GROUP BY "Device Type"
 ORDER BY "Patch Compliance" ASC
 """,
     },
@@ -2605,24 +2623,35 @@ ORDER BY "Patch Compliance" ASC
         "viz_settings": {"graph.dimensions": ["Operating System Family"], "graph.metrics": ["Patch Compliance"]},
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS,
-        "click_behavior": {"target": DASH_DETAIL, "params": {"p_org": "Organization", "p_os": "Operating System Family"}},
+        "click_behavior": {"target": DASH_DETAIL, "params": {"p_os": "Operating System Family"}},
+        # Same two-bug fix as org_device_type: install_outcome math,
+        # and drop o.name from SELECT/GROUP BY so the chart renders
+        # with or without an org filter selected.
         "query": f"""
-WITH current_state AS (
-    SELECT DISTINCT ON (device_id, patch_uid) device_id, patch_uid, status
+WITH all_patches AS (
+    SELECT DISTINCT pf.device_id, pf.patch_uid
+    FROM ninja_patches.patch_facts pf
+    JOIN ninja_core.v_active_devices d ON d.id = pf.device_id
+    WHERE d.approval_status = 'APPROVED'
+),
+installed_patches AS (
+    SELECT DISTINCT device_id, patch_uid
     FROM ninja_patches.patch_facts
-    WHERE fact_type = 'patch_state'
-    ORDER BY device_id, patch_uid, last_observed_at DESC, id DESC
+    WHERE fact_type = 'install_outcome' AND status = 'INSTALLED'
 )
 SELECT
-    o.name AS "Organization",
     {OS_FAMILY_D} AS "Operating System Family",
-    ROUND(COUNT(*) FILTER (WHERE cs.status = 'INSTALLED') * 100.0 / NULLIF(COUNT(*), 0), 1) AS "Patch Compliance"
-FROM current_state cs
-JOIN ninja_core.v_active_devices d ON d.id = cs.device_id
+    ROUND(
+      COUNT(*) FILTER (WHERE ip.device_id IS NOT NULL) * 100.0
+      / NULLIF(COUNT(*), 0), 1
+    ) AS "Patch Compliance"
+FROM all_patches ap
+LEFT JOIN installed_patches ip USING (device_id, patch_uid)
+JOIN ninja_core.v_active_devices d ON d.id = ap.device_id
 JOIN ninja_core.organizations o ON o.id = d.organization_id
 WHERE 1=1
 {_ORG_FILTERS_DEVICE}
-GROUP BY o.name, "Operating System Family"
+GROUP BY "Operating System Family"
 ORDER BY "Patch Compliance" ASC
 """,
     },
@@ -2920,6 +2949,17 @@ ORDER BY 1
 # the card specs in place. Keyed by card key so the rules are obvious.
 # Each rule = (SQL output column name, operator, threshold, hex color).
 
+# Suffix rules for scalar cards whose number reads better with a unit
+# (e.g. "%" on compliance). Keyed by card key. Applied as
+# column_settings.<col>.suffix in the same post-process step that
+# adds alert coloring.
+_SCALAR_SUFFIX_RULES: dict[str, tuple[str, str]] = {
+    # key            (column, suffix)
+    "overall_compliance": ("percent_installed", "%"),
+    "org_compliance":     ("percent_installed", "%"),
+}
+
+
 _SCALAR_ALERT_RULES: dict[str, tuple[str, str, float, str]] = {
     # Red alerts — actionable failures / silent devices.
     "cmd_failed":      ("patches", ">", 0, COLOR_ALERT_RED),
@@ -2960,7 +3000,31 @@ def _apply_scalar_alerts(*card_lists: list[dict]) -> None:
             card["viz_settings"] = viz
 
 
+def _apply_scalar_suffixes(*card_lists: list[dict]) -> None:
+    """Merge a per-column `suffix` into viz_settings.column_settings
+    for any card whose key matches `_SCALAR_SUFFIX_RULES`. Stacks
+    cleanly with the alert-color rules (different keys in the same
+    column_settings dict)."""
+    for cards in card_lists:
+        for card in cards:
+            rule = _SCALAR_SUFFIX_RULES.get(card.get("key"))
+            if rule is None:
+                continue
+            col, suffix = rule
+            viz = dict(card.get("viz_settings") or {})
+            col_settings = dict(viz.get("column_settings") or {})
+            key = f'["name","{col}"]'
+            entry = dict(col_settings.get(key) or {})
+            entry["suffix"] = suffix
+            col_settings[key] = entry
+            viz["column_settings"] = col_settings
+            card["viz_settings"] = viz
+
+
 _apply_scalar_alerts(
+    COMMAND_CARDS, OVERVIEW_CARDS, ORG_OVERVIEW_CARDS, PCOV_CARDS,
+)
+_apply_scalar_suffixes(
     COMMAND_CARDS, OVERVIEW_CARDS, ORG_OVERVIEW_CARDS, PCOV_CARDS,
 )
 
