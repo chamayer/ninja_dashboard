@@ -2,6 +2,24 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.13.0] — 2026-06-04
+
+### Added
+- **Patches Installed Awaiting Reboot** table on Patch Command
+  Center. Joins INSTALLED patches × `needs_reboot=true` × no
+  `SYSTEM_REBOOTED` activity since last install. Surfaces the
+  common patching-loop gap where install landed but reboot didn't.
+  Click-throughs on Organization → Org Overview, Device → Drilldown.
+- **Recent Patch Activity (Fleet)** table on Patch Command Center.
+  Last 100 patch-lifecycle + reboot activities across the whole
+  fleet, joined to device + org. Uses the same allowlist
+  (`_DRILLDOWN_ACTIVITY_CODES`) as the per-device card on Drilldown.
+
+### Changed
+- `_DRILLDOWN_ACTIVITY_CODES` and `_DRILLDOWN_ACTIVITY_CODES_SQL`
+  moved to the top of the file (near the color palettes) so they
+  resolve before COMMAND_CARDS at module import time.
+
 ## [0.12.7] — 2026-06-04
 
 ### Added

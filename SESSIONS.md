@@ -5,6 +5,19 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-04 — v0.13.0 Command Center: awaiting-reboot + fleet activity feed
+
+**Done:**
+- Added `cmd_awaiting_reboot` table — INSTALLED patches × device
+  needing reboot × no SYSTEM_REBOOTED activity since install.
+- Added `cmd_recent_activity` table — fleet-wide patch+reboot
+  activity stream (last 100), filtered to the canonical allowlist.
+- Hoisted `_DRILLDOWN_ACTIVITY_CODES` and the SQL constant to the
+  top of the file so they resolve before COMMAND_CARDS uses them.
+
+**Validation:**
+- `python -m py_compile` passes.
+
 ## 2026-06-04 — v0.12.7 stale-data banner on Overall Status
 
 **Done:**

@@ -108,6 +108,27 @@ PATCH_ACTIVITY_COLORS = {
     "Unknown":               "#bdbdbd",
 }
 
+# Canonical patch-lifecycle and reboot activity codes for the
+# Device Drilldown "Recent Patch & Reboot Activity" card and the
+# Command Center "Recent Patch Activity (Fleet)" card. Restricting at
+# the dashboard layer means the cards stay focused even if the ingest
+# TYPES_INCLUDE has broader codes. PATCH_MANAGEMENT_MESSAGE is left
+# OUT — it's the noisy generic info message code.
+_DRILLDOWN_ACTIVITY_CODES = (
+    "PATCH_MANAGEMENT_APPLY_PATCH_STARTED",
+    "PATCH_MANAGEMENT_APPLY_PATCH_COMPLETED",
+    "PATCH_MANAGEMENT_FAILURE",
+    "PATCH_MANAGEMENT_ROLLBACK_PATCH_REQUESTED",
+    "PATCH_MANAGEMENT_ROLLBACK_PATCH_STARTED",
+    "PATCH_MANAGEMENT_ROLLBACK_PATCH_COMPLETED",
+    "PATCH_MANAGEMENT_PATCH_APPROVED",
+    "PATCH_MANAGEMENT_PATCH_REJECTED",
+    "SYSTEM_REBOOTED",
+)
+_DRILLDOWN_ACTIVITY_CODES_SQL = ", ".join(
+    f"'{c}'" for c in _DRILLDOWN_ACTIVITY_CODES
+)
+
 OS_FAMILY_D = OS_FAMILY_SQL.format(alias="d").strip()
 OS_FAMILY_C = OS_FAMILY_SQL.format(alias="c").strip()
 PATCH_ACTIVITY_LABEL_C = PATCH_ACTIVITY_LABEL_SQL.format(expr="c.patch_status").strip()
@@ -517,6 +538,83 @@ ORDER BY
     c.last_install_at ASC NULLS FIRST,
     o.name,
     c.system_name
+LIMIT 100
+""",
+    },
+    # Row 38 — Devices with installed patches still pending reboot.
+    # Join INSTALLED patches × needs_reboot=true × no SYSTEM_REBOOTED
+    # activity since last install. Common patching-loop gap: install
+    # landed, reboot didn't happen, the patch hasn't really "taken".
+    {
+        "key":     "cmd_awaiting_reboot",
+        "name":    "Patches Installed Awaiting Reboot",
+        "display": "table",
+        "row": 38, "col": 0, "size_x": 24, "size_y": 10,
+        "column_click_behaviors": {
+            "organization": {"target": DASH_ORG,       "params": {"p_org": "organization"}},
+            "device":       {"target": DASH_DRILLDOWN, "params": {"p_device": "device"}},
+        },
+        "query": """
+WITH last_install AS (
+    SELECT device_id,
+           MAX(installed_at) AS last_install_at,
+           COUNT(*)          AS install_count
+    FROM ninja_patches.patch_facts
+    WHERE fact_type = 'install_outcome'
+      AND status    = 'INSTALLED'
+      AND installed_at IS NOT NULL
+    GROUP BY device_id
+),
+last_reboot AS (
+    SELECT device_id, MAX(activity_time) AS last_reboot_at
+    FROM ninja_activities.activities
+    WHERE activity_type = 'SYSTEM_REBOOTED'
+      AND device_id IS NOT NULL
+    GROUP BY device_id
+)
+SELECT
+    o.name AS organization,
+    d.system_name AS device,
+    li.last_install_at AS "Last Install",
+    lr.last_reboot_at  AS "Last Reboot",
+    li.install_count   AS "Installs",
+    ROUND(EXTRACT(EPOCH FROM (NOW() - li.last_install_at))/3600)::int
+        AS "Hours Since Install"
+FROM ninja_core.v_active_devices d
+JOIN ninja_core.organizations o ON o.id = d.organization_id
+JOIN last_install li ON li.device_id = d.id
+LEFT JOIN last_reboot lr ON lr.device_id = d.id
+WHERE d.needs_reboot = TRUE
+  AND (lr.last_reboot_at IS NULL OR lr.last_reboot_at < li.last_install_at)
+ORDER BY li.last_install_at DESC
+LIMIT 100
+""",
+    },
+    # Row 48 — Fleet-wide patch + reboot activity stream. Same
+    # allowlist as the Device Drilldown card so the noise/signal
+    # mix matches.
+    {
+        "key":     "cmd_recent_activity",
+        "name":    "Recent Patch Activity (Fleet)",
+        "display": "table",
+        "row": 48, "col": 0, "size_x": 24, "size_y": 10,
+        "column_click_behaviors": {
+            "organization": {"target": DASH_ORG,       "params": {"p_org": "organization"}},
+            "device":       {"target": DASH_DRILLDOWN, "params": {"p_device": "device"}},
+        },
+        "query": f"""
+SELECT
+    a.activity_time AS "Time",
+    d.system_name   AS device,
+    o.name          AS organization,
+    a.activity_type AS "Event Code",
+    a.subject       AS "Event",
+    a.message       AS "Message"
+FROM ninja_activities.activities a
+JOIN ninja_core.devices d ON d.id = a.device_id
+JOIN ninja_core.organizations o ON o.id = d.organization_id
+WHERE a.activity_type IN ({_DRILLDOWN_ACTIVITY_CODES_SQL})
+ORDER BY a.activity_time DESC
 LIMIT 100
 """,
     },
@@ -1549,26 +1647,6 @@ DEVICE_TIMELINE_PARAM_MAPPINGS = {
 }
 
 _DEVICE_FILTER = "[[AND d.system_name = {{device}}]]"
-
-# Canonical patch-lifecycle and reboot activity codes for the
-# Drilldown "Recent Patch & Reboot Activity" card. Restricting at the
-# dashboard layer means the card stays focused even if the ingest
-# TYPES_INCLUDE has broader codes. PATCH_MANAGEMENT_MESSAGE is left
-# OUT — it's the noisy generic info message code.
-_DRILLDOWN_ACTIVITY_CODES = (
-    "PATCH_MANAGEMENT_APPLY_PATCH_STARTED",
-    "PATCH_MANAGEMENT_APPLY_PATCH_COMPLETED",
-    "PATCH_MANAGEMENT_FAILURE",
-    "PATCH_MANAGEMENT_ROLLBACK_PATCH_REQUESTED",
-    "PATCH_MANAGEMENT_ROLLBACK_PATCH_STARTED",
-    "PATCH_MANAGEMENT_ROLLBACK_PATCH_COMPLETED",
-    "PATCH_MANAGEMENT_PATCH_APPROVED",
-    "PATCH_MANAGEMENT_PATCH_REJECTED",
-    "SYSTEM_REBOOTED",
-)
-_DRILLDOWN_ACTIVITY_CODES_SQL = ", ".join(
-    f"'{c}'" for c in _DRILLDOWN_ACTIVITY_CODES
-)
 
 
 def build_device_parameters(device_names: list[str]) -> list[dict]:
