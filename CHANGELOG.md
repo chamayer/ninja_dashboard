@@ -2,6 +2,44 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.14.1] — 2026-06-04
+
+### Added
+- **Patch Command Center filter set expanded** to Org · Device
+  Type · Severity (all multi-select). Previously only Device Type.
+  Every card on Command Center now honors all three filters.
+- New `PARAM_CMD_ORG`, `PARAM_CMD_SEV` parameter constants;
+  `_CMD_TAGS` / `_CMD_PARAM_MAPPINGS` expanded; new filter
+  fragments `_CMD_FILTER_ORG`, `_CMD_FILTER_SEV_CS`,
+  `_CMD_FILTER_SEV_LIR` and combined `_CMD_FILTERS_DEVICE`,
+  `_CMD_FILTERS_PATCH_CS`, `_CMD_FILTERS_PATCH_LIR` mirror the
+  pattern established in Org Overview.
+
+### Changed
+- All Command Center scalar SQLs that previously joined just
+  `ninja_core.devices` now also join `ninja_core.organizations` so
+  the Org filter can bite.
+- Patch-context scalar CTEs (`cmd_approved` / `_manual` /
+  `_delayed` / `_failed`) now select `severity` so it can be
+  filtered in the outer WHERE.
+- `cmd_clients` table applies the severity filter at CTE-level
+  (inside each `WITH ...` block) so the outer LEFT JOIN
+  semantics are preserved — filtering severity in the outer
+  WHERE would silently drop devices with no matching patch row.
+
+### Notes
+- Audit before changes (per blueprint): every Command Center card
+  was already correctly wired for the Device Type filter
+  (template_tags + param_mappings + filter in SQL). User-reported
+  "filters don't apply" was most likely a stale Metabase state
+  from before the v0.13.6 wiring deployed. Forcing a fresh
+  bootstrap should resolve it.
+
+### Process
+- Followed the new blueprint-first rule. `BLUEPRINT.md` updated
+  with the proposed filter set per dashboard; user confirmed
+  before implementation.
+
 ## [0.14.0] — 2026-06-04
 
 ### Removed

@@ -5,6 +5,41 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-04 — v0.14.1 Patch Command Center filter set expanded
+
+**Why:** User reported "cards on Command Center don't follow
+filters" and asked for high-level dashboards to have richer filter
+sets. Per the blueprint-first rule, wrote BLUEPRINT.md with
+proposed filter set per dashboard, user confirmed.
+
+**Audit:** every Command Center card was correctly wired for the
+existing Device Type filter (template_tags + param_mappings +
+predicate fragment in SQL). User-reported breakage most likely a
+stale Metabase state from before v0.13.6.
+
+**Done (Command Center only):**
+- Added Org + Severity dropdowns (all 3 multi-select).
+- `_CMD_TAGS` / `_CMD_PARAM_MAPPINGS_FULL` / new filter fragments
+  mirror the existing Org Overview pattern.
+- All 13 cards re-wired with org JOIN where missing, severity
+  added to CTEs where needed, and the appropriate filter fragment
+  in the outer WHERE.
+- `cmd_clients` filters severity at CTE level to preserve LEFT
+  JOIN semantics — filtering severity in the outer WHERE would
+  silently drop devices.
+- `build_command_parameters` now takes `org_names`; build_
+  dashboards passes it through.
+
+**Pending in same task (v0.14.2):**
+- Overall Patching Status filter expansion (Org + OS Family +
+  Severity).
+- Trends filter expansion (Org + Severity).
+- Convert remaining Org dropdowns (Detail, Org Overview, PCOV) to
+  multi-select.
+
+**Validation:**
+- `python -m py_compile` passes.
+
 ## 2026-06-04 — v0.14.0 filter audit clean + Needs Reboot demoted
 
 **Why:** Operator wanted (1) confidence the v0.13.9 bug pattern

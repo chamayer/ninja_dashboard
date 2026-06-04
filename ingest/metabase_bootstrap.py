@@ -234,27 +234,47 @@ END
 
 # ── Card specs ──────────────────────────────────────────────────────
 
+PARAM_CMD_ORG   = "p_cmd_org"
 PARAM_CMD_CLASS = "p_cmd_class"
+PARAM_CMD_SEV   = "p_cmd_sev"
+
 _CMD_TAGS = {
-    "device_type": {
-        "id": "tt_cmd_device_type", "name": "device_type",
-        "display-name": "Device Type", "type": "text",
-    },
+    "org":         {"id": "tt_cmd_org",         "name": "org",         "display-name": "Organization", "type": "text"},
+    "device_type": {"id": "tt_cmd_device_type", "name": "device_type", "display-name": "Device Type",  "type": "text"},
+    "severity":    {"id": "tt_cmd_severity",    "name": "severity",    "display-name": "Severity",     "type": "text"},
 }
+
+# Mapping used by device-context cards (no patch severity available).
 _CMD_PARAM_MAPPINGS = {
+    PARAM_CMD_ORG:   ["variable", ["template-tag", "org"]],
     PARAM_CMD_CLASS: ["variable", ["template-tag", "device_type"]],
 }
-_CMD_DEVICE_TYPE_FILTER = (
-    f"  [[AND {DEVICE_TYPE_D} IN ({{{{device_type}}}})]]\n"
-)
+# Mapping used by patch-context cards (severity wires through cs / lir).
+_CMD_PARAM_MAPPINGS_FULL = {
+    **_CMD_PARAM_MAPPINGS,
+    PARAM_CMD_SEV: ["variable", ["template-tag", "severity"]],
+}
+
+# Filter fragments — appended after WHERE / before GROUP BY.
+_CMD_FILTER_ORG         = "  [[AND o.name IN ({{org}})]]\n"
+_CMD_FILTER_DEVICE_TYPE = f"  [[AND {DEVICE_TYPE_D} IN ({{{{device_type}}}})]]\n"
+_CMD_FILTER_SEV_CS      = "  [[AND cs.severity IN ({{severity}})]]\n"
+_CMD_FILTER_SEV_LIR     = "  [[AND lir.severity IN ({{severity}})]]\n"
+
+_CMD_FILTERS_DEVICE       = _CMD_FILTER_ORG + _CMD_FILTER_DEVICE_TYPE
+_CMD_FILTERS_PATCH_CS     = _CMD_FILTERS_DEVICE + _CMD_FILTER_SEV_CS
+_CMD_FILTERS_PATCH_LIR    = _CMD_FILTERS_DEVICE + _CMD_FILTER_SEV_LIR
+
+# Back-compat — older edits still reference this name. Aliases the
+# device-only filter (the old single-purpose Device Type fragment).
+_CMD_DEVICE_TYPE_FILTER   = _CMD_FILTER_DEVICE_TYPE
 
 
-def build_command_parameters() -> list[dict]:
+def build_command_parameters(org_names: list[str]) -> list[dict]:
     return [
-        _param_multiselect(
-            PARAM_CMD_CLASS, "Device Type", "device_type",
-            _NODE_CLASS_OPTIONS,
-        ),
+        _param_multiselect(PARAM_CMD_ORG,   "Organization", "org",         org_names),
+        _param_multiselect(PARAM_CMD_CLASS, "Device Type",  "device_type", _NODE_CLASS_OPTIONS),
+        _param_multiselect(PARAM_CMD_SEV,   "Severity",     "severity",    _SEVERITY_OPTIONS),
     ]
 
 
@@ -274,8 +294,9 @@ COMMAND_CARDS: list[dict[str, Any]] = [
         "query": f"""
 SELECT COUNT(*) AS devices
 FROM ninja_core.v_active_devices d
+JOIN ninja_core.organizations o ON o.id = d.organization_id
 WHERE 1=1
-{_CMD_DEVICE_TYPE_FILTER}
+{_CMD_FILTERS_DEVICE}
 """,
     },
     {
@@ -296,11 +317,12 @@ WITH last_install AS (
 )
 SELECT COUNT(*) AS devices
 FROM ninja_core.devices d
+JOIN ninja_core.organizations o ON o.id = d.organization_id
 JOIN last_install li ON li.device_id = d.id
 WHERE d.approval_status = 'APPROVED'
   AND d.node_class IN ('WINDOWS_WORKSTATION', 'WINDOWS_SERVER')
   AND li.last_install_at >= NOW() - (INTERVAL '1 day' * {DEFAULT_STALE_PATCH_DAYS})
-{_CMD_DEVICE_TYPE_FILTER}
+{_CMD_FILTERS_DEVICE}
 """,
     },
     {
@@ -321,11 +343,12 @@ WITH last_install AS (
 )
 SELECT COUNT(*) AS devices
 FROM ninja_core.devices d
+JOIN ninja_core.organizations o ON o.id = d.organization_id
 JOIN last_install li ON li.device_id = d.id
 WHERE d.approval_status = 'APPROVED'
   AND d.node_class IN ('WINDOWS_WORKSTATION', 'WINDOWS_SERVER')
   AND li.last_install_at < NOW() - (INTERVAL '1 day' * {DEFAULT_STALE_PATCH_DAYS})
-{_CMD_DEVICE_TYPE_FILTER}
+{_CMD_FILTERS_DEVICE}
 """,
     },
     {
@@ -339,6 +362,7 @@ WHERE d.approval_status = 'APPROVED'
         "query": f"""
 SELECT COUNT(*) AS devices
 FROM ninja_core.devices d
+JOIN ninja_core.organizations o ON o.id = d.organization_id
 LEFT JOIN ninja_patches.patch_facts pf
   ON pf.device_id = d.id
  AND pf.fact_type = 'install_outcome'
@@ -346,7 +370,7 @@ LEFT JOIN ninja_patches.patch_facts pf
 WHERE d.approval_status = 'APPROVED'
   AND d.node_class IN ('WINDOWS_WORKSTATION', 'WINDOWS_SERVER')
   AND pf.device_id IS NULL
-{_CMD_DEVICE_TYPE_FILTER}
+{_CMD_FILTERS_DEVICE}
 """,
     },
     # Row 4 — Patches (canonical order: Approved, Manual, Delayed,
@@ -358,11 +382,11 @@ WHERE d.approval_status = 'APPROVED'
         "display":        "scalar",
         "row": 4, "col": 0, "size_x": 6, "size_y": 4,
         "template_tags":  _CMD_TAGS,
-        "param_mappings": _CMD_PARAM_MAPPINGS,
+        "param_mappings": _CMD_PARAM_MAPPINGS_FULL,
         "click_behavior": {"target": DASH_DETAIL, "preset": {"status": "APPROVED"}},
         "query": f"""
 WITH current_state AS (
-    SELECT DISTINCT ON (device_id, patch_uid) device_id, status
+    SELECT DISTINCT ON (device_id, patch_uid) device_id, status, severity
     FROM ninja_patches.patch_facts
     WHERE fact_type = 'patch_state'
     ORDER BY device_id, patch_uid, last_observed_at DESC, id DESC
@@ -370,8 +394,9 @@ WITH current_state AS (
 SELECT COUNT(*) AS patches
 FROM current_state cs
 JOIN ninja_core.devices d ON d.id = cs.device_id
+JOIN ninja_core.organizations o ON o.id = d.organization_id
 WHERE cs.status = 'APPROVED'
-{_CMD_DEVICE_TYPE_FILTER}
+{_CMD_FILTERS_PATCH_CS}
 """,
     },
     {
@@ -380,11 +405,11 @@ WHERE cs.status = 'APPROVED'
         "display":        "scalar",
         "row": 4, "col": 6, "size_x": 6, "size_y": 4,
         "template_tags":  _CMD_TAGS,
-        "param_mappings": _CMD_PARAM_MAPPINGS,
+        "param_mappings": _CMD_PARAM_MAPPINGS_FULL,
         "click_behavior": {"target": DASH_DETAIL, "preset": {"status": "MANUAL"}},
         "query": f"""
 WITH current_state AS (
-    SELECT DISTINCT ON (device_id, patch_uid) device_id, status
+    SELECT DISTINCT ON (device_id, patch_uid) device_id, status, severity
     FROM ninja_patches.patch_facts
     WHERE fact_type = 'patch_state'
     ORDER BY device_id, patch_uid, last_observed_at DESC, id DESC
@@ -392,8 +417,9 @@ WITH current_state AS (
 SELECT COUNT(*) AS patches
 FROM current_state cs
 JOIN ninja_core.devices d ON d.id = cs.device_id
+JOIN ninja_core.organizations o ON o.id = d.organization_id
 WHERE cs.status = 'MANUAL'
-{_CMD_DEVICE_TYPE_FILTER}
+{_CMD_FILTERS_PATCH_CS}
 """,
     },
     {
@@ -402,11 +428,11 @@ WHERE cs.status = 'MANUAL'
         "display":        "scalar",
         "row": 4, "col": 12, "size_x": 6, "size_y": 4,
         "template_tags":  _CMD_TAGS,
-        "param_mappings": _CMD_PARAM_MAPPINGS,
+        "param_mappings": _CMD_PARAM_MAPPINGS_FULL,
         "click_behavior": {"target": DASH_DETAIL, "preset": {"status": "DELAYED"}},
         "query": f"""
 WITH current_state AS (
-    SELECT DISTINCT ON (device_id, patch_uid) device_id, status
+    SELECT DISTINCT ON (device_id, patch_uid) device_id, status, severity
     FROM ninja_patches.patch_facts
     WHERE fact_type = 'patch_state'
     ORDER BY device_id, patch_uid, last_observed_at DESC, id DESC
@@ -414,8 +440,9 @@ WITH current_state AS (
 SELECT COUNT(*) AS patches
 FROM current_state cs
 JOIN ninja_core.devices d ON d.id = cs.device_id
+JOIN ninja_core.organizations o ON o.id = d.organization_id
 WHERE cs.status = 'DELAYED'
-{_CMD_DEVICE_TYPE_FILTER}
+{_CMD_FILTERS_PATCH_CS}
 """,
     },
     {
@@ -424,11 +451,11 @@ WHERE cs.status = 'DELAYED'
         "display":        "scalar",
         "row": 4, "col": 18, "size_x": 6, "size_y": 4,
         "template_tags":  _CMD_TAGS,
-        "param_mappings": _CMD_PARAM_MAPPINGS,
+        "param_mappings": _CMD_PARAM_MAPPINGS_FULL,
         "click_behavior": {"target": DASH_DETAIL, "preset": {"install_outcome": "FAILED"}},
         "query": f"""
 WITH latest_install_result AS (
-    SELECT DISTINCT ON (device_id, patch_uid) device_id, status
+    SELECT DISTINCT ON (device_id, patch_uid) device_id, status, severity
     FROM ninja_patches.patch_facts
     WHERE fact_type = 'install_outcome'
     ORDER BY
@@ -442,8 +469,9 @@ WITH latest_install_result AS (
 SELECT COUNT(*) AS patches
 FROM latest_install_result lir
 JOIN ninja_core.devices d ON d.id = lir.device_id
+JOIN ninja_core.organizations o ON o.id = d.organization_id
 WHERE lir.status = 'FAILED'
-{_CMD_DEVICE_TYPE_FILTER}
+{_CMD_FILTERS_PATCH_LIR}
 """,
     },
     {
@@ -452,21 +480,27 @@ WHERE lir.status = 'FAILED'
         "display":        "table",
         "row": 8, "col": 0, "size_x": 24, "size_y": 10,
         "template_tags":  _CMD_TAGS,
-        "param_mappings": _CMD_PARAM_MAPPINGS,
+        "param_mappings": _CMD_PARAM_MAPPINGS_FULL,
         "column_click_behaviors": {
             "organization": {"target": DASH_ORG, "params": {"p_org": "organization"}},
         },
+        # Severity filter applied at CTE-level (not outer WHERE) so
+        # LEFT JOIN semantics are preserved — filtering severity in
+        # the outer WHERE would silently drop devices with no
+        # matching patch row.
         "query": f"""
 WITH current_state AS (
-    SELECT DISTINCT ON (device_id, patch_uid) device_id, patch_uid, status
+    SELECT DISTINCT ON (device_id, patch_uid) device_id, patch_uid, status, severity
     FROM ninja_patches.patch_facts
     WHERE fact_type = 'patch_state'
+      [[AND severity IN ({{{{severity}}}})]]
     ORDER BY device_id, patch_uid, last_observed_at DESC, id DESC
 ),
 latest_install_result AS (
-    SELECT DISTINCT ON (device_id, patch_uid) device_id, patch_uid, status
+    SELECT DISTINCT ON (device_id, patch_uid) device_id, patch_uid, status, severity
     FROM ninja_patches.patch_facts
     WHERE fact_type = 'install_outcome'
+      [[AND severity IN ({{{{severity}}}})]]
     ORDER BY
         device_id,
         patch_uid,
@@ -512,7 +546,7 @@ LEFT JOIN latest_install_result lio
   ON lio.device_id = cs.device_id AND lio.patch_uid = cs.patch_uid
 LEFT JOIN device_status ds ON ds.id = d.id
 WHERE 1=1
-{_CMD_DEVICE_TYPE_FILTER}
+{_CMD_FILTERS_DEVICE}
 GROUP BY o.name
 HAVING
     COUNT(*) FILTER (WHERE lio.status = 'FAILED') > 0
@@ -535,7 +569,7 @@ LIMIT 50
         "display":        "table",
         "row": 18, "col": 0, "size_x": 24, "size_y": 10,
         "template_tags":  _CMD_TAGS,
-        "param_mappings": _CMD_PARAM_MAPPINGS,
+        "param_mappings": _CMD_PARAM_MAPPINGS_FULL,
         "column_click_behaviors": {
             "organization": {"target": DASH_ORG,       "params": {"p_org": "organization"}},
             "device":       {"target": DASH_DRILLDOWN, "params": {"p_device": "device"}},
@@ -571,7 +605,7 @@ FROM latest_install_result lir
 JOIN ninja_core.v_active_devices d ON d.id = lir.device_id
 JOIN ninja_core.organizations o ON o.id = d.organization_id
 WHERE lir.status = 'FAILED'
-{_CMD_DEVICE_TYPE_FILTER}
+{_CMD_FILTERS_PATCH_LIR}
 ORDER BY lir.installed_at DESC NULLS LAST, o.name, d.system_name
 LIMIT 100
 """,
@@ -582,7 +616,7 @@ LIMIT 100
         "display":        "table",
         "row": 28, "col": 0, "size_x": 24, "size_y": 10,
         "template_tags":  _CMD_TAGS,
-        "param_mappings": _CMD_PARAM_MAPPINGS,
+        "param_mappings": _CMD_PARAM_MAPPINGS_FULL,
         "column_click_behaviors": {
             "organization":        {"target": DASH_ORG,    "params": {"p_org": "organization"}},
             "device":              {"target": DASH_DRILLDOWN, "params": {"p_device": "device"}},
@@ -610,7 +644,7 @@ FROM current_state cs
 JOIN ninja_core.v_active_devices d ON d.id = cs.device_id
 JOIN ninja_core.organizations o ON o.id = d.organization_id
 WHERE cs.status IN ('MANUAL', 'DELAYED')
-{_CMD_DEVICE_TYPE_FILTER}
+{_CMD_FILTERS_PATCH_CS}
 ORDER BY
     CASE cs.status WHEN 'MANUAL' THEN 0 ELSE 1 END,
     cs.last_observed_at DESC,
@@ -666,7 +700,7 @@ JOIN last_install li ON li.device_id = d.id
 LEFT JOIN last_reboot lr ON lr.device_id = d.id
 WHERE d.needs_reboot = TRUE
   AND (lr.last_reboot_at IS NULL OR lr.last_reboot_at < li.last_install_at)
-{_CMD_DEVICE_TYPE_FILTER}
+{_CMD_FILTERS_DEVICE}
 ORDER BY li.last_install_at DESC
 LIMIT 100
 """,
@@ -697,7 +731,7 @@ FROM ninja_activities.activities a
 JOIN ninja_core.devices d ON d.id = a.device_id
 JOIN ninja_core.organizations o ON o.id = d.organization_id
 WHERE a.activity_type IN ({_DRILLDOWN_ACTIVITY_CODES_SQL})
-{_CMD_DEVICE_TYPE_FILTER}
+{_CMD_FILTERS_DEVICE}
 ORDER BY a.activity_time DESC
 LIMIT 100
 """,
@@ -3094,7 +3128,7 @@ def build_dashboards(
     return [
         {
             "name":       DASH_COMMAND,
-            "parameters": build_command_parameters(),
+            "parameters": build_command_parameters(org_names),
             "cards":      COMMAND_CARDS,
             "section_headers": [
                 {"row": 0, "text": "### Devices"},
