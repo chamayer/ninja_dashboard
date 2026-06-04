@@ -5,6 +5,24 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-04 — v0.14.10 align Org + Trends visible labels to patching-device KPI
+
+**Why:** The Org Overview bars and Trends line still showed the old
+`Fully patched devices %` wording even after the KPI formula was
+clarified.
+
+**Done:**
+- Renamed the Org Overview bar chart labels to
+  `Fully patched % (patching devices)` by device type / operating
+  system.
+- Renamed the Trends line to
+  `Fully patched % (patching devices) per Day`.
+- Left Command Center alone.
+
+**Validation:**
+- `python -m py_compile ingest/metabase_bootstrap.py` passes.
+- Commit hash pending until the docs follow-up lands.
+
 ## 2026-06-04 — v0.14.9 clarify fully-patched KPI as patching-device subset
 
 **Why:** The second KPI title looked like fleet-wide compliance even

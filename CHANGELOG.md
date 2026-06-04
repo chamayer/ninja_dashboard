@@ -2,6 +2,15 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.14.10] — 2026-06-04
+
+### Changed
+- **Org Overview and Trends now use the patching-device denominator in
+  the visible KPI titles.** The second operator KPI is now
+  `Fully patched % (patching devices)` everywhere it appears on the
+  org-facing and trend dashboards.
+- Commit: `TBD`
+
 ## [0.14.9] — 2026-06-04
 
 ### Changed
