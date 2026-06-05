@@ -1116,3 +1116,11 @@ list):**
 - Reflowed the Overall Status and Org Overview KPI bands so the percent
   cards, count cards, and Active Devices card sit in a compact top
   section.
+- Added patch summary materialized views for current patch state,
+  latest install outcome, and per-device patch signal; patch ingest now
+  refreshes them after each run.
+- Reworked the heavy Metabase cards to use those summary views instead
+  of rebuilding latest patch state per card.
+- Re-banded Overall Patching Status and Org Overview into compact
+  Compliance, Devices, and Patches sections, and fixed the Trends
+  patch-scope filter path for Patch Installs per Day.

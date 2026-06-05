@@ -102,6 +102,7 @@ def run(client: NinjaClient, snapshot_at: datetime) -> tuple[int, int]:
             "patch_facts: %d observed (installs %d + state %d), %d inserts/updates",
             total_observed, installs_count, pending_count, total_changed,
         )
+        _refresh_summary_views()
         return total_changed, total_observed
 
 
@@ -126,6 +127,15 @@ def _flush(rows: list[dict[str, Any]]) -> int:
             conflict_keys=["device_id", "patch_uid", "content_hash"],
             update_cols=["fact_type", "last_observed_at", "ninja_observed_at", "data"],
         )
+
+
+def _refresh_summary_views() -> None:
+    """Refresh dashboard summary views after patch facts change."""
+    with db.transaction() as cur:
+        cur.execute("REFRESH MATERIALIZED VIEW ninja_patches.current_patch_state")
+        cur.execute("REFRESH MATERIALIZED VIEW ninja_patches.latest_install_outcome")
+        cur.execute("REFRESH MATERIALIZED VIEW ninja_patches.device_patch_signal")
+    log.info("Refreshed patch summary materialized views")
 
 
 def _to_row(rec: dict[str, Any], snapshot_at: datetime, fact_type: str) -> dict[str, Any]:

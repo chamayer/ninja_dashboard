@@ -1,8 +1,8 @@
 -- =============================================================================
--- 007_active_devices_custom_fields.sql
--- Extends v_active_devices with the resolved patching-scope fields from
--- the raw custom-field values table so dashboards can display and filter
--- device/org exception state in one place.
+-- 009_active_devices_location_scope.sql
+-- Rebuilds v_active_devices so patching-scope exclusions can inherit from
+-- device, organization, or location custom fields. Device values still win,
+-- then organization, then location.
 -- =============================================================================
 
 CREATE OR REPLACE VIEW ninja_core.v_active_devices AS
