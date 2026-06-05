@@ -5,6 +5,76 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-05 — v0.15.0 never-patched fix + driver-category exclude
+
+**Why:** Troubleshooting session on device 4042 found ~6 devices
+fleet-wide misclassified as Never-Patched. Root cause: Ninja's
+`/queries/os-patch-installs` returns INSTALLED rows without
+`installedAt` for some historical / OS-applied patches. The
+`device_patch_signal` MV filtered `installed_at IS NOT NULL` at
+source, so those devices disappeared from the signal and
+classification logic concluded "never installed." Separately, the
+operator wanted to hide DRIVER_UPDATES from every patch-context view
+since they're not in scope for installs yet.
+
+**Done:**
+- Wrote `sql/migrations/016_install_signal_and_patch_category.sql`:
+  - Rebuilt `device_patch_signal` to expose `ever_installed bool`
+    alongside `last_seen_at` (still `MAX(installed_at)`). Dropped
+    the source `IS NOT NULL` filter.
+  - Added `patch_category` column to `current_patch_state` and
+    `latest_install_outcome` (sourced from `patch_facts.type`).
+  - Drop+recreated `device_troubleshooting_signal` (mig 015 body)
+    with `patch_status`, `issue_type`, and `suggested_action` CASE
+    blocks updated to read `dps.ever_installed`. Added explicit
+    branches for `'Stalled (install dates missing)'`.
+- Added `DASHBOARD_PATCH_CATEGORIES_EXCLUDE` setting to
+  `ingest/config.py` and documented it in `.env.example`. Default
+  `DRIVER_UPDATES`. Empty value disables the exclusion.
+- In `ingest/metabase_bootstrap.py`:
+  - Added module-level `EXCLUDE_PATCH_TYPES`,
+    `_PATCH_TYPE_EXCLUDE` (for MV-based CTEs), and
+    `_PATCH_TYPE_EXCLUDE_RAW` (for raw `patch_facts` CTEs).
+  - Threaded the exclude fragment into every patch-context CTE:
+    `_COMPLIANCE_CTES` and its three inline duplicates, all `cmd_*`
+    / `patches_*` / `org_*` scalar+table cards, both Patch Detail
+    shared CTEs (`_CTE_CURRENT_STATE`), Device Drilldown Patch
+    State / Install History, Trends installs/failures per day, the
+    daily-compliance helpers, Awaiting-Reboot last-install CTE,
+    Org Overview client tables, etc.
+  - Swapped `dps.last_seen_at IS NULL → NOT COALESCE(dps.ever_installed,
+    FALSE)` everywhere classification runs (5 spots in scalar/count
+    helpers, 1 in trends per-day, 1 in `cmd_clients`, 1 in
+    `_PCOV_CTE`, 1 in `_problem_devices_cte`).
+  - Surfaced `Type` column on Device Drilldown's Patch State
+    History and Install History tables.
+- Updated `CONTEXT.md` with two new sections: "Patch category
+  exclusion" and "Never-patched vs install-dates-missing".
+- Bumped `VERSION` to 0.15.0 (compliance counts shift +
+  new env-var default).
+
+**Validation:**
+- `python -m py_compile ingest/metabase_bootstrap.py` passes.
+- Smoke tests deferred until next ingest cycle on real DB; expected:
+  - `SELECT ever_installed, last_seen_at FROM
+    ninja_patches.device_patch_signal WHERE device_id = 4042;` →
+    `ever_installed = TRUE`, `last_seen_at IS NULL`.
+  - `issue_type` for device 4042 in
+    `device_troubleshooting_signal` should read
+    `'Stalled (install dates missing)'`.
+  - `SELECT COUNT(*) FROM ninja_patches.device_patch_signal WHERE
+    ever_installed AND last_seen_at IS NULL;` → ~6.
+  - Driver rows hidden from every patch card; raw `patch_facts`
+    counts unchanged.
+
+**Open follow-ups (parked in TROUBLESHOOTING.md):**
+- `ninja_core.devices.needs_reboot` column missing — separate fix.
+- `installed_at = 2010-11-20` outlier sanity check.
+- `INGEST_PATCHING_ENABLED_POLICIES` wire-up audit.
+- Dead code: `_PATCH_SCOPE_CTE` (line 224 of
+  `metabase_bootstrap.py`) is defined but never referenced —
+  separate cleanup.
+
 ## 2026-06-04 — handy commands reference added
 
 **Why:** The same host, ingest, Metabase, Postgres, probe, and SQL

@@ -138,6 +138,49 @@ See `REQUIREMENTS.md` §4 for the full schema.
 Dashboards should split MANUAL from DELAYED, not lump them — they
 mean very different things operationally.
 
+## Patch category exclusion
+
+`patch_facts.type` holds Ninja's patch category (`SECURITY_UPDATES`,
+`DRIVER_UPDATES`, `UPDATE_ROLLUPS`, `UNKNOWN`, etc.). Surfaced as
+`patch_category` on the `current_patch_state` and
+`latest_install_outcome` materialized views (migration 016).
+
+Dashboards filter categories via `DASHBOARD_PATCH_CATEGORIES_EXCLUDE`
+in `.env` — comma-separated list applied as a shared
+`_PATCH_TYPE_EXCLUDE` SQL fragment at the top of
+`metabase_bootstrap.py`. Default excludes `DRIVER_UPDATES` because the
+operator does not install drivers; flipping the env var back to empty
+restores them everywhere with no migration needed. Raw rows always
+stay in `patch_facts` — exclusion is presentation-only.
+
+## Never-patched vs install-dates-missing
+
+The `device_patch_signal` materialized view (migration 016) exposes
+two distinct signals per device:
+
+- `ever_installed bool` — true when there is at least one
+  `install_outcome / INSTALLED` row, regardless of timestamp.
+- `last_seen_at timestamptz` — strictly `MAX(installed_at)` of real
+  install dates. NULL when `ever_installed` is TRUE but Ninja's
+  `/queries/os-patch-installs` returned the install records without
+  `installedAt` (typically old / OS-applied historical patches).
+
+Classification rules used everywhere:
+
+- `ever_installed = FALSE` → **Never patched**.
+- `ever_installed AND (last_seen_at IS NULL OR last_seen_at < now() -
+  35d)` → **Stalled**. The dateless subset surfaces as
+  `'Stalled (install dates missing)'` in `issue_type` on
+  `device_troubleshooting_signal` so operators see why they landed
+  there.
+- `ever_installed AND last_seen_at >= now() - 35d` →
+  **Actively patching**.
+
+`ninja_observed_at` is deliberately NOT used as a fallback install
+date — it's Ninja's scan timestamp, refreshed every ingest cycle, so
+treating it as install time would falsely classify devices that Ninja
+just keeps re-scanning ancient installs on as actively patching.
+
 ## Fully patched devices formula
 
 Single source of truth for every `Fully patched devices %` card across

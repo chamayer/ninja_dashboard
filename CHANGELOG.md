@@ -2,6 +2,53 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.15.0] — 2026-06-05
+
+### Fixed
+- **Never-Patched misclassification for devices with install rows but
+  no `installedAt`.** Ninja's `/queries/os-patch-installs` omits the
+  install timestamp for ~1.2% of INSTALLED rows (typically old or
+  OS-applied historical patches). The `device_patch_signal`
+  materialized view previously filtered `installed_at IS NOT NULL` at
+  source, dropping ~6 devices from the signal entirely and showing
+  them as Never-Patched even though Ninja has them as installed.
+  Migration 016 rebuilds the view with two columns:
+  `ever_installed bool` (existence-only) and `last_seen_at`
+  (still strictly `MAX(installed_at)`). All 53 references to
+  `dps.last_seen_at` in `metabase_bootstrap.py` keep working; the
+  Never-Patched / Stalled / Actively-patching classification now
+  reads `ever_installed`, so the affected devices reclassify into
+  Stalled with `issue_type = 'Stalled (install dates missing)'`.
+
+### Added
+- **`DASHBOARD_PATCH_CATEGORIES_EXCLUDE` env var.** Comma-separated
+  list of Ninja patch categories (`patch_facts.type` values) to hide
+  from every patch-context dashboard query. Default
+  `DRIVER_UPDATES`. Rendered into a shared `_PATCH_TYPE_EXCLUDE` SQL
+  fragment at the top of `metabase_bootstrap.py` and appended to
+  every patch CTE. Empty value disables the exclusion in one place.
+  Raw rows stay in `patch_facts` — exclusion is presentation-only,
+  so re-enabling drivers later is a one-line config change.
+- **`patch_category` column** surfaced on the
+  `current_patch_state` and `latest_install_outcome` materialized
+  views (sourced from `patch_facts.type`). Device Drilldown's
+  Patch State History and Install History tables now include a
+  `Type` column. Operator-facing tables on Patch Detail / Command
+  Center / Org Overview select the column too so it's available to
+  Metabase via the underlying CTE.
+
+### Notes
+- Migration 016 drop+recreates `device_troubleshooting_signal` along
+  with the three patch MVs (dependency order). The signal MV's
+  `patch_status`, `issue_type`, and `suggested_action` CASE blocks
+  were updated to read `ever_installed` and added explicit branches
+  for the dateless-stalled subset.
+- `ninja_observed_at` deliberately NOT used as a fallback install
+  date. It's Ninja's scan timestamp, refreshed every ingest cycle,
+  so treating it as install time would falsely classify devices Ninja
+  keeps re-scanning ancient installs on as actively patching.
+- Commit: `TBD`
+
 ## [0.14.11] — 2026-06-04
 
 ### Changed

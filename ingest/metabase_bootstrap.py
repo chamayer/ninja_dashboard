@@ -197,16 +197,39 @@ COMPLIANCE_MISSING_SQL = ", ".join(
     f"'{s}'" for s in COMPLIANCE_MISSING_STATES
 )
 
+# Patch categories to hide from every patch-context view. Driven by
+# DASHBOARD_PATCH_CATEGORIES_EXCLUDE in .env. Default excludes
+# DRIVER_UPDATES. Rendered into _PATCH_TYPE_EXCLUDE below and appended
+# to every patch-context WHERE clause. Empty tuple = no exclusion (the
+# fragment becomes the empty string, no-op).
+EXCLUDE_PATCH_TYPES = settings.dashboard_patch_categories_exclude
+_EXCLUDE_PATCH_TYPES_SQL = ", ".join(f"'{t}'" for t in EXCLUDE_PATCH_TYPES)
+# For CTEs reading the materialized views (current_patch_state /
+# latest_install_outcome — column renamed `patch_category`).
+_PATCH_TYPE_EXCLUDE = (
+    f"  AND COALESCE(patch_category, 'UNKNOWN') NOT IN ({_EXCLUDE_PATCH_TYPES_SQL})\n"
+    if EXCLUDE_PATCH_TYPES
+    else ""
+)
+# For CTEs reading raw patch_facts (trends per-day, ad-hoc joins) where
+# the column is `type` and needs a table alias.
+_PATCH_TYPE_EXCLUDE_RAW = (
+    f"  AND COALESCE(pf.type, 'UNKNOWN') NOT IN ({_EXCLUDE_PATCH_TYPES_SQL})\n"
+    if EXCLUDE_PATCH_TYPES
+    else ""
+)
+
 _COMPLIANCE_CTES = f"""
 WITH installed_patches AS (
     SELECT DISTINCT device_id, patch_uid
     FROM ninja_patches.latest_install_outcome
     WHERE status = 'INSTALLED'
-),
+{_PATCH_TYPE_EXCLUDE}),
 current_patch_state AS (
     SELECT device_id, patch_uid, status
     FROM ninja_patches.current_patch_state
-),
+    WHERE 1=1
+{_PATCH_TYPE_EXCLUDE}),
 missing_patches AS (
     SELECT device_id, patch_uid
     FROM current_patch_state
@@ -333,9 +356,11 @@ WITH classified AS (
         d.organization_id,
         d.node_class,
         d.os_name,
+        dps.ever_installed,
         dps.last_seen_at,
         CASE
-            WHEN dps.last_seen_at IS NULL THEN 'no_patch_data'
+            WHEN NOT COALESCE(dps.ever_installed, FALSE) THEN 'no_patch_data'
+            WHEN dps.last_seen_at IS NULL THEN 'stale_patch_data'
             WHEN dps.last_seen_at < NOW() - (INTERVAL '1 day' * {DEFAULT_STALE_PATCH_DAYS}) THEN 'stale_patch_data'
             ELSE 'active_patching'
         END AS patch_status
@@ -389,9 +414,11 @@ WITH classified AS (
         d.organization_id,
         d.node_class,
         d.os_name,
+        dps.ever_installed,
         dps.last_seen_at,
         CASE
-            WHEN dps.last_seen_at IS NULL THEN 'no_patch_data'
+            WHEN NOT COALESCE(dps.ever_installed, FALSE) THEN 'no_patch_data'
+            WHEN dps.last_seen_at IS NULL THEN 'stale_patch_data'
             WHEN dps.last_seen_at < NOW() - (INTERVAL '1 day' * {DEFAULT_STALE_PATCH_DAYS}) THEN 'stale_patch_data'
             ELSE 'active_patching'
         END AS patch_status
@@ -404,11 +431,12 @@ installed_patches AS (
     SELECT DISTINCT device_id, patch_uid
     FROM ninja_patches.latest_install_outcome
     WHERE status = 'INSTALLED'
-),
+{_PATCH_TYPE_EXCLUDE}),
 current_patch_state AS (
     SELECT device_id, patch_uid, status
     FROM ninja_patches.current_patch_state
-),
+    WHERE 1=1
+{_PATCH_TYPE_EXCLUDE}),
 missing_patches AS (
     SELECT device_id, patch_uid
     FROM current_patch_state
@@ -454,9 +482,11 @@ WITH classified AS (
         d.organization_id,
         d.node_class,
         d.os_name,
+        dps.ever_installed,
         dps.last_seen_at,
         CASE
-            WHEN dps.last_seen_at IS NULL THEN 'no_patch_data'
+            WHEN NOT COALESCE(dps.ever_installed, FALSE) THEN 'no_patch_data'
+            WHEN dps.last_seen_at IS NULL THEN 'stale_patch_data'
             WHEN dps.last_seen_at < NOW() - (INTERVAL '1 day' * {DEFAULT_STALE_PATCH_DAYS}) THEN 'stale_patch_data'
             ELSE 'active_patching'
         END AS patch_status
@@ -483,9 +513,11 @@ WITH classified AS (
         d.organization_id,
         d.node_class,
         d.os_name,
+        dps.ever_installed,
         dps.last_seen_at,
         CASE
-            WHEN dps.last_seen_at IS NULL THEN 'no_patch_data'
+            WHEN NOT COALESCE(dps.ever_installed, FALSE) THEN 'no_patch_data'
+            WHEN dps.last_seen_at IS NULL THEN 'stale_patch_data'
             WHEN dps.last_seen_at < NOW() - (INTERVAL '1 day' * {DEFAULT_STALE_PATCH_DAYS}) THEN 'stale_patch_data'
             ELSE 'active_patching'
         END AS patch_status
@@ -498,11 +530,12 @@ installed_patches AS (
     SELECT DISTINCT device_id, patch_uid
     FROM ninja_patches.latest_install_outcome
     WHERE status = 'INSTALLED'
-),
+{_PATCH_TYPE_EXCLUDE}),
 current_patch_state AS (
     SELECT device_id, patch_uid, status
     FROM ninja_patches.current_patch_state
-),
+    WHERE 1=1
+{_PATCH_TYPE_EXCLUDE}),
 missing_patches AS (
     SELECT device_id, patch_uid
     FROM current_patch_state
@@ -554,7 +587,7 @@ installed_patches AS (
       ON pf.fact_type = 'install_outcome'
      AND pf.status = 'INSTALLED'
      AND pf.installed_at < days.day + INTERVAL '1 day'
-    ORDER BY
+{_PATCH_TYPE_EXCLUDE_RAW}    ORDER BY
         days.day,
         pf.device_id,
         pf.patch_uid,
@@ -572,7 +605,7 @@ current_patch_state AS (
     JOIN ninja_patches.patch_facts pf
       ON pf.fact_type = 'patch_state'
      AND pf.first_observed_at < days.day + INTERVAL '1 day'
-    ORDER BY
+{_PATCH_TYPE_EXCLUDE_RAW}    ORDER BY
         days.day,
         pf.device_id,
         pf.patch_uid,
@@ -640,7 +673,7 @@ device_patch_signal AS (
     JOIN ninja_patches.patch_facts pf
       ON pf.fact_type = 'install_outcome'
      AND pf.installed_at < days.day + INTERVAL '1 day'
-    GROUP BY days.day, pf.device_id
+{_PATCH_TYPE_EXCLUDE_RAW}    GROUP BY days.day, pf.device_id
 ),
 classified AS (
     SELECT
@@ -669,7 +702,7 @@ installed_patches AS (
       ON pf.fact_type = 'install_outcome'
      AND pf.status = 'INSTALLED'
      AND pf.installed_at < days.day + INTERVAL '1 day'
-    ORDER BY
+{_PATCH_TYPE_EXCLUDE_RAW}    ORDER BY
         days.day,
         pf.device_id,
         pf.patch_uid,
@@ -687,7 +720,7 @@ current_patch_state AS (
     JOIN ninja_patches.patch_facts pf
       ON pf.fact_type = 'patch_state'
      AND pf.first_observed_at < days.day + INTERVAL '1 day'
-    ORDER BY
+{_PATCH_TYPE_EXCLUDE_RAW}    ORDER BY
         days.day,
         pf.device_id,
         pf.patch_uid,
@@ -750,7 +783,7 @@ WHERE pf.fact_type = 'install_outcome'
   AND pf.installed_at IS NOT NULL
   AND pf.installed_at > NOW() - (INTERVAL '1 day' * CAST({{{{days}}}} AS integer))
   AND d.approval_status = 'APPROVED'
-{filters}
+{_PATCH_TYPE_EXCLUDE_RAW}{filters}
 GROUP BY 1
 ORDER BY 1
 """
@@ -962,7 +995,8 @@ WHERE 1=1
 WITH current_state AS (
     SELECT device_id, status, severity
     FROM ninja_patches.current_patch_state
-)
+    WHERE 1=1
+{_PATCH_TYPE_EXCLUDE})
 SELECT COUNT(*) AS patches
 FROM current_state cs
 JOIN ninja_core.v_active_devices d ON d.id = cs.device_id
@@ -983,7 +1017,8 @@ WHERE cs.status = 'APPROVED'
 WITH current_state AS (
     SELECT device_id, status, severity
     FROM ninja_patches.current_patch_state
-)
+    WHERE 1=1
+{_PATCH_TYPE_EXCLUDE})
 SELECT COUNT(*) AS patches
 FROM current_state cs
 JOIN ninja_core.v_active_devices d ON d.id = cs.device_id
@@ -1004,7 +1039,8 @@ WHERE cs.status = 'MANUAL'
 WITH current_state AS (
     SELECT device_id, status, severity
     FROM ninja_patches.current_patch_state
-)
+    WHERE 1=1
+{_PATCH_TYPE_EXCLUDE})
 SELECT COUNT(*) AS patches
 FROM current_state cs
 JOIN ninja_core.v_active_devices d ON d.id = cs.device_id
@@ -1025,7 +1061,8 @@ WHERE cs.status = 'DELAYED'
 WITH latest_install_result AS (
     SELECT device_id, status, severity
     FROM ninja_patches.latest_install_outcome
-)
+    WHERE 1=1
+{_PATCH_TYPE_EXCLUDE})
 SELECT COUNT(*) AS patches
 FROM latest_install_result lir
 JOIN ninja_core.v_active_devices d ON d.id = lir.device_id
@@ -1052,15 +1089,20 @@ WHERE lir.status = 'FAILED'
 WITH current_state AS (
     SELECT device_id, patch_uid, status, severity
     FROM ninja_patches.current_patch_state
+    WHERE 1=1
       [[AND severity IN ({{{{severity}}}})]]
-),
+{_PATCH_TYPE_EXCLUDE}),
 latest_install_result AS (
     SELECT device_id, patch_uid, status, severity
     FROM ninja_patches.latest_install_outcome
+    WHERE 1=1
       [[AND severity IN ({{{{severity}}}})]]
-),
+{_PATCH_TYPE_EXCLUDE}),
 last_install AS (
-    SELECT device_id, last_seen_at AS last_install_at
+    SELECT
+        device_id,
+        ever_installed,
+        last_seen_at AS last_install_at
     FROM ninja_patches.device_patch_signal
 ),
 device_status AS (
@@ -1068,7 +1110,8 @@ device_status AS (
         d.id,
         d.organization_id,
         CASE
-            WHEN li.last_install_at IS NULL THEN 'never'
+            WHEN NOT COALESCE(li.ever_installed, FALSE) THEN 'never'
+            WHEN li.last_install_at IS NULL THEN 'stale'
             WHEN li.last_install_at < NOW() - (INTERVAL '1 day' * {DEFAULT_STALE_PATCH_DAYS}) THEN 'stale'
             ELSE 'recent'
         END AS patch_activity
@@ -1122,9 +1165,11 @@ LIMIT 50
         },
         "query": f"""
 WITH latest_install_result AS (
-    SELECT device_id, patch_uid, status, severity, kb_number, patch_name, installed_at
+    SELECT device_id, patch_uid, status, severity, patch_category,
+           kb_number, patch_name, installed_at
     FROM ninja_patches.latest_install_outcome
-)
+    WHERE 1=1
+{_PATCH_TYPE_EXCLUDE})
 SELECT
     o.name AS organization,
     d.system_name AS device,
@@ -1159,9 +1204,11 @@ LIMIT 100
         },
         "query": f"""
 WITH current_state AS (
-    SELECT device_id, patch_uid, status, severity, kb_number, patch_name, last_observed_at
+    SELECT device_id, patch_uid, status, severity, patch_category,
+           kb_number, patch_name, last_observed_at
     FROM ninja_patches.current_patch_state
-)
+    WHERE 1=1
+{_PATCH_TYPE_EXCLUDE})
 SELECT
     o.name AS organization,
     d.system_name AS device,
@@ -1199,14 +1246,14 @@ LIMIT 100
         },
         "query": f"""
 WITH last_install AS (
-    SELECT device_id,
-           MAX(installed_at) AS last_install_at,
-           COUNT(*)          AS install_count
-    FROM ninja_patches.patch_facts
-    WHERE fact_type = 'install_outcome'
-      AND status    = 'INSTALLED'
-      AND installed_at IS NOT NULL
-    GROUP BY device_id
+    SELECT pf.device_id,
+           MAX(pf.installed_at) AS last_install_at,
+           COUNT(*)             AS install_count
+    FROM ninja_patches.patch_facts pf
+    WHERE pf.fact_type = 'install_outcome'
+      AND pf.status    = 'INSTALLED'
+      AND pf.installed_at IS NOT NULL
+{_PATCH_TYPE_EXCLUDE_RAW}    GROUP BY pf.device_id
 ),
 last_reboot AS (
     SELECT device_id, MAX(activity_time) AS last_reboot_at
@@ -1447,7 +1494,8 @@ FROM (
 WITH current_state AS (
     SELECT device_id, status, severity
     FROM ninja_patches.current_patch_state
-)
+    WHERE 1=1
+{_PATCH_TYPE_EXCLUDE})
 SELECT COUNT(*) AS approved_queued
 FROM current_state cs
 JOIN ninja_core.v_active_devices d ON d.id = cs.device_id
@@ -1468,7 +1516,8 @@ WHERE cs.status = 'APPROVED'
 WITH current_state AS (
     SELECT device_id, status, severity
     FROM ninja_patches.current_patch_state
-)
+    WHERE 1=1
+{_PATCH_TYPE_EXCLUDE})
 SELECT COUNT(*) AS manual
 FROM current_state cs
 JOIN ninja_core.v_active_devices d ON d.id = cs.device_id
@@ -1489,7 +1538,8 @@ WHERE cs.status = 'MANUAL'
 WITH current_state AS (
     SELECT device_id, status, severity
     FROM ninja_patches.current_patch_state
-)
+    WHERE 1=1
+{_PATCH_TYPE_EXCLUDE})
 SELECT COUNT(*) AS delayed
 FROM current_state cs
 JOIN ninja_core.v_active_devices d ON d.id = cs.device_id
@@ -1513,7 +1563,8 @@ WHERE cs.status = 'DELAYED'
 WITH latest_install_outcome AS (
     SELECT device_id, patch_uid, status, severity
     FROM ninja_patches.latest_install_outcome
-)
+    WHERE 1=1
+{_PATCH_TYPE_EXCLUDE})
 SELECT COUNT(*) AS failed
 FROM latest_install_outcome lir
 JOIN ninja_core.v_active_devices d ON d.id = lir.device_id
@@ -1611,7 +1662,8 @@ WHERE dps.device_id IS NULL
 WITH current_state AS (
     SELECT device_id, status, severity
     FROM ninja_patches.current_patch_state
-)
+    WHERE 1=1
+{_PATCH_TYPE_EXCLUDE})
 SELECT cs.status AS "Current Patch State", COUNT(*) AS "Patches"
 FROM current_state cs
 JOIN ninja_core.v_active_devices d ON d.id = cs.device_id
@@ -1686,7 +1738,8 @@ LIMIT 15
 latest_install_outcome AS (
     SELECT device_id, patch_uid, status
     FROM ninja_patches.latest_install_outcome
-),
+    WHERE 1=1
+{_PATCH_TYPE_EXCLUDE}),
 all_known AS (
     SELECT device_id, patch_uid FROM current_patch_state
     UNION
@@ -2073,19 +2126,23 @@ _TIMELINE_PARAM_MAPPINGS = {
 }
 
 # Reused SQL fragments. Filter predicates include the new OS + KB filters.
-_CTE_CURRENT_STATE = """
+_CTE_CURRENT_STATE = f"""
 WITH current_state AS (
     SELECT
-        device_id, patch_uid, status, severity, patch_name, kb_number,
+        device_id, patch_uid, status, severity, patch_category,
+        patch_name, kb_number,
         installed_at, first_observed_at, last_observed_at
     FROM ninja_patches.current_patch_state
-),
+    WHERE 1=1
+{_PATCH_TYPE_EXCLUDE}),
 latest_install_outcome AS (
     SELECT
-        device_id, patch_uid, status, severity, patch_name, kb_number,
+        device_id, patch_uid, status, severity, patch_category,
+        patch_name, kb_number,
         installed_at, ninja_observed_at, last_observed_at
     FROM ninja_patches.latest_install_outcome
-)
+    WHERE 1=1
+{_PATCH_TYPE_EXCLUDE})
 """
 _FILTER_PREDICATES = f"""
   [[AND o.name IN ({{{{org}}}})]]
@@ -2490,8 +2547,7 @@ JOIN ninja_core.v_active_devices d ON d.id = pf.device_id
 WHERE pf.installed_at IS NOT NULL
   AND pf.fact_type = 'install_outcome'
   AND pf.installed_at > NOW() - (INTERVAL '1 day' * {{{{days}}}})
-  AND 1=1
-{_DEVICE_FILTER}
+{_PATCH_TYPE_EXCLUDE_RAW}{_DEVICE_FILTER}
 GROUP BY 1
 ORDER BY 1
 """,
@@ -2541,13 +2597,13 @@ SELECT
     pf.kb_number         AS kb_number,
     pf.status            AS "Patch State",
     pf.severity          AS "Severity",
+    pf.type              AS "Type",
     pf.first_observed_at AS "First Seen in This State",
     pf.last_observed_at  AS "Last Seen in This State"
 FROM ninja_patches.patch_facts pf
 JOIN ninja_core.v_active_devices d ON d.id = pf.device_id
 WHERE pf.fact_type = 'patch_state'
-  AND 1=1
-{_DEVICE_FILTER}
+{_PATCH_TYPE_EXCLUDE_RAW}{_DEVICE_FILTER}
 ORDER BY
     pf.last_observed_at DESC,
     pf.patch_uid
@@ -2569,13 +2625,13 @@ SELECT
     pf.kb_number    AS kb_number,
     pf.status       AS "Install Outcome",
     pf.severity     AS "Severity",
+    pf.type         AS "Type",
     pf.installed_at AS "Install Attempt Time",
     pf.last_observed_at AS "Last Seen"
 FROM ninja_patches.patch_facts pf
 JOIN ninja_core.v_active_devices d ON d.id = pf.device_id
 WHERE pf.fact_type = 'install_outcome'
-  AND 1=1
-{_DEVICE_FILTER}
+{_PATCH_TYPE_EXCLUDE_RAW}{_DEVICE_FILTER}
 ORDER BY
     pf.installed_at DESC NULLS LAST,
     pf.last_observed_at DESC
@@ -2670,9 +2726,11 @@ WITH classified AS (
         s.os_name,
         s.assigned_policy,
         s.patching_scope,
+        s.ever_installed,
         s.last_seen_at,
         CASE
-            WHEN s.last_seen_at IS NULL THEN 'no_patch_data'
+            WHEN NOT COALESCE(s.ever_installed, FALSE) THEN 'no_patch_data'
+            WHEN s.last_seen_at IS NULL THEN 'stale_patch_data'
             WHEN s.last_seen_at < NOW() - (INTERVAL '1 day' * {{pcov_days}}) THEN 'stale_patch_data'
             ELSE 'active_patching'
         END AS patch_status
@@ -2711,9 +2769,11 @@ WITH classified AS (
         s.patching_scope,
         s.patching_disabled,
         s.patching_notes,
+        s.ever_installed,
         s.last_seen_at,
         CASE
-            WHEN s.last_seen_at IS NULL THEN 'no_patch_data'
+            WHEN NOT COALESCE(s.ever_installed, FALSE) THEN 'no_patch_data'
+            WHEN s.last_seen_at IS NULL THEN 'stale_patch_data'
             WHEN s.last_seen_at < NOW() - (INTERVAL '1 day' * {{{{{days_tag}}}}}) THEN 'stale_patch_data'
             ELSE 'active_patching'
         END AS patch_status,
@@ -3652,7 +3712,8 @@ FROM (
 WITH latest_install_result AS (
     SELECT device_id, patch_uid, status, severity
     FROM ninja_patches.latest_install_outcome
-)
+    WHERE 1=1
+{_PATCH_TYPE_EXCLUDE})
 SELECT COUNT(*) AS patches
 FROM latest_install_result lir
 JOIN ninja_core.v_active_devices d ON d.id = lir.device_id
@@ -3672,7 +3733,8 @@ WHERE lir.status = 'FAILED'
 WITH current_state AS (
     SELECT device_id, patch_uid, status, severity
     FROM ninja_patches.current_patch_state
-)
+    WHERE 1=1
+{_PATCH_TYPE_EXCLUDE})
 SELECT COUNT(*) AS patches
 FROM current_state cs
 JOIN ninja_core.v_active_devices d ON d.id = cs.device_id
@@ -3692,7 +3754,8 @@ WHERE cs.status = 'APPROVED'
 WITH current_state AS (
     SELECT device_id, patch_uid, status, severity
     FROM ninja_patches.current_patch_state
-)
+    WHERE 1=1
+{_PATCH_TYPE_EXCLUDE})
 SELECT COUNT(*) AS patches
 FROM current_state cs
 JOIN ninja_core.v_active_devices d ON d.id = cs.device_id
@@ -3712,7 +3775,8 @@ WHERE cs.status = 'MANUAL'
 WITH current_state AS (
     SELECT device_id, patch_uid, status, severity
     FROM ninja_patches.current_patch_state
-)
+    WHERE 1=1
+{_PATCH_TYPE_EXCLUDE})
 SELECT COUNT(*) AS patches
 FROM current_state cs
 JOIN ninja_core.v_active_devices d ON d.id = cs.device_id
@@ -3795,7 +3859,8 @@ WHERE 1=1
 WITH current_state AS (
     SELECT device_id, patch_uid, status, severity
     FROM ninja_patches.current_patch_state
-)
+    WHERE 1=1
+{_PATCH_TYPE_EXCLUDE})
 SELECT
     cs.status AS "Current Patch State",
     COUNT(*) AS "Patches"
@@ -3876,9 +3941,11 @@ ORDER BY "Fully patched % (patching devices)" ASC
         },
         "query": f"""
 WITH latest_install_result AS (
-    SELECT device_id, patch_uid, status, severity, kb_number, patch_name, installed_at
+    SELECT device_id, patch_uid, status, severity, patch_category,
+           kb_number, patch_name, installed_at
     FROM ninja_patches.latest_install_outcome
-)
+    WHERE 1=1
+{_PATCH_TYPE_EXCLUDE})
 SELECT
     o.name AS organization,
     d.system_name AS device,
@@ -3913,9 +3980,11 @@ LIMIT 100
         },
         "query": f"""
 WITH current_state AS (
-    SELECT device_id, patch_uid, status, severity, kb_number, patch_name, last_observed_at
+    SELECT device_id, patch_uid, status, severity, patch_category,
+           kb_number, patch_name, last_observed_at
     FROM ninja_patches.current_patch_state
-)
+    WHERE 1=1
+{_PATCH_TYPE_EXCLUDE})
 SELECT
     o.name AS organization,
     d.system_name AS device,
@@ -4059,7 +4128,7 @@ WHERE pf.fact_type = 'install_outcome'
   AND pf.status    = 'INSTALLED'
   AND pf.installed_at IS NOT NULL
   AND pf.installed_at > NOW() - (INTERVAL '1 day' * {{{{days}}}})
-{_TRENDS_FILTERS_PATCH_PF}
+{_PATCH_TYPE_EXCLUDE_RAW}{_TRENDS_FILTERS_PATCH_PF}
 GROUP BY 1
 ORDER BY 1
 """,
@@ -4090,7 +4159,7 @@ WHERE pf.fact_type = 'install_outcome'
   AND pf.status    = 'FAILED'
   AND pf.installed_at IS NOT NULL
   AND pf.installed_at > NOW() - (INTERVAL '1 day' * {{{{days}}}})
-{_TRENDS_FILTERS_PATCH_PF}
+{_PATCH_TYPE_EXCLUDE_RAW}{_TRENDS_FILTERS_PATCH_PF}
 GROUP BY 1
 ORDER BY 1
 """,
@@ -4200,7 +4269,8 @@ ORDER BY 1
 WITH current_state AS (
     SELECT device_id, patch_uid, status, severity, first_observed_at
     FROM ninja_patches.current_patch_state
-)
+    WHERE 1=1
+{_PATCH_TYPE_EXCLUDE})
 SELECT
     DATE_TRUNC('week', cs.first_observed_at)::date AS "Week First Seen",
     COUNT(*)                                       AS "MANUAL Patches"

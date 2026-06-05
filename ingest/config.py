@@ -51,6 +51,13 @@ class Settings(BaseSettings):
     # patching-enabled for servers. Empty = no policy-based server include.
     INGEST_PATCHING_ENABLED_POLICIES: str = ""
 
+    # ── Dashboard view filters ───────────────────────────────────────
+    # Comma-separated patch category types (Ninja's `type` value) to
+    # hide from every patch-context dashboard query. Empty = show all.
+    # Default excludes DRIVER_UPDATES since the operator is not
+    # currently installing drivers.
+    DASHBOARD_PATCH_CATEGORIES_EXCLUDE: str = "DRIVER_UPDATES"
+
     # ── Metabase auto-bootstrap (optional) ───────────────────────────
     # If MB_BOOTSTRAP_USER and MB_BOOTSTRAP_PASS are both set, ingest
     # runs the dashboard bootstrap script on startup in a background
@@ -84,6 +91,15 @@ class Settings(BaseSettings):
             for s in self.INGEST_PATCHING_ENABLED_POLICIES.split(",")
             if s.strip()
         }
+
+    @property
+    def dashboard_patch_categories_exclude(self) -> tuple[str, ...]:
+        """Empty tuple = no exclusion. Order preserved for SQL rendering."""
+        return tuple(
+            s.strip()
+            for s in self.DASHBOARD_PATCH_CATEGORIES_EXCLUDE.split(",")
+            if s.strip()
+        )
 
     @property
     def postgres_dsn(self) -> str:
