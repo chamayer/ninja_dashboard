@@ -37,6 +37,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import psycopg
 from psycopg.types.json import Json
 
 from ingest import db
@@ -116,6 +117,7 @@ def run(client: NinjaClient) -> int:
         if max_id > last_id:
             _set_last_id(max_id)
 
+        _refresh_activity_summary_views()
         stats["rows_inserted"] = inserted
         log.info(
             "activities: fetched %d total, kept %d, inserted %d, cursor %d → %d",
@@ -270,4 +272,18 @@ def _set_last_id(value: int) -> None:
             "ON CONFLICT (key) DO UPDATE "
             "SET value = EXCLUDED.value, updated_at = NOW()",
             (_STATE_KEY, str(value)),
+        )
+
+
+def _refresh_activity_summary_views() -> None:
+    try:
+        with db.transaction() as cur:
+            cur.execute(
+                "REFRESH MATERIALIZED VIEW ninja_activities.device_activity_signal"
+            )
+        log.info("Refreshed activity summary materialized views")
+    except (psycopg.errors.UndefinedTable, psycopg.errors.WrongObjectType):
+        log.info(
+            "ninja_activities.device_activity_signal is not materialized yet; "
+            "skipping refresh"
         )

@@ -1141,3 +1141,15 @@ list):**
   cause signals such as offline state, reboot pending, failed installs,
   manual approvals, approved waiting patches, missing patches, and
   patching notes, with drillthrough to Device Drilldown.
+- Added a dedicated Issues dashboard using the latest materialized
+  current-device and patch-summary views plus `ninja_activities`
+  activity-feed evidence. The issue queue filters by issue type,
+  offline, reboot, failed installs, missing patches, and patch-started
+  without completion; device rows drill into Device Drilldown.
+- Added a materialized `ninja_activities.device_activity_signal` view so
+  issue cards reuse one per-device activity summary instead of
+  re-aggregating raw activity rows per card.
+- Reordered navigation into the operational workflow and moved Trends
+  to the end; added spaced bullet separators in the nav bar.
+- Capped table card heights globally so operators can see several rows
+  and still reach horizontal scrolling without paging down.
