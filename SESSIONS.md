@@ -1128,3 +1128,8 @@ list):**
   org, location, device type, and device-name filters use stored indexed
   columns instead of recomputing custom-field inheritance for every
   dashboard card.
+- Added separate `Total Devices` cards to Command Center, Overall
+  Patching Status, and Org Overview while preserving `Active Devices`
+  as its own KPI immediately to the right.
+- Fixed Device Drilldown `Device Summary` so dashboard filters are
+  applied through a valid `WHERE 1=1` clause.

@@ -798,6 +798,7 @@ _CMD_FILTER_PATCHING_SCOPE = (
 _CMD_FILTER_SEV_CS      = "  [[AND cs.severity IN ({{severity}})]]\n"
 _CMD_FILTER_SEV_LIR     = "  [[AND lir.severity IN ({{severity}})]]\n"
 
+_CMD_FILTERS_TOTAL_DEVICE = _CMD_FILTER_ORG + _CMD_FILTER_DEVICE_TYPE
 _CMD_FILTERS_DEVICE       = _CMD_FILTER_ORG + _CMD_FILTER_DEVICE_TYPE + _CMD_FILTER_PATCHING_SCOPE
 _CMD_FILTERS_PATCH_CS     = _CMD_FILTERS_DEVICE + _CMD_FILTER_SEV_CS
 _CMD_FILTERS_PATCH_LIR    = _CMD_FILTERS_DEVICE + _CMD_FILTER_SEV_LIR
@@ -817,16 +818,33 @@ def build_command_parameters(org_names: list[str]) -> list[dict]:
 
 
 COMMAND_CARDS: list[dict[str, Any]] = [
-    # Row 0 — Devices (canonical order: Active, Patching, Stalled,
-    # Never-Patched, Devices Compliant). 4 scalars at size 5 each
-    # plus one 4-wide compliance tile = 24. Needs Reboot was demoted
+    # Row 0 — Devices (canonical order: Total, Active, Patching,
+    # Stalled, Never-Patched, Actively Patching %). Scalars share the same
+    # compact height so the band reads as one row. Needs Reboot was demoted
     # from a top-row KPI in v0.14.0 — it belongs in the action-queue
     # tables, not as a high-level patch-management KPI.
+    {
+        "key":            "cmd_total_devices",
+        "name":           "Total Devices",
+        "display":        "scalar",
+        "row": 0, "col": 0, "size_x": 4, "size_y": 3,
+        "template_tags":  _CMD_TAGS,
+        "param_mappings": _CMD_PARAM_MAPPINGS_FULL,
+        "click_behavior": {"target": DASH_DETAIL, "preset": {}},
+        "query": f"""
+SELECT COUNT(*) AS devices
+FROM ninja_core.devices d
+JOIN ninja_core.organizations o ON o.id = d.organization_id
+WHERE d.approval_status = 'APPROVED'
+  AND d.node_class IN ('WINDOWS_WORKSTATION', 'WINDOWS_SERVER')
+{_CMD_FILTERS_TOTAL_DEVICE}
+""",
+    },
     {
         "key":            "cmd_active_devices",
         "name":           "Active Devices",
         "display":        "scalar",
-        "row": 0, "col": 0, "size_x": 5, "size_y": 4,
+        "row": 0, "col": 4, "size_x": 4, "size_y": 3,
         "template_tags":  _CMD_TAGS,
         "param_mappings": _CMD_PARAM_MAPPINGS_FULL,
         "click_behavior": {"target": DASH_DETAIL, "preset": {}},
@@ -842,7 +860,7 @@ WHERE 1=1
         "key":            "cmd_patching",
         "name":           "Patching Devices",
         "display":        "scalar",
-        "row": 0, "col": 5, "size_x": 5, "size_y": 4,
+        "row": 0, "col": 8, "size_x": 4, "size_y": 3,
         "template_tags":  _CMD_TAGS,
         "param_mappings": _CMD_PARAM_MAPPINGS_FULL,
         "click_behavior": {"target": DASH_PCOV, "preset": {"pcov_status": "Patching Devices"}},
@@ -860,7 +878,7 @@ WHERE 1=1
         "key":            "cmd_stale",
         "name":           "Stalled Devices",
         "display":        "scalar",
-        "row": 0, "col": 10, "size_x": 5, "size_y": 4,
+        "row": 0, "col": 12, "size_x": 4, "size_y": 3,
         "template_tags":  _CMD_TAGS,
         "param_mappings": _CMD_PARAM_MAPPINGS_FULL,
         "click_behavior": {"target": DASH_PCOV, "preset": {"pcov_status": "Stalled Devices"}},
@@ -878,7 +896,7 @@ WHERE 1=1
         "key":            "cmd_never",
         "name":           "Never-Patched Devices",
         "display":        "scalar",
-        "row": 0, "col": 15, "size_x": 5, "size_y": 4,
+        "row": 0, "col": 16, "size_x": 4, "size_y": 3,
         "template_tags":  _CMD_TAGS,
         "param_mappings": _CMD_PARAM_MAPPINGS_FULL,
         "click_behavior": {"target": DASH_PCOV, "preset": {"pcov_status": "Never-Patched Devices"}},
@@ -896,7 +914,7 @@ WHERE 1=1
         "key":            "cmd_compliance",
         "name":           "Actively patching %",
         "display":        "scalar",
-        "row": 0, "col": 20, "size_x": 4, "size_y": 4,
+        "row": 0, "col": 20, "size_x": 4, "size_y": 3,
         "template_tags":  _CMD_TAGS,
         "param_mappings": _CMD_PARAM_MAPPINGS_FULL,
         "query": _active_patching_scalar_query(_CMD_FILTERS_DEVICE),
@@ -908,7 +926,7 @@ WHERE 1=1
         "key":            "cmd_approved",
         "name":           "Approved Patches",
         "display":        "scalar",
-        "row": 6, "col": 0, "size_x": 6, "size_y": 3,
+        "row": 4, "col": 0, "size_x": 6, "size_y": 3,
         "template_tags":  _CMD_TAGS,
         "param_mappings": _CMD_PARAM_MAPPINGS_FULL,
         "click_behavior": {"target": DASH_DETAIL, "preset": {"status": "APPROVED"}},
@@ -929,7 +947,7 @@ WHERE cs.status = 'APPROVED'
         "key":            "cmd_manual",
         "name":           "Manual Approval",
         "display":        "scalar",
-        "row": 4, "col": 6, "size_x": 6, "size_y": 4,
+        "row": 4, "col": 6, "size_x": 6, "size_y": 3,
         "template_tags":  _CMD_TAGS,
         "param_mappings": _CMD_PARAM_MAPPINGS_FULL,
         "click_behavior": {"target": DASH_DETAIL, "preset": {"status": "MANUAL"}},
@@ -950,7 +968,7 @@ WHERE cs.status = 'MANUAL'
         "key":            "cmd_delayed",
         "name":           "Delayed Patches",
         "display":        "scalar",
-        "row": 4, "col": 12, "size_x": 6, "size_y": 4,
+        "row": 4, "col": 12, "size_x": 6, "size_y": 3,
         "template_tags":  _CMD_TAGS,
         "param_mappings": _CMD_PARAM_MAPPINGS_FULL,
         "click_behavior": {"target": DASH_DETAIL, "preset": {"status": "DELAYED"}},
@@ -971,7 +989,7 @@ WHERE cs.status = 'DELAYED'
         "key":            "cmd_failed",
         "name":           "Failed Patches",
         "display":        "scalar",
-        "row": 4, "col": 18, "size_x": 6, "size_y": 4,
+        "row": 4, "col": 18, "size_x": 6, "size_y": 3,
         "template_tags":  _CMD_TAGS,
         "param_mappings": _CMD_PARAM_MAPPINGS_FULL,
         "click_behavior": {"target": DASH_DETAIL, "preset": {"install_outcome": "FAILED"}},
@@ -1267,6 +1285,11 @@ _OVERALL_FILTERS_DEVICE   = (
     + _OVERALL_FILTER_OS_FAMILY
     + _OVERALL_FILTER_PATCHING_SCOPE
 )
+_OVERALL_FILTERS_TOTAL_DEVICE = (
+    _OVERALL_FILTER_ORG
+    + _OVERALL_FILTER_DEVICE_TYPE
+    + _OVERALL_FILTER_OS_FAMILY
+)
 _OVERALL_FILTERS_PATCH_CS  = _OVERALL_FILTERS_DEVICE + _OVERALL_FILTER_SEV_CS
 _OVERALL_FILTERS_PATCH_LIR = _OVERALL_FILTERS_DEVICE + _OVERALL_FILTER_SEV_LIR
 
@@ -1323,10 +1346,27 @@ OVERVIEW_CARDS: list[dict[str, Any]] = [
         "query": _patching_device_compliance_count_query(_OVERALL_FILTERS_DEVICE),
     },
     {
+        "key":            "overall_total_devices",
+        "name":           "Total Devices",
+        "display":        "scalar",
+        "row": 6, "col": 0, "size_x": 5, "size_y": 3,
+        "template_tags":  _OVERALL_TAGS,
+        "param_mappings": _OVERALL_PARAM_MAPPINGS_FULL,
+        "click_behavior": {"target": DASH_DETAIL, "preset": {}},
+        "query": f"""
+SELECT COUNT(*) AS devices
+FROM ninja_core.devices d
+JOIN ninja_core.organizations o ON o.id = d.organization_id
+WHERE d.approval_status = 'APPROVED'
+  AND d.node_class IN ('WINDOWS_WORKSTATION', 'WINDOWS_SERVER')
+{_OVERALL_FILTERS_TOTAL_DEVICE}
+""",
+    },
+    {
         "key":            "active_devices",
         "name":           "Active Devices",
         "display":        "scalar",
-        "row": 6, "col": 0, "size_x": 6, "size_y": 3,
+        "row": 6, "col": 5, "size_x": 5, "size_y": 3,
         "template_tags":  _OVERALL_TAGS,
         "param_mappings": _OVERALL_PARAM_MAPPINGS_FULL,
         "click_behavior": {"target": DASH_DETAIL, "preset": {}},
@@ -1464,7 +1504,7 @@ WHERE lir.status = 'FAILED'
         "key":            "ov_pcov_active",
         "name":           "Patching Devices",
         "display":        "scalar",
-        "row": 6, "col": 6, "size_x": 6, "size_y": 3,
+        "row": 6, "col": 10, "size_x": 5, "size_y": 3,
         "template_tags":  _OVERALL_TAGS,
         "param_mappings": _OVERALL_PARAM_MAPPINGS_FULL,
         "click_behavior": {
@@ -1484,7 +1524,7 @@ WHERE dps.last_seen_at > NOW() - (INTERVAL '1 day' * {DEFAULT_STALE_PATCH_DAYS})
         "key":            "ov_pcov_stale",
         "name":           "Stalled Devices",
         "display":        "scalar",
-        "row": 6, "col": 12, "size_x": 6, "size_y": 3,
+        "row": 6, "col": 15, "size_x": 5, "size_y": 3,
         "template_tags":  _OVERALL_TAGS,
         "param_mappings": _OVERALL_PARAM_MAPPINGS_FULL,
         "click_behavior": {
@@ -1504,7 +1544,7 @@ WHERE dps.last_seen_at <= NOW() - (INTERVAL '1 day' * {DEFAULT_STALE_PATCH_DAYS}
         "key":            "ov_pcov_none",
         "name":            "Never-Patched Devices",
         "display":         "scalar",
-        "row": 6, "col": 18, "size_x": 6, "size_y": 3,
+        "row": 6, "col": 20, "size_x": 4, "size_y": 3,
         "template_tags":  _OVERALL_TAGS,
         "param_mappings": _OVERALL_PARAM_MAPPINGS_FULL,
         "click_behavior": {
@@ -2378,6 +2418,7 @@ SELECT
 FROM ninja_core.v_active_devices d
 JOIN ninja_core.organizations o ON o.id = d.organization_id
 LEFT JOIN latest_snap ls ON ls.device_id = d.id
+WHERE 1=1
 {_DEVICE_FILTER}
 ORDER BY d.system_name
 LIMIT 100
@@ -2933,6 +2974,11 @@ _ORG_FILTERS_DEVICE = (
     + _ORG_FILTER_OS_FAMILY
     + _ORG_FILTER_PATCHING_SCOPE
 )
+_ORG_FILTERS_TOTAL_DEVICE = (
+    _ORG_FILTER_ORG
+    + _ORG_FILTER_DEVICE_TYPE
+    + _ORG_FILTER_OS_FAMILY
+)
 # Patch cards using `cs.severity` (current_state alias).
 _ORG_FILTERS_PATCH_CS = _ORG_FILTERS_DEVICE + _ORG_FILTER_SEV_CS
 # Patch cards using `lir.severity` (latest_install_result alias).
@@ -2961,10 +3007,26 @@ def build_org_parameters(org_names: list[str]) -> list[dict]:
 
 ORG_OVERVIEW_CARDS = [
     {
+        "key":     "org_total_devices",
+        "name":    "Total Devices",
+        "display": "scalar",
+        "row": 6, "col": 0, "size_x": 5, "size_y": 3,
+        "template_tags":  _ORG_TAGS,
+        "param_mappings": _ORG_PARAM_MAPPINGS_FULL,
+        "query": f"""
+SELECT COUNT(*) AS devices
+FROM ninja_core.devices d
+JOIN ninja_core.organizations o ON o.id = d.organization_id
+WHERE d.approval_status = 'APPROVED'
+  AND d.node_class IN ('WINDOWS_WORKSTATION', 'WINDOWS_SERVER')
+{_ORG_FILTERS_TOTAL_DEVICE}
+""",
+    },
+    {
         "key":     "org_active_devices",
         "name":    "Active Devices",
         "display": "scalar",
-        "row": 6, "col": 0, "size_x": 6, "size_y": 3,
+        "row": 6, "col": 5, "size_x": 5, "size_y": 3,
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS_FULL,
         "query": f"""
@@ -3010,6 +3072,30 @@ WHERE 1=1
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS_FULL,
         "query": _patching_device_compliance_count_query(_ORG_FILTERS_DEVICE),
+    },
+    {
+        "key":     "org_data_freshness",
+        "name":    "Data Freshness",
+        "display": "scalar",
+        "row": 0, "col": 16, "size_x": 8, "size_y": 3,
+        "query": """
+SELECT
+    CASE
+        WHEN max_ts IS NULL THEN 'no ingest yet'
+        WHEN max_ts < NOW() - INTERVAL '3 hours' THEN
+            'STALE - last ok run ' ||
+            ROUND(EXTRACT(EPOCH FROM (NOW() - max_ts)) / 3600)::text ||
+            ' h ago'
+        ELSE
+            ROUND(EXTRACT(EPOCH FROM (NOW() - max_ts)) / 60)::text ||
+            ' min ago'
+    END AS data_freshness
+FROM (
+    SELECT MAX(started_at) AS max_ts
+    FROM ninja_core.run_log
+    WHERE status = 'ok'
+) latest
+""",
     },
     {
         "key":     "org_failed",
@@ -3095,7 +3181,7 @@ WHERE cs.status = 'DELAYED'
         "key":     "org_stale",
         "name":    "Stalled Devices",
         "display": "scalar",
-        "row": 6, "col": 12, "size_x": 6, "size_y": 3,
+        "row": 6, "col": 15, "size_x": 5, "size_y": 3,
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS_FULL,
         "query": f"""
@@ -3112,7 +3198,7 @@ WHERE 1=1
         "key":     "org_never",
         "name":    "Never-Patched Devices",
         "display": "scalar",
-        "row": 6, "col": 18, "size_x": 6, "size_y": 3,
+        "row": 6, "col": 20, "size_x": 4, "size_y": 3,
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS_FULL,
         "query": f"""
@@ -3128,7 +3214,7 @@ WHERE dps.device_id IS NULL
         "key":     "org_patching",
         "name":    "Patching Devices",
         "display": "scalar",
-        "row": 6, "col": 6, "size_x": 6, "size_y": 3,
+        "row": 6, "col": 10, "size_x": 5, "size_y": 3,
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS_FULL,
         "query": f"""
