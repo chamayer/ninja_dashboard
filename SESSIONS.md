@@ -1153,3 +1153,16 @@ list):**
   to the end; added spaced bullet separators in the nav bar.
 - Capped table card heights globally so operators can see several rows
   and still reach horizontal scrolling without paging down.
+- Trimmed wide table cards so high-level queues show decision columns
+  first while verbose evidence stays in Device Drilldown.
+- Surfaced assigned policy in the Issues/triage workflow and Device
+  Summary, with policy filters on Issues and Device Patching Status.
+- Added `/queries/device-health` ingest design: stores health snapshots,
+  latest health rollup, pending reboot reason, Ninja OS patch summary
+  counts, alerts, active jobs, install issues, vulnerability counts, and
+  product installation statuses for comparison against patch facts.
+- Added `ninja_core.device_troubleshooting_signal` as a one-row-per-device
+  materialized signal for issue/triage dashboards. It combines patch facts,
+  activity evidence, health counts, policy, scope, and current device metadata
+  once per ingest run so Issue and Device Status cards do not re-aggregate the
+  same raw tables independently.

@@ -27,9 +27,17 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from ingest import db, migrations
 from ingest.config import settings
 from ingest.activities import ingest as activities_ingest
-from ingest.core import custom_fields, devices, locations, organizations, policies
+from ingest.core import (
+    custom_fields,
+    device_health,
+    devices,
+    locations,
+    organizations,
+    policies,
+)
 from ingest.ninja_client import NinjaClient
 from ingest.patches import ingest as patches_ingest
+from ingest.summary_views import refresh_device_troubleshooting_signal
 
 log = logging.getLogger("ingest.main")
 
@@ -53,9 +61,11 @@ def run_once() -> None:
         _safe("locations",      locations.run, client)
         _safe("policies",       policies.run, client)
         _safe("devices",        devices.run, client, snapshot_at)
+        _safe("device_health",  device_health.run, client, snapshot_at)
         _safe("custom_fields",  custom_fields.run, client, snapshot_at)
         _safe("patches",        patches_ingest.run, client, snapshot_at)
         _safe("activities",     activities_ingest.run, client)
+        _safe("troubleshooting_signal", refresh_device_troubleshooting_signal)
     log.info("Ingest run complete")
 
 

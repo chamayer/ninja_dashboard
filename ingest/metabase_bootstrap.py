@@ -1112,7 +1112,6 @@ SELECT
     o.name AS organization,
     d.system_name AS device,
     COALESCE(NULLIF(lir.kb_number, ''), '(none)') AS kb_number,
-    lir.patch_name AS "Patch",
     lir.severity AS "Severity",
     lir.status AS "Install Results",
     lir.installed_at AS "Last Install Attempt",
@@ -1151,7 +1150,6 @@ SELECT
     d.system_name AS device,
     cs.status AS current_patch_state,
     COALESCE(NULLIF(cs.kb_number, ''), '(none)') AS kb_number,
-    cs.patch_name AS "Patch",
     cs.severity AS "Severity",
     cs.last_observed_at AS "Last Seen"
 FROM current_state cs
@@ -1238,9 +1236,7 @@ SELECT
     a.activity_time AS "Time",
     d.system_name   AS device,
     o.name          AS organization,
-    a.activity_type AS "Event Code",
-    a.subject       AS "Event",
-    a.message       AS "Message"
+    a.subject       AS "Event"
 FROM ninja_activities.activities a
 JOIN ninja_core.v_active_devices d ON d.id = a.device_id
 JOIN ninja_core.organizations o ON o.id = d.organization_id
@@ -2240,7 +2236,6 @@ SELECT
     o.name               AS organization,
     {DEVICE_TYPE_D} AS device_type,
     d.patching_scope     AS "Patching Scope",
-    d.patching_notes     AS "Patching Notes",
     COUNT(*)             AS "Patches"
 FROM current_state cs
 LEFT JOIN latest_install_outcome lio
@@ -2249,7 +2244,7 @@ JOIN ninja_core.v_active_devices d ON d.id = cs.device_id
 JOIN ninja_core.organizations o  ON o.id = d.organization_id
 WHERE d.approval_status = 'APPROVED'
 {_FILTER_PREDICATES}
-GROUP BY d.system_name, o.name, device_type, d.patching_scope, d.patching_notes
+GROUP BY d.system_name, o.name, device_type, d.patching_scope
 ORDER BY "Patches" DESC
 """,
     },
@@ -2267,7 +2262,6 @@ ORDER BY "Patches" DESC
 {_CTE_CURRENT_STATE}
 SELECT
     COALESCE(NULLIF(cs.kb_number, ''), '(none)') AS kb_number,
-    cs.patch_name AS "Patch",
     cs.severity AS "Severity",
     COUNT(DISTINCT cs.device_id) AS "Devices",
     COUNT(*)                     AS "Patches"
@@ -2278,7 +2272,7 @@ JOIN ninja_core.v_active_devices d ON d.id = cs.device_id
 JOIN ninja_core.organizations o  ON o.id = d.organization_id
 WHERE d.approval_status = 'APPROVED'
 {_FILTER_PREDICATES}
-GROUP BY 1, cs.patch_name, cs.severity
+GROUP BY 1, cs.severity
 ORDER BY "Patches" DESC
 """,
     },
@@ -2305,15 +2299,13 @@ SELECT
     d.system_name    AS device,
     {DEVICE_TYPE_D} AS device_type,
     cs.kb_number AS kb_number,
-    cs.patch_name AS "Patch",
     cs.status AS current_patch_state,
     lio.status AS install_results,
     cs.severity AS severity,
     lio.installed_at AS "Last Install Attempt",
     CASE WHEN lio.installed_at IS NULL THEN NULL
          ELSE ROUND(EXTRACT(EPOCH FROM (NOW() - lio.installed_at)) / 86400)
-    END AS "Days Since Attempt",
-    cs.last_observed_at AS "Last Seen"
+    END AS "Days Since Attempt"
 FROM current_state cs
 LEFT JOIN latest_install_outcome lio
   ON lio.device_id = cs.device_id AND lio.patch_uid = cs.patch_uid
@@ -2406,30 +2398,33 @@ WITH latest_snap AS (
     ORDER BY device_id, snapshot_at DESC
 )
 SELECT
-    d.id::text             AS "Device ID",
     d.system_name          AS "Device",
-    d.display_name         AS "Display Name",
     o.name                 AS "Organization",
+    COALESCE(role_policy.name, assigned_policy.name, '(none)') AS "Policy",
+    ldh.health_status      AS "Health",
     d.patching_scope       AS "Patching Scope",
     d.patching_notes       AS "Patching Notes",
     {DEVICE_TYPE_D}        AS "Device Type",
     d.os_name              AS "Operating System",
-    d.os_release_id        AS "OS Release",
-    d.serial_number        AS "Serial Number",
-    d.manufacturer         AS "Manufacturer",
-    d.model                AS "Model",
     ls.last_contact        AS "Last Contact",
     CASE
         WHEN ls.offline IS NULL THEN 'Unknown'
         WHEN ls.offline THEN 'No'
         ELSE 'Yes'
     END AS "Online?",
-    ls.last_boot           AS "Last Boot",
     ls.needs_reboot        AS "Needs Reboot",
+    ldh.pending_reboot_reason AS "Reboot Reason",
+    ldh.pending_os_patches_count AS "Ninja OS Pending",
+    ldh.failed_os_patches_count AS "Ninja OS Failed",
+    ldh.alert_count        AS "Alerts",
+    ldh.installation_issues_count AS "Install Issues",
     ls.maintenance_status  AS "Maintenance Status"
 FROM ninja_core.v_active_devices d
 JOIN ninja_core.organizations o ON o.id = d.organization_id
 LEFT JOIN latest_snap ls ON ls.device_id = d.id
+LEFT JOIN ninja_core.policies assigned_policy ON assigned_policy.id = d.policy_id
+LEFT JOIN ninja_core.policies role_policy ON role_policy.id = d.role_policy_id
+LEFT JOIN ninja_core.latest_device_health ldh ON ldh.device_id = d.id
 WHERE 1=1
 {_DEVICE_FILTER}
 ORDER BY d.system_name
@@ -2500,11 +2495,8 @@ ORDER BY 1
         "query": f"""
 SELECT
     a.activity_time        AS "Activity Time",
-    a.activity_type        AS "Event Code",
     a.subject              AS "Event",
-    a.message              AS "Message",
-    a.source_name          AS "Category",
-    a.id                   AS "Activity ID"
+    a.message              AS "Message"
 FROM ninja_activities.activities a
 JOIN ninja_core.v_active_devices d ON d.id = a.device_id
 WHERE a.activity_type IN ({_DRILLDOWN_ACTIVITY_CODES_SQL})
@@ -2529,9 +2521,7 @@ LIMIT 200
         },
         "query": f"""
 SELECT
-    d.system_name        AS "Device",
     pf.kb_number         AS kb_number,
-    pf.name              AS "Patch",
     pf.status            AS "Patch State",
     pf.severity          AS "Severity",
     pf.first_observed_at AS "First Seen in This State",
@@ -2542,7 +2532,6 @@ WHERE pf.fact_type = 'patch_state'
   AND 1=1
 {_DEVICE_FILTER}
 ORDER BY
-    d.system_name,
     pf.last_observed_at DESC,
     pf.patch_uid
 LIMIT 5000
@@ -2560,9 +2549,7 @@ LIMIT 5000
         },
         "query": f"""
 SELECT
-    d.system_name   AS "Device",
     pf.kb_number    AS kb_number,
-    pf.name         AS "Patch",
     pf.status       AS "Install Outcome",
     pf.severity     AS "Severity",
     pf.installed_at AS "Install Attempt Time",
@@ -2573,7 +2560,6 @@ WHERE pf.fact_type = 'install_outcome'
   AND 1=1
 {_DEVICE_FILTER}
 ORDER BY
-    d.system_name,
     pf.installed_at DESC NULLS LAST,
     pf.last_observed_at DESC
 LIMIT 5000
@@ -2595,6 +2581,7 @@ LIMIT 5000
 PARAM_PCOV_ORG    = "p_pcov_org"
 PARAM_PCOV_CLASS  = "p_pcov_class"
 PARAM_PCOV_OS     = "p_pcov_os"
+PARAM_PCOV_POLICY = "p_pcov_policy"
 PARAM_PCOV_STATUS = "p_pcov_status"
 PARAM_PCOV_DAYS   = "p_pcov_days"
 
@@ -2612,12 +2599,15 @@ def _param_number(pid: str, name: str, slug: str, default: int) -> dict:
     }
 
 
-def build_pcov_parameters(org_names: list[str], os_families: list[str]) -> list[dict]:
+def build_pcov_parameters(
+    org_names: list[str], os_families: list[str], policy_names: list[str],
+) -> list[dict]:
     return [
         _param_multiselect(PARAM_PCOV_ORG,    "Organization",            "pcov_org",        org_names),
         _param_multiselect(PARAM_PCOV_CLASS,  "Device Type",             "pcov_node_class", _NODE_CLASS_OPTIONS,
                            default="Windows Workstation"),
         _param_multiselect(PARAM_PCOV_OS,     "Operating System Family", "pcov_os",         os_families),
+        _param_multiselect(PARAM_PCOV_POLICY, "Policy",                  "pcov_policy",     policy_names),
         _param_multiselect(PARAM_PATCHING_SCOPE, "Patching Scope",       "patching_scope",  _PATCHING_SCOPE_OPTIONS, default="Included"),
         _param_multiselect(PARAM_PCOV_STATUS, "Patching Status",         "pcov_status",     _PCOV_STATUS_OPTIONS),
         _param_number(     PARAM_PCOV_DAYS,   "Stale threshold (days)",  "pcov_days",       DEFAULT_STALE_PATCH_DAYS),
@@ -2628,6 +2618,7 @@ _PCOV_TAGS = {
     "pcov_org":         {"id": "tt_pcov_org",    "name": "pcov_org",        "display-name": "Organization", "type": "text"},
     "pcov_node_class":  {"id": "tt_pcov_class",  "name": "pcov_node_class", "display-name": "Device Type",  "type": "text"},
     "pcov_os":          {"id": "tt_pcov_os",     "name": "pcov_os",         "display-name": "Operating System Family", "type": "text"},
+    "pcov_policy":      {"id": "tt_pcov_policy", "name": "pcov_policy",     "display-name": "Policy", "type": "text"},
     "patching_scope":   {"id": "tt_pcov_patching_scope", "name": "patching_scope", "display-name": "Patching Scope", "type": "text"},
     "pcov_status":      {"id": "tt_pcov_status", "name": "pcov_status",     "display-name": "Patching Status", "type": "text"},
     "pcov_days":        {
@@ -2641,6 +2632,7 @@ _PCOV_PARAM_MAPPINGS = {
     PARAM_PCOV_ORG:    ["variable", ["template-tag", "pcov_org"]],
     PARAM_PCOV_CLASS:  ["variable", ["template-tag", "pcov_node_class"]],
     PARAM_PCOV_OS:     ["variable", ["template-tag", "pcov_os"]],
+    PARAM_PCOV_POLICY: ["variable", ["template-tag", "pcov_policy"]],
     PARAM_PATCHING_SCOPE: ["variable", ["template-tag", "patching_scope"]],
     PARAM_PCOV_STATUS: ["variable", ["template-tag", "pcov_status"]],
     PARAM_PCOV_DAYS:   ["variable", ["template-tag", "pcov_days"]],
@@ -2653,21 +2645,21 @@ _PCOV_PARAM_MAPPINGS = {
 _PCOV_CTE = """
 WITH classified AS (
     SELECT
-        d.id              AS device_id,
-        d.system_name,
-        d.display_name,
-        d.organization_id,
-        d.node_class,
-        d.os_name,
-        d.patching_scope,
-        dps.last_seen_at,
+        s.device_id,
+        s.system_name,
+        s.display_name,
+        s.organization_id,
+        s.node_class,
+        s.os_name,
+        s.assigned_policy,
+        s.patching_scope,
+        s.last_seen_at,
         CASE
-            WHEN dps.last_seen_at IS NULL THEN 'no_patch_data'
-            WHEN dps.last_seen_at < NOW() - (INTERVAL '1 day' * {{pcov_days}}) THEN 'stale_patch_data'
+            WHEN s.last_seen_at IS NULL THEN 'no_patch_data'
+            WHEN s.last_seen_at < NOW() - (INTERVAL '1 day' * {{pcov_days}}) THEN 'stale_patch_data'
             ELSE 'active_patching'
         END AS patch_status
-    FROM ninja_core.v_active_devices d
-    LEFT JOIN ninja_patches.device_patch_signal dps ON dps.device_id = d.id
+    FROM ninja_core.device_troubleshooting_signal s
 )
 """
 
@@ -2675,153 +2667,124 @@ _PCOV_FILTERS = f"""
   [[AND o.name IN ({{{{pcov_org}}}})]]
   [[AND {DEVICE_TYPE_C} IN ({{{{pcov_node_class}}}})]]
   [[AND {OS_FAMILY_C} IN ({{{{pcov_os}}}})]]
+  [[AND c.assigned_policy IN ({{{{pcov_policy}}}})]]
   [[AND c.patching_scope IN ({{{{patching_scope}}}})]]
   [[AND {PATCH_ACTIVITY_LABEL_C} IN ({{{{pcov_status}}}})]]
 """
 
 
 def _problem_devices_cte(days_tag: str) -> str:
-    """Shared issue classification used by Device Status and Issues.
+    """Shared issue selector used by Device Status and Issues.
 
-    One row per device with a primary issue label, suggested action, and
-    compact supporting evidence. `days_tag` is the Metabase numeric
-    template tag that controls the stale patch-activity threshold.
+    The heavy one-row-per-device rollup is materialized in
+    ninja_core.device_troubleshooting_signal. This helper applies the
+    dashboard stale-threshold override while preserving the problem_devices
+    alias used by existing cards.
     """
     return f"""
 WITH classified AS (
     SELECT
-        d.id              AS device_id,
-        d.system_name,
-        d.display_name,
-        d.organization_id,
-        d.node_class,
-        d.os_name,
-        d.patching_scope,
-        dps.last_seen_at,
+        s.device_id,
+        s.system_name,
+        s.display_name,
+        s.organization_id,
+        s.node_class,
+        s.os_name,
+        s.assigned_policy,
+        s.patching_scope,
+        s.patching_disabled,
+        s.patching_notes,
+        s.last_seen_at,
         CASE
-            WHEN dps.last_seen_at IS NULL THEN 'no_patch_data'
-            WHEN dps.last_seen_at < NOW() - (INTERVAL '1 day' * {{{{{days_tag}}}}}) THEN 'stale_patch_data'
+            WHEN s.last_seen_at IS NULL THEN 'no_patch_data'
+            WHEN s.last_seen_at < NOW() - (INTERVAL '1 day' * {{{{{days_tag}}}}}) THEN 'stale_patch_data'
             ELSE 'active_patching'
-        END AS patch_status
-    FROM ninja_core.v_active_devices d
-    LEFT JOIN ninja_patches.device_patch_signal dps ON dps.device_id = d.id
-),
-patch_state_rollup AS (
-    SELECT
-        device_id,
-        COUNT(*) FILTER (WHERE status = 'APPROVED') AS approved_patches,
-        COUNT(*) FILTER (WHERE status = 'MANUAL') AS manual_patches,
-        COUNT(*) FILTER (WHERE status = 'DELAYED') AS delayed_patches,
-        COUNT(*) FILTER (WHERE status IN ({COMPLIANCE_MISSING_SQL})) AS missing_patches,
-        MAX(last_observed_at) AS last_patch_state_seen
-    FROM ninja_patches.current_patch_state
-    GROUP BY device_id
-),
-install_rollup AS (
-    SELECT
-        device_id,
-        COUNT(*) FILTER (WHERE status = 'FAILED') AS failed_installs,
-        MAX(installed_at) FILTER (WHERE status = 'FAILED') AS last_failed_install,
-        MAX(installed_at) AS last_install_attempt
-    FROM ninja_patches.latest_install_outcome
-    GROUP BY device_id
+        END AS patch_status,
+        s.last_contact,
+        s.offline,
+        s.needs_reboot,
+        s.approved_patches,
+        s.manual_patches,
+        s.delayed_patches,
+        s.missing_patches,
+        s.waiting_patches,
+        s.last_patch_state_seen,
+        s.failed_installs,
+        s.last_failed_install,
+        s.last_install_attempt,
+        s.last_activity_event,
+        s.last_patch_started,
+        s.last_patch_completed,
+        s.last_patch_failure,
+        s.last_reboot,
+        s.patch_started_events,
+        s.patch_completed_events,
+        s.patch_failure_events,
+        s.last_failure_message,
+        s.health_status,
+        s.pending_reboot_reason,
+        s.ninja_pending_os_patches,
+        s.ninja_failed_os_patches,
+        s.alert_count,
+        s.active_job_count,
+        s.installation_issues_count,
+        s.started_without_completion
+    FROM ninja_core.device_troubleshooting_signal s
 ),
 problem_devices AS (
     SELECT
-        c.device_id,
-        c.system_name,
-        c.organization_id,
-        c.node_class,
-        c.os_name,
-        c.patching_scope,
-        c.patch_status,
-        c.last_seen_at,
-        d.last_contact,
-        d.offline,
-        d.needs_reboot,
-        d.patching_notes,
-        COALESCE(psr.approved_patches, 0) AS approved_patches,
-        COALESCE(psr.manual_patches, 0) AS manual_patches,
-        COALESCE(psr.delayed_patches, 0) AS delayed_patches,
-        COALESCE(psr.missing_patches, 0) AS missing_patches,
-        COALESCE(psr.approved_patches, 0)
-            + COALESCE(psr.manual_patches, 0)
-            + COALESCE(psr.delayed_patches, 0) AS waiting_patches,
-        psr.last_patch_state_seen,
-        COALESCE(ir.failed_installs, 0) AS failed_installs,
-        ir.last_failed_install,
-        ir.last_install_attempt,
-        ar.last_activity_event,
-        ar.last_patch_started,
-        ar.last_patch_completed,
-        ar.last_patch_failure,
-        ar.last_reboot,
-        COALESCE(ar.patch_started_events, 0) AS patch_started_events,
-        COALESCE(ar.patch_completed_events, 0) AS patch_completed_events,
-        COALESCE(ar.patch_failure_events, 0) AS patch_failure_events,
-        ar.last_failure_message,
-        (
-            ar.last_patch_started IS NOT NULL
-            AND (
-                ar.last_patch_completed IS NULL
-                OR ar.last_patch_completed < ar.last_patch_started
-            )
-        ) AS started_without_completion,
+        c.*,
         CASE
             WHEN c.patching_scope = 'Excluded' THEN 'Excluded'
-            WHEN c.patch_status = 'no_patch_data' AND COALESCE(d.offline, FALSE) THEN 'Never patched and offline'
+            WHEN c.patch_status = 'no_patch_data' AND COALESCE(c.offline, FALSE) THEN 'Never patched and offline'
             WHEN c.patch_status = 'no_patch_data' THEN 'Never patched'
-            WHEN c.patch_status = 'stale_patch_data' AND COALESCE(d.offline, FALSE) THEN 'Stalled and offline'
+            WHEN c.patch_status = 'stale_patch_data' AND COALESCE(c.offline, FALSE) THEN 'Stalled and offline'
             WHEN c.patch_status = 'stale_patch_data'
-                AND ar.last_patch_started IS NOT NULL
+                AND c.last_patch_started IS NOT NULL
                 AND (
-                    ar.last_patch_completed IS NULL
-                    OR ar.last_patch_completed < ar.last_patch_started
+                    c.last_patch_completed IS NULL
+                    OR c.last_patch_completed < c.last_patch_started
                 ) THEN 'Stalled after patch start'
-            WHEN c.patch_status = 'stale_patch_data' AND COALESCE(ar.patch_failure_events, 0) > 0 THEN 'Stalled with activity failures'
-            WHEN c.patch_status = 'stale_patch_data' AND COALESCE(ir.failed_installs, 0) > 0 THEN 'Stalled with failures'
-            WHEN c.patch_status = 'stale_patch_data' AND COALESCE(d.needs_reboot, FALSE) THEN 'Stalled with reboot pending'
-            WHEN c.patch_status = 'stale_patch_data' AND COALESCE(psr.manual_patches, 0) > 0 THEN 'Stalled with manual approvals'
-            WHEN c.patch_status = 'stale_patch_data' AND COALESCE(psr.delayed_patches, 0) > 0 THEN 'Stalled with delayed patches'
-            WHEN c.patch_status = 'stale_patch_data' AND COALESCE(psr.approved_patches, 0) > 0 THEN 'Stalled with approved waiting'
+            WHEN c.patch_status = 'stale_patch_data' AND COALESCE(c.patch_failure_events, 0) > 0 THEN 'Stalled with activity failures'
+            WHEN c.patch_status = 'stale_patch_data' AND COALESCE(c.failed_installs, 0) > 0 THEN 'Stalled with failures'
+            WHEN c.patch_status = 'stale_patch_data' AND COALESCE(c.needs_reboot, FALSE) THEN 'Stalled with reboot pending'
+            WHEN c.patch_status = 'stale_patch_data' AND COALESCE(c.manual_patches, 0) > 0 THEN 'Stalled with manual approvals'
+            WHEN c.patch_status = 'stale_patch_data' AND COALESCE(c.delayed_patches, 0) > 0 THEN 'Stalled with delayed patches'
+            WHEN c.patch_status = 'stale_patch_data' AND COALESCE(c.approved_patches, 0) > 0 THEN 'Stalled with approved waiting'
             WHEN c.patch_status = 'stale_patch_data' THEN 'Stalled'
-            WHEN COALESCE(ir.failed_installs, 0) > 0 THEN 'Active with failures'
-            WHEN COALESCE(d.needs_reboot, FALSE) THEN 'Reboot pending'
-            WHEN COALESCE(psr.manual_patches, 0) > 0 THEN 'Manual approvals'
+            WHEN COALESCE(c.failed_installs, 0) > 0 THEN 'Active with failures'
+            WHEN COALESCE(c.needs_reboot, FALSE) THEN 'Reboot pending'
+            WHEN COALESCE(c.manual_patches, 0) > 0 THEN 'Manual approvals'
             ELSE 'Review'
         END AS issue_type,
         CASE
             WHEN c.patching_scope = 'Excluded' THEN 'Validate exclusion and notes'
-            WHEN c.patch_status = 'no_patch_data' AND COALESCE(d.offline, FALSE) THEN 'Bring online; verify Ninja agent and patch policy'
+            WHEN c.patch_status = 'no_patch_data' AND COALESCE(c.offline, FALSE) THEN 'Bring online; verify Ninja agent and patch policy'
             WHEN c.patch_status = 'no_patch_data' THEN 'Verify policy assignment, agent health, and OS patch inventory'
-            WHEN c.patch_status = 'stale_patch_data' AND COALESCE(d.offline, FALSE) THEN 'Bring online; confirm agent check-in'
+            WHEN c.patch_status = 'stale_patch_data' AND COALESCE(c.offline, FALSE) THEN 'Bring online; confirm agent check-in'
             WHEN c.patch_status = 'stale_patch_data'
-                AND ar.last_patch_started IS NOT NULL
+                AND c.last_patch_started IS NOT NULL
                 AND (
-                    ar.last_patch_completed IS NULL
-                    OR ar.last_patch_completed < ar.last_patch_started
+                    c.last_patch_completed IS NULL
+                    OR c.last_patch_completed < c.last_patch_started
                 ) THEN 'Review activity feed: patch started but no later completion'
-            WHEN c.patch_status = 'stale_patch_data' AND COALESCE(ar.patch_failure_events, 0) > 0 THEN 'Review patch-management failure activity'
-            WHEN c.patch_status = 'stale_patch_data' AND COALESCE(ir.failed_installs, 0) > 0 THEN 'Review failed install results'
-            WHEN c.patch_status = 'stale_patch_data' AND COALESCE(d.needs_reboot, FALSE) THEN 'Reboot or confirm reboot policy'
-            WHEN c.patch_status = 'stale_patch_data' AND COALESCE(psr.manual_patches, 0) > 0 THEN 'Review manual approvals'
-            WHEN c.patch_status = 'stale_patch_data' AND COALESCE(psr.delayed_patches, 0) > 0 THEN 'Review delay policy/window'
-            WHEN c.patch_status = 'stale_patch_data' AND COALESCE(psr.approved_patches, 0) > 0 THEN 'Check why approved patches are not installing'
+            WHEN c.patch_status = 'stale_patch_data' AND COALESCE(c.patch_failure_events, 0) > 0 THEN 'Review patch-management failure activity'
+            WHEN c.patch_status = 'stale_patch_data' AND COALESCE(c.failed_installs, 0) > 0 THEN 'Review failed install results'
+            WHEN c.patch_status = 'stale_patch_data' AND COALESCE(c.needs_reboot, FALSE) THEN 'Reboot or confirm reboot policy'
+            WHEN c.patch_status = 'stale_patch_data' AND COALESCE(c.manual_patches, 0) > 0 THEN 'Review manual approvals'
+            WHEN c.patch_status = 'stale_patch_data' AND COALESCE(c.delayed_patches, 0) > 0 THEN 'Review delay policy/window'
+            WHEN c.patch_status = 'stale_patch_data' AND COALESCE(c.approved_patches, 0) > 0 THEN 'Check why approved patches are not installing'
             WHEN c.patch_status = 'stale_patch_data' THEN 'Check schedule, agent health, maintenance window, and policy'
-            WHEN COALESCE(ir.failed_installs, 0) > 0 THEN 'Review failed install results'
-            WHEN COALESCE(d.needs_reboot, FALSE) THEN 'Reboot or confirm reboot policy'
-            WHEN COALESCE(psr.manual_patches, 0) > 0 THEN 'Review manual approvals'
+            WHEN COALESCE(c.failed_installs, 0) > 0 THEN 'Review failed install results'
+            WHEN COALESCE(c.needs_reboot, FALSE) THEN 'Reboot or confirm reboot policy'
+            WHEN COALESCE(c.manual_patches, 0) > 0 THEN 'Review manual approvals'
             ELSE 'Open device drilldown'
         END AS suggested_action
     FROM classified c
-    JOIN ninja_core.v_active_devices d ON d.id = c.device_id
-    LEFT JOIN patch_state_rollup psr ON psr.device_id = c.device_id
-    LEFT JOIN install_rollup ir ON ir.device_id = c.device_id
-    LEFT JOIN ninja_activities.device_activity_signal ar ON ar.device_id = c.device_id
     WHERE c.patch_status IN ('no_patch_data', 'stale_patch_data')
-       OR COALESCE(ir.failed_installs, 0) > 0
-       OR COALESCE(d.needs_reboot, FALSE)
-       OR COALESCE(psr.manual_patches, 0) > 0
+       OR COALESCE(c.failed_installs, 0) > 0
+       OR COALESCE(c.needs_reboot, FALSE)
+       OR COALESCE(c.manual_patches, 0) > 0
        OR c.patching_scope = 'Excluded'
 )
 """
@@ -3036,9 +2999,6 @@ ORDER BY "Patching %" ASC, "Total Devices" DESC
         "column_click_behaviors": {
             "device":                  {"target": DASH_DRILLDOWN, "params": {"p_device":      "device"}},
             "organization":            {"target": "self",         "params": {"p_pcov_org":    "organization"}},
-            "device_type":             {"target": "self",         "params": {"p_pcov_class":  "device_type"}},
-            "operating_system_family": {"target": "self",         "params": {"p_pcov_os":     "operating_system_family"}},
-            "patching_status":         {"target": "self",         "params": {"p_pcov_status": "patching_status"}},
         },
         "template_tags":  _PCOV_TAGS,
         "param_mappings": _PCOV_PARAM_MAPPINGS,
@@ -3047,8 +3007,10 @@ ORDER BY "Patching %" ASC, "Total Devices" DESC
 SELECT
     p.system_name AS device,
     o.name AS organization,
+    p.assigned_policy AS "Policy",
     p.issue_type AS issue,
     p.suggested_action AS action,
+    p.health_status AS "Health",
     CASE WHEN p.last_seen_at IS NULL THEN NULL
          ELSE EXTRACT(DAY FROM (NOW() - p.last_seen_at))::int
     END AS "Days Since Patch",
@@ -3057,8 +3019,11 @@ SELECT
     END AS "Days Since Contact",
     COALESCE(p.offline, FALSE) AS "Offline",
     COALESCE(p.needs_reboot, FALSE) AS "Needs Reboot",
+    p.pending_reboot_reason AS "Reboot Reason",
     p.failed_installs AS "Failed",
     p.missing_patches AS "Missing",
+    p.ninja_pending_os_patches AS "Ninja OS Pending",
+    p.ninja_failed_os_patches AS "Ninja OS Failed",
     p.waiting_patches AS "Waiting",
     NULLIF(p.patching_notes, '') AS "Patching Notes"
 FROM problem_devices p
@@ -3104,7 +3069,6 @@ latest_contact AS (
     ORDER BY device_id, snapshot_at DESC
 )
 SELECT
-    c.device_id::text AS "Device ID",
     c.system_name AS device,
     o.name AS organization,
     {DEVICE_TYPE_C} AS device_type,
@@ -3117,7 +3081,8 @@ SELECT
     END AS "Days Since Attempt",
     CASE WHEN lc.last_contact IS NULL THEN NULL
          ELSE EXTRACT(DAY FROM (NOW() - lc.last_contact))::int
-    END AS "Days Since Contact"
+    END AS "Days Since Contact",
+    c.device_id::text AS "Device ID"
 FROM classified c
 JOIN ninja_core.organizations o ON o.id = c.organization_id
 LEFT JOIN latest_contact lc ON lc.device_id = c.device_id
@@ -3133,6 +3098,39 @@ ORDER BY
     o.name, c.system_name
 """,
     },
+    {
+        "key":     "pcov_count_source_check",
+        "name":    "Patch Count Source Check",
+        "display": "table",
+        "row": 48, "col": 0, "size_x": 24, "size_y": 7,
+        "template_tags":  _PCOV_TAGS,
+        "param_mappings": _PCOV_PARAM_MAPPINGS,
+        "column_click_behaviors": {
+            "organization": {"target": "self", "params": {"p_pcov_org": "organization"}},
+        },
+        "query": f"""
+{_PCOV_CTE}
+SELECT
+    o.name AS organization,
+    COUNT(*) AS devices,
+    SUM(COALESCE(s.missing_patches, 0)) AS "DB Missing",
+    SUM(COALESCE(s.ninja_pending_os_patches, 0)) AS "Ninja OS Pending",
+    SUM(COALESCE(s.failed_installs, 0)) AS "DB Failed Installs",
+    SUM(COALESCE(s.ninja_failed_os_patches, 0)) AS "Ninja OS Failed",
+    SUM(COALESCE(s.approved_patches, 0)) AS "DB Approved Waiting"
+FROM classified c
+JOIN ninja_core.organizations o ON o.id = c.organization_id
+JOIN ninja_core.device_troubleshooting_signal s ON s.device_id = c.device_id
+WHERE 1=1
+{_PCOV_FILTERS}
+GROUP BY o.name
+ORDER BY
+    ABS(SUM(COALESCE(s.missing_patches, 0)) - SUM(COALESCE(s.ninja_pending_os_patches, 0))) DESC,
+    devices DESC,
+    o.name
+LIMIT 50
+""",
+    },
 ]
 
 
@@ -3141,6 +3139,7 @@ ORDER BY
 PARAM_ISSUE_ORG = "p_issue_org"
 PARAM_ISSUE_CLASS = "p_issue_class"
 PARAM_ISSUE_OS = "p_issue_os"
+PARAM_ISSUE_POLICY = "p_issue_policy"
 PARAM_ISSUE_TYPE = "p_issue_type"
 PARAM_ISSUE_OFFLINE = "p_issue_offline"
 PARAM_ISSUE_REBOOT = "p_issue_reboot"
@@ -3170,11 +3169,14 @@ _ISSUE_TYPE_OPTIONS = [
 _BOOL_OPTIONS = ["Yes", "No"]
 
 
-def build_issue_parameters(org_names: list[str], os_families: list[str]) -> list[dict]:
+def build_issue_parameters(
+    org_names: list[str], os_families: list[str], policy_names: list[str],
+) -> list[dict]:
     return [
         _param_multiselect(PARAM_ISSUE_ORG, "Organization", "issue_org", org_names),
         _param_multiselect(PARAM_ISSUE_CLASS, "Device Type", "issue_device_type", _NODE_CLASS_OPTIONS),
         _param_multiselect(PARAM_ISSUE_OS, "OS Family", "issue_os", os_families),
+        _param_multiselect(PARAM_ISSUE_POLICY, "Policy", "issue_policy", policy_names),
         _param_multiselect(PARAM_PATCHING_SCOPE, "Patching Scope", "patching_scope", _PATCHING_SCOPE_OPTIONS, default="Included"),
         _param_multiselect(PARAM_ISSUE_TYPE, "Issue Type", "issue_type", _ISSUE_TYPE_OPTIONS),
         _param_multiselect(PARAM_ISSUE_OFFLINE, "Offline", "offline", _BOOL_OPTIONS),
@@ -3190,6 +3192,7 @@ _ISSUE_TAGS = {
     "issue_org": {"id": "tt_issue_org", "name": "issue_org", "display-name": "Organization", "type": "text"},
     "issue_device_type": {"id": "tt_issue_class", "name": "issue_device_type", "display-name": "Device Type", "type": "text"},
     "issue_os": {"id": "tt_issue_os", "name": "issue_os", "display-name": "OS Family", "type": "text"},
+    "issue_policy": {"id": "tt_issue_policy", "name": "issue_policy", "display-name": "Policy", "type": "text"},
     "patching_scope": {"id": "tt_issue_scope", "name": "patching_scope", "display-name": "Patching Scope", "type": "text"},
     "issue_type": {"id": "tt_issue_type", "name": "issue_type", "display-name": "Issue Type", "type": "text"},
     "offline": {"id": "tt_issue_offline", "name": "offline", "display-name": "Offline", "type": "text"},
@@ -3208,6 +3211,7 @@ _ISSUE_PARAM_MAPPINGS = {
     PARAM_ISSUE_ORG: ["variable", ["template-tag", "issue_org"]],
     PARAM_ISSUE_CLASS: ["variable", ["template-tag", "issue_device_type"]],
     PARAM_ISSUE_OS: ["variable", ["template-tag", "issue_os"]],
+    PARAM_ISSUE_POLICY: ["variable", ["template-tag", "issue_policy"]],
     PARAM_PATCHING_SCOPE: ["variable", ["template-tag", "patching_scope"]],
     PARAM_ISSUE_TYPE: ["variable", ["template-tag", "issue_type"]],
     PARAM_ISSUE_OFFLINE: ["variable", ["template-tag", "offline"]],
@@ -3222,6 +3226,7 @@ _ISSUE_FILTERS = f"""
   [[AND o.name IN ({{{{issue_org}}}})]]
   [[AND {DEVICE_TYPE_P} IN ({{{{issue_device_type}}}})]]
   [[AND {OS_FAMILY_P} IN ({{{{issue_os}}}})]]
+  [[AND p.assigned_policy IN ({{{{issue_policy}}}})]]
   [[AND p.patching_scope IN ({{{{patching_scope}}}})]]
   [[AND p.issue_type IN ({{{{issue_type}}}})]]
   [[AND CASE WHEN COALESCE(p.offline, FALSE) THEN 'Yes' ELSE 'No' END IN ({{{{offline}}}})]]
@@ -3346,26 +3351,25 @@ WHERE COALESCE(p.needs_reboot, FALSE)
 SELECT
     p.system_name AS device,
     o.name AS organization,
+    p.assigned_policy AS "Policy",
     p.issue_type AS issue,
     p.suggested_action AS action,
+    p.health_status AS "Health",
     CASE WHEN p.last_seen_at IS NULL THEN NULL
          ELSE EXTRACT(DAY FROM (NOW() - p.last_seen_at))::int
     END AS "Days Since Patch",
     CASE WHEN p.last_contact IS NULL THEN NULL
          ELSE EXTRACT(DAY FROM (NOW() - p.last_contact))::int
     END AS "Days Since Contact",
-    p.last_activity_event AS "Last Activity",
-    p.last_patch_started AS "Last Started",
-    p.last_patch_completed AS "Last Completed",
-    p.last_patch_failure AS "Last Failure",
     COALESCE(p.offline, FALSE) AS "Offline",
     COALESCE(p.needs_reboot, FALSE) AS "Needs Reboot",
+    p.pending_reboot_reason AS "Reboot Reason",
     p.failed_installs AS "Failed",
     p.missing_patches AS "Missing",
+    p.ninja_pending_os_patches AS "Ninja OS Pending",
+    p.ninja_failed_os_patches AS "Ninja OS Failed",
     p.waiting_patches AS "Waiting",
-    COALESCE(p.started_without_completion, FALSE) AS "Started No Completion",
-    NULLIF(p.patching_notes, '') AS "Notes",
-    p.device_id::text AS "Device ID"
+    COALESCE(p.started_without_completion, FALSE) AS "Started No Completion"
 FROM problem_devices p
 JOIN ninja_core.organizations o ON o.id = p.organization_id
 WHERE 1=1
@@ -3862,7 +3866,6 @@ SELECT
     o.name AS organization,
     d.system_name AS device,
     COALESCE(NULLIF(lir.kb_number, ''), '(none)') AS kb_number,
-    lir.patch_name AS "Patch",
     lir.severity AS "Severity",
     lir.status AS "Install Results",
     lir.installed_at AS "Last Install Attempt",
@@ -3901,7 +3904,6 @@ SELECT
     d.system_name AS device,
     cs.status AS current_patch_state,
     COALESCE(NULLIF(cs.kb_number, ''), '(none)') AS kb_number,
-    cs.patch_name AS "Patch",
     cs.severity AS "Severity",
     cs.last_observed_at AS "Last Seen"
 FROM current_state cs
@@ -4298,6 +4300,7 @@ _cap_table_card_heights(
 
 def build_dashboards(
     org_names: list[str], os_families: list[str], device_names: list[str],
+    policy_names: list[str],
 ) -> list[dict]:
     """All dashboards this script provisions. Detail / Patching Status
     dropdowns are populated from the live data passed in.
@@ -4338,7 +4341,7 @@ def build_dashboards(
         },
         {
             "name":       DASH_ISSUES,
-            "parameters": build_issue_parameters(org_names, os_families),
+            "parameters": build_issue_parameters(org_names, os_families, policy_names),
             "cards":      ISSUE_CARDS,
         },
         {
@@ -4353,7 +4356,7 @@ def build_dashboards(
         },
         {
             "name":       DASH_PCOV,
-            "parameters": build_pcov_parameters(org_names, os_families),
+            "parameters": build_pcov_parameters(org_names, os_families, policy_names),
             "cards":      PCOV_CARDS,
         },
         {
@@ -4364,13 +4367,15 @@ def build_dashboards(
     ]
 
 
-def _fetch_dropdown_sources() -> tuple[list[str], list[str], list[str]]:
+def _fetch_dropdown_sources() -> tuple[list[str], list[str], list[str], list[str]]:
     """Query Postgres for current orgs, OS families, and active devices."""
     db.init(settings.postgres_dsn)
     with db.transaction() as cur:
         cur.execute("SELECT name FROM ninja_core.organizations ORDER BY name")
         org_names = [r[0] for r in cur.fetchall() if r[0]]
         os_families = list(_OS_FAMILY_OPTIONS)
+        cur.execute("SELECT name FROM ninja_core.policies ORDER BY name")
+        policy_names = [r[0] for r in cur.fetchall() if r[0]]
         cur.execute(
             "SELECT system_name FROM ninja_core.v_active_devices "
             "WHERE system_name IS NOT NULL AND system_name <> '' "
@@ -4378,10 +4383,10 @@ def _fetch_dropdown_sources() -> tuple[list[str], list[str], list[str]]:
         )
         device_names = [r[0] for r in cur.fetchall() if r[0]]
     log.info(
-        "Dropdown sources: %d orgs, %d OS families, %d devices",
-        len(org_names), len(os_families), len(device_names),
+        "Dropdown sources: %d orgs, %d OS families, %d policies, %d devices",
+        len(org_names), len(os_families), len(policy_names), len(device_names),
     )
-    return org_names, os_families, device_names
+    return org_names, os_families, device_names, policy_names
 
 
 # ── HTTP helpers ────────────────────────────────────────────────────
@@ -4774,8 +4779,8 @@ def run_bootstrap(
       2.  Apply click_behavior (cross-dashboard drill-through and
           crossfilter — also needs IDs).
     Raises on auth / API errors."""
-    org_names, os_families, device_names = _fetch_dropdown_sources()
-    dashboards = build_dashboards(org_names, os_families, device_names)
+    org_names, os_families, device_names, policy_names = _fetch_dropdown_sources()
+    dashboards = build_dashboards(org_names, os_families, device_names, policy_names)
 
     urls: list[str] = []
     dash_id_by_name: dict[str, int] = {}
