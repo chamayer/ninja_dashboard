@@ -1109,3 +1109,10 @@ list):**
 - Optimized the Device Patching Status scope filter by carrying
   `patching_scope` into the classified device CTE instead of re-checking
   the active-device view row-by-row.
+- Removed the remaining correlated `v_active_devices` scope filters
+  from the Metabase bootstrap and moved the affected cards onto
+  `ninja_core.v_active_devices` directly so `patching_scope` filters
+  behave as ordinary column filters.
+- Reflowed the Overall Status and Org Overview KPI bands so the percent
+  cards, count cards, and Active Devices card sit in a compact top
+  section.

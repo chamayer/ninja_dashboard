@@ -7,35 +7,34 @@
 
 ## Goal
 
-Fix the dashboard org filter UX, add the missing Device Drilldown org
-filter, and add compact count cards for the active-patching KPIs.
+Audit the dashboard query layer for performance bottlenecks and remove
+the worst repeated-filter / repeated-join patterns.
 
 ## Why
 
-The operator keeps needing the same host, ingest, Metabase, Postgres,
-and probe commands. A single reference file makes the workflow faster
-and reduces drift from memory.
+The Device Patching Status page gets slow when multiple filters are
+combined, especially `Patching Scope`. The dashboard needs the same
+scope behavior, but with fewer repeated scans through
+`ninja_core.v_active_devices`.
 
 ## Scope
 
 **In:**
-- Convert the broken Organization dropdowns on the affected dashboards
-  into real text search boxes.
-- Add an Organization filter to Device Drilldown.
-- Add compact count cards for the active-patching KPI pages without
-  bloating the layouts.
+- Remove correlated `patching_scope` lookups where the query already
+  has the needed scope data.
+- Reuse derived scope columns inside shared CTEs where that reduces
+  repeated scans.
+- Keep the existing dashboard behavior and filters intact.
 
 **Out / separate investigation:**
 - Any offline-device cleanup.
-- Offline-device cleanup.
 - Reworking existing docs beyond the new reference file.
 
 ## Files to change
 
-- `HANDY_COMMANDS.md`
-  - Keep the new reference file in the repo.
 - `ingest/metabase_bootstrap.py`
-  - Update org filters, Device Drilldown, and compact KPI counts.
+  - Remove repeated scope checks and keep the slow pages on one scan
+    path.
 - `BLUEPRINT.md`
   - Track this task while it is in progress.
 - `SESSIONS.md`
@@ -43,11 +42,12 @@ and reduces drift from memory.
 
 ## Steps
 
-1. Patch the bootstrap for org search, Device Drilldown org filter,
-   and count cards.
-2. Compile-check the bootstrap.
-3. Update the session log.
-4. Commit and push after approval.
+1. Patch the bootstrap to remove the remaining correlated scope
+   filters.
+2. Re-scan the query layer for the next obvious bottleneck.
+3. Compile-check the bootstrap.
+4. Update the session log.
+5. Commit and push after approval.
 
 ## Open questions
 

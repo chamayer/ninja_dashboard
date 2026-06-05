@@ -330,10 +330,8 @@ classified AS (
             WHEN dps.last_seen_at < NOW() - (INTERVAL '1 day' * {DEFAULT_STALE_PATCH_DAYS}) THEN 'stale_patch_data'
             ELSE 'active_patching'
         END AS patch_status
-    FROM ninja_core.devices d
+    FROM ninja_core.v_active_devices d
     LEFT JOIN device_patch_signal dps ON dps.device_id = d.id
-    WHERE d.approval_status = 'APPROVED'
-      AND d.node_class IN ('WINDOWS_WORKSTATION', 'WINDOWS_SERVER')
 )
 SELECT ROUND(
     COUNT(*) FILTER (WHERE c.patch_status = 'active_patching') * 100.0
@@ -341,7 +339,7 @@ SELECT ROUND(
     1
 ) AS percent_installed
 FROM classified c
-JOIN ninja_core.devices d ON d.id = c.device_id
+JOIN ninja_core.v_active_devices d ON d.id = c.device_id
 JOIN ninja_core.organizations o ON o.id = c.organization_id
 WHERE 1=1
 {filters}
@@ -829,8 +827,7 @@ _CMD_PARAM_MAPPINGS_FULL = {
 _CMD_FILTER_ORG         = "  [[AND o.name ILIKE '%' || {{org}} || '%']]\n"
 _CMD_FILTER_DEVICE_TYPE = f"  [[AND {DEVICE_TYPE_D} IN ({{{{device_type}}}})]]\n"
 _CMD_FILTER_PATCHING_SCOPE = (
-    "  [[AND EXISTS (SELECT 1 FROM ninja_core.v_active_devices vad "
-    "WHERE vad.id = d.id AND vad.patching_scope IN ({{patching_scope}}))]]\n"
+    "  [[AND d.patching_scope IN ({{patching_scope}})]]\n"
 )
 _CMD_FILTER_SEV_CS      = "  [[AND cs.severity IN ({{severity}})]]\n"
 _CMD_FILTER_SEV_LIR     = "  [[AND lir.severity IN ({{severity}})]]\n"
@@ -892,11 +889,10 @@ WHERE 1=1
     GROUP BY device_id
 )
 SELECT COUNT(*) AS devices
-FROM ninja_core.devices d
+FROM ninja_core.v_active_devices d
 JOIN ninja_core.organizations o ON o.id = d.organization_id
 JOIN last_install li ON li.device_id = d.id
-WHERE d.approval_status = 'APPROVED'
-  AND d.node_class IN ('WINDOWS_WORKSTATION', 'WINDOWS_SERVER')
+WHERE 1=1
   AND li.last_install_at >= NOW() - (INTERVAL '1 day' * {DEFAULT_STALE_PATCH_DAYS})
 {_CMD_FILTERS_DEVICE}
 """,
@@ -918,11 +914,10 @@ WHERE d.approval_status = 'APPROVED'
     GROUP BY device_id
 )
 SELECT COUNT(*) AS devices
-FROM ninja_core.devices d
+FROM ninja_core.v_active_devices d
 JOIN ninja_core.organizations o ON o.id = d.organization_id
 JOIN last_install li ON li.device_id = d.id
-WHERE d.approval_status = 'APPROVED'
-  AND d.node_class IN ('WINDOWS_WORKSTATION', 'WINDOWS_SERVER')
+WHERE 1=1
   AND li.last_install_at < NOW() - (INTERVAL '1 day' * {DEFAULT_STALE_PATCH_DAYS})
 {_CMD_FILTERS_DEVICE}
 """,
@@ -936,15 +931,14 @@ WHERE d.approval_status = 'APPROVED'
         "param_mappings": _CMD_PARAM_MAPPINGS_FULL,
         "click_behavior": {"target": DASH_PCOV, "preset": {"pcov_status": "Never-Patched Devices"}},
         "query": f"""
-        SELECT COUNT(*) AS devices
-FROM ninja_core.devices d
+SELECT COUNT(*) AS devices
+FROM ninja_core.v_active_devices d
 JOIN ninja_core.organizations o ON o.id = d.organization_id
 LEFT JOIN ninja_patches.patch_facts pf
   ON pf.device_id = d.id
  AND pf.fact_type = 'install_outcome'
  AND pf.installed_at IS NOT NULL
-WHERE d.approval_status = 'APPROVED'
-        AND d.node_class IN ('WINDOWS_WORKSTATION', 'WINDOWS_SERVER')
+WHERE 1=1
         AND pf.device_id IS NULL
         {_CMD_FILTERS_DEVICE}
 """,
@@ -1110,10 +1104,8 @@ device_status AS (
             WHEN li.last_install_at < NOW() - (INTERVAL '1 day' * {DEFAULT_STALE_PATCH_DAYS}) THEN 'stale'
             ELSE 'recent'
         END AS patch_activity
-    FROM ninja_core.devices d
+    FROM ninja_core.v_active_devices d
     LEFT JOIN last_install li ON li.device_id = d.id
-    WHERE d.approval_status = 'APPROVED'
-      AND d.node_class IN ('WINDOWS_WORKSTATION', 'WINDOWS_SERVER')
 )
 SELECT
     o.name AS organization,
@@ -1355,8 +1347,7 @@ _OVERALL_FILTER_ORG         = "  [[AND o.name ILIKE '%' || {{org}} || '%']]\n"
 _OVERALL_FILTER_DEVICE_TYPE = f"  [[AND {DEVICE_TYPE_D} IN ({{{{device_type}}}})]]\n"
 _OVERALL_FILTER_OS_FAMILY   = f"  [[AND {OS_FAMILY_D} IN ({{{{os_family}}}})]]\n"
 _OVERALL_FILTER_PATCHING_SCOPE = (
-    "  [[AND EXISTS (SELECT 1 FROM ninja_core.v_active_devices vad "
-    "WHERE vad.id = d.id AND vad.patching_scope IN ({{patching_scope}}))]]\n"
+    "  [[AND d.patching_scope IN ({{patching_scope}})]]\n"
 )
 _OVERALL_FILTER_SEV_CS      = "  [[AND cs.severity IN ({{severity}})]]\n"
 _OVERALL_FILTER_SEV_LIR     = "  [[AND lir.severity IN ({{severity}})]]\n"
@@ -1391,7 +1382,7 @@ OVERVIEW_CARDS: list[dict[str, Any]] = [
         "key":            "overall_compliance",
         "name":           "Actively patching %",
         "display":        "scalar",
-        "row": 0, "col": 0, "size_x": 8, "size_y": 4,
+        "row": 0, "col": 0, "size_x": 8, "size_y": 3,
         "template_tags":  _OVERALL_TAGS,
         "param_mappings": _OVERALL_PARAM_MAPPINGS_FULL,
         "query": _active_patching_scalar_query(_OVERALL_FILTERS_DEVICE),
@@ -1400,7 +1391,7 @@ OVERVIEW_CARDS: list[dict[str, Any]] = [
         "key":            "overall_progress",
         "name":           "Fully patched % (patching devices)",
         "display":        "scalar",
-        "row": 0, "col": 8, "size_x": 8, "size_y": 4,
+        "row": 0, "col": 8, "size_x": 8, "size_y": 3,
         "template_tags":  _OVERALL_TAGS,
         "param_mappings": _OVERALL_PARAM_MAPPINGS_FULL,
         "query": _patching_device_compliance_scalar_query(_OVERALL_FILTERS_DEVICE),
@@ -1409,7 +1400,7 @@ OVERVIEW_CARDS: list[dict[str, Any]] = [
         "key":            "overall_active_count",
         "name":           "Actively patching",
         "display":        "scalar",
-        "row": 4, "col": 0, "size_x": 8, "size_y": 3,
+        "row": 5, "col": 0, "size_x": 8, "size_y": 2,
         "template_tags":  _OVERALL_TAGS,
         "param_mappings": _OVERALL_PARAM_MAPPINGS_FULL,
         "query": _active_patching_count_query(_OVERALL_FILTERS_DEVICE),
@@ -1418,7 +1409,7 @@ OVERVIEW_CARDS: list[dict[str, Any]] = [
         "key":            "overall_progress_count",
         "name":           "Fully patched",
         "display":        "scalar",
-        "row": 4, "col": 8, "size_x": 8, "size_y": 3,
+        "row": 5, "col": 8, "size_x": 8, "size_y": 2,
         "template_tags":  _OVERALL_TAGS,
         "param_mappings": _OVERALL_PARAM_MAPPINGS_FULL,
         "query": _patching_device_compliance_count_query(_OVERALL_FILTERS_DEVICE),
@@ -1427,7 +1418,7 @@ OVERVIEW_CARDS: list[dict[str, Any]] = [
         "key":            "active_devices",
         "name":           "Active Devices",
         "display":        "scalar",
-        "row": 4, "col": 16, "size_x": 8, "size_y": 4,
+        "row": 4, "col": 16, "size_x": 8, "size_y": 3,
         "template_tags":  _OVERALL_TAGS,
         "param_mappings": _OVERALL_PARAM_MAPPINGS_FULL,
         "click_behavior": {"target": DASH_DETAIL, "preset": {}},
@@ -1596,11 +1587,10 @@ WITH dps AS (
     GROUP BY device_id
 )
 SELECT COUNT(*) AS active
-FROM ninja_core.devices d
+FROM ninja_core.v_active_devices d
 JOIN ninja_core.organizations o ON o.id = d.organization_id
 JOIN dps ON dps.device_id = d.id
-WHERE d.approval_status = 'APPROVED'
-  AND dps.last_seen_at > NOW() - (INTERVAL '1 day' * {DEFAULT_STALE_PATCH_DAYS})
+WHERE dps.last_seen_at > NOW() - (INTERVAL '1 day' * {DEFAULT_STALE_PATCH_DAYS})
 {_OVERALL_FILTERS_DEVICE}
 """,
     },
@@ -1624,11 +1614,10 @@ WITH dps AS (
     GROUP BY device_id
 )
 SELECT COUNT(*) AS stale
-FROM ninja_core.devices d
+FROM ninja_core.v_active_devices d
 JOIN ninja_core.organizations o ON o.id = d.organization_id
 JOIN dps ON dps.device_id = d.id
-WHERE d.approval_status = 'APPROVED'
-  AND dps.last_seen_at <= NOW() - (INTERVAL '1 day' * {DEFAULT_STALE_PATCH_DAYS})
+WHERE dps.last_seen_at <= NOW() - (INTERVAL '1 day' * {DEFAULT_STALE_PATCH_DAYS})
 {_OVERALL_FILTERS_DEVICE}
 """,
     },
@@ -1645,14 +1634,13 @@ WHERE d.approval_status = 'APPROVED'
         },
         "query": f"""
 SELECT COUNT(*) AS no_data
-FROM ninja_core.devices d
+FROM ninja_core.v_active_devices d
 JOIN ninja_core.organizations o ON o.id = d.organization_id
 LEFT JOIN ninja_patches.patch_facts pf
   ON pf.device_id = d.id
  AND pf.fact_type = 'install_outcome'
  AND pf.installed_at IS NOT NULL
-WHERE d.approval_status = 'APPROVED'
-  AND pf.device_id IS NULL
+WHERE pf.device_id IS NULL
 {_OVERALL_FILTERS_DEVICE}
 """,
     },
@@ -2185,7 +2173,7 @@ _FILTER_PREDICATES = f"""
   [[AND cs.severity IN ({{{{severity}}}})]]
   [[AND lio.status IN ({{{{install_outcome}}}})]]
   [[AND {OS_FAMILY_D} IN ({{{{os}}}})]]
-  [[AND EXISTS (SELECT 1 FROM ninja_core.v_active_devices vad WHERE vad.id = d.id AND vad.patching_scope IN ({{{{patching_scope}}}}))]]
+  [[AND d.patching_scope IN ({{{{patching_scope}}}})]]
   [[AND cs.kb_number = {{{{kb}}}}]]
 """
 
@@ -2480,8 +2468,7 @@ _DEVICE_FILTER = (
     "[[AND EXISTS (SELECT 1 FROM ninja_core.organizations o "
     "WHERE o.id = d.organization_id AND o.name ILIKE '%' || {{org}} || '%')]]\n"
     "[[AND d.system_name = {{device}}]]\n"
-    "[[AND EXISTS (SELECT 1 FROM ninja_core.v_active_devices vad "
-    "WHERE vad.id = d.id AND vad.patching_scope IN ({{patching_scope}}))]]"
+    "[[AND d.patching_scope IN ({{patching_scope}})]]"
 )
 
 
@@ -2557,8 +2544,8 @@ LIMIT 100
 {_CTE_CURRENT_STATE}
 SELECT cs.status AS "Current Patch State", COUNT(*) AS "Patches"
 FROM current_state cs
-JOIN ninja_core.devices d ON d.id = cs.device_id
-WHERE d.approval_status = 'APPROVED'
+JOIN ninja_core.v_active_devices d ON d.id = cs.device_id
+WHERE 1=1
 {_DEVICE_FILTER}
 GROUP BY cs.status
 ORDER BY "Patches" DESC
@@ -2577,11 +2564,11 @@ SELECT
     DATE_TRUNC('day', pf.installed_at)::date AS "Day",
     COUNT(*) AS "Install Results"
 FROM ninja_patches.patch_facts pf
-JOIN ninja_core.devices d ON d.id = pf.device_id
+JOIN ninja_core.v_active_devices d ON d.id = pf.device_id
 WHERE pf.installed_at IS NOT NULL
   AND pf.fact_type = 'install_outcome'
   AND pf.installed_at > NOW() - (INTERVAL '1 day' * {{{{days}}}})
-  AND d.approval_status = 'APPROVED'
+  AND 1=1
 {_DEVICE_FILTER}
 GROUP BY 1
 ORDER BY 1
@@ -2609,7 +2596,7 @@ SELECT
     a.source_name          AS "Category",
     a.id                   AS "Activity ID"
 FROM ninja_activities.activities a
-JOIN ninja_core.devices d ON d.id = a.device_id
+JOIN ninja_core.v_active_devices d ON d.id = a.device_id
 WHERE a.activity_type IN ({_DRILLDOWN_ACTIVITY_CODES_SQL})
 {_DEVICE_FILTER}
 ORDER BY a.activity_time DESC
@@ -2640,9 +2627,9 @@ SELECT
     pf.first_observed_at AS "First Seen in This State",
     pf.last_observed_at  AS "Last Seen in This State"
 FROM ninja_patches.patch_facts pf
-JOIN ninja_core.devices d ON d.id = pf.device_id
+JOIN ninja_core.v_active_devices d ON d.id = pf.device_id
 WHERE pf.fact_type = 'patch_state'
-  AND d.approval_status = 'APPROVED'
+  AND 1=1
 {_DEVICE_FILTER}
 ORDER BY
     d.system_name,
@@ -2671,9 +2658,9 @@ SELECT
     pf.installed_at AS "Install Attempt Time",
     pf.last_observed_at AS "Last Seen"
 FROM ninja_patches.patch_facts pf
-JOIN ninja_core.devices d ON d.id = pf.device_id
+JOIN ninja_core.v_active_devices d ON d.id = pf.device_id
 WHERE pf.fact_type = 'install_outcome'
-  AND d.approval_status = 'APPROVED'
+  AND 1=1
 {_DEVICE_FILTER}
 ORDER BY
     d.system_name,
@@ -2769,18 +2756,15 @@ classified AS (
         d.organization_id,
         d.node_class,
         d.os_name,
-        COALESCE(vad.patching_scope, 'Included') AS patching_scope,
+        d.patching_scope,
         dps.last_seen_at,
         CASE
             WHEN dps.last_seen_at IS NULL THEN 'no_patch_data'
             WHEN dps.last_seen_at < NOW() - (INTERVAL '1 day' * {{pcov_days}}) THEN 'stale_patch_data'
             ELSE 'active_patching'
         END AS patch_status
-    FROM ninja_core.devices d
+    FROM ninja_core.v_active_devices d
     LEFT JOIN device_patch_signal dps ON dps.device_id = d.id
-    LEFT JOIN ninja_core.v_active_devices vad ON vad.id = d.id
-    WHERE d.approval_status = 'APPROVED'
-      AND d.node_class IN ('WINDOWS_WORKSTATION', 'WINDOWS_SERVER')
 )
 """
 
@@ -3087,8 +3071,7 @@ _ORG_FILTER_ORG         = "  [[AND o.name ILIKE '%' || {{org}} || '%']]\n"
 _ORG_FILTER_DEVICE_TYPE = f"  [[AND {DEVICE_TYPE_D} IN ({{{{device_type}}}})]]\n"
 _ORG_FILTER_OS_FAMILY   = f"  [[AND {OS_FAMILY_D} IN ({{{{os_family}}}})]]\n"
 _ORG_FILTER_PATCHING_SCOPE = (
-    "  [[AND EXISTS (SELECT 1 FROM ninja_core.v_active_devices vad "
-    "WHERE vad.id = d.id AND vad.patching_scope IN ({{patching_scope}}))]]\n"
+    "  [[AND d.patching_scope IN ({{patching_scope}})]]\n"
 )
 _ORG_FILTER_SEV_CS      = "  [[AND cs.severity IN ({{severity}})]]\n"
 _ORG_FILTER_SEV_LIR     = "  [[AND lir.severity IN ({{severity}})]]\n"
@@ -3131,7 +3114,7 @@ ORG_OVERVIEW_CARDS = [
         "key":     "org_active_devices",
         "name":    "Active Devices",
         "display": "scalar",
-        "row": 4, "col": 16, "size_x": 8, "size_y": 4,
+        "row": 0, "col": 16, "size_x": 8, "size_y": 3,
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS_FULL,
         "query": f"""
@@ -3146,7 +3129,7 @@ WHERE 1=1
         "key":     "org_compliance",
         "name":    "Actively patching %",
         "display": "scalar",
-        "row": 0, "col": 0, "size_x": 12, "size_y": 4,
+        "row": 0, "col": 0, "size_x": 8, "size_y": 3,
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS_FULL,
         "query": _active_patching_scalar_query(_ORG_FILTERS_DEVICE),
@@ -3155,7 +3138,7 @@ WHERE 1=1
         "key":     "org_progress",
         "name":    "Fully patched % (patching devices)",
         "display": "scalar",
-        "row": 0, "col": 12, "size_x": 12, "size_y": 4,
+        "row": 0, "col": 8, "size_x": 8, "size_y": 3,
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS_FULL,
         "query": _patching_device_compliance_scalar_query(_ORG_FILTERS_DEVICE),
@@ -3164,7 +3147,7 @@ WHERE 1=1
         "key":     "org_active_count",
         "name":    "Actively patching",
         "display": "scalar",
-        "row": 4, "col": 0, "size_x": 8, "size_y": 3,
+        "row": 5, "col": 0, "size_x": 8, "size_y": 2,
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS_FULL,
         "query": _active_patching_count_query(_ORG_FILTERS_DEVICE),
@@ -3173,7 +3156,7 @@ WHERE 1=1
         "key":     "org_progress_count",
         "name":    "Fully patched",
         "display": "scalar",
-        "row": 4, "col": 8, "size_x": 8, "size_y": 3,
+        "row": 5, "col": 8, "size_x": 8, "size_y": 2,
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS_FULL,
         "query": _patching_device_compliance_count_query(_ORG_FILTERS_DEVICE),
@@ -3288,11 +3271,10 @@ WITH last_install AS (
     GROUP BY device_id
 )
 SELECT COUNT(*) AS devices
-FROM ninja_core.devices d
+FROM ninja_core.v_active_devices d
 JOIN ninja_core.organizations o ON o.id = d.organization_id
 JOIN last_install li ON li.device_id = d.id
-WHERE d.approval_status = 'APPROVED'
-  AND d.node_class IN ('WINDOWS_WORKSTATION', 'WINDOWS_SERVER')
+WHERE 1=1
   AND li.last_install_at < NOW() - (INTERVAL '1 day' * {DEFAULT_STALE_PATCH_DAYS})
 {_ORG_FILTERS_DEVICE}
 """,
@@ -3306,15 +3288,13 @@ WHERE d.approval_status = 'APPROVED'
         "param_mappings": _ORG_PARAM_MAPPINGS_FULL,
         "query": f"""
 SELECT COUNT(*) AS devices
-FROM ninja_core.devices d
+FROM ninja_core.v_active_devices d
 JOIN ninja_core.organizations o ON o.id = d.organization_id
 LEFT JOIN ninja_patches.patch_facts pf
   ON pf.device_id = d.id
  AND pf.fact_type = 'install_outcome'
  AND pf.installed_at IS NOT NULL
-WHERE d.approval_status = 'APPROVED'
-  AND d.node_class IN ('WINDOWS_WORKSTATION', 'WINDOWS_SERVER')
-  AND pf.device_id IS NULL
+WHERE pf.device_id IS NULL
 {_ORG_FILTERS_DEVICE}
 """,
     },
@@ -3334,11 +3314,10 @@ WITH last_install AS (
     GROUP BY device_id
 )
 SELECT COUNT(*) AS devices
-FROM ninja_core.devices d
+FROM ninja_core.v_active_devices d
 JOIN ninja_core.organizations o ON o.id = d.organization_id
 JOIN last_install li ON li.device_id = d.id
-WHERE d.approval_status = 'APPROVED'
-  AND d.node_class IN ('WINDOWS_WORKSTATION', 'WINDOWS_SERVER')
+WHERE 1=1
   AND li.last_install_at >= NOW() - (INTERVAL '1 day' * {DEFAULT_STALE_PATCH_DAYS})
 {_ORG_FILTERS_DEVICE}
 """,
@@ -3600,8 +3579,7 @@ _TRENDS_PARAM_MAPPINGS_FULL = {
 _TRENDS_FILTER_ORG         = "  [[AND o.name ILIKE '%' || {{org}} || '%']]\n"
 _TRENDS_FILTER_DEVICE_TYPE = f"  [[AND {DEVICE_TYPE_D} IN ({{{{device_type}}}})]]\n"
 _TRENDS_FILTER_PATCHING_SCOPE = (
-    "  [[AND EXISTS (SELECT 1 FROM ninja_core.v_active_devices vad "
-    "WHERE vad.id = d.id AND vad.patching_scope IN ({{patching_scope}}))]]\n"
+    "  [[AND d.patching_scope IN ({{patching_scope}})]]\n"
 )
 _TRENDS_FILTER_SEV_PF      = "  [[AND pf.severity IN ({{severity}})]]\n"
 _TRENDS_FILTER_SEV_CS      = "  [[AND cs.severity IN ({{severity}})]]\n"
@@ -3675,7 +3653,7 @@ SELECT
     DATE_TRUNC('day', pf.installed_at)::date AS "Day",
     COUNT(*)                                 AS "Failures"
 FROM ninja_patches.patch_facts pf
-JOIN ninja_core.devices d ON d.id = pf.device_id
+JOIN ninja_core.v_active_devices d ON d.id = pf.device_id
 JOIN ninja_core.organizations o ON o.id = d.organization_id
 WHERE pf.fact_type = 'install_outcome'
   AND pf.status    = 'FAILED'
@@ -3703,7 +3681,7 @@ SELECT
     DATE_TRUNC('day', a.activity_time)::date AS "Day",
     COUNT(*)                                 AS "Reboots"
 FROM ninja_activities.activities a
-JOIN ninja_core.devices d ON d.id = a.device_id
+JOIN ninja_core.v_active_devices d ON d.id = a.device_id
 JOIN ninja_core.organizations o ON o.id = d.organization_id
 WHERE a.activity_type = 'SYSTEM_REBOOTED'
   AND a.activity_time > NOW() - (INTERVAL '1 day' * {{{{days}}}})
@@ -3732,7 +3710,7 @@ SELECT
     DATE_TRUNC('day', s.snapshot_at)::date AS "Day",
     COUNT(DISTINCT s.device_id)            AS "Active Devices"
 FROM ninja_core.device_snapshots s
-JOIN ninja_core.devices d ON d.id = s.device_id
+JOIN ninja_core.v_active_devices d ON d.id = s.device_id
 JOIN ninja_core.organizations o ON o.id = d.organization_id
 WHERE s.snapshot_at > NOW() - (INTERVAL '1 day' * {{{{days}}}})
 {_TRENDS_FILTERS_DEVICE}
