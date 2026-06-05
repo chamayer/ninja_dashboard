@@ -163,6 +163,12 @@ def _alert_color(
     }
 
 
+def _sql_string_list(values: set[str]) -> str:
+    if not values:
+        return "NULL"
+    return ", ".join("'" + v.replace("'", "''") + "'" for v in sorted(values))
+
+
 # Standard alert colors.
 COLOR_ALERT_RED   = "#c62828"
 COLOR_ALERT_AMBER = "#f9a825"
@@ -213,11 +219,14 @@ universe AS (
 )
 """
 
+ENABLED_POLICY_SQL = _sql_string_list(settings.patching_enabled_policies)
+
 _PATCH_SCOPE_CTE = """
 WITH device_custom_fields AS (
     SELECT
         entity_id AS device_id,
         patchingdisabled AS device_patching_disabled,
+        patchingenabled AS device_patching_enabled,
         serverpatchingdisabled AS device_server_patching_disabled,
         workstationpatchingdisabled AS device_workstation_patching_disabled,
         patchingnotes AS device_patching_notes
@@ -247,6 +256,7 @@ scoped_devices AS (
         d.system_name AS device,
         d.organization_id,
         o.name AS organization,
+        assigned_policy.name AS assigned_policy,
         CASE
             WHEN d.node_class = 'WINDOWS_SERVER' THEN 'Windows Server'
             WHEN d.node_class = 'WINDOWS_WORKSTATION' THEN 'Windows Workstation'
@@ -266,13 +276,18 @@ scoped_devices AS (
                 lcf.location_patching_disabled,
                 FALSE
             ) THEN 'Excluded'
+            WHEN COALESCE(dcf.device_patching_enabled, FALSE) THEN 'Included'
             WHEN d.node_class = 'WINDOWS_SERVER'
-                AND COALESCE(
-                    dcf.device_server_patching_disabled,
-                    ocf.org_server_patching_disabled,
-                    lcf.location_server_patching_disabled,
-                    FALSE
-                ) THEN 'Excluded'
+                THEN CASE
+                    WHEN COALESCE(
+                        dcf.device_server_patching_disabled,
+                        ocf.org_server_patching_disabled,
+                        lcf.location_server_patching_disabled,
+                        FALSE
+                    ) THEN 'Excluded'
+                    WHEN COALESCE(assigned_policy.name, role_policy.name, '') IN ({ENABLED_POLICY_SQL}) THEN 'Included'
+                    ELSE 'Excluded'
+                END
             WHEN d.node_class = 'WINDOWS_WORKSTATION'
                 AND COALESCE(
                     dcf.device_workstation_patching_disabled,
@@ -297,6 +312,8 @@ scoped_devices AS (
         END AS patching_notes
     FROM ninja_core.v_active_devices d
     JOIN ninja_core.organizations o ON o.id = d.organization_id
+    LEFT JOIN ninja_core.policies assigned_policy ON assigned_policy.id = d.policy_id
+    LEFT JOIN ninja_core.policies role_policy ON role_policy.id = d.role_policy_id
     LEFT JOIN device_custom_fields dcf ON dcf.device_id = d.id
     LEFT JOIN organization_custom_fields ocf ON ocf.organization_id = d.organization_id
     LEFT JOIN location_custom_fields lcf ON lcf.location_id = d.location_id

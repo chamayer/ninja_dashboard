@@ -35,6 +35,7 @@ from ingest.core import (
     organizations,
     policies,
 )
+from ingest.policy_scope import sync_patching_enabled_policies
 from ingest.ninja_client import NinjaClient
 from ingest.patches import ingest as patches_ingest
 from ingest.summary_views import refresh_device_troubleshooting_signal
@@ -60,6 +61,7 @@ def run_once() -> None:
         _safe("organizations",  organizations.run, client)
         _safe("locations",      locations.run, client)
         _safe("policies",       policies.run, client)
+        _safe("patching_enabled_policies", sync_patching_enabled_policies)
         _safe("devices",        devices.run, client, snapshot_at)
         _safe("device_health",  device_health.run, client, snapshot_at)
         _safe("custom_fields",  custom_fields.run, client, snapshot_at)

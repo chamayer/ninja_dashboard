@@ -47,6 +47,9 @@ class Settings(BaseSettings):
     INGEST_CUSTOM_FIELDS_INCLUDE: str = ""
     # Cap on value_text length per cell (rebootReason etc. can be 20k+).
     INGEST_CUSTOM_FIELDS_MAX_TEXT: int = 4000
+    # Optional allowlist of policy names that should be treated as
+    # patching-enabled for servers. Empty = no policy-based server include.
+    INGEST_PATCHING_ENABLED_POLICIES: str = ""
 
     # ── Metabase auto-bootstrap (optional) ───────────────────────────
     # If MB_BOOTSTRAP_USER and MB_BOOTSTRAP_PASS are both set, ingest
@@ -72,6 +75,15 @@ class Settings(BaseSettings):
     def custom_fields_include(self) -> set[str]:
         """Empty set = include every field name."""
         return {s.strip() for s in self.INGEST_CUSTOM_FIELDS_INCLUDE.split(",") if s.strip()}
+
+    @property
+    def patching_enabled_policies(self) -> set[str]:
+        """Empty set = no policy-based enablement for server patching."""
+        return {
+            s.strip()
+            for s in self.INGEST_PATCHING_ENABLED_POLICIES.split(",")
+            if s.strip()
+        }
 
     @property
     def postgres_dsn(self) -> str:
