@@ -1136,3 +1136,8 @@ list):**
 - Added current-inventory tracking for devices: full device ingest now
   marks devices missing from Ninja as non-current instead of deleting
   history, and current dashboard totals exclude non-current devices.
+- Added a `Problem Devices - Triage Queue` table to Device Patching
+  Status. It surfaces stalled/never-patched devices plus supporting
+  cause signals such as offline state, reboot pending, failed installs,
+  manual approvals, approved waiting patches, missing patches, and
+  patching notes, with drillthrough to Device Drilldown.

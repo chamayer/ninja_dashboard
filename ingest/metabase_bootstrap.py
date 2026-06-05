@@ -739,7 +739,9 @@ ORDER BY 1
 
 OS_FAMILY_D = OS_FAMILY_SQL.format(alias="d").strip()
 OS_FAMILY_C = OS_FAMILY_SQL.format(alias="c").strip()
+OS_FAMILY_P = OS_FAMILY_SQL.format(alias="p").strip()
 PATCH_ACTIVITY_LABEL_C = PATCH_ACTIVITY_LABEL_SQL.format(expr="c.patch_status").strip()
+PATCH_ACTIVITY_LABEL_P = PATCH_ACTIVITY_LABEL_SQL.format(expr="p.patch_status").strip()
 DEVICE_TYPE_D = """
 CASE d.node_class
     WHEN 'WINDOWS_WORKSTATION' THEN 'Windows Workstation'
@@ -752,6 +754,13 @@ CASE c.node_class
     WHEN 'WINDOWS_WORKSTATION' THEN 'Windows Workstation'
     WHEN 'WINDOWS_SERVER' THEN 'Windows Server'
     ELSE c.node_class
+END
+""".strip()
+DEVICE_TYPE_P = """
+CASE p.node_class
+    WHEN 'WINDOWS_WORKSTATION' THEN 'Windows Workstation'
+    WHEN 'WINDOWS_SERVER' THEN 'Windows Server'
+    ELSE p.node_class
 END
 """.strip()
 
@@ -2872,10 +2881,156 @@ ORDER BY "Patching %" ASC, "Total Devices" DESC
 """,
     },
     {
+        "key":     "pcov_problem_devices",
+        "name":    "Problem Devices - Triage Queue",
+        "display": "table",
+        "row": 20, "col": 0, "size_x": 24, "size_y": 14,
+        "column_click_behaviors": {
+            "device":                  {"target": DASH_DRILLDOWN, "params": {"p_device":      "device"}},
+            "organization":            {"target": "self",         "params": {"p_pcov_org":    "organization"}},
+            "device_type":             {"target": "self",         "params": {"p_pcov_class":  "device_type"}},
+            "operating_system_family": {"target": "self",         "params": {"p_pcov_os":     "operating_system_family"}},
+            "patching_status":         {"target": "self",         "params": {"p_pcov_status": "patching_status"}},
+        },
+        "template_tags":  _PCOV_TAGS,
+        "param_mappings": _PCOV_PARAM_MAPPINGS,
+        "query": f"""
+{_PCOV_CTE},
+patch_state_rollup AS (
+    SELECT
+        device_id,
+        COUNT(*) FILTER (WHERE status = 'APPROVED') AS approved_patches,
+        COUNT(*) FILTER (WHERE status = 'MANUAL') AS manual_patches,
+        COUNT(*) FILTER (WHERE status = 'DELAYED') AS delayed_patches,
+        COUNT(*) FILTER (WHERE status IN ({COMPLIANCE_MISSING_SQL})) AS missing_patches,
+        MAX(last_observed_at) AS last_patch_state_seen
+    FROM ninja_patches.current_patch_state
+    GROUP BY device_id
+),
+install_rollup AS (
+    SELECT
+        device_id,
+        COUNT(*) FILTER (WHERE status = 'FAILED') AS failed_installs,
+        MAX(installed_at) FILTER (WHERE status = 'FAILED') AS last_failed_install,
+        MAX(installed_at) AS last_install_attempt
+    FROM ninja_patches.latest_install_outcome
+    GROUP BY device_id
+),
+problem_devices AS (
+    SELECT
+        c.device_id,
+        c.system_name,
+        c.organization_id,
+        c.node_class,
+        c.os_name,
+        c.patching_scope,
+        c.patch_status,
+        c.last_seen_at,
+        d.last_contact,
+        d.offline,
+        d.needs_reboot,
+        d.patching_notes,
+        COALESCE(psr.approved_patches, 0) AS approved_patches,
+        COALESCE(psr.manual_patches, 0) AS manual_patches,
+        COALESCE(psr.delayed_patches, 0) AS delayed_patches,
+        COALESCE(psr.missing_patches, 0) AS missing_patches,
+        psr.last_patch_state_seen,
+        COALESCE(ir.failed_installs, 0) AS failed_installs,
+        ir.last_failed_install,
+        ir.last_install_attempt
+    FROM classified c
+    JOIN ninja_core.v_active_devices d ON d.id = c.device_id
+    LEFT JOIN patch_state_rollup psr ON psr.device_id = c.device_id
+    LEFT JOIN install_rollup ir ON ir.device_id = c.device_id
+)
+SELECT
+    p.device_id AS "Device ID",
+    p.system_name AS device,
+    o.name AS organization,
+    {DEVICE_TYPE_P} AS device_type,
+    {OS_FAMILY_P} AS operating_system_family,
+    {PATCH_ACTIVITY_LABEL_P} AS patching_status,
+    CASE
+        WHEN p.patching_scope = 'Excluded' THEN 'Excluded from patching scope'
+        WHEN p.patch_status = 'no_patch_data' AND COALESCE(p.offline, FALSE) THEN 'Never patched and offline'
+        WHEN p.patch_status = 'no_patch_data' THEN 'Never patched'
+        WHEN p.patch_status = 'stale_patch_data' AND COALESCE(p.offline, FALSE) THEN 'Stalled and offline'
+        WHEN p.patch_status = 'stale_patch_data' AND p.failed_installs > 0 THEN 'Stalled with install failures'
+        WHEN p.patch_status = 'stale_patch_data' AND COALESCE(p.needs_reboot, FALSE) THEN 'Stalled with reboot pending'
+        WHEN p.patch_status = 'stale_patch_data' AND p.manual_patches > 0 THEN 'Stalled with manual approvals'
+        WHEN p.patch_status = 'stale_patch_data' AND p.delayed_patches > 0 THEN 'Stalled with delayed patches'
+        WHEN p.patch_status = 'stale_patch_data' AND p.approved_patches > 0 THEN 'Stalled with approved patches waiting'
+        WHEN p.patch_status = 'stale_patch_data' THEN 'Stalled - no recent patch activity'
+        WHEN p.failed_installs > 0 THEN 'Active patching with failures'
+        WHEN COALESCE(p.needs_reboot, FALSE) THEN 'Active patching with reboot pending'
+        WHEN p.manual_patches > 0 THEN 'Active patching with manual approvals'
+        ELSE 'Review'
+    END AS "Primary Signal",
+    CASE
+        WHEN p.patching_scope = 'Excluded' THEN 'Validate exclusion and notes'
+        WHEN p.patch_status = 'no_patch_data' AND COALESCE(p.offline, FALSE) THEN 'Bring device online; verify Ninja agent and patch policy'
+        WHEN p.patch_status = 'no_patch_data' THEN 'Verify patch policy assignment, agent health, and OS patch inventory'
+        WHEN p.patch_status = 'stale_patch_data' AND COALESCE(p.offline, FALSE) THEN 'Bring device online; confirm agent check-in'
+        WHEN p.patch_status = 'stale_patch_data' AND p.failed_installs > 0 THEN 'Open device drilldown and review failed install results'
+        WHEN p.patch_status = 'stale_patch_data' AND COALESCE(p.needs_reboot, FALSE) THEN 'Reboot or confirm reboot policy'
+        WHEN p.patch_status = 'stale_patch_data' AND p.manual_patches > 0 THEN 'Review manual patch approvals'
+        WHEN p.patch_status = 'stale_patch_data' AND p.delayed_patches > 0 THEN 'Review delay policy/window'
+        WHEN p.patch_status = 'stale_patch_data' AND p.approved_patches > 0 THEN 'Check why approved patches are not installing'
+        WHEN p.patch_status = 'stale_patch_data' THEN 'Check patch schedule, agent health, maintenance window, and policy'
+        WHEN p.failed_installs > 0 THEN 'Review failed install results'
+        WHEN COALESCE(p.needs_reboot, FALSE) THEN 'Reboot or confirm reboot policy'
+        WHEN p.manual_patches > 0 THEN 'Review manual patch approvals'
+        ELSE 'Open device drilldown'
+    END AS "Suggested Action",
+    p.last_seen_at AS "Last Patch Activity",
+    p.last_contact AS "Last Contact",
+    CASE WHEN p.last_seen_at IS NULL THEN NULL
+         ELSE EXTRACT(DAY FROM (NOW() - p.last_seen_at))::int
+    END AS "Days Since Patch Activity",
+    CASE WHEN p.last_contact IS NULL THEN NULL
+         ELSE EXTRACT(DAY FROM (NOW() - p.last_contact))::int
+    END AS "Days Since Contact",
+    COALESCE(p.offline, FALSE) AS "Offline",
+    COALESCE(p.needs_reboot, FALSE) AS "Needs Reboot",
+    p.failed_installs AS "Failed Installs",
+    p.missing_patches AS "Missing Patches",
+    p.approved_patches AS "Approved Waiting",
+    p.manual_patches AS "Manual Approval",
+    p.delayed_patches AS "Delayed",
+    NULLIF(p.patching_notes, '') AS "Patching Notes"
+FROM problem_devices p
+JOIN ninja_core.organizations o ON o.id = p.organization_id
+WHERE 1=1
+  AND (
+      p.patch_status IN ('no_patch_data', 'stale_patch_data')
+      OR p.failed_installs > 0
+      OR COALESCE(p.needs_reboot, FALSE)
+      OR p.manual_patches > 0
+      OR p.patching_scope = 'Excluded'
+  )
+{_PCOV_FILTERS.replace("c.", "p.")}
+ORDER BY
+    CASE
+        WHEN p.patch_status = 'no_patch_data' THEN 0
+        WHEN p.patch_status = 'stale_patch_data' THEN 1
+        WHEN p.failed_installs > 0 THEN 2
+        WHEN COALESCE(p.needs_reboot, FALSE) THEN 3
+        WHEN p.manual_patches > 0 THEN 4
+        WHEN p.patching_scope = 'Excluded' THEN 5
+        ELSE 6
+    END,
+    "Days Since Patch Activity" DESC NULLS FIRST,
+    "Failed Installs" DESC,
+    "Missing Patches" DESC,
+    o.name,
+    p.system_name
+""",
+    },
+    {
         "key":     "pcov_all_devices",
         "name":    "All Devices by Patching Status",
         "display": "table",
-        "row": 20, "col": 0, "size_x": 24, "size_y": 14,
+        "row": 34, "col": 0, "size_x": 24, "size_y": 14,
         "column_click_behaviors": {
             "device":                  {"target": DASH_DRILLDOWN, "params": {"p_device":      "device"}},
             "organization":            {"target": "self",         "params": {"p_pcov_org":    "organization"}},
