@@ -115,11 +115,12 @@ PATCH_ACTIVITY_COLORS = {
 # Device Drilldown "Recent Patch & Reboot Activity" card and the
 # Command Center "Recent Patch Activity (Fleet)" card. Restricting at
 # the dashboard layer means the cards stay focused even if the ingest
-# TYPES_INCLUDE has broader codes. PATCH_MANAGEMENT_MESSAGE is left
-# OUT — it's the noisy generic info message code.
+# TYPES_INCLUDE has broader codes. SCAN_STARTED / SCAN_COMPLETED are
+# noisy and intentionally excluded from the ingest allowlist anyway.
 _DRILLDOWN_ACTIVITY_CODES = (
     "PATCH_MANAGEMENT_APPLY_PATCH_STARTED",
     "PATCH_MANAGEMENT_APPLY_PATCH_COMPLETED",
+    "PATCH_MANAGEMENT_MESSAGE",
     "PATCH_MANAGEMENT_FAILURE",
     "PATCH_MANAGEMENT_ROLLBACK_PATCH_REQUESTED",
     "PATCH_MANAGEMENT_ROLLBACK_PATCH_STARTED",
