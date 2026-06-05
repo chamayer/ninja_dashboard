@@ -835,7 +835,8 @@ COMMAND_CARDS: list[dict[str, Any]] = [
 SELECT COUNT(*) AS devices
 FROM ninja_core.devices d
 JOIN ninja_core.organizations o ON o.id = d.organization_id
-WHERE d.approval_status = 'APPROVED'
+WHERE d.is_current = TRUE
+  AND d.approval_status = 'APPROVED'
   AND d.node_class IN ('WINDOWS_WORKSTATION', 'WINDOWS_SERVER')
 {_CMD_FILTERS_TOTAL_DEVICE}
 """,
@@ -1357,7 +1358,8 @@ OVERVIEW_CARDS: list[dict[str, Any]] = [
 SELECT COUNT(*) AS devices
 FROM ninja_core.devices d
 JOIN ninja_core.organizations o ON o.id = d.organization_id
-WHERE d.approval_status = 'APPROVED'
+WHERE d.is_current = TRUE
+  AND d.approval_status = 'APPROVED'
   AND d.node_class IN ('WINDOWS_WORKSTATION', 'WINDOWS_SERVER')
 {_OVERALL_FILTERS_TOTAL_DEVICE}
 """,
@@ -3017,7 +3019,8 @@ ORG_OVERVIEW_CARDS = [
 SELECT COUNT(*) AS devices
 FROM ninja_core.devices d
 JOIN ninja_core.organizations o ON o.id = d.organization_id
-WHERE d.approval_status = 'APPROVED'
+WHERE d.is_current = TRUE
+  AND d.approval_status = 'APPROVED'
   AND d.node_class IN ('WINDOWS_WORKSTATION', 'WINDOWS_SERVER')
 {_ORG_FILTERS_TOTAL_DEVICE}
 """,

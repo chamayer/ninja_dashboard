@@ -1133,3 +1133,6 @@ list):**
   as its own KPI immediately to the right.
 - Fixed Device Drilldown `Device Summary` so dashboard filters are
   applied through a valid `WHERE 1=1` clause.
+- Added current-inventory tracking for devices: full device ingest now
+  marks devices missing from Ninja as non-current instead of deleting
+  history, and current dashboard totals exclude non-current devices.
