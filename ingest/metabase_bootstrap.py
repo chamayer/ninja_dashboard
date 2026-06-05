@@ -111,12 +111,12 @@ PATCH_ACTIVITY_COLORS = {
     "Unknown":               "#bdbdbd",
 }
 
-# Canonical patch-lifecycle and reboot activity codes for the
+# Canonical patch-lifecycle, scan, and reboot activity codes for the
 # Device Drilldown "Recent Patch & Reboot Activity" card and the
 # Command Center "Recent Patch Activity (Fleet)" card. Restricting at
 # the dashboard layer means the cards stay focused even if the ingest
-# TYPES_INCLUDE has broader codes. SCAN_STARTED / SCAN_COMPLETED are
-# noisy and intentionally excluded from the ingest allowlist anyway.
+# TYPES_INCLUDE has broader codes. SCAN_STARTED included so the feed
+# shows when Ninja first / last looked at a device for patches.
 _DRILLDOWN_ACTIVITY_CODES = (
     "PATCH_MANAGEMENT_APPLY_PATCH_STARTED",
     "PATCH_MANAGEMENT_APPLY_PATCH_COMPLETED",
@@ -127,6 +127,7 @@ _DRILLDOWN_ACTIVITY_CODES = (
     "PATCH_MANAGEMENT_ROLLBACK_PATCH_COMPLETED",
     "PATCH_MANAGEMENT_PATCH_APPROVED",
     "PATCH_MANAGEMENT_PATCH_REJECTED",
+    "PATCH_MANAGEMENT_SCAN_STARTED",
     "SYSTEM_REBOOTED",
 )
 _DRILLDOWN_ACTIVITY_CODES_SQL = ", ".join(
