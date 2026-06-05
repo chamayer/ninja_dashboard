@@ -1124,3 +1124,7 @@ list):**
 - Re-banded Overall Patching Status and Org Overview into compact
   Compliance, Devices, and Patches sections, and fixed the Trends
   patch-scope filter path for Patch Installs per Day.
+- Materialized `ninja_core.v_active_devices` itself so patching scope,
+  org, location, device type, and device-name filters use stored indexed
+  columns instead of recomputing custom-field inheritance for every
+  dashboard card.

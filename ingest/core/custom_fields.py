@@ -23,6 +23,7 @@ from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+import psycopg
 from psycopg.types.json import Json
 
 from ingest import db
@@ -118,6 +119,7 @@ def run(client: NinjaClient, snapshot_at: datetime) -> tuple[int, int]:
             )
             _regenerate_pivoted_views(cur, list(observed.values()))
 
+        _refresh_active_devices_view()
         stats["rows_inserted"] = val_count
         stats["rows_upserted"] = len(observed)
         return val_count, len(observed)
@@ -210,6 +212,19 @@ def _regenerate_pivoted_views(cur: Any, defs: list[dict[str, Any]]) -> None:
         )
         log.info("Regenerated view ninja_core.%s (%d fields)",
                  view_name, len(fields))
+
+
+def _refresh_active_devices_view() -> None:
+    """Refresh materialized active-device scope/enrichment after custom fields."""
+    try:
+        with db.transaction() as cur:
+            cur.execute("REFRESH MATERIALIZED VIEW ninja_core.v_active_devices")
+        log.info("Refreshed materialized view ninja_core.v_active_devices")
+    except (psycopg.errors.UndefinedTable, psycopg.errors.WrongObjectType):
+        log.info(
+            "ninja_core.v_active_devices is not materialized yet; "
+            "skipping refresh"
+        )
 
 
 def _safe_col_name(name: str) -> str:
