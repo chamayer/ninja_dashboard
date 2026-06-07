@@ -9,6 +9,13 @@
 -- in 016) reads from device_activity_signal, so drop dependent first.
 -- =============================================================================
 
+-- Fail fast if a query takes longer than 5 minutes, instead of hanging
+-- until container restart timeout. Prior versions of this migration
+-- used a correlated subquery that triggered an O(N²) plan over the
+-- ~500k-row activities table; the statement_timeout keeps future
+-- accidents diagnosable.
+SET LOCAL statement_timeout = '5min';
+
 DROP MATERIALIZED VIEW IF EXISTS ninja_core.device_troubleshooting_signal;
 DROP MATERIALIZED VIEW IF EXISTS ninja_activities.device_activity_signal;
 
@@ -58,12 +65,13 @@ SELECT
         WHERE activity_type = 'PATCH_MANAGEMENT_FAILURE'
           AND activity_time >= NOW() - INTERVAL '30 days'
     ) AS patch_failure_events_30d,
-    -- ARRAY_AGG ... FILTER pattern: single-pass aggregation, picks
-    -- the latest message by activity_time without a correlated
-    -- subquery. Returns NULL if no rows match the filter.
-    (ARRAY_AGG(message ORDER BY activity_time DESC) FILTER (
+    -- Plain MAX(message) FILTER — matches the migration 012 pattern
+    -- (lexically max message rather than latest-by-time). Single-pass,
+    -- no sort. ARRAY_AGG ORDER BY was tried and proved too slow at
+    -- ~500k-row activities table volume.
+    MAX(message) FILTER (
         WHERE activity_type = 'PATCH_MANAGEMENT_FAILURE'
-    ))[1] AS last_failure_message,
+    ) AS last_failure_message,
     -- Warning rollup (NEW). MESSAGE codes from both prefixes carry
     -- operationally critical signals ("outstanding approved patches",
     -- "post reboot scan required", "download error", "scheduled update
@@ -88,12 +96,12 @@ SELECT
         )
           AND activity_time >= NOW() - INTERVAL '30 days'
     ) AS warning_events_30d,
-    (ARRAY_AGG(message ORDER BY activity_time DESC) FILTER (
+    MAX(message) FILTER (
         WHERE activity_type IN (
             'PATCH_MANAGEMENT_MESSAGE',
             'SOFTWARE_PATCH_MANAGEMENT_MESSAGE'
         )
-    ))[1] AS last_warning_message,
+    ) AS last_warning_message,
     -- Scan rollup (NEW). Pair = SOFTWARE_PATCH_MANAGEMENT_SCAN_STARTED
     -- → PATCH_MANAGEMENT_SCAN_COMPLETED; the SOFTWARE_ prefix on
     -- STARTED is Ninja's API quirk (see memory).
