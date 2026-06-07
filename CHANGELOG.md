@@ -2,6 +2,58 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.15.1] — 2026-06-07
+
+### Added
+- **Per-device warning + failure + scan rollups on
+  `device_activity_signal`** (migration 017). Three new column
+  groups, all driven from existing activity rows so no re-ingest
+  needed:
+  - Warning rollup: `last_warning_at`, `warning_events`,
+    `warning_events_30d`, `last_warning_message` — aggregates
+    `PATCH_MANAGEMENT_MESSAGE` + `SOFTWARE_PATCH_MANAGEMENT_MESSAGE`
+    rows per device.
+  - Failure 30d window: `patch_failure_events_30d` joins the
+    existing `patch_failure_events` lifetime count.
+  - Scan rollup: `last_scan_started`, `last_scan_completed`,
+    `first_scan_started`, `scan_events_30d` — answers "when did
+    Ninja first / last scan this device?" without per-card
+    aggregation.
+  - All surfaced on `device_troubleshooting_signal` for
+    Issues / Drilldown re-use.
+- **Device Drilldown Device Summary** now shows `First Managed`,
+  `Last Scan`, `Last Warning`, `Warnings (30d)`, `Failures (30d)`
+  columns alongside the existing health/contact fields.
+- **Device Drilldown `Recent OS Patch Warnings (30d)` table** —
+  one row per warning event with a `Category` column that hand-
+  classifies the 7 dominant message patterns we see in real data
+  (outstanding approved patches, scheduled job skipped, metered
+  connection, post-reboot scan required, OS patch download error,
+  reboot needed, WUA out of date) plus `Other` / `Reboot
+  scheduling` / `Download complete` buckets.
+- **Device Drilldown `Recent OS Patch Failures (30d)` table** —
+  same shape, classified by Ninja error code (-3005 / -3004 /
+  -1001) plus common service-level signatures.
+- **Issues `Issue Queue` table** gains `Warnings 30d`,
+  `Failures 30d`, and `Days Since Warning` columns. Sort order
+  now bumps devices with active warnings or failures above
+  manual approvals.
+- **Issues `Warnings by Category (30d)` card** — fleet-wide
+  table of warning events grouped by category, with device count
+  per category. Respects the dashboard org filter.
+- **Issues `Failures by Error Code (30d)` card** — same shape
+  for failures.
+
+### Notes
+- Migration 017 drop+recreates both `device_activity_signal` and
+  the dependent `device_troubleshooting_signal` (full body
+  duplicated from migration 016 with new columns added). Same
+  refresh strategy as before — no `main.py` changes needed.
+- Category classification lives in dashboard SQL (CASE WHEN over
+  message text), not in the MV. Tweaking categories doesn't
+  require a migration.
+- Commit: `TBD`
+
 ## [0.15.0] — 2026-06-05
 
 ### Fixed

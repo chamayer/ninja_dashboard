@@ -2492,6 +2492,11 @@ SELECT
     END AS "Online?",
     ls.needs_reboot        AS "Needs Reboot",
     ldh.pending_reboot_reason AS "Reboot Reason",
+    ts.first_scan_started  AS "First Managed",
+    ts.last_scan_completed AS "Last Scan",
+    ts.last_warning_at     AS "Last Warning",
+    ts.warning_events_30d  AS "Warnings (30d)",
+    ts.patch_failure_events_30d AS "Failures (30d)",
     ldh.pending_os_patches_count AS "Ninja OS Pending",
     ldh.failed_os_patches_count AS "Ninja OS Failed",
     ldh.alert_count        AS "Alerts",
@@ -2503,6 +2508,7 @@ LEFT JOIN latest_snap ls ON ls.device_id = d.id
 LEFT JOIN ninja_core.policies assigned_policy ON assigned_policy.id = d.policy_id
 LEFT JOIN ninja_core.policies role_policy ON role_policy.id = d.role_policy_id
 LEFT JOIN ninja_core.latest_device_health ldh ON ldh.device_id = d.id
+LEFT JOIN ninja_core.device_troubleshooting_signal ts ON ts.device_id = d.id
 WHERE 1=1
 {_DEVICE_FILTER}
 ORDER BY d.system_name
@@ -2640,6 +2646,78 @@ ORDER BY
     pf.installed_at DESC NULLS LAST,
     pf.last_observed_at DESC
 LIMIT 5000
+""",
+    },
+    # ── Recent OS Patch Warnings table ──────────────────────────────
+    # Surfaces PATCH_MANAGEMENT_MESSAGE + SOFTWARE_PATCH_MANAGEMENT_-
+    # MESSAGE rows for the selected device in the last 30 days.
+    # Category column hand-classifies the dominant message patterns
+    # we've seen in real data — Outstanding approved patches, Skipped
+    # schedule, Metered connection, Post-reboot scan, Download error,
+    # Needs reboot, WUA out of date — plus an Other bucket.
+    {
+        "key":            "device_warnings",
+        "name":           "Recent OS Patch Warnings (30d)",
+        "display":        "table",
+        "row": 48, "col": 0, "size_x": 24, "size_y": 10,
+        "template_tags":  DEVICE_TAGS,
+        "param_mappings": DEVICE_PARAM_MAPPINGS,
+        "query": f"""
+SELECT
+    a.activity_time AS "Time",
+    CASE
+        WHEN a.message ILIKE '%outstanding approved patches%' THEN 'Outstanding approved patches'
+        WHEN a.message ILIKE '%was skipped because%' THEN 'Scheduled job skipped'
+        WHEN a.message ILIKE '%metered connection%' THEN 'Metered connection'
+        WHEN a.message ILIKE '%post reboot scan%' THEN 'Post-reboot scan required'
+        WHEN a.message ILIKE '%download error%' OR a.message ILIKE '%download failed%' THEN 'OS patch download error'
+        WHEN a.message ILIKE '%requires a reboot%' OR a.message ILIKE '%needs to be rebooted%' THEN 'Reboot needed'
+        WHEN a.message ILIKE '%Windows Update Agent%out of date%' THEN 'WUA out of date'
+        WHEN a.message ILIKE '%reboot%scheduled%' THEN 'Reboot scheduling'
+        WHEN a.message ILIKE '%download is complete%' THEN 'Download complete'
+        ELSE 'Other'
+    END AS "Category",
+    LEFT(a.message, 250) AS "Message"
+FROM ninja_activities.activities a
+JOIN ninja_core.v_active_devices d ON d.id = a.device_id
+WHERE a.activity_type IN ('PATCH_MANAGEMENT_MESSAGE','SOFTWARE_PATCH_MANAGEMENT_MESSAGE')
+  AND a.activity_time >= NOW() - INTERVAL '30 days'
+{_DEVICE_FILTER}
+ORDER BY a.activity_time DESC
+LIMIT 500
+""",
+    },
+    # ── Recent OS Patch Failures table ──────────────────────────────
+    # PATCH_MANAGEMENT_FAILURE rows for the selected device, last 30d.
+    # Error Type column classifies by the Ninja error code embedded in
+    # the message (-3005, -3004, -1001) plus common service-level
+    # failures.
+    {
+        "key":            "device_failures",
+        "name":           "Recent OS Patch Failures (30d)",
+        "display":        "table",
+        "row": 58, "col": 0, "size_x": 24, "size_y": 10,
+        "template_tags":  DEVICE_TAGS,
+        "param_mappings": DEVICE_PARAM_MAPPINGS,
+        "query": f"""
+SELECT
+    a.activity_time AS "Time",
+    CASE
+        WHEN a.message LIKE '%[-3005%' THEN '-3005 Windows comm error'
+        WHEN a.message LIKE '%[-3004%' THEN '-3004 Windows comm error'
+        WHEN a.message LIKE '%[-1001%' OR a.message ILIKE '%execution timeout%' OR a.message ILIKE '%timeout reached%' THEN '-1001 NinjaWPM timeout'
+        WHEN a.message ILIKE '%restart Windows Update services%' THEN 'WU service restart failed'
+        WHEN a.message ILIKE '%Unexpected return code%' THEN 'Unexpected return code'
+        ELSE 'Other'
+    END AS "Error Type",
+    LEFT(a.message, 250) AS "Message"
+FROM ninja_activities.activities a
+JOIN ninja_core.v_active_devices d ON d.id = a.device_id
+WHERE a.activity_type = 'PATCH_MANAGEMENT_FAILURE'
+  AND a.activity_time >= NOW() - INTERVAL '30 days'
+{_DEVICE_FILTER}
+ORDER BY a.activity_time DESC
+LIMIT 500
 """,
     },
 ]
@@ -2801,7 +2879,16 @@ WITH classified AS (
         s.patch_started_events,
         s.patch_completed_events,
         s.patch_failure_events,
+        s.patch_failure_events_30d,
         s.last_failure_message,
+        s.warning_events,
+        s.warning_events_30d,
+        s.last_warning_at,
+        s.last_warning_message,
+        s.last_scan_started,
+        s.last_scan_completed,
+        s.first_scan_started,
+        s.scan_events_30d,
         s.health_status,
         s.pending_reboot_reason,
         s.ninja_pending_os_patches,
@@ -3450,6 +3537,11 @@ SELECT
     p.ninja_pending_os_patches AS "Ninja OS Pending",
     p.ninja_failed_os_patches AS "Ninja OS Failed",
     p.waiting_patches AS "Waiting",
+    p.warning_events_30d AS "Warnings 30d",
+    p.patch_failure_events_30d AS "Failures 30d",
+    CASE WHEN p.last_warning_at IS NULL THEN NULL
+         ELSE EXTRACT(DAY FROM (NOW() - p.last_warning_at))::int
+    END AS "Days Since Warning",
     COALESCE(p.started_without_completion, FALSE) AS "Started No Completion"
 FROM problem_devices p
 JOIN ninja_core.organizations o ON o.id = p.organization_id
@@ -3461,12 +3553,16 @@ ORDER BY
         WHEN p.patch_status = 'stale_patch_data' THEN 1
         WHEN p.failed_installs > 0 THEN 2
         WHEN COALESCE(p.needs_reboot, FALSE) THEN 3
-        WHEN p.manual_patches > 0 THEN 4
-        WHEN p.patching_scope = 'Excluded' THEN 5
-        ELSE 6
+        WHEN COALESCE(p.patch_failure_events_30d, 0) > 0 THEN 4
+        WHEN COALESCE(p.warning_events_30d, 0) > 0 THEN 5
+        WHEN p.manual_patches > 0 THEN 6
+        WHEN p.patching_scope = 'Excluded' THEN 7
+        ELSE 8
     END,
     "Days Since Patch" DESC NULLS FIRST,
     p.failed_installs DESC,
+    p.patch_failure_events_30d DESC,
+    p.warning_events_30d DESC,
     p.missing_patches DESC,
     o.name,
     p.system_name
@@ -3525,6 +3621,93 @@ WHERE 1=1
 {_ISSUE_FILTERS}
 GROUP BY p.issue_type
 ORDER BY devices DESC, issue
+""",
+    },
+    # ── Warnings by Category (fleet-wide, last 30 days) ────────────
+    # Walks the activity feed directly (not via problem_devices) so
+    # categorization can evolve without re-aggregating the rollup MV.
+    {
+        "key": "issues_warnings_by_category",
+        "name": "Warnings by Category (30d)",
+        "display": "table",
+        "row": 26, "col": 0, "size_x": 12, "size_y": 8,
+        "template_tags": _ISSUE_TAGS,
+        "param_mappings": _ISSUE_PARAM_MAPPINGS,
+        "query": f"""
+WITH categorized AS (
+    SELECT
+        d.id AS device_id,
+        d.organization_id,
+        a.activity_time,
+        CASE
+            WHEN a.message ILIKE '%outstanding approved patches%' THEN 'Outstanding approved patches'
+            WHEN a.message ILIKE '%was skipped because%' THEN 'Scheduled job skipped'
+            WHEN a.message ILIKE '%metered connection%' THEN 'Metered connection'
+            WHEN a.message ILIKE '%post reboot scan%' THEN 'Post-reboot scan required'
+            WHEN a.message ILIKE '%download error%' OR a.message ILIKE '%download failed%' THEN 'OS patch download error'
+            WHEN a.message ILIKE '%requires a reboot%' OR a.message ILIKE '%needs to be rebooted%' THEN 'Reboot needed'
+            WHEN a.message ILIKE '%Windows Update Agent%out of date%' THEN 'WUA out of date'
+            WHEN a.message ILIKE '%reboot%scheduled%' THEN 'Reboot scheduling'
+            WHEN a.message ILIKE '%download is complete%' THEN 'Download complete'
+            ELSE 'Other'
+        END AS category
+    FROM ninja_activities.activities a
+    JOIN ninja_core.v_active_devices d ON d.id = a.device_id
+    WHERE a.activity_type IN ('PATCH_MANAGEMENT_MESSAGE','SOFTWARE_PATCH_MANAGEMENT_MESSAGE')
+      AND a.activity_time >= NOW() - INTERVAL '30 days'
+)
+SELECT
+    c.category AS "Category",
+    COUNT(*) AS "Events",
+    COUNT(DISTINCT c.device_id) AS "Devices"
+FROM categorized c
+JOIN ninja_core.organizations o ON o.id = c.organization_id
+WHERE 1=1
+  [[AND o.name IN ({{{{issue_org}}}})]]
+GROUP BY c.category
+ORDER BY "Events" DESC
+""",
+    },
+    # ── Failures by Error Code (fleet-wide, last 30 days) ──────────
+    # Classifies PATCH_MANAGEMENT_FAILURE messages by the Ninja error
+    # code embedded in the text (-3005, -3004, -1001) plus common
+    # service-level signatures.
+    {
+        "key": "issues_failures_by_error",
+        "name": "Failures by Error Code (30d)",
+        "display": "table",
+        "row": 26, "col": 12, "size_x": 12, "size_y": 8,
+        "template_tags": _ISSUE_TAGS,
+        "param_mappings": _ISSUE_PARAM_MAPPINGS,
+        "query": f"""
+WITH categorized AS (
+    SELECT
+        d.id AS device_id,
+        d.organization_id,
+        a.activity_time,
+        CASE
+            WHEN a.message LIKE '%[-3005%' THEN '-3005 Windows comm error'
+            WHEN a.message LIKE '%[-3004%' THEN '-3004 Windows comm error'
+            WHEN a.message LIKE '%[-1001%' OR a.message ILIKE '%execution timeout%' OR a.message ILIKE '%timeout reached%' THEN '-1001 NinjaWPM timeout'
+            WHEN a.message ILIKE '%restart Windows Update services%' THEN 'WU service restart failed'
+            WHEN a.message ILIKE '%Unexpected return code%' THEN 'Unexpected return code'
+            ELSE 'Other'
+        END AS error_type
+    FROM ninja_activities.activities a
+    JOIN ninja_core.v_active_devices d ON d.id = a.device_id
+    WHERE a.activity_type = 'PATCH_MANAGEMENT_FAILURE'
+      AND a.activity_time >= NOW() - INTERVAL '30 days'
+)
+SELECT
+    c.error_type AS "Error Type",
+    COUNT(*) AS "Events",
+    COUNT(DISTINCT c.device_id) AS "Devices"
+FROM categorized c
+JOIN ninja_core.organizations o ON o.id = c.organization_id
+WHERE 1=1
+  [[AND o.name IN ({{{{issue_org}}}})]]
+GROUP BY c.error_type
+ORDER BY "Events" DESC
 """,
     },
 ]
