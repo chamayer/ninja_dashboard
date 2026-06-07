@@ -58,15 +58,12 @@ SELECT
         WHERE activity_type = 'PATCH_MANAGEMENT_FAILURE'
           AND activity_time >= NOW() - INTERVAL '30 days'
     ) AS patch_failure_events_30d,
-    MAX(message) FILTER (
+    -- ARRAY_AGG ... FILTER pattern: single-pass aggregation, picks
+    -- the latest message by activity_time without a correlated
+    -- subquery. Returns NULL if no rows match the filter.
+    (ARRAY_AGG(message ORDER BY activity_time DESC) FILTER (
         WHERE activity_type = 'PATCH_MANAGEMENT_FAILURE'
-          AND activity_time = (
-              SELECT MAX(activity_time)
-              FROM ninja_activities.activities a2
-              WHERE a2.device_id = ninja_activities.activities.device_id
-                AND a2.activity_type = 'PATCH_MANAGEMENT_FAILURE'
-          )
-    ) AS last_failure_message,
+    ))[1] AS last_failure_message,
     -- Warning rollup (NEW). MESSAGE codes from both prefixes carry
     -- operationally critical signals ("outstanding approved patches",
     -- "post reboot scan required", "download error", "scheduled update
@@ -91,21 +88,12 @@ SELECT
         )
           AND activity_time >= NOW() - INTERVAL '30 days'
     ) AS warning_events_30d,
-    MAX(message) FILTER (
+    (ARRAY_AGG(message ORDER BY activity_time DESC) FILTER (
         WHERE activity_type IN (
             'PATCH_MANAGEMENT_MESSAGE',
             'SOFTWARE_PATCH_MANAGEMENT_MESSAGE'
-          )
-          AND activity_time = (
-              SELECT MAX(activity_time)
-              FROM ninja_activities.activities a2
-              WHERE a2.device_id = ninja_activities.activities.device_id
-                AND a2.activity_type IN (
-                    'PATCH_MANAGEMENT_MESSAGE',
-                    'SOFTWARE_PATCH_MANAGEMENT_MESSAGE'
-                )
-          )
-    ) AS last_warning_message,
+        )
+    ))[1] AS last_warning_message,
     -- Scan rollup (NEW). Pair = SOFTWARE_PATCH_MANAGEMENT_SCAN_STARTED
     -- → PATCH_MANAGEMENT_SCAN_COMPLETED; the SOFTWARE_ prefix on
     -- STARTED is Ninja's API quirk (see memory).
