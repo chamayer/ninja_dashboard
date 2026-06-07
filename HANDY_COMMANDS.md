@@ -25,6 +25,30 @@ docker exec -it ninja-ingest printenv INGEST_CUSTOM_FIELDS_INCLUDE
 docker exec -it ninja-ingest python -c "from ingest.config import settings; print(settings.INGEST_CUSTOM_FIELDS_INCLUDE)"
 ```
 
+Backfill historical activities (all codes in the current allowlist):
+
+```bash
+docker exec ninja-ingest python -m ingest.activities.backfill --days 90
+```
+
+Backfill ONE or a FEW specific activity statusCode(s) only — useful
+after adding a new code to the allowlist when you don't want to re-walk
+the whole history for every code. The `-e` override wins because the
+ingest config loads `/app/.env` with `override=False`, so process env
+takes precedence. Comma-separated for multiple codes:
+
+```bash
+docker exec -e INGEST_ACTIVITY_TYPES_INCLUDE=SOFTWARE_PATCH_MANAGEMENT_MESSAGE ninja-ingest python -m ingest.activities.backfill --days 90
+```
+
+Delete activity rows whose `activity_type` is no longer in the
+allowlist (cleanup after tightening the filter). Refreshes the
+dependent rollup MV:
+
+```bash
+docker exec -i ninja-postgres psql -U ninja -d ninja -c "DELETE FROM ninja_activities.activities WHERE activity_type NOT IN ('PATCH_MANAGEMENT_APPLY_PATCH_STARTED','PATCH_MANAGEMENT_APPLY_PATCH_COMPLETED','PATCH_MANAGEMENT_MESSAGE','PATCH_MANAGEMENT_FAILURE','PATCH_MANAGEMENT_ROLLBACK_PATCH_REQUESTED','PATCH_MANAGEMENT_ROLLBACK_PATCH_STARTED','PATCH_MANAGEMENT_ROLLBACK_PATCH_COMPLETED','PATCH_MANAGEMENT_PATCH_APPROVED','PATCH_MANAGEMENT_PATCH_REJECTED','PATCH_MANAGEMENT_SCAN_COMPLETED','SOFTWARE_PATCH_MANAGEMENT_SCAN_STARTED','SOFTWARE_PATCH_MANAGEMENT_MESSAGE','SYSTEM_REBOOTED'); REFRESH MATERIALIZED VIEW ninja_activities.device_activity_signal;"
+```
+
 ## Logs
 
 Tail ingest logs:
