@@ -2380,6 +2380,7 @@ SELECT
     cs.status AS current_patch_state,
     lio.status AS install_results,
     cs.severity AS severity,
+    cs.patch_category AS "Type",
     lio.installed_at AS "Last Install Attempt",
     CASE WHEN lio.installed_at IS NULL THEN NULL
          ELSE ROUND(EXTRACT(EPOCH FROM (NOW() - lio.installed_at)) / 86400)
@@ -2810,6 +2811,10 @@ WITH classified AS (
         s.patching_scope,
         s.ever_installed,
         s.last_seen_at,
+        s.last_scan_completed,
+        s.warning_events_30d,
+        s.patch_failure_events_30d,
+        s.last_warning_at,
         CASE
             WHEN NOT COALESCE(s.ever_installed, FALSE) THEN 'no_patch_data'
             WHEN s.last_seen_at IS NULL THEN 'stale_patch_data'
@@ -3243,6 +3248,7 @@ SELECT
     {OS_FAMILY_C} AS operating_system_family,
     {PATCH_ACTIVITY_LABEL_C} AS patching_status,
     c.last_seen_at AS "Last Install Attempt",
+    c.last_scan_completed AS "Last Scan",
     lc.last_contact AS "Last Contact",
     CASE WHEN c.last_seen_at IS NULL THEN NULL
          ELSE EXTRACT(DAY FROM (NOW() - c.last_seen_at))::int
@@ -3250,6 +3256,8 @@ SELECT
     CASE WHEN lc.last_contact IS NULL THEN NULL
          ELSE EXTRACT(DAY FROM (NOW() - lc.last_contact))::int
     END AS "Days Since Contact",
+    c.warning_events_30d AS "Warnings 30d",
+    c.patch_failure_events_30d AS "Failures 30d",
     c.device_id::text AS "Device ID"
 FROM classified c
 JOIN ninja_core.organizations o ON o.id = c.organization_id
@@ -3666,6 +3674,65 @@ WHERE 1=1
   [[AND o.name IN ({{{{issue_org}}}})]]
 GROUP BY c.category
 ORDER BY "Events" DESC
+""",
+    },
+    # ── Top devices by warning count (30d, fleet-wide) ─────────────
+    # Companion to Warnings by Category: tells the operator WHICH
+    # devices are generating the noise. Click-through goes to
+    # Device Drilldown for that device.
+    {
+        "key": "issues_top_devices_warnings",
+        "name": "Top Devices by Warnings (30d)",
+        "display": "table",
+        "row": 35, "col": 0, "size_x": 12, "size_y": 8,
+        "template_tags": _ISSUE_TAGS,
+        "param_mappings": _ISSUE_PARAM_MAPPINGS,
+        "column_click_behaviors": {
+            "device": {"target": DASH_DRILLDOWN, "params": {"p_device": "device"}},
+            "organization": {"target": "self", "params": {"p_issue_org": "organization"}},
+        },
+        "query": f"""
+{_problem_devices_cte("issue_days")}
+SELECT
+    p.system_name AS device,
+    o.name AS organization,
+    p.warning_events_30d AS "Warnings 30d",
+    p.last_warning_at AS "Last Warning",
+    LEFT(p.last_warning_message, 120) AS "Last Message"
+FROM problem_devices p
+JOIN ninja_core.organizations o ON o.id = p.organization_id
+WHERE COALESCE(p.warning_events_30d, 0) > 0
+{_ISSUE_FILTERS}
+ORDER BY p.warning_events_30d DESC, p.last_warning_at DESC NULLS LAST
+LIMIT 50
+""",
+    },
+    # ── Top devices by failure count (30d, fleet-wide) ─────────────
+    {
+        "key": "issues_top_devices_failures",
+        "name": "Top Devices by Failures (30d)",
+        "display": "table",
+        "row": 35, "col": 12, "size_x": 12, "size_y": 8,
+        "template_tags": _ISSUE_TAGS,
+        "param_mappings": _ISSUE_PARAM_MAPPINGS,
+        "column_click_behaviors": {
+            "device": {"target": DASH_DRILLDOWN, "params": {"p_device": "device"}},
+            "organization": {"target": "self", "params": {"p_issue_org": "organization"}},
+        },
+        "query": f"""
+{_problem_devices_cte("issue_days")}
+SELECT
+    p.system_name AS device,
+    o.name AS organization,
+    p.patch_failure_events_30d AS "Failures 30d",
+    p.last_patch_failure AS "Last Failure",
+    LEFT(p.last_failure_message, 120) AS "Last Message"
+FROM problem_devices p
+JOIN ninja_core.organizations o ON o.id = p.organization_id
+WHERE COALESCE(p.patch_failure_events_30d, 0) > 0
+{_ISSUE_FILTERS}
+ORDER BY p.patch_failure_events_30d DESC, p.last_patch_failure DESC NULLS LAST
+LIMIT 50
 """,
     },
     # ── Failures by Error Code (fleet-wide, last 30 days) ──────────
@@ -4191,6 +4258,44 @@ ORDER BY
 LIMIT 100
 """,
     },
+    # ── Org warnings + failures rollup (30d) ───────────────────────
+    # Per-org operational pulse — how many warning + failure events
+    # fired across this client's devices in the last 30 days. Two
+    # scalars + one table for the recent activity detail.
+    {
+        "key":     "org_warnings_30d",
+        "name":    "OS Patch Warnings (30d)",
+        "display": "scalar",
+        "row": 14, "col": 0, "size_x": 6, "size_y": 3,
+        "template_tags":  _ORG_TAGS,
+        "param_mappings": _ORG_PARAM_MAPPINGS,
+        "query": f"""
+SELECT COUNT(*) AS warnings
+FROM ninja_activities.activities a
+JOIN ninja_core.v_active_devices d ON d.id = a.device_id
+JOIN ninja_core.organizations o ON o.id = d.organization_id
+WHERE a.activity_type IN ('PATCH_MANAGEMENT_MESSAGE', 'SOFTWARE_PATCH_MANAGEMENT_MESSAGE')
+  AND a.activity_time >= NOW() - INTERVAL '30 days'
+{_ORG_FILTERS_DEVICE}
+""",
+    },
+    {
+        "key":     "org_failures_30d",
+        "name":    "OS Patch Failures (30d)",
+        "display": "scalar",
+        "row": 14, "col": 6, "size_x": 6, "size_y": 3,
+        "template_tags":  _ORG_TAGS,
+        "param_mappings": _ORG_PARAM_MAPPINGS,
+        "query": f"""
+SELECT COUNT(*) AS failures
+FROM ninja_activities.activities a
+JOIN ninja_core.v_active_devices d ON d.id = a.device_id
+JOIN ninja_core.organizations o ON o.id = d.organization_id
+WHERE a.activity_type = 'PATCH_MANAGEMENT_FAILURE'
+  AND a.activity_time >= NOW() - INTERVAL '30 days'
+{_ORG_FILTERS_DEVICE}
+""",
+    },
     {
         "key":     "org_reboot_devices",
         "name":    "Devices Needing Reboot",
@@ -4466,6 +4571,75 @@ JOIN ninja_core.v_active_devices d ON d.id = cs.device_id
 JOIN ninja_core.organizations o ON o.id = d.organization_id
 WHERE cs.status = 'MANUAL'
 {_TRENDS_FILTERS_PATCH_CS}
+GROUP BY 1
+ORDER BY 1
+""",
+    },
+    # ── Warnings per Day (fleet-wide) ──────────────────────────────
+    # Direct count of PATCH_MANAGEMENT_MESSAGE + SOFTWARE_PATCH_-
+    # MANAGEMENT_MESSAGE rows per day. Useful for spotting "did our
+    # warning volume jump after the last patch cycle?".
+    {
+        "key":     "trends_warnings_daily",
+        "name":    "OS Patch Warnings per Day",
+        "display": "bar",
+        "row": 32, "col": 0, "size_x": 12, "size_y": 8,
+        "viz_settings": {
+            "graph.dimensions": ["Day"],
+            "graph.metrics":    ["Warnings"],
+            "graph.show_values": False,
+            "series_settings": {
+                "Warnings": {"color": "#f9a825"},
+            },
+        },
+        "template_tags":  _TRENDS_TAGS,
+        "param_mappings": _TRENDS_PARAM_MAPPINGS_FULL,
+        "query": f"""
+SELECT
+    DATE_TRUNC('day', a.activity_time)::date AS "Day",
+    COUNT(*)                                 AS "Warnings"
+FROM ninja_activities.activities a
+JOIN ninja_core.v_active_devices d ON d.id = a.device_id
+JOIN ninja_core.organizations o ON o.id = d.organization_id
+WHERE a.activity_type IN ('PATCH_MANAGEMENT_MESSAGE', 'SOFTWARE_PATCH_MANAGEMENT_MESSAGE')
+  AND a.activity_time > NOW() - (INTERVAL '1 day' * {{{{days}}}})
+{_TRENDS_FILTERS_DEVICE}
+GROUP BY 1
+ORDER BY 1
+""",
+    },
+    # ── Failures per Day (PATCH_MANAGEMENT_FAILURE activity) ───────
+    # Distinct from trends_failures_daily above, which counts
+    # install_outcome status=FAILED rows. This one counts the
+    # operational failure activities — service restart failures,
+    # download errors, timeouts. Different signal: the install_outcome
+    # variant is "patch X didn't install"; this one is "scan/update
+    # operation itself broke".
+    {
+        "key":     "trends_patch_failures_activity_daily",
+        "name":    "OS Patch Operational Failures per Day",
+        "display": "bar",
+        "row": 32, "col": 12, "size_x": 12, "size_y": 8,
+        "viz_settings": {
+            "graph.dimensions": ["Day"],
+            "graph.metrics":    ["Failures"],
+            "graph.show_values": False,
+            "series_settings": {
+                "Failures": {"color": "#c62828"},
+            },
+        },
+        "template_tags":  _TRENDS_TAGS,
+        "param_mappings": _TRENDS_PARAM_MAPPINGS_FULL,
+        "query": f"""
+SELECT
+    DATE_TRUNC('day', a.activity_time)::date AS "Day",
+    COUNT(*)                                 AS "Failures"
+FROM ninja_activities.activities a
+JOIN ninja_core.v_active_devices d ON d.id = a.device_id
+JOIN ninja_core.organizations o ON o.id = d.organization_id
+WHERE a.activity_type = 'PATCH_MANAGEMENT_FAILURE'
+  AND a.activity_time > NOW() - (INTERVAL '1 day' * {{{{days}}}})
+{_TRENDS_FILTERS_DEVICE}
 GROUP BY 1
 ORDER BY 1
 """,

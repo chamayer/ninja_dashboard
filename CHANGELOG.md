@@ -2,6 +2,37 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.15.2] — 2026-06-07
+
+### Added
+- **PCOV `All Devices` table** gains `Last Scan`, `Warnings 30d`,
+  `Failures 30d` columns (alongside the existing Last Install /
+  Last Contact pair). Operator's "all devices, everything" sortable
+  table now exposes the warning/failure signal so they can pivot
+  without going to Issues. `_PCOV_CTE` extended to surface the
+  underlying columns from `device_troubleshooting_signal`.
+- **Patch Detail big table** gains a `Type` column (sourced from
+  `current_patch_state.patch_category`). Operator filtering by KB
+  or status can now see category alongside severity.
+- **Trends dashboard**: two new bar cards.
+  - `OS Patch Warnings per Day` — fleet-wide MESSAGE volume per day.
+  - `OS Patch Operational Failures per Day` — distinct from the
+    existing install-outcome failure trend; counts the
+    `PATCH_MANAGEMENT_FAILURE` activity rows (service restart,
+    timeouts, download errors) rather than install_outcome rows.
+- **Org Overview**: per-org `OS Patch Warnings (30d)` and
+  `OS Patch Failures (30d)` scalars. Per-client SLA review.
+- **Issues dashboard**: `Top Devices by Warnings (30d)` and
+  `Top Devices by Failures (30d)` tables. Companion to the
+  by-category and by-error-code cards added in 0.15.1; tells the
+  operator WHICH devices are responsible for the volume. Click-
+  through to Device Drilldown.
+
+### Notes
+- All additive — no migration, no schema changes. Existing cards
+  unchanged.
+- Commit: `TBD`
+
 ## [0.15.1] — 2026-06-07
 
 ### Added
