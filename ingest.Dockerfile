@@ -27,11 +27,11 @@ ENV PYTHONUNBUFFERED=1 \
 
 EXPOSE 8090
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10m --retries=5 \
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
   CMD python -c "import urllib.request,os; urllib.request.urlopen(f'http://localhost:{os.environ.get(\"INGEST_HTTP_PORT\",\"8090\")}/healthz')" || exit 1
-# start-period generous because main.py runs DB migrations BEFORE the
-# HTTP server starts — a long migration (or a backfill of activities)
-# can take several minutes, and a short start-period leads to the
-# container being killed mid-migration in a restart loop.
+# main.py binds the HTTP server BEFORE running migrations or any other
+# slow startup work, so /healthz responds in well under a second.
+# /readyz reports starting/ready state if you need to wait for the
+# service to be fully initialised (e.g. before triggering /run).
 
 CMD ["python", "-m", "ingest.main"]

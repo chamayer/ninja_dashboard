@@ -2,14 +2,20 @@
 
 Boot sequence:
   1. Load settings, configure logging.
-  2. Initialise DB pool.
-  3. Apply pending migrations.
-  4. Start APScheduler at the configured interval. No jobs wired yet —
+  2. Start HTTP server FIRST in a background thread so /healthz is
+     reachable immediately. Docker HEALTHCHECK polls this — if the
+     server isn't up within start-period, the container gets killed
+     mid-startup (which historically caused migration rollback loops).
+     /readyz reports starting/ready state; /healthz is always green
+     once the listener binds.
+  3. Initialise DB pool.
+  4. Apply pending migrations.
+  5. Start APScheduler at the configured interval. No jobs wired yet —
      each ingest module adds its job once it lands.
-  5. Catch-up: if the last successful core run is older than the
+  6. Catch-up: if the last successful core run is older than the
      schedule interval, fire run_once now in a background thread.
      Fresh installs (no run_log rows) wait for the first scheduled tick.
-  6. Start HTTP server for /healthz and /run, block forever.
+  7. Mark service ready; block forever serving HTTP.
 """
 
 from __future__ import annotations
@@ -168,18 +174,34 @@ def should_catch_up(now: datetime | None = None) -> bool:
 
 # ── HTTP endpoints ──────────────────────────────────────────────────
 
+# Set by main() after migrations + scheduler are up. /healthz is
+# liveness (always 200 once HTTP server binds); /readyz is readiness
+# (503 with "starting" body until this event is set).
+_READY = threading.Event()
+
+
 class _Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, fmt: str, *args: object) -> None:
         log.info("http %s - %s", self.address_string(), fmt % args)
 
     def do_GET(self) -> None:
         if self.path == "/healthz":
+            # Liveness — server is alive. Always 200 once we bind.
             self._respond(200, b"ok\n")
+        elif self.path == "/readyz":
+            # Readiness — migrations done, scheduler up.
+            if _READY.is_set():
+                self._respond(200, b"ready\n")
+            else:
+                self._respond(503, b"starting\n")
         else:
             self.send_error(404)
 
     def do_POST(self) -> None:
         if self.path == "/run":
+            if not _READY.is_set():
+                self._respond(503, b"still starting - try again shortly\n")
+                return
             threading.Thread(target=run_once, daemon=True).start()
             self._respond(202, b"run scheduled\n")
         elif self.path == "/bootstrap-metabase":
@@ -201,11 +223,31 @@ class _ThreadingServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
     allow_reuse_address = True
 
 
+def _start_http_server() -> _ThreadingServer:
+    """Bind and start the HTTP server in a daemon thread. Returns the
+    server instance so main() can hold a reference (otherwise the
+    serve_forever thread exits when the local goes out of scope)."""
+    addr = ("0.0.0.0", settings.INGEST_HTTP_PORT)
+    httpd = _ThreadingServer(addr, _Handler)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    log.info(
+        "HTTP server listening on %s:%d "
+        "(/healthz liveness, /readyz readiness, /run, /bootstrap-metabase)",
+        *addr,
+    )
+    return httpd
+
+
 def main() -> None:
     logging.basicConfig(
         level=settings.INGEST_LOG_LEVEL,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
+
+    # Bind HTTP server FIRST so /healthz is reachable before any
+    # potentially-slow startup work. Keeps the Docker HEALTHCHECK
+    # green and prevents migration-rollback restart loops.
+    httpd = _start_http_server()
 
     log.info("Initialising DB pool")
     db.init(settings.postgres_dsn)
@@ -239,13 +281,15 @@ def main() -> None:
     # startup if Metabase isn't ready or creds aren't set.
     threading.Thread(target=bootstrap_metabase, daemon=True).start()
 
-    addr = ("0.0.0.0", settings.INGEST_HTTP_PORT)
-    log.info(
-        "HTTP server listening on %s:%d (/healthz, /run, /bootstrap-metabase)",
-        *addr,
-    )
-    with _ThreadingServer(addr, _Handler) as httpd:
-        httpd.serve_forever()
+    _READY.set()
+    log.info("Ingest service ready")
+
+    # Block forever holding the server reference (the daemon thread
+    # serving requests dies if this main thread exits).
+    try:
+        threading.Event().wait()
+    finally:
+        httpd.shutdown()
 
 
 if __name__ == "__main__":
