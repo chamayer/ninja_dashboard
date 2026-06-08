@@ -2,6 +2,47 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.15.3] — 2026-06-07
+
+### Added
+- **Command Center row 7 — fleet pulse band:** three new scalars —
+  `OS Patch Warnings (24h)`, `OS Patch Failures (24h)`, `Data
+  Freshness`. Operator opening CC now sees both today's warning/-
+  failure volume AND whether the numbers below are fresh, without
+  drilling into Issues. Both activity scalars click-through to Issues.
+- **Command Center `Ingest Pipeline Health` table** (bottom row) —
+  per-domain last run status, started_at, rows inserted, duration,
+  age, and error preview. Surfaces silent per-domain failures.
+- **Issues row 3:** `Devices with Warnings (30d)` + `Devices with
+  Failures (30d)` scalars to round out the 6-scalar device-state row.
+- **Patch Detail `Patches by Type` pie** — companion to the Type
+  column added in 0.15.2. Shows the in-scope patch category mix at
+  a glance.
+- **PCOV All Devices** gets `Earliest Scan in DB` column (matches
+  Drilldown's rename, below). `_PCOV_CTE` extended to expose the
+  underlying signal.
+
+### Changed
+- **Device Drilldown Device Summary**: `First Managed` column
+  renamed to `Earliest Scan in DB`. The value is bounded by Ninja's
+  ~90-day activity retention plus our backfill window — calling it
+  "First Managed" implied a true onboarding date that the data
+  can't honestly support.
+- **Command Center layout**: tables shifted +3 rows to make room
+  for the new row-7 scalar band. No card content changed.
+- **Issues layout**: queue and below shifted +3 rows for the same
+  reason. No card content changed.
+
+### Notes
+- Pure dashboard surface — no migration, no schema change, no
+  ingest change.
+- Deferred from this pass (low value or high complexity, parked):
+  warning-category → device-list drillthrough (requires a new
+  Metabase param + categorised device card); with-drivers vs.
+  without-drivers compliance comparison (adds confusion, env-var
+  toggle already does the job for ad-hoc).
+- Commit: `TBD`
+
 ## [0.15.2] — 2026-06-07
 
 ### Added

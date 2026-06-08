@@ -1075,11 +1075,81 @@ WHERE lir.status = 'FAILED'
 {_CMD_FILTERS_PATCH_LIR}
 """,
     },
+    # ── Row 7 — fleet-wide pulse: warnings/failures volume + data
+    # freshness so the operator knows whether they're looking at
+    # stale numbers. Each scalar is 8 wide (3 across the 24-wide grid).
+    {
+        "key":            "cmd_warnings_24h",
+        "name":           "OS Patch Warnings (24h)",
+        "display":        "scalar",
+        "row": 7, "col": 0, "size_x": 8, "size_y": 3,
+        "template_tags":  _CMD_TAGS,
+        "param_mappings": _CMD_PARAM_MAPPINGS_FULL,
+        "click_behavior": {"target": DASH_ISSUES, "preset": {}},
+        "query": f"""
+SELECT COUNT(*) AS warnings
+FROM ninja_activities.activities a
+JOIN ninja_core.v_active_devices d ON d.id = a.device_id
+JOIN ninja_core.organizations o ON o.id = d.organization_id
+WHERE a.activity_type IN ('PATCH_MANAGEMENT_MESSAGE', 'SOFTWARE_PATCH_MANAGEMENT_MESSAGE')
+  AND a.activity_time >= NOW() - INTERVAL '24 hours'
+{_CMD_FILTERS_DEVICE}
+""",
+    },
+    {
+        "key":            "cmd_failures_24h",
+        "name":           "OS Patch Failures (24h)",
+        "display":        "scalar",
+        "row": 7, "col": 8, "size_x": 8, "size_y": 3,
+        "template_tags":  _CMD_TAGS,
+        "param_mappings": _CMD_PARAM_MAPPINGS_FULL,
+        "click_behavior": {"target": DASH_ISSUES, "preset": {}},
+        "query": f"""
+SELECT COUNT(*) AS failures
+FROM ninja_activities.activities a
+JOIN ninja_core.v_active_devices d ON d.id = a.device_id
+JOIN ninja_core.organizations o ON o.id = d.organization_id
+WHERE a.activity_type = 'PATCH_MANAGEMENT_FAILURE'
+  AND a.activity_time >= NOW() - INTERVAL '24 hours'
+{_CMD_FILTERS_DEVICE}
+""",
+    },
+    {
+        "key":            "cmd_data_freshness",
+        "name":           "Data Freshness",
+        "display":        "scalar",
+        "row": 7, "col": 16, "size_x": 8, "size_y": 3,
+        "template_tags":  _CMD_TAGS,
+        "param_mappings": _CMD_PARAM_MAPPINGS_FULL,
+        # Mirror of the per-org card on Org Overview. Tells the operator
+        # how stale the numbers below are — if the latest run failed and
+        # the timestamp is hours old, the dashboard isn't fresh.
+        "query": """
+SELECT
+    CASE
+        WHEN max_ts IS NULL THEN 'no runs yet'
+        WHEN max_ts > NOW() - INTERVAL '60 min' THEN
+            ROUND(EXTRACT(EPOCH FROM (NOW() - max_ts)) / 60)::text ||
+            ' min ago'
+        WHEN max_ts > NOW() - INTERVAL '1 day' THEN
+            ROUND(EXTRACT(EPOCH FROM (NOW() - max_ts)) / 3600)::text ||
+            ' h ago'
+        ELSE
+            ROUND(EXTRACT(EPOCH FROM (NOW() - max_ts)) / 86400)::text ||
+            ' d ago'
+    END AS data_freshness
+FROM (
+    SELECT MAX(started_at) AS max_ts
+    FROM ninja_core.run_log
+    WHERE status = 'ok'
+) latest
+""",
+    },
     {
         "key":            "cmd_clients",
         "name":           "Clients Needing Attention",
         "display":        "table",
-        "row": 8, "col": 0, "size_x": 24, "size_y": 10,
+        "row": 11, "col": 0, "size_x": 24, "size_y": 10,
         "template_tags":  _CMD_TAGS,
         "param_mappings": _CMD_PARAM_MAPPINGS_FULL,
         "column_click_behaviors": {
@@ -1159,7 +1229,7 @@ LIMIT 50
         "key":            "cmd_failed_queue",
         "name":           "Failed Patch Queue",
         "display":        "table",
-        "row": 18, "col": 0, "size_x": 24, "size_y": 10,
+        "row": 21, "col": 0, "size_x": 24, "size_y": 10,
         "template_tags":  _CMD_TAGS,
         "param_mappings": _CMD_PARAM_MAPPINGS_FULL,
         "column_click_behaviors": {
@@ -1197,7 +1267,7 @@ LIMIT 100
         "key":            "cmd_approval_queue",
         "name":           "Manual and Delayed Patches",
         "display":        "table",
-        "row": 28, "col": 0, "size_x": 24, "size_y": 10,
+        "row": 31, "col": 0, "size_x": 24, "size_y": 10,
         "template_tags":  _CMD_TAGS,
         "param_mappings": _CMD_PARAM_MAPPINGS_FULL,
         "column_click_behaviors": {
@@ -1241,7 +1311,7 @@ LIMIT 100
         "key":            "cmd_awaiting_reboot",
         "name":           "Patches Installed Awaiting Reboot",
         "display":        "table",
-        "row": 38, "col": 0, "size_x": 24, "size_y": 10,
+        "row": 41, "col": 0, "size_x": 24, "size_y": 10,
         "template_tags":  _CMD_TAGS,
         "param_mappings": _CMD_PARAM_MAPPINGS_FULL,
         "column_click_behaviors": {
@@ -1292,7 +1362,7 @@ LIMIT 100
         "key":            "cmd_recent_activity",
         "name":           "Recent Patch Activity (Fleet)",
         "display":        "table",
-        "row": 48, "col": 0, "size_x": 24, "size_y": 10,
+        "row": 51, "col": 0, "size_x": 24, "size_y": 10,
         "template_tags":  _CMD_TAGS,
         "param_mappings": _CMD_PARAM_MAPPINGS_FULL,
         "column_click_behaviors": {
@@ -1312,6 +1382,49 @@ WHERE a.activity_type IN ({_DRILLDOWN_ACTIVITY_CODES_SQL})
 {_CMD_FILTERS_DEVICE}
 ORDER BY a.activity_time DESC
 LIMIT 100
+""",
+    },
+    # ── Ingest Pipeline Health ─────────────────────────────────────
+    # Per-module last-run status + age. Tells the operator whether the
+    # numbers above are fresh or stale per domain — useful when a
+    # single domain (e.g. activities) has been failing silently while
+    # the rest succeed. Pulled from ninja_core.run_log directly.
+    {
+        "key":            "cmd_ingest_health",
+        "name":           "Ingest Pipeline Health",
+        "display":        "table",
+        "row": 61, "col": 0, "size_x": 24, "size_y": 8,
+        "template_tags":  _CMD_TAGS,
+        "param_mappings": _CMD_PARAM_MAPPINGS_FULL,
+        "query": """
+WITH latest AS (
+    SELECT DISTINCT ON (domain)
+        domain,
+        started_at,
+        finished_at,
+        status,
+        rows_inserted,
+        error
+    FROM ninja_core.run_log
+    ORDER BY domain, started_at DESC
+)
+SELECT
+    domain AS "Domain",
+    status AS "Last Status",
+    started_at AS "Last Started",
+    rows_inserted AS "Rows Inserted",
+    EXTRACT(EPOCH FROM (finished_at - started_at))::int AS "Seconds",
+    CASE
+        WHEN started_at > NOW() - INTERVAL '60 min' THEN
+            ROUND(EXTRACT(EPOCH FROM (NOW() - started_at)) / 60)::text || ' min ago'
+        WHEN started_at > NOW() - INTERVAL '1 day' THEN
+            ROUND(EXTRACT(EPOCH FROM (NOW() - started_at)) / 3600)::text || ' h ago'
+        ELSE
+            ROUND(EXTRACT(EPOCH FROM (NOW() - started_at)) / 86400)::text || ' d ago'
+    END AS "Age",
+    LEFT(COALESCE(error, ''), 80) AS "Error"
+FROM latest
+ORDER BY started_at DESC
 """,
     },
 ]
@@ -2396,6 +2509,38 @@ ORDER BY cs.last_observed_at DESC, lio.installed_at DESC NULLS LAST
 LIMIT 1000
 """,
     },
+    # ── Patches by Type distribution ───────────────────────────────
+    # Companion to the Type column added to the detail table. Pie
+    # shows the mix of patch categories currently in scope (after the
+    # DASHBOARD_PATCH_CATEGORIES_EXCLUDE env filter has been applied).
+    {
+        "key":            "detail_type_distribution",
+        "name":           "Patches by Type",
+        "display":        "pie",
+        "row": 38, "col": 0, "size_x": 12, "size_y": 8,
+        "viz_settings":   {
+            "pie.dimension":       "Type",
+            "pie.metric":          "Patches",
+            "pie.slice_threshold": 0,
+            "pie.show_legend":     True,
+            "pie.show_total":      True,
+        },
+        "template_tags":  _FILTER_TAGS,
+        "param_mappings": _FILTER_PARAM_MAPPINGS,
+        "query": f"""
+{_CTE_CURRENT_STATE}
+SELECT
+    COALESCE(NULLIF(cs.patch_category, ''), 'UNKNOWN') AS "Type",
+    COUNT(*) AS "Patches"
+FROM current_state cs
+JOIN ninja_core.v_active_devices d ON d.id = cs.device_id
+JOIN ninja_core.organizations o ON o.id = d.organization_id
+WHERE d.approval_status = 'APPROVED'
+{_FILTER_PREDICATES}
+GROUP BY 1
+ORDER BY "Patches" DESC
+""",
+    },
 ]
 
 
@@ -2493,7 +2638,7 @@ SELECT
     END AS "Online?",
     ls.needs_reboot        AS "Needs Reboot",
     ldh.pending_reboot_reason AS "Reboot Reason",
-    ts.first_scan_started  AS "First Managed",
+    ts.first_scan_started  AS "Earliest Scan in DB",
     ts.last_scan_completed AS "Last Scan",
     ts.last_warning_at     AS "Last Warning",
     ts.warning_events_30d  AS "Warnings (30d)",
@@ -2811,6 +2956,7 @@ WITH classified AS (
         s.patching_scope,
         s.ever_installed,
         s.last_seen_at,
+        s.first_scan_started,
         s.last_scan_completed,
         s.warning_events_30d,
         s.patch_failure_events_30d,
@@ -3247,6 +3393,7 @@ SELECT
     {DEVICE_TYPE_C} AS device_type,
     {OS_FAMILY_C} AS operating_system_family,
     {PATCH_ACTIVITY_LABEL_C} AS patching_status,
+    c.first_scan_started AS "Earliest Scan in DB",
     c.last_seen_at AS "Last Install Attempt",
     c.last_scan_completed AS "Last Scan",
     lc.last_contact AS "Last Contact",
@@ -3510,11 +3657,49 @@ WHERE COALESCE(p.needs_reboot, FALSE)
 {_ISSUE_FILTERS}
 """,
     },
+    # ── Row 3 — warning / failure scalar pair ──────────────────────
+    # Closes the visual gap between the row-0 device-state scalars and
+    # the queue table: shows fleet-wide volume of devices with active
+    # warnings or failures in the last 30 days. Companion to the
+    # per-device columns added in 0.15.1 and the by-category cards
+    # added in 0.15.1.
+    {
+        "key": "issues_with_warnings",
+        "name": "Devices with Warnings (30d)",
+        "display": "scalar",
+        "row": 3, "col": 0, "size_x": 4, "size_y": 3,
+        "template_tags": _ISSUE_TAGS,
+        "param_mappings": _ISSUE_PARAM_MAPPINGS,
+        "query": f"""
+{_problem_devices_cte("issue_days")}
+SELECT COUNT(*) AS devices
+FROM problem_devices p
+JOIN ninja_core.organizations o ON o.id = p.organization_id
+WHERE COALESCE(p.warning_events_30d, 0) > 0
+{_ISSUE_FILTERS}
+""",
+    },
+    {
+        "key": "issues_with_failures",
+        "name": "Devices with Failures (30d)",
+        "display": "scalar",
+        "row": 3, "col": 4, "size_x": 4, "size_y": 3,
+        "template_tags": _ISSUE_TAGS,
+        "param_mappings": _ISSUE_PARAM_MAPPINGS,
+        "query": f"""
+{_problem_devices_cte("issue_days")}
+SELECT COUNT(*) AS devices
+FROM problem_devices p
+JOIN ninja_core.organizations o ON o.id = p.organization_id
+WHERE COALESCE(p.patch_failure_events_30d, 0) > 0
+{_ISSUE_FILTERS}
+""",
+    },
     {
         "key": "issues_queue",
         "name": "Issue Queue",
         "display": "table",
-        "row": 4, "col": 0, "size_x": 24, "size_y": 14,
+        "row": 7, "col": 0, "size_x": 24, "size_y": 14,
         "template_tags": _ISSUE_TAGS,
         "param_mappings": _ISSUE_PARAM_MAPPINGS,
         "column_click_behaviors": {
@@ -3580,7 +3765,7 @@ ORDER BY
         "key": "issues_by_org",
         "name": "Issues by Organization",
         "display": "table",
-        "row": 18, "col": 0, "size_x": 12, "size_y": 8,
+        "row": 21, "col": 0, "size_x": 12, "size_y": 8,
         "template_tags": _ISSUE_TAGS,
         "param_mappings": _ISSUE_PARAM_MAPPINGS,
         "column_click_behaviors": {
@@ -3609,7 +3794,7 @@ LIMIT 50
         "key": "issues_by_type",
         "name": "Issues by Type",
         "display": "table",
-        "row": 18, "col": 12, "size_x": 12, "size_y": 8,
+        "row": 21, "col": 12, "size_x": 12, "size_y": 8,
         "template_tags": _ISSUE_TAGS,
         "param_mappings": _ISSUE_PARAM_MAPPINGS,
         "column_click_behaviors": {
@@ -3638,7 +3823,7 @@ ORDER BY devices DESC, issue
         "key": "issues_warnings_by_category",
         "name": "Warnings by Category (30d)",
         "display": "table",
-        "row": 26, "col": 0, "size_x": 12, "size_y": 8,
+        "row": 29, "col": 0, "size_x": 12, "size_y": 8,
         "template_tags": _ISSUE_TAGS,
         "param_mappings": _ISSUE_PARAM_MAPPINGS,
         "query": f"""
@@ -3684,7 +3869,7 @@ ORDER BY "Events" DESC
         "key": "issues_top_devices_warnings",
         "name": "Top Devices by Warnings (30d)",
         "display": "table",
-        "row": 35, "col": 0, "size_x": 12, "size_y": 8,
+        "row": 38, "col": 0, "size_x": 12, "size_y": 8,
         "template_tags": _ISSUE_TAGS,
         "param_mappings": _ISSUE_PARAM_MAPPINGS,
         "column_click_behaviors": {
@@ -3712,7 +3897,7 @@ LIMIT 50
         "key": "issues_top_devices_failures",
         "name": "Top Devices by Failures (30d)",
         "display": "table",
-        "row": 35, "col": 12, "size_x": 12, "size_y": 8,
+        "row": 38, "col": 12, "size_x": 12, "size_y": 8,
         "template_tags": _ISSUE_TAGS,
         "param_mappings": _ISSUE_PARAM_MAPPINGS,
         "column_click_behaviors": {
@@ -3743,7 +3928,7 @@ LIMIT 50
         "key": "issues_failures_by_error",
         "name": "Failures by Error Code (30d)",
         "display": "table",
-        "row": 26, "col": 12, "size_x": 12, "size_y": 8,
+        "row": 29, "col": 12, "size_x": 12, "size_y": 8,
         "template_tags": _ISSUE_TAGS,
         "param_mappings": _ISSUE_PARAM_MAPPINGS,
         "query": f"""
@@ -4266,7 +4451,7 @@ LIMIT 100
         "key":     "org_warnings_30d",
         "name":    "OS Patch Warnings (30d)",
         "display": "scalar",
-        "row": 14, "col": 0, "size_x": 6, "size_y": 3,
+        "row": 14, "col": 0, "size_x": 6, "size_y": 2,
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS,
         "query": f"""
@@ -4283,7 +4468,7 @@ WHERE a.activity_type IN ('PATCH_MANAGEMENT_MESSAGE', 'SOFTWARE_PATCH_MANAGEMENT
         "key":     "org_failures_30d",
         "name":    "OS Patch Failures (30d)",
         "display": "scalar",
-        "row": 14, "col": 6, "size_x": 6, "size_y": 3,
+        "row": 14, "col": 6, "size_x": 6, "size_y": 2,
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS,
         "query": f"""
