@@ -1349,7 +1349,7 @@ FROM (
         "key":     "overall_warnings_30d",
         "name":    "Warnings (30d)",
         "display": "scalar",
-        "row": 14, "col": 0, "size_x": 8, "size_y": 2,
+        "row": 14, "col": 0, "size_x": 12, "size_y": 2,
         "template_tags":  _OVERALL_TAGS,
         "param_mappings": _OVERALL_PARAM_MAPPINGS,
         "click_behavior": {"target": DASH_ISSUES, "preset": {}},
@@ -1367,7 +1367,7 @@ WHERE a.activity_type IN ('PATCH_MANAGEMENT_MESSAGE', 'SOFTWARE_PATCH_MANAGEMENT
         "key":     "overall_failures_30d",
         "name":    "Failures (30d)",
         "display": "scalar",
-        "row": 14, "col": 8, "size_x": 8, "size_y": 2,
+        "row": 14, "col": 12, "size_x": 12, "size_y": 2,
         "template_tags":  _OVERALL_TAGS,
         "param_mappings": _OVERALL_PARAM_MAPPINGS,
         "click_behavior": {"target": DASH_ISSUES, "preset": {}},
@@ -2429,7 +2429,7 @@ LIMIT 1000
         "key":            "detail_type_distribution",
         "name":           "Patches by Type",
         "display":        "pie",
-        "row": 38, "col": 0, "size_x": 12, "size_y": 8,
+        "row": 38, "col": 0, "size_x": 24, "size_y": 8,
         "viz_settings":   {
             "pie.dimension":       "Type",
             "pie.metric":          "Patches",
@@ -3603,7 +3603,7 @@ WHERE COALESCE(p.needs_reboot, FALSE)
         "key": "issues_with_warnings",
         "name": "With Warnings",
         "display": "scalar",
-        "row": 3, "col": 0, "size_x": 4, "size_y": 3,
+        "row": 3, "col": 0, "size_x": 12, "size_y": 3,
         "template_tags": _ISSUE_TAGS,
         "param_mappings": _ISSUE_PARAM_MAPPINGS,
         "query": f"""
@@ -3619,7 +3619,7 @@ WHERE COALESCE(p.warning_events_30d, 0) > 0
         "key": "issues_with_failures",
         "name": "With Failures",
         "display": "scalar",
-        "row": 3, "col": 4, "size_x": 4, "size_y": 3,
+        "row": 3, "col": 12, "size_x": 12, "size_y": 3,
         "template_tags": _ISSUE_TAGS,
         "param_mappings": _ISSUE_PARAM_MAPPINGS,
         "query": f"""
@@ -4499,7 +4499,7 @@ LIMIT 100
         "key":     "org_warnings_30d",
         "name":    "Warnings (30d)",
         "display": "scalar",
-        "row": 14, "col": 0, "size_x": 6, "size_y": 2,
+        "row": 14, "col": 0, "size_x": 12, "size_y": 2,
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS,
         "query": f"""
@@ -4516,7 +4516,7 @@ WHERE a.activity_type IN ('PATCH_MANAGEMENT_MESSAGE', 'SOFTWARE_PATCH_MANAGEMENT
         "key":     "org_failures_30d",
         "name":    "Failures (30d)",
         "display": "scalar",
-        "row": 14, "col": 6, "size_x": 6, "size_y": 2,
+        "row": 14, "col": 12, "size_x": 12, "size_y": 2,
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS,
         "query": f"""
