@@ -2143,9 +2143,10 @@ def _build_click_behavior_json(
            spec = {"target": <dash name>|"self", "preset": {<slug>: <value>}}
        → linkTemplate = /dashboard/<id>[?slug=val&...]
 
-       For cross-dashboard targets, additional source-filter values are
-       appended via Metabase's {{filter:<slug>}} URL substitution so the
-       operator's current filter selection propagates to the target.
+       Note: SHAPE A (URL preset) does NOT propagate source-dashboard
+       filters — Metabase's URL-link-template substitution syntax for
+       parameters is version-dependent and risky. Cross-dashboard
+       filter propagation flows through SHAPE C below.
 
     B. params with target="self": crossfilter the current dashboard.
            spec = {"target": "self", "params": {<param_id>: <col>}}
@@ -2173,25 +2174,9 @@ def _build_click_behavior_json(
                 log.warning("Click behavior: unknown target dashboard %r", target)
                 return None
         path = f"/dashboard/{target_id}"
-        parts: list[str] = []
-        for k, v in preset.items():
-            parts.append(f"{quote_plus(str(k))}={quote_plus(str(v))}")
-        # Auto-propagate source filters via Metabase URL substitution.
-        # preset values win on slug collision (explicit beats propagated).
-        preset_keys = set(preset.keys() if preset else ())
-        for _tpid, (tgt_slug, src_pid) in propagated.items():
-            if tgt_slug in preset_keys:
-                continue
-            # Metabase resolves {{filter:slug}} at click-time using the
-            # source dashboard's current parameter value for that slug.
-            # The source slug is looked up via the source param-id map.
-            src_dash_map = (slug_to_param_per_dash or {}).get(current_dash_name or "", {})
-            src_slug = next((s for s, pid in src_dash_map.items() if pid == src_pid), None)
-            if not src_slug:
-                continue
-            parts.append(f"{quote_plus(tgt_slug)}={{{{filter:{src_slug}}}}}")
-        if parts:
-            path = f"{path}?{'&'.join(parts)}"
+        if preset:
+            qs = "&".join(f"{quote_plus(str(k))}={quote_plus(str(v))}" for k, v in preset.items())
+            path = f"{path}?{qs}"
         return {
             "type":         "link",
             "linkType":     "url",
