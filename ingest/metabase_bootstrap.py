@@ -602,7 +602,7 @@ _CMD_PARAM_MAPPINGS_FULL = {
 }
 
 # Filter fragments — appended after WHERE / before GROUP BY.
-_CMD_FILTER_ORG         = "  [[AND o.name ILIKE '%' || {{org}} || '%']]\n"
+_CMD_FILTER_ORG         = "  [[AND o.name IN ({{org}})]]\n"
 _CMD_FILTER_DEVICE_TYPE = f"  [[AND {DEVICE_TYPE_D} IN ({{{{device_type}}}})]]\n"
 _CMD_FILTER_PATCHING_SCOPE = (
     "  [[AND d.patching_scope IN ({{patching_scope}})]]\n"
@@ -618,7 +618,7 @@ _CMD_FILTERS_PATCH_LIR    = _CMD_FILTERS_DEVICE + _CMD_FILTER_SEV_LIR
 
 def build_command_parameters(org_names: list[str]) -> list[dict]:
     return [
-        _param_text(      PARAM_CMD_ORG,   "Organization", "org"),
+        _param_multiselect(PARAM_CMD_ORG,   "Organization", "org", org_names),
         _param_multiselect(PARAM_CMD_CLASS, "Device Type",  "device_type", _NODE_CLASS_OPTIONS),
         _param_multiselect(PARAM_PATCHING_SCOPE, "Patching Scope", "patching_scope", _PATCHING_SCOPE_OPTIONS),
         _param_multiselect(PARAM_CMD_SEV,   "Severity",     "severity",    _SEVERITY_OPTIONS),
@@ -1207,7 +1207,7 @@ _OVERALL_PARAM_MAPPINGS_FULL = {
     PARAM_OVERALL_SEV: ["variable", ["template-tag", "severity"]],
 }
 
-_OVERALL_FILTER_ORG         = "  [[AND o.name ILIKE '%' || {{org}} || '%']]\n"
+_OVERALL_FILTER_ORG         = "  [[AND o.name IN ({{org}})]]\n"
 _OVERALL_FILTER_DEVICE_TYPE = f"  [[AND {DEVICE_TYPE_D} IN ({{{{device_type}}}})]]\n"
 _OVERALL_FILTER_OS_FAMILY   = f"  [[AND {OS_FAMILY_D} IN ({{{{os_family}}}})]]\n"
 _OVERALL_FILTER_PATCHING_SCOPE = (
@@ -1234,7 +1234,7 @@ _OVERALL_FILTERS_PATCH_LIR = _OVERALL_FILTERS_DEVICE + _OVERALL_FILTER_SEV_LIR
 
 def build_overall_parameters(org_names: list[str], os_families: list[str]) -> list[dict]:
     return [
-        _param_text(      PARAM_OVERALL_ORG,   "Organization",            "org"),
+        _param_multiselect(PARAM_OVERALL_ORG,   "Organization",            "org", org_names),
         _param_multiselect(PARAM_OVERALL_CLASS, "Device Type",             "device_type", _NODE_CLASS_OPTIONS),
         _param_multiselect(PARAM_OVERALL_OS,    "Operating System Family", "os_family",   os_families),
         _param_multiselect(PARAM_PATCHING_SCOPE, "Patching Scope",         "patching_scope", _PATCHING_SCOPE_OPTIONS),
@@ -2091,7 +2091,7 @@ def build_detail_parameters(
     workstations across all clients first" is the default view.
     """
     return [
-        _param_text(       PARAM_ORG,     "Organization",            "org"),
+        _param_multiselect(PARAM_ORG,     "Organization",            "org",             org_names),
         _param_dropdown(   PARAM_DEVICE,  "Device",                  "device",          device_names),
         _param_multiselect(PARAM_STATUS,  "Current Patch State",     "status",          _STATUS_OPTIONS),
         _param_multiselect(PARAM_CLASS,   "Device Type",             "node_class",      _NODE_CLASS_OPTIONS,
@@ -4055,7 +4055,7 @@ _ORG_PARAM_MAPPINGS_FULL = {
 # WHERE/AND lines. Device-only cards use the DEVICE variant; patch-
 # context cards use PATCH_CS (cs.severity alias) or PATCH_LIR
 # (lir.severity alias).
-_ORG_FILTER_ORG         = "  [[AND o.name ILIKE '%' || {{org}} || '%']]\n"
+_ORG_FILTER_ORG         = "  [[AND o.name IN ({{org}})]]\n"
 _ORG_FILTER_DEVICE_TYPE = f"  [[AND {DEVICE_TYPE_D} IN ({{{{device_type}}}})]]\n"
 _ORG_FILTER_OS_FAMILY   = f"  [[AND {OS_FAMILY_D} IN ({{{{os_family}}}})]]\n"
 _ORG_FILTER_PATCHING_SCOPE = (
@@ -4087,7 +4087,7 @@ _ORG_FILTERS_PATCH_LIR = _ORG_FILTERS_DEVICE + _ORG_FILTER_SEV_LIR
 
 def build_org_parameters(org_names: list[str]) -> list[dict]:
     return [
-        _param_text(      PARAM_ORG,   "Organization", "org"),
+        _param_multiselect(PARAM_ORG,   "Organization", "org", org_names),
         _param_multiselect(PARAM_CLASS, "Device Type",  "device_type", _NODE_CLASS_OPTIONS),
         _param_multiselect(PARAM_OS,    "OS Family",    "os_family",   _OS_FAMILY_OPTIONS),
         _param_multiselect(PARAM_PATCHING_SCOPE, "Patching Scope", "patching_scope", _PATCHING_SCOPE_OPTIONS),
@@ -4650,7 +4650,7 @@ _TRENDS_PARAM_MAPPINGS_FULL = {
     PARAM_TRENDS_SEV: ["variable", ["template-tag", "severity"]],
 }
 
-_TRENDS_FILTER_ORG         = "  [[AND o.name ILIKE '%' || {{org}} || '%']]\n"
+_TRENDS_FILTER_ORG         = "  [[AND o.name IN ({{org}})]]\n"
 _TRENDS_FILTER_DEVICE_TYPE = f"  [[AND {DEVICE_TYPE_D} IN ({{{{device_type}}}})]]\n"
 _TRENDS_FILTER_PATCHING_SCOPE = (
     "  [[AND d.patching_scope IN ({{patching_scope}})]]\n"
@@ -4668,7 +4668,7 @@ _TRENDS_FILTERS_PATCH_CS   = _TRENDS_FILTERS_DEVICE + _TRENDS_FILTER_SEV_CS
 def build_trends_parameters(org_names: list[str]) -> list[dict]:
     return [
         _param_number(     PARAM_TRENDS_DAYS,  "Timeline window (days)", "days",        90),
-        _param_text(      PARAM_TRENDS_ORG,   "Organization",           "org"),
+        _param_multiselect(PARAM_TRENDS_ORG,   "Organization",           "org", org_names),
         _param_multiselect(PARAM_TRENDS_CLASS, "Device Type",            "device_type", _NODE_CLASS_OPTIONS),
         _param_multiselect(PARAM_PATCHING_SCOPE, "Patching Scope",       "patching_scope", _PATCHING_SCOPE_OPTIONS),
         _param_multiselect(PARAM_TRENDS_SEV,   "Severity",               "severity",    _SEVERITY_OPTIONS),
