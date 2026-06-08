@@ -876,7 +876,7 @@ def build_command_parameters(org_names: list[str]) -> list[dict]:
     return [
         _param_text(      PARAM_CMD_ORG,   "Organization", "org"),
         _param_multiselect(PARAM_CMD_CLASS, "Device Type",  "device_type", _NODE_CLASS_OPTIONS),
-        _param_multiselect(PARAM_PATCHING_SCOPE, "Patching Scope", "patching_scope", _PATCHING_SCOPE_OPTIONS, default="Included"),
+        _param_multiselect(PARAM_PATCHING_SCOPE, "Patching Scope", "patching_scope", _PATCHING_SCOPE_OPTIONS),
         _param_multiselect(PARAM_CMD_SEV,   "Severity",     "severity",    _SEVERITY_OPTIONS),
     ]
 
@@ -1490,7 +1490,7 @@ def build_overall_parameters(org_names: list[str], os_families: list[str]) -> li
         _param_text(      PARAM_OVERALL_ORG,   "Organization",            "org"),
         _param_multiselect(PARAM_OVERALL_CLASS, "Device Type",             "device_type", _NODE_CLASS_OPTIONS),
         _param_multiselect(PARAM_OVERALL_OS,    "Operating System Family", "os_family",   os_families),
-        _param_multiselect(PARAM_PATCHING_SCOPE, "Patching Scope",         "patching_scope", _PATCHING_SCOPE_OPTIONS, default="Included"),
+        _param_multiselect(PARAM_PATCHING_SCOPE, "Patching Scope",         "patching_scope", _PATCHING_SCOPE_OPTIONS),
         _param_multiselect(PARAM_OVERALL_SEV,   "Severity",                "severity",    _SEVERITY_OPTIONS),
     ]
 
@@ -2013,21 +2013,120 @@ ORDER BY started_at DESC, run_id DESC
 # target=<name> → link to that dashboard with parameters pre-set
 
 
-def _build_param_mapping(params: dict[str, str]) -> dict[str, dict]:
-    """Turn {param_id: source_column} into Metabase's parameterMapping JSON."""
-    return {
+# Cross-dashboard filter propagation map.
+# Logical filter name -> dashboard name -> slug on that dashboard.
+# Used by _build_click_behavior_json to auto-attach parameterMapping
+# entries that carry the operator's current filter selection from the
+# source dashboard to the target. Add new dashboards / slugs here when
+# you add cross-dashboard filters you want to propagate.
+_CANONICAL_SLUG_MAP: dict[str, dict[str, str]] = {
+    "org": {
+        DASH_COMMAND:   "org",
+        DASH_OVERVIEW:  "org",
+        DASH_ORG:       "org",
+        DASH_ISSUES:    "issue_org",
+        DASH_PCOV:      "pcov_org",
+        DASH_DETAIL:    "org",
+        DASH_DRILLDOWN: "org",
+        DASH_TRENDS:    "org",
+    },
+    "device_type": {
+        DASH_COMMAND:  "device_type",
+        DASH_OVERVIEW: "device_type",
+        DASH_ORG:      "device_type",
+        DASH_ISSUES:   "issue_device_type",
+        DASH_PCOV:     "pcov_node_class",
+        DASH_DETAIL:   "node_class",
+        DASH_TRENDS:   "device_type",
+    },
+    "os_family": {
+        DASH_OVERVIEW: "os_family",
+        DASH_ORG:      "os_family",
+        DASH_ISSUES:   "issue_os",
+        DASH_PCOV:     "pcov_os",
+        DASH_DETAIL:   "os",
+    },
+    "severity": {
+        DASH_COMMAND:  "severity",
+        DASH_OVERVIEW: "severity",
+        DASH_ORG:      "severity",
+        DASH_DETAIL:   "severity",
+        DASH_TRENDS:   "severity",
+    },
+    "patching_scope": {
+        DASH_COMMAND:   "patching_scope",
+        DASH_OVERVIEW:  "patching_scope",
+        DASH_ORG:       "patching_scope",
+        DASH_ISSUES:    "patching_scope",
+        DASH_PCOV:      "patching_scope",
+        DASH_DETAIL:    "patching_scope",
+        DASH_DRILLDOWN: "patching_scope",
+        DASH_TRENDS:    "patching_scope",
+    },
+}
+
+
+def _resolve_propagated_params(
+    source_dash: str | None,
+    target_dash: str,
+    slug_to_param_per_dash: dict[str, dict[str, str]] | None,
+) -> dict[str, tuple[str, str]]:
+    """For each canonical filter present on BOTH source and target, return
+    {target_param_id: (target_slug, source_param_id)} so the caller can
+    build either a URL substitution or a parameterMapping entry."""
+    if not source_dash or not slug_to_param_per_dash or source_dash == target_dash:
+        return {}
+    out: dict[str, tuple[str, str]] = {}
+    src_map = slug_to_param_per_dash.get(source_dash, {})
+    tgt_map = slug_to_param_per_dash.get(target_dash, {})
+    for dash_to_slug in _CANONICAL_SLUG_MAP.values():
+        s_slug = dash_to_slug.get(source_dash)
+        t_slug = dash_to_slug.get(target_dash)
+        if not s_slug or not t_slug:
+            continue
+        s_pid = src_map.get(s_slug)
+        t_pid = tgt_map.get(t_slug)
+        if s_pid and t_pid:
+            out[t_pid] = (t_slug, s_pid)
+    return out
+
+
+def _build_param_mapping(
+    column_params: dict[str, str],
+    parameter_params: dict[str, str] | None = None,
+) -> dict[str, dict]:
+    """Build parameterMapping JSON.
+
+    column_params:    {target_param_id: source_column_name} — row-data sources.
+    parameter_params: {target_param_id: source_param_id}    — propagated
+                      source-dashboard filter values. Column sources win on
+                      target_param_id collision (operator-explicit beats
+                      auto-propagated)."""
+    out: dict[str, dict] = {
         pid: {
             "id":     pid,
             "source": {"type": "column", "id": src, "name": src},
             "target": {"type": "parameter", "id": pid},
         }
-        for pid, src in params.items()
+        for pid, src in column_params.items()
     }
+    if parameter_params:
+        for pid, src_pid in parameter_params.items():
+            if pid in out:
+                continue
+            out[pid] = {
+                "id":     pid,
+                "source": {"type": "parameter", "id": src_pid, "name": src_pid},
+                "target": {"type": "parameter", "id": pid},
+            }
+    return out
 
 
 def _build_click_behavior_json(
     spec: dict, dash_id_by_name: dict[str, int],
     current_dash_id: int | None = None,
+    current_dash_name: str | None = None,
+    slug_to_param_per_dash: dict[str, dict[str, str]] | None = None,
 ) -> dict | None:
     """Three shapes, in priority order:
 
@@ -2038,14 +2137,23 @@ def _build_click_behavior_json(
            spec = {"target": <dash name>|"self", "preset": {<slug>: <value>}}
        → linkTemplate = /dashboard/<id>[?slug=val&...]
 
+       For cross-dashboard targets, additional source-filter values are
+       appended via Metabase's {{filter:<slug>}} URL substitution so the
+       operator's current filter selection propagates to the target.
+
     B. params with target="self": crossfilter the current dashboard.
            spec = {"target": "self", "params": {<param_id>: <col>}}
 
     C. params with target=<dash name>: cross-dashboard link with
-       parameterMapping reading from the row's columns.
+       parameterMapping reading from the row's columns AND
+       auto-propagating the source dashboard's matching filters.
     """
     target = spec.get("target")
     preset = spec.get("preset")
+
+    propagated = _resolve_propagated_params(
+        current_dash_name, target, slug_to_param_per_dash,
+    ) if target and target != "self" else {}
 
     if preset is not None:
         if target == "self":
@@ -2059,9 +2167,25 @@ def _build_click_behavior_json(
                 log.warning("Click behavior: unknown target dashboard %r", target)
                 return None
         path = f"/dashboard/{target_id}"
-        if preset:
-            qs = "&".join(f"{quote_plus(str(k))}={quote_plus(str(v))}" for k, v in preset.items())
-            path = f"{path}?{qs}"
+        parts: list[str] = []
+        for k, v in preset.items():
+            parts.append(f"{quote_plus(str(k))}={quote_plus(str(v))}")
+        # Auto-propagate source filters via Metabase URL substitution.
+        # preset values win on slug collision (explicit beats propagated).
+        preset_keys = set(preset.keys() if preset else ())
+        for _tpid, (tgt_slug, src_pid) in propagated.items():
+            if tgt_slug in preset_keys:
+                continue
+            # Metabase resolves {{filter:slug}} at click-time using the
+            # source dashboard's current parameter value for that slug.
+            # The source slug is looked up via the source param-id map.
+            src_dash_map = (slug_to_param_per_dash or {}).get(current_dash_name or "", {})
+            src_slug = next((s for s, pid in src_dash_map.items() if pid == src_pid), None)
+            if not src_slug:
+                continue
+            parts.append(f"{quote_plus(tgt_slug)}={{{{filter:{src_slug}}}}}")
+        if parts:
+            path = f"{path}?{'&'.join(parts)}"
         return {
             "type":         "link",
             "linkType":     "url",
@@ -2081,7 +2205,10 @@ def _build_click_behavior_json(
         "type":             "link",
         "linkType":         "dashboard",
         "targetId":         target_id,
-        "parameterMapping": _build_param_mapping(spec.get("params", {})),
+        "parameterMapping": _build_param_mapping(
+            spec.get("params", {}),
+            parameter_params={tpid: spid for tpid, (_slug, spid) in propagated.items()},
+        ),
     }
 
 
@@ -2092,16 +2219,27 @@ def _apply_click_behaviors(
     dash_id_by_name: dict[str, int],
 ) -> None:
     """Second pass: merge click_behavior into each card's
-    visualization_settings now that dashboard IDs are resolved."""
+    visualization_settings now that dashboard IDs are resolved.
+
+    Builds a slug-to-param-id map per dashboard from each spec's
+    parameters list so cross-dashboard click_behaviors can
+    auto-propagate the operator's current filter values via the
+    canonical-slug map (_CANONICAL_SLUG_MAP)."""
+    slug_to_param_per_dash: dict[str, dict[str, str]] = {
+        d["name"]: {p["slug"]: p["id"] for p in d.get("parameters", []) if "slug" in p and "id" in p}
+        for d in dashboards
+    }
     for dash_spec in dashboards:
         card_ids = card_ids_by_dash[dash_spec["name"]]
         current_dash_id = dash_id_by_name.get(dash_spec["name"])
+        current_dash_name = dash_spec["name"]
         for card_spec in dash_spec["cards"]:
             extra: dict[str, Any] = {}
 
             if "click_behavior" in card_spec:
                 cb = _build_click_behavior_json(
-                    card_spec["click_behavior"], dash_id_by_name, current_dash_id,
+                    card_spec["click_behavior"], dash_id_by_name,
+                    current_dash_id, current_dash_name, slug_to_param_per_dash,
                 )
                 if cb:
                     extra["click_behavior"] = cb
@@ -2109,7 +2247,10 @@ def _apply_click_behaviors(
             if "column_click_behaviors" in card_spec:
                 column_settings: dict[str, dict] = {}
                 for col, ccb in card_spec["column_click_behaviors"].items():
-                    cb = _build_click_behavior_json(ccb, dash_id_by_name, current_dash_id)
+                    cb = _build_click_behavior_json(
+                        ccb, dash_id_by_name, current_dash_id,
+                        current_dash_name, slug_to_param_per_dash,
+                    )
                     if cb:
                         # Metabase keys column_settings by JSON-encoded
                         # ["name", "<col>"] arrays.
@@ -2226,7 +2367,7 @@ def build_detail_parameters(
         _param_multiselect(PARAM_SEV,     "Severity",                "severity",        _SEVERITY_OPTIONS),
         _param_multiselect(PARAM_OUTCOME, "Install Results",         "install_outcome", _OUTCOME_OPTIONS),
         _param_multiselect(PARAM_OS,      "Operating System Family", "os",              os_families),
-        _param_multiselect(PARAM_PATCHING_SCOPE, "Patching Scope",   "patching_scope",  _PATCHING_SCOPE_OPTIONS, default="Included"),
+        _param_multiselect(PARAM_PATCHING_SCOPE, "Patching Scope",   "patching_scope",  _PATCHING_SCOPE_OPTIONS),
         _param_text(       PARAM_KB,      "KB Number",               "kb"),
         _param_number(     PARAM_DAYS,    "Timeline window (days)",  "days",            90),
     ]
@@ -2641,7 +2782,7 @@ def build_device_parameters(device_names: list[str]) -> list[dict]:
     return [
         _param_text(      PARAM_ORG,      "Organization", "org"),
         _param_dropdown(PARAM_DEVICE,      "Device", "device", device_names),
-        _param_multiselect(PARAM_PATCHING_SCOPE, "Patching Scope", "patching_scope", _PATCHING_SCOPE_OPTIONS, default="Included"),
+        _param_multiselect(PARAM_PATCHING_SCOPE, "Patching Scope", "patching_scope", _PATCHING_SCOPE_OPTIONS),
         _param_number(  PARAM_DEVICE_DAYS, "Timeline window (days)", "device_days", 180),
     ]
 
@@ -2948,7 +3089,7 @@ def build_pcov_parameters(
                            default="Windows Workstation"),
         _param_multiselect(PARAM_PCOV_OS,     "Operating System Family", "pcov_os",         os_families),
         _param_multiselect(PARAM_PCOV_POLICY, "Policy",                  "pcov_policy",     policy_names),
-        _param_multiselect(PARAM_PATCHING_SCOPE, "Patching Scope",       "patching_scope",  _PATCHING_SCOPE_OPTIONS, default="Included"),
+        _param_multiselect(PARAM_PATCHING_SCOPE, "Patching Scope",       "patching_scope",  _PATCHING_SCOPE_OPTIONS),
         _param_multiselect(PARAM_PCOV_STATUS, "Patching Status",         "pcov_status",     _PCOV_STATUS_OPTIONS),
         _param_number(     PARAM_PCOV_DAYS,   "Stale threshold (days)",  "pcov_days",       DEFAULT_STALE_PATCH_DAYS),
     ]
@@ -3539,7 +3680,7 @@ def build_issue_parameters(
         _param_multiselect(PARAM_ISSUE_CLASS, "Device Type", "issue_device_type", _NODE_CLASS_OPTIONS),
         _param_multiselect(PARAM_ISSUE_OS, "OS Family", "issue_os", os_families),
         _param_multiselect(PARAM_ISSUE_POLICY, "Policy", "issue_policy", policy_names),
-        _param_multiselect(PARAM_PATCHING_SCOPE, "Patching Scope", "patching_scope", _PATCHING_SCOPE_OPTIONS, default="Included"),
+        _param_multiselect(PARAM_PATCHING_SCOPE, "Patching Scope", "patching_scope", _PATCHING_SCOPE_OPTIONS),
         _param_multiselect(PARAM_ISSUE_TYPE, "Issue Type", "issue_type", _ISSUE_TYPE_OPTIONS),
         _param_multiselect(PARAM_ISSUE_OFFLINE, "Offline", "offline", _BOOL_OPTIONS),
         _param_multiselect(PARAM_ISSUE_REBOOT, "Needs Reboot", "needs_reboot", _BOOL_OPTIONS),
@@ -4081,7 +4222,7 @@ def build_org_parameters(org_names: list[str]) -> list[dict]:
         _param_text(      PARAM_ORG,   "Organization", "org"),
         _param_multiselect(PARAM_CLASS, "Device Type",  "device_type", _NODE_CLASS_OPTIONS),
         _param_multiselect(PARAM_OS,    "OS Family",    "os_family",   _OS_FAMILY_OPTIONS),
-        _param_multiselect(PARAM_PATCHING_SCOPE, "Patching Scope", "patching_scope", _PATCHING_SCOPE_OPTIONS, default="Included"),
+        _param_multiselect(PARAM_PATCHING_SCOPE, "Patching Scope", "patching_scope", _PATCHING_SCOPE_OPTIONS),
         _param_multiselect(PARAM_SEV,   "Severity",     "severity",    _SEVERITY_OPTIONS),
     ]
 
@@ -4615,7 +4756,7 @@ def build_trends_parameters(org_names: list[str]) -> list[dict]:
         _param_number(     PARAM_TRENDS_DAYS,  "Timeline window (days)", "days",        90),
         _param_text(      PARAM_TRENDS_ORG,   "Organization",           "org"),
         _param_multiselect(PARAM_TRENDS_CLASS, "Device Type",            "device_type", _NODE_CLASS_OPTIONS),
-        _param_multiselect(PARAM_PATCHING_SCOPE, "Patching Scope",       "patching_scope", _PATCHING_SCOPE_OPTIONS, default="Included"),
+        _param_multiselect(PARAM_PATCHING_SCOPE, "Patching Scope",       "patching_scope", _PATCHING_SCOPE_OPTIONS),
         _param_multiselect(PARAM_TRENDS_SEV,   "Severity",               "severity",    _SEVERITY_OPTIONS),
     ]
 
