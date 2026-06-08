@@ -1595,6 +1595,45 @@ FROM (
 ) latest
 """,
     },
+    # Row 14 — fleet activity pulse (mirror of the Command Center
+    # pulse band): warning + failure event counts in the last 30 days,
+    # scoped by the dashboard's org / device-type / OS / scope filters.
+    {
+        "key":     "overall_warnings_30d",
+        "name":    "Warnings (30d)",
+        "display": "scalar",
+        "row": 14, "col": 0, "size_x": 8, "size_y": 2,
+        "template_tags":  _OVERALL_TAGS,
+        "param_mappings": _OVERALL_PARAM_MAPPINGS,
+        "click_behavior": {"target": DASH_ISSUES, "preset": {}},
+        "query": f"""
+SELECT COUNT(*) AS warnings
+FROM ninja_activities.activities a
+JOIN ninja_core.v_active_devices d ON d.id = a.device_id
+JOIN ninja_core.organizations o ON o.id = d.organization_id
+WHERE a.activity_type IN ('PATCH_MANAGEMENT_MESSAGE', 'SOFTWARE_PATCH_MANAGEMENT_MESSAGE')
+  AND a.activity_time >= NOW() - INTERVAL '30 days'
+{_OVERALL_FILTERS_DEVICE}
+""",
+    },
+    {
+        "key":     "overall_failures_30d",
+        "name":    "Failures (30d)",
+        "display": "scalar",
+        "row": 14, "col": 8, "size_x": 8, "size_y": 2,
+        "template_tags":  _OVERALL_TAGS,
+        "param_mappings": _OVERALL_PARAM_MAPPINGS,
+        "click_behavior": {"target": DASH_ISSUES, "preset": {}},
+        "query": f"""
+SELECT COUNT(*) AS failures
+FROM ninja_activities.activities a
+JOIN ninja_core.v_active_devices d ON d.id = a.device_id
+JOIN ninja_core.organizations o ON o.id = d.organization_id
+WHERE a.activity_type = 'PATCH_MANAGEMENT_FAILURE'
+  AND a.activity_time >= NOW() - INTERVAL '30 days'
+{_OVERALL_FILTERS_DEVICE}
+""",
+    },
     # Row 8 — Patches (canonical order: Approved, Manual, Delayed,
     # Failed). 4 scalars at size 6 each = 24. Each CTE now selects
     # device_id and the outer SELECT joins ninja_core.devices so the
@@ -3665,7 +3704,7 @@ WHERE COALESCE(p.needs_reboot, FALSE)
     # added in 0.15.1.
     {
         "key": "issues_with_warnings",
-        "name": "Devices with Warnings (30d)",
+        "name": "With Warnings",
         "display": "scalar",
         "row": 3, "col": 0, "size_x": 4, "size_y": 3,
         "template_tags": _ISSUE_TAGS,
@@ -3681,7 +3720,7 @@ WHERE COALESCE(p.warning_events_30d, 0) > 0
     },
     {
         "key": "issues_with_failures",
-        "name": "Devices with Failures (30d)",
+        "name": "With Failures",
         "display": "scalar",
         "row": 3, "col": 4, "size_x": 4, "size_y": 3,
         "template_tags": _ISSUE_TAGS,
@@ -4449,7 +4488,7 @@ LIMIT 100
     # scalars + one table for the recent activity detail.
     {
         "key":     "org_warnings_30d",
-        "name":    "OS Patch Warnings (30d)",
+        "name":    "Warnings (30d)",
         "display": "scalar",
         "row": 14, "col": 0, "size_x": 6, "size_y": 2,
         "template_tags":  _ORG_TAGS,
@@ -4466,7 +4505,7 @@ WHERE a.activity_type IN ('PATCH_MANAGEMENT_MESSAGE', 'SOFTWARE_PATCH_MANAGEMENT
     },
     {
         "key":     "org_failures_30d",
-        "name":    "OS Patch Failures (30d)",
+        "name":    "Failures (30d)",
         "display": "scalar",
         "row": 14, "col": 6, "size_x": 6, "size_y": 2,
         "template_tags":  _ORG_TAGS,
