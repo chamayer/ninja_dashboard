@@ -2,6 +2,44 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.15.4] — 2026-06-07
+
+### Changed
+- **`issue_type` priority: warnings now rank above delayed patches**
+  (migration 018, drop+recreate `device_troubleshooting_signal`).
+  Operator feedback: delayed patches are normal (auto-approve window),
+  warnings are operator-actionable. New branch
+  `Stalled with warnings` inserted between `Stalled with manual
+  approvals` and `Stalled with delayed patches`; mirror `Active with
+  warnings` added between `Reboot pending` and `Manual approvals` in
+  the active-path. `_ISSUE_TYPE_OPTIONS` updated to include the new
+  values (plus the previously-missing "Stalled (install dates
+  missing)" pair).
+
+### Added
+- **Issues drillthroughs from Warnings by Category / Failures by
+  Error Code cards.** Click a category row → new
+  `Devices Matching Warning Category (30d)` table populates with
+  the specific devices generating that warning. Same for failures
+  via `Devices Matching Failure Error Type (30d)`. Two new
+  parameters: `p_issue_warning_cat` + `p_issue_failure_err`.
+- **Org Overview `Top Problem Devices` table** — per-org triage
+  view (mirrors Issues queue but scoped to the active org filter).
+  Click device → Device Drilldown.
+- **`Earliest Scan in DB` column** added to operator-facing tables
+  where missing: Issues queue, Top Devices by Warnings/Failures,
+  CC Failed Patch Queue, CC Manual + Delayed Patches, CC Patches
+  Installed Awaiting Reboot. CC tables get a LEFT JOIN to
+  `device_troubleshooting_signal` to pick up the column. Operator
+  can now see "is this device's failure an old-history thing or a
+  fresh-onboarding thing?" without leaving the table.
+
+### Notes
+- Migration 018 drop+recreates only `device_troubleshooting_signal`
+  (no patch MV touches), so it's fast (~seconds).
+- All dashboard additions are additive; no card removed.
+- Commit: `TBD`
+
 ## [0.15.3] — 2026-06-07
 
 ### Added

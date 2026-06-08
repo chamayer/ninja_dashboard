@@ -1253,10 +1253,12 @@ SELECT
     lir.installed_at AS "Last Install Attempt",
     CASE WHEN lir.installed_at IS NULL THEN NULL
          ELSE ROUND(EXTRACT(EPOCH FROM (NOW() - lir.installed_at)) / 86400)
-    END AS "Days Since Attempt"
+    END AS "Days Since Attempt",
+    ts.first_scan_started AS "Earliest Scan"
 FROM latest_install_result lir
 JOIN ninja_core.v_active_devices d ON d.id = lir.device_id
 JOIN ninja_core.organizations o ON o.id = d.organization_id
+LEFT JOIN ninja_core.device_troubleshooting_signal ts ON ts.device_id = d.id
 WHERE lir.status = 'FAILED'
 {_CMD_FILTERS_PATCH_LIR}
 ORDER BY lir.installed_at DESC NULLS LAST, o.name, d.system_name
@@ -1289,10 +1291,12 @@ SELECT
     cs.status AS current_patch_state,
     COALESCE(NULLIF(cs.kb_number, ''), '(none)') AS kb_number,
     cs.severity AS "Severity",
-    cs.last_observed_at AS "Last Seen"
+    cs.last_observed_at AS "Last Seen",
+    ts.first_scan_started AS "Earliest Scan"
 FROM current_state cs
 JOIN ninja_core.v_active_devices d ON d.id = cs.device_id
 JOIN ninja_core.organizations o ON o.id = d.organization_id
+LEFT JOIN ninja_core.device_troubleshooting_signal ts ON ts.device_id = d.id
 WHERE cs.status IN ('MANUAL', 'DELAYED')
 {_CMD_FILTERS_PATCH_CS}
 ORDER BY
@@ -1343,11 +1347,13 @@ SELECT
     lr.last_reboot_at  AS "Last Reboot",
     li.install_count   AS "Installs",
     ROUND(EXTRACT(EPOCH FROM (NOW() - li.last_install_at))/3600)::int
-        AS "Hours Since Install"
+        AS "Hours Since Install",
+    ts.first_scan_started AS "Earliest Scan"
 FROM ninja_core.v_active_devices d
 JOIN ninja_core.organizations o ON o.id = d.organization_id
 JOIN last_install li ON li.device_id = d.id
 LEFT JOIN last_reboot lr ON lr.device_id = d.id
+LEFT JOIN ninja_core.device_troubleshooting_signal ts ON ts.device_id = d.id
 WHERE d.needs_reboot = TRUE
   AND (lr.last_reboot_at IS NULL OR lr.last_reboot_at < li.last_install_at)
 {_CMD_FILTERS_DEVICE}
@@ -3650,21 +3656,30 @@ PARAM_ISSUE_FAILED = "p_issue_failed"
 PARAM_ISSUE_MISSING = "p_issue_missing"
 PARAM_ISSUE_STARTED_OPEN = "p_issue_started_open"
 PARAM_ISSUE_DAYS = "p_issue_days"
+# Set by click-through from the Warnings by Category / Failures by
+# Error Code cards. Drives the "Devices Matching ..." drillthrough
+# tables added in 0.15.4.
+PARAM_ISSUE_WARNING_CAT = "p_issue_warning_cat"
+PARAM_ISSUE_FAILURE_ERR = "p_issue_failure_err"
 
 _ISSUE_TYPE_OPTIONS = [
     "Never patched and offline",
     "Never patched",
+    "Stalled (install dates missing) and offline",
+    "Stalled (install dates missing)",
     "Stalled and offline",
     "Stalled after patch start",
     "Stalled with activity failures",
     "Stalled with failures",
     "Stalled with reboot pending",
     "Stalled with manual approvals",
+    "Stalled with warnings",
     "Stalled with delayed patches",
     "Stalled with approved waiting",
     "Stalled",
     "Active with failures",
     "Reboot pending",
+    "Active with warnings",
     "Manual approvals",
     "Excluded",
     "Review",
@@ -3688,6 +3703,8 @@ def build_issue_parameters(
         _param_multiselect(PARAM_ISSUE_MISSING, "Has Missing Patches", "has_missing", _BOOL_OPTIONS),
         _param_multiselect(PARAM_ISSUE_STARTED_OPEN, "Started Without Completion", "started_open", _BOOL_OPTIONS),
         _param_number(PARAM_ISSUE_DAYS, "Stale threshold (days)", "issue_days", DEFAULT_STALE_PATCH_DAYS),
+        _param_text(PARAM_ISSUE_WARNING_CAT, "Warning Category", "warning_category"),
+        _param_text(PARAM_ISSUE_FAILURE_ERR, "Failure Error Type", "failure_error_type"),
     ]
 
 
@@ -3708,6 +3725,16 @@ _ISSUE_TAGS = {
         "display-name": "Stale threshold (days)",
         "type": "number", "default": "35", "required": True,
     },
+    # Set by drillthrough from Warnings by Category / Failures by Error
+    # Code cards; consumed by the device-list drillthrough tables.
+    "warning_category": {
+        "id": "tt_issue_warning_cat", "name": "warning_category",
+        "display-name": "Warning Category", "type": "text",
+    },
+    "failure_error_type": {
+        "id": "tt_issue_failure_err", "name": "failure_error_type",
+        "display-name": "Failure Error Type", "type": "text",
+    },
 }
 
 _ISSUE_PARAM_MAPPINGS = {
@@ -3723,6 +3750,8 @@ _ISSUE_PARAM_MAPPINGS = {
     PARAM_ISSUE_MISSING: ["variable", ["template-tag", "has_missing"]],
     PARAM_ISSUE_STARTED_OPEN: ["variable", ["template-tag", "started_open"]],
     PARAM_ISSUE_DAYS: ["variable", ["template-tag", "issue_days"]],
+    PARAM_ISSUE_WARNING_CAT: ["variable", ["template-tag", "warning_category"]],
+    PARAM_ISSUE_FAILURE_ERR: ["variable", ["template-tag", "failure_error_type"]],
 }
 
 _ISSUE_FILTERS = f"""
@@ -3915,6 +3944,7 @@ SELECT
     CASE WHEN p.last_warning_at IS NULL THEN NULL
          ELSE EXTRACT(DAY FROM (NOW() - p.last_warning_at))::int
     END AS "Days Since Warning",
+    p.first_scan_started AS "Earliest Scan",
     COALESCE(p.started_without_completion, FALSE) AS "Started No Completion"
 FROM problem_devices p
 JOIN ninja_core.organizations o ON o.id = p.organization_id
@@ -4006,6 +4036,11 @@ ORDER BY devices DESC, issue
         "row": 29, "col": 0, "size_x": 12, "size_y": 8,
         "template_tags": _ISSUE_TAGS,
         "param_mappings": _ISSUE_PARAM_MAPPINGS,
+        # Click a category row → sets warning_category dashboard param,
+        # which the issues_devices_by_warning_category card consumes.
+        "column_click_behaviors": {
+            "Category": {"target": "self", "params": {PARAM_ISSUE_WARNING_CAT: "Category"}},
+        },
         "query": f"""
 WITH categorized AS (
     SELECT
@@ -4063,6 +4098,7 @@ SELECT
     o.name AS organization,
     p.warning_events_30d AS "Warnings 30d",
     p.last_warning_at AS "Last Warning",
+    p.first_scan_started AS "Earliest Scan",
     LEFT(p.last_warning_message, 120) AS "Last Message"
 FROM problem_devices p
 JOIN ninja_core.organizations o ON o.id = p.organization_id
@@ -4091,6 +4127,7 @@ SELECT
     o.name AS organization,
     p.patch_failure_events_30d AS "Failures 30d",
     p.last_patch_failure AS "Last Failure",
+    p.first_scan_started AS "Earliest Scan",
     LEFT(p.last_failure_message, 120) AS "Last Message"
 FROM problem_devices p
 JOIN ninja_core.organizations o ON o.id = p.organization_id
@@ -4111,6 +4148,11 @@ LIMIT 50
         "row": 29, "col": 12, "size_x": 12, "size_y": 8,
         "template_tags": _ISSUE_TAGS,
         "param_mappings": _ISSUE_PARAM_MAPPINGS,
+        # Click an error type row → sets failure_error_type dashboard
+        # param, consumed by issues_devices_by_failure_error.
+        "column_click_behaviors": {
+            "Error Type": {"target": "self", "params": {PARAM_ISSUE_FAILURE_ERR: "Error Type"}},
+        },
         "query": f"""
 WITH categorized AS (
     SELECT
@@ -4140,6 +4182,112 @@ WHERE 1=1
   [[AND o.name IN ({{{{issue_org}}}})]]
 GROUP BY c.error_type
 ORDER BY "Events" DESC
+""",
+    },
+    # ── Devices matching selected Warning Category (drillthrough) ──
+    # Populated when operator clicks a row in the Warnings by Category
+    # card above. The warning_category template tag is set via the
+    # click_behavior on that card. With no selection (direct load), the
+    # [[AND]] filter drops and the table shows every device with any
+    # warning in the last 30 days — operator can still browse, just
+    # not narrowed.
+    {
+        "key": "issues_devices_by_warning_category",
+        "name": "Devices Matching Warning Category (30d)",
+        "display": "table",
+        "row": 46, "col": 0, "size_x": 24, "size_y": 10,
+        "template_tags": _ISSUE_TAGS,
+        "param_mappings": _ISSUE_PARAM_MAPPINGS,
+        "column_click_behaviors": {
+            "device": {"target": DASH_DRILLDOWN, "params": {"p_device": "device"}},
+            "organization": {"target": DASH_ORG, "params": {"p_org": "organization"}},
+        },
+        "query": f"""
+WITH categorized AS (
+    SELECT
+        d.id AS device_id,
+        d.system_name,
+        d.organization_id,
+        a.activity_time,
+        CASE
+            WHEN a.message ILIKE '%outstanding approved patches%' THEN 'Outstanding approved patches'
+            WHEN a.message ILIKE '%was skipped because%' THEN 'Scheduled job skipped'
+            WHEN a.message ILIKE '%metered connection%' THEN 'Metered connection'
+            WHEN a.message ILIKE '%post reboot scan%' THEN 'Post-reboot scan required'
+            WHEN a.message ILIKE '%download error%' OR a.message ILIKE '%download failed%' THEN 'OS patch download error'
+            WHEN a.message ILIKE '%requires a reboot%' OR a.message ILIKE '%needs to be rebooted%' THEN 'Reboot needed'
+            WHEN a.message ILIKE '%Windows Update Agent%out of date%' THEN 'WUA out of date'
+            WHEN a.message ILIKE '%reboot%scheduled%' THEN 'Reboot scheduling'
+            WHEN a.message ILIKE '%download is complete%' THEN 'Download complete'
+            ELSE 'Other'
+        END AS category
+    FROM ninja_activities.activities a
+    JOIN ninja_core.v_active_devices d ON d.id = a.device_id
+    WHERE a.activity_type IN ('PATCH_MANAGEMENT_MESSAGE','SOFTWARE_PATCH_MANAGEMENT_MESSAGE')
+      AND a.activity_time >= NOW() - INTERVAL '30 days'
+)
+SELECT
+    c.system_name AS device,
+    o.name AS organization,
+    COUNT(*) AS "Events",
+    MAX(c.activity_time) AS "Last Event"
+FROM categorized c
+JOIN ninja_core.organizations o ON o.id = c.organization_id
+WHERE 1=1
+  [[AND c.category = {{{{warning_category}}}}]]
+  [[AND o.name IN ({{{{issue_org}}}})]]
+GROUP BY c.system_name, o.name
+ORDER BY "Events" DESC, "Last Event" DESC
+LIMIT 200
+""",
+    },
+    # ── Devices matching selected Failure Error Type (drillthrough) ─
+    {
+        "key": "issues_devices_by_failure_error",
+        "name": "Devices Matching Failure Error Type (30d)",
+        "display": "table",
+        "row": 56, "col": 0, "size_x": 24, "size_y": 10,
+        "template_tags": _ISSUE_TAGS,
+        "param_mappings": _ISSUE_PARAM_MAPPINGS,
+        "column_click_behaviors": {
+            "device": {"target": DASH_DRILLDOWN, "params": {"p_device": "device"}},
+            "organization": {"target": DASH_ORG, "params": {"p_org": "organization"}},
+        },
+        "query": f"""
+WITH categorized AS (
+    SELECT
+        d.id AS device_id,
+        d.system_name,
+        d.organization_id,
+        a.activity_time,
+        a.message,
+        CASE
+            WHEN a.message LIKE '%[-3005%' THEN '-3005 Windows comm error'
+            WHEN a.message LIKE '%[-3004%' THEN '-3004 Windows comm error'
+            WHEN a.message LIKE '%[-1001%' OR a.message ILIKE '%execution timeout%' OR a.message ILIKE '%timeout reached%' THEN '-1001 NinjaWPM timeout'
+            WHEN a.message ILIKE '%restart Windows Update services%' THEN 'WU service restart failed'
+            WHEN a.message ILIKE '%Unexpected return code%' THEN 'Unexpected return code'
+            ELSE 'Other'
+        END AS error_type
+    FROM ninja_activities.activities a
+    JOIN ninja_core.v_active_devices d ON d.id = a.device_id
+    WHERE a.activity_type = 'PATCH_MANAGEMENT_FAILURE'
+      AND a.activity_time >= NOW() - INTERVAL '30 days'
+)
+SELECT
+    c.system_name AS device,
+    o.name AS organization,
+    COUNT(*) AS "Events",
+    MAX(c.activity_time) AS "Last Event",
+    LEFT(MAX(c.message), 150) AS "Sample Message"
+FROM categorized c
+JOIN ninja_core.organizations o ON o.id = c.organization_id
+WHERE 1=1
+  [[AND c.error_type = {{{{failure_error_type}}}}]]
+  [[AND o.name IN ({{{{issue_org}}}})]]
+GROUP BY c.system_name, o.name
+ORDER BY "Events" DESC, "Last Event" DESC
+LIMIT 200
 """,
     },
 ]
@@ -4659,6 +4807,55 @@ JOIN ninja_core.organizations o ON o.id = d.organization_id
 WHERE a.activity_type = 'PATCH_MANAGEMENT_FAILURE'
   AND a.activity_time >= NOW() - INTERVAL '30 days'
 {_ORG_FILTERS_DEVICE}
+""",
+    },
+    # ── Top Problem Devices in this Org ────────────────────────────
+    # Per-org triage table. Operator opens Org Overview filtered to a
+    # client → sees the worst devices for that client, ordered by
+    # issue severity (no_patch_data > stale > failures > warnings).
+    # Click device → Device Drilldown. Reuses the canonical
+    # device_troubleshooting_signal classification (35-day stale
+    # threshold baked into the MV).
+    {
+        "key":     "org_top_problem_devices",
+        "name":    "Top Problem Devices",
+        "display": "table",
+        "row": 48, "col": 0, "size_x": 24, "size_y": 10,
+        "template_tags":  _ORG_TAGS,
+        "param_mappings": _ORG_PARAM_MAPPINGS,
+        "column_click_behaviors": {
+            "device": {"target": DASH_DRILLDOWN, "params": {"p_device": "device"}},
+        },
+        "query": f"""
+SELECT
+    d.system_name              AS device,
+    s.issue_type               AS issue,
+    s.suggested_action         AS "Suggested Action",
+    s.first_scan_started       AS "Earliest Scan",
+    s.last_seen_at             AS "Last Install",
+    s.warning_events_30d       AS "Warnings 30d",
+    s.patch_failure_events_30d AS "Failures 30d",
+    s.failed_installs          AS "Failed",
+    s.manual_patches           AS "Manual",
+    s.waiting_patches          AS "Waiting"
+FROM ninja_core.device_troubleshooting_signal s
+JOIN ninja_core.v_active_devices d ON d.id = s.device_id
+JOIN ninja_core.organizations o ON o.id = d.organization_id
+WHERE s.issue_type NOT IN ('Review', 'Excluded')
+{_ORG_FILTERS_DEVICE}
+ORDER BY
+    CASE s.patch_status
+        WHEN 'no_patch_data' THEN 0
+        WHEN 'stale_patch_data' THEN 1
+        ELSE 2
+    END,
+    s.patch_failure_events_30d DESC,
+    s.warning_events_30d DESC,
+    s.failed_installs DESC,
+    s.manual_patches DESC,
+    s.last_seen_at ASC NULLS FIRST,
+    d.system_name
+LIMIT 50
 """,
     },
     {
