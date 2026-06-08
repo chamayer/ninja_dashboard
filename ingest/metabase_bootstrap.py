@@ -167,16 +167,9 @@ def _alert_color(
     }
 
 
-def _sql_string_list(values: set[str]) -> str:
-    if not values:
-        return "NULL"
-    return ", ".join("'" + v.replace("'", "''") + "'" for v in sorted(values))
-
-
 # Standard alert colors.
 COLOR_ALERT_RED   = "#c62828"
 COLOR_ALERT_AMBER = "#f9a825"
-COLOR_OK_GREEN    = "#2e7d32"
 
 
 # ── Fully patched devices formula (single source of truth) ─────────
@@ -246,109 +239,6 @@ universe AS (
 )
 """
 
-ENABLED_POLICY_SQL = _sql_string_list(settings.patching_enabled_policies)
-
-_PATCH_SCOPE_CTE = """
-WITH device_custom_fields AS (
-    SELECT
-        entity_id AS device_id,
-        patchingdisabled AS device_patching_disabled,
-        patchingenabled AS device_patching_enabled,
-        serverpatchingdisabled AS device_server_patching_disabled,
-        workstationpatchingdisabled AS device_workstation_patching_disabled,
-        patchingnotes AS device_patching_notes
-    FROM ninja_core.v_device_custom_fields
-),
-organization_custom_fields AS (
-    SELECT
-        entity_id AS organization_id,
-        patchingdisabled AS org_patching_disabled,
-        serverpatchingdisabled AS org_server_patching_disabled,
-        workstationpatchingdisabled AS org_workstation_patching_disabled,
-        patchingnotes AS org_patching_notes
-    FROM ninja_core.v_organization_custom_fields
-),
-location_custom_fields AS (
-    SELECT
-        entity_id AS location_id,
-        patchingdisabled AS location_patching_disabled,
-        serverpatchingdisabled AS location_server_patching_disabled,
-        workstationpatchingdisabled AS location_workstation_patching_disabled,
-        patchingnotes AS location_patching_notes
-    FROM ninja_core.v_location_custom_fields
-),
-scoped_devices AS (
-    SELECT
-        d.id AS device_id,
-        d.system_name AS device,
-        d.organization_id,
-        o.name AS organization,
-        assigned_policy.name AS assigned_policy,
-        CASE
-            WHEN d.node_class = 'WINDOWS_SERVER' THEN 'Windows Server'
-            WHEN d.node_class = 'WINDOWS_WORKSTATION' THEN 'Windows Workstation'
-            ELSE d.node_class
-        END AS device_type,
-        CASE
-            WHEN d.os_name ILIKE '%Windows 11%' THEN 'Windows 11'
-            WHEN d.os_name ILIKE '%Windows 10%' THEN 'Windows 10'
-            WHEN d.os_name ILIKE '%Windows Server%' THEN 'Windows Server'
-            WHEN d.os_name ILIKE '%Windows%' THEN 'Other Windows'
-            ELSE 'Unknown'
-        END AS operating_system_family,
-        CASE
-            WHEN COALESCE(
-                dcf.device_patching_disabled,
-                ocf.org_patching_disabled,
-                lcf.location_patching_disabled,
-                FALSE
-            ) THEN 'Excluded'
-            WHEN COALESCE(dcf.device_patching_enabled, FALSE) THEN 'Included'
-            WHEN d.node_class = 'WINDOWS_SERVER'
-                THEN CASE
-                    WHEN COALESCE(
-                        dcf.device_server_patching_disabled,
-                        ocf.org_server_patching_disabled,
-                        lcf.location_server_patching_disabled,
-                        FALSE
-                    ) THEN 'Excluded'
-                    WHEN COALESCE(assigned_policy.name, role_policy.name, '') IN ({ENABLED_POLICY_SQL}) THEN 'Included'
-                    ELSE 'Excluded'
-                END
-            WHEN d.node_class = 'WINDOWS_WORKSTATION'
-                AND COALESCE(
-                    dcf.device_workstation_patching_disabled,
-                    ocf.org_workstation_patching_disabled,
-                    lcf.location_workstation_patching_disabled,
-                    FALSE
-                ) THEN 'Excluded'
-            ELSE 'Included'
-        END AS patching_scope,
-        CASE
-            WHEN COALESCE(
-                NULLIF(dcf.device_patching_notes, ''),
-                NULLIF(ocf.org_patching_notes, ''),
-                NULLIF(lcf.location_patching_notes, '')
-            ) IS NOT NULL
-                THEN COALESCE(
-                    NULLIF(dcf.device_patching_notes, ''),
-                    NULLIF(ocf.org_patching_notes, ''),
-                    NULLIF(lcf.location_patching_notes, '')
-                )
-            ELSE NULL
-        END AS patching_notes
-    FROM ninja_core.v_active_devices d
-    JOIN ninja_core.organizations o ON o.id = d.organization_id
-    LEFT JOIN ninja_core.policies assigned_policy ON assigned_policy.id = d.policy_id
-    LEFT JOIN ninja_core.policies role_policy ON role_policy.id = d.role_policy_id
-    LEFT JOIN device_custom_fields dcf ON dcf.device_id = d.id
-    LEFT JOIN organization_custom_fields ocf ON ocf.organization_id = d.organization_id
-    LEFT JOIN location_custom_fields lcf ON lcf.location_id = d.location_id
-    WHERE d.approval_status = 'APPROVED'
-)
-"""
-
-
 def _active_patching_scalar_query(filters: str) -> str:
     """Active-patching percent = actively patching devices / scoped devices."""
     return f"""
@@ -380,31 +270,6 @@ FROM classified c
 JOIN ninja_core.v_active_devices d ON d.id = c.device_id
 JOIN ninja_core.organizations o ON o.id = c.organization_id
 WHERE 1=1
-{filters}
-"""
-
-
-def _device_compliance_scalar_query(filters: str) -> str:
-    """Device-compliant percent = fully patched devices / scoped devices."""
-    return f"""
-{_COMPLIANCE_CTES},
-device_rollup AS (
-    SELECT
-        u.device_id,
-        COUNT(*) FILTER (WHERE mp.device_id IS NOT NULL) AS missing_count
-    FROM universe u
-    LEFT JOIN missing_patches mp USING (device_id, patch_uid)
-    GROUP BY u.device_id
-)
-SELECT ROUND(
-    COUNT(*) FILTER (WHERE dr.missing_count = 0) * 100.0
-    / NULLIF(COUNT(*), 0),
-    1
-) AS percent_installed
-FROM device_rollup dr
-JOIN ninja_core.v_active_devices d ON d.id = dr.device_id
-JOIN ninja_core.organizations o ON o.id = d.organization_id
-WHERE d.approval_status = 'APPROVED'
 {filters}
 """
 
@@ -659,122 +524,6 @@ ORDER BY dr.day
 """
 
 
-def _daily_patching_device_compliance_query(filters: str) -> str:
-    return f"""
-WITH days AS (
-    SELECT generate_series(
-        (date_trunc('day', NOW())::date - (INTERVAL '1 day' * ({{{{days}}}} - 1))),
-        date_trunc('day', NOW())::date,
-        INTERVAL '1 day'
-    )::date AS day
-),
-device_patch_signal AS (
-    SELECT
-        days.day,
-        pf.device_id,
-        MAX(pf.installed_at) AS last_seen_at
-    FROM days
-    JOIN ninja_patches.patch_facts pf
-      ON pf.fact_type = 'install_outcome'
-     AND pf.installed_at < days.day + INTERVAL '1 day'
-{_PATCH_TYPE_EXCLUDE_RAW}    GROUP BY days.day, pf.device_id
-),
-classified AS (
-    SELECT
-        d.id AS device_id,
-        days.day,
-        CASE
-            WHEN dps.last_seen_at IS NULL THEN 'no_patch_data'
-            WHEN dps.last_seen_at < NOW() - (INTERVAL '1 day' * {DEFAULT_STALE_PATCH_DAYS}) THEN 'stale_patch_data'
-            ELSE 'active_patching'
-        END AS patch_status
-    FROM days
-    JOIN ninja_core.v_active_devices d
-      ON d.last_snapshot_at < days.day + INTERVAL '1 day'
-    LEFT JOIN device_patch_signal dps
-      ON dps.day = days.day AND dps.device_id = d.id
-    WHERE d.approval_status = 'APPROVED'
-      AND d.node_class IN ('WINDOWS_WORKSTATION', 'WINDOWS_SERVER')
-),
-installed_patches AS (
-    SELECT DISTINCT ON (days.day, pf.device_id, pf.patch_uid)
-        days.day,
-        pf.device_id,
-        pf.patch_uid
-    FROM days
-    JOIN ninja_patches.patch_facts pf
-      ON pf.fact_type = 'install_outcome'
-     AND pf.status = 'INSTALLED'
-     AND pf.installed_at < days.day + INTERVAL '1 day'
-{_PATCH_TYPE_EXCLUDE_RAW}    ORDER BY
-        days.day,
-        pf.device_id,
-        pf.patch_uid,
-        pf.installed_at DESC NULLS LAST,
-        pf.last_observed_at DESC NULLS LAST,
-        pf.id DESC
-),
-current_patch_state AS (
-    SELECT DISTINCT ON (days.day, pf.device_id, pf.patch_uid)
-        days.day,
-        pf.device_id,
-        pf.patch_uid,
-        pf.status
-    FROM days
-    JOIN ninja_patches.patch_facts pf
-      ON pf.fact_type = 'patch_state'
-     AND pf.first_observed_at < days.day + INTERVAL '1 day'
-{_PATCH_TYPE_EXCLUDE_RAW}    ORDER BY
-        days.day,
-        pf.device_id,
-        pf.patch_uid,
-        pf.first_observed_at DESC NULLS LAST,
-        pf.last_observed_at DESC NULLS LAST,
-        pf.id DESC
-),
-missing_patches AS (
-    SELECT day, device_id, patch_uid
-    FROM current_patch_state
-    WHERE status IN ({COMPLIANCE_MISSING_SQL})
-),
-universe AS (
-    SELECT day, device_id, patch_uid FROM installed_patches
-    UNION
-    SELECT day, device_id, patch_uid FROM missing_patches
-),
-device_rollup AS (
-    SELECT
-        u.day,
-        u.device_id,
-        COUNT(*) FILTER (WHERE mp.device_id IS NOT NULL) AS missing_count
-    FROM universe u
-    LEFT JOIN missing_patches mp USING (day, device_id, patch_uid)
-    GROUP BY u.day, u.device_id
-)
-SELECT
-    c.day AS "Day",
-    ROUND(
-        COUNT(*) FILTER (
-            WHERE c.patch_status = 'active_patching'
-              AND dr.device_id IS NOT NULL
-              AND dr.missing_count = 0
-        ) * 100.0
-        / NULLIF(COUNT(*) FILTER (WHERE c.patch_status = 'active_patching'), 0),
-        1
-    ) AS "Fully patched % (patching devices)"
-FROM classified c
-LEFT JOIN device_rollup dr
-  ON dr.day = c.day
- AND dr.device_id = c.device_id
-JOIN ninja_core.organizations o
-  ON o.id = c.device_id
-WHERE 1=1
-{filters}
-GROUP BY c.day
-ORDER BY c.day
-"""
-
-
 def _daily_patching_devices_query(filters: str) -> str:
     return f"""
 SELECT
@@ -796,7 +545,6 @@ OS_FAMILY_D = OS_FAMILY_SQL.format(alias="d").strip()
 OS_FAMILY_C = OS_FAMILY_SQL.format(alias="c").strip()
 OS_FAMILY_P = OS_FAMILY_SQL.format(alias="p").strip()
 PATCH_ACTIVITY_LABEL_C = PATCH_ACTIVITY_LABEL_SQL.format(expr="c.patch_status").strip()
-PATCH_ACTIVITY_LABEL_P = PATCH_ACTIVITY_LABEL_SQL.format(expr="p.patch_status").strip()
 DEVICE_TYPE_D = """
 CASE d.node_class
     WHEN 'WINDOWS_WORKSTATION' THEN 'Windows Workstation'
@@ -866,10 +614,6 @@ _CMD_FILTERS_TOTAL_DEVICE = _CMD_FILTER_ORG + _CMD_FILTER_DEVICE_TYPE
 _CMD_FILTERS_DEVICE       = _CMD_FILTER_ORG + _CMD_FILTER_DEVICE_TYPE + _CMD_FILTER_PATCHING_SCOPE
 _CMD_FILTERS_PATCH_CS     = _CMD_FILTERS_DEVICE + _CMD_FILTER_SEV_CS
 _CMD_FILTERS_PATCH_LIR    = _CMD_FILTERS_DEVICE + _CMD_FILTER_SEV_LIR
-
-# Back-compat — older edits still reference this name. Aliases the
-# device-only filter (the old single-purpose Device Type fragment).
-_CMD_DEVICE_TYPE_FILTER   = _CMD_FILTER_DEVICE_TYPE
 
 
 def build_command_parameters(org_names: list[str]) -> list[dict]:
@@ -1486,9 +1230,6 @@ _OVERALL_FILTERS_TOTAL_DEVICE = (
 )
 _OVERALL_FILTERS_PATCH_CS  = _OVERALL_FILTERS_DEVICE + _OVERALL_FILTER_SEV_CS
 _OVERALL_FILTERS_PATCH_LIR = _OVERALL_FILTERS_DEVICE + _OVERALL_FILTER_SEV_LIR
-
-# Back-compat alias — older edits still use this name.
-_OVERALL_DEVICE_TYPE_FILTER = _OVERALL_FILTER_DEVICE_TYPE
 
 
 def build_overall_parameters(org_names: list[str], os_families: list[str]) -> list[dict]:
@@ -2802,6 +2543,7 @@ SELECT
     {DEVICE_TYPE_D}        AS "Device Type",
     d.os_name              AS "Operating System",
     ls.last_contact        AS "Last Contact",
+    ls.last_boot           AS "Last Boot",
     CASE
         WHEN ls.offline IS NULL THEN 'Unknown'
         WHEN ls.offline THEN 'No'
@@ -4342,13 +4084,6 @@ _ORG_FILTERS_PATCH_LIR = _ORG_FILTERS_DEVICE + _ORG_FILTER_SEV_LIR
 # charts where the X dimension is itself the filter we'd otherwise
 # constrain). Patch-context with severity but skipping one of the
 # device dimensions.
-_ORG_FILTERS_PATCH_CS_NO_CLASS = (
-    _ORG_FILTER_ORG + _ORG_FILTER_OS_FAMILY + _ORG_FILTER_SEV_CS
-)
-_ORG_FILTERS_PATCH_CS_NO_OS = (
-    _ORG_FILTER_ORG + _ORG_FILTER_DEVICE_TYPE + _ORG_FILTER_SEV_CS
-)
-
 
 def build_org_parameters(org_names: list[str]) -> list[dict]:
     return [
@@ -4928,9 +4663,6 @@ _TRENDS_FILTERS_DEVICE     = (
 )
 _TRENDS_FILTERS_PATCH_PF   = _TRENDS_FILTERS_DEVICE + _TRENDS_FILTER_SEV_PF
 _TRENDS_FILTERS_PATCH_CS   = _TRENDS_FILTERS_DEVICE + _TRENDS_FILTER_SEV_CS
-
-# Back-compat alias.
-_TRENDS_DEVICE_TYPE_FILTER = _TRENDS_FILTER_DEVICE_TYPE
 
 
 def build_trends_parameters(org_names: list[str]) -> list[dict]:

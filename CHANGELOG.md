@@ -2,6 +2,34 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.15.5] — 2026-06-08
+
+### Removed (dead code, ~248 lines)
+- `_PATCH_SCOPE_CTE` (~99 lines) — scope-derivation block, dead since
+  migration 015 moved `patching_scope` into `v_active_devices` as an
+  indexed column.
+- `_device_compliance_scalar_query()` — superseded by
+  `_patching_device_compliance_scalar_query()`.
+- `_daily_patching_device_compliance_query()` — never wired into any
+  Trends card; replaced by `_daily_device_compliance_query()`.
+- `_sql_string_list()` + `ENABLED_POLICY_SQL` — orphans (only used
+  by the removed `_PATCH_SCOPE_CTE`).
+- `COLOR_OK_GREEN`, `PATCH_ACTIVITY_LABEL_P`,
+  `_CMD_DEVICE_TYPE_FILTER`, `_OVERALL_DEVICE_TYPE_FILTER`,
+  `_TRENDS_DEVICE_TYPE_FILTER`, `_ORG_FILTERS_PATCH_CS_NO_CLASS`,
+  `_ORG_FILTERS_PATCH_CS_NO_OS` — back-compat aliases / unused
+  filter variants.
+
+### Added
+- **Device Drilldown Device Summary** gains `Last Boot` column
+  (from `device_snapshots.last_boot` via the existing `latest_snap`
+  CTE).
+
+### Notes
+- Pure cleanup + one column add. No schema change, no migration,
+  no behavior change.
+- Commit: `TBD`
+
 ## [0.15.4] — 2026-06-07
 
 ### Changed
