@@ -1154,7 +1154,7 @@ WITH latest AS (
         finished_at,
         status,
         rows_inserted,
-        error
+        error_text
     FROM ninja_core.run_log
     ORDER BY domain, started_at DESC
 )
@@ -1172,7 +1172,7 @@ SELECT
         ELSE
             ROUND(EXTRACT(EPOCH FROM (NOW() - started_at)) / 86400)::text || ' d ago'
     END AS "Age",
-    LEFT(COALESCE(error, ''), 80) AS "Error"
+    LEFT(COALESCE(error_text, ''), 80) AS "Error"
 FROM latest
 ORDER BY started_at DESC
 """,
@@ -1721,7 +1721,7 @@ SELECT
     duration_ms,
     COALESCE(rows_inserted, 0) AS inserted,
     COALESCE(rows_upserted, 0) AS upserted,
-    LEFT(COALESCE(error_text, ''), 80) AS error
+    LEFT(COALESCE(error_text, ''), 80) AS error_preview
 FROM ninja_core.run_log
 WHERE started_at > NOW() - INTERVAL '24 hours'
 ORDER BY started_at DESC, run_id DESC
@@ -1736,7 +1736,7 @@ ORDER BY started_at DESC, run_id DESC
             "duration_ms": {"target": "self", "preset": {}},
             "inserted":    {"target": "self", "preset": {}},
             "upserted":    {"target": "self", "preset": {}},
-            "error":       {"target": "self", "preset": {}},
+            "error_preview": {"target": "self", "preset": {}},
         },
     },
 ]
