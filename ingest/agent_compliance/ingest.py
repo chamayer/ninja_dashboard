@@ -20,6 +20,7 @@ from ingest.agent_compliance.config_loader import (
     load_requirements,
     load_sources,
     resolve_client_id,
+    sync_clients_from_observations,
 )
 from ingest.runlog import run_log
 
@@ -38,29 +39,38 @@ def run() -> tuple[int, int]:
     with run_log("agent_compliance") as stats:
         run_id = stats["run_id"]
         sources = load_sources()
-        clients = load_clients()
-        aliases = load_aliases()
         requirements = load_requirements()
         source_status: dict[int, str] = {}
         all_observations: list[dict[str, Any]] = []
+        fetched_sources: list[tuple[int, SourceConfig, list[dict[str, Any]]]] = []
 
         for source in sources:
             source_run_id = _start_source_run(run_id, source, observed_at)
             try:
                 rows = _FETCHERS[source.platform](source, observed_at)
-                resolved = _resolve_observations(rows, source, clients, aliases)
-                _insert_observations(source_run_id, resolved)
-                _finish_source_run(source_run_id, "ok", len(resolved), None)
-                all_observations.extend(resolved)
+                fetched_sources.append((source_run_id, source, rows))
                 source_status[source.source_id] = "ok"
                 log.info(
                     "Agent compliance source %s returned %d observations",
-                    source.source_name, len(resolved),
+                    source.source_name, len(rows),
                 )
             except Exception as exc:
                 log.exception("Agent compliance source failed: %s", source.source_name)
                 _finish_source_run(source_run_id, "failed", 0, str(exc))
                 source_status[source.source_id] = "failed"
+
+        sync_clients_from_observations([
+            obs
+            for _, _, rows in fetched_sources
+            for obs in rows
+        ])
+        clients = load_clients()
+        aliases = load_aliases()
+        for source_run_id, source, rows in fetched_sources:
+            resolved = _resolve_observations(rows, source, clients, aliases)
+            _insert_observations(source_run_id, resolved)
+            _finish_source_run(source_run_id, "ok", len(resolved), None)
+            all_observations.extend(resolved)
 
         matrix_rows, finding_rows = _build_matrix_and_findings(
             run_id=run_id,

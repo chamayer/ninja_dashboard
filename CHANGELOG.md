@@ -2,6 +2,23 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.16.3] — 2026-06-10
+
+### Fixed
+- Agent Compliance org mapping now mirrors the PowerShell alignment
+  model more closely:
+  - observed Ninja orgs, SentinelOne sites, and LogMeIn groups are
+    admitted as clients automatically unless excluded;
+  - every client receives default Ninja org, SentinelOne site, and
+    LogMeIn group aliases by client name;
+  - explicit configured aliases still override/augment defaults.
+- Preserved the original static excludes for `Abe Private` and
+  `AMRose-Test`.
+
+### Notes
+- No schema migration is required for v0.16.3.
+- Commit: `TBD`
+
 ## [0.16.2] — 2026-06-10
 
 ### Fixed

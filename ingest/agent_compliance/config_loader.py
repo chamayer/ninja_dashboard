@@ -9,6 +9,8 @@ from typing import Any
 from ingest import db
 from ingest.agent_compliance.normalize import canonical_platform, normalize_org_name
 
+ORG_EXCLUDES = {"abe private", "amrose-test"}
+
 
 @dataclass(frozen=True)
 class SourceConfig:
@@ -125,6 +127,14 @@ def load_aliases() -> dict[tuple[str, str, str], int]:
             """
         )
         rows = cur.fetchall()
+        cur.execute(
+            """
+            SELECT client_id, client_name
+            FROM ninja_agent_compliance.clients
+            WHERE enabled
+            """
+        )
+        client_rows = cur.fetchall()
     aliases: dict[tuple[str, str, str], int] = {}
     for platform, alias_type, alias_value, client_id in rows:
         platform = canonical_platform(platform)
@@ -133,7 +143,43 @@ def load_aliases() -> dict[tuple[str, str, str], int]:
         normalized = normalize_org_name(alias_value)
         if normalized:
             aliases[(platform, f"{alias_type}_norm", normalized)] = client_id
+    for client_id, client_name in client_rows:
+        for platform, alias_type in (
+            ("Ninja", "org_name"),
+            ("SentinelOne", "site_name"),
+            ("LogMeIn", "group_name"),
+        ):
+            exact = client_name.strip().lower()
+            aliases.setdefault((platform, alias_type, exact), client_id)
+            normalized = normalize_org_name(client_name)
+            if normalized:
+                aliases.setdefault((platform, f"{alias_type}_norm", normalized), client_id)
     return aliases
+
+
+def sync_clients_from_observations(observations: list[dict[str, Any]]) -> int:
+    """Mirror the PowerShell alignment map by admitting observed org names."""
+    names: set[str] = set()
+    for obs in observations:
+        name = (obs.get("platform_group_name") or "").strip()
+        if not name:
+            continue
+        if name.lower() in ORG_EXCLUDES:
+            continue
+        names.add(name)
+    if not names:
+        return 0
+
+    with db.transaction() as cur:
+        cur.executemany(
+            """
+            INSERT INTO ninja_agent_compliance.clients (client_name, default_max_age_days)
+            VALUES (%s, 30)
+            ON CONFLICT (client_name) DO NOTHING
+            """,
+            [(name,) for name in sorted(names)],
+        )
+        return cur.rowcount or 0
 
 
 def load_requirements() -> list[Requirement]:

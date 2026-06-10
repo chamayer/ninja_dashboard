@@ -5,6 +5,26 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-10 — v0.16.3 PowerShell org-alignment parity
+
+**Why:** Live validation showed many resolved platform group names still
+unresolved as clients. The original PowerShell does not limit the
+matrix to static `OrgConfig` entries; it builds an alignment map from
+all observed Ninja orgs, SentinelOne sites, and LogMeIn groups, then
+applies explicit config only as overrides.
+
+**Done:**
+- Added dynamic client discovery from observed platform group names.
+- Added default Ninja org, SentinelOne site, and LogMeIn group aliases
+  for every enabled client by client name.
+- Preserved explicit configured aliases as additive mappings.
+- Preserved original excludes: `Abe Private`, `AMRose-Test`.
+- Refactored agent-compliance runs to fetch all sources first, sync
+  observed clients, reload config, then resolve/insert observations.
+
+**Validation:**
+- Pending deployment and live `/run/agent-compliance` validation.
+
 ## 2026-06-10 — v0.16.2 LogMeIn PowerShell parity correction
 
 **Why:** Live host validation showed LogMeIn host rows had `groupid`,
