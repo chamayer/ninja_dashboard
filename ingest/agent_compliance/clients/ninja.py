@@ -12,6 +12,18 @@ from ingest.agent_compliance.config_loader import SourceConfig
 from ingest.agent_compliance.normalize import infer_device_type, normalize_hostname
 
 
+def _contains_no_av(value: object) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return "no av" in value.lower()
+    if isinstance(value, dict):
+        return any(_contains_no_av(item) for item in value.values())
+    if isinstance(value, list):
+        return any(_contains_no_av(item) for item in value)
+    return False
+
+
 def fetch(source: SourceConfig, observed_at: datetime) -> list[dict]:
     with db.pool.connection() as conn:
         with conn.cursor(row_factory=dict_row) as cur:
@@ -49,6 +61,13 @@ def fetch(source: SourceConfig, observed_at: datetime) -> list[dict]:
         norm = normalize_hostname(hostname)
         if not hostname or not norm:
             continue
+        raw_data = dict(row["data"] or {})
+        raw_data["_agent_compliance"] = {
+            "no_av_exempt": _contains_no_av(raw_data.get("tags"))
+            or _contains_no_av(raw_data.get("rolePolicyName"))
+            or _contains_no_av(raw_data.get("policy"))
+            or _contains_no_av(raw_data.get("rolePolicy")),
+        }
         observations.append({
             "observed_at": observed_at,
             "platform": "Ninja",
@@ -63,9 +82,9 @@ def fetch(source: SourceConfig, observed_at: datetime) -> list[dict]:
             "match_name": norm,
             "device_type": infer_device_type(row["os_name"], row["node_class"]),
             "os_name": row["os_name"],
-            "domain_name": (row["data"] or {}).get("system", {}).get("domain"),
+            "domain_name": raw_data.get("system", {}).get("domain"),
             "is_online": None if row["offline"] is None else not row["offline"],
             "last_seen_at": row["last_contact"],
-            "raw_data": Json(row["data"] or {}),
+            "raw_data": Json(raw_data),
         })
     return observations

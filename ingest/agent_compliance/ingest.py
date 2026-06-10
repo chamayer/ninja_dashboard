@@ -172,6 +172,7 @@ def _build_matrix_and_findings(
     sources: list[SourceConfig],
     source_status: dict[int, str],
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    observations = _apply_prefix_matches(observations)
     by_client_norm: dict[tuple[int, str], list[dict[str, Any]]] = {}
     clients_by_norm: dict[str, set[int]] = {}
     for obs in observations:
@@ -193,7 +194,11 @@ def _build_matrix_and_findings(
         req = get_requirement(requirements, client_id, device_scope)
         max_age_days = req.max_age_days or client.default_max_age_days
         latest_by_platform = _latest_by_platform(obs_rows)
-        required = tuple(req.required_platforms)
+        no_av_exempt = _has_no_av_exemption(latest_by_platform.get("Ninja"))
+        required = tuple(
+            platform for platform in req.required_platforms
+            if not (platform == "SentinelOne" and no_av_exempt)
+        )
         observed_platforms = tuple(sorted(latest_by_platform))
         source_failed = tuple(
             platform for platform in required
@@ -218,6 +223,7 @@ def _build_matrix_and_findings(
             ",".join(stale),
             ",".join(unknown),
             str(cross_client),
+            str(no_av_exempt),
         ]))
         matrix = {
             "client_id": client_id,
@@ -258,6 +264,46 @@ def _source_failure_platforms(
     }
 
 
+def _apply_prefix_matches(observations: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Merge unique truncated hostname matches within the same resolved client."""
+    norms_by_client: dict[int, set[str]] = {}
+    for obs in observations:
+        client_id = obs.get("resolved_client_id")
+        norm = obs.get("norm_name")
+        if client_id and norm:
+            norms_by_client.setdefault(client_id, set()).add(norm)
+
+    canonical_by_client_norm: dict[tuple[int, str], str] = {}
+    for client_id, norms in norms_by_client.items():
+        for norm in norms:
+            candidates = [
+                other for other in norms
+                if other != norm
+                and min(len(other), len(norm)) >= 10
+                and (other.startswith(norm) or norm.startswith(other))
+            ]
+            if len(candidates) == 1:
+                candidate = candidates[0]
+                canonical_by_client_norm[(client_id, norm)] = (
+                    candidate if len(candidate) > len(norm) else norm
+                )
+
+    if not canonical_by_client_norm:
+        return observations
+
+    merged: list[dict[str, Any]] = []
+    for obs in observations:
+        client_id = obs.get("resolved_client_id")
+        norm = obs.get("norm_name")
+        canonical = canonical_by_client_norm.get((client_id, norm))
+        if canonical and canonical != norm:
+            obs = dict(obs)
+            obs["match_name"] = canonical
+            obs["norm_name"] = canonical
+        merged.append(obs)
+    return merged
+
+
 def _required_source_failed(
     platform: str,
     client_id: int,
@@ -291,6 +337,20 @@ def _latest_by_platform(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]
         ):
             latest[row["platform"]] = row
     return latest
+
+
+def _has_no_av_exemption(ninja_row: dict[str, Any] | None) -> bool:
+    if not ninja_row:
+        return False
+    raw = _raw_json_obj(ninja_row.get("raw_data"))
+    marker = raw.get("_agent_compliance", {}) if isinstance(raw, dict) else {}
+    return bool(marker.get("no_av_exempt"))
+
+
+def _raw_json_obj(value: Any) -> Any:
+    if hasattr(value, "obj"):
+        return value.obj
+    return value
 
 
 def _is_stale(value: datetime | None, now: datetime, max_age_days: int) -> bool:

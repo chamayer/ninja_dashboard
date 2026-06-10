@@ -7,7 +7,8 @@ from datetime import datetime
 from typing import Any
 
 _TRAILING_PARENS_RE = re.compile(r"\s*\(.*?\)\s*$")
-_STRIP_CHARS_RE = re.compile(r"[\s'`]")
+_HOST_STRIP_CHARS_RE = re.compile(r"[\s'`\u2018\u2019]")
+_ORG_STRIP_CHARS_RE = re.compile(r"[\s\-_.]")
 
 PLATFORM_ALIASES = {
     "ninja": "Ninja",
@@ -30,7 +31,13 @@ def normalize_hostname(name: str | None) -> str:
         return ""
     clean = _TRAILING_PARENS_RE.sub("", name)
     short = clean.split(".", 1)[0].lower().strip()
-    return _STRIP_CHARS_RE.sub("", short)
+    return _HOST_STRIP_CHARS_RE.sub("", short)
+
+
+def normalize_org_name(name: str | None) -> str:
+    if not name:
+        return ""
+    return _ORG_STRIP_CHARS_RE.sub("", name).lower().strip()
 
 
 def parse_dt(value: Any) -> datetime | None:

@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ingest import db
-from ingest.agent_compliance.normalize import canonical_platform
+from ingest.agent_compliance.normalize import canonical_platform, normalize_org_name
 
 
 @dataclass(frozen=True)
@@ -115,7 +115,7 @@ def load_clients() -> dict[int, ClientConfig]:
 
 
 def load_aliases() -> dict[tuple[str, str, str], int]:
-    """Return (platform, alias_type, lower_value) -> client_id."""
+    """Return exact and normalized (platform, alias_type, value) aliases."""
     with db.transaction() as cur:
         cur.execute(
             """
@@ -125,10 +125,15 @@ def load_aliases() -> dict[tuple[str, str, str], int]:
             """
         )
         rows = cur.fetchall()
-    return {
-        (canonical_platform(row[0]), row[1], row[2].strip().lower()): row[3]
-        for row in rows
-    }
+    aliases: dict[tuple[str, str, str], int] = {}
+    for platform, alias_type, alias_value, client_id in rows:
+        platform = canonical_platform(platform)
+        exact = alias_value.strip().lower()
+        aliases[(platform, alias_type, exact)] = client_id
+        normalized = normalize_org_name(alias_value)
+        if normalized:
+            aliases[(platform, f"{alias_type}_norm", normalized)] = client_id
+    return aliases
 
 
 def load_requirements() -> list[Requirement]:
@@ -189,9 +194,14 @@ def resolve_client_id(
     for alias_type, value in candidates:
         if not value:
             continue
-        client_id = aliases.get((platform, alias_type, value.strip().lower()))
+        exact_value = value.strip().lower()
+        client_id = aliases.get((platform, alias_type, exact_value))
         if client_id:
             return client_id, "alias"
+        normalized_value = normalize_org_name(value)
+        client_id = aliases.get((platform, f"{alias_type}_norm", normalized_value))
+        if client_id:
+            return client_id, "alias_norm"
     return None, "unresolved"
 
 

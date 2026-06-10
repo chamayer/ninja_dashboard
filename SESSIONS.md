@@ -5,6 +5,33 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-10 — v0.16.1 Agent Compliance mapping parity pass
+
+**Why:** Re-review of the original PowerShell script showed that
+mapping behavior is core to trustworthy counts. The v0.16.0 foundation
+collected data, but did not fully preserve LogMeIn group resolution,
+LogMeIn rate-limit handling, normalized alias matching, hostname prefix
+fallback, or Ninja `NO AV` SentinelOne exemption behavior.
+
+**Done:**
+- Fixed LogMeIn `/v2/hostswithgroups` parsing to map `payload.groups`
+  by ID and resolve host group names from `groupid`/`groupId`.
+- Added one retry after a 61-second minimum wait for LogMeIn HTTP `429`.
+- Added normalized alias lookup for org/site/group aliases.
+- Extended hostname normalization to strip curly apostrophes.
+- Added conservative unique-prefix hostname matching for truncated names.
+- Added Ninja raw-data marker for `NO AV` tag/policy evidence and
+  excluded SentinelOne from required platforms for those devices.
+- Added `AGENT_COMPLIANCE_MIGRATION_REVIEW.md`.
+
+**Validation:**
+- `python -m compileall ingest` passes.
+
+**Pending:**
+- Deploy to host, trigger `/run/agent-compliance`, and compare
+  unresolved observations, missing-platform counts, and `NO AV`
+  SentinelOne findings against the previous run.
+
 ## 2026-06-10 — v0.16.0 Agent Compliance v1 foundation
 
 **Why:** The existing PowerShell compliance report needs to become an

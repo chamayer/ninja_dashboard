@@ -2,6 +2,28 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.16.1] — 2026-06-10
+
+### Fixed
+- Agent Compliance migration parity:
+  - LogMeIn now resolves host group names from the `/v2/hostswithgroups`
+    `groups` map using host `groupid`/`groupId`.
+  - LogMeIn now waits and retries once on HTTP `429` rate limits.
+  - Client alias matching now includes normalized org/site/group names.
+  - Hostname normalization now strips curly apostrophes.
+  - Matrix building now applies conservative unique-prefix hostname
+    matching for truncated hostnames.
+  - Ninja `NO AV` tag/policy evidence now exempts devices from
+    SentinelOne missing-agent findings.
+
+### Added
+- `AGENT_COMPLIANCE_MIGRATION_REVIEW.md` documenting migrated behavior,
+  v0.16.1 parity fixes, and remaining intentional differences.
+
+### Notes
+- No schema migration is required for v0.16.1.
+- Commit: `TBD`
+
 ## [0.16.0] — 2026-06-10
 
 ### Added
