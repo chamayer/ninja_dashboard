@@ -174,6 +174,35 @@ CARDS = [
         """,
         "row": 38, "col": 0, "size_x": 24, "size_y": 10,
     },
+    {
+        # Surfaces silent client-resolution misses. When a platform org
+        # / site / group name has no matching client alias and no
+        # alignment fuzzy-match, the observation lands in
+        # platform_observations with resolved_client_id = NULL and gets
+        # filtered out of the compliance matrix. Without this card the
+        # only signal is missing counts on the per-client dashboard,
+        # which is easy to overlook. Operator-actionable: add a manual
+        # alias row, or rename in source.
+        "key": "unresolved_observations",
+        "name": "Unresolved Observations (no matching client)",
+        "display": "table",
+        "query": """
+            SELECT
+                source_name,
+                platform,
+                COALESCE(NULLIF(platform_group_name, ''), '(blank)') AS source_group,
+                COALESCE(NULLIF(platform_group_id, ''), '(none)') AS source_group_id,
+                COUNT(*) AS devices,
+                MAX(observed_at) AS last_observed
+            FROM ninja_agent_compliance.platform_observations
+            WHERE resolved_client_id IS NULL
+              AND observed_at > now() - INTERVAL '7 days'
+            GROUP BY source_name, platform, source_group, source_group_id
+            ORDER BY devices DESC, source_name
+            LIMIT 200
+        """,
+        "row": 48, "col": 0, "size_x": 24, "size_y": 8,
+    },
 ]
 
 

@@ -30,12 +30,19 @@ def fetch(source: SourceConfig, observed_at: datetime) -> list[dict]:
         sessions = resp.json()
 
     best: dict[str, tuple[datetime | None, dict]] = {}
+    # Track how many distinct ScreenConnect sessions resolved to each
+    # normalized hostname. The original PowerShell stamped IsDup=True
+    # on the survivor when more than one session collapsed to the same
+    # NormName; the matrix builder reads `raw_data.IsDup` to surface
+    # `screenconnect_dup` on compliance_matrix_current.
+    session_counts: dict[str, int] = {}
     for session in sessions or []:
         guest = session.get("GuestInfo") or {}
         hostname = guest.get("MachineName") or session.get("Name")
         norm = normalize_hostname(hostname)
         if not hostname or not norm:
             continue
+        session_counts[norm] = session_counts.get(norm, 0) + 1
         last_seen = parse_dt(guest.get("LastActivityTime"))
         if last_seen and last_seen.year <= 1:
             last_seen = None
@@ -56,6 +63,13 @@ def fetch(source: SourceConfig, observed_at: datetime) -> list[dict]:
             conn.get("ProcessType") == 2
             for conn in session.get("ActiveConnections") or []
         )
+        raw = dict(session)
+        count = session_counts.get(norm, 1)
+        raw["IsDup"] = count > 1
+        raw["_agent_compliance"] = {
+            "sc_session_count": count,
+            "sc_is_dup": count > 1,
+        }
         observations.append({
             "observed_at": observed_at,
             "platform": "ScreenConnect",
@@ -73,6 +87,6 @@ def fetch(source: SourceConfig, observed_at: datetime) -> list[dict]:
             "domain_name": guest.get("MachineDomain"),
             "is_online": is_online,
             "last_seen_at": last_seen,
-            "raw_data": Json(session),
+            "raw_data": Json(raw),
         })
     return observations

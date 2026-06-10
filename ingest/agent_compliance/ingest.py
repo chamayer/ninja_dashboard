@@ -38,6 +38,7 @@ def run() -> tuple[int, int]:
     observed_at = datetime.now(timezone.utc)
     with run_log("agent_compliance") as stats:
         run_id = stats["run_id"]
+        _clear_stuck_source_runs()
         sources = load_sources()
         requirements = load_requirements()
         source_status: dict[int, str] = {}
@@ -91,6 +92,30 @@ def run() -> tuple[int, int]:
         stats["rows_upserted"] = len(matrix_rows)
         stats["alerts_sent"] = alerts_sent
         return len(matrix_rows), len(finding_rows)
+
+
+def _clear_stuck_source_runs() -> None:
+    """Reap source_runs left in 'running' from a prior crash.
+
+    Without this, container restarts mid-cycle leave perpetual 'running'
+    rows that confuse v_source_health_current ("DISTINCT ON latest run
+    per source ORDER BY started_at DESC") and break the Source Failures
+    KPI. We use a 1h floor so a healthy in-flight run is not clobbered.
+    """
+    with db.transaction() as cur:
+        cur.execute(
+            """
+            UPDATE ninja_agent_compliance.source_runs
+            SET status = 'failed',
+                finished_at = COALESCE(finished_at, now()),
+                error_text = COALESCE(
+                    error_text,
+                    'Stuck in running state — cleaned up at next run start'
+                )
+            WHERE status = 'running'
+              AND started_at < now() - INTERVAL '1 hour'
+            """
+        )
 
 
 def _start_source_run(run_id: int, source: SourceConfig, started_at: datetime) -> int:
