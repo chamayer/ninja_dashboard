@@ -10,8 +10,6 @@ from typing import Any
 from ingest import db
 from ingest.agent_compliance.normalize import canonical_platform, normalize_org_name
 
-ORG_EXCLUDES = {"abe private", "amrose-test"}
-
 
 @dataclass(frozen=True)
 class SourceConfig:
@@ -117,6 +115,18 @@ def load_clients() -> dict[int, ClientConfig]:
     }
 
 
+def load_org_excludes() -> set[str]:
+    with db.transaction() as cur:
+        cur.execute(
+            """
+            SELECT pattern
+            FROM ninja_agent_compliance.org_excludes
+            WHERE enabled
+            """
+        )
+        return {row[0].strip().lower() for row in cur.fetchall()}
+
+
 def load_aliases() -> dict[tuple[str, str, str], int]:
     """Return exact and normalized (platform, alias_type, value) aliases."""
     with db.transaction() as cur:
@@ -153,6 +163,7 @@ def sync_clients_from_observations(
     observed_at: datetime | None = None,
 ) -> int:
     """Mirror the PowerShell alignment map and persist platform aliases."""
+    org_excludes = load_org_excludes()
     platform_alias_types = {
         "Ninja": "org_name",
         "SentinelOne": "site_name",
@@ -166,7 +177,7 @@ def sync_clients_from_observations(
         name = (obs.get("platform_group_name") or "").strip()
         if not name:
             continue
-        if name.lower() in ORG_EXCLUDES:
+        if name.lower() in org_excludes:
             continue
         norm = normalize_org_name(name)
         if not norm:
@@ -197,15 +208,28 @@ def sync_clients_from_observations(
         )
         configured_client_ids = {row[0] for row in cur.fetchall()}
 
-        client_by_norm = {
-            normalize_org_name(row[1]): (row[0], row[1], row[2])
-            for row in clients
-        }
         explicit_by_norm = {
             normalize_org_name(row[1]): (row[0], row[1], row[2])
             for row in clients
             if row[0] in configured_client_ids
         }
+
+        known_client_by_norm = {
+            normalize_org_name(row[1]): (row[0], row[1])
+            for row in clients
+        }
+        cur.execute(
+            """
+            SELECT c.client_id, c.client_name, a.alias_value
+            FROM ninja_agent_compliance.client_aliases a
+            JOIN ninja_agent_compliance.clients c ON c.client_id = a.client_id
+            WHERE a.enabled
+              AND a.source IN ('manual', 'seed')
+            """
+        )
+        for client_id, client_name, alias_value in cur.fetchall():
+            known_client_by_norm.setdefault(normalize_org_name(client_name), (client_id, client_name))
+            known_client_by_norm.setdefault(normalize_org_name(alias_value), (client_id, client_name))
 
         platforms_by_norm = {
             norm: {platform for platform, _ in entries}
@@ -234,6 +258,17 @@ def sync_clients_from_observations(
             explicit = explicit_by_norm.get(norm)
             if explicit:
                 canonical_names[norm] = explicit[1]
+                continue
+            preferred_existing = None
+            for preferred_platform in ("Ninja", "SentinelOne", "LogMeIn"):
+                candidate_name = next((entry_name for platform, entry_name in entries if platform == preferred_platform), None)
+                if not candidate_name:
+                    continue
+                preferred_existing = known_client_by_norm.get(normalize_org_name(candidate_name))
+                if preferred_existing:
+                    canonical_names[norm] = preferred_existing[1]
+                    break
+            if norm in canonical_names:
                 continue
             for preferred_platform in ("Ninja", "SentinelOne", "LogMeIn"):
                 name = next((entry_name for platform, entry_name in entries if platform == preferred_platform), None)

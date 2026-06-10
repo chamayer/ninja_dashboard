@@ -5,6 +5,24 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-10 — v0.17.3 org excludes and alias-aware discovery
+
+**Why:** Claude left a concrete next-commit bundle from the PowerShell
+parity notes: move org excludes into the DB, make discovery alias-aware
+so typo variants do not create duplicate canonical orgs, and filter
+excluded orgs out of the unresolved-observations operator card.
+
+**Done:**
+- Added migration `021_org_excludes.sql`.
+- Replaced the hardcoded org-exclude constant with a DB-backed lookup.
+- Taught discovery to prefer existing client names/aliases before
+  creating a new canonical org.
+- Filtered the unresolved-observations Metabase card by `org_excludes`.
+
+**Validation:**
+- `python -m compileall ingest` passes.
+- `git diff --check` passes.
+
 ## 2026-06-10 — v0.17.1 alignment persistence fix
 
 **Why:** The v0.17.0 parity schema still had one stale-lookup bug:

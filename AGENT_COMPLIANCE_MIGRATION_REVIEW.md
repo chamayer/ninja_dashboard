@@ -46,6 +46,8 @@ Original script reviewed:
   `is_degraded`.
 - v0.17.1 fixed alignment persistence so newly discovered canonical
   orgs are written after the refreshed client lookup.
+- v0.17.3 moved org excludes into the DB, made discovery alias-aware,
+  and filtered excluded orgs out of the unresolved-observations card.
 
 ## Still intentionally not identical
 

@@ -197,6 +197,12 @@ CARDS = [
             FROM ninja_agent_compliance.platform_observations
             WHERE resolved_client_id IS NULL
               AND observed_at > now() - INTERVAL '7 days'
+              AND NOT EXISTS (
+                    SELECT 1
+                    FROM ninja_agent_compliance.org_excludes e
+                    WHERE e.enabled
+                      AND lower(trim(COALESCE(platform_group_name, ''))) = e.pattern
+                )
             GROUP BY source_name, platform, source_group, source_group_id
             ORDER BY devices DESC, source_name
             LIMIT 200

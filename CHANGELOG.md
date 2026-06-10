@@ -2,6 +2,27 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.17.3] — 2026-06-10
+
+### Added
+- Migration `021_org_excludes.sql` with a DB-backed org-exclude list
+  seeded to the original PowerShell values:
+  - `abe private`
+  - `amrose-test`
+
+### Fixed
+- `config_loader.py` now loads org excludes from Postgres instead of a
+  hardcoded constant.
+- `sync_clients_from_observations` now skips DB-backed excludes and uses
+  alias-aware discovery to avoid duplicate canonical org creation for
+  similar names/typos.
+- The Metabase unresolved-observations card now filters out excluded org
+  names so it stays focused on operator action items.
+
+### Notes
+- No schema migration is required for v0.17.3 beyond applying `021`.
+- Commit: `TBD`
+
 ## [0.17.2] — 2026-06-05
 
 ### Fixed
