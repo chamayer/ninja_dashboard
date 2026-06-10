@@ -2,6 +2,17 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.17.1] — 2026-06-10
+
+### Fixed
+- Alignment persistence now uses the refreshed client lookup after new
+  canonical orgs are inserted, so newly discovered orgs are written to
+  `org_alignment_current` and `client_aliases`.
+
+### Notes
+- No schema migration is required for v0.17.1.
+- Commit: `TBD`
+
 ## [0.17.0] — 2026-06-10
 
 ### Added

@@ -271,13 +271,16 @@ def sync_clients_from_observations(
         platform_name_by_client: dict[int, dict[str, str]] = {}
         merged_from_by_client: dict[int, list[str]] = {}
         for norm, entries in by_norm.items():
-            canonical = client_by_name.get(canonical_names[norm].strip().lower())
+            canonical_name = canonical_names.get(norm)
+            if not canonical_name:
+                continue
+            canonical = client_by_name.get(canonical_name.strip().lower())
             if not canonical:
                 continue
             client_id = canonical[0]
             if canonical_norm_by_norm.get(norm, norm) != norm:
                 merged_from_by_client.setdefault(client_id, []).append(
-                    f"{canonical_names.get(norm, norm)} ({'+'.join(sorted(platforms_by_norm[norm]))}, fuzzy)"
+                    f"{canonical_name} ({'+'.join(sorted(platforms_by_norm[norm]))}, fuzzy)"
                 )
             seen: set[tuple[str, str, str]] = set()
             for platform, name in entries:

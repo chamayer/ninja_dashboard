@@ -5,6 +5,22 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-10 — v0.17.1 alignment persistence fix
+
+**Why:** The v0.17.0 parity schema still had one stale-lookup bug:
+newly discovered canonical orgs were inserted, but the alignment rows
+were being assembled from the pre-insert client lookup. That left the
+alignment tables empty in live validation.
+
+**Done:**
+- Rebuilt alignment aliases and alignment rows after the refreshed
+  client lookup.
+- Ensured newly discovered canonical orgs are persisted into
+  `org_alignment_current` and `client_aliases`.
+
+**Validation:**
+- `python -m compileall ingest` passes.
+
 ## 2026-06-10 — v0.17.0 Agent Compliance PowerShell parity schema
 
 **Why:** The prior fixes improved behavior, but full parity with the

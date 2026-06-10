@@ -44,6 +44,8 @@ Original script reviewed:
   views, PowerShell-style alignment statuses, per-platform matrix
   presence/online/last-seen/device-id fields, `s1_exempt`, and
   `is_degraded`.
+- v0.17.1 fixed alignment persistence so newly discovered canonical
+  orgs are written after the refreshed client lookup.
 
 ## Still intentionally not identical
 
