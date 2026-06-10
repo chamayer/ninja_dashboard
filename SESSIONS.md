@@ -5,6 +5,57 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-10 — v0.16.0 Agent Compliance v1 foundation
+
+**Why:** The existing PowerShell compliance report needs to become an
+always-on platform feature: collect all platform observations every few
+hours, evaluate per-client required platform combos, surface the
+current matrix in Metabase, and alert on actionable findings. Decision:
+keep v1 inside `ninja-dashboard` to reuse Postgres, Metabase, and the
+existing Portainer deployment pattern instead of duplicating a stack.
+
+**Done:**
+- Added `AGENT_COMPLIANCE_PROPOSAL.md` and rewrote `BLUEPRINT.md` for
+  the v1 scope.
+- Added migration `019_agent_compliance.sql` with the
+  `ninja_agent_compliance` schema: clients, platform sources, aliases,
+  requirements, notification routes, alert rules, suppressions, source
+  runs, observations, current/history matrix, findings, alert state,
+  alert events, and first-pass dashboard views.
+- Added `ingest/agent_compliance/`:
+  - Ninja observation source reads existing `ninja_core` tables.
+  - SentinelOne, LogMeIn, and ScreenConnect collectors call native APIs.
+  - ScreenConnect is modeled as per-client sources.
+  - Matrix builder evaluates required platforms per client/device type.
+  - Source failures/unconfigured required sources become unknown/source
+    conditions rather than false missing-agent findings.
+  - Alert delivery supports webhook, SMTP email, and Zendesk requests.
+- Split schedules in `ingest/main.py`:
+  - patch/Ninja ingest remains the default `/run` path.
+  - added `/run/patches`.
+  - added `/run/agent-compliance`.
+  - added `AGENT_COMPLIANCE_ENABLED` and
+    `AGENT_COMPLIANCE_SCHEDULE_HOURS`.
+- Added an Agent Compliance Metabase bootstrap module that creates a
+  separate `Agent Compliance` collection and command-center dashboard.
+- Updated `.env.example`, `CONTEXT.md`, `CHANGELOG.md`, `VERSION`, and
+  `TODO.md`.
+
+**Validation:**
+- `python -m compileall ingest` passes.
+- Runtime import check could not run locally because project
+  dependencies are not installed in this Windows Python environment
+  (`python-dotenv` missing).
+- Migration/live DB smoke was not run because local `psql`/`docker`
+  commands are unavailable in this shell.
+
+**Pending:**
+- Apply migration 019 on the live stack.
+- Configure platform source rows and host `.env` secrets.
+- Trigger `/run/agent-compliance`.
+- Verify source health, matrix rows, active findings, dashboard
+  bootstrap, and one alert route.
+
 ## 2026-06-05 — v0.15.0 never-patched fix + driver-category exclude
 
 **Why:** Troubleshooting session on device 4042 found ~6 devices

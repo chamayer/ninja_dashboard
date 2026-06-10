@@ -2,6 +2,44 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.16.0] — 2026-06-10
+
+### Added
+- **Agent Compliance v1 foundation** inside the existing
+  `ninja-dashboard` stack. New `ninja_agent_compliance` schema covers
+  DB-backed client/source/alias/requirement config, source runs,
+  platform observations, current/history compliance matrix, findings,
+  suppressions, alert state, and alert delivery events.
+- **Multi-platform collection model**:
+  - Ninja observations come from existing `ninja_core` tables.
+  - SentinelOne, LogMeIn, and ScreenConnect have dedicated collectors.
+  - ScreenConnect is modeled as many per-client tenant sources.
+- **Source-health guardrail**: source failures are recorded as source
+  findings and do not blindly turn every device into a missing-agent
+  finding for that platform.
+- **Alerting routes**: webhook, SMTP email, and Zendesk request
+  delivery are available behind DB route config and `.env` settings.
+  Alert state dedupes unchanged findings and respects cooldowns.
+- **Separate scheduling** for agent compliance:
+  `AGENT_COMPLIANCE_ENABLED` plus
+  `AGENT_COMPLIANCE_SCHEDULE_HOURS`. Manual endpoint:
+  `POST /run/agent-compliance`.
+- **Agent Compliance Metabase collection/dashboard bootstrap** with
+  first-pass KPI, source health, remediation, and active-finding cards.
+
+### Changed
+- Existing `/run` remains a patch/Ninja ingest trigger; explicit
+  `POST /run/patches` was added for clarity.
+- `run_log` stats now expose `run_id` to domain modules while keeping
+  existing row-count behavior.
+
+### Notes
+- Agent compliance is disabled by default until source config and
+  secrets are provisioned.
+- Ninja health can enrich AV/security triage, but SentinelOne API
+  remains the authoritative S1 compliance source.
+- Commit: `TBD`
+
 ## [0.15.5] — 2026-06-08
 
 ### Removed (dead code, ~248 lines)

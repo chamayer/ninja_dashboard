@@ -34,6 +34,9 @@ class Settings(BaseSettings):
 
     # ── Ingest behavior ──────────────────────────────────────────────
     INGEST_SCHEDULE_HOURS: int = Field(default=1, ge=1, le=24)
+    PATCH_INGEST_SCHEDULE_HOURS: int | None = Field(default=None, ge=1, le=24)
+    AGENT_COMPLIANCE_ENABLED: bool = False
+    AGENT_COMPLIANCE_SCHEDULE_HOURS: int = Field(default=4, ge=1, le=24)
     INGEST_LOG_LEVEL: str = "INFO"
     INGEST_HTTP_PORT: int = 8090
 
@@ -69,6 +72,23 @@ class Settings(BaseSettings):
     MB_BOOTSTRAP_PASS: SecretStr = SecretStr("")
     MB_BOOTSTRAP_DB_NAME: str = "Ninja"
 
+    # ── Agent compliance alerts ──────────────────────────────────────
+    AGENT_COMPLIANCE_ALERTS_ENABLED: bool = False
+    AGENT_COMPLIANCE_ALERT_COOLDOWN_HOURS: int = Field(default=24, ge=1, le=168)
+    AGENT_COMPLIANCE_ALERT_WEBHOOK_URL_REF: str = "AGENT_COMPLIANCE_ALERT_WEBHOOK_URL"
+    AGENT_COMPLIANCE_ALERT_EMAIL_FROM: str = ""
+    AGENT_COMPLIANCE_ALERT_EMAIL_TO: str = ""
+    AGENT_COMPLIANCE_SMTP_HOST: str = ""
+    AGENT_COMPLIANCE_SMTP_PORT: int = 587
+    AGENT_COMPLIANCE_SMTP_USERNAME: str = ""
+    AGENT_COMPLIANCE_SMTP_PASSWORD: SecretStr = SecretStr("")
+    AGENT_COMPLIANCE_SMTP_STARTTLS: bool = True
+    AGENT_COMPLIANCE_ZENDESK_URL: str = ""
+    AGENT_COMPLIANCE_ZENDESK_REQUESTER_EMAIL: str = ""
+    AGENT_COMPLIANCE_ZENDESK_REQUESTER_NAME: str = "Agent Compliance"
+    AGENT_COMPLIANCE_ZENDESK_AUTH_USERNAME: str = ""
+    AGENT_COMPLIANCE_ZENDESK_AUTH_TOKEN: SecretStr = SecretStr("")
+
     @property
     def activity_sources(self) -> list[str]:
         return [s.strip() for s in self.INGEST_ACTIVITY_SOURCES.split(",") if s.strip()]
@@ -100,6 +120,10 @@ class Settings(BaseSettings):
             for s in self.DASHBOARD_PATCH_CATEGORIES_EXCLUDE.split(",")
             if s.strip()
         )
+
+    @property
+    def patch_ingest_schedule_hours(self) -> int:
+        return self.PATCH_INGEST_SCHEDULE_HOURS or self.INGEST_SCHEDULE_HOURS
 
     @property
     def postgres_dsn(self) -> str:

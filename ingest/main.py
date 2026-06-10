@@ -33,6 +33,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from ingest import db, migrations
 from ingest.config import settings
 from ingest.activities import ingest as activities_ingest
+from ingest.agent_compliance import ingest as agent_compliance_ingest
 from ingest.core import (
     custom_fields,
     device_health,
@@ -50,12 +51,16 @@ log = logging.getLogger("ingest.main")
 
 
 def run_once() -> None:
-    """Execute one full ingest cycle. Modules run in dependency order
+    run_patching_once()
+
+
+def run_patching_once() -> None:
+    """Execute one full patch/Ninja ingest cycle. Modules run in dependency order
     with per-module exception isolation: a failure in one module is
     logged with status='failed' in run_log and the rest continue.
     Shared `snapshot_at` so all rows from a single run carry the
     same first/last_observed_at."""
-    log.info("Ingest run starting")
+    log.info("Patch ingest run starting")
     snapshot_at = datetime.now(timezone.utc)
     with NinjaClient(
         base_url=settings.NINJA_BASE_URL,
@@ -74,7 +79,16 @@ def run_once() -> None:
         _safe("patches",        patches_ingest.run, client, snapshot_at)
         _safe("activities",     activities_ingest.run, client)
         _safe("troubleshooting_signal", refresh_device_troubleshooting_signal)
-    log.info("Ingest run complete")
+    log.info("Patch ingest run complete")
+
+
+def run_agent_compliance_once() -> None:
+    if not settings.AGENT_COMPLIANCE_ENABLED:
+        log.info("Agent compliance disabled; skipping run")
+        return
+    log.info("Agent compliance run starting")
+    agent_compliance_ingest.run()
+    log.info("Agent compliance run complete")
 
 
 def _safe(name: str, func, *args) -> None:
@@ -142,34 +156,55 @@ def bootstrap_metabase() -> None:
     log.info("Running Metabase dashboard bootstrap")
     try:
         from ingest.metabase_bootstrap import run_bootstrap
+        from ingest.agent_compliance.metabase_bootstrap import (
+            run_bootstrap as run_agent_compliance_bootstrap,
+        )
         urls = run_bootstrap(
             url=url,
             user=user,
             password=password,
             db_name=settings.MB_BOOTSTRAP_DB_NAME,
         )
+        if settings.AGENT_COMPLIANCE_ENABLED:
+            urls.extend(run_agent_compliance_bootstrap(
+                url=url,
+                user=user,
+                password=password,
+                db_name=settings.MB_BOOTSTRAP_DB_NAME,
+            ))
         for u in urls:
             log.info("Dashboard ready: %s", u)
     except Exception:
         log.exception("Metabase bootstrap failed (will not retry; trigger via /bootstrap-metabase)")
 
 
-def last_successful_run_at() -> datetime | None:
+def last_successful_run_at(domain: str | None = None) -> datetime | None:
     with db.transaction() as cur:
-        cur.execute(
-            "SELECT MAX(finished_at) FROM ninja_core.run_log "
-            "WHERE status = 'ok'"
-        )
+        if domain:
+            cur.execute(
+                "SELECT MAX(finished_at) FROM ninja_core.run_log "
+                "WHERE status = 'ok' AND domain = %s",
+                (domain,),
+            )
+        else:
+            cur.execute(
+                "SELECT MAX(finished_at) FROM ninja_core.run_log "
+                "WHERE status = 'ok'"
+            )
         row = cur.fetchone()
         return row[0] if row else None
 
 
-def should_catch_up(now: datetime | None = None) -> bool:
+def should_catch_up(
+    domain: str | None = None,
+    schedule_hours: int | None = None,
+    now: datetime | None = None,
+) -> bool:
     now = now or datetime.now(timezone.utc)
-    last = last_successful_run_at()
+    last = last_successful_run_at(domain)
     if last is None:
         return False
-    return (now - last) > timedelta(hours=settings.INGEST_SCHEDULE_HOURS)
+    return (now - last) > timedelta(hours=schedule_hours or settings.INGEST_SCHEDULE_HOURS)
 
 
 # ── HTTP endpoints ──────────────────────────────────────────────────
@@ -202,8 +237,20 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             if not _READY.is_set():
                 self._respond(503, b"still starting - try again shortly\n")
                 return
-            threading.Thread(target=run_once, daemon=True).start()
+            threading.Thread(target=run_patching_once, daemon=True).start()
             self._respond(202, b"run scheduled\n")
+        elif self.path == "/run/patches":
+            if not _READY.is_set():
+                self._respond(503, b"still starting - try again shortly\n")
+                return
+            threading.Thread(target=run_patching_once, daemon=True).start()
+            self._respond(202, b"patch run scheduled\n")
+        elif self.path == "/run/agent-compliance":
+            if not _READY.is_set():
+                self._respond(503, b"still starting - try again shortly\n")
+                return
+            threading.Thread(target=run_agent_compliance_once, daemon=True).start()
+            self._respond(202, b"agent compliance run scheduled\n")
         elif self.path == "/bootstrap-metabase":
             threading.Thread(target=bootstrap_metabase, daemon=True).start()
             self._respond(202, b"metabase bootstrap scheduled\n")
@@ -232,7 +279,8 @@ def _start_http_server() -> _ThreadingServer:
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     log.info(
         "HTTP server listening on %s:%d "
-        "(/healthz liveness, /readyz readiness, /run, /bootstrap-metabase)",
+        "(/healthz liveness, /readyz readiness, /run, /run/patches, "
+        "/run/agent-compliance, /bootstrap-metabase)",
         *addr,
     )
     return httpd
@@ -257,25 +305,47 @@ def main() -> None:
 
     scheduler = BackgroundScheduler()
     scheduler.add_job(
-        run_once,
+        run_patching_once,
         "interval",
-        hours=settings.INGEST_SCHEDULE_HOURS,
-        id="ingest_cycle",
+        hours=settings.patch_ingest_schedule_hours,
+        id="patch_ingest_cycle",
     )
+    if settings.AGENT_COMPLIANCE_ENABLED:
+        scheduler.add_job(
+            run_agent_compliance_once,
+            "interval",
+            hours=settings.AGENT_COMPLIANCE_SCHEDULE_HOURS,
+            id="agent_compliance_cycle",
+        )
     scheduler.start()
     log.info(
-        "Scheduler started (every %dh, no jobs wired yet)",
-        settings.INGEST_SCHEDULE_HOURS,
+        "Patch scheduler started (every %dh)",
+        settings.patch_ingest_schedule_hours,
     )
+    if settings.AGENT_COMPLIANCE_ENABLED:
+        log.info(
+            "Agent compliance scheduler started (every %dh)",
+            settings.AGENT_COMPLIANCE_SCHEDULE_HOURS,
+        )
 
-    if should_catch_up():
+    if should_catch_up("patches", settings.patch_ingest_schedule_hours):
         log.info(
             "Catch-up: last successful run > %dh ago — firing run_once",
-            settings.INGEST_SCHEDULE_HOURS,
+            settings.patch_ingest_schedule_hours,
         )
-        threading.Thread(target=run_once, daemon=True).start()
+        threading.Thread(target=run_patching_once, daemon=True).start()
     else:
-        log.info("No catch-up needed (fresh install or recent run)")
+        log.info("No patch catch-up needed (fresh install or recent run)")
+
+    if (
+        settings.AGENT_COMPLIANCE_ENABLED
+        and should_catch_up("agent_compliance", settings.AGENT_COMPLIANCE_SCHEDULE_HOURS)
+    ):
+        log.info(
+            "Catch-up: last successful agent compliance run > %dh ago",
+            settings.AGENT_COMPLIANCE_SCHEDULE_HOURS,
+        )
+        threading.Thread(target=run_agent_compliance_once, daemon=True).start()
 
     # Kick off Metabase bootstrap in the background — won't block
     # startup if Metabase isn't ready or creds aren't set.

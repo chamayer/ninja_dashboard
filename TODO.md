@@ -13,6 +13,14 @@ _(empty — drop free-form items here)_
 
 ## Backlog
 
+### Agent compliance domain
+
+- [ ] Configure and validate v0.16.0 agent-compliance on the live
+      stack: enable required platform sources in DB, add S1/LMI/SC
+      secrets to host `.env`, run migration 019, trigger
+      `/run/agent-compliance`, verify source health, matrix rows,
+      findings, and alert route delivery.
+
 ### Ingest core (next milestone — gets us to a working v0.2.0)
 
 - [ ] `ingest/config.py` — pydantic-settings loading `NINJA_*`,
@@ -176,6 +184,16 @@ _(empty — drop free-form items here)_
 ---
 
 ## Completed
+
+### v0.16.0 — 2026-06-10
+
+- [x] Built Agent Compliance v1 foundation inside this project:
+      schema/config tables, source runs, platform observations,
+      current/history matrix, findings, suppressions, alert state,
+      webhook/email/Zendesk alert delivery, per-client ScreenConnect
+      source model, separate schedule/manual endpoint, and basic
+      Metabase dashboard bootstrap. Compile passed; live DB smoke
+      remains pending.
 
 ### v0.14.10 — 2026-06-04
 

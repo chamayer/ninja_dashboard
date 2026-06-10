@@ -37,7 +37,11 @@ def run_log(domain: str) -> Iterator[dict[str, int]]:
         )
         run_id = cur.fetchone()[0]
 
-    stats: dict[str, int] = {"rows_upserted": 0, "rows_inserted": 0}
+    stats: dict[str, int] = {
+        "run_id": run_id,
+        "rows_upserted": 0,
+        "rows_inserted": 0,
+    }
     try:
         yield stats
     except Exception as exc:

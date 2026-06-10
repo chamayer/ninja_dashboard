@@ -37,6 +37,56 @@ Ninja API ──► ingest (Python) ──► Postgres ◄── Metabase ──
 Three containers, one Compose file. `ingest` is built from this repo;
 `postgres` and `metabase` are upstream images.
 
+## Agent Compliance Domain
+
+`ninja_agent_compliance` is a v1 cross-platform agent compliance
+domain added in 0.16.0. It stays inside this stack to avoid duplicating
+Postgres or Metabase.
+
+Purpose:
+- collect endpoint presence/status from Ninja, SentinelOne, LogMeIn,
+  and ScreenConnect
+- support per-client required platform combos
+- model ScreenConnect as per-client tenant sources
+- build a current compliance matrix
+- alert on missing/stale/wrong-source findings
+
+Ninja data for this domain comes from the existing `ninja_core` tables,
+not from a second Ninja API call. Ninja provides the Ninja-side device
+identity: org, hostname, device id, OS/device class, last contact, and
+offline state. SentinelOne, LogMeIn, and ScreenConnect remain
+authoritative for their own platform presence and check-in state.
+
+Ninja `/queries/device-health` exposes AV/security enrichment
+(`products_installation_statuses`, threat counts, install issues), but
+that is triage context only. SentinelOne API remains authoritative for
+SentinelOne compliance.
+
+Configuration is DB-backed for operational data:
+- clients
+- platform sources
+- client aliases
+- platform requirements
+- alert rules
+- suppressions
+- notification routes
+
+Secrets stay in `/amr-ch-01_data/ninja-dashboard/.env`; DB rows store
+secret reference names only.
+
+Agent compliance has its own schedule:
+
+```env
+AGENT_COMPLIANCE_ENABLED=false
+AGENT_COMPLIANCE_SCHEDULE_HOURS=4
+```
+
+Manual trigger:
+
+```bash
+curl -X POST http://127.0.0.1:8090/run/agent-compliance
+```
+
 ## Repo layout
 
 ```
