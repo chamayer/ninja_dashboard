@@ -5,6 +5,25 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-10 — v0.16.4 PowerShell alignment parity correction
+
+**Why:** The previous dynamic mapping pass admitted every observed
+platform group as a client. That was not full PowerShell parity. The
+PowerShell script builds a canonical alignment map first, collapses
+normalized-identical names, prefers configured names/Ninja names, then
+uses fuzzy Ninja absorption only when unambiguous and complementary.
+
+**Done:**
+- Replaced synthetic default aliases with persisted alignment aliases.
+- Canonical selection now follows configured client, Ninja, S1, LMI.
+- Normalized-identical platform names route to one canonical client.
+- Added fuzzy non-Ninja to Ninja absorption with the original ambiguity
+  guardrail.
+- Alias lookup now applies deterministic source precedence.
+
+**Validation:**
+- Pending deployment and live `/run/agent-compliance` validation.
+
 ## 2026-06-10 — v0.16.3 PowerShell org-alignment parity
 
 **Why:** Live validation showed many resolved platform group names still

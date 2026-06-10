@@ -34,6 +34,11 @@ Original script reviewed:
 - Ninja observations now mark `NO AV` evidence in raw data, and matrix
   evaluation exempts those devices from SentinelOne missing-agent
   findings.
+- v0.16.4 corrected org alignment to persist canonical platform aliases
+  instead of treating every observed name as its own client. Canonical
+  selection now follows the original script: configured client, then
+  Ninja, then SentinelOne, then LogMeIn. Fuzzy non-Ninja absorption into
+  Ninja is limited to exactly one complementary match.
 
 ## Still intentionally not identical
 

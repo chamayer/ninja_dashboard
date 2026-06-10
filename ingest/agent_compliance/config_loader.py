@@ -124,62 +124,180 @@ def load_aliases() -> dict[tuple[str, str, str], int]:
             SELECT platform, alias_type, alias_value, client_id
             FROM ninja_agent_compliance.client_aliases
             WHERE enabled
+            ORDER BY
+                CASE source
+                    WHEN 'manual' THEN 0
+                    WHEN 'seed' THEN 1
+                    WHEN 'alignment' THEN 2
+                    ELSE 3
+                END,
+                alias_id
             """
         )
         rows = cur.fetchall()
-        cur.execute(
-            """
-            SELECT client_id, client_name
-            FROM ninja_agent_compliance.clients
-            WHERE enabled
-            """
-        )
-        client_rows = cur.fetchall()
     aliases: dict[tuple[str, str, str], int] = {}
     for platform, alias_type, alias_value, client_id in rows:
         platform = canonical_platform(platform)
         exact = alias_value.strip().lower()
-        aliases[(platform, alias_type, exact)] = client_id
+        aliases.setdefault((platform, alias_type, exact), client_id)
         normalized = normalize_org_name(alias_value)
         if normalized:
-            aliases[(platform, f"{alias_type}_norm", normalized)] = client_id
-    for client_id, client_name in client_rows:
-        for platform, alias_type in (
-            ("Ninja", "org_name"),
-            ("SentinelOne", "site_name"),
-            ("LogMeIn", "group_name"),
-        ):
-            exact = client_name.strip().lower()
-            aliases.setdefault((platform, alias_type, exact), client_id)
-            normalized = normalize_org_name(client_name)
-            if normalized:
-                aliases.setdefault((platform, f"{alias_type}_norm", normalized), client_id)
+            aliases.setdefault((platform, f"{alias_type}_norm", normalized), client_id)
     return aliases
 
 
 def sync_clients_from_observations(observations: list[dict[str, Any]]) -> int:
-    """Mirror the PowerShell alignment map by admitting observed org names."""
-    names: set[str] = set()
+    """Mirror the PowerShell alignment map and persist platform aliases."""
+    platform_alias_types = {
+        "Ninja": "org_name",
+        "SentinelOne": "site_name",
+        "LogMeIn": "group_name",
+    }
+    by_norm: dict[str, list[tuple[str, str]]] = {}
     for obs in observations:
+        platform = canonical_platform(obs.get("platform") or "")
+        if platform not in platform_alias_types:
+            continue
         name = (obs.get("platform_group_name") or "").strip()
         if not name:
             continue
         if name.lower() in ORG_EXCLUDES:
             continue
-        names.add(name)
-    if not names:
+        norm = normalize_org_name(name)
+        if not norm:
+            continue
+        by_norm.setdefault(norm, []).append((platform, name))
+    if not by_norm:
         return 0
 
     with db.transaction() as cur:
+        cur.execute(
+            """
+            SELECT client_id, client_name, source
+            FROM ninja_agent_compliance.clients
+            WHERE enabled
+            """
+        )
+        clients = cur.fetchall()
+        cur.execute(
+            """
+            SELECT DISTINCT client_id
+            FROM ninja_agent_compliance.client_aliases
+            WHERE enabled
+            UNION
+            SELECT DISTINCT client_id
+            FROM ninja_agent_compliance.platform_requirements
+            WHERE client_id IS NOT NULL AND enabled
+            """
+        )
+        configured_client_ids = {row[0] for row in cur.fetchall()}
+
+        client_by_norm = {
+            normalize_org_name(row[1]): (row[0], row[1], row[2])
+            for row in clients
+        }
+        explicit_by_norm = {
+            normalize_org_name(row[1]): (row[0], row[1], row[2])
+            for row in clients
+            if row[0] in configured_client_ids
+        }
+
+        platforms_by_norm = {
+            norm: {platform for platform, _ in entries}
+            for norm, entries in by_norm.items()
+        }
+        canonical_norm_by_norm = {norm: norm for norm in by_norm}
+        ninja_norms = [
+            norm for norm, platforms in platforms_by_norm.items()
+            if "Ninja" in platforms
+        ]
+        for norm, platforms in platforms_by_norm.items():
+            if "Ninja" in platforms or len(norm) < 4:
+                continue
+            candidates = [
+                ninja_norm for ninja_norm in ninja_norms
+                if ninja_norm != norm
+                and len(ninja_norm) >= 4
+                and (ninja_norm in norm or norm in ninja_norm)
+                and not (platforms & platforms_by_norm[ninja_norm])
+            ]
+            if len(candidates) == 1:
+                canonical_norm_by_norm[norm] = candidates[0]
+
+        canonical_names: dict[str, str] = {}
+        for norm, entries in by_norm.items():
+            explicit = explicit_by_norm.get(norm)
+            if explicit:
+                canonical_names[norm] = explicit[1]
+                continue
+            for preferred_platform in ("Ninja", "SentinelOne", "LogMeIn"):
+                name = next((entry_name for platform, entry_name in entries if platform == preferred_platform), None)
+                if name:
+                    canonical_names[norm] = name
+                    break
+        for norm, canonical_norm in canonical_norm_by_norm.items():
+            if norm in explicit_by_norm:
+                continue
+            if canonical_norm != norm and canonical_norm in canonical_names:
+                canonical_names[norm] = canonical_names[canonical_norm]
+
         cur.executemany(
             """
-            INSERT INTO ninja_agent_compliance.clients (client_name, default_max_age_days)
-            VALUES (%s, 30)
+            INSERT INTO ninja_agent_compliance.clients
+                (client_name, default_max_age_days, source, notes)
+            VALUES (%s, 30, 'alignment', 'Discovered from platform org/site/group alignment')
             ON CONFLICT (client_name) DO NOTHING
             """,
-            [(name,) for name in sorted(names)],
+            [(name,) for name in sorted(set(canonical_names.values()))],
         )
-        return cur.rowcount or 0
+        cur.execute(
+            """
+            SELECT client_id, client_name, source
+            FROM ninja_agent_compliance.clients
+            WHERE enabled
+            """
+        )
+        client_by_name = {
+            row[1].strip().lower(): (row[0], row[1], row[2])
+            for row in cur.fetchall()
+        }
+
+        alias_rows: list[tuple[int, str, str, str, str]] = []
+        for norm, entries in by_norm.items():
+            canonical = client_by_name.get(canonical_names[norm].strip().lower())
+            if not canonical:
+                continue
+            client_id = canonical[0]
+            seen: set[tuple[str, str, str]] = set()
+            for platform, name in entries:
+                alias_type = platform_alias_types[platform]
+                key = (platform, alias_type, name.strip().lower())
+                if key in seen:
+                    continue
+                seen.add(key)
+                alias_rows.append((
+                    client_id,
+                    platform,
+                    alias_type,
+                    name,
+                    "Generated from PowerShell-style org alignment",
+                ))
+        if alias_rows:
+            cur.executemany(
+                """
+                INSERT INTO ninja_agent_compliance.client_aliases
+                    (client_id, platform, alias_type, alias_value, source, notes, updated_by)
+                VALUES (%s, %s, %s, %s, 'alignment', %s, 'agent_compliance')
+                ON CONFLICT (client_id, platform, (COALESCE(source_id, 0)), alias_type, alias_value)
+                DO UPDATE SET
+                    enabled = true,
+                    notes = EXCLUDED.notes,
+                    updated_at = now(),
+                    updated_by = EXCLUDED.updated_by
+                """,
+                alias_rows,
+            )
+        return len(alias_rows)
 
 
 def load_requirements() -> list[Requirement]:

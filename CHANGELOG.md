@@ -2,6 +2,25 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.16.4] — 2026-06-10
+
+### Fixed
+- Agent Compliance org alignment now persists PowerShell-style
+  canonical platform aliases instead of treating every observed platform
+  name as its own mapped client.
+- Canonical org selection now follows the PowerShell priority:
+  configured client, then Ninja name, then SentinelOne name, then
+  LogMeIn name.
+- Added the PowerShell fuzzy absorption guardrail: non-Ninja names can
+  route to exactly one Ninja org when normalized names contain each
+  other and platform sets are complementary.
+- Alias loading now has deterministic precedence: manual, seed,
+  alignment, then other.
+
+### Notes
+- No schema migration is required for v0.16.4.
+- Commit: `TBD`
+
 ## [0.16.3] — 2026-06-10
 
 ### Fixed
