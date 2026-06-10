@@ -2,6 +2,22 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.16.2] — 2026-06-10
+
+### Fixed
+- LogMeIn group-map parsing now mirrors PowerShell's case-insensitive
+  JSON property access for `hosts`, `groups`, group `id`/`name`, and
+  host `groupid`.
+
+### Added
+- LogMeIn raw observation data now includes an `_agent_compliance`
+  parser marker with `lmi_group_id`, `lmi_group_name_resolved`, and
+  `lmi_group_map_size` for deployment verification.
+
+### Notes
+- No schema migration is required for v0.16.2.
+- Commit: `TBD`
+
 ## [0.16.1] — 2026-06-10
 
 ### Fixed

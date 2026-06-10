@@ -5,6 +5,25 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-10 — v0.16.2 LogMeIn PowerShell parity correction
+
+**Why:** Live host validation showed LogMeIn host rows had `groupid`,
+but `platform_group_name` was blank. The original PowerShell already
+worked this out by using `$resp.groups`, `$g.id`, `$g.name`, and
+`$h.groupid`. The migration gap was Python's case-sensitive JSON dict
+access versus PowerShell's case-insensitive property access.
+
+**Done:**
+- Updated the LogMeIn collector to use case-insensitive JSON lookup for
+  PowerShell-equivalent properties.
+- Kept the original PowerShell semantics: build a group map from
+  `groups` using group `id`/`name`, then resolve each host by `groupid`.
+- Added LogMeIn parser markers into raw observation data:
+  `lmi_group_id`, `lmi_group_name_resolved`, and `lmi_group_map_size`.
+
+**Validation:**
+- Pending deployment and live `/run/agent-compliance` validation.
+
 ## 2026-06-10 — v0.16.1 Agent Compliance mapping parity pass
 
 **Why:** Re-review of the original PowerShell script showed that

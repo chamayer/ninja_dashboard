@@ -20,6 +20,41 @@ def _retry_after_seconds(value: str | None) -> int:
         return 61
 
 
+def _ci_get(data: dict, key: str) -> object | None:
+    """Match PowerShell's case-insensitive JSON property access."""
+    value = data.get(key)
+    if value is not None:
+        return value
+    lowered = key.lower()
+    for current_key, current_value in data.items():
+        if str(current_key).lower() == lowered:
+            return current_value
+    return None
+
+
+def _build_group_map(groups: object) -> dict[str, str]:
+    if isinstance(groups, dict):
+        mapped: dict[str, str] = {}
+        for key, value in groups.items():
+            if isinstance(value, dict):
+                name = _ci_get(value, "name")
+                mapped[str(key)] = str(name or key)
+            else:
+                mapped[str(key)] = str(value)
+        return mapped
+    if isinstance(groups, list):
+        mapped = {}
+        for group in groups:
+            if not isinstance(group, dict):
+                continue
+            group_id = _ci_get(group, "id")
+            name = _ci_get(group, "name")
+            if group_id is not None and name:
+                mapped[str(group_id)] = str(name)
+        return mapped
+    return {}
+
+
 def fetch(source: SourceConfig, observed_at: datetime) -> list[dict]:
     if not source.base_url or not source.company_id or not source.psk:
         raise RuntimeError("LogMeIn source requires base_url, company_id_secret_ref, psk_secret_ref")
@@ -36,29 +71,33 @@ def fetch(source: SourceConfig, observed_at: datetime) -> list[dict]:
         resp.raise_for_status()
         payload = resp.json()
 
-    hosts = payload.get("hosts") if isinstance(payload, dict) else payload
-    groups = payload.get("groups") if isinstance(payload, dict) else []
-    group_map = {
-        str(group.get("id")): group.get("name")
-        for group in groups or []
-        if group.get("id") is not None
-    }
+    hosts = _ci_get(payload, "hosts") if isinstance(payload, dict) else payload
+    groups = _ci_get(payload, "groups") if isinstance(payload, dict) else []
+    group_map = _build_group_map(groups)
     observations: list[dict] = []
     for host in hosts or []:
-        hostname = host.get("hostName") or host.get("name") or host.get("description")
+        hostname = _ci_get(host, "hostName") or _ci_get(host, "name") or _ci_get(host, "description")
         norm = normalize_hostname(hostname)
         if not hostname or not norm:
             continue
-        group = host.get("group") or {}
-        group_id = group.get("id") or host.get("groupId") or host.get("groupid")
-        group_name = group.get("name") or host.get("groupName") or group_map.get(str(group_id))
+        group = _ci_get(host, "group") or {}
+        group_id = _ci_get(group, "id") if isinstance(group, dict) else None
+        group_id = group_id or _ci_get(host, "groupid")
+        group_name = _ci_get(group, "name") if isinstance(group, dict) else None
+        group_name = group_name or _ci_get(host, "groupName") or group_map.get(str(group_id))
         is_online = (
-            host.get("isHostOnline")
-            if "isHostOnline" in host
-            else host.get("isOnline")
-            if "isOnline" in host
-            else host.get("online")
+            _ci_get(host, "isHostOnline")
+            if _ci_get(host, "isHostOnline") is not None
+            else _ci_get(host, "isOnline")
+            if _ci_get(host, "isOnline") is not None
+            else _ci_get(host, "online")
         )
+        raw_data = dict(host)
+        raw_data["_agent_compliance"] = {
+            "lmi_group_id": str(group_id or ""),
+            "lmi_group_name_resolved": bool(group_name),
+            "lmi_group_map_size": len(group_map),
+        }
         observations.append({
             "observed_at": observed_at,
             "platform": "LogMeIn",
@@ -67,15 +106,15 @@ def fetch(source: SourceConfig, observed_at: datetime) -> list[dict]:
             "source_client_name": None,
             "platform_group_name": group_name,
             "platform_group_id": str(group_id or ""),
-            "platform_device_id": str(host.get("id") or host.get("hostId") or ""),
+            "platform_device_id": str(_ci_get(host, "id") or _ci_get(host, "hostId") or ""),
             "hostname": hostname,
             "norm_name": norm,
             "match_name": norm,
-            "device_type": infer_device_type(host.get("osName") or host.get("os")),
-            "os_name": host.get("osName") or host.get("os"),
-            "domain_name": host.get("domain"),
+            "device_type": infer_device_type(_ci_get(host, "osName") or _ci_get(host, "os")),
+            "os_name": _ci_get(host, "osName") or _ci_get(host, "os"),
+            "domain_name": _ci_get(host, "domain"),
             "is_online": is_online,
-            "last_seen_at": parse_dt(host.get("hostStateChangeDate") or host.get("lastSeen") or host.get("lastOnline")),
-            "raw_data": Json(host),
+            "last_seen_at": parse_dt(_ci_get(host, "hostStateChangeDate") or _ci_get(host, "lastSeen") or _ci_get(host, "lastOnline")),
+            "raw_data": Json(raw_data),
         })
     return observations
