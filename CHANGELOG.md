@@ -2,6 +2,30 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.17.2] — 2026-06-05
+
+### Fixed
+- `compliance_matrix_current.is_compliant` no longer gates on
+  `cross_client_conflict` or `is_stale`. This restores PowerShell
+  parity with `Build-MultiOrgComplianceMatrix` line 1539
+  (`$isCompliant = $missing.Count -eq 0`). Cross-org conflict remains
+  an informational column and continues to generate its own finding;
+  stale remains an independent column. The `not unknown` clause is
+  retained as an intentional Python-side improvement for the
+  continuous-collection model, where a transient source failure must
+  not silently flip devices to non-compliant.
+- Org alignment status now consults `client_aliases` (manual + seed)
+  for the expected platform name before falling back to the observed
+  routed name and finally to the client's display name. This matches
+  the PowerShell `Get-OrgAlignmentMap` precedence (`$cfg.NinjaOrg` /
+  `$cfg.S1Site` / `$cfg.LMIGroup` first, observed norms second,
+  `$orgName` third). Aliases sourced from prior alignment runs are
+  excluded to avoid feedback loops.
+
+### Notes
+- No schema migration is required for v0.17.2.
+- Commit: `TBD`
+
 ## [0.17.1] — 2026-06-10
 
 ### Fixed

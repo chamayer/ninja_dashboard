@@ -348,6 +348,33 @@ def _write_alignment_rows(
         required_by_client.setdefault(client_id, set()).update(canonical_platform(p) for p in platforms)
     default_required = required_by_client.get(None, {"Ninja", "SentinelOne", "LogMeIn"})
 
+    # PowerShell parity (Get-OrgAlignmentMap, lines 972-987): the "expected"
+    # platform name comes from explicit OrgConfig FIRST, observed FIRST-norm-match
+    # SECOND, org_name THIRD. In our schema, OrgConfig is the manual/seed alias
+    # table — 'org_name' for Ninja, 'site_name' for S1, 'group_name' for LMI.
+    # Manual outranks seed; we ignore source='alignment' to avoid feedback loop.
+    alias_type_for_platform = {
+        "Ninja": "org_name",
+        "SentinelOne": "site_name",
+        "LogMeIn": "group_name",
+    }
+    cur.execute(
+        """
+        SELECT client_id, platform, alias_type, alias_value, source
+        FROM ninja_agent_compliance.client_aliases
+        WHERE enabled AND source IN ('manual', 'seed')
+        ORDER BY
+            CASE source WHEN 'manual' THEN 0 ELSE 1 END,
+            alias_id
+        """
+    )
+    configured_name_by_client: dict[tuple[int, str], str] = {}
+    for client_id, platform, alias_type, alias_value, _source in cur.fetchall():
+        canon_platform = canonical_platform(platform)
+        if alias_type_for_platform.get(canon_platform) != alias_type:
+            continue
+        configured_name_by_client.setdefault((client_id, canon_platform), alias_value)
+
     norm_maps = {"Ninja": {}, "SentinelOne": {}, "LogMeIn": {}}
     for entries in by_norm.values():
         for platform, name in entries:
@@ -359,12 +386,27 @@ def _write_alignment_rows(
         if not names and client_id not in explicit_client_ids:
             continue
         required = required_by_client.get(client_id, default_required)
+        expected_ninja = (
+            configured_name_by_client.get((client_id, "Ninja"))
+            or names.get("Ninja")
+            or org_name
+        )
+        expected_s1 = (
+            configured_name_by_client.get((client_id, "SentinelOne"))
+            or names.get("SentinelOne")
+            or org_name
+        )
+        expected_lmi = (
+            configured_name_by_client.get((client_id, "LogMeIn"))
+            or names.get("LogMeIn")
+            or org_name
+        )
         statuses = {
-            "Ninja": _alignment_status(names.get("Ninja") or org_name, norm_maps["Ninja"])
+            "Ninja": _alignment_status(expected_ninja, norm_maps["Ninja"])
             if "Ninja" in required else "NA",
-            "SentinelOne": _alignment_status(names.get("SentinelOne") or org_name, norm_maps["SentinelOne"])
+            "SentinelOne": _alignment_status(expected_s1, norm_maps["SentinelOne"])
             if "SentinelOne" in required else "NA",
-            "LogMeIn": _alignment_status(names.get("LogMeIn") or org_name, norm_maps["LogMeIn"])
+            "LogMeIn": _alignment_status(expected_lmi, norm_maps["LogMeIn"])
             if "LogMeIn" in required else "NA",
         }
         sc_status = "CONFIGURED" if "ScreenConnect" in required else "NA"
@@ -384,9 +426,9 @@ def _write_alignment_rows(
             statuses["SentinelOne"],
             statuses["LogMeIn"],
             overall,
-            names.get("Ninja") or org_name,
-            names.get("SentinelOne") or org_name,
-            names.get("LogMeIn") or org_name,
+            expected_ninja,
+            expected_s1,
+            expected_lmi,
             sorted(set(merged_from_by_client.get(client_id, []))),
             _suggested_config(org_name, names),
             observed_at,

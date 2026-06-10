@@ -270,7 +270,11 @@ def _build_matrix_and_findings(
             and len(present_required) > 0
             and len(active_required) < len(present_required)
         )
-        is_compliant = not missing and not ps_is_stale and not unknown and not cross_client
+        # PowerShell parity: $isCompliant = $missing.Count -eq 0 (Multi_org_agent_compliance.ps1:1539).
+        # IsStale and CrossOrgConflict are informational, not gates. We add `not unknown`
+        # only because PS is one-shot and crashes on source failure; in our continuous
+        # model an unreachable source must not silently flip a device non-compliant.
+        is_compliant = not missing and not unknown
         alignment = alignment_by_client.get(client_id, {})
         signature = _hash("|".join([
             client.client_name,
