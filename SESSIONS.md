@@ -5,6 +5,31 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-10 — v0.17.0 Agent Compliance PowerShell parity schema
+
+**Why:** The prior fixes improved behavior, but full parity with the
+PowerShell report requires persisted alignment status and matrix fields,
+not hidden in alias resolution. The operator needs to prove mapping and
+collection against the original script.
+
+**Done:**
+- Added migration `020_agent_compliance_parity.sql`.
+- Added current/history org alignment tables and views.
+- Persisted PowerShell-style alignment fields:
+  `MATCHED`, `FUZZY`, `MISSING`, `NA`, `CONFIGURED`,
+  `OverallStatus`, platform names, merged-from, suggested config.
+- Added PowerShell report fields to current/history matrix:
+  per-platform presence/online/last-seen/device-id, S1 exemption, and
+  degraded state.
+- Updated matrix stale/degraded semantics to match PowerShell.
+- Added Metabase cards for alignment mismatches and degraded devices.
+- Added `AGENT_COMPLIANCE_V2_BLUEPRINT.md`.
+
+**Validation:**
+- `python -m compileall ingest` passes.
+- `git diff --check` passes.
+- Pending host migration/run validation.
+
 ## 2026-06-10 — v0.16.4 PowerShell alignment parity correction
 
 **Why:** The previous dynamic mapping pass admitted every observed

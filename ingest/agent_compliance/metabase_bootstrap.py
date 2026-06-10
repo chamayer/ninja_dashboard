@@ -90,6 +90,27 @@ CARDS = [
         "row": 4, "col": 12, "size_x": 12, "size_y": 8,
     },
     {
+        "key": "alignment_mismatches",
+        "name": "Org Alignment Mismatches",
+        "display": "table",
+        "query": """
+            SELECT
+                org_name,
+                overall_status,
+                ninja_status,
+                s1_status,
+                lmi_status,
+                ninja_platform_name,
+                s1_platform_name,
+                lmi_platform_name,
+                merged_from,
+                suggested_config
+            FROM ninja_agent_compliance.v_alignment_mismatches
+            LIMIT 500
+        """,
+        "row": 12, "col": 0, "size_x": 24, "size_y": 8,
+    },
+    {
         "key": "remediation_candidates",
         "name": "Remediation Candidates",
         "display": "table",
@@ -101,12 +122,39 @@ CARDS = [
                 required_platforms,
                 observed_platforms,
                 missing_required_platforms,
-                stale_required_platforms
+                stale_required_platforms,
+                is_stale,
+                is_degraded,
+                s1_exempt,
+                org_align_status
             FROM ninja_agent_compliance.v_remediation_candidates
             ORDER BY client_name, hostname
             LIMIT 500
         """,
-        "row": 12, "col": 0, "size_x": 24, "size_y": 10,
+        "row": 20, "col": 0, "size_x": 24, "size_y": 10,
+    },
+    {
+        "key": "degraded_devices",
+        "name": "Degraded Devices",
+        "display": "table",
+        "query": """
+            SELECT
+                client_name,
+                hostname,
+                device_type,
+                required_platforms,
+                observed_platforms,
+                stale_required_platforms,
+                ninja_last_seen,
+                sentinelone_last_seen,
+                logmein_last_seen,
+                screenconnect_last_seen
+            FROM ninja_agent_compliance.v_compliance_matrix_current
+            WHERE is_degraded
+            ORDER BY client_name, hostname
+            LIMIT 500
+        """,
+        "row": 30, "col": 0, "size_x": 24, "size_y": 8,
     },
     {
         "key": "active_findings_table",
@@ -124,7 +172,7 @@ CARDS = [
             FROM ninja_agent_compliance.v_active_findings
             LIMIT 500
         """,
-        "row": 22, "col": 0, "size_x": 24, "size_y": 10,
+        "row": 38, "col": 0, "size_x": 24, "size_y": 10,
     },
 ]
 

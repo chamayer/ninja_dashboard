@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any
 
 from ingest import db
@@ -146,7 +147,11 @@ def load_aliases() -> dict[tuple[str, str, str], int]:
     return aliases
 
 
-def sync_clients_from_observations(observations: list[dict[str, Any]]) -> int:
+def sync_clients_from_observations(
+    observations: list[dict[str, Any]],
+    run_id: int | None = None,
+    observed_at: datetime | None = None,
+) -> int:
     """Mirror the PowerShell alignment map and persist platform aliases."""
     platform_alias_types = {
         "Ninja": "org_name",
@@ -183,7 +188,7 @@ def sync_clients_from_observations(observations: list[dict[str, Any]]) -> int:
             """
             SELECT DISTINCT client_id
             FROM ninja_agent_compliance.client_aliases
-            WHERE enabled
+            WHERE enabled AND source <> 'alignment'
             UNION
             SELECT DISTINCT client_id
             FROM ninja_agent_compliance.platform_requirements
@@ -263,13 +268,20 @@ def sync_clients_from_observations(observations: list[dict[str, Any]]) -> int:
         }
 
         alias_rows: list[tuple[int, str, str, str, str]] = []
+        platform_name_by_client: dict[int, dict[str, str]] = {}
+        merged_from_by_client: dict[int, list[str]] = {}
         for norm, entries in by_norm.items():
             canonical = client_by_name.get(canonical_names[norm].strip().lower())
             if not canonical:
                 continue
             client_id = canonical[0]
+            if canonical_norm_by_norm.get(norm, norm) != norm:
+                merged_from_by_client.setdefault(client_id, []).append(
+                    f"{canonical_names.get(norm, norm)} ({'+'.join(sorted(platforms_by_norm[norm]))}, fuzzy)"
+                )
             seen: set[tuple[str, str, str]] = set()
             for platform, name in entries:
+                platform_name_by_client.setdefault(client_id, {}).setdefault(platform, name)
                 alias_type = platform_alias_types[platform]
                 key = (platform, alias_type, name.strip().lower())
                 if key in seen:
@@ -297,7 +309,135 @@ def sync_clients_from_observations(observations: list[dict[str, Any]]) -> int:
                 """,
                 alias_rows,
             )
+        _write_alignment_rows(
+            cur,
+            run_id=run_id,
+            observed_at=observed_at or datetime.now(timezone.utc),
+            clients=client_by_name,
+            explicit_client_ids=configured_client_ids,
+            platform_name_by_client=platform_name_by_client,
+            merged_from_by_client=merged_from_by_client,
+            by_norm=by_norm,
+        )
         return len(alias_rows)
+
+
+def _write_alignment_rows(
+    cur: Any,
+    run_id: int | None,
+    observed_at: datetime,
+    clients: dict[str, tuple[int, str, str]],
+    explicit_client_ids: set[int],
+    platform_name_by_client: dict[int, dict[str, str]],
+    merged_from_by_client: dict[int, list[str]],
+    by_norm: dict[str, list[tuple[str, str]]],
+) -> None:
+    cur.execute(
+        """
+        SELECT client_id, required_platforms
+        FROM ninja_agent_compliance.platform_requirements
+        WHERE enabled
+        ORDER BY client_id NULLS LAST
+        """
+    )
+    required_by_client: dict[int | None, set[str]] = {}
+    for client_id, platforms in cur.fetchall():
+        required_by_client.setdefault(client_id, set()).update(canonical_platform(p) for p in platforms)
+    default_required = required_by_client.get(None, {"Ninja", "SentinelOne", "LogMeIn"})
+
+    norm_maps = {"Ninja": {}, "SentinelOne": {}, "LogMeIn": {}}
+    for entries in by_norm.values():
+        for platform, name in entries:
+            norm_maps[platform][normalize_org_name(name)] = name
+
+    rows = []
+    for client_id, org_name, _source in clients.values():
+        names = platform_name_by_client.get(client_id, {})
+        if not names and client_id not in explicit_client_ids:
+            continue
+        required = required_by_client.get(client_id, default_required)
+        statuses = {
+            "Ninja": _alignment_status(names.get("Ninja") or org_name, norm_maps["Ninja"])
+            if "Ninja" in required else "NA",
+            "SentinelOne": _alignment_status(names.get("SentinelOne") or org_name, norm_maps["SentinelOne"])
+            if "SentinelOne" in required else "NA",
+            "LogMeIn": _alignment_status(names.get("LogMeIn") or org_name, norm_maps["LogMeIn"])
+            if "LogMeIn" in required else "NA",
+        }
+        sc_status = "CONFIGURED" if "ScreenConnect" in required else "NA"
+        actionable = [v for v in statuses.values() if v != "NA"]
+        if all(v == "MATCHED" for v in actionable):
+            overall = "OK"
+        elif any(v == "FUZZY" for v in actionable):
+            overall = "OK - FUZZY"
+        else:
+            overall = "MISMATCH"
+        rows.append((
+            client_id,
+            org_name,
+            client_id in explicit_client_ids,
+            statuses["Ninja"],
+            sc_status,
+            statuses["SentinelOne"],
+            statuses["LogMeIn"],
+            overall,
+            names.get("Ninja") or org_name,
+            names.get("SentinelOne") or org_name,
+            names.get("LogMeIn") or org_name,
+            sorted(set(merged_from_by_client.get(client_id, []))),
+            _suggested_config(org_name, names),
+            observed_at,
+        ))
+
+    if not rows:
+        return
+    cur.execute("DELETE FROM ninja_agent_compliance.org_alignment_current")
+    cur.executemany(
+        """
+        INSERT INTO ninja_agent_compliance.org_alignment_current
+            (client_id, org_name, is_configured, ninja_status, sc_status,
+             s1_status, lmi_status, overall_status, ninja_platform_name,
+             s1_platform_name, lmi_platform_name, merged_from,
+             suggested_config, evaluated_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """,
+        rows,
+    )
+    if run_id is not None:
+        cur.executemany(
+            """
+            INSERT INTO ninja_agent_compliance.org_alignment_history
+                (run_id, client_id, org_name, is_configured, ninja_status,
+                 sc_status, s1_status, lmi_status, overall_status,
+                 ninja_platform_name, s1_platform_name, lmi_platform_name,
+                 merged_from, suggested_config, evaluated_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            [(run_id, *row) for row in rows],
+        )
+
+
+def _alignment_status(expected: str | None, norm_map: dict[str, str]) -> str:
+    if not expected:
+        return "MISSING"
+    expected_norm = normalize_org_name(expected)
+    if expected_norm in norm_map:
+        return "MATCHED"
+    for key in norm_map:
+        if len(key) > 2 and (expected_norm in key or key in expected_norm):
+            return "FUZZY"
+    return "MISSING"
+
+
+def _suggested_config(org_name: str, names: dict[str, str]) -> str | None:
+    parts = []
+    if names.get("Ninja") and names["Ninja"] != org_name:
+        parts.append(f'NinjaOrg="{names["Ninja"]}"')
+    if names.get("SentinelOne") and names["SentinelOne"] != org_name:
+        parts.append(f'S1Site="{names["SentinelOne"]}"')
+    if names.get("LogMeIn") and names["LogMeIn"] != org_name:
+        parts.append(f'LMIGroup="{names["LogMeIn"]}"')
+    return "; ".join(parts) if parts else None
 
 
 def load_requirements() -> list[Requirement]:

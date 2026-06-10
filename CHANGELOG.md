@@ -2,6 +2,40 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.17.0] — 2026-06-10
+
+### Added
+- Migration `020_agent_compliance_parity.sql`:
+  - `org_alignment_current`;
+  - `org_alignment_history`;
+  - alignment views for current state and mismatches;
+  - PowerShell parity columns on current/history compliance matrix.
+- Persisted org alignment report fields:
+  - `MATCHED` / `FUZZY` / `MISSING` / `NA` / `CONFIGURED`;
+  - overall alignment status;
+  - platform routing names;
+  - merged-from details;
+  - suggested config.
+- Matrix parity fields:
+  - org alignment status;
+  - per-platform presence, online state, last seen, and device IDs;
+  - S1 exemption;
+  - degraded state.
+- Agent Compliance dashboard cards for alignment mismatches and
+  degraded devices.
+- `AGENT_COMPLIANCE_V2_BLUEPRINT.md`.
+
+### Changed
+- Matrix `is_stale` now follows the PowerShell semantics: present on
+  at least one platform and active on none.
+- Matrix `is_degraded` now follows the PowerShell semantics:
+  compliant, not stale, but at least one required-present platform is
+  inactive.
+
+### Notes
+- This is the parity/schema pass before v2 architecture cleanup.
+- Commit: `TBD`
+
 ## [0.16.4] — 2026-06-10
 
 ### Fixed

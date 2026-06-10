@@ -63,7 +63,7 @@ def run() -> tuple[int, int]:
             obs
             for _, _, rows in fetched_sources
             for obs in rows
-        ])
+        ], run_id=run_id, observed_at=observed_at)
         clients = load_clients()
         aliases = load_aliases()
         for source_run_id, source, rows in fetched_sources:
@@ -71,6 +71,7 @@ def run() -> tuple[int, int]:
             _insert_observations(source_run_id, resolved)
             _finish_source_run(source_run_id, "ok", len(resolved), None)
             all_observations.extend(resolved)
+        alignment_by_client = _load_alignment_by_client()
 
         matrix_rows, finding_rows = _build_matrix_and_findings(
             run_id=run_id,
@@ -80,6 +81,7 @@ def run() -> tuple[int, int]:
             requirements=requirements,
             sources=sources,
             source_status=source_status,
+            alignment_by_client=alignment_by_client,
         )
         _write_matrix(run_id, matrix_rows)
         _write_findings(finding_rows)
@@ -181,6 +183,7 @@ def _build_matrix_and_findings(
     requirements: list[Any],
     sources: list[SourceConfig],
     source_status: dict[int, str],
+    alignment_by_client: dict[int, dict[str, Any]],
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     observations = _apply_prefix_matches(observations)
     by_client_norm: dict[tuple[int, str], list[dict[str, Any]]] = {}
@@ -223,8 +226,27 @@ def _build_matrix_and_findings(
             platform for platform, row in latest_by_platform.items()
             if platform in required and _is_stale(row.get("last_seen_at"), observed_at, max_age_days)
         )
+        present_required = tuple(platform for platform in required if platform in latest_by_platform)
+        active_required = tuple(
+            platform for platform in present_required
+            if _platform_active(latest_by_platform[platform], observed_at, max_age_days)
+        )
+        active_any = any(
+            _platform_active(row, observed_at, max_age_days)
+            for row in latest_by_platform.values()
+        )
+        present_any = bool(latest_by_platform)
+        ps_is_stale = present_any and not active_any
         cross_client = len(clients_by_norm.get(norm, set())) > 1
-        is_compliant = not missing and not stale and not unknown and not cross_client
+        is_degraded = (
+            not ps_is_stale
+            and not missing
+            and not unknown
+            and len(present_required) > 0
+            and len(active_required) < len(present_required)
+        )
+        is_compliant = not missing and not ps_is_stale and not unknown and not cross_client
+        alignment = alignment_by_client.get(client_id, {})
         signature = _hash("|".join([
             client.client_name,
             norm,
@@ -234,10 +256,23 @@ def _build_matrix_and_findings(
             ",".join(unknown),
             str(cross_client),
             str(no_av_exempt),
+            str(is_degraded),
         ]))
+        ninja_info = _platform_info(latest_by_platform.get("Ninja"))
+        sc_info = _platform_info(latest_by_platform.get("ScreenConnect"))
+        s1_info = _platform_info(latest_by_platform.get("SentinelOne"))
+        lmi_info = _platform_info(latest_by_platform.get("LogMeIn"))
         matrix = {
             "client_id": client_id,
             "client_name": client.client_name,
+            "org_align_status": alignment.get("overall_status"),
+            "ninja_status": alignment.get("ninja_status"),
+            "sc_status": alignment.get("sc_status"),
+            "s1_status": alignment.get("s1_status"),
+            "lmi_status": alignment.get("lmi_status"),
+            "ninja_platform_name": alignment.get("ninja_platform_name"),
+            "s1_platform_name": alignment.get("s1_platform_name"),
+            "lmi_platform_name": alignment.get("lmi_platform_name"),
             "norm_name": norm,
             "hostname": primary["hostname"],
             "device_type": device_scope,
@@ -250,9 +285,28 @@ def _build_matrix_and_findings(
             "unknown_required_platforms": list(unknown),
             "source_failed_platforms": list(source_failed),
             "is_compliant": is_compliant,
-            "is_stale": bool(stale),
+            "is_stale": ps_is_stale,
+            "is_degraded": is_degraded,
             "is_unknown": bool(unknown),
             "cross_client_conflict": cross_client,
+            "s1_exempt": no_av_exempt,
+            "in_ninja": ninja_info["present"],
+            "ninja_online": ninja_info["online"],
+            "ninja_last_seen": ninja_info["last_seen"],
+            "ninja_device_id": ninja_info["device_id"],
+            "in_screenconnect": sc_info["present"],
+            "screenconnect_online": sc_info["online"],
+            "screenconnect_last_seen": sc_info["last_seen"],
+            "screenconnect_device_id": sc_info["device_id"],
+            "screenconnect_dup": _screenconnect_dup(latest_by_platform.get("ScreenConnect")),
+            "in_sentinelone": s1_info["present"],
+            "sentinelone_online": s1_info["online"],
+            "sentinelone_last_seen": s1_info["last_seen"],
+            "sentinelone_device_id": s1_info["device_id"],
+            "in_logmein": lmi_info["present"],
+            "logmein_online": lmi_info["online"],
+            "logmein_last_seen": lmi_info["last_seen"],
+            "logmein_device_id": lmi_info["device_id"],
             "finding_signature": signature,
             "evaluated_at": observed_at,
         }
@@ -271,6 +325,33 @@ def _source_failure_platforms(
         source.source_id: source.platform
         for source in sources
         if source_status.get(source.source_id) == "failed"
+    }
+
+
+def _load_alignment_by_client() -> dict[int, dict[str, Any]]:
+    with db.transaction() as cur:
+        cur.execute(
+            """
+            SELECT
+                client_id, overall_status, ninja_status, sc_status,
+                s1_status, lmi_status, ninja_platform_name,
+                s1_platform_name, lmi_platform_name
+            FROM ninja_agent_compliance.org_alignment_current
+            """
+        )
+        rows = cur.fetchall()
+    return {
+        row[0]: {
+            "overall_status": row[1],
+            "ninja_status": row[2],
+            "sc_status": row[3],
+            "s1_status": row[4],
+            "lmi_status": row[5],
+            "ninja_platform_name": row[6],
+            "s1_platform_name": row[7],
+            "lmi_platform_name": row[8],
+        }
+        for row in rows
     }
 
 
@@ -369,6 +450,36 @@ def _is_stale(value: datetime | None, now: datetime, max_age_days: int) -> bool:
     if value.tzinfo is None:
         value = value.replace(tzinfo=timezone.utc)
     return (now - value).days > max_age_days
+
+
+def _platform_active(row: dict[str, Any], now: datetime, max_age_days: int) -> bool:
+    if row.get("is_online") is True:
+        return True
+    last_seen = row.get("last_seen_at")
+    return not _is_stale(last_seen, now, max_age_days)
+
+
+def _platform_info(row: dict[str, Any] | None) -> dict[str, Any]:
+    if not row:
+        return {
+            "present": False,
+            "online": None,
+            "last_seen": None,
+            "device_id": "",
+        }
+    return {
+        "present": True,
+        "online": row.get("is_online"),
+        "last_seen": row.get("last_seen_at"),
+        "device_id": row.get("platform_device_id") or "",
+    }
+
+
+def _screenconnect_dup(row: dict[str, Any] | None) -> bool:
+    if not row:
+        return False
+    raw = _raw_json_obj(row.get("raw_data"))
+    return bool(raw.get("IsDup")) if isinstance(raw, dict) else False
 
 
 def _findings_for_matrix(

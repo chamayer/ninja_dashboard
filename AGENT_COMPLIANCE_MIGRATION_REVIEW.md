@@ -39,16 +39,18 @@ Original script reviewed:
   selection now follows the original script: configured client, then
   Ninja, then SentinelOne, then LogMeIn. Fuzzy non-Ninja absorption into
   Ninja is limited to exactly one complementary match.
+- v0.17.0 added first-class persisted parity output:
+  `org_alignment_current`, `org_alignment_history`, alignment mismatch
+  views, PowerShell-style alignment statuses, per-platform matrix
+  presence/online/last-seen/device-id fields, `s1_exempt`, and
+  `is_degraded`.
 
 ## Still intentionally not identical
 
 - ScreenConnect is modeled as per-client sources instead of the original
   UTA-only flat lookup. This is the desired platform model for v1.
-- Full org-alignment status fields (`MATCHED`, `FUZZY`, `MISSING`) are
-  not yet persisted as a dedicated DB table/view.
-- Full degraded-state semantics are not yet represented as separate
-  matrix columns. Current v1 records missing, stale, unknown, and
-  cross-client conflict states.
+- Full PowerShell parity now depends on live validation against the
+  original report outputs for the same run window.
 
 ## Re-review focus after deployment
 
