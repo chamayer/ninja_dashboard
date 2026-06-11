@@ -207,7 +207,7 @@ def _build_devices_parameters() -> list[dict[str, Any]]:
         _param_multiselect(PARAM_MISSING, "Missing platform", "missing", PLATFORM_VALUES),
         _param_multiselect(PARAM_ONLINE_IN, "Online in", "online_in", PLATFORM_VALUES),
         _param_multiselect(PARAM_STATE, "State", "state", STATE_VALUES),
-        _param_multiselect(PARAM_AV_EXEMPT, "AV exempt", "av", AV_EXEMPT_VALUES),
+        _param_multiselect(PARAM_AV_EXEMPT, "NO AV", "av", AV_EXEMPT_VALUES),
     ]
 
 
@@ -219,7 +219,7 @@ _DEVICES_FILTER_TAGS = {
     "missing": _tag("missing", "Missing platform"),
     "online_in": _tag("online_in", "Online in"),
     "state": _tag("state", "State"),
-    "av": _tag("av", "AV exempt"),
+    "av": _tag("av", "NO AV"),
 }
 
 
@@ -306,7 +306,7 @@ DASHBOARDS = [
                             WHEN is_stale THEN 'Stale'
                             ELSE 'Review'
                         END AS "State",
-                        CASE WHEN s1_exempt THEN 'Yes' ELSE 'No' END AS "AV",
+                        CASE WHEN s1_exempt THEN 'Yes' ELSE 'No' END AS "NO AV",
                         'Ignore' AS "Action"
                     FROM ninja_agent_compliance.v_remediation_candidates
                     WHERE 1=1
@@ -501,7 +501,7 @@ DASHBOARDS = [
                         hostname AS "Device",
                         device_type AS "Type",
                         COALESCE(NULLIF(os_name, ''), '') AS "OS",
-                        CASE WHEN s1_exempt THEN 'Yes' ELSE 'No' END AS "AV exempt",
+                        CASE WHEN s1_exempt THEN 'Yes' ELSE 'No' END AS "NO AV",
                         missing_platform AS "Missing",
                         online_platform AS "Online in",
                         COALESCE(TO_CHAR(last_seen_at, 'YYYY-MM-DD HH24:MI'), 'Unknown') AS "Seen there",

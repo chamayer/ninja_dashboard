@@ -40,9 +40,15 @@ def fetch(source: SourceConfig, observed_at: datetime) -> list[dict]:
                     o.name AS organization_name,
                     o.id::text AS organization_id,
                     s.offline,
-                    s.last_contact
+                    s.last_contact,
+                    p.name  AS policy_name,
+                    rp.name AS role_policy_name
                 FROM ninja_core.devices d
                 JOIN ninja_core.organizations o ON o.id = d.organization_id
+                LEFT JOIN ninja_core.policies p
+                       ON p.id = d.policy_id
+                LEFT JOIN ninja_core.policies rp
+                       ON rp.id = d.role_policy_id
                 LEFT JOIN LATERAL (
                     SELECT offline, last_contact
                     FROM ninja_core.device_snapshots s
@@ -62,11 +68,20 @@ def fetch(source: SourceConfig, observed_at: datetime) -> list[dict]:
         if not hostname or not norm:
             continue
         raw_data = dict(row["data"] or {})
+        # PowerShell parity: NO AV exemption fires when any of the device
+        # tags array OR the assigned policy / role-policy name contains
+        # "NO AV". The previous code checked raw_data["policy"] /
+        # raw_data["rolePolicy"] / raw_data["rolePolicyName"], none of
+        # which exist on /v2/devices-detailed — Ninja only returns the
+        # policy IDs there. Resolve through ninja_core.policies instead.
         raw_data["_agent_compliance"] = {
-            "no_av_exempt": _contains_no_av(raw_data.get("tags"))
-            or _contains_no_av(raw_data.get("rolePolicyName"))
-            or _contains_no_av(raw_data.get("policy"))
-            or _contains_no_av(raw_data.get("rolePolicy")),
+            "no_av_exempt": (
+                _contains_no_av(raw_data.get("tags"))
+                or _contains_no_av(row.get("policy_name"))
+                or _contains_no_av(row.get("role_policy_name"))
+            ),
+            "policy_name": row.get("policy_name"),
+            "role_policy_name": row.get("role_policy_name"),
         }
         observations.append({
             "observed_at": observed_at,
