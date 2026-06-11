@@ -40,9 +40,11 @@ PARAM_CUSTOMER = "p_dev_customer"
 PARAM_MISSING = "p_dev_missing"
 PARAM_ONLINE_IN = "p_dev_online_in"
 PARAM_STATE = "p_dev_state"
+PARAM_AV_EXEMPT = "p_dev_av"
 
 PLATFORM_VALUES = ["Ninja", "ScreenConnect", "SentinelOne", "LogMeIn"]
 STATE_VALUES = ["Stale", "Degraded", "Review"]
+AV_EXEMPT_VALUES = ["Yes", "No"]
 
 NAV_ORDER = [DASH_TODAY, DASH_DEVICES, DASH_CUSTOMERS, DASH_HEALTH, DASH_DEBUG]
 NAV_LABELS = {
@@ -205,6 +207,7 @@ def _build_devices_parameters() -> list[dict[str, Any]]:
         _param_multiselect(PARAM_MISSING, "Missing platform", "missing", PLATFORM_VALUES),
         _param_multiselect(PARAM_ONLINE_IN, "Online in", "online_in", PLATFORM_VALUES),
         _param_multiselect(PARAM_STATE, "State", "state", STATE_VALUES),
+        _param_multiselect(PARAM_AV_EXEMPT, "AV exempt", "av", AV_EXEMPT_VALUES),
     ]
 
 
@@ -216,6 +219,7 @@ _DEVICES_FILTER_TAGS = {
     "missing": _tag("missing", "Missing platform"),
     "online_in": _tag("online_in", "Online in"),
     "state": _tag("state", "State"),
+    "av": _tag("av", "AV exempt"),
 }
 
 
@@ -314,6 +318,7 @@ DASHBOARDS = [
                               ELSE 'Review'
                           END
                       ) IN ({{state}})]]
+                      [[AND (CASE WHEN s1_exempt THEN 'Yes' ELSE 'No' END) IN ({{av}})]]
                     ORDER BY client_name, hostname
                     LIMIT 500
                 """,
@@ -329,10 +334,12 @@ DASHBOARDS = [
                 template_tags={
                     "customer": _DEVICES_FILTER_TAGS["customer"],
                     "state": _DEVICES_FILTER_TAGS["state"],
+                    "av": _DEVICES_FILTER_TAGS["av"],
                 },
                 param_mappings={
                     PARAM_CUSTOMER: _mapping("customer"),
                     PARAM_STATE: _mapping("state"),
+                    PARAM_AV_EXEMPT: _mapping("av"),
                 },
             ),
             _card(
@@ -345,6 +352,7 @@ DASHBOARDS = [
                             m.client_id,
                             m.client_name,
                             m.norm_name,
+                            m.s1_exempt,
                             missing.platform AS missing_platform,
                             online.platform AS online_platform
                         FROM ninja_agent_compliance.v_compliance_matrix_current m
@@ -360,7 +368,6 @@ DASHBOARDS = [
                          AND online.platform <> missing.platform
                         WHERE NOT m.is_stale
                           AND NOT m.is_unknown
-                          AND NOT (missing.platform = 'SentinelOne' AND m.s1_exempt)
                     )
                     SELECT
                         missing_platform AS "Missing",
@@ -371,6 +378,14 @@ DASHBOARDS = [
                       [[AND client_name IN ({{customer}})]]
                       [[AND missing_platform IN ({{missing}})]]
                       [[AND online_platform IN ({{online_in}})]]
+                      [[AND (CASE WHEN s1_exempt THEN 'Yes' ELSE 'No' END) IN ({{av}})]]
+                      -- Default: hide exempt devices from S1-gap counts.
+                      -- The user can override by selecting Yes in the AV exempt filter.
+                      AND (
+                          missing_platform <> 'SentinelOne'
+                          OR NOT s1_exempt
+                          [[OR (CASE WHEN s1_exempt THEN 'Yes' ELSE 'No' END) IN ({{av}})]]
+                      )
                     GROUP BY missing_platform, online_platform
                     ORDER BY "Devices" DESC, missing_platform, online_platform
                     LIMIT 500
@@ -384,11 +399,13 @@ DASHBOARDS = [
                     "customer": _DEVICES_FILTER_TAGS["customer"],
                     "missing": _DEVICES_FILTER_TAGS["missing"],
                     "online_in": _DEVICES_FILTER_TAGS["online_in"],
+                    "av": _DEVICES_FILTER_TAGS["av"],
                 },
                 param_mappings={
                     PARAM_CUSTOMER: _mapping("customer"),
                     PARAM_MISSING: _mapping("missing"),
                     PARAM_ONLINE_IN: _mapping("online_in"),
+                    PARAM_AV_EXEMPT: _mapping("av"),
                 },
             ),
             _card(
@@ -401,6 +418,7 @@ DASHBOARDS = [
                             m.client_id,
                             m.client_name,
                             m.norm_name,
+                            m.s1_exempt,
                             missing.platform AS missing_platform
                         FROM ninja_agent_compliance.v_compliance_matrix_current m
                         CROSS JOIN LATERAL unnest(m.missing_required_platforms) AS missing(platform)
@@ -415,7 +433,6 @@ DASHBOARDS = [
                          AND online.platform <> missing.platform
                         WHERE NOT m.is_stale
                           AND NOT m.is_unknown
-                          AND NOT (missing.platform = 'SentinelOne' AND m.s1_exempt)
                     )
                     SELECT
                         missing_platform AS "Missing",
@@ -424,6 +441,12 @@ DASHBOARDS = [
                     WHERE 1=1
                       [[AND client_name IN ({{customer}})]]
                       [[AND missing_platform IN ({{missing}})]]
+                      [[AND (CASE WHEN s1_exempt THEN 'Yes' ELSE 'No' END) IN ({{av}})]]
+                      AND (
+                          missing_platform <> 'SentinelOne'
+                          OR NOT s1_exempt
+                          [[OR (CASE WHEN s1_exempt THEN 'Yes' ELSE 'No' END) IN ({{av}})]]
+                      )
                     GROUP BY missing_platform
                     ORDER BY "Devices" DESC
                 """,
@@ -434,10 +457,12 @@ DASHBOARDS = [
                 template_tags={
                     "customer": _DEVICES_FILTER_TAGS["customer"],
                     "missing": _DEVICES_FILTER_TAGS["missing"],
+                    "av": _DEVICES_FILTER_TAGS["av"],
                 },
                 param_mappings={
                     PARAM_CUSTOMER: _mapping("customer"),
                     PARAM_MISSING: _mapping("missing"),
+                    PARAM_AV_EXEMPT: _mapping("av"),
                 },
             ),
             _card(
@@ -451,6 +476,7 @@ DASHBOARDS = [
                             m.hostname,
                             m.device_type,
                             m.os_name,
+                            m.s1_exempt,
                             m.required_platforms,
                             m.observed_platforms,
                             missing.platform AS missing_platform,
@@ -469,13 +495,13 @@ DASHBOARDS = [
                          AND online.platform <> missing.platform
                         WHERE NOT m.is_stale
                           AND NOT m.is_unknown
-                          AND NOT (missing.platform = 'SentinelOne' AND m.s1_exempt)
                     )
                     SELECT
                         client_name AS "Customer",
                         hostname AS "Device",
                         device_type AS "Type",
                         COALESCE(NULLIF(os_name, ''), '') AS "OS",
+                        CASE WHEN s1_exempt THEN 'Yes' ELSE 'No' END AS "AV exempt",
                         missing_platform AS "Missing",
                         online_platform AS "Online in",
                         COALESCE(TO_CHAR(last_seen_at, 'YYYY-MM-DD HH24:MI'), 'Unknown') AS "Seen there",
@@ -487,6 +513,12 @@ DASHBOARDS = [
                       [[AND client_name IN ({{customer}})]]
                       [[AND missing_platform IN ({{missing}})]]
                       [[AND online_platform IN ({{online_in}})]]
+                      [[AND (CASE WHEN s1_exempt THEN 'Yes' ELSE 'No' END) IN ({{av}})]]
+                      AND (
+                          missing_platform <> 'SentinelOne'
+                          OR NOT s1_exempt
+                          [[OR (CASE WHEN s1_exempt THEN 'Yes' ELSE 'No' END) IN ({{av}})]]
+                      )
                     ORDER BY missing_platform, online_platform, client_name, hostname
                     LIMIT 500
                 """,
@@ -503,11 +535,13 @@ DASHBOARDS = [
                     "customer": _DEVICES_FILTER_TAGS["customer"],
                     "missing": _DEVICES_FILTER_TAGS["missing"],
                     "online_in": _DEVICES_FILTER_TAGS["online_in"],
+                    "av": _DEVICES_FILTER_TAGS["av"],
                 },
                 param_mappings={
                     PARAM_CUSTOMER: _mapping("customer"),
                     PARAM_MISSING: _mapping("missing"),
                     PARAM_ONLINE_IN: _mapping("online_in"),
+                    PARAM_AV_EXEMPT: _mapping("av"),
                 },
             ),
             _card(
