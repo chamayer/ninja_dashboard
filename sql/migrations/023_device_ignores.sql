@@ -1,3 +1,6 @@
+ALTER TABLE ninja_agent_compliance.alert_suppressions
+    ADD COLUMN IF NOT EXISTS display_name text;
+
 CREATE OR REPLACE VIEW ninja_agent_compliance.v_device_ignores_current AS
 SELECT
     s.suppression_id,
