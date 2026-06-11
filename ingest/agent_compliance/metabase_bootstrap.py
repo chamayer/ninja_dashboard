@@ -208,26 +208,123 @@ DASHBOARDS = [
                 },
             ),
             _card(
-                "missing_s1_online_ninja",
-                "Missing SentinelOne, online in Ninja",
+                "active_gaps_summary",
+                "Missing but online elsewhere",
                 "table",
                 """
+                    WITH gaps AS (
+                        SELECT
+                            m.client_id,
+                            m.norm_name,
+                            missing.platform AS missing_platform,
+                            online.platform AS online_platform
+                        FROM ninja_agent_compliance.v_compliance_matrix_current m
+                        CROSS JOIN LATERAL unnest(m.missing_required_platforms) AS missing(platform)
+                        JOIN LATERAL (
+                            VALUES
+                                ('Ninja', m.ninja_online),
+                                ('ScreenConnect', m.screenconnect_online),
+                                ('SentinelOne', m.sentinelone_online),
+                                ('LogMeIn', m.logmein_online)
+                        ) AS online(platform, is_online)
+                          ON online.is_online IS TRUE
+                         AND online.platform <> missing.platform
+                        WHERE NOT m.is_stale
+                          AND NOT m.is_unknown
+                          AND NOT (missing.platform = 'SentinelOne' AND m.s1_exempt)
+                    )
+                    SELECT
+                        missing_platform AS "Missing",
+                        online_platform AS "Online in",
+                        COUNT(DISTINCT (client_id, norm_name)) AS "Devices"
+                    FROM gaps
+                    GROUP BY missing_platform, online_platform
+                    ORDER BY "Devices" DESC, missing_platform, online_platform
+                    LIMIT 500
+                """,
+                10, 0, 12, 6,
+            ),
+            _card(
+                "active_gaps_by_missing",
+                "Active gaps by missing platform",
+                "bar",
+                """
+                    WITH gaps AS (
+                        SELECT DISTINCT
+                            m.client_id,
+                            m.norm_name,
+                            missing.platform AS missing_platform
+                        FROM ninja_agent_compliance.v_compliance_matrix_current m
+                        CROSS JOIN LATERAL unnest(m.missing_required_platforms) AS missing(platform)
+                        JOIN LATERAL (
+                            VALUES
+                                ('Ninja', m.ninja_online),
+                                ('ScreenConnect', m.screenconnect_online),
+                                ('SentinelOne', m.sentinelone_online),
+                                ('LogMeIn', m.logmein_online)
+                        ) AS online(platform, is_online)
+                          ON online.is_online IS TRUE
+                         AND online.platform <> missing.platform
+                        WHERE NOT m.is_stale
+                          AND NOT m.is_unknown
+                          AND NOT (missing.platform = 'SentinelOne' AND m.s1_exempt)
+                    )
+                    SELECT
+                        missing_platform AS "Missing",
+                        COUNT(*) AS "Devices"
+                    FROM gaps
+                    GROUP BY missing_platform
+                    ORDER BY "Devices" DESC
+                """,
+                10, 12, 12, 6,
+            ),
+            _card(
+                "active_platform_gap_details",
+                "Active platform gap details",
+                "table",
+                """
+                    WITH gaps AS (
+                        SELECT
+                            m.client_name,
+                            m.hostname,
+                            m.device_type,
+                            m.os_name,
+                            m.required_platforms,
+                            m.observed_platforms,
+                            missing.platform AS missing_platform,
+                            online.platform AS online_platform,
+                            online.last_seen_at
+                        FROM ninja_agent_compliance.v_compliance_matrix_current m
+                        CROSS JOIN LATERAL unnest(m.missing_required_platforms) AS missing(platform)
+                        JOIN LATERAL (
+                            VALUES
+                                ('Ninja', m.ninja_online, m.ninja_last_seen),
+                                ('ScreenConnect', m.screenconnect_online, m.screenconnect_last_seen),
+                                ('SentinelOne', m.sentinelone_online, m.sentinelone_last_seen),
+                                ('LogMeIn', m.logmein_online, m.logmein_last_seen)
+                        ) AS online(platform, is_online, last_seen_at)
+                          ON online.is_online IS TRUE
+                         AND online.platform <> missing.platform
+                        WHERE NOT m.is_stale
+                          AND NOT m.is_unknown
+                          AND NOT (missing.platform = 'SentinelOne' AND m.s1_exempt)
+                    )
                     SELECT
                         client_name AS "Customer",
                         hostname AS "Device",
                         device_type AS "Type",
                         COALESCE(NULLIF(os_name, ''), '') AS "OS",
-                        COALESCE(TO_CHAR(ninja_last_seen, 'YYYY-MM-DD HH24:MI'), 'Unknown') AS "Ninja seen",
+                        missing_platform AS "Missing",
+                        online_platform AS "Online in",
+                        COALESCE(TO_CHAR(last_seen_at, 'YYYY-MM-DD HH24:MI'), 'Unknown') AS "Seen there",
+                        COALESCE(array_to_string(required_platforms, ', '), '') AS "Required",
+                        COALESCE(array_to_string(observed_platforms, ', '), '') AS "Found in",
                         'Ignore' AS "Action"
-                    FROM ninja_agent_compliance.v_compliance_matrix_current
-                    WHERE 'SentinelOne' = ANY(missing_required_platforms)
-                      AND in_ninja
-                      AND ninja_online IS TRUE
-                      AND NOT s1_exempt
-                    ORDER BY client_name, hostname
+                    FROM gaps
+                    ORDER BY missing_platform, online_platform, client_name, hostname
                     LIMIT 500
                 """,
-                10, 0, 24, 8,
+                16, 0, 24, 10,
                 column_click_behaviors={
                     "Action": {
                         "url_template": _url_template(
@@ -252,7 +349,7 @@ DASHBOARDS = [
                     ORDER BY updated_at DESC, client_name, display_name
                     LIMIT 200
                 """,
-                18, 0, 24, 6,
+                26, 0, 24, 6,
                 column_click_behaviors={
                     "Action": {
                         "url_template": _url_template(
