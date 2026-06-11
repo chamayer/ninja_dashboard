@@ -520,6 +520,81 @@ def _suggested_config(org_name: str, names: dict[str, str]) -> str | None:
     return "; ".join(parts) if parts else None
 
 
+def promote_alignment_aliases(client_id: int, updated_by: str = "agent_compliance") -> int:
+    """Promote the current alignment names into manual aliases."""
+    with db.transaction() as cur:
+        cur.execute(
+            """
+            SELECT org_name, ninja_platform_name, s1_platform_name, lmi_platform_name
+            FROM ninja_agent_compliance.org_alignment_current
+            WHERE client_id = %s
+            """,
+            (client_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return 0
+        org_name, ninja_name, s1_name, lmi_name = row
+        alias_rows: list[tuple[int, str, str, str, str]] = []
+        for platform, alias_type, value in (
+            ("Ninja", "org_name", ninja_name),
+            ("SentinelOne", "site_name", s1_name),
+            ("LogMeIn", "group_name", lmi_name),
+        ):
+            if not value:
+                continue
+            if normalize_org_name(value) == normalize_org_name(org_name):
+                continue
+            alias_rows.append((
+                client_id,
+                platform,
+                alias_type,
+                value,
+                "Promoted from alignment review",
+            ))
+        if not alias_rows:
+            return 0
+        cur.executemany(
+            """
+            INSERT INTO ninja_agent_compliance.client_aliases
+                (client_id, platform, alias_type, alias_value, source, notes, updated_by)
+            VALUES (%s, %s, %s, %s, 'manual', %s, %s)
+            ON CONFLICT (client_id, platform, (COALESCE(source_id, 0)), alias_type, alias_value)
+            DO UPDATE SET
+                enabled = true,
+                source = 'manual',
+                notes = EXCLUDED.notes,
+                updated_at = now(),
+                updated_by = EXCLUDED.updated_by
+            """,
+            [(client_id, platform, alias_type, value, notes, updated_by) for client_id, platform, alias_type, value, notes in alias_rows],
+        )
+        return len(alias_rows)
+
+
+def add_org_exclude(pattern: str, updated_by: str = "agent_compliance", notes: str | None = None) -> bool:
+    """Add or promote a normalized org exclude."""
+    normalized = pattern.strip().lower()
+    if not normalized:
+        return False
+    with db.transaction() as cur:
+        cur.execute(
+            """
+            INSERT INTO ninja_agent_compliance.org_excludes
+                (pattern, source, notes, enabled, updated_by)
+            VALUES (%s, 'manual', %s, true, %s)
+            ON CONFLICT (pattern) DO UPDATE SET
+                enabled = true,
+                source = 'manual',
+                notes = COALESCE(EXCLUDED.notes, ninja_agent_compliance.org_excludes.notes),
+                updated_at = now(),
+                updated_by = EXCLUDED.updated_by
+            """,
+            (normalized, notes, updated_by),
+        )
+    return True
+
+
 def load_requirements() -> list[Requirement]:
     with db.transaction() as cur:
         cur.execute(

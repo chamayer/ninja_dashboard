@@ -25,6 +25,7 @@ import logging
 import socketserver
 import threading
 import time
+from urllib.parse import parse_qs, urlparse
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -34,6 +35,10 @@ from ingest import db, migrations
 from ingest.config import settings
 from ingest.activities import ingest as activities_ingest
 from ingest.agent_compliance import ingest as agent_compliance_ingest
+from ingest.agent_compliance.config_loader import (
+    add_org_exclude,
+    promote_alignment_aliases,
+)
 from ingest.core import (
     custom_fields,
     device_health,
@@ -229,6 +234,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 self._respond(200, b"ready\n")
             else:
                 self._respond(503, b"starting\n")
+        elif self.path.startswith("/agent-compliance/action/"):
+            self._handle_agent_compliance_action()
         else:
             self.send_error(404)
 
@@ -254,8 +261,52 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         elif self.path == "/bootstrap-metabase":
             threading.Thread(target=bootstrap_metabase, daemon=True).start()
             self._respond(202, b"metabase bootstrap scheduled\n")
+        elif self.path.startswith("/agent-compliance/action/"):
+            self._handle_agent_compliance_action()
         else:
             self.send_error(404)
+
+    def _handle_agent_compliance_action(self) -> None:
+        if not _READY.is_set():
+            self._respond(503, b"still starting - try again shortly\n")
+            return
+        parsed = urlparse(self.path)
+        params = parse_qs(parsed.query)
+        confirm = params.get("confirm", ["0"])[0]
+        if confirm != "1":
+            self._respond(400, b"missing confirm=1\n")
+            return
+
+        if parsed.path == "/agent-compliance/action/add-alias":
+            client_id_value = params.get("client_id", [""])[0]
+            try:
+                client_id = int(client_id_value)
+            except ValueError:
+                self._respond(400, b"invalid client_id\n")
+                return
+            count = promote_alignment_aliases(client_id)
+            body = f"added {count} alias row(s)\n".encode("utf-8")
+            self._respond(200, body)
+            return
+
+        if parsed.path == "/agent-compliance/action/exclude-org":
+            pattern_hex = params.get("pattern_hex", [""])[0]
+            if not pattern_hex:
+                self._respond(400, b"missing pattern_hex\n")
+                return
+            try:
+                pattern = bytes.fromhex(pattern_hex).decode("utf-8")
+            except ValueError:
+                self._respond(400, b"invalid pattern_hex\n")
+                return
+            if add_org_exclude(pattern, notes="Added from operator dashboard"):
+                body = f"excluded {pattern}\n".encode("utf-8")
+                self._respond(200, body)
+            else:
+                self._respond(400, b"blank pattern\n")
+            return
+
+        self.send_error(404)
 
     def _respond(self, code: int, body: bytes) -> None:
         self.send_response(code)

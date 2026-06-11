@@ -232,6 +232,40 @@ V1 tables:
 - Cross-client or wrong-tenant conflicts
 - Recent alert events
 
+## Humanized Dashboard Shape
+
+Primary dashboard layout should be operator-first:
+
+- top nav bar like the patching dashboards;
+- primary landing page = Command Center;
+- device-level actions on the operator path;
+- org/system configuration on the admin path;
+- debug details kept on a separate dashboard.
+
+Primary table language should be humanized:
+
+- short labels;
+- no schema names;
+- no quoted values unless absolutely needed;
+- no bracketed JSON-style display in operator tables;
+- show only what an operator needs to act.
+
+Recommended top-level dashboards:
+
+- Command Center
+- Devices
+- Org Review
+- Source Health
+- Debug
+
+Recommended CTAs:
+
+- Add alias
+- Exclude org
+- Open device
+- Review source
+- Mark resolved
+
 Filters:
 - Client
 - Device type
@@ -246,6 +280,16 @@ Alerting is in scope for v1.
 Delivery starts with generic webhook, SMTP email, and Zendesk request
 routes. Routes are DB-configured; credentials and target secrets stay
 in `.env`.
+
+Alert model:
+
+- device alerts for missing combos, stale coverage, degraded devices,
+  and cross-client conflicts;
+- org review items for aliases, excludes, and unresolved names;
+- source alerts for collector failure or recovery;
+- system alerts for ingest, scheduling, or delivery failures.
+
+Alerts should fire on state changes, not on unchanged noise.
 
 Environment:
 

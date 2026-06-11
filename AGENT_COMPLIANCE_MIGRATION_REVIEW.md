@@ -65,3 +65,14 @@ Run a fresh Agent Compliance collection and inspect:
 - LogMeIn observations with blank group names
 - S1 missing findings where Ninja raw data indicates `NO AV`
 - prefix-matched hostnames where `match_name <> norm_name`
+
+## UI Follow-Up
+
+The next dashboard pass should follow the operator UI contract in
+`AGENT_COMPLIANCE_OPERATOR_UI.md`:
+
+- operator-first landing page;
+- admin review path for aliases and excludes;
+- debug-only raw detail views;
+- humanized table labels and concise rows;
+- top nav matching the patching dashboards.

@@ -9,6 +9,10 @@ The PowerShell report is the v1 parity contract. v2 should preserve
 that behavior while separating collection, alignment, evaluation,
 dashboarding, and alerting into auditable phases.
 
+The dashboard must be human-navigatable. The primary experience should
+be operator-first, with a separate admin/review path and a debug path
+that stays out of the way.
+
 ## Design Principles
 
 - Raw platform data is immutable per run.
@@ -17,6 +21,9 @@ dashboarding, and alerting into auditable phases.
 - Alerts are generated from findings, not directly from collectors.
 - Configuration belongs in Postgres with optional web/UI management,
   not hidden in `.env` except for secrets.
+- Primary UI text should be human language, not schema language.
+- Primary tables should be concise; raw details belong in debug views.
+- Top navigation should mirror the patching dashboards.
 
 ## Phase Model
 
@@ -61,12 +68,21 @@ dashboarding, and alerting into auditable phases.
 
 5. Alerting
    - Route by finding type, platform, client, severity.
+   - Split alerts into device, org review, source, and system levels.
    - Support email and Zendesk early.
    - Keep Ninja API posting optional because Ninja can be the missing
      or unhealthy platform.
+   - Do not alert on unchanged review noise; alert on state changes and
+     important recoveries.
 
 6. Dashboard
    - One Metabase collection: `Agent Compliance`.
+   - Primary dashboards:
+     - Command Center;
+     - Devices;
+     - Org Review;
+     - Source Health;
+     - Debug.
    - Views/cards:
      - source health;
      - org alignment;
@@ -76,6 +92,8 @@ dashboarding, and alerting into auditable phases.
      - stale/degraded devices;
      - active findings;
      - alert delivery history.
+   - Primary dashboard text should stay short and action-oriented.
+   - Debug dashboards may expose raw IDs, raw payloads, and mapping notes.
 
 ## Data Model Targets
 
@@ -101,6 +119,15 @@ Good idea for v2, with limits:
 - Web UI should not store raw secrets directly.
   - Secrets remain env/secret-store references.
   - DB stores secret reference names.
+- Split UI responsibility:
+  - operator views for device-level actions;
+  - admin views for org/system configuration;
+  - debug views for raw internal state.
+
+See `AGENT_COMPLIANCE_OPERATOR_UI.md` for the operator-facing
+navigation and wording contract.
+See `AGENT_COMPLIANCE_ALERT_WORKFLOW.md` for the alert taxonomy and
+route behavior.
 
 ## v2 Milestones
 
@@ -113,6 +140,8 @@ Good idea for v2, with limits:
    - promote alignment alias to manual alias.
 5. Add alert routing rules per finding type/client/platform.
 6. Add retention policies for observations/history.
+7. Add operator/admin dashboard navigation and humanized labels as the
+   default presentation layer.
 
 ## Non-Goals
 

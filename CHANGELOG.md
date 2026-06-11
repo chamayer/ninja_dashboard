@@ -2,6 +2,50 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.17.5] — 2026-06-11
+
+### Added
+- Agent Compliance Org Review rows now include explicit action links
+  for:
+  - Add alias
+  - Exclude org
+- Added loopback operator endpoints in the ingest service to write
+  promoted aliases and excludes back into Postgres.
+
+### Fixed
+- The operator review flow no longer stops at a read-only dashboard; it
+  can now push approved alias/exclude changes into the DB-backed config.
+
+### Notes
+- Commit: `TBD`
+
+## [0.17.4] — 2026-06-11
+
+### Added
+- Agent Compliance Metabase now provisions separate operator-facing
+  dashboards for:
+  - Command Center
+  - Devices
+  - Org Review
+  - Source Health
+  - Debug
+- Top nav bars were added to the Agent Compliance dashboards so the
+  operator can move between those views like the patching dashboards.
+- Primary Agent Compliance tables now use humanized labels and concise
+  columns instead of schema-style names.
+- Added `AGENT_COMPLIANCE_OPERATOR_UI.md` and
+  `AGENT_COMPLIANCE_ALERT_WORKFLOW.md` to define the dashboard and
+  alert contract before further build-out.
+
+### Fixed
+- Debug/raw observation details are now isolated to the Debug dashboard
+  instead of appearing in the primary operator view.
+- Org review and source health work are separated from device-level
+  remediation work to make the primary dashboard easier to navigate.
+
+### Notes
+- Commit: `TBD`
+
 ## [0.17.3] — 2026-06-10
 
 ### Added
