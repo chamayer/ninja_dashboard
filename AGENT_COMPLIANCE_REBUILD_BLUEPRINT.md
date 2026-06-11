@@ -37,6 +37,12 @@ It should show:
 
 These should be plain labels, not metric jargon.
 
+Recommended labels:
+- Today
+- Devices
+- Health
+- Debug
+
 ### Devices
 
 This is the operator queue.
@@ -61,6 +67,14 @@ It is for real names that need a decision:
 - confirm a mismatch.
 
 It should not be polluted by placeholders or leftover audit rows.
+
+In the rebuilt dashboard, mapping work belongs in the supporting views,
+not as a separate noisy top-level page. The main operator path is:
+
+1. Today for the summary.
+2. Devices for device work.
+3. Health for source health and new names.
+4. Debug for leftovers and admin-only mapping cleanup.
 
 ### Health
 
@@ -107,6 +121,13 @@ Use either:
 - a separate action page;
 - or a dedicated action panel.
 
+For the rebuild, the preferred pattern is:
+- keep the table value as a short label;
+- attach the URL in click behavior, not the SQL output;
+- let the browser reveal the target only when the operator hovers or clicks.
+
+Raw URLs should never be selected as visible data.
+
 ## Alert Design
 
 Alerts should only come from meaningful current-state queues:
@@ -141,4 +162,3 @@ The rebuild is acceptable when:
 4. Placeholder names are not part of the main flow.
 5. No table field shows a raw action URL.
 6. Debug still exposes the raw data when needed.
-

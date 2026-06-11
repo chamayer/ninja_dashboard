@@ -1,35 +1,41 @@
-"""Provision the Agent Compliance Metabase collection and dashboards."""
+"""Provision the Agent Compliance Metabase collection and dashboards.
+
+This module builds the dashboard surface from scratch around a simple
+human workflow:
+
+* Today: what needs attention right now.
+* Devices: device-level fixes and ignore/restore.
+* Health: source health plus new names that need a decision.
+* Debug: raw leftovers and admin-level mapping cleanup.
+
+No visible table field should contain a raw URL. Action cells are plain
+labels, and the link target lives in the card visualization settings.
+"""
 
 from __future__ import annotations
 
 import logging
 from typing import Any
-from urllib.parse import quote_plus
 
 import httpx
 
 from ingest.config import settings
 
 log = logging.getLogger(__name__)
-ACTION_BASE_URL = settings.AGENT_COMPLIANCE_ACTION_BASE_URL.rstrip("/")
 
+ACTION_BASE_URL = settings.AGENT_COMPLIANCE_ACTION_BASE_URL.rstrip("/")
 COLLECTION_NAME = "Agent Compliance"
 
-DASH_COMMAND = "Agent Compliance - Today"
+DASH_TODAY = "Agent Compliance - Today"
 DASH_DEVICES = "Agent Compliance - Devices"
-DASH_SOURCE = "Agent Compliance - Health"
+DASH_HEALTH = "Agent Compliance - Health"
 DASH_DEBUG = "Agent Compliance - Debug"
 
-NAV_ORDER = [
-    DASH_COMMAND,
-    DASH_DEVICES,
-    DASH_SOURCE,
-    DASH_DEBUG,
-]
-NAV_DISPLAY_NAMES = {
-    DASH_COMMAND: "Home",
+NAV_ORDER = [DASH_TODAY, DASH_DEVICES, DASH_HEALTH, DASH_DEBUG]
+NAV_LABELS = {
+    DASH_TODAY: "Today",
     DASH_DEVICES: "Devices",
-    DASH_SOURCE: "Health",
+    DASH_HEALTH: "Health",
     DASH_DEBUG: "Debug",
 }
 NAV_HEIGHT = 2
@@ -45,6 +51,7 @@ def _card(
     size_x: int,
     size_y: int,
     click_behavior: dict[str, Any] | None = None,
+    column_click_behaviors: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     card = {
         "key": key,
@@ -58,126 +65,109 @@ def _card(
     }
     if click_behavior is not None:
         card["click_behavior"] = click_behavior
+    if column_click_behaviors is not None:
+        card["column_click_behaviors"] = column_click_behaviors
     return card
 
 
-def _build_click_behavior_json(spec: dict[str, Any], dash_id_by_name: dict[str, int]) -> dict[str, Any] | None:
+def _dashboard_link(target: str) -> dict[str, Any]:
+    return {"target": target}
+
+
+def _url_template(path: str, params: list[tuple[str, str]]) -> str:
+    query = "&".join(f"{key}={{{{{field}}}}}" for key, field in params)
+    suffix = f"?{query}&confirm=1" if query else "?confirm=1"
+    return f"{ACTION_BASE_URL}{path}{suffix}"
+
+
+def _build_click_behavior_json(
+    spec: dict[str, Any],
+    dash_id_by_name: dict[str, int],
+) -> dict[str, Any] | None:
     target = spec.get("target")
-    if not target:
-        return None
-    target_id = dash_id_by_name.get(target)
-    if target_id is None:
-        log.warning("Click behavior: unknown target dashboard %r", target)
-        return None
-    path = f"/dashboard/{target_id}"
-    preset = spec.get("preset") or {}
-    if preset:
-        qs = "&".join(f"{quote_plus(str(k))}={quote_plus(str(v))}" for k, v in preset.items())
-        path = f"{path}?{qs}"
-    return {
-        "type": "link",
-        "linkType": "url",
-        "linkTemplate": path,
-    }
+    if target:
+        target_id = dash_id_by_name.get(target)
+        if target_id is None:
+            log.warning("Click behavior: unknown target dashboard %r", target)
+            return None
+        return {
+            "type": "link",
+            "linkType": "url",
+            "linkTemplate": f"/dashboard/{target_id}",
+        }
 
-
-def _action_url(path: str) -> str:
-    return f"{ACTION_BASE_URL}{path}"
+    url_template = spec.get("url_template")
+    if url_template:
+        return {
+            "type": "link",
+            "linkType": "url",
+            "linkTemplate": url_template,
+        }
+    return None
 
 
 DASHBOARDS = [
     {
-        "name": DASH_COMMAND,
+        "name": DASH_TODAY,
         "cards": [
             _card(
-                "compliance_percent",
+                "compliant_percent",
                 "Compliant %",
                 "scalar",
                 """
                     SELECT ROUND(
                         COUNT(*) FILTER (WHERE is_compliant) * 100.0 / NULLIF(COUNT(*), 0),
                         1
-                    ) AS compliance_percent
+                    ) AS "Compliant %"
                     FROM ninja_agent_compliance.v_compliance_matrix_current
                 """,
-                0, 0, 4, 4,
-                click_behavior={"target": DASH_DEVICES},
+                0, 0, 5, 4,
+                click_behavior=_dashboard_link(DASH_DEVICES),
             ),
             _card(
-                "devices_needing_action",
+                "devices_to_fix",
                 "Devices to fix",
                 "scalar",
                 """
-                    SELECT COUNT(*) AS devices
-                    FROM ninja_agent_compliance.v_compliance_matrix_current
-                    WHERE NOT is_compliant
+                    SELECT COUNT(*) AS "Devices to fix"
+                    FROM ninja_agent_compliance.v_remediation_candidates
                 """,
-                0, 4, 4, 4,
-                click_behavior={"target": DASH_DEVICES},
+                0, 5, 5, 4,
+                click_behavior=_dashboard_link(DASH_DEVICES),
             ),
             _card(
-                "active_findings",
-                "Degraded devices",
+                "sources_down",
+                "Sources down",
                 "scalar",
                 """
-                    SELECT COUNT(*) AS degraded_devices
-                    FROM ninja_agent_compliance.v_compliance_matrix_current
-                    WHERE is_degraded
-                """,
-                0, 8, 4, 4,
-                click_behavior={"target": DASH_DEVICES},
-            ),
-            _card(
-                "source_issues",
-                "Services down",
-                "scalar",
-                """
-                    SELECT COUNT(*) AS source_issues
+                    SELECT COUNT(*) AS "Sources down"
                     FROM ninja_agent_compliance.v_source_health_current
                     WHERE enabled AND status = 'failed'
                 """,
-                0, 12, 4, 4,
-                click_behavior={"target": DASH_SOURCE},
+                0, 10, 5, 4,
+                click_behavior=_dashboard_link(DASH_HEALTH),
             ),
             _card(
-                "org_review_queue",
-                "Names to map",
+                "names_to_review",
+                "Names to review",
                 "scalar",
                 """
-                    SELECT COUNT(*) AS orgs
-                    FROM ninja_agent_compliance.v_alignment_mismatches
-                    WHERE overall_status = 'MISMATCH'
-                      AND COALESCE(BTRIM(suggested_config), '') <> ''
+                    SELECT COUNT(*) AS "Names to review"
+                    FROM ninja_agent_compliance.v_org_candidates_current
                 """,
-                0, 16, 4, 4,
-                click_behavior={"target": DASH_SOURCE},
+                0, 15, 5, 4,
+                click_behavior=_dashboard_link(DASH_HEALTH),
             ),
             _card(
-                "unresolved_names",
-                "Unmatched names",
+                "ignored_devices",
+                "Ignored devices",
                 "scalar",
                 """
-                    SELECT COUNT(*) AS unresolved_groups
-                    FROM (
-                        SELECT
-                            source_name,
-                            platform,
-                            COALESCE(NULLIF(platform_group_name, ''), 'Unknown') AS source_group,
-                            COALESCE(NULLIF(platform_group_id, ''), 'Unknown') AS source_group_id
-                        FROM ninja_agent_compliance.platform_observations
-                        WHERE resolved_client_id IS NULL
-                          AND observed_at > now() - INTERVAL '7 days'
-                          AND NOT EXISTS (
-                                SELECT 1
-                                FROM ninja_agent_compliance.org_excludes e
-                                WHERE e.enabled
-                                  AND lower(trim(COALESCE(platform_group_name, ''))) = e.pattern
-                          )
-                        GROUP BY source_name, platform, source_group, source_group_id
-                    ) unresolved_groups
+                    SELECT COUNT(*) AS "Ignored devices"
+                    FROM ninja_agent_compliance.v_device_ignores_current
                 """,
                 0, 20, 4, 4,
-                click_behavior={"target": DASH_SOURCE},
+                click_behavior=_dashboard_link(DASH_DEVICES),
             ),
         ],
     },
@@ -185,112 +175,74 @@ DASHBOARDS = [
         "name": DASH_DEVICES,
         "cards": [
             _card(
-                "remediation_candidates",
-                "Devices to fix",
+                "device_queue",
+                "Need action",
                 "table",
                 """
                     SELECT
                         client_name AS "Org",
                         hostname AS "Device",
                         device_type AS "Type",
-                        COALESCE(array_to_string(missing_required_platforms, ', '), 'None') AS "Missing",
+                        COALESCE(array_to_string(missing_required_platforms, ', '), 'None') AS "Need",
                         CASE
                             WHEN is_degraded THEN 'Degraded'
                             WHEN is_stale THEN 'Stale'
-                            ELSE 'Needs review'
-                        END AS "Status",
-                        org_align_status AS "Alignment",
+                            ELSE 'Review'
+                        END AS "State",
                         CASE WHEN s1_exempt THEN 'Yes' ELSE 'No' END AS "AV",
-                        '{ACTION_BASE_URL}/a/ig?client_hex='
-                            || encode(convert_to(client_name, 'UTF8'), 'hex')
-                            || '&host_hex='
-                            || encode(convert_to(hostname, 'UTF8'), 'hex')
-                            || '&confirm=1' AS "Skip"
+                        'Ignore' AS "Action"
                     FROM ninja_agent_compliance.v_remediation_candidates
                     ORDER BY client_name, hostname
                     LIMIT 500
                 """,
-                0, 0, 24, 8,
-            ),
-            _card(
-                "degraded_devices",
-                "Degraded devices",
-                "table",
-                f"""
-                    SELECT
-                        client_name AS "Org",
-                        hostname AS "Device",
-                        device_type AS "Type",
-                        COALESCE(array_to_string(required_platforms, ', '), 'None') AS "Required",
-                        COALESCE(array_to_string(observed_platforms, ', '), 'None') AS "Observed",
-                        COALESCE(array_to_string(stale_required_platforms, ', '), 'None') AS "Stale platforms",
-                        COALESCE(TO_CHAR(ninja_last_seen, 'YYYY-MM-DD HH24:MI'), 'Unknown') AS "Ninja last seen",
-                        COALESCE(TO_CHAR(sentinelone_last_seen, 'YYYY-MM-DD HH24:MI'), 'Unknown') AS "SentinelOne last seen",
-                        COALESCE(TO_CHAR(logmein_last_seen, 'YYYY-MM-DD HH24:MI'), 'Unknown') AS "LogMeIn last seen",
-                        COALESCE(TO_CHAR(screenconnect_last_seen, 'YYYY-MM-DD HH24:MI'), 'Unknown') AS "ScreenConnect last seen"
-                    FROM ninja_agent_compliance.v_compliance_matrix_current
-                    WHERE is_degraded
-                    ORDER BY client_name, hostname
-                    LIMIT 500
-                """,
-                0, 8, 24, 8,
-            ),
-            _card(
-                "active_findings_table",
-                "Open issues",
-                "table",
-                f"""
-                    SELECT
-                        severity AS "Severity",
-                        finding_type AS "Finding",
-                        affected_platform AS "Platform",
-                        client_name AS "Org",
-                        hostname AS "Device",
-                        summary AS "Summary",
-                        last_seen_at AS "Last seen",
-                        '{ACTION_BASE_URL}/a/ig?client_hex='
-                            || encode(convert_to(client_name, 'UTF8'), 'hex')
-                            || '&host_hex='
-                            || encode(convert_to(hostname, 'UTF8'), 'hex')
-                            || '&confirm=1' AS "Skip"
-                    FROM ninja_agent_compliance.v_active_findings
-                    ORDER BY severity DESC, client_name, hostname
-                    LIMIT 500
-                """,
-                0, 16, 24, 10,
+                0, 0, 24, 10,
+                column_click_behaviors={
+                    "Action": {
+                        "url_template": _url_template(
+                            "/a/ig",
+                            [("client", "Org"), ("host", "Device")],
+                        ),
+                    },
+                },
             ),
             _card(
                 "ignored_devices",
-                "Ignored items",
+                "Ignored",
                 "table",
-                f"""
+                """
                     SELECT
                         client_name AS "Org",
                         COALESCE(NULLIF(display_name, ''), norm_name) AS "Device",
                         COALESCE(NULLIF(reason, ''), 'Ignored') AS "Reason",
                         COALESCE(TO_CHAR(updated_at, 'YYYY-MM-DD HH24:MI'), 'Unknown') AS "Updated",
-                        '{ACTION_BASE_URL}/a/ui?client_hex='
-                            || encode(convert_to(client_name, 'UTF8'), 'hex')
-                            || '&host_hex='
-                            || encode(convert_to(norm_name, 'UTF8'), 'hex')
-                            || '&confirm=1' AS "Restore"
+                        'Restore' AS "Action"
                     FROM ninja_agent_compliance.v_device_ignores_current
                     ORDER BY updated_at DESC, client_name, display_name
                     LIMIT 200
                 """,
-                0, 26, 24, 6,
+                0, 10, 24, 6,
+                column_click_behaviors={
+                    "Action": {
+                        "url_template": _url_template(
+                            "/a/ui",
+                            [("client", "Org"), ("host", "Device")],
+                        ),
+                    },
+                },
             ),
         ],
     },
     {
-        "name": DASH_SOURCE,
+        "name": DASH_HEALTH,
         "cards": [
             _card(
                 "missing_by_platform",
-                "Missing by Platform",
+                "Missing by platform",
                 "bar",
                 """
-                    SELECT platform AS "Platform", COUNT(*) AS "Devices"
+                    SELECT
+                        platform AS "Platform",
+                        COUNT(*) AS "Devices"
                     FROM ninja_agent_compliance.v_compliance_matrix_current m
                     CROSS JOIN LATERAL unnest(m.missing_required_platforms) AS platform
                     GROUP BY platform
@@ -300,16 +252,16 @@ DASHBOARDS = [
             ),
             _card(
                 "source_health",
-                "Health",
+                "Source health",
                 "table",
                 """
                     SELECT
-                        platform AS "Platform",
                         source_name AS "Source",
-                        COALESCE(NULLIF(client_name, ''), 'Shared') AS "Client",
+                        platform AS "Platform",
+                        COALESCE(NULLIF(client_name, ''), 'Shared') AS "Org",
                         status AS "Status",
                         rows_observed AS "Rows",
-                        finished_at AS "Finished",
+                        COALESCE(TO_CHAR(finished_at, 'YYYY-MM-DD HH24:MI'), 'Unknown') AS "Finished",
                         COALESCE(NULLIF(error_text, ''), 'OK') AS "Issue"
                     FROM ninja_agent_compliance.v_source_health_current
                     ORDER BY platform, source_name
@@ -317,54 +269,31 @@ DASHBOARDS = [
                 0, 12, 12, 8,
             ),
             _card(
-                "alignment_mismatches",
-                "Names to map",
+                "new_names",
+                "New names",
                 "table",
-                f"""
+                """
                     SELECT
-                        org_name AS "Name",
-                        overall_status AS "Status",
-                        COALESCE(NULLIF(ninja_platform_name, ''), 'No name') AS "Ninja",
-                        COALESCE(NULLIF(s1_platform_name, ''), 'No name') AS "S1",
-                        COALESCE(NULLIF(lmi_platform_name, ''), 'No name') AS "LMI",
-                        COALESCE(NULLIF(suggested_config, ''), 'No suggestion') AS "Suggested",
-                        CASE
-                            WHEN ninja_status = 'MISSING'
-                                 AND COALESCE(NULLIF(ninja_platform_name, ''), '') <> '' THEN
-                                '{ACTION_BASE_URL}/a/aa?client_id='
-                                || client_id::text
-                                || '&platform=Ninja&alias_hex='
-                                || encode(convert_to(ninja_platform_name, 'UTF8'), 'hex')
-                                || '&confirm=1'
-                        END AS "N",
-                        CASE
-                            WHEN s1_status = 'MISSING'
-                                 AND COALESCE(NULLIF(s1_platform_name, ''), '') <> '' THEN
-                                '{ACTION_BASE_URL}/a/aa?client_id='
-                                || client_id::text
-                                || '&platform=SentinelOne&alias_hex='
-                                || encode(convert_to(s1_platform_name, 'UTF8'), 'hex')
-                                || '&confirm=1'
-                        END AS "S1",
-                        CASE
-                            WHEN lmi_status = 'MISSING'
-                                 AND COALESCE(NULLIF(lmi_platform_name, ''), '') <> '' THEN
-                                '{ACTION_BASE_URL}/a/aa?client_id='
-                                || client_id::text
-                                || '&platform=LogMeIn&alias_hex='
-                                || encode(convert_to(lmi_platform_name, 'UTF8'), 'hex')
-                                || '&confirm=1'
-                        END AS "LMI",
-                        '{ACTION_BASE_URL}/a/eo?pattern_hex='
-                            || encode(convert_to(org_name, 'UTF8'), 'hex')
-                            || '&confirm=1' AS "Skip"
-                    FROM ninja_agent_compliance.org_alignment_current
-                    WHERE overall_status NOT LIKE 'OK%'
-                      AND COALESCE(BTRIM(suggested_config), '') <> ''
-                    ORDER BY org_name
-                    LIMIT 500
+                        candidate_name AS "Name",
+                        platform AS "Platform",
+                        observed_count AS "Hits",
+                        COALESCE(NULLIF(source_name, ''), 'Unknown') AS "Source",
+                        COALESCE(NULLIF(suggested_target, ''), 'Review needed') AS "Target",
+                        status AS "State",
+                        'Skip' AS "Action"
+                    FROM ninja_agent_compliance.v_org_candidates_current
+                    ORDER BY last_seen_at DESC, candidate_name
+                    LIMIT 200
                 """,
                 0, 20, 24, 8,
+                column_click_behaviors={
+                    "Action": {
+                        "url_template": _url_template(
+                            "/a/eo",
+                            [("pattern", "Name")],
+                        ),
+                    },
+                },
             ),
         ],
     },
@@ -373,11 +302,11 @@ DASHBOARDS = [
         "cards": [
             _card(
                 "raw_observations",
-                "Raw Observations",
+                "Raw observations",
                 "table",
                 """
                     SELECT
-                        observed_at AS "Observed at",
+                        observed_at AS "Seen",
                         platform AS "Platform",
                         source_name AS "Source",
                         COALESCE(NULLIF(resolved_client_name, ''), 'Unresolved') AS "Org",
@@ -389,68 +318,82 @@ DASHBOARDS = [
                     ORDER BY observed_at DESC
                     LIMIT 200
                 """,
-                0, 0, 24, 12,
+                0, 0, 24, 10,
             ),
             _card(
-                "alignment_backlog",
-                "Review leftovers",
+                "alignment_leftovers",
+                "Alignment leftovers",
                 "table",
                 """
                     SELECT
                         org_name AS "Name",
-                        overall_status AS "Status",
-                        COALESCE(NULLIF(ninja_platform_name, ''), 'No name') AS "Ninja",
-                        COALESCE(NULLIF(s1_platform_name, ''), 'No name') AS "SentinelOne",
-                        COALESCE(NULLIF(lmi_platform_name, ''), 'No name') AS "LogMeIn",
-                        COALESCE(NULLIF(suggested_config, ''), 'No suggestion') AS "Suggested"
-                    FROM ninja_agent_compliance.v_org_alignment_current
+                        overall_status AS "State",
+                        COALESCE(NULLIF(ninja_platform_name, ''), '') AS "N",
+                        COALESCE(NULLIF(s1_platform_name, ''), '') AS "S1",
+                        COALESCE(NULLIF(lmi_platform_name, ''), '') AS "LMI",
+                        COALESCE(NULLIF(suggested_config, ''), 'No suggestion') AS "Target",
+                        CASE WHEN ninja_status = 'MISSING' AND COALESCE(NULLIF(ninja_platform_name, ''), '') <> '' THEN 'Fix N' ELSE '' END AS "Fix N",
+                        CASE WHEN s1_status = 'MISSING' AND COALESCE(NULLIF(s1_platform_name, ''), '') <> '' THEN 'Fix S1' ELSE '' END AS "Fix S1",
+                        CASE WHEN lmi_status = 'MISSING' AND COALESCE(NULLIF(lmi_platform_name, ''), '') <> '' THEN 'Fix LMI' ELSE '' END AS "Fix LMI",
+                        'Skip' AS "Skip"
+                    FROM ninja_agent_compliance.v_alignment_mismatches
                     WHERE overall_status NOT LIKE 'OK%'
                     ORDER BY org_name
-                    LIMIT 500
+                    LIMIT 200
                 """,
-                0, 12, 24, 8,
+                0, 10, 24, 8,
+                column_click_behaviors={
+                    "Fix N": {
+                        "url_template": _url_template(
+                            "/a/aa",
+                            [("client_name", "Name"), ("platform", "Ninja"), ("alias", "N")],
+                        ),
+                    },
+                    "Fix S1": {
+                        "url_template": _url_template(
+                            "/a/aa",
+                            [("client_name", "Name"), ("platform", "SentinelOne"), ("alias", "S1")],
+                        ),
+                    },
+                    "Fix LMI": {
+                        "url_template": _url_template(
+                            "/a/aa",
+                            [("client_name", "Name"), ("platform", "LogMeIn"), ("alias", "LMI")],
+                        ),
+                    },
+                    "Skip": {
+                        "url_template": _url_template(
+                            "/a/eo",
+                            [("pattern", "Name")],
+                        ),
+                    },
+                },
             ),
             _card(
-                "known_exclusions",
+                "ignored_names",
                 "Ignored names",
                 "table",
-                f"""
+                """
                     SELECT
-                        pattern AS "Org",
+                        pattern AS "Name",
                         source AS "Source",
                         COALESCE(NULLIF(notes, ''), 'No notes') AS "Notes",
                         COALESCE(TO_CHAR(updated_at, 'YYYY-MM-DD HH24:MI'), 'Unknown') AS "Updated",
-                        CASE
-                            WHEN source = 'manual' THEN
-                                '{ACTION_BASE_URL}/a/ue?pattern_hex='
-                                || encode(convert_to(pattern, 'UTF8'), 'hex')
-                                || '&confirm=1'
-                            ELSE NULL
-                        END AS "Restore"
+                        CASE WHEN source = 'manual' THEN 'Restore' ELSE '' END AS "Action"
                     FROM ninja_agent_compliance.org_excludes
                     WHERE enabled
                     ORDER BY source, pattern
                     LIMIT 200
                 """,
-                0, 20, 24, 4,
-            ),
-            _card(
-                "org_candidates",
-                "New Names",
-                "table",
-                """
-                    SELECT
-                        candidate_name AS "Candidate",
-                        platform AS "Platform",
-                        observed_count AS "Hits",
-                        COALESCE(NULLIF(source_name, ''), 'Unknown') AS "Source",
-                        COALESCE(NULLIF(suggested_target, ''), 'Review needed') AS "Suggested target",
-                        COALESCE(TO_CHAR(last_seen_at, 'YYYY-MM-DD HH24:MI'), 'Unknown') AS "Last seen"
-                    FROM ninja_agent_compliance.v_org_candidates_current
-                    ORDER BY last_seen_at DESC, candidate_name
-                    LIMIT 200
-                """,
-                0, 24, 24, 4,
+                0, 18, 24, 4,
+                column_click_behaviors={
+                    "Action": {
+                        "url_template": _url_template(
+                            "/a/ue",
+                            [("pattern", "Name")],
+                        ),
+                    },
+                },
             ),
         ],
     },
@@ -496,7 +439,7 @@ def run_bootstrap(url: str, user: str, password: str, db_name: str = "Ninja") ->
         }
         _apply_click_behaviors(client, DASHBOARDS, card_ids_by_dash, dash_id_by_name)
 
-        _set_custom_homepage(client, dash_id_by_name.get(DASH_COMMAND))
+        _set_custom_homepage(client, dash_id_by_name.get(DASH_TODAY))
         return urls
 
 
@@ -584,7 +527,7 @@ def _upsert_dashboard(client: httpx.Client, name: str, collection_id: int) -> di
 def _build_nav_markdown(current_dash_name: str, dash_id_by_name: dict[str, int]) -> str:
     parts: list[str] = []
     for name in NAV_ORDER:
-        label = NAV_DISPLAY_NAMES.get(name, name)
+        label = NAV_LABELS.get(name, name)
         if name == current_dash_name:
             parts.append(f"**{label}**")
             continue
@@ -592,7 +535,7 @@ def _build_nav_markdown(current_dash_name: str, dash_id_by_name: dict[str, int])
         if dash_id is None:
             continue
         parts.append(f"[{label}](/dashboard/{dash_id})")
-    return " · ".join(parts)
+    return " | ".join(parts)
 
 
 def _nav_dashcard(text: str) -> dict[str, Any]:
@@ -652,16 +595,25 @@ def _apply_click_behaviors(
         current_dash_name = dash_spec["name"]
         for card_spec in dash_spec["cards"]:
             click_spec = card_spec.get("click_behavior")
-            if not click_spec:
-                continue
-            cb = _build_click_behavior_json(click_spec, dash_id_by_name)
-            if not cb:
+            column_specs = card_spec.get("column_click_behaviors") or {}
+            if not click_spec and not column_specs:
                 continue
             card_id = card_ids_by_dash[current_dash_name][card_spec["key"]]
             r = client.get(f"/api/card/{card_id}")
             r.raise_for_status()
             current = r.json().get("visualization_settings") or {}
-            current["click_behavior"] = cb
+            if click_spec:
+                cb = _build_click_behavior_json(click_spec, dash_id_by_name)
+                if cb:
+                    current["click_behavior"] = cb
+            if column_specs:
+                column_settings: dict[str, dict[str, Any]] = dict(current.get("column_settings") or {})
+                for col, col_spec in column_specs.items():
+                    cb = _build_click_behavior_json(col_spec, dash_id_by_name)
+                    if cb:
+                        column_settings[f'["name","{col}"]'] = {"click_behavior": cb}
+                if column_settings:
+                    current["column_settings"] = column_settings
             r = client.put(
                 f"/api/card/{card_id}",
                 json={"visualization_settings": current},

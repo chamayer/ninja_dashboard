@@ -290,22 +290,54 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._respond(400, b"missing confirm=1\n")
             return
 
+        def _text_param(*names: str, hex_names: tuple[str, ...] = ()) -> str | None:
+            for name in names:
+                value = params.get(name, [""])[0].strip()
+                if value:
+                    return value
+            for name in hex_names:
+                value = params.get(name, [""])[0].strip()
+                if not value:
+                    continue
+                try:
+                    return bytes.fromhex(value).decode("utf-8")
+                except ValueError:
+                    self._respond(400, f"invalid {name}\n".encode("utf-8"))
+                    return None
+            return None
+
         if path == "/agent-compliance/action/add-alias":
             client_id_value = params.get("client_id", [""])[0]
-            try:
-                client_id = int(client_id_value)
-            except ValueError:
-                self._respond(400, b"invalid client_id\n")
+            client_name = _text_param("client_name", "org", hex_names=("client_hex",))
+            if not client_id_value and not client_name:
+                self._respond(400, b"missing client_id or client_name\n")
                 return
-            platform = params.get("platform", [""])[0].strip() or None
-            alias_hex = params.get("alias_hex", [""])[0]
-            alias_value = None
-            if alias_hex:
+            client_id = None
+            if client_id_value:
                 try:
-                    alias_value = bytes.fromhex(alias_hex).decode("utf-8")
+                    client_id = int(client_id_value)
                 except ValueError:
-                    self._respond(400, b"invalid alias_hex\n")
+                    self._respond(400, b"invalid client_id\n")
                     return
+            platform = _text_param("platform") or None
+            alias_value = _text_param("alias", "alias_value", hex_names=("alias_hex",))
+            if client_id is None and client_name:
+                with db.transaction() as cur:
+                    cur.execute(
+                        """
+                        SELECT client_id
+                        FROM ninja_agent_compliance.clients
+                        WHERE client_name = %s
+                        ORDER BY client_id
+                        LIMIT 1
+                        """,
+                        (client_name,),
+                    )
+                    row = cur.fetchone()
+                if not row:
+                    self._respond(404, b"client not found\n")
+                    return
+                client_id = int(row[0])
             if alias_value and is_placeholder_org_name(alias_value):
                 self._respond(400, b"placeholder names are not valid aliases\n")
                 return
@@ -315,14 +347,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             return
 
         if path == "/agent-compliance/action/exclude-org":
-            pattern_hex = params.get("pattern_hex", [""])[0]
-            if not pattern_hex:
-                self._respond(400, b"missing pattern_hex\n")
-                return
-            try:
-                pattern = bytes.fromhex(pattern_hex).decode("utf-8")
-            except ValueError:
-                self._respond(400, b"invalid pattern_hex\n")
+            pattern = _text_param("pattern", "org", hex_names=("pattern_hex",))
+            if not pattern:
+                self._respond(400, b"missing pattern\n")
                 return
             if add_org_exclude(pattern, notes="Added from operator dashboard"):
                 body = f"excluded {pattern}\n".encode("utf-8")
@@ -332,14 +359,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             return
 
         if path == "/agent-compliance/action/unexclude-org":
-            pattern_hex = params.get("pattern_hex", [""])[0]
-            if not pattern_hex:
-                self._respond(400, b"missing pattern_hex\n")
-                return
-            try:
-                pattern = bytes.fromhex(pattern_hex).decode("utf-8")
-            except ValueError:
-                self._respond(400, b"invalid pattern_hex\n")
+            pattern = _text_param("pattern", "org", hex_names=("pattern_hex",))
+            if not pattern:
+                self._respond(400, b"missing pattern\n")
                 return
             if remove_org_exclude(pattern):
                 body = f"restored {pattern}\n".encode("utf-8")
@@ -349,34 +371,28 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             return
 
         if path == "/agent-compliance/action/ignore-device":
-            client_hex = params.get("client_hex", [""])[0]
-            host_hex = params.get("host_hex", [""])[0]
-            if not client_hex or not host_hex:
-                self._respond(400, b"missing client_hex or host_hex\n")
+            client_name = _text_param("client", "client_name", hex_names=("client_hex",))
+            hostname = _text_param("host", "hostname", hex_names=("host_hex",))
+            if not client_name or not hostname:
+                self._respond(400, b"missing client or host\n")
                 return
-            try:
-                client_name = bytes.fromhex(client_hex).decode("utf-8")
-                hostname = bytes.fromhex(host_hex).decode("utf-8")
-                with db.transaction() as cur:
-                    cur.execute(
-                        """
-                        SELECT client_id, norm_name
-                        FROM ninja_agent_compliance.compliance_matrix_current
-                        WHERE client_name = %s
-                          AND hostname = %s
-                        ORDER BY evaluated_at DESC
-                        LIMIT 1
-                        """,
-                        (client_name, hostname),
-                    )
-                    row = cur.fetchone()
-                if not row:
-                    self._respond(404, b"device not found\n")
-                    return
-                client_id, norm_name = row
-            except ValueError:
-                self._respond(400, b"invalid device reference\n")
+            with db.transaction() as cur:
+                cur.execute(
+                    """
+                    SELECT client_id, norm_name
+                    FROM ninja_agent_compliance.compliance_matrix_current
+                    WHERE client_name = %s
+                      AND hostname = %s
+                    ORDER BY evaluated_at DESC
+                    LIMIT 1
+                    """,
+                    (client_name, hostname),
+                )
+                row = cur.fetchone()
+            if not row:
+                self._respond(404, b"device not found\n")
                 return
+            client_id, norm_name = row
             if add_device_ignore(client_id, norm_name, display_name=hostname):
                 body = f"ignored {norm_name}\n".encode("utf-8")
                 self._respond(200, body)
@@ -385,34 +401,28 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             return
 
         if path == "/agent-compliance/action/unignore-device":
-            client_hex = params.get("client_hex", [""])[0]
-            host_hex = params.get("host_hex", [""])[0]
-            if not client_hex or not host_hex:
-                self._respond(400, b"missing client_hex or host_hex\n")
+            client_name = _text_param("client", "client_name", hex_names=("client_hex",))
+            hostname = _text_param("host", "hostname", hex_names=("host_hex",))
+            if not client_name or not hostname:
+                self._respond(400, b"missing client or host\n")
                 return
-            try:
-                client_name = bytes.fromhex(client_hex).decode("utf-8")
-                hostname = bytes.fromhex(host_hex).decode("utf-8")
-                with db.transaction() as cur:
-                    cur.execute(
-                        """
-                        SELECT client_id, norm_name
-                        FROM ninja_agent_compliance.compliance_matrix_current
-                        WHERE client_name = %s
-                          AND hostname = %s
-                        ORDER BY evaluated_at DESC
-                        LIMIT 1
-                        """,
-                        (client_name, hostname),
-                    )
-                    row = cur.fetchone()
-                if not row:
-                    self._respond(404, b"device not found\n")
-                    return
-                client_id, norm_name = row
-            except ValueError:
-                self._respond(400, b"invalid device reference\n")
+            with db.transaction() as cur:
+                cur.execute(
+                    """
+                    SELECT client_id, norm_name
+                    FROM ninja_agent_compliance.compliance_matrix_current
+                    WHERE client_name = %s
+                      AND hostname = %s
+                    ORDER BY evaluated_at DESC
+                    LIMIT 1
+                    """,
+                    (client_name, hostname),
+                )
+                row = cur.fetchone()
+            if not row:
+                self._respond(404, b"device not found\n")
                 return
+            client_id, norm_name = row
             if remove_device_ignore(client_id, norm_name):
                 body = f"restored {norm_name}\n".encode("utf-8")
                 self._respond(200, body)

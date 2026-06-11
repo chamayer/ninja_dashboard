@@ -69,9 +69,8 @@ Recommended dashboard set:
 
 1. Today
 2. Devices
-3. Review
-4. Health
-5. Debug
+3. Health
+4. Debug
 
 The primary landing page should be Today.
 
@@ -182,9 +181,8 @@ Use human language in UI labels:
 
   - `Today` for the main landing page;
   - `Devices` for device-level findings;
-  - `Review` for alignment and alias work;
-  - `Health` for platform collector status;
-  - `Debug` for raw data and internal state.
+  - `Health` for platform collector status and new-name review;
+  - `Debug` for raw data, leftovers, and admin-level mapping cleanup.
 
 Avoid exposing raw database terms in the main UI:
 

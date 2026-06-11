@@ -49,7 +49,7 @@ What it should look like:
 
 Typical route:
 
-  - main dashboard;
+  - Today / Devices dashboard;
 - email for notable issues;
 - Zendesk when human follow-up is needed.
 
@@ -76,7 +76,8 @@ What it should look like:
 
 Typical route:
 
-- Org Review dashboard;
+- Health dashboard for new-name review;
+- Debug dashboard for leftovers and admin cleanup;
 - setup email summary;
 - Zendesk only if someone needs to own cleanup.
 
