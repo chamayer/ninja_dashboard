@@ -6,12 +6,11 @@ from urllib.parse import urlsplit, urlunsplit
 def redact_url(url: str) -> str:
     """Return a log-safe version of a URL.
 
-    Keeps scheme, host, port, and path. Drops username, password,
+    Keeps scheme, host, and port. Drops username, password, path,
     query string, and fragment so secrets never leak into logs.
     """
     parts = urlsplit(url)
     netloc = parts.hostname or ""
     if parts.port:
         netloc = f"{netloc}:{parts.port}"
-    path = parts.path or ""
-    return urlunsplit((parts.scheme, netloc, path, "", ""))
+    return urlunsplit((parts.scheme, netloc, "", "", ""))

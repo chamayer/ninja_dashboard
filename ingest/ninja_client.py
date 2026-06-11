@@ -16,8 +16,6 @@ from typing import Any
 
 import httpx
 
-from ingest.url_utils import redact_url
-
 log = logging.getLogger(__name__)
 
 _DEFAULT_PAGE_SIZE = 500
@@ -58,7 +56,7 @@ class NinjaClient:
     # ── Auth ──────────────────────────────────────────────────────────
 
     def _fetch_token(self) -> str:
-        log.debug("Fetching new OAuth token from %s", redact_url(self.token_url))
+        log.debug("Fetching new OAuth token")
         resp = self._http.post(
             self.token_url,
             data={

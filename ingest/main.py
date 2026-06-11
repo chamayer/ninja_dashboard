@@ -33,6 +33,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 
 from ingest import db, migrations
 from ingest.config import settings
+from ingest.logging_utils import install_log_safety
 from ingest.activities import ingest as activities_ingest
 from ingest.agent_compliance import ingest as agent_compliance_ingest
 from ingest.agent_compliance.config_loader import (
@@ -435,6 +436,7 @@ def main() -> None:
         level=settings.INGEST_LOG_LEVEL,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
+    install_log_safety()
 
     # Bind HTTP server FIRST so /healthz is reachable before any
     # potentially-slow startup work. Keeps the Docker HEALTHCHECK
