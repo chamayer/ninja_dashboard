@@ -208,6 +208,36 @@ DASHBOARDS = [
                 },
             ),
             _card(
+                "missing_s1_online_ninja",
+                "Missing SentinelOne, online in Ninja",
+                "table",
+                """
+                    SELECT
+                        client_name AS "Customer",
+                        hostname AS "Device",
+                        device_type AS "Type",
+                        COALESCE(NULLIF(os_name, ''), '') AS "OS",
+                        COALESCE(TO_CHAR(ninja_last_seen, 'YYYY-MM-DD HH24:MI'), 'Unknown') AS "Ninja seen",
+                        'Ignore' AS "Action"
+                    FROM ninja_agent_compliance.v_compliance_matrix_current
+                    WHERE 'SentinelOne' = ANY(missing_required_platforms)
+                      AND in_ninja
+                      AND ninja_online IS TRUE
+                      AND NOT s1_exempt
+                    ORDER BY client_name, hostname
+                    LIMIT 500
+                """,
+                10, 0, 24, 8,
+                column_click_behaviors={
+                    "Action": {
+                        "url_template": _url_template(
+                            "/a/ig",
+                            [("client", "Customer"), ("host", "Device")],
+                        ),
+                    },
+                },
+            ),
+            _card(
                 "ignored_devices",
                 "Ignored",
                 "table",
@@ -222,7 +252,7 @@ DASHBOARDS = [
                     ORDER BY updated_at DESC, client_name, display_name
                     LIMIT 200
                 """,
-                0, 10, 24, 6,
+                18, 0, 24, 6,
                 column_click_behaviors={
                     "Action": {
                         "url_template": _url_template(
@@ -362,6 +392,127 @@ DASHBOARDS = [
                 22, 0, 24, 8,
             ),
             _card(
+                "customer_requirements",
+                "Required coverage",
+                "table",
+                """
+                    WITH customers AS (
+                        SELECT client_id, client_name
+                        FROM ninja_agent_compliance.clients
+                        WHERE enabled
+                          AND source NOT IN ('alignment', 'demoted')
+                          AND lower(trim(client_name)) NOT IN ('default site', 'unknown', 'various', '.default')
+                    ),
+                    scopes(device_scope, label) AS (
+                        VALUES
+                            ('all', 'All devices'),
+                            ('server', 'Servers'),
+                            ('workstation', 'Workstations')
+                    ),
+                    effective AS (
+                        SELECT
+                            c.client_id,
+                            c.client_name,
+                            s.device_scope,
+                            s.label,
+                            req.required_platforms,
+                            req.max_age_days,
+                            req.source,
+                            req.notes,
+                            req.source_scope,
+                            req.client_id AS source_client_id
+                        FROM customers c
+                        CROSS JOIN scopes s
+                        JOIN LATERAL (
+                            SELECT
+                                pr.client_id,
+                                pr.device_scope AS source_scope,
+                                pr.required_platforms,
+                                pr.max_age_days,
+                                pr.source,
+                                pr.notes
+                            FROM ninja_agent_compliance.platform_requirements pr
+                            WHERE pr.enabled
+                              AND (
+                                  (pr.client_id = c.client_id AND pr.device_scope = s.device_scope)
+                                  OR (pr.client_id = c.client_id AND pr.device_scope = 'all')
+                                  OR (pr.client_id IS NULL AND pr.device_scope = s.device_scope)
+                                  OR (pr.client_id IS NULL AND pr.device_scope = 'all')
+                              )
+                            ORDER BY
+                                CASE
+                                    WHEN pr.client_id = c.client_id AND pr.device_scope = s.device_scope THEN 0
+                                    WHEN pr.client_id = c.client_id AND pr.device_scope = 'all' THEN 1
+                                    WHEN pr.client_id IS NULL AND pr.device_scope = s.device_scope THEN 2
+                                    ELSE 3
+                                END
+                            LIMIT 1
+                        ) req ON true
+                    )
+                    SELECT
+                        client_name AS "Customer",
+                        label AS "Applies to",
+                        array_to_string(required_platforms, ', ') AS "Required",
+                        COALESCE(max_age_days, 30) AS "Max age",
+                        CASE
+                            WHEN source_client_id IS NULL THEN 'Default'
+                            WHEN source_scope <> device_scope AND source = 'manual' THEN 'Reviewed, from all devices'
+                            WHEN source_scope <> device_scope AND source = 'seed' THEN 'Built in, from all devices'
+                            WHEN source = 'manual' THEN 'Reviewed'
+                            WHEN source = 'seed' THEN 'Built in'
+                            ELSE source
+                        END AS "Source",
+                        'Set' AS "Ninja + S1",
+                        'Set' AS "Ninja + LMI",
+                        'Set' AS "Ninja + S1 + LMI",
+                        'Set' AS "Ninja + S1 + SC",
+                        CASE
+                            WHEN source_client_id IS NOT NULL AND source_scope = device_scope THEN 'Use default'
+                            ELSE ''
+                        END AS "Default"
+                    FROM effective
+                    ORDER BY client_name,
+                        CASE device_scope WHEN 'all' THEN 0 WHEN 'server' THEN 1 ELSE 2 END
+                    LIMIT 500
+                """,
+                30, 0, 24, 10,
+                column_click_behaviors={
+                    "Ninja + S1": {
+                        "url_template": f"{ACTION_BASE_URL}/a/sr?customer={{{{Customer}}}}&scope={{{{Applies to}}}}&profile=ninja_s1&confirm=1",
+                    },
+                    "Ninja + LMI": {
+                        "url_template": f"{ACTION_BASE_URL}/a/sr?customer={{{{Customer}}}}&scope={{{{Applies to}}}}&profile=ninja_lmi&confirm=1",
+                    },
+                    "Ninja + S1 + LMI": {
+                        "url_template": f"{ACTION_BASE_URL}/a/sr?customer={{{{Customer}}}}&scope={{{{Applies to}}}}&profile=ninja_s1_lmi&confirm=1",
+                    },
+                    "Ninja + S1 + SC": {
+                        "url_template": f"{ACTION_BASE_URL}/a/sr?customer={{{{Customer}}}}&scope={{{{Applies to}}}}&profile=ninja_s1_sc&confirm=1",
+                    },
+                    "Default": {
+                        "url_template": f"{ACTION_BASE_URL}/a/sr?customer={{{{Customer}}}}&scope={{{{Applies to}}}}&profile=default&confirm=1",
+                    },
+                },
+            ),
+            _card(
+                "cross_customer_conflicts",
+                "Same device under multiple customers",
+                "table",
+                """
+                    SELECT
+                        norm_name AS "Match key",
+                        client_name AS "Customer",
+                        hostname AS "Device",
+                        COALESCE(NULLIF(os_name, ''), '') AS "OS",
+                        COALESCE(array_to_string(observed_platforms, ', '), '') AS "Found in",
+                        COALESCE(array_to_string(missing_required_platforms, ', '), '') AS "Missing"
+                    FROM ninja_agent_compliance.v_cross_client_conflicts
+                    ORDER BY norm_name, client_name, hostname
+                    LIMIT 300
+                """,
+                40, 0, 24, 8,
+            ),
+            _card(
                 "ignored_names",
                 "Ignored customer names",
                 "table",
@@ -377,7 +528,7 @@ DASHBOARDS = [
                     ORDER BY source, pattern
                     LIMIT 200
                 """,
-                30, 0, 24, 4,
+                48, 0, 24, 4,
                 column_click_behaviors={
                     "Action": {
                         "url_template": _url_template(

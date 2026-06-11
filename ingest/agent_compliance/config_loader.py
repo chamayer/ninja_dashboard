@@ -809,6 +809,89 @@ def approve_customer_name(name: str, updated_by: str = "agent_compliance") -> bo
     return True
 
 
+def set_customer_requirement(
+    customer_name: str,
+    scope: str,
+    profile: str,
+    updated_by: str = "agent_compliance",
+) -> str | None:
+    """Set or restore a customer's required platform profile."""
+    customer = customer_name.strip()
+    scope_value = _normalize_requirement_scope(scope)
+    profile_value = profile.strip().lower().replace(" ", "_").replace("+", "_")
+    profiles = {
+        "ninja_s1": ["Ninja", "SentinelOne"],
+        "ninja_lmi": ["Ninja", "LogMeIn"],
+        "ninja_s1_lmi": ["Ninja", "SentinelOne", "LogMeIn"],
+        "ninja_s1_sc": ["Ninja", "SentinelOne", "ScreenConnect"],
+        "default": [],
+    }
+    if not customer or scope_value is None or profile_value not in profiles:
+        return None
+    with db.transaction() as cur:
+        cur.execute(
+            """
+            SELECT client_id
+            FROM ninja_agent_compliance.clients
+            WHERE client_name = %s
+              AND enabled
+            ORDER BY client_id
+            LIMIT 1
+            """,
+            (customer,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+        client_id = row[0]
+        if profile_value == "default":
+            cur.execute(
+                """
+                UPDATE ninja_agent_compliance.platform_requirements
+                SET enabled = false,
+                    source = 'manual',
+                    notes = COALESCE(NULLIF(notes, ''), 'Restored default coverage'),
+                    updated_at = now(),
+                    updated_by = %s
+                WHERE client_id = %s
+                  AND device_scope = %s
+                  AND enabled
+                """,
+                (updated_by, client_id, scope_value),
+            )
+            return "default"
+        platforms = profiles[profile_value]
+        cur.execute(
+            """
+            INSERT INTO ninja_agent_compliance.platform_requirements
+                (client_id, device_scope, required_platforms, max_age_days, notes, source, updated_by)
+            VALUES (%s, %s, %s, 30, 'Manual customer coverage override', 'manual', %s)
+            ON CONFLICT (COALESCE(client_id, 0), device_scope)
+            DO UPDATE SET
+                required_platforms = EXCLUDED.required_platforms,
+                max_age_days = EXCLUDED.max_age_days,
+                notes = EXCLUDED.notes,
+                source = 'manual',
+                enabled = true,
+                updated_at = now(),
+                updated_by = EXCLUDED.updated_by
+            """,
+            (client_id, scope_value, platforms, updated_by),
+        )
+        return ", ".join(platforms)
+
+
+def _normalize_requirement_scope(scope: str) -> str | None:
+    normalized = scope.strip().lower().replace("_", " ")
+    if normalized in {"all", "all devices", "all device"}:
+        return "all"
+    if normalized in {"server", "servers"}:
+        return "server"
+    if normalized in {"workstation", "workstations", "workstation devices"}:
+        return "workstation"
+    return None
+
+
 def _close_org_candidates(
     cur: Any,
     status: str,

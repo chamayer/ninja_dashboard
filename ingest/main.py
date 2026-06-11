@@ -43,6 +43,7 @@ from ingest.agent_compliance.config_loader import (
     promote_alignment_aliases,
     remove_org_exclude,
     remove_device_ignore,
+    set_customer_requirement,
 )
 from ingest.agent_compliance.normalize import is_placeholder_org_name
 from ingest.url_utils import redact_url
@@ -282,6 +283,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             "/a/aa": "/agent-compliance/action/add-alias",
             "/a/ac": "/agent-compliance/action/approve-customer",
             "/a/eo": "/agent-compliance/action/exclude-org",
+            "/a/sr": "/agent-compliance/action/set-requirement",
             "/a/ue": "/agent-compliance/action/unexclude-org",
             "/a/ig": "/agent-compliance/action/ignore-device",
             "/a/ui": "/agent-compliance/action/unignore-device",
@@ -358,6 +360,26 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 self._respond(200, body)
             else:
                 self._respond(400, b"blank or placeholder customer name\n")
+            return
+
+        if path == "/agent-compliance/action/set-requirement":
+            customer_name = _text_param("customer", "client_name", hex_names=("customer_hex", "client_hex"))
+            scope = _text_param("scope") or ""
+            profile = _text_param("profile") or ""
+            if not customer_name or not scope or not profile:
+                self._respond(400, b"missing customer, scope, or profile\n")
+                return
+            result = set_customer_requirement(
+                customer_name,
+                scope,
+                profile,
+                updated_by="operator_dashboard",
+            )
+            if result is None:
+                self._respond(400, b"invalid customer, scope, or profile\n")
+                return
+            body = f"set {customer_name} {scope} coverage to {result}\n".encode("utf-8")
+            self._respond(200, body)
             return
 
         if path == "/agent-compliance/action/exclude-org":
