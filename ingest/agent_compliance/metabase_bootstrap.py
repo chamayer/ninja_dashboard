@@ -8,7 +8,10 @@ from urllib.parse import quote_plus
 
 import httpx
 
+from ingest.config import settings
+
 log = logging.getLogger(__name__)
+ACTION_BASE_URL = settings.AGENT_COMPLIANCE_ACTION_BASE_URL.rstrip("/")
 
 COLLECTION_NAME = "Agent Compliance"
 
@@ -29,7 +32,7 @@ NAV_DISPLAY_NAMES = {
     DASH_COMMAND: "Today",
     DASH_DEVICES: "Devices",
     DASH_ORG: "Review",
-    DASH_SOURCE: "Health",
+    DASH_SOURCE: "Source Health",
     DASH_DEBUG: "Debug",
 }
 NAV_HEIGHT = 2
@@ -81,6 +84,10 @@ def _build_click_behavior_json(spec: dict[str, Any], dash_id_by_name: dict[str, 
     }
 
 
+def _action_url(path: str) -> str:
+    return f"{ACTION_BASE_URL}{path}"
+
+
 DASHBOARDS = [
     {
         "name": DASH_COMMAND,
@@ -113,11 +120,11 @@ DASHBOARDS = [
             ),
             _card(
                 "active_findings",
-                "Open Issues",
+                "Ignored Devices",
                 "scalar",
                 """
-                    SELECT COUNT(*) AS findings
-                    FROM ninja_agent_compliance.v_remediation_candidates
+                    SELECT COUNT(*) AS ignored_devices
+                    FROM ninja_agent_compliance.v_device_ignores_current
                 """,
                 0, 8, 4, 4,
                 click_behavior={"target": DASH_DEVICES},
@@ -195,7 +202,7 @@ DASHBOARDS = [
                         END AS "Status",
                         org_align_status AS "Alignment",
                         CASE WHEN s1_exempt THEN 'Yes' ELSE 'No' END AS "S1 exempt",
-                        'http://127.0.0.1:8090/agent-compliance/action/ignore-device?client_hex='
+                        '{ACTION_BASE_URL}/agent-compliance/action/ignore-device?client_hex='
                             || encode(convert_to(client_name, 'UTF8'), 'hex')
                             || '&host_hex='
                             || encode(convert_to(hostname, 'UTF8'), 'hex')
@@ -210,7 +217,7 @@ DASHBOARDS = [
                 "degraded_devices",
                 "Degraded Devices",
                 "table",
-                """
+                f"""
                     SELECT
                         client_name AS "Org",
                         hostname AS "Device",
@@ -233,7 +240,7 @@ DASHBOARDS = [
                 "active_findings_table",
                 "Active Findings",
                 "table",
-                """
+                f"""
                     SELECT
                         severity AS "Severity",
                         finding_type AS "Finding",
@@ -242,7 +249,7 @@ DASHBOARDS = [
                         hostname AS "Device",
                         summary AS "Summary",
                         last_seen_at AS "Last seen",
-                        'http://127.0.0.1:8090/agent-compliance/action/ignore-device?client_hex='
+                        '{ACTION_BASE_URL}/agent-compliance/action/ignore-device?client_hex='
                             || encode(convert_to(client_name, 'UTF8'), 'hex')
                             || '&host_hex='
                             || encode(convert_to(hostname, 'UTF8'), 'hex')
@@ -257,13 +264,13 @@ DASHBOARDS = [
                 "ignored_devices",
                 "Ignored Devices",
                 "table",
-                """
+                f"""
                     SELECT
                         client_name AS "Org",
                         COALESCE(NULLIF(display_name, ''), norm_name) AS "Device",
                         COALESCE(NULLIF(reason, ''), 'Ignored') AS "Reason",
                         COALESCE(TO_CHAR(updated_at, 'YYYY-MM-DD HH24:MI'), 'Unknown') AS "Updated",
-                        'http://127.0.0.1:8090/agent-compliance/action/unignore-device?client_hex='
+                        '{ACTION_BASE_URL}/agent-compliance/action/unignore-device?client_hex='
                             || encode(convert_to(client_name, 'UTF8'), 'hex')
                             || '&host_hex='
                             || encode(convert_to(norm_name, 'UTF8'), 'hex')
@@ -283,7 +290,7 @@ DASHBOARDS = [
                 "alignment_mismatches",
                 "Org Alignment",
                 "table",
-                """
+                f"""
                     SELECT
                         org_name AS "Org",
                         overall_status AS "Status",
@@ -295,7 +302,7 @@ DASHBOARDS = [
                         CASE
                             WHEN ninja_status = 'MISSING'
                                  AND COALESCE(NULLIF(ninja_platform_name, ''), '') <> '' THEN
-                                'http://127.0.0.1:8090/agent-compliance/action/add-alias?client_id='
+                                '{ACTION_BASE_URL}/agent-compliance/action/add-alias?client_id='
                                 || client_id::text
                                 || '&platform=Ninja&alias_hex='
                                 || encode(convert_to(ninja_platform_name, 'UTF8'), 'hex')
@@ -304,7 +311,7 @@ DASHBOARDS = [
                         CASE
                             WHEN s1_status = 'MISSING'
                                  AND COALESCE(NULLIF(s1_platform_name, ''), '') <> '' THEN
-                                'http://127.0.0.1:8090/agent-compliance/action/add-alias?client_id='
+                                '{ACTION_BASE_URL}/agent-compliance/action/add-alias?client_id='
                                 || client_id::text
                                 || '&platform=SentinelOne&alias_hex='
                                 || encode(convert_to(s1_platform_name, 'UTF8'), 'hex')
@@ -313,13 +320,13 @@ DASHBOARDS = [
                         CASE
                             WHEN lmi_status = 'MISSING'
                                  AND COALESCE(NULLIF(lmi_platform_name, ''), '') <> '' THEN
-                                'http://127.0.0.1:8090/agent-compliance/action/add-alias?client_id='
+                                '{ACTION_BASE_URL}/agent-compliance/action/add-alias?client_id='
                                 || client_id::text
                                 || '&platform=LogMeIn&alias_hex='
                                 || encode(convert_to(lmi_platform_name, 'UTF8'), 'hex')
                                 || '&confirm=1'
                         END AS "Fix LogMeIn",
-                        'http://127.0.0.1:8090/agent-compliance/action/exclude-org?pattern_hex='
+                        '{ACTION_BASE_URL}/agent-compliance/action/exclude-org?pattern_hex='
                             || encode(convert_to(org_name, 'UTF8'), 'hex')
                             || '&confirm=1' AS "Exclude org"
                     FROM ninja_agent_compliance.org_alignment_current
@@ -333,7 +340,7 @@ DASHBOARDS = [
                 "unresolved_observations",
                 "Unresolved Observations",
                 "table",
-                """
+                f"""
                     SELECT
                         source_name AS "Source",
                         platform AS "Platform",
@@ -343,7 +350,7 @@ DASHBOARDS = [
                         MAX(observed_at) AS "Last seen",
                         MIN(CASE
                             WHEN COALESCE(NULLIF(platform_group_name, ''), '') <> '' THEN
-                                'http://127.0.0.1:8090/agent-compliance/action/exclude-org?pattern_hex='
+                                '{ACTION_BASE_URL}/agent-compliance/action/exclude-org?pattern_hex='
                                 || encode(convert_to(platform_group_name, 'UTF8'), 'hex')
                                 || '&confirm=1'
                         END) AS "Exclude org"
@@ -370,7 +377,7 @@ DASHBOARDS = [
                 "known_exclusions",
                 "Suppressed Names",
                 "table",
-                """
+                f"""
                     SELECT
                         pattern AS "Org",
                         source AS "Source",
@@ -378,7 +385,7 @@ DASHBOARDS = [
                         COALESCE(TO_CHAR(updated_at, 'YYYY-MM-DD HH24:MI'), 'Unknown') AS "Updated",
                         CASE
                             WHEN source = 'manual' THEN
-                                'http://127.0.0.1:8090/agent-compliance/action/unexclude-org?pattern_hex='
+                                '{ACTION_BASE_URL}/agent-compliance/action/unexclude-org?pattern_hex='
                                 || encode(convert_to(pattern, 'UTF8'), 'hex')
                                 || '&confirm=1'
                             ELSE NULL
@@ -504,9 +511,14 @@ def run_bootstrap(url: str, user: str, password: str, db_name: str = "Ninja") ->
                 dash_obj_by_name[dash_spec["name"]],
                 dash_spec["cards"],
                 card_ids,
-                dash_id_by_name,
                 nav_markdown=nav_md,
             )
+
+        card_ids_by_dash = {
+            dash_spec["name"]: {card["key"]: card_ids[card["key"]] for card in dash_spec["cards"]}
+            for dash_spec in DASHBOARDS
+        }
+        _apply_click_behaviors(client, DASHBOARDS, card_ids_by_dash, dash_id_by_name)
 
         _set_custom_homepage(client, dash_id_by_name.get(DASH_COMMAND))
         return urls
@@ -594,22 +606,17 @@ def _upsert_dashboard(client: httpx.Client, name: str, collection_id: int) -> di
 
 
 def _build_nav_markdown(current_dash_name: str, dash_id_by_name: dict[str, int]) -> str:
-    def _segment(title: str, names: list[str]) -> str:
-        parts: list[str] = []
-        for name in names:
-            label = NAV_DISPLAY_NAMES.get(name, name)
-            if name == current_dash_name:
-                parts.append(f"**{label}**")
-                continue
-            dash_id = dash_id_by_name.get(name)
-            if dash_id is None:
-                continue
-            parts.append(f"[{label}](/dashboard/{dash_id})")
-        return f"{title}: " + " &nbsp;&nbsp;•&nbsp;&nbsp; ".join(parts)
-
-    main = _segment("Main", [DASH_COMMAND, DASH_DEVICES, DASH_ORG])
-    setup = _segment("Behind the scenes", [DASH_SOURCE, DASH_DEBUG])
-    return "**Navigate:** " + main + " &nbsp;&nbsp;•&nbsp;&nbsp; " + setup
+    parts: list[str] = []
+    for name in NAV_ORDER:
+        label = NAV_DISPLAY_NAMES.get(name, name)
+        if name == current_dash_name:
+            parts.append(f"**{label}**")
+            continue
+        dash_id = dash_id_by_name.get(name)
+        if dash_id is None:
+            continue
+        parts.append(f"[{label}](/dashboard/{dash_id})")
+    return "**Navigate:** " + " &nbsp;&nbsp;•&nbsp;&nbsp; ".join(parts)
 
 
 def _nav_dashcard(text: str) -> dict[str, Any]:
@@ -638,7 +645,6 @@ def _set_layout(
     dashboard: dict[str, Any],
     specs: list[dict[str, Any]],
     card_ids: dict[str, int],
-    dash_id_by_name: dict[str, int],
     nav_markdown: str | None = None,
 ) -> None:
     dashcards = []
@@ -646,12 +652,7 @@ def _set_layout(
     if nav_markdown is not None:
         dashcards.append(_nav_dashcard(nav_markdown))
     for i, spec in enumerate(specs):
-        extra: dict[str, Any] = {}
-        if "click_behavior" in spec:
-            cb = _build_click_behavior_json(spec["click_behavior"], dash_id_by_name)
-            if cb:
-                extra["click_behavior"] = cb
-        dashcard = {
+        dashcards.append({
             "id": -(i + 2),
             "card_id": card_ids[spec["key"]],
             "row": spec["row"] + row_offset,
@@ -660,12 +661,36 @@ def _set_layout(
             "size_y": spec["size_y"],
             "parameter_mappings": [],
             "visualization_settings": {},
-        }
-        if extra:
-            dashcard["visualization_settings"] = extra
-        dashcards.append(dashcard)
+        })
     resp = client.put(f"/api/dashboard/{dashboard['id']}", json={"dashcards": dashcards})
     resp.raise_for_status()
+
+
+def _apply_click_behaviors(
+    client: httpx.Client,
+    dashboards: list[dict[str, Any]],
+    card_ids_by_dash: dict[str, dict[str, int]],
+    dash_id_by_name: dict[str, int],
+) -> None:
+    for dash_spec in dashboards:
+        current_dash_name = dash_spec["name"]
+        for card_spec in dash_spec["cards"]:
+            click_spec = card_spec.get("click_behavior")
+            if not click_spec:
+                continue
+            cb = _build_click_behavior_json(click_spec, dash_id_by_name)
+            if not cb:
+                continue
+            card_id = card_ids_by_dash[current_dash_name][card_spec["key"]]
+            r = client.get(f"/api/card/{card_id}")
+            r.raise_for_status()
+            current = r.json().get("visualization_settings") or {}
+            current["click_behavior"] = cb
+            r = client.put(
+                f"/api/card/{card_id}",
+                json={"visualization_settings": current},
+            )
+            r.raise_for_status()
 
 
 def _set_custom_homepage(client: httpx.Client, dashboard_id: int | None) -> None:

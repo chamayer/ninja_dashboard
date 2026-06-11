@@ -71,6 +71,7 @@ class Settings(BaseSettings):
     MB_BOOTSTRAP_USER: str = ""
     MB_BOOTSTRAP_PASS: SecretStr = SecretStr("")
     MB_BOOTSTRAP_DB_NAME: str = "Ninja"
+    AGENT_COMPLIANCE_ACTION_BASE_URL: str = "http://am-ch-01:8090"
 
     # ── Agent compliance alerts ──────────────────────────────────────
     AGENT_COMPLIANCE_ALERTS_ENABLED: bool = False
