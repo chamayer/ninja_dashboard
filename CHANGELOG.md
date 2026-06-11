@@ -2,6 +2,51 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.18.0] — 2026-06-11
+
+### Added
+- Agent Compliance Devices dashboard is now scenario-explorable. Four
+  top-level filters (Customer, Missing platform, Online in, State) wire
+  through the operator-facing cards on a per-card basis:
+  - `Need action` consumes Customer + State.
+  - `Missing but online elsewhere`, `Active gaps by missing platform`,
+    and `Active platform gap details` consume Customer + Missing +
+    Online in (and Missing only, for the bar chart).
+- Drill-through on the two summary cards re-opens the same dashboard
+  with the row's Missing / Online in values pre-applied as filter
+  values — the count card is now actionable.
+- `Stale devices by customer` table with a `Bulk ignore` action. One
+  click suppresses every stale device under one customer; active
+  missing-agent findings are never touched.
+- `/agent-compliance/action/bulk-ignore-stale` (short alias `/a/bs`)
+  for the bulk path. Single-customer, stale-only, guarded by the same
+  `WHERE enabled` partial-index conflict path the single-row ignore
+  already uses.
+- Cumulative operator-UI rebuild since v0.17.5: rebuilt Devices /
+  Customers / Health / Debug dashboard surface, humanized labels,
+  customer mapping + coverage workflows, dashboard nav simplification,
+  per-row action links to add-alias / exclude-org / approve-customer /
+  ignore-device / restore-device / set-requirement, and the
+  `AGENT_COMPLIANCE_ACTION_BASE_URL` config that lets the browser hit
+  the loopback action endpoints when Metabase and ingest live on the
+  same host.
+
+### Fixed
+- `/a/*` short-path links from Metabase no longer 404. The `do_GET`
+  router was only dispatching `/agent-compliance/action/` paths; the
+  inner alias map (`/a/aa`, `/a/ac`, `/a/eo`, `/a/sr`, `/a/ue`,
+  `/a/ig`, `/a/ui`, and the new `/a/bs`) is now reachable.
+- Logs no longer leak OAuth tokens or full request URLs.
+- Seed orgs that produced bad canonical names are now demoted instead
+  of cluttering the customer-review queue.
+- Ingest service port is now published on the loopback so the
+  in-browser action links resolve against the same host as Metabase.
+
+### Notes
+- Apply through migration `026_alert_suppressions_display_name.sql`
+  before bootstrapping Metabase.
+- Commit: `TBD`
+
 ## [0.17.5] — 2026-06-11
 
 ### Added

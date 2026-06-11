@@ -15,11 +15,21 @@ _(empty — drop free-form items here)_
 
 ### Agent compliance domain
 
-- [ ] Configure and validate v0.16.0 agent-compliance on the live
-      stack: enable required platform sources in DB, add S1/LMI/SC
-      secrets to host `.env`, run migration 019, trigger
-      `/run/agent-compliance`, verify source health, matrix rows,
-      findings, and alert route delivery.
+- [ ] **First end-to-end alert** — pick one finding type (e.g.
+      `missing_agent` for a known noncompliant device), enable a
+      notification route in `ninja_agent_compliance.notification_routes`
+      (webhook is the lowest-friction), set the corresponding host
+      `.env` secret, trigger `/run/agent-compliance`, and confirm the
+      alert dispatcher records a send in `alert_events`.
+- [ ] **Gap assessment** — original PowerShell agent-compliance
+      report vs current build vs the
+      `AGENT_COMPLIANCE_OPERATOR_UI.md` / `_ALERT_WORKFLOW.md` intent.
+      Output: a checklist of missing capabilities + a parity score per
+      surface (matrix, alignment, alerts, suppressions, drill-down).
+- [ ] Live-validate v0.18.0 on the stack: apply migrations through
+      026, bootstrap Metabase, exercise the Devices filters, drill
+      through from `Missing but online elsewhere`, bulk-ignore stale
+      for one customer, verify alert_state and finding counts shift.
 
 ### Ingest core (next milestone — gets us to a working v0.2.0)
 
