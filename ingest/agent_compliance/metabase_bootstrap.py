@@ -55,6 +55,7 @@ NAV_LABELS = {
     DASH_DEBUG: "Debug",
 }
 NAV_HEIGHT = 2
+SECTION_HEADER_HEIGHT = 1
 
 
 def _card(
@@ -290,6 +291,11 @@ DASHBOARDS = [
     {
         "name": DASH_DEVICES,
         "parameters_builder": _build_devices_parameters,
+        "section_headers": [
+            {"row": 0,  "text": "### Triage"},
+            {"row": 16, "text": "### Gap analysis"},
+            {"row": 32, "text": "### Maintenance"},
+        ],
         "cards": [
             _card(
                 "device_queue",
@@ -297,29 +303,42 @@ DASHBOARDS = [
                 "table",
                 """
                     SELECT
-                        client_name AS "Customer",
-                        hostname AS "Device",
-                        device_type AS "Type",
-                        COALESCE(array_to_string(missing_required_platforms, ', '), 'None') AS "Need",
+                        m.client_name AS "Customer",
+                        m.hostname AS "Device",
+                        m.device_type AS "Type",
+                        COALESCE(array_to_string(m.missing_required_platforms, ', '), 'None') AS "Need",
                         CASE
-                            WHEN is_degraded THEN 'Degraded'
-                            WHEN is_stale THEN 'Stale'
+                            WHEN m.is_degraded THEN 'Degraded'
+                            WHEN m.is_stale THEN 'Stale'
                             ELSE 'Review'
                         END AS "State",
-                        CASE WHEN s1_exempt THEN 'Yes' ELSE 'No' END AS "NO AV",
+                        CASE WHEN m.s1_exempt THEN 'Yes' ELSE 'No' END AS "NO AV",
                         'Ignore' AS "Action"
-                    FROM ninja_agent_compliance.v_remediation_candidates
-                    WHERE 1=1
-                      [[AND client_name IN ({{customer}})]]
+                    FROM ninja_agent_compliance.compliance_matrix_current m
+                    WHERE NOT m.is_unknown
+                      -- Include both noncompliant and degraded-but-compliant rows.
+                      -- Degraded = compliant overall but at least one required
+                      -- platform is offline; PowerShell parity surfaces these in
+                      -- the operator queue, not only the strict noncompliant set.
+                      AND (NOT m.is_compliant OR m.is_degraded)
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM ninja_agent_compliance.alert_suppressions s
+                          WHERE s.enabled
+                            AND (s.client_id IS NULL OR s.client_id = m.client_id)
+                            AND (s.norm_name IS NULL OR s.norm_name = m.norm_name)
+                            AND (s.expires_at IS NULL OR s.expires_at > now())
+                      )
+                      [[AND m.client_name IN ({{customer}})]]
                       [[AND (
                           CASE
-                              WHEN is_degraded THEN 'Degraded'
-                              WHEN is_stale THEN 'Stale'
+                              WHEN m.is_degraded THEN 'Degraded'
+                              WHEN m.is_stale THEN 'Stale'
                               ELSE 'Review'
                           END
                       ) IN ({{state}})]]
-                      [[AND (CASE WHEN s1_exempt THEN 'Yes' ELSE 'No' END) IN ({{av}})]]
-                    ORDER BY client_name, hostname
+                      [[AND (CASE WHEN m.s1_exempt THEN 'Yes' ELSE 'No' END) IN ({{av}})]]
+                    ORDER BY m.client_name, m.hostname
                     LIMIT 500
                 """,
                 0, 0, 24, 10,
@@ -390,7 +409,7 @@ DASHBOARDS = [
                     ORDER BY "Devices" DESC, missing_platform, online_platform
                     LIMIT 500
                 """,
-                10, 0, 12, 6,
+                16, 0, 12, 6,
                 click_behavior=_dashboard_link(
                     DASH_DEVICES,
                     params=[("missing", "Missing"), ("online_in", "Online in")],
@@ -450,7 +469,7 @@ DASHBOARDS = [
                     GROUP BY missing_platform
                     ORDER BY "Devices" DESC
                 """,
-                10, 12, 12, 6,
+                16, 12, 12, 6,
                 click_behavior=_dashboard_link(
                     DASH_DEVICES, params=[("missing", "Missing")],
                 ),
@@ -522,7 +541,7 @@ DASHBOARDS = [
                     ORDER BY missing_platform, online_platform, client_name, hostname
                     LIMIT 500
                 """,
-                16, 0, 24, 10,
+                22, 0, 24, 10,
                 column_click_behaviors={
                     "Action": {
                         "url_template": _url_template(
@@ -568,12 +587,13 @@ DASHBOARDS = [
                     FROM ninja_agent_compliance.v_remediation_candidates
                     WHERE is_stale
                       AND norm_name IS NOT NULL
+                      [[AND client_name IN ({{customer}})]]
                     GROUP BY client_name
                     HAVING COUNT(*) > 0
                     ORDER BY COUNT(*) DESC, client_name
                     LIMIT 100
                 """,
-                26, 0, 24, 6,
+                10, 0, 24, 6,
                 column_click_behaviors={
                     "Action": {
                         "url_template": _url_template(
@@ -581,6 +601,12 @@ DASHBOARDS = [
                             [("client", "Customer")],
                         ),
                     },
+                },
+                template_tags={
+                    "customer": _DEVICES_FILTER_TAGS["customer"],
+                },
+                param_mappings={
+                    PARAM_CUSTOMER: _mapping("customer"),
                 },
             ),
             _card(
@@ -595,6 +621,8 @@ DASHBOARDS = [
                         COALESCE(TO_CHAR(updated_at, 'YYYY-MM-DD HH24:MI'), 'Unknown') AS "Updated",
                         'Restore' AS "Action"
                     FROM ninja_agent_compliance.v_device_ignores_current
+                    WHERE 1=1
+                      [[AND client_name IN ({{customer}})]]
                     ORDER BY updated_at DESC, client_name, display_name
                     LIMIT 200
                 """,
@@ -606,6 +634,12 @@ DASHBOARDS = [
                             [("client", "Customer"), ("host", "Device")],
                         ),
                     },
+                },
+                template_tags={
+                    "customer": _DEVICES_FILTER_TAGS["customer"],
+                },
+                param_mappings={
+                    PARAM_CUSTOMER: _mapping("customer"),
                 },
             ),
         ],
@@ -1034,6 +1068,7 @@ def run_bootstrap(url: str, user: str, password: str, db_name: str = "Ninja") ->
                 card_ids,
                 nav_markdown=nav_md,
                 dash_id_by_name=dash_id_by_name,
+                section_headers=dash_spec.get("section_headers"),
             )
 
         card_ids_by_dash = {
@@ -1181,6 +1216,29 @@ def _nav_dashcard(text: str) -> dict[str, Any]:
     }
 
 
+def _section_header_dashcard(text: str, row: int, idx: int) -> dict[str, Any]:
+    """Markdown divider between groups of cards. `text` is rendered
+    verbatim — use `### Section name` or similar for emphasis."""
+    return {
+        "id": -(1000 + idx),
+        "card_id": None,
+        "row": row,
+        "col": 0,
+        "size_x": 24,
+        "size_y": SECTION_HEADER_HEIGHT,
+        "parameter_mappings": [],
+        "visualization_settings": {
+            "virtual_card": {
+                "display": "text",
+                "name": None,
+                "archived": False,
+                "dataset_query": {},
+            },
+            "text": text,
+        },
+    }
+
+
 def _set_layout(
     client: httpx.Client,
     dashboard: dict[str, Any],
@@ -1188,11 +1246,32 @@ def _set_layout(
     card_ids: dict[str, int],
     nav_markdown: str | None = None,
     dash_id_by_name: dict[str, int] | None = None,
+    section_headers: list[dict[str, Any]] | None = None,
 ) -> None:
+    """Section headers are markdown dividers between groups of cards.
+    Pass `[{"row": <natural_row>, "text": "### Triage"}, ...]`. Each
+    header inserted at a natural row pushes every card at or below
+    that row down by SECTION_HEADER_HEIGHT, so card spec rows stay at
+    their natural positions and don't need to bake in header offsets."""
     dashcards = []
     row_offset = NAV_HEIGHT if nav_markdown is not None else 0
     if nav_markdown is not None:
         dashcards.append(_nav_dashcard(nav_markdown))
+
+    headers = sorted(section_headers or [], key=lambda h: h["row"])
+
+    def shift(orig_row: int) -> int:
+        return orig_row + sum(
+            SECTION_HEADER_HEIGHT for h in headers if h["row"] <= orig_row
+        )
+
+    for i, h in enumerate(headers):
+        prior = sum(1 for hh in headers if hh["row"] < h["row"])
+        header_row = h["row"] + prior * SECTION_HEADER_HEIGHT
+        dashcards.append(
+            _section_header_dashcard(h["text"], header_row + row_offset, i)
+        )
+
     for i, spec in enumerate(specs):
         card_id = card_ids[spec["key"]]
         param_mappings = [
@@ -1206,7 +1285,7 @@ def _set_layout(
         dashcards.append({
             "id": -(i + 2),
             "card_id": card_id,
-            "row": spec["row"] + row_offset,
+            "row": shift(spec["row"]) + row_offset,
             "col": spec["col"],
             "size_x": spec["size_x"],
             "size_y": spec["size_y"],
