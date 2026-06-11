@@ -8,7 +8,11 @@ from datetime import datetime, timezone
 from typing import Any
 
 from ingest import db
-from ingest.agent_compliance.normalize import canonical_platform, normalize_org_name
+from ingest.agent_compliance.normalize import (
+    canonical_platform,
+    is_placeholder_org_name,
+    normalize_org_name,
+)
 
 
 @dataclass(frozen=True)
@@ -70,7 +74,10 @@ def load_sources() -> list[SourceConfig]:
             ORDER BY ps.platform, ps.source_name
             """
         )
-        rows = cur.fetchall()
+        rows = [
+            row for row in cur.fetchall()
+            if not is_placeholder_org_name(row[5])
+        ]
     return [
         SourceConfig(
             source_id=row[0],
@@ -105,7 +112,7 @@ def load_clients() -> dict[int, ClientConfig]:
               AND source <> 'alignment'
             """
         )
-        rows = cur.fetchall()
+        rows = [row for row in cur.fetchall() if not is_placeholder_org_name(row[1])]
     return {
         row[0]: ClientConfig(
             client_id=row[0],
@@ -149,6 +156,8 @@ def load_aliases() -> dict[tuple[str, str, str], int]:
         rows = cur.fetchall()
     aliases: dict[tuple[str, str, str], int] = {}
     for platform, alias_type, alias_value, client_id in rows:
+        if is_placeholder_org_name(alias_value):
+            continue
         platform = canonical_platform(platform)
         exact = alias_value.strip().lower()
         aliases.setdefault((platform, alias_type, exact), client_id)
@@ -176,7 +185,7 @@ def sync_clients_from_observations(
         if platform not in platform_alias_types:
             continue
         name = (obs.get("platform_group_name") or "").strip()
-        if not name:
+        if not name or is_placeholder_org_name(name):
             continue
         if name.lower() in org_excludes:
             continue
@@ -195,7 +204,7 @@ def sync_clients_from_observations(
             WHERE enabled
             """
         )
-        clients = cur.fetchall()
+        clients = [row for row in cur.fetchall() if not is_placeholder_org_name(row[1])]
         authoritative_clients = {
             normalize_org_name(row[1]): (row[0], row[1], row[2])
             for row in clients
@@ -232,6 +241,8 @@ def sync_clients_from_observations(
         )
         for client_id, client_name, alias_value in cur.fetchall():
             known_client_by_norm.setdefault(normalize_org_name(client_name), (client_id, client_name))
+            if is_placeholder_org_name(alias_value):
+                continue
             known_client_by_norm.setdefault(normalize_org_name(alias_value), (client_id, client_name))
 
         platforms_by_norm = {
@@ -287,6 +298,7 @@ def sync_clients_from_observations(
         client_by_name = {
             row[1].strip().lower(): (row[0], row[1], row[2])
             for row in cur.fetchall()
+            if not is_placeholder_org_name(row[1])
         }
 
         alias_rows: list[tuple[int, str, str, str, str]] = []

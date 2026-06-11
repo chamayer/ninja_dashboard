@@ -43,6 +43,7 @@ from ingest.agent_compliance.config_loader import (
     remove_org_exclude,
     remove_device_ignore,
 )
+from ingest.agent_compliance.normalize import is_placeholder_org_name
 from ingest.url_utils import redact_url
 from ingest.core import (
     custom_fields,
@@ -298,6 +299,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 except ValueError:
                     self._respond(400, b"invalid alias_hex\n")
                     return
+            if alias_value and is_placeholder_org_name(alias_value):
+                self._respond(400, b"placeholder names are not valid aliases\n")
+                return
             count = promote_alignment_aliases(client_id, platform=platform, alias_value=alias_value)
             body = f"added {count} alias row(s)\n".encode("utf-8")
             self._respond(200, body)
