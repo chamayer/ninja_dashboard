@@ -316,6 +316,26 @@ DASHBOARDS = [
                 0, 20, 4, 4,
                 click_behavior=_dashboard_link(DASH_DEVICES),
             ),
+            _card(
+                "new_customers_found",
+                "New customer names found",
+                "table",
+                """
+                    SELECT
+                        candidate_name AS "Customer name",
+                        platform AS "Found in",
+                        COALESCE(NULLIF(source_name, ''), 'Unknown') AS "Source",
+                        COALESCE(TO_CHAR(last_seen_at, 'YYYY-MM-DD HH24:MI'), 'Unknown') AS "Last seen",
+                        'Review' AS "Action"
+                    FROM ninja_agent_compliance.v_org_candidates_current
+                    ORDER BY last_seen_at DESC, candidate_name
+                    LIMIT 15
+                """,
+                4, 0, 24, 6,
+                column_click_behaviors={
+                    "Action": _dashboard_link(DASH_CUSTOMERS),
+                },
+            ),
         ],
     },
     {
