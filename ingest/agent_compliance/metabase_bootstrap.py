@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any
+from urllib.parse import quote_plus
 
 import httpx
 
@@ -43,8 +44,9 @@ def _card(
     col: int,
     size_x: int,
     size_y: int,
+    click_behavior: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    return {
+    card = {
         "key": key,
         "name": name,
         "display": display,
@@ -53,6 +55,29 @@ def _card(
         "col": col,
         "size_x": size_x,
         "size_y": size_y,
+    }
+    if click_behavior is not None:
+        card["click_behavior"] = click_behavior
+    return card
+
+
+def _build_click_behavior_json(spec: dict[str, Any], dash_id_by_name: dict[str, int]) -> dict[str, Any] | None:
+    target = spec.get("target")
+    if not target:
+        return None
+    target_id = dash_id_by_name.get(target)
+    if target_id is None:
+        log.warning("Click behavior: unknown target dashboard %r", target)
+        return None
+    path = f"/dashboard/{target_id}"
+    preset = spec.get("preset") or {}
+    if preset:
+        qs = "&".join(f"{quote_plus(str(k))}={quote_plus(str(v))}" for k, v in preset.items())
+        path = f"{path}?{qs}"
+    return {
+        "type": "link",
+        "linkType": "url",
+        "linkTemplate": path,
     }
 
 
@@ -72,6 +97,7 @@ DASHBOARDS = [
                     FROM ninja_agent_compliance.v_compliance_matrix_current
                 """,
                 0, 0, 4, 4,
+                click_behavior={"target": DASH_DEVICES},
             ),
             _card(
                 "devices_needing_action",
@@ -83,16 +109,18 @@ DASHBOARDS = [
                     WHERE NOT is_compliant
                 """,
                 0, 4, 4, 4,
+                click_behavior={"target": DASH_DEVICES},
             ),
             _card(
                 "active_findings",
-                "Active Findings",
+                "Open Issues",
                 "scalar",
                 """
                     SELECT COUNT(*) AS findings
-                    FROM ninja_agent_compliance.v_active_findings
+                    FROM ninja_agent_compliance.v_remediation_candidates
                 """,
                 0, 8, 4, 4,
+                click_behavior={"target": DASH_DEVICES},
             ),
             _card(
                 "source_issues",
@@ -104,6 +132,7 @@ DASHBOARDS = [
                     WHERE enabled AND status = 'failed'
                 """,
                 0, 12, 4, 4,
+                click_behavior={"target": DASH_SOURCE},
             ),
             _card(
                 "org_review_queue",
@@ -115,6 +144,7 @@ DASHBOARDS = [
                     WHERE overall_status = 'MISMATCH'
                 """,
                 0, 16, 4, 4,
+                click_behavior={"target": DASH_ORG},
             ),
             _card(
                 "unresolved_names",
@@ -141,6 +171,7 @@ DASHBOARDS = [
                     ) unresolved_groups
                 """,
                 0, 20, 4, 4,
+                click_behavior={"target": DASH_ORG},
             ),
         ],
     },
@@ -256,18 +287,43 @@ DASHBOARDS = [
                     SELECT
                         org_name AS "Org",
                         overall_status AS "Status",
-                        ninja_status AS "Ninja",
-                        s1_status AS "SentinelOne",
-                        lmi_status AS "LogMeIn",
+                        COALESCE(NULLIF(ninja_platform_name, ''), 'No name') AS "Ninja",
+                        COALESCE(NULLIF(s1_platform_name, ''), 'No name') AS "SentinelOne",
+                        COALESCE(NULLIF(lmi_platform_name, ''), 'No name') AS "LogMeIn",
                         merged_from AS "Merged from",
                         suggested_config AS "Suggested config",
-                        'http://127.0.0.1:8090/agent-compliance/action/add-alias?client_id='
-                            || client_id::text
-                            || '&confirm=1' AS "Add alias",
+                        CASE
+                            WHEN ninja_status = 'MISSING'
+                                 AND COALESCE(NULLIF(ninja_platform_name, ''), '') <> '' THEN
+                                'http://127.0.0.1:8090/agent-compliance/action/add-alias?client_id='
+                                || client_id::text
+                                || '&platform=Ninja&alias_hex='
+                                || encode(convert_to(ninja_platform_name, 'UTF8'), 'hex')
+                                || '&confirm=1'
+                        END AS "Fix Ninja",
+                        CASE
+                            WHEN s1_status = 'MISSING'
+                                 AND COALESCE(NULLIF(s1_platform_name, ''), '') <> '' THEN
+                                'http://127.0.0.1:8090/agent-compliance/action/add-alias?client_id='
+                                || client_id::text
+                                || '&platform=SentinelOne&alias_hex='
+                                || encode(convert_to(s1_platform_name, 'UTF8'), 'hex')
+                                || '&confirm=1'
+                        END AS "Fix SentinelOne",
+                        CASE
+                            WHEN lmi_status = 'MISSING'
+                                 AND COALESCE(NULLIF(lmi_platform_name, ''), '') <> '' THEN
+                                'http://127.0.0.1:8090/agent-compliance/action/add-alias?client_id='
+                                || client_id::text
+                                || '&platform=LogMeIn&alias_hex='
+                                || encode(convert_to(lmi_platform_name, 'UTF8'), 'hex')
+                                || '&confirm=1'
+                        END AS "Fix LogMeIn",
                         'http://127.0.0.1:8090/agent-compliance/action/exclude-org?pattern_hex='
                             || encode(convert_to(org_name, 'UTF8'), 'hex')
                             || '&confirm=1' AS "Exclude org"
-                    FROM ninja_agent_compliance.v_alignment_mismatches
+                    FROM ninja_agent_compliance.org_alignment_current
+                    WHERE overall_status NOT LIKE 'OK%'
                     ORDER BY org_name
                     LIMIT 500
                 """,
@@ -281,13 +337,16 @@ DASHBOARDS = [
                     SELECT
                         source_name AS "Source",
                         platform AS "Platform",
-                        COALESCE(NULLIF(platform_group_name, ''), 'Unknown') AS "Group",
-                        COALESCE(NULLIF(platform_group_id, ''), 'Unknown') AS "Group ID",
+                        COALESCE(NULLIF(platform_group_name, ''), 'No group name') AS "Group",
+                        COALESCE(NULLIF(platform_group_id, ''), 'No group id') AS "Group ID",
                         COUNT(*) AS "Devices",
                         MAX(observed_at) AS "Last seen",
-                        MIN('http://127.0.0.1:8090/agent-compliance/action/exclude-org?pattern_hex='
-                            || encode(convert_to(COALESCE(NULLIF(platform_group_name, ''), 'Unknown'), 'UTF8'), 'hex')
-                            || '&confirm=1') AS "Exclude org"
+                        MIN(CASE
+                            WHEN COALESCE(NULLIF(platform_group_name, ''), '') <> '' THEN
+                                'http://127.0.0.1:8090/agent-compliance/action/exclude-org?pattern_hex='
+                                || encode(convert_to(platform_group_name, 'UTF8'), 'hex')
+                                || '&confirm=1'
+                        END) AS "Exclude org"
                     FROM ninja_agent_compliance.platform_observations
                     WHERE resolved_client_id IS NULL
                       AND observed_at > now() - INTERVAL '7 days'
@@ -300,8 +359,8 @@ DASHBOARDS = [
                     GROUP BY
                         source_name,
                         platform,
-                        COALESCE(NULLIF(platform_group_name, ''), 'Unknown'),
-                        COALESCE(NULLIF(platform_group_id, ''), 'Unknown')
+                        COALESCE(NULLIF(platform_group_name, ''), 'No group name'),
+                        COALESCE(NULLIF(platform_group_id, ''), 'No group id')
                     ORDER BY "Devices" DESC, source_name
                     LIMIT 200
                 """,
@@ -445,6 +504,7 @@ def run_bootstrap(url: str, user: str, password: str, db_name: str = "Ninja") ->
                 dash_obj_by_name[dash_spec["name"]],
                 dash_spec["cards"],
                 card_ids,
+                dash_id_by_name,
                 nav_markdown=nav_md,
             )
 
@@ -578,6 +638,7 @@ def _set_layout(
     dashboard: dict[str, Any],
     specs: list[dict[str, Any]],
     card_ids: dict[str, int],
+    dash_id_by_name: dict[str, int],
     nav_markdown: str | None = None,
 ) -> None:
     dashcards = []
@@ -585,7 +646,12 @@ def _set_layout(
     if nav_markdown is not None:
         dashcards.append(_nav_dashcard(nav_markdown))
     for i, spec in enumerate(specs):
-        dashcards.append({
+        extra: dict[str, Any] = {}
+        if "click_behavior" in spec:
+            cb = _build_click_behavior_json(spec["click_behavior"], dash_id_by_name)
+            if cb:
+                extra["click_behavior"] = cb
+        dashcard = {
             "id": -(i + 2),
             "card_id": card_ids[spec["key"]],
             "row": spec["row"] + row_offset,
@@ -594,7 +660,10 @@ def _set_layout(
             "size_y": spec["size_y"],
             "parameter_mappings": [],
             "visualization_settings": {},
-        })
+        }
+        if extra:
+            dashcard["visualization_settings"] = extra
+        dashcards.append(dashcard)
     resp = client.put(f"/api/dashboard/{dashboard['id']}", json={"dashcards": dashcards})
     resp.raise_for_status()
 

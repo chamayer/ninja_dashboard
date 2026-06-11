@@ -544,8 +544,69 @@ def _suggested_config(org_name: str, names: dict[str, str]) -> str | None:
     return "; ".join(parts) if parts else None
 
 
-def promote_alignment_aliases(client_id: int, updated_by: str = "agent_compliance") -> int:
-    """Promote the current alignment names into manual aliases."""
+def promote_alignment_aliases(
+    client_id: int,
+    platform: str | None = None,
+    alias_value: str | None = None,
+    updated_by: str = "agent_compliance",
+) -> int:
+    """Promote a reviewed alias into manual aliases.
+
+    When platform + alias_value are supplied, only that one row is
+    promoted. The broader fallback remains for compatibility with
+    older operator links."""
+    platform = canonical_platform(platform or "") if platform else None
+    if platform and alias_value is not None:
+        alias_value = alias_value.strip()
+        if not alias_value:
+            return 0
+        alias_type_by_platform = {
+            "Ninja": "org_name",
+            "SentinelOne": "site_name",
+            "LogMeIn": "group_name",
+        }
+        alias_type = alias_type_by_platform.get(platform)
+        if alias_type is None:
+            return 0
+        with db.transaction() as cur:
+            cur.execute(
+                """
+                SELECT org_name
+                FROM ninja_agent_compliance.org_alignment_current
+                WHERE client_id = %s
+                """,
+                (client_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                return 0
+            org_name = row[0]
+            if normalize_org_name(alias_value) == normalize_org_name(org_name):
+                return 0
+            cur.execute(
+                """
+                INSERT INTO ninja_agent_compliance.client_aliases
+                    (client_id, platform, alias_type, alias_value, source, notes, updated_by)
+                VALUES (%s, %s, %s, %s, 'manual', %s, %s)
+                ON CONFLICT (client_id, platform, (COALESCE(source_id, 0)), alias_type, alias_value)
+                DO UPDATE SET
+                    enabled = true,
+                    source = 'manual',
+                    notes = EXCLUDED.notes,
+                    updated_at = now(),
+                    updated_by = EXCLUDED.updated_by
+                """,
+                (
+                    client_id,
+                    platform,
+                    alias_type,
+                    alias_value,
+                    "Promoted from alignment review",
+                    updated_by,
+                ),
+            )
+            return 1
+
     with db.transaction() as cur:
         cur.execute(
             """
@@ -560,7 +621,7 @@ def promote_alignment_aliases(client_id: int, updated_by: str = "agent_complianc
             return 0
         org_name, ninja_name, s1_name, lmi_name = row
         alias_rows: list[tuple[int, str, str, str, str]] = []
-        for platform, alias_type, value in (
+        for platform_name, alias_type, value in (
             ("Ninja", "org_name", ninja_name),
             ("SentinelOne", "site_name", s1_name),
             ("LogMeIn", "group_name", lmi_name),
@@ -571,7 +632,7 @@ def promote_alignment_aliases(client_id: int, updated_by: str = "agent_complianc
                 continue
             alias_rows.append((
                 client_id,
-                platform,
+                platform_name,
                 alias_type,
                 value,
                 "Promoted from alignment review",
@@ -591,7 +652,10 @@ def promote_alignment_aliases(client_id: int, updated_by: str = "agent_complianc
                 updated_at = now(),
                 updated_by = EXCLUDED.updated_by
             """,
-            [(client_id, platform, alias_type, value, notes, updated_by) for client_id, platform, alias_type, value, notes in alias_rows],
+            [
+                (client_id, platform_name, alias_type, value, notes, updated_by)
+                for client_id, platform_name, alias_type, value, notes in alias_rows
+            ],
         )
         return len(alias_rows)
 

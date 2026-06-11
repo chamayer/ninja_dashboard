@@ -289,7 +289,16 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             except ValueError:
                 self._respond(400, b"invalid client_id\n")
                 return
-            count = promote_alignment_aliases(client_id)
+            platform = params.get("platform", [""])[0].strip() or None
+            alias_hex = params.get("alias_hex", [""])[0]
+            alias_value = None
+            if alias_hex:
+                try:
+                    alias_value = bytes.fromhex(alias_hex).decode("utf-8")
+                except ValueError:
+                    self._respond(400, b"invalid alias_hex\n")
+                    return
+            count = promote_alignment_aliases(client_id, platform=platform, alias_value=alias_value)
             body = f"added {count} alias row(s)\n".encode("utf-8")
             self._respond(200, body)
             return
