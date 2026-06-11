@@ -300,6 +300,24 @@ DASHBOARDS = [
                 """,
                 0, 16, 24, 6,
             ),
+            _card(
+                "org_candidates",
+                "New Org Candidates",
+                "table",
+                """
+                    SELECT
+                        candidate_name AS "Candidate",
+                        platform AS "Platform",
+                        observed_count AS "Hits",
+                        COALESCE(NULLIF(source_name, ''), 'Unknown') AS "Source",
+                        COALESCE(NULLIF(suggested_target, ''), 'Review needed') AS "Suggested target",
+                        COALESCE(TO_CHAR(last_seen_at, 'YYYY-MM-DD HH24:MI'), 'Unknown') AS "Last seen"
+                    FROM ninja_agent_compliance.v_org_candidates_current
+                    ORDER BY last_seen_at DESC, candidate_name
+                    LIMIT 200
+                """,
+                0, 22, 24, 6,
+            ),
         ],
     },
     {

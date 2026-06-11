@@ -195,6 +195,11 @@ def sync_clients_from_observations(
             """
         )
         clients = cur.fetchall()
+        authoritative_clients = {
+            normalize_org_name(row[1]): (row[0], row[1], row[2])
+            for row in clients
+            if row[2] != "alignment"
+        }
         cur.execute(
             """
             SELECT DISTINCT client_id
@@ -214,10 +219,7 @@ def sync_clients_from_observations(
             if row[0] in configured_client_ids
         }
 
-        known_client_by_norm = {
-            normalize_org_name(row[1]): (row[0], row[1])
-            for row in clients
-        }
+        known_client_by_norm = dict(authoritative_clients)
         cur.execute(
             """
             SELECT c.client_id, c.client_name, a.alias_value
@@ -254,42 +256,54 @@ def sync_clients_from_observations(
                 canonical_norm_by_norm[norm] = candidates[0]
 
         canonical_names: dict[str, str] = {}
+        canonical_source_by_norm: dict[str, str] = {}
+        candidate_rows: list[tuple[str, str, str, str, int, datetime, datetime]] = []
+        new_ninja_clients: set[str] = set()
+        run_seen_at = observed_at or datetime.now(timezone.utc)
         for norm, entries in by_norm.items():
             explicit = explicit_by_norm.get(norm)
             if explicit:
                 canonical_names[norm] = explicit[1]
+                canonical_source_by_norm[norm] = explicit[2]
                 continue
-            preferred_existing = None
-            for preferred_platform in ("Ninja", "SentinelOne", "LogMeIn"):
-                candidate_name = next((entry_name for platform, entry_name in entries if platform == preferred_platform), None)
-                if not candidate_name:
-                    continue
-                preferred_existing = known_client_by_norm.get(normalize_org_name(candidate_name))
+            ninja_name = next((entry_name for platform, entry_name in entries if platform == "Ninja"), None)
+            if ninja_name:
+                preferred_existing = known_client_by_norm.get(normalize_org_name(ninja_name))
                 if preferred_existing:
                     canonical_names[norm] = preferred_existing[1]
-                    break
-            if norm in canonical_names:
+                    canonical_source_by_norm[norm] = preferred_existing[2]
+                else:
+                    canonical_names[norm] = ninja_name
+                    canonical_source_by_norm[norm] = "ninja"
+                    new_ninja_clients.add(ninja_name)
                 continue
-            for preferred_platform in ("Ninja", "SentinelOne", "LogMeIn"):
-                name = next((entry_name for platform, entry_name in entries if platform == preferred_platform), None)
-                if name:
-                    canonical_names[norm] = name
-                    break
+            for platform, name in entries:
+                candidate_rows.append((
+                    norm,
+                    name,
+                    platform,
+                    name,
+                    sum(1 for p, candidate_name in entries if p == platform and candidate_name == name),
+                    run_seen_at,
+                    run_seen_at,
+                ))
         for norm, canonical_norm in canonical_norm_by_norm.items():
             if norm in explicit_by_norm:
                 continue
             if canonical_norm != norm and canonical_norm in canonical_names:
                 canonical_names[norm] = canonical_names[canonical_norm]
+                canonical_source_by_norm[norm] = canonical_source_by_norm.get(canonical_norm, "ninja")
 
-        cur.executemany(
-            """
-            INSERT INTO ninja_agent_compliance.clients
-                (client_name, default_max_age_days, source, notes)
-            VALUES (%s, 30, 'alignment', 'Discovered from platform org/site/group alignment')
-            ON CONFLICT (client_name) DO NOTHING
-            """,
-            [(name,) for name in sorted(set(canonical_names.values()))],
-        )
+        if new_ninja_clients:
+            cur.executemany(
+                """
+                INSERT INTO ninja_agent_compliance.clients
+                    (client_name, default_max_age_days, source, notes)
+                VALUES (%s, 30, 'ninja', 'Discovered from Ninja canonical org observations')
+                ON CONFLICT (client_name) DO NOTHING
+                """,
+                [(name,) for name in sorted(new_ninja_clients)],
+            )
         cur.execute(
             """
             SELECT client_id, client_name, source
@@ -347,10 +361,25 @@ def sync_clients_from_observations(
                 """,
                 alias_rows,
             )
+        if candidate_rows:
+            cur.executemany(
+                """
+                INSERT INTO ninja_agent_compliance.org_candidates
+                    (norm_name, candidate_name, platform, source_name, observed_count, first_seen_at, last_seen_at, updated_by)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, 'agent_compliance')
+                ON CONFLICT (norm_name, platform, candidate_name) DO UPDATE SET
+                    observed_count = ninja_agent_compliance.org_candidates.observed_count + EXCLUDED.observed_count,
+                    last_seen_at = GREATEST(ninja_agent_compliance.org_candidates.last_seen_at, EXCLUDED.last_seen_at),
+                    updated_at = now(),
+                    updated_by = EXCLUDED.updated_by,
+                    enabled = true
+                """,
+                candidate_rows,
+            )
         _write_alignment_rows(
             cur,
             run_id=run_id,
-            observed_at=observed_at or datetime.now(timezone.utc),
+            observed_at=run_seen_at,
             clients=client_by_name,
             explicit_client_ids=configured_client_ids,
             platform_name_by_client=platform_name_by_client,
@@ -416,8 +445,10 @@ def _write_alignment_rows(
             norm_maps[platform][normalize_org_name(name)] = name
 
     rows = []
-    for client_id, org_name, _source in clients.values():
+    for client_id, org_name, source in clients.values():
         names = platform_name_by_client.get(client_id, {})
+        if source == "alignment" and "Ninja" not in names and client_id not in explicit_client_ids:
+            continue
         if not names and client_id not in explicit_client_ids:
             continue
         required = required_by_client.get(client_id, default_required)
