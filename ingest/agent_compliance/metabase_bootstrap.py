@@ -16,10 +16,11 @@ labels, and the link target lives in the card visualization settings.
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Callable
 
 import httpx
 
+from ingest import db
 from ingest.config import settings
 
 log = logging.getLogger(__name__)
@@ -32,6 +33,16 @@ DASH_DEVICES = "Agent Compliance - Devices"
 DASH_CUSTOMERS = "Agent Compliance - Customers"
 DASH_HEALTH = "Agent Compliance - Health"
 DASH_DEBUG = "Agent Compliance - Debug"
+
+# ── Devices dashboard parameter slugs + IDs ─────────────────────────
+# These slugs also act as URL query keys for cross-card drill-through.
+PARAM_CUSTOMER = "p_dev_customer"
+PARAM_MISSING = "p_dev_missing"
+PARAM_ONLINE_IN = "p_dev_online_in"
+PARAM_STATE = "p_dev_state"
+
+PLATFORM_VALUES = ["Ninja", "ScreenConnect", "SentinelOne", "LogMeIn"]
+STATE_VALUES = ["Stale", "Degraded", "Review"]
 
 NAV_ORDER = [DASH_TODAY, DASH_DEVICES, DASH_CUSTOMERS, DASH_HEALTH, DASH_DEBUG]
 NAV_LABELS = {
@@ -55,6 +66,8 @@ def _card(
     size_y: int,
     click_behavior: dict[str, Any] | None = None,
     column_click_behaviors: dict[str, dict[str, Any]] | None = None,
+    template_tags: dict[str, dict[str, Any]] | None = None,
+    param_mappings: dict[str, list[Any]] | None = None,
 ) -> dict[str, Any]:
     card = {
         "key": key,
@@ -70,11 +83,24 @@ def _card(
         card["click_behavior"] = click_behavior
     if column_click_behaviors is not None:
         card["column_click_behaviors"] = column_click_behaviors
+    if template_tags is not None:
+        card["template_tags"] = template_tags
+    if param_mappings is not None:
+        card["param_mappings"] = param_mappings
     return card
 
 
-def _dashboard_link(target: str) -> dict[str, Any]:
-    return {"target": target}
+def _dashboard_link(
+    target: str, params: list[tuple[str, str]] | None = None,
+) -> dict[str, Any]:
+    """Cell click navigates to a dashboard. With `params`, columns from
+    the row are passed through as dashboard URL parameters — Metabase
+    binds them to dashboard filters with matching slugs, so a click on
+    `Missing=SentinelOne` opens Devices already scoped to that value."""
+    spec: dict[str, Any] = {"target": target}
+    if params:
+        spec["params"] = params
+    return spec
 
 
 def _url_template(path: str, params: list[tuple[str, str]]) -> str:
@@ -93,10 +119,16 @@ def _build_click_behavior_json(
         if target_id is None:
             log.warning("Click behavior: unknown target dashboard %r", target)
             return None
+        params = spec.get("params") or []
+        if params:
+            qs = "&".join(f"{key}={{{{{field}}}}}" for key, field in params)
+            link = f"/dashboard/{target_id}?{qs}"
+        else:
+            link = f"/dashboard/{target_id}"
         return {
             "type": "link",
             "linkType": "url",
-            "linkTemplate": f"/dashboard/{target_id}",
+            "linkTemplate": link,
         }
 
     url_template = spec.get("url_template")
@@ -107,6 +139,84 @@ def _build_click_behavior_json(
             "linkTemplate": url_template,
         }
     return None
+
+
+# ── Filter parameter helpers ────────────────────────────────────────
+
+def _param_multiselect(
+    pid: str, name: str, slug: str, values: list[str],
+) -> dict[str, Any]:
+    """Dashboard parameter widget: multi-select dropdown backed by a
+    static value list. SQL clauses written as
+    `[[AND col IN ({{slug}})]]` are skipped when nothing is selected
+    and ORed across selections when one or more values are chosen."""
+    return {
+        "id": pid,
+        "name": name,
+        "slug": slug,
+        "type": "category",
+        "values_query_type": "list",
+        "values_source_type": "static-list",
+        "values_source_config": {"values": [[v] for v in values]},
+        "isMultiSelect": True,
+    }
+
+
+def _tag(slug: str, display_name: str) -> dict[str, Any]:
+    """Template tag declaration that goes inside `template-tags` on a
+    native query. Slug is the placeholder used in SQL (`{{slug}}`)."""
+    return {
+        "id": f"tt_{slug}",
+        "name": slug,
+        "display-name": display_name,
+        "type": "text",
+    }
+
+
+def _mapping(slug: str) -> list[Any]:
+    """Target shape that binds a dashboard parameter to a card-level
+    template tag. Same on every card that consumes the same slug."""
+    return ["variable", ["template-tag", slug]]
+
+
+def _fetch_customer_values() -> list[str]:
+    """List of active customer names for the Customer dropdown. Mirrors
+    the same filter as the customer-directory card so the dropdown
+    stays consistent with what the dashboards actually show."""
+    with db.transaction() as cur:
+        cur.execute(
+            """
+            SELECT client_name
+            FROM ninja_agent_compliance.clients
+            WHERE enabled
+              AND source NOT IN ('alignment', 'demoted')
+              AND lower(trim(client_name)) NOT IN
+                  ('default site', 'unknown', 'various', '.default')
+            ORDER BY client_name
+            """
+        )
+        return [r[0] for r in cur.fetchall() if r[0]]
+
+
+def _build_devices_parameters() -> list[dict[str, Any]]:
+    customer_values = _fetch_customer_values()
+    return [
+        _param_multiselect(PARAM_CUSTOMER, "Customer", "customer", customer_values),
+        _param_multiselect(PARAM_MISSING, "Missing platform", "missing", PLATFORM_VALUES),
+        _param_multiselect(PARAM_ONLINE_IN, "Online in", "online_in", PLATFORM_VALUES),
+        _param_multiselect(PARAM_STATE, "State", "state", STATE_VALUES),
+    ]
+
+
+# Template tags shared across every Devices card that consumes any
+# filter. Cards opt into a subset via `param_mappings`; tags that
+# aren't mapped are still declared but unused, which Metabase tolerates.
+_DEVICES_FILTER_TAGS = {
+    "customer": _tag("customer", "Customer"),
+    "missing": _tag("missing", "Missing platform"),
+    "online_in": _tag("online_in", "Online in"),
+    "state": _tag("state", "State"),
+}
 
 
 DASHBOARDS = [
@@ -175,6 +285,7 @@ DASHBOARDS = [
     },
     {
         "name": DASH_DEVICES,
+        "parameters_builder": _build_devices_parameters,
         "cards": [
             _card(
                 "device_queue",
@@ -194,6 +305,15 @@ DASHBOARDS = [
                         CASE WHEN s1_exempt THEN 'Yes' ELSE 'No' END AS "AV",
                         'Ignore' AS "Action"
                     FROM ninja_agent_compliance.v_remediation_candidates
+                    WHERE 1=1
+                      [[AND client_name IN ({{customer}})]]
+                      [[AND (
+                          CASE
+                              WHEN is_degraded THEN 'Degraded'
+                              WHEN is_stale THEN 'Stale'
+                              ELSE 'Review'
+                          END
+                      ) IN ({{state}})]]
                     ORDER BY client_name, hostname
                     LIMIT 500
                 """,
@@ -206,6 +326,14 @@ DASHBOARDS = [
                         ),
                     },
                 },
+                template_tags={
+                    "customer": _DEVICES_FILTER_TAGS["customer"],
+                    "state": _DEVICES_FILTER_TAGS["state"],
+                },
+                param_mappings={
+                    PARAM_CUSTOMER: _mapping("customer"),
+                    PARAM_STATE: _mapping("state"),
+                },
             ),
             _card(
                 "active_gaps_summary",
@@ -215,6 +343,7 @@ DASHBOARDS = [
                     WITH gaps AS (
                         SELECT
                             m.client_id,
+                            m.client_name,
                             m.norm_name,
                             missing.platform AS missing_platform,
                             online.platform AS online_platform
@@ -238,11 +367,29 @@ DASHBOARDS = [
                         online_platform AS "Online in",
                         COUNT(DISTINCT (client_id, norm_name)) AS "Devices"
                     FROM gaps
+                    WHERE 1=1
+                      [[AND client_name IN ({{customer}})]]
+                      [[AND missing_platform IN ({{missing}})]]
+                      [[AND online_platform IN ({{online_in}})]]
                     GROUP BY missing_platform, online_platform
                     ORDER BY "Devices" DESC, missing_platform, online_platform
                     LIMIT 500
                 """,
                 10, 0, 12, 6,
+                click_behavior=_dashboard_link(
+                    DASH_DEVICES,
+                    params=[("missing", "Missing"), ("online_in", "Online in")],
+                ),
+                template_tags={
+                    "customer": _DEVICES_FILTER_TAGS["customer"],
+                    "missing": _DEVICES_FILTER_TAGS["missing"],
+                    "online_in": _DEVICES_FILTER_TAGS["online_in"],
+                },
+                param_mappings={
+                    PARAM_CUSTOMER: _mapping("customer"),
+                    PARAM_MISSING: _mapping("missing"),
+                    PARAM_ONLINE_IN: _mapping("online_in"),
+                },
             ),
             _card(
                 "active_gaps_by_missing",
@@ -252,6 +399,7 @@ DASHBOARDS = [
                     WITH gaps AS (
                         SELECT DISTINCT
                             m.client_id,
+                            m.client_name,
                             m.norm_name,
                             missing.platform AS missing_platform
                         FROM ninja_agent_compliance.v_compliance_matrix_current m
@@ -273,10 +421,24 @@ DASHBOARDS = [
                         missing_platform AS "Missing",
                         COUNT(*) AS "Devices"
                     FROM gaps
+                    WHERE 1=1
+                      [[AND client_name IN ({{customer}})]]
+                      [[AND missing_platform IN ({{missing}})]]
                     GROUP BY missing_platform
                     ORDER BY "Devices" DESC
                 """,
                 10, 12, 12, 6,
+                click_behavior=_dashboard_link(
+                    DASH_DEVICES, params=[("missing", "Missing")],
+                ),
+                template_tags={
+                    "customer": _DEVICES_FILTER_TAGS["customer"],
+                    "missing": _DEVICES_FILTER_TAGS["missing"],
+                },
+                param_mappings={
+                    PARAM_CUSTOMER: _mapping("customer"),
+                    PARAM_MISSING: _mapping("missing"),
+                },
             ),
             _card(
                 "active_platform_gap_details",
@@ -321,6 +483,10 @@ DASHBOARDS = [
                         COALESCE(array_to_string(observed_platforms, ', '), '') AS "Found in",
                         'Ignore' AS "Action"
                     FROM gaps
+                    WHERE 1=1
+                      [[AND client_name IN ({{customer}})]]
+                      [[AND missing_platform IN ({{missing}})]]
+                      [[AND online_platform IN ({{online_in}})]]
                     ORDER BY missing_platform, online_platform, client_name, hostname
                     LIMIT 500
                 """,
@@ -332,6 +498,16 @@ DASHBOARDS = [
                             [("client", "Customer"), ("host", "Device")],
                         ),
                     },
+                },
+                template_tags={
+                    "customer": _DEVICES_FILTER_TAGS["customer"],
+                    "missing": _DEVICES_FILTER_TAGS["missing"],
+                    "online_in": _DEVICES_FILTER_TAGS["online_in"],
+                },
+                param_mappings={
+                    PARAM_CUSTOMER: _mapping("customer"),
+                    PARAM_MISSING: _mapping("missing"),
+                    PARAM_ONLINE_IN: _mapping("online_in"),
                 },
             ),
             _card(
@@ -771,12 +947,34 @@ def run_bootstrap(url: str, user: str, password: str, db_name: str = "Ninja") ->
             for card in all_cards
         }
 
+        # Build dashboard-level parameter widgets up front. Customer lists
+        # come from Postgres so they can't be baked into the module-level
+        # DASHBOARDS constant.
+        dashboard_params: dict[str, list[dict[str, Any]]] = {}
+        for dash_spec in DASHBOARDS:
+            builder: Callable[[], list[dict[str, Any]]] | None = dash_spec.get("parameters_builder")
+            if builder is None:
+                continue
+            try:
+                dashboard_params[dash_spec["name"]] = builder()
+            except Exception:
+                log.exception(
+                    "Parameter builder failed for dashboard %r; falling back to no filters",
+                    dash_spec["name"],
+                )
+                dashboard_params[dash_spec["name"]] = []
+
         dash_id_by_name: dict[str, int] = {}
         dash_obj_by_name: dict[str, dict[str, Any]] = {}
         urls: list[str] = []
 
         for dash_spec in DASHBOARDS:
-            dashboard = _upsert_dashboard(client, dash_spec["name"], collection_id)
+            dashboard = _upsert_dashboard(
+                client,
+                dash_spec["name"],
+                collection_id,
+                parameters=dashboard_params.get(dash_spec["name"]),
+            )
             dash_id_by_name[dash_spec["name"]] = int(dashboard["id"])
             dash_obj_by_name[dash_spec["name"]] = dashboard
             urls.append(f"dashboard/{dashboard['id']}  ({dash_spec['name']})")
@@ -789,6 +987,7 @@ def run_bootstrap(url: str, user: str, password: str, db_name: str = "Ninja") ->
                 dash_spec["cards"],
                 card_ids,
                 nav_markdown=nav_md,
+                dash_id_by_name=dash_id_by_name,
             )
 
         card_ids_by_dash = {
@@ -846,6 +1045,9 @@ def _upsert_card(
     collection_id: int,
     existing_cards: list[dict[str, Any]],
 ) -> int:
+    native: dict[str, Any] = {"query": spec["query"].strip()}
+    if "template_tags" in spec:
+        native["template-tags"] = spec["template_tags"]
     body = {
         "name": spec["name"],
         "description": _uid(spec["key"]),
@@ -855,7 +1057,7 @@ def _upsert_card(
         "dataset_query": {
             "type": "native",
             "database": db_id,
-            "native": {"query": spec["query"].strip()},
+            "native": native,
         },
     }
     existing = next((card for card in existing_cards if card.get("description") == _uid(spec["key"])), None)
@@ -869,17 +1071,33 @@ def _upsert_card(
     return int(resp.json()["id"])
 
 
-def _upsert_dashboard(client: httpx.Client, name: str, collection_id: int) -> dict[str, Any]:
+def _upsert_dashboard(
+    client: httpx.Client,
+    name: str,
+    collection_id: int,
+    parameters: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     resp = client.get("/api/dashboard")
     resp.raise_for_status()
-    for dashboard in resp.json():
-        if dashboard.get("name") == name and dashboard.get("collection_id") == collection_id:
-            detail = client.get(f"/api/dashboard/{dashboard['id']}")
+    dashboard = None
+    for d in resp.json():
+        if d.get("name") == name and d.get("collection_id") == collection_id:
+            detail = client.get(f"/api/dashboard/{d['id']}")
             detail.raise_for_status()
-            return detail.json()
-    resp = client.post("/api/dashboard", json={"name": name, "collection_id": collection_id})
-    resp.raise_for_status()
-    return resp.json()
+            dashboard = detail.json()
+            break
+    if dashboard is None:
+        resp = client.post("/api/dashboard", json={"name": name, "collection_id": collection_id})
+        resp.raise_for_status()
+        dashboard = resp.json()
+    if parameters is not None:
+        resp = client.put(
+            f"/api/dashboard/{dashboard['id']}",
+            json={"parameters": parameters},
+        )
+        resp.raise_for_status()
+        dashboard = resp.json()
+    return dashboard
 
 
 def _build_nav_markdown(current_dash_name: str, dash_id_by_name: dict[str, int]) -> str:
@@ -923,24 +1141,30 @@ def _set_layout(
     specs: list[dict[str, Any]],
     card_ids: dict[str, int],
     nav_markdown: str | None = None,
+    dash_id_by_name: dict[str, int] | None = None,
 ) -> None:
     dashcards = []
     row_offset = NAV_HEIGHT if nav_markdown is not None else 0
     if nav_markdown is not None:
         dashcards.append(_nav_dashcard(nav_markdown))
     for i, spec in enumerate(specs):
+        card_id = card_ids[spec["key"]]
+        param_mappings = [
+            {"parameter_id": pid, "card_id": card_id, "target": target}
+            for pid, target in (spec.get("param_mappings") or {}).items()
+        ]
         dashcard_viz: dict[str, Any] = {}
-        column_settings = _build_column_settings(spec)
+        column_settings = _build_column_settings(spec, dash_id_by_name)
         if column_settings:
             dashcard_viz["column_settings"] = column_settings
         dashcards.append({
             "id": -(i + 2),
-            "card_id": card_ids[spec["key"]],
+            "card_id": card_id,
             "row": spec["row"] + row_offset,
             "col": spec["col"],
             "size_x": spec["size_x"],
             "size_y": spec["size_y"],
-            "parameter_mappings": [],
+            "parameter_mappings": param_mappings,
             "visualization_settings": dashcard_viz,
         })
     resp = client.put(f"/api/dashboard/{dashboard['id']}", json={"dashcards": dashcards})
@@ -983,10 +1207,13 @@ def _apply_click_behaviors(
             r.raise_for_status()
 
 
-def _build_column_settings(spec: dict[str, Any]) -> dict[str, dict[str, Any]]:
+def _build_column_settings(
+    spec: dict[str, Any],
+    dash_id_by_name: dict[str, int] | None = None,
+) -> dict[str, dict[str, Any]]:
     column_settings: dict[str, dict[str, Any]] = {}
     for col, col_spec in (spec.get("column_click_behaviors") or {}).items():
-        cb = _build_click_behavior_json(col_spec, {})
+        cb = _build_click_behavior_json(col_spec, dash_id_by_name or {})
         if cb:
             column_settings[f'["name","{col}"]'] = {"click_behavior": cb}
     return column_settings
