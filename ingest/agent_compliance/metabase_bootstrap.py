@@ -30,6 +30,7 @@ COLLECTION_NAME = "Agent Compliance"
 
 DASH_TODAY = "Agent Compliance - Today"
 DASH_DEVICES = "Agent Compliance - Devices"
+DASH_DEVICE_DRILLDOWN = "Agent Compliance - Device drilldown"
 DASH_CUSTOMERS = "Agent Compliance - Customers"
 DASH_HEALTH = "Agent Compliance - Health"
 DASH_DEBUG = "Agent Compliance - Debug"
@@ -41,6 +42,10 @@ PARAM_MISSING = "p_dev_missing"
 PARAM_ONLINE_IN = "p_dev_online_in"
 PARAM_STATE = "p_dev_state"
 PARAM_AV_EXEMPT = "p_dev_av"
+
+# Device drilldown — dashboard scoped to one (customer, host) pair.
+PARAM_DD_CUSTOMER = "p_dd_customer"
+PARAM_DD_HOST = "p_dd_host"
 
 PLATFORM_VALUES = ["Ninja", "ScreenConnect", "SentinelOne", "LogMeIn"]
 STATE_VALUES = ["Stale", "Degraded", "Review"]
@@ -201,6 +206,18 @@ def _fetch_customer_values() -> list[str]:
         return [r[0] for r in cur.fetchall() if r[0]]
 
 
+def _param_text(pid: str, name: str, slug: str) -> dict[str, Any]:
+    """Free-text dashboard parameter. Used for drilldown scoping where
+    the value is passed via URL params from a row click (no dropdown
+    population needed)."""
+    return {
+        "id": pid,
+        "name": name,
+        "slug": slug,
+        "type": "category",
+    }
+
+
 def _build_devices_parameters() -> list[dict[str, Any]]:
     customer_values = _fetch_customer_values()
     return [
@@ -221,6 +238,19 @@ _DEVICES_FILTER_TAGS = {
     "online_in": _tag("online_in", "Online in"),
     "state": _tag("state", "State"),
     "av": _tag("av", "NO AV"),
+}
+
+
+def _build_drilldown_parameters() -> list[dict[str, Any]]:
+    return [
+        _param_text(PARAM_DD_CUSTOMER, "Customer", "customer"),
+        _param_text(PARAM_DD_HOST, "Device", "host"),
+    ]
+
+
+_DRILLDOWN_FILTER_TAGS = {
+    "customer": _tag("customer", "Customer"),
+    "host": _tag("host", "Device"),
 }
 
 
@@ -343,6 +373,10 @@ DASHBOARDS = [
                 """,
                 0, 0, 24, 10,
                 column_click_behaviors={
+                    "Device": _dashboard_link(
+                        DASH_DEVICE_DRILLDOWN,
+                        params=[("customer", "Customer"), ("host", "Device")],
+                    ),
                     "Action": {
                         "url_template": _url_template(
                             "/a/ig",
@@ -543,6 +577,10 @@ DASHBOARDS = [
                 """,
                 22, 0, 24, 10,
                 column_click_behaviors={
+                    "Device": _dashboard_link(
+                        DASH_DEVICE_DRILLDOWN,
+                        params=[("customer", "Customer"), ("host", "Device")],
+                    ),
                     "Action": {
                         "url_template": _url_template(
                             "/a/ig",
@@ -628,6 +666,10 @@ DASHBOARDS = [
                 """,
                 32, 0, 24, 6,
                 column_click_behaviors={
+                    "Device": _dashboard_link(
+                        DASH_DEVICE_DRILLDOWN,
+                        params=[("customer", "Customer"), ("host", "Device")],
+                    ),
                     "Action": {
                         "url_template": _url_template(
                             "/a/ui",
@@ -640,6 +682,158 @@ DASHBOARDS = [
                 },
                 param_mappings={
                     PARAM_CUSTOMER: _mapping("customer"),
+                },
+            ),
+        ],
+    },
+    {
+        "name": DASH_DEVICE_DRILLDOWN,
+        "parameters_builder": _build_drilldown_parameters,
+        "section_headers": [
+            {"row": 0, "text": "### Compliance timeline"},
+            {"row": 10, "text": "### Findings"},
+            {"row": 16, "text": "### Alerts and suppressions"},
+        ],
+        "cards": [
+            _card(
+                "drilldown_matrix_timeline",
+                "Per-run state",
+                "table",
+                """
+                    SELECT
+                        TO_CHAR(evaluated_at, 'YYYY-MM-DD HH24:MI') AS "Evaluated",
+                        CASE WHEN is_compliant THEN 'Compliant' ELSE 'Noncompliant' END AS "State",
+                        CASE WHEN is_stale THEN 'Yes' ELSE '' END AS "Stale",
+                        CASE WHEN is_degraded THEN 'Yes' ELSE '' END AS "Degraded",
+                        CASE
+                            WHEN ninja_online THEN 'Online'
+                            WHEN ninja_last_seen IS NOT NULL THEN 'Offline'
+                            ELSE '—'
+                        END AS "Ninja",
+                        CASE
+                            WHEN screenconnect_online THEN 'Online'
+                            WHEN screenconnect_last_seen IS NOT NULL THEN 'Offline'
+                            ELSE '—'
+                        END AS "ScreenConnect",
+                        CASE
+                            WHEN sentinelone_online THEN 'Online'
+                            WHEN sentinelone_last_seen IS NOT NULL THEN 'Offline'
+                            ELSE '—'
+                        END AS "SentinelOne",
+                        CASE
+                            WHEN logmein_online THEN 'Online'
+                            WHEN logmein_last_seen IS NOT NULL THEN 'Offline'
+                            ELSE '—'
+                        END AS "LogMeIn",
+                        COALESCE(array_to_string(missing_required_platforms, ', '), '—') AS "Missing"
+                    FROM ninja_agent_compliance.compliance_matrix_history
+                    WHERE 1=1
+                      [[AND client_name = {{customer}}]]
+                      [[AND hostname = {{host}}]]
+                    ORDER BY evaluated_at DESC
+                    LIMIT 100
+                """,
+                0, 0, 24, 10,
+                template_tags={
+                    "customer": _DRILLDOWN_FILTER_TAGS["customer"],
+                    "host": _DRILLDOWN_FILTER_TAGS["host"],
+                },
+                param_mappings={
+                    PARAM_DD_CUSTOMER: _mapping("customer"),
+                    PARAM_DD_HOST: _mapping("host"),
+                },
+            ),
+            _card(
+                "drilldown_findings",
+                "Findings history",
+                "table",
+                """
+                    SELECT
+                        TO_CHAR(last_seen_at, 'YYYY-MM-DD HH24:MI') AS "Last seen",
+                        TO_CHAR(first_seen_at, 'YYYY-MM-DD HH24:MI') AS "First seen",
+                        finding_type AS "Type",
+                        COALESCE(affected_platform, '—') AS "Platform",
+                        severity AS "Severity",
+                        status AS "Status",
+                        summary AS "Summary"
+                    FROM ninja_agent_compliance.compliance_findings
+                    WHERE 1=1
+                      [[AND client_name = {{customer}}]]
+                      [[AND hostname = {{host}}]]
+                    ORDER BY last_seen_at DESC
+                    LIMIT 100
+                """,
+                10, 0, 24, 6,
+                template_tags={
+                    "customer": _DRILLDOWN_FILTER_TAGS["customer"],
+                    "host": _DRILLDOWN_FILTER_TAGS["host"],
+                },
+                param_mappings={
+                    PARAM_DD_CUSTOMER: _mapping("customer"),
+                    PARAM_DD_HOST: _mapping("host"),
+                },
+            ),
+            _card(
+                "drilldown_alerts",
+                "Alert deliveries",
+                "table",
+                """
+                    SELECT
+                        TO_CHAR(ae.attempted_at, 'YYYY-MM-DD HH24:MI') AS "When",
+                        ae.event_type AS "Event",
+                        COALESCE(nr.display_name, '—') AS "Route",
+                        ae.status AS "Status",
+                        COALESCE(ae.response_code::text, '—') AS "Code",
+                        f.finding_type AS "Finding",
+                        COALESCE(f.affected_platform, '—') AS "Platform"
+                    FROM ninja_agent_compliance.alert_events ae
+                    LEFT JOIN ninja_agent_compliance.notification_routes nr
+                           ON nr.route_id = ae.route_id
+                    JOIN ninja_agent_compliance.compliance_findings f
+                           ON f.finding_id = ae.finding_id
+                    WHERE 1=1
+                      [[AND f.client_name = {{customer}}]]
+                      [[AND f.hostname = {{host}}]]
+                    ORDER BY ae.attempted_at DESC
+                    LIMIT 50
+                """,
+                16, 0, 12, 6,
+                template_tags={
+                    "customer": _DRILLDOWN_FILTER_TAGS["customer"],
+                    "host": _DRILLDOWN_FILTER_TAGS["host"],
+                },
+                param_mappings={
+                    PARAM_DD_CUSTOMER: _mapping("customer"),
+                    PARAM_DD_HOST: _mapping("host"),
+                },
+            ),
+            _card(
+                "drilldown_suppressions",
+                "Ignore history",
+                "table",
+                """
+                    SELECT
+                        TO_CHAR(s.updated_at, 'YYYY-MM-DD HH24:MI') AS "Updated",
+                        COALESCE(s.updated_by, '—') AS "By",
+                        COALESCE(NULLIF(s.reason, ''), 'No reason') AS "Reason",
+                        CASE WHEN s.enabled THEN 'Suppressed' ELSE 'Restored' END AS "State"
+                    FROM ninja_agent_compliance.alert_suppressions s
+                    JOIN ninja_agent_compliance.clients c
+                           ON c.client_id = s.client_id
+                    WHERE 1=1
+                      [[AND c.client_name = {{customer}}]]
+                      [[AND (s.display_name = {{host}} OR s.norm_name = lower({{host}}))]]
+                    ORDER BY s.updated_at DESC
+                    LIMIT 50
+                """,
+                16, 12, 12, 6,
+                template_tags={
+                    "customer": _DRILLDOWN_FILTER_TAGS["customer"],
+                    "host": _DRILLDOWN_FILTER_TAGS["host"],
+                },
+                param_mappings={
+                    PARAM_DD_CUSTOMER: _mapping("customer"),
+                    PARAM_DD_HOST: _mapping("host"),
                 },
             ),
         ],
