@@ -32,7 +32,7 @@ NAV_DISPLAY_NAMES = {
     DASH_COMMAND: "Today",
     DASH_DEVICES: "Devices",
     DASH_ORG: "Review",
-    DASH_SOURCE: "Source Health",
+    DASH_SOURCE: "Health",
     DASH_DEBUG: "Debug",
 }
 NAV_HEIGHT = 2
@@ -108,7 +108,7 @@ DASHBOARDS = [
             ),
             _card(
                 "devices_needing_action",
-                "Devices Needing Action",
+                "Need Action",
                 "scalar",
                 """
                     SELECT COUNT(*) AS devices
@@ -120,18 +120,19 @@ DASHBOARDS = [
             ),
             _card(
                 "active_findings",
-                "Ignored Devices",
+                "Degraded",
                 "scalar",
                 """
-                    SELECT COUNT(*) AS ignored_devices
-                    FROM ninja_agent_compliance.v_device_ignores_current
+                    SELECT COUNT(*) AS degraded_devices
+                    FROM ninja_agent_compliance.v_compliance_matrix_current
+                    WHERE is_degraded
                 """,
                 0, 8, 4, 4,
                 click_behavior={"target": DASH_DEVICES},
             ),
             _card(
                 "source_issues",
-                "Source Issues",
+                "Source Down",
                 "scalar",
                 """
                     SELECT COUNT(*) AS source_issues
@@ -143,7 +144,7 @@ DASHBOARDS = [
             ),
             _card(
                 "org_review_queue",
-                "Needs Mapping",
+                "Needs Review",
                 "scalar",
                 """
                     SELECT COUNT(*) AS orgs
@@ -155,7 +156,7 @@ DASHBOARDS = [
             ),
             _card(
                 "unresolved_names",
-                "Names to Review",
+                "New Names",
                 "scalar",
                 """
                     SELECT COUNT(*) AS unresolved_groups
@@ -187,7 +188,7 @@ DASHBOARDS = [
         "cards": [
             _card(
                 "remediation_candidates",
-                "Devices Needing Action",
+                "Need Action",
                 "table",
                 """
                     SELECT
@@ -215,7 +216,7 @@ DASHBOARDS = [
             ),
             _card(
                 "degraded_devices",
-                "Degraded Devices",
+                "Degraded",
                 "table",
                 f"""
                     SELECT
@@ -238,7 +239,7 @@ DASHBOARDS = [
             ),
             _card(
                 "active_findings_table",
-                "Active Findings",
+                "Current Issues",
                 "table",
                 f"""
                     SELECT
@@ -262,7 +263,7 @@ DASHBOARDS = [
             ),
             _card(
                 "ignored_devices",
-                "Ignored Devices",
+                "Ignored",
                 "table",
                 f"""
                     SELECT
