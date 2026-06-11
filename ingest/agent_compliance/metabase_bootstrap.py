@@ -29,9 +29,9 @@ NAV_ORDER = [
     DASH_DEBUG,
 ]
 NAV_DISPLAY_NAMES = {
-    DASH_COMMAND: "Today",
+    DASH_COMMAND: "Home",
     DASH_DEVICES: "Devices",
-    DASH_ORG: "Review",
+    DASH_ORG: "Map",
     DASH_SOURCE: "Health",
     DASH_DEBUG: "Debug",
 }
@@ -144,12 +144,13 @@ DASHBOARDS = [
             ),
             _card(
                 "org_review_queue",
-                "Review list",
+                "Names to map",
                 "scalar",
                 """
                     SELECT COUNT(*) AS orgs
                     FROM ninja_agent_compliance.v_alignment_mismatches
                     WHERE overall_status = 'MISMATCH'
+                      AND COALESCE(BTRIM(suggested_config), '') <> ''
                 """,
                 0, 16, 4, 4,
                 click_behavior={"target": DASH_ORG},
@@ -289,17 +290,16 @@ DASHBOARDS = [
         "cards": [
             _card(
                 "alignment_mismatches",
-                "Review list",
+                "Names to map",
                 "table",
                 f"""
                     SELECT
-                        org_name AS "Org",
+                        org_name AS "Name",
                         overall_status AS "Status",
                         COALESCE(NULLIF(ninja_platform_name, ''), 'No name') AS "Ninja",
                         COALESCE(NULLIF(s1_platform_name, ''), 'No name') AS "SentinelOne",
                         COALESCE(NULLIF(lmi_platform_name, ''), 'No name') AS "LogMeIn",
-                        merged_from AS "Merged from",
-                        suggested_config AS "Suggested config",
+                        COALESCE(NULLIF(suggested_config, ''), 'No suggestion') AS "Suggested",
                         CASE
                             WHEN ninja_status = 'MISSING'
                                  AND COALESCE(NULLIF(ninja_platform_name, ''), '') <> '' THEN
@@ -332,6 +332,7 @@ DASHBOARDS = [
                             || '&confirm=1' AS "Ignore this name"
                     FROM ninja_agent_compliance.org_alignment_current
                     WHERE overall_status NOT LIKE 'OK%'
+                      AND COALESCE(BTRIM(suggested_config), '') <> ''
                     ORDER BY org_name
                     LIMIT 500
                 """,
@@ -477,6 +478,25 @@ DASHBOARDS = [
                 """,
                 0, 0, 24, 12,
             ),
+            _card(
+                "alignment_backlog",
+                "Review leftovers",
+                "table",
+                """
+                    SELECT
+                        org_name AS "Name",
+                        overall_status AS "Status",
+                        COALESCE(NULLIF(ninja_platform_name, ''), 'No name') AS "Ninja",
+                        COALESCE(NULLIF(s1_platform_name, ''), 'No name') AS "SentinelOne",
+                        COALESCE(NULLIF(lmi_platform_name, ''), 'No name') AS "LogMeIn",
+                        COALESCE(NULLIF(suggested_config, ''), 'No suggestion') AS "Suggested"
+                    FROM ninja_agent_compliance.v_org_alignment_current
+                    WHERE overall_status NOT LIKE 'OK%'
+                    ORDER BY org_name
+                    LIMIT 500
+                """,
+                0, 12, 24, 8,
+            ),
         ],
     },
 ]
@@ -617,7 +637,7 @@ def _build_nav_markdown(current_dash_name: str, dash_id_by_name: dict[str, int])
         if dash_id is None:
             continue
         parts.append(f"[{label}](/dashboard/{dash_id})")
-    return " ".join(parts)
+    return " · ".join(parts)
 
 
 def _nav_dashcard(text: str) -> dict[str, Any]:
