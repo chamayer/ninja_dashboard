@@ -113,9 +113,9 @@ services:
       # python-dotenv to load /app/.env at startup and merge into
       # os.environ. Same trick as dmarc-manager.
       - /amr-ch-01_data/ninja-dashboard/.env:/app/.env:ro
-    # Loopback only — /healthz and /run are operator endpoints, not LAN.
+    # Publish the operator endpoints on the host so browser links work.
     ports:
-      - "127.0.0.1:8090:8090"
+      - "8090:8090"
     depends_on:
       postgres:
         condition: service_healthy
