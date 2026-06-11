@@ -595,6 +595,26 @@ def add_org_exclude(pattern: str, updated_by: str = "agent_compliance", notes: s
     return True
 
 
+def remove_org_exclude(pattern: str, updated_by: str = "agent_compliance") -> bool:
+    """Disable a manual org exclude without removing seed parity rows."""
+    normalized = pattern.strip().lower()
+    if not normalized:
+        return False
+    with db.transaction() as cur:
+        cur.execute(
+            """
+            UPDATE ninja_agent_compliance.org_excludes
+            SET enabled = false,
+                updated_at = now(),
+                updated_by = %s
+            WHERE pattern = %s
+              AND source = 'manual'
+            """,
+            (updated_by, normalized),
+        )
+        return cur.rowcount > 0
+
+
 def load_requirements() -> list[Requirement]:
     with db.transaction() as cur:
         cur.execute(

@@ -276,6 +276,30 @@ DASHBOARDS = [
                 """,
                 0, 8, 24, 8,
             ),
+            _card(
+                "known_exclusions",
+                "Known Exclusions",
+                "table",
+                """
+                    SELECT
+                        pattern AS "Org",
+                        source AS "Source",
+                        COALESCE(NULLIF(notes, ''), 'No notes') AS "Notes",
+                        COALESCE(TO_CHAR(updated_at, 'YYYY-MM-DD HH24:MI'), 'Unknown') AS "Updated",
+                        CASE
+                            WHEN source = 'manual' THEN
+                                'http://127.0.0.1:8090/agent-compliance/action/unexclude-org?pattern_hex='
+                                || encode(convert_to(pattern, 'UTF8'), 'hex')
+                                || '&confirm=1'
+                            ELSE NULL
+                        END AS "Restore"
+                    FROM ninja_agent_compliance.org_excludes
+                    WHERE enabled
+                    ORDER BY source, pattern
+                    LIMIT 200
+                """,
+                0, 16, 24, 6,
+            ),
         ],
     },
     {

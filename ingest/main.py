@@ -38,6 +38,7 @@ from ingest.agent_compliance import ingest as agent_compliance_ingest
 from ingest.agent_compliance.config_loader import (
     add_org_exclude,
     promote_alignment_aliases,
+    remove_org_exclude,
 )
 from ingest.core import (
     custom_fields,
@@ -304,6 +305,23 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 self._respond(200, body)
             else:
                 self._respond(400, b"blank pattern\n")
+            return
+
+        if parsed.path == "/agent-compliance/action/unexclude-org":
+            pattern_hex = params.get("pattern_hex", [""])[0]
+            if not pattern_hex:
+                self._respond(400, b"missing pattern_hex\n")
+                return
+            try:
+                pattern = bytes.fromhex(pattern_hex).decode("utf-8")
+            except ValueError:
+                self._respond(400, b"invalid pattern_hex\n")
+                return
+            if remove_org_exclude(pattern):
+                body = f"restored {pattern}\n".encode("utf-8")
+                self._respond(200, body)
+            else:
+                self._respond(404, b"not found or not removable\n")
             return
 
         self.send_error(404)
