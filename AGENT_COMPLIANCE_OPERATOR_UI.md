@@ -1,4 +1,4 @@
-# Agent Compliance Operator UI Contract
+# Agent Compliance UI Contract
 
 Date: 2026-06-11
 
@@ -7,18 +7,18 @@ Date: 2026-06-11
 This document defines the human-facing dashboard shape for Agent
 Compliance before more code is built.
 
-The goal is a dashboard that an operator can navigate quickly:
+The goal is a dashboard that a person can navigate quickly:
 
 - clear calls to action;
 - no raw schema language in primary views;
 - concise table cells;
-- operator work first, admin work second, debug third.
+- device work first, setup work second, debug third.
 
 ## Audience Split
 
-### Operator
+### Main View
 
-Operator views are device-level and action-oriented.
+Main views are device-level and action-oriented.
 
 They answer:
 
@@ -27,7 +27,7 @@ They answer:
 - which devices need follow-up now;
 - which source is failing right now.
 
-Operator actions should be short and obvious:
+Actions should be short and obvious:
 
 - open device;
 - review finding;
@@ -36,13 +36,13 @@ Operator actions should be short and obvious:
 - acknowledge source issue.
 
 For v1, the Add alias and Exclude org actions are exposed as explicit
-links from the Org Review dashboard and unresolved-observation rows.
+links from the Review dashboard and unresolved-observation rows.
 The ingest service owns the write-back endpoints; Metabase stays the
 navigation and review surface.
 
-### Admin
+### Setup View
 
-Admin views are org-level and system-level.
+Setup views are org-level and system-level.
 
 They answer:
 
@@ -52,7 +52,7 @@ They answer:
 - which platform source is failing;
 - which client/source config needs maintenance.
 
-Admin actions should change configuration, not device state.
+Setup actions should change configuration, not device state.
 
 ## Navigation Model
 
@@ -65,19 +65,19 @@ Use the same top navigation pattern already used by patching:
 
 Recommended dashboard set:
 
-1. Command Center
+1. Today
 2. Devices
-3. Org Review
-4. Source Health
+3. Review
+4. Health
 5. Debug
 
-The primary landing page should be the Command Center.
+The primary landing page should be Today.
 
 ## Display Rules
 
 Primary tables and cards must follow these rules:
 
-- show only the fields an operator needs first;
+- show only the fields a person needs first;
 - avoid raw JSON in primary tables;
 - avoid quoting values unless the value itself requires it;
 - avoid bracketed lists in primary tables;
@@ -106,7 +106,7 @@ The primary dashboard should show:
 - orgs needing review;
 - unresolved observations that need aliasing.
 
-The primary tables should be concise and operator-readable.
+The primary tables should be concise and human-readable.
 
 Suggested visible columns:
 
@@ -127,9 +127,9 @@ Suggested hidden or secondary fields:
 - merge candidates;
 - debug notes.
 
-## Admin / Review Dashboard Content
+## Setup / Review Dashboard Content
 
-The admin review dashboard should show:
+The setup review dashboard should show:
 
 - alignment mismatches;
 - alias candidates;
@@ -169,18 +169,18 @@ Primary CTAs should be short and consistent:
 - Refresh data
 - Mark resolved
 
-If a CTA is only relevant to admin/config work, keep it on the
-admin/review dashboards rather than the operator home page.
+If a CTA is only relevant to setup/config work, keep it on the
+setup/review dashboards rather than the main page.
 
 ## Terminology
 
 Use human language in UI labels:
 
-- `Command Center` for the main landing page;
-- `Devices` for device-level findings;
-- `Org Review` for alignment and alias work;
-- `Source Health` for platform collector status;
-- `Debug` for raw data and internal state.
+  - `Today` for the main landing page;
+  - `Devices` for device-level findings;
+  - `Review` for alignment and alias work;
+  - `Health` for platform collector status;
+  - `Debug` for raw data and internal state.
 
 Avoid exposing raw database terms in the main UI:
 

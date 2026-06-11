@@ -8,8 +8,8 @@ Define what qualifies as an alert in Agent Compliance, at every level.
 
 The intent is to keep the dashboard actionable:
 
-- operator alerts for device-level problems;
-- admin alerts for org/config problems;
+- device alerts for device-level problems;
+- setup alerts for org/config problems;
 - source alerts for collector health;
 - system alerts for pipeline failures;
 - no spam for unchanged or non-actionable noise.
@@ -29,7 +29,7 @@ The intent is to keep the dashboard actionable:
 
 ### Device Alert
 
-Device alerts are the primary operator workload.
+Device alerts are the primary work queue.
 
 Trigger examples:
 
@@ -49,13 +49,13 @@ What it should look like:
 
 Typical route:
 
-- operator dashboard;
+  - main dashboard;
 - email for notable issues;
 - Zendesk when human follow-up is needed.
 
 ### Org Review Alert
 
-Org review items are admin/operator config work, not device remediation.
+Org review items are setup/config work, not device remediation.
 
 Trigger examples:
 
@@ -77,10 +77,10 @@ What it should look like:
 Typical route:
 
 - Org Review dashboard;
-- admin email summary;
+- setup email summary;
 - Zendesk only if someone needs to own cleanup.
 
-These should not page the operator repeatedly by default.
+These should not page the main dashboard repeatedly by default.
 
 ### Source Alert
 
@@ -107,7 +107,7 @@ What it should look like:
 Typical route:
 
 - Source Health dashboard;
-- admin/system email;
+- setup/system email;
 - Zendesk when vendor/support action is needed.
 
 Source failure should suppress false missing-platform alerts for that
@@ -136,7 +136,7 @@ What it should look like:
 
 Typical route:
 
-- admin/system dashboard;
+- setup/system dashboard;
 - email to the service owner;
 - incident ticket if the failure persists.
 
@@ -187,11 +187,10 @@ The debug view can show the raw fields.
 
 ## Recommended Default Routes
 
-1. Device alerts -> operator email + dashboard.
-2. Org review items -> admin dashboard + summary email.
-3. Source alerts -> admin/system email + dashboard.
-4. System alerts -> admin/system email + ticket.
+1. Device alerts -> main email + dashboard.
+2. Org review items -> setup dashboard + summary email.
+3. Source alerts -> setup/system email + dashboard.
+4. System alerts -> setup/system email + ticket.
 
 Ninja should remain optional as an alert route because the platform
 itself can be the thing that is missing or unhealthy.
-

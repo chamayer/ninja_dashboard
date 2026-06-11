@@ -234,12 +234,12 @@ V1 tables:
 
 ## Humanized Dashboard Shape
 
-Primary dashboard layout should be operator-first:
+Primary dashboard layout should be device-first:
 
 - top nav bar like the patching dashboards;
-- primary landing page = Command Center;
-- device-level actions on the operator path;
-- org/system configuration on the admin path;
+- primary landing page = Today;
+- device-level actions on the main path;
+- org/system configuration on the setup path;
 - debug details kept on a separate dashboard.
 
 Primary table language should be humanized:
@@ -247,8 +247,8 @@ Primary table language should be humanized:
 - short labels;
 - no schema names;
 - no quoted values unless absolutely needed;
-- no bracketed JSON-style display in operator tables;
-- show only what an operator needs to act.
+- no bracketed JSON-style display in main tables;
+- show only what a person needs to act.
 
 Recommended top-level dashboards:
 
@@ -381,7 +381,7 @@ authoritative S1 compliance source.
 - Store only secret references in DB; actual secrets stay in `.env`.
 - Include alerting in v1, starting with webhook, email, and Zendesk
   request delivery.
-- Defer admin UI until the config model is proven.
+- Defer setup UI until the config model is proven.
 
 ## Risks
 

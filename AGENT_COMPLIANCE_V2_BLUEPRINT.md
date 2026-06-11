@@ -10,7 +10,7 @@ that behavior while separating collection, alignment, evaluation,
 dashboarding, and alerting into auditable phases.
 
 The dashboard must be human-navigatable. The primary experience should
-be operator-first, with a separate admin/review path and a debug path
+be device-first, with a separate setup/review path and a debug path
 that stays out of the way.
 
 ## Design Principles
@@ -78,10 +78,10 @@ that stays out of the way.
 6. Dashboard
    - One Metabase collection: `Agent Compliance`.
    - Primary dashboards:
-     - Command Center;
+     - Today;
      - Devices;
-     - Org Review;
-     - Source Health;
+     - Review;
+     - Health;
      - Debug.
    - Views/cards:
      - source health;
@@ -119,12 +119,12 @@ Good idea for v2, with limits:
 - Web UI should not store raw secrets directly.
   - Secrets remain env/secret-store references.
   - DB stores secret reference names.
-- Split UI responsibility:
-  - operator views for device-level actions;
-  - admin views for org/system configuration;
-  - debug views for raw internal state.
+   - Split UI responsibility:
+     - main views for device-level actions;
+     - setup views for org/system configuration;
+     - debug views for raw internal state.
 
-See `AGENT_COMPLIANCE_OPERATOR_UI.md` for the operator-facing
+See `AGENT_COMPLIANCE_OPERATOR_UI.md` for the main-view
 navigation and wording contract.
 See `AGENT_COMPLIANCE_ALERT_WORKFLOW.md` for the alert taxonomy and
 route behavior.
@@ -133,14 +133,14 @@ route behavior.
 
 1. Stabilize v1 parity output after live validation.
 2. Add config audit table.
-3. Add a small admin web UI or protected endpoint set.
+3. Add a small setup web UI or protected endpoint set.
 4. Add alignment review workflow:
    - approve generated alias;
    - reject generated alias;
    - promote alignment alias to manual alias.
 5. Add alert routing rules per finding type/client/platform.
 6. Add retention policies for observations/history.
-7. Add operator/admin dashboard navigation and humanized labels as the
+7. Add main/setup dashboard navigation and humanized labels as the
    default presentation layer.
 
 ## Non-Goals

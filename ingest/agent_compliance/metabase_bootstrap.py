@@ -11,10 +11,10 @@ log = logging.getLogger(__name__)
 
 COLLECTION_NAME = "Agent Compliance"
 
-DASH_COMMAND = "Agent Compliance - Command Center"
+DASH_COMMAND = "Agent Compliance - Today"
 DASH_DEVICES = "Agent Compliance - Devices"
-DASH_ORG = "Agent Compliance - Org Review"
-DASH_SOURCE = "Agent Compliance - Source Health"
+DASH_ORG = "Agent Compliance - Review"
+DASH_SOURCE = "Agent Compliance - Health"
 DASH_DEBUG = "Agent Compliance - Debug"
 
 NAV_ORDER = [
@@ -25,10 +25,10 @@ NAV_ORDER = [
     DASH_DEBUG,
 ]
 NAV_DISPLAY_NAMES = {
-    DASH_COMMAND: "Command Center",
+    DASH_COMMAND: "Today",
     DASH_DEVICES: "Devices",
-    DASH_ORG: "Org Review",
-    DASH_SOURCE: "Source Health",
+    DASH_ORG: "Review",
+    DASH_SOURCE: "Health",
     DASH_DEBUG: "Debug",
 }
 NAV_HEIGHT = 2
@@ -107,7 +107,7 @@ DASHBOARDS = [
             ),
             _card(
                 "org_review_queue",
-                "Org Review Queue",
+                "Needs Mapping",
                 "scalar",
                 """
                     SELECT COUNT(*) AS orgs
@@ -118,7 +118,7 @@ DASHBOARDS = [
             ),
             _card(
                 "unresolved_names",
-                "Unresolved Names",
+                "Names to Review",
                 "scalar",
                 """
                     SELECT COUNT(*) AS unresolved_groups
@@ -278,7 +278,7 @@ DASHBOARDS = [
             ),
             _card(
                 "known_exclusions",
-                "Known Exclusions",
+                "Suppressed Names",
                 "table",
                 """
                     SELECT
@@ -302,7 +302,7 @@ DASHBOARDS = [
             ),
             _card(
                 "org_candidates",
-                "New Org Candidates",
+                "New Names",
                 "table",
                 """
                     SELECT
@@ -338,7 +338,7 @@ DASHBOARDS = [
             ),
             _card(
                 "source_health",
-                "Source Health",
+                "Health",
                 "table",
                 """
                     SELECT
@@ -503,17 +503,22 @@ def _upsert_dashboard(client: httpx.Client, name: str, collection_id: int) -> di
 
 
 def _build_nav_markdown(current_dash_name: str, dash_id_by_name: dict[str, int]) -> str:
-    parts: list[str] = []
-    for name in NAV_ORDER:
-        label = NAV_DISPLAY_NAMES.get(name, name)
-        if name == current_dash_name:
-            parts.append(f"**{label}**")
-            continue
-        dash_id = dash_id_by_name.get(name)
-        if dash_id is None:
-            continue
-        parts.append(f"[{label}](/dashboard/{dash_id})")
-    return "**Navigate:** " + " &nbsp;&nbsp;•&nbsp;&nbsp; ".join(parts)
+    def _segment(title: str, names: list[str]) -> str:
+        parts: list[str] = []
+        for name in names:
+            label = NAV_DISPLAY_NAMES.get(name, name)
+            if name == current_dash_name:
+                parts.append(f"**{label}**")
+                continue
+            dash_id = dash_id_by_name.get(name)
+            if dash_id is None:
+                continue
+            parts.append(f"[{label}](/dashboard/{dash_id})")
+        return f"{title}: " + " &nbsp;&nbsp;•&nbsp;&nbsp; ".join(parts)
+
+    main = _segment("Main", [DASH_COMMAND, DASH_DEVICES, DASH_ORG])
+    setup = _segment("Behind the scenes", [DASH_SOURCE, DASH_DEBUG])
+    return "**Navigate:** " + main + " &nbsp;&nbsp;•&nbsp;&nbsp; " + setup
 
 
 def _nav_dashcard(text: str) -> dict[str, Any]:
@@ -577,4 +582,4 @@ def _set_custom_homepage(client: httpx.Client, dashboard_id: int | None) -> None
         except httpx.HTTPStatusError as exc:
             log.warning("Custom homepage setting failed for %s: %s", endpoint, exc)
             return
-    log.info("Set custom homepage to Agent Compliance command center id=%d", dashboard_id)
+    log.info("Set custom homepage to Agent Compliance today id=%d", dashboard_id)
