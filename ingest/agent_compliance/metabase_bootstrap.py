@@ -887,24 +887,6 @@ DASHBOARDS = [
                 },
             ),
             _card(
-                "cross_customer_conflicts",
-                "Same device under multiple customers",
-                "table",
-                """
-                    SELECT
-                        norm_name AS "Match key",
-                        client_name AS "Customer",
-                        hostname AS "Device",
-                        COALESCE(NULLIF(os_name, ''), '') AS "OS",
-                        COALESCE(array_to_string(observed_platforms, ', '), '') AS "Found in",
-                        COALESCE(array_to_string(missing_required_platforms, ', '), '') AS "Missing"
-                    FROM ninja_agent_compliance.v_cross_client_conflicts
-                    ORDER BY norm_name, client_name, hostname
-                    LIMIT 300
-                """,
-                40, 0, 24, 8,
-            ),
-            _card(
                 "ignored_names",
                 "Ignored customer names",
                 "table",
@@ -920,7 +902,7 @@ DASHBOARDS = [
                     ORDER BY source, pattern
                     LIMIT 200
                 """,
-                48, 0, 24, 4,
+                40, 0, 24, 4,
                 column_click_behaviors={
                     "Action": {
                         "url_template": _url_template(
@@ -1008,6 +990,24 @@ DASHBOARDS = [
                     LIMIT 200
                 """,
                 0, 0, 24, 10,
+            ),
+            _card(
+                "cross_customer_conflicts",
+                "Same device under multiple customers",
+                "table",
+                """
+                    SELECT
+                        norm_name AS "Match key",
+                        client_name AS "Customer",
+                        hostname AS "Device",
+                        COALESCE(NULLIF(os_name, ''), '') AS "OS",
+                        COALESCE(array_to_string(observed_platforms, ', '), '') AS "Found in",
+                        COALESCE(array_to_string(missing_required_platforms, ', '), '') AS "Missing"
+                    FROM ninja_agent_compliance.v_cross_client_conflicts
+                    ORDER BY norm_name, client_name, hostname
+                    LIMIT 300
+                """,
+                10, 0, 24, 8,
             ),
         ],
     },
