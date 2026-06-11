@@ -16,20 +16,60 @@ _(empty — drop free-form items here)_
 ### Agent compliance domain
 
 - [ ] **First end-to-end alert** — pick one finding type (e.g.
-      `missing_agent` for a known noncompliant device), enable a
-      notification route in `ninja_agent_compliance.notification_routes`
-      (webhook is the lowest-friction), set the corresponding host
-      `.env` secret, trigger `/run/agent-compliance`, and confirm the
-      alert dispatcher records a send in `alert_events`.
-- [ ] **Gap assessment** — original PowerShell agent-compliance
-      report vs current build vs the
-      `AGENT_COMPLIANCE_OPERATOR_UI.md` / `_ALERT_WORKFLOW.md` intent.
-      Output: a checklist of missing capabilities + a parity score per
-      surface (matrix, alignment, alerts, suppressions, drill-down).
-- [ ] Live-validate v0.18.0 on the stack: apply migrations through
-      026, bootstrap Metabase, exercise the Devices filters, drill
-      through from `Missing but online elsewhere`, bulk-ignore stale
-      for one customer, verify alert_state and finding counts shift.
+      `missing_required_platform` for a known noncompliant device),
+      enable a notification route in
+      `ninja_agent_compliance.notification_routes` (webhook is the
+      lowest-friction), set the corresponding host `.env` secret,
+      trigger `/run/agent-compliance`, and confirm the alert
+      dispatcher records a send in `alert_events`.
+
+- [ ] **Alias gap audit (DJ-UTAH class)** — run the diagnostic
+      SELECT from the v0.19.0 design notes, diff the unresolved /
+      discovered-as-client rows against the PowerShell `$OrgConfig`
+      table, and seed the missing aliases in one migration. Plus:
+      audit `config_loader.py` alias matching for case sensitivity
+      (`DJ-Utah` vs `DJ-UTAH`) and trim/punctuation normalization.
+
+- [ ] Live-validate v0.19.0 on the stack: redeploy ingest, run
+      `/run/agent-compliance`, bootstrap Metabase, verify section
+      headers render, Customer filter scopes every card on Devices,
+      `State = Degraded` matches rows, `NO AV = Yes` matches rows for
+      policy-exempt devices, device drilldown click-through works,
+      and `Age 7d` / `30d` / `90d` writes through without changing
+      the platform combo.
+
+### Drilldown follow-ups (v0.19.0 baseline → future polish)
+
+- [ ] Add a "pick a device" hint card on the drilldown dashboard so
+      the experience isn't empty when reached directly (today the
+      cards just show no rows). Could be a `Need action` mini-table
+      that link-targets the drilldown.
+- [ ] Per-platform observation timeline — surface
+      `platform_observations` events as a sparse log alongside the
+      matrix snapshots, so the operator can see exactly when Ninja
+      stopped reporting vs S1 etc.
+- [ ] Compliance-state sparkline / day rollup — easier to scan than
+      the per-run matrix snapshot for devices with many history
+      rows.
+- [ ] Drilldown alias match: support `?norm=...` URL param in
+      addition to `?host=...` so suppression history joins by
+      `norm_name` for devices whose display name has changed over
+      time.
+
+### Operator UI follow-ups exposed by v0.19.0
+
+- [ ] **Enable / disable sources from the UI.** Today it's psql.
+      A Health-dashboard action column would cut friction for the
+      one-off cases (rotating an S1 key, pausing LMI during
+      maintenance).
+- [ ] **New canonical customer endpoint (`/a/nc`)** — the discovery
+      flow handles 99% of cases, but pre-seeding a customer before
+      onboarding is psql-only today. Low priority; revisit if it
+      starts happening regularly.
+- [ ] **Drop or keep `Cross-customer conflict` long-term.** Demoted
+      to Debug in v0.19.0; revisit after a month of live data — if
+      it never surfaces anything actionable, drop the card and the
+      view entirely.
 
 ### Ingest core (next milestone — gets us to a working v0.2.0)
 

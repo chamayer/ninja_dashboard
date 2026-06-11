@@ -2,6 +2,64 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.19.0] — 2026-06-11
+
+### Added
+- **Devices dashboard reorganized into Triage / Gap analysis /
+  Maintenance sections** with markdown dividers between groups, so
+  the scope of the top filters is visible at a glance. Customer
+  filter now applies to every card on Devices (including
+  `Stale by customer` and `Ignored`).
+- **Per-device drilldown dashboard** scoped to one `(customer, host)`
+  pair. Accessible via row click on the `Device` column in
+  `Need action`, `Active platform gap details`, and `Ignored`.
+  Surfaces four history slices: per-run state from
+  `compliance_matrix_history`, findings history, alert deliveries
+  joined to `notification_routes`, and ignore history.
+- **NO AV filter on Devices** (Yes / No) with the s1-exempt override
+  semantics: by default exempt devices stay hidden from
+  S1-missing-gap counts; selecting `Yes` reveals them.
+- **Per-customer max age days from the UI** — `Required coverage`
+  card on Customers gets `Age 7d` / `Age 30d` / `Age 90d` preset
+  columns. `/agent-compliance/action/set-max-age` (short `/a/sd`)
+  changes `max_age_days` independently from the platform combo so
+  age and combo can be tuned separately.
+- **Device drilldown click-through** from `Ignored` row → opens the
+  drilldown scoped to that device.
+- **New-customer candidates on Today** — a small table listing the
+  most recent unresolved candidate names (platform, source, last
+  seen) with a `Review` action that opens the Customers dashboard.
+  The count-only KPI is preserved.
+
+### Changed
+- `Need action` now sources from `compliance_matrix_current` with
+  inline suppression handling and includes degraded-but-compliant
+  rows. Previously it sourced from `v_remediation_candidates`
+  (strict noncompliant) which made the `State = Degraded` filter a
+  no-op. PowerShell parity: degraded rows belong in the operator
+  queue.
+- Cross-customer conflict view (`Same device under multiple
+  customers`) demoted from Customers to Debug. It's a data-quality
+  signal, not a daily operator concern.
+
+### Fixed
+- **`s1_exempt` was always false.** The Ninja collector probed
+  raw_data keys `policy`, `rolePolicy`, `rolePolicyName` — none of
+  which exist on the `/v2/devices-detailed` response. Now joins to
+  `ninja_core.policies` for both the assigned policy and the role
+  policy and checks each name for `NO AV` (case-insensitive).
+  The tags-array check is preserved. Devices flip on the next
+  `/run/agent-compliance` cycle.
+- `/a/*` short-path links from Metabase no longer 404. The `do_GET`
+  router previously only matched the long
+  `/agent-compliance/action/` prefix.
+
+### Notes
+- Renamed the `AV` / `AV exempt` column and filter to `NO AV` so it
+  matches the Ninja tag/policy convention operators already know.
+- No schema migrations beyond what's already applied.
+- Commit: `TBD`
+
 ## [0.18.0] — 2026-06-11
 
 ### Added

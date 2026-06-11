@@ -5,6 +5,77 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-11 — v0.19.0 Devices redesign + drilldown + NO AV fix
+
+**Why:** v0.18.0 shipped the filters but operator review surfaced
+several issues:
+
+- The Devices top filters only made sense for some cards (the gap
+  cards) and not others (Need action, Stale by customer, Ignored)
+  with no visual cue about which card responded to which filter.
+- `s1_exempt` was always false — every device showed `NO AV = No`.
+  The Ninja collector probed raw_data keys that don't exist on the
+  `/v2/devices-detailed` response.
+- `Need action` excluded degraded-compliant rows, which made the
+  `State = Degraded` filter a silent no-op and hid a real operator
+  signal (agent installed everywhere, one platform stopped checking
+  in).
+- No per-device drilldown — operator could see the noncompliant row
+  but couldn't see history (when did it first fail, when was it
+  alerted on, who ignored it before).
+- `Required coverage` could set the platform combo but not the
+  staleness window — and the existing combo write reset
+  `max_age_days` to 30 as a side effect.
+
+**Done:**
+- Sectioned the Devices layout into Triage / Gap analysis /
+  Maintenance with reusable section-header infrastructure that other
+  dashboards can opt into.
+- Applied Customer filter uniformly across every Devices card.
+- Broadened Need action to include degraded-compliant rows and
+  inlined the suppression check so the Degraded state filter now
+  matches.
+- Fixed `s1_exempt` detection by joining to `ninja_core.policies`
+  for both the assigned and role policies and checking the policy
+  NAME for `NO AV` (case-insensitive). Tags-array check preserved.
+- Renamed the `AV` / `AV exempt` column and filter to `NO AV` so it
+  matches the Ninja tag/policy convention operators recognize.
+- Added per-customer max age preset buttons (7d / 30d / 90d) on the
+  Required coverage card. New endpoint
+  `/agent-compliance/action/set-max-age` (`/a/sd`) writes through
+  without touching the platform combo.
+- Built the per-device drilldown dashboard (off the top nav by
+  design — only reachable via row click on a Device column). Surfaces
+  per-run state from `compliance_matrix_history`, findings history,
+  alert deliveries joined to `notification_routes`, and ignore
+  history.
+- Demoted the cross-customer conflict view from Customers to Debug
+  per operator feedback that it's a data-quality signal, not a daily
+  concern.
+- Surfaced the new-customer-candidates count as a table on Today so
+  the discovery signal is visible on the landing page, not only
+  inside Customers.
+
+**Commits:** `13c710a` (NO AV fix), `806d15e` (max age UI),
+`0088967` (Devices layout + Degraded), `aa08bf1` (demote
+cross-customer), `16d8e18` (drilldown), `d0bec89` (Today new-customer
+table).
+
+**Validation:**
+- `python -m compileall ingest` passes (all touched files).
+- Live host run pending: redeploy ingest, trigger
+  `/run/agent-compliance` to flip `s1_exempt` on policy-exempt
+  devices, `POST /bootstrap-metabase`, verify the section headers
+  render, drilldown click-through resolves with customer + host
+  URL params, and the AV exempt filter shows the right rows on
+  Yes / No.
+
+**Pending follow-ups (see TODO):**
+- First end-to-end alert delivery.
+- DJ-UTAH-class alias gap diff vs PowerShell `$OrgConfig`.
+- Drilldown nice-to-haves listed under Backlog.
+- Source enable/disable from the UI (currently psql only).
+
 ## 2026-06-11 — v0.18.0 Agent Compliance operator-actionable Devices
 
 **Why:** Two parallel pushes landed on the same day. First, codex
