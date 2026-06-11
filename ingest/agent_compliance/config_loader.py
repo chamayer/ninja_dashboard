@@ -961,6 +961,60 @@ def add_device_ignore(
     return True
 
 
+def bulk_ignore_devices(
+    client_name: str,
+    kind: str,
+    updated_by: str = "agent_compliance",
+    reason: str | None = None,
+) -> int | None:
+    """Ignore a guarded set of current device findings.
+
+    Bulk actions are intentionally narrow. For v1, only stale devices can be
+    hidden in bulk, and only for one customer at a time.
+    """
+    customer = client_name.strip()
+    normalized_kind = kind.strip().lower().replace("_", "-")
+    if not customer or normalized_kind != "stale":
+        return None
+    with db.transaction() as cur:
+        cur.execute(
+            """
+            INSERT INTO ninja_agent_compliance.alert_suppressions
+                (client_id, norm_name, display_name, finding_type, affected_platform, reason, enabled, updated_by)
+            SELECT
+                client_id,
+                norm_name,
+                hostname,
+                NULL,
+                NULL,
+                %s,
+                true,
+                %s
+            FROM ninja_agent_compliance.v_remediation_candidates
+            WHERE client_name = %s
+              AND is_stale
+              AND norm_name IS NOT NULL
+            ON CONFLICT (
+                COALESCE(client_id, 0),
+                COALESCE(norm_name, ''),
+                COALESCE(finding_type, ''),
+                COALESCE(affected_platform, '')
+            ) WHERE enabled DO UPDATE SET
+                display_name = COALESCE(EXCLUDED.display_name, ninja_agent_compliance.alert_suppressions.display_name),
+                reason = EXCLUDED.reason,
+                enabled = true,
+                updated_at = now(),
+                updated_by = EXCLUDED.updated_by
+            """,
+            (
+                reason or "Bulk ignored stale devices from dashboard",
+                updated_by,
+                customer,
+            ),
+        )
+        return cur.rowcount
+
+
 def remove_device_ignore(client_id: int, norm_name: str, updated_by: str = "agent_compliance") -> bool:
     normalized = norm_name.strip().lower()
     if not normalized:

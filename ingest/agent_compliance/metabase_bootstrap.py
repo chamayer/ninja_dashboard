@@ -335,6 +335,45 @@ DASHBOARDS = [
                 },
             ),
             _card(
+                "stale_by_customer",
+                "Stale devices by customer",
+                "table",
+                """
+                    SELECT
+                        client_name AS "Customer",
+                        COUNT(*) AS "Stale devices",
+                        COALESCE(
+                            TO_CHAR(
+                                MAX(GREATEST(
+                                    ninja_last_seen,
+                                    screenconnect_last_seen,
+                                    sentinelone_last_seen,
+                                    logmein_last_seen
+                                )),
+                                'YYYY-MM-DD HH24:MI'
+                            ),
+                            'Unknown'
+                        ) AS "Last seen anywhere",
+                        'Bulk ignore' AS "Action"
+                    FROM ninja_agent_compliance.v_remediation_candidates
+                    WHERE is_stale
+                      AND norm_name IS NOT NULL
+                    GROUP BY client_name
+                    HAVING COUNT(*) > 0
+                    ORDER BY COUNT(*) DESC, client_name
+                    LIMIT 100
+                """,
+                26, 0, 24, 6,
+                column_click_behaviors={
+                    "Action": {
+                        "url_template": _url_template(
+                            "/a/bs",
+                            [("client", "Customer")],
+                        ),
+                    },
+                },
+            ),
+            _card(
                 "ignored_devices",
                 "Ignored",
                 "table",
@@ -349,7 +388,7 @@ DASHBOARDS = [
                     ORDER BY updated_at DESC, client_name, display_name
                     LIMIT 200
                 """,
-                26, 0, 24, 6,
+                32, 0, 24, 6,
                 column_click_behaviors={
                     "Action": {
                         "url_template": _url_template(

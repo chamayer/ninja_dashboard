@@ -40,6 +40,7 @@ from ingest.agent_compliance.config_loader import (
     add_device_ignore,
     add_org_exclude,
     approve_customer_name,
+    bulk_ignore_devices,
     promote_alignment_aliases,
     remove_org_exclude,
     remove_device_ignore,
@@ -287,6 +288,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             "/a/ue": "/agent-compliance/action/unexclude-org",
             "/a/ig": "/agent-compliance/action/ignore-device",
             "/a/ui": "/agent-compliance/action/unignore-device",
+            "/a/bs": "/agent-compliance/action/bulk-ignore-stale",
         }.get(parsed.path, parsed.path)
         params = parse_qs(parsed.query)
         confirm = params.get("confirm", ["0"])[0]
@@ -434,6 +436,23 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 self._respond(200, body)
             else:
                 self._respond(400, b"blank norm_name\n")
+            return
+
+        if path == "/agent-compliance/action/bulk-ignore-stale":
+            client_name = _text_param("client", "client_name", "customer", hex_names=("client_hex", "customer_hex"))
+            if not client_name:
+                self._respond(400, b"missing client\n")
+                return
+            count = bulk_ignore_devices(
+                client_name,
+                kind="stale",
+                updated_by="operator_dashboard",
+            )
+            if count is None:
+                self._respond(400, b"invalid client or kind\n")
+                return
+            body = f"bulk ignored {count} stale device(s) for {client_name}\n".encode("utf-8")
+            self._respond(200, body)
             return
 
         if path == "/agent-compliance/action/unignore-device":
