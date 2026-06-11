@@ -717,6 +717,98 @@ def add_org_exclude(pattern: str, updated_by: str = "agent_compliance", notes: s
     return True
 
 
+def approve_customer_name(name: str, updated_by: str = "agent_compliance") -> bool:
+    """Approve a reviewed customer name as a real managed customer."""
+    customer_name = name.strip()
+    if not customer_name or is_placeholder_org_name(customer_name):
+        return False
+    alias_type_by_platform = {
+        "Ninja": "org_name",
+        "SentinelOne": "site_name",
+        "LogMeIn": "group_name",
+        "ScreenConnect": "group_name",
+    }
+    with db.transaction() as cur:
+        cur.execute(
+            """
+            INSERT INTO ninja_agent_compliance.clients
+                (client_name, enabled, source, notes, updated_by)
+            VALUES (%s, true, 'manual', 'Confirmed real managed customer', %s)
+            ON CONFLICT (client_name) DO UPDATE SET
+                enabled = true,
+                source = 'manual',
+                notes = COALESCE(NULLIF(ninja_agent_compliance.clients.notes, ''), EXCLUDED.notes),
+                updated_at = now(),
+                updated_by = EXCLUDED.updated_by
+            RETURNING client_id
+            """,
+            (customer_name, updated_by),
+        )
+        row = cur.fetchone()
+        if not row:
+            return False
+        client_id = row[0]
+        cur.execute(
+            """
+            SELECT DISTINCT platform, candidate_name
+            FROM ninja_agent_compliance.org_candidates
+            WHERE enabled
+              AND lower(trim(candidate_name)) = lower(trim(%s))
+            """,
+            (customer_name,),
+        )
+        alias_rows = []
+        for platform, alias_value in cur.fetchall():
+            canon_platform = canonical_platform(platform)
+            alias_type = alias_type_by_platform.get(canon_platform)
+            if not alias_type:
+                continue
+            alias_rows.append((
+                client_id,
+                canon_platform,
+                alias_type,
+                alias_value,
+                "Approved from customer-name review",
+                updated_by,
+            ))
+        if not alias_rows:
+            for platform, alias_type in (
+                ("Ninja", "org_name"),
+                ("SentinelOne", "site_name"),
+                ("LogMeIn", "group_name"),
+            ):
+                alias_rows.append((
+                    client_id,
+                    platform,
+                    alias_type,
+                    customer_name,
+                    "Approved from customer-name review",
+                    updated_by,
+                ))
+        cur.executemany(
+            """
+            INSERT INTO ninja_agent_compliance.client_aliases
+                (client_id, platform, alias_type, alias_value, source, notes, updated_by)
+            VALUES (%s, %s, %s, %s, 'manual', %s, %s)
+            ON CONFLICT (client_id, platform, (COALESCE(source_id, 0)), alias_type, alias_value)
+            DO UPDATE SET
+                enabled = true,
+                source = 'manual',
+                notes = EXCLUDED.notes,
+                updated_at = now(),
+                updated_by = EXCLUDED.updated_by
+            """,
+            alias_rows,
+        )
+        _close_org_candidates(
+            cur,
+            status="promoted",
+            candidate_names=[customer_name],
+            updated_by=updated_by,
+        )
+    return True
+
+
 def _close_org_candidates(
     cur: Any,
     status: str,

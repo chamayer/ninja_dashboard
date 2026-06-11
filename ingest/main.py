@@ -39,6 +39,7 @@ from ingest.agent_compliance import ingest as agent_compliance_ingest
 from ingest.agent_compliance.config_loader import (
     add_device_ignore,
     add_org_exclude,
+    approve_customer_name,
     promote_alignment_aliases,
     remove_org_exclude,
     remove_device_ignore,
@@ -279,6 +280,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = {
             "/a/aa": "/agent-compliance/action/add-alias",
+            "/a/ac": "/agent-compliance/action/approve-customer",
             "/a/eo": "/agent-compliance/action/exclude-org",
             "/a/ue": "/agent-compliance/action/unexclude-org",
             "/a/ig": "/agent-compliance/action/ignore-device",
@@ -344,6 +346,18 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             count = promote_alignment_aliases(client_id, platform=platform, alias_value=alias_value)
             body = f"added {count} alias row(s)\n".encode("utf-8")
             self._respond(200, body)
+            return
+
+        if path == "/agent-compliance/action/approve-customer":
+            customer_name = _text_param("name", "customer", "org", hex_names=("name_hex", "customer_hex"))
+            if not customer_name:
+                self._respond(400, b"missing customer name\n")
+                return
+            if approve_customer_name(customer_name, updated_by="operator_dashboard"):
+                body = f"approved customer {customer_name}\n".encode("utf-8")
+                self._respond(200, body)
+            else:
+                self._respond(400, b"blank or placeholder customer name\n")
             return
 
         if path == "/agent-compliance/action/exclude-org":

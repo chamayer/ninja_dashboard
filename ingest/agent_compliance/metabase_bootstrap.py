@@ -5,8 +5,9 @@ human workflow:
 
 * Today: what needs attention right now.
 * Devices: device-level fixes and ignore/restore.
-* Health: source health plus new names that need a decision.
-* Debug: raw leftovers and admin-level mapping cleanup.
+* Customers: customer names across platforms and customer-name review.
+* Health: source health and system-level collection work.
+* Debug: raw leftovers and low-level troubleshooting.
 
 No visible table field should contain a raw URL. Action cells are plain
 labels, and the link target lives in the card visualization settings.
@@ -28,13 +29,15 @@ COLLECTION_NAME = "Agent Compliance"
 
 DASH_TODAY = "Agent Compliance - Today"
 DASH_DEVICES = "Agent Compliance - Devices"
+DASH_CUSTOMERS = "Agent Compliance - Customers"
 DASH_HEALTH = "Agent Compliance - Health"
 DASH_DEBUG = "Agent Compliance - Debug"
 
-NAV_ORDER = [DASH_TODAY, DASH_DEVICES, DASH_HEALTH, DASH_DEBUG]
+NAV_ORDER = [DASH_TODAY, DASH_DEVICES, DASH_CUSTOMERS, DASH_HEALTH, DASH_DEBUG]
 NAV_LABELS = {
     DASH_TODAY: "Today",
     DASH_DEVICES: "Devices",
+    DASH_CUSTOMERS: "Customers",
     DASH_HEALTH: "Health",
     DASH_DEBUG: "Debug",
 }
@@ -148,17 +151,17 @@ DASHBOARDS = [
             ),
             _card(
                 "names_to_review",
-                "Names to review",
+                "Customer names to review",
                 "scalar",
                 """
-                    SELECT COUNT(*) AS "Names to review"
+                    SELECT COUNT(*) AS "Customer names to review"
                     FROM ninja_agent_compliance.v_org_candidates_current
                 """,
                 0, 15, 5, 4,
-                click_behavior=_dashboard_link(DASH_HEALTH),
+                click_behavior=_dashboard_link(DASH_CUSTOMERS),
             ),
             _card(
-                "ignored_devices",
+                "ignored_devices_count",
                 "Ignored devices",
                 "scalar",
                 """
@@ -179,7 +182,7 @@ DASHBOARDS = [
                 "table",
                 """
                     SELECT
-                        client_name AS "Org",
+                        client_name AS "Customer",
                         hostname AS "Device",
                         device_type AS "Type",
                         COALESCE(array_to_string(missing_required_platforms, ', '), 'None') AS "Need",
@@ -199,7 +202,7 @@ DASHBOARDS = [
                     "Action": {
                         "url_template": _url_template(
                             "/a/ig",
-                            [("client", "Org"), ("host", "Device")],
+                            [("client", "Customer"), ("host", "Device")],
                         ),
                     },
                 },
@@ -210,7 +213,7 @@ DASHBOARDS = [
                 "table",
                 """
                     SELECT
-                        client_name AS "Org",
+                        client_name AS "Customer",
                         COALESCE(NULLIF(display_name, ''), norm_name) AS "Device",
                         COALESCE(NULLIF(reason, ''), 'Ignored') AS "Reason",
                         COALESCE(TO_CHAR(updated_at, 'YYYY-MM-DD HH24:MI'), 'Unknown') AS "Updated",
@@ -224,7 +227,162 @@ DASHBOARDS = [
                     "Action": {
                         "url_template": _url_template(
                             "/a/ui",
-                            [("client", "Org"), ("host", "Device")],
+                            [("client", "Customer"), ("host", "Device")],
+                        ),
+                    },
+                },
+            ),
+        ],
+    },
+    {
+        "name": DASH_CUSTOMERS,
+        "cards": [
+            _card(
+                "customer_directory",
+                "Customers and platform names",
+                "table",
+                """
+                    WITH names AS (
+                        SELECT
+                            c.client_id,
+                            c.client_name,
+                            STRING_AGG(DISTINCT a.alias_value, ', ' ORDER BY a.alias_value)
+                                FILTER (WHERE a.enabled AND a.platform = 'Ninja') AS ninja_names,
+                            STRING_AGG(DISTINCT a.alias_value, ', ' ORDER BY a.alias_value)
+                                FILTER (WHERE a.enabled AND a.platform = 'SentinelOne') AS s1_names,
+                            STRING_AGG(DISTINCT a.alias_value, ', ' ORDER BY a.alias_value)
+                                FILTER (WHERE a.enabled AND a.platform = 'LogMeIn') AS lmi_names,
+                            STRING_AGG(DISTINCT a.alias_value, ', ' ORDER BY a.alias_value)
+                                FILTER (WHERE a.enabled AND a.platform = 'ScreenConnect') AS sc_names
+                        FROM ninja_agent_compliance.clients c
+                        LEFT JOIN ninja_agent_compliance.client_aliases a
+                          ON a.client_id = c.client_id
+                         AND a.source IN ('manual', 'seed', 'alignment')
+                        WHERE c.enabled
+                          AND c.source NOT IN ('alignment', 'demoted')
+                          AND lower(trim(c.client_name)) NOT IN ('default site', 'unknown', 'various', '.default')
+                        GROUP BY c.client_id, c.client_name
+                    )
+                    SELECT
+                        n.client_name AS "Customer",
+                        COALESCE(a.overall_status, 'Not seen') AS "Mapping",
+                        COALESCE(NULLIF(n.ninja_names, ''), '-') AS "Ninja",
+                        COALESCE(NULLIF(n.s1_names, ''), '-') AS "SentinelOne",
+                        COALESCE(NULLIF(n.lmi_names, ''), '-') AS "LogMeIn",
+                        COALESCE(NULLIF(n.sc_names, ''), '-') AS "ScreenConnect"
+                    FROM names n
+                    LEFT JOIN ninja_agent_compliance.v_org_alignment_current a
+                      ON a.client_id = n.client_id
+                    ORDER BY n.client_name
+                    LIMIT 300
+                """,
+                0, 0, 24, 10,
+            ),
+            _card(
+                "new_names",
+                "Customer names to review",
+                "table",
+                """
+                    WITH latest_runs AS (
+                        SELECT DISTINCT ON (platform, source_id)
+                            platform,
+                            source_id,
+                            source_run_id
+                        FROM ninja_agent_compliance.platform_observations
+                        ORDER BY platform, source_id, observed_at DESC
+                    ),
+                    latest_counts AS (
+                        SELECT
+                            po.platform,
+                            lower(trim(po.platform_group_name)) AS norm_name,
+                            COUNT(*) AS latest_devices
+                        FROM ninja_agent_compliance.platform_observations po
+                        JOIN latest_runs lr
+                          ON lr.source_run_id = po.source_run_id
+                        WHERE COALESCE(NULLIF(po.platform_group_name, ''), '') <> ''
+                        GROUP BY po.platform, lower(trim(po.platform_group_name))
+                    )
+                    SELECT
+                        c.candidate_name AS "Customer name",
+                        c.platform AS "Found in",
+                        COALESCE(l.latest_devices, 0) AS "Current devices",
+                        COALESCE(NULLIF(c.source_name, ''), 'Unknown') AS "Source",
+                        COALESCE(TO_CHAR(c.last_seen_at, 'YYYY-MM-DD HH24:MI'), 'Unknown') AS "Last seen",
+                        'This is a customer' AS "Approve",
+                        'Ignore name' AS "Ignore"
+                    FROM ninja_agent_compliance.v_org_candidates_current c
+                    LEFT JOIN latest_counts l
+                      ON l.platform = c.platform
+                     AND l.norm_name = lower(trim(c.candidate_name))
+                    ORDER BY c.last_seen_at DESC, c.candidate_name
+                    LIMIT 200
+                """,
+                10, 0, 24, 8,
+                column_click_behaviors={
+                    "Approve": {
+                        "url_template": _url_template(
+                            "/a/ac",
+                            [("name", "Customer name")],
+                        ),
+                    },
+                    "Ignore": {
+                        "url_template": _url_template(
+                            "/a/eo",
+                            [("pattern", "Customer name")],
+                        ),
+                    },
+                },
+            ),
+            _card(
+                "customer_name_rules",
+                "Customer names by platform",
+                "table",
+                """
+                    SELECT
+                        c.client_name AS "Customer",
+                        a.platform AS "Platform",
+                        a.alias_value AS "Name used there",
+                        CASE
+                            WHEN a.source = 'manual' THEN 'Reviewed'
+                            WHEN a.source = 'seed' THEN 'Built in'
+                            WHEN a.source = 'alignment' THEN 'Auto matched'
+                            ELSE a.source
+                        END AS "Source",
+                        COALESCE(NULLIF(a.notes, ''), '') AS "Notes",
+                        COALESCE(TO_CHAR(a.updated_at, 'YYYY-MM-DD HH24:MI'), 'Unknown') AS "Updated"
+                    FROM ninja_agent_compliance.client_aliases a
+                    JOIN ninja_agent_compliance.clients c
+                      ON c.client_id = a.client_id
+                    WHERE a.enabled
+                      AND c.enabled
+                      AND c.source NOT IN ('alignment', 'demoted')
+                    ORDER BY c.client_name, a.platform, a.alias_value
+                    LIMIT 500
+                """,
+                22, 0, 24, 8,
+            ),
+            _card(
+                "ignored_names",
+                "Ignored customer names",
+                "table",
+                """
+                    SELECT
+                        pattern AS "Name",
+                        source AS "Source",
+                        COALESCE(NULLIF(notes, ''), 'No notes') AS "Notes",
+                        COALESCE(TO_CHAR(updated_at, 'YYYY-MM-DD HH24:MI'), 'Unknown') AS "Updated",
+                        CASE WHEN source = 'manual' THEN 'Restore' ELSE '' END AS "Action"
+                    FROM ninja_agent_compliance.org_excludes
+                    WHERE enabled
+                    ORDER BY source, pattern
+                    LIMIT 200
+                """,
+                30, 0, 24, 4,
+                column_click_behaviors={
+                    "Action": {
+                        "url_template": _url_template(
+                            "/a/ue",
+                            [("pattern", "Name")],
                         ),
                     },
                 },
@@ -258,7 +416,7 @@ DASHBOARDS = [
                         work_type AS "Work",
                         platform AS "Platform",
                         source_name AS "Source",
-                        COALESCE(NULLIF(client_name, ''), 'Shared') AS "Org",
+                        COALESCE(NULLIF(client_name, ''), 'Shared') AS "Customer",
                         rows_observed AS "Rows",
                         COALESCE(NULLIF(issue, ''), 'OK') AS "Issue"
                     FROM ninja_agent_compliance.v_source_work_current
@@ -274,7 +432,7 @@ DASHBOARDS = [
                     SELECT
                         source_name AS "Source",
                         platform AS "Platform",
-                        COALESCE(NULLIF(client_name, ''), 'Shared') AS "Org",
+                        COALESCE(NULLIF(client_name, ''), 'Shared') AS "Customer",
                         status AS "State",
                         rows_observed AS "Rows",
                         COALESCE(TO_CHAR(finished_at, 'YYYY-MM-DD HH24:MI'), 'Unknown') AS "Finished"
@@ -282,33 +440,6 @@ DASHBOARDS = [
                     ORDER BY platform, source_name
                 """,
                 8, 0, 24, 6,
-            ),
-            _card(
-                "new_names",
-                "New names",
-                "table",
-                """
-                    SELECT
-                        candidate_name AS "Name",
-                        platform AS "Platform",
-                        observed_count AS "Hits",
-                        COALESCE(NULLIF(source_name, ''), 'Unknown') AS "Source",
-                        COALESCE(NULLIF(suggested_target, ''), 'Review needed') AS "Target",
-                        status AS "State",
-                        'Skip' AS "Action"
-                    FROM ninja_agent_compliance.v_org_candidates_current
-                    ORDER BY last_seen_at DESC, candidate_name
-                    LIMIT 200
-                """,
-                14, 0, 24, 8,
-                column_click_behaviors={
-                    "Action": {
-                        "url_template": _url_template(
-                            "/a/eo",
-                            [("pattern", "Name")],
-                        ),
-                    },
-                },
             ),
         ],
     },
@@ -324,7 +455,7 @@ DASHBOARDS = [
                         observed_at AS "Seen",
                         platform AS "Platform",
                         source_name AS "Source",
-                        COALESCE(NULLIF(resolved_client_name, ''), 'Unresolved') AS "Org",
+                        COALESCE(NULLIF(resolved_client_name, ''), 'Unresolved') AS "Customer",
                         hostname AS "Device",
                         COALESCE(NULLIF(platform_group_name, ''), 'Unknown') AS "Group",
                         COALESCE(NULLIF(platform_group_id, ''), 'Unknown') AS "Group ID",
@@ -334,81 +465,6 @@ DASHBOARDS = [
                     LIMIT 200
                 """,
                 0, 0, 24, 10,
-            ),
-            _card(
-                "alignment_leftovers",
-                "Alignment leftovers",
-                "table",
-                """
-                    SELECT
-                        org_name AS "Name",
-                        overall_status AS "State",
-                        COALESCE(NULLIF(ninja_platform_name, ''), '') AS "N",
-                        COALESCE(NULLIF(s1_platform_name, ''), '') AS "S1",
-                        COALESCE(NULLIF(lmi_platform_name, ''), '') AS "LMI",
-                        COALESCE(NULLIF(suggested_config, ''), 'No suggestion') AS "Target",
-                        CASE WHEN ninja_status = 'MISSING' AND COALESCE(NULLIF(ninja_platform_name, ''), '') <> '' THEN 'Fix N' ELSE '' END AS "Fix N",
-                        CASE WHEN s1_status = 'MISSING' AND COALESCE(NULLIF(s1_platform_name, ''), '') <> '' THEN 'Fix S1' ELSE '' END AS "Fix S1",
-                        CASE WHEN lmi_status = 'MISSING' AND COALESCE(NULLIF(lmi_platform_name, ''), '') <> '' THEN 'Fix LMI' ELSE '' END AS "Fix LMI",
-                        'Skip' AS "Skip"
-                    FROM ninja_agent_compliance.v_alignment_mismatches
-                    WHERE overall_status NOT LIKE 'OK%'
-                    ORDER BY org_name
-                    LIMIT 200
-                """,
-                0, 10, 24, 8,
-                column_click_behaviors={
-                    "Fix N": {
-                        "url_template": _url_template(
-                            "/a/aa",
-                            [("client_name", "Name"), ("platform", "Ninja"), ("alias", "N")],
-                        ),
-                    },
-                    "Fix S1": {
-                        "url_template": _url_template(
-                            "/a/aa",
-                            [("client_name", "Name"), ("platform", "SentinelOne"), ("alias", "S1")],
-                        ),
-                    },
-                    "Fix LMI": {
-                        "url_template": _url_template(
-                            "/a/aa",
-                            [("client_name", "Name"), ("platform", "LogMeIn"), ("alias", "LMI")],
-                        ),
-                    },
-                    "Skip": {
-                        "url_template": _url_template(
-                            "/a/eo",
-                            [("pattern", "Name")],
-                        ),
-                    },
-                },
-            ),
-            _card(
-                "ignored_names",
-                "Ignored names",
-                "table",
-                """
-                    SELECT
-                        pattern AS "Name",
-                        source AS "Source",
-                        COALESCE(NULLIF(notes, ''), 'No notes') AS "Notes",
-                        COALESCE(TO_CHAR(updated_at, 'YYYY-MM-DD HH24:MI'), 'Unknown') AS "Updated",
-                        CASE WHEN source = 'manual' THEN 'Restore' ELSE '' END AS "Action"
-                    FROM ninja_agent_compliance.org_excludes
-                    WHERE enabled
-                    ORDER BY source, pattern
-                    LIMIT 200
-                """,
-                0, 18, 24, 4,
-                column_click_behaviors={
-                    "Action": {
-                        "url_template": _url_template(
-                            "/a/ue",
-                            [("pattern", "Name")],
-                        ),
-                    },
-                },
             ),
         ],
     },
