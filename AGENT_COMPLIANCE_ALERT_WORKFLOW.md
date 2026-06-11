@@ -147,6 +147,7 @@ These are dashboard review items, not alerts by themselves:
 - unchanged alignment mismatches;
 - unchanged unresolved observations;
 - known excludes that are already filtered;
+- ignored devices that are intentionally suppressed;
 - raw observation noise with no action needed;
 - repeated findings that have already been acknowledged and are
   unchanged inside cooldown.

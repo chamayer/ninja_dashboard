@@ -65,6 +65,8 @@ that stays out of the way.
      - source failure;
      - org alignment mismatch;
      - cross-org conflict.
+   - Expose device and org suppressions as reversible review state,
+     not hidden deletes.
 
 5. Alerting
    - Route by finding type, platform, client, severity.
@@ -101,6 +103,7 @@ that stays out of the way.
 - `org_alignment_current/history`: canonical org/platform mapping.
 - `compliance_matrix_current/history`: evaluated device compliance.
 - `compliance_findings`: alertable findings.
+- `alert_suppressions`: reversible device/org suppression state.
 - `notification_routes`, `alert_rules`, `alert_state`,
   `alert_events`: alert routing and dedupe.
 - Future `config_audit_log`: who changed client/source/alias/rule config.

@@ -163,7 +163,12 @@ DASHBOARDS = [
                             ELSE 'Needs review'
                         END AS "Status",
                         org_align_status AS "Alignment",
-                        CASE WHEN s1_exempt THEN 'Yes' ELSE 'No' END AS "S1 exempt"
+                        CASE WHEN s1_exempt THEN 'Yes' ELSE 'No' END AS "S1 exempt",
+                        'http://127.0.0.1:8090/agent-compliance/action/ignore-device?client_hex='
+                            || encode(convert_to(client_name, 'UTF8'), 'hex')
+                            || '&host_hex='
+                            || encode(convert_to(hostname, 'UTF8'), 'hex')
+                            || '&confirm=1' AS "Ignore device"
                     FROM ninja_agent_compliance.v_remediation_candidates
                     ORDER BY client_name, hostname
                     LIMIT 500
@@ -205,12 +210,38 @@ DASHBOARDS = [
                         client_name AS "Org",
                         hostname AS "Device",
                         summary AS "Summary",
-                        last_seen_at AS "Last seen"
+                        last_seen_at AS "Last seen",
+                        'http://127.0.0.1:8090/agent-compliance/action/ignore-device?client_hex='
+                            || encode(convert_to(client_name, 'UTF8'), 'hex')
+                            || '&host_hex='
+                            || encode(convert_to(hostname, 'UTF8'), 'hex')
+                            || '&confirm=1' AS "Ignore device"
                     FROM ninja_agent_compliance.v_active_findings
                     ORDER BY severity DESC, client_name, hostname
                     LIMIT 500
                 """,
                 0, 16, 24, 10,
+            ),
+            _card(
+                "ignored_devices",
+                "Ignored Devices",
+                "table",
+                """
+                    SELECT
+                        client_name AS "Org",
+                        COALESCE(NULLIF(display_name, ''), norm_name) AS "Device",
+                        COALESCE(NULLIF(reason, ''), 'Ignored') AS "Reason",
+                        COALESCE(TO_CHAR(updated_at, 'YYYY-MM-DD HH24:MI'), 'Unknown') AS "Updated",
+                        'http://127.0.0.1:8090/agent-compliance/action/unignore-device?client_hex='
+                            || encode(convert_to(client_name, 'UTF8'), 'hex')
+                            || '&host_hex='
+                            || encode(convert_to(norm_name, 'UTF8'), 'hex')
+                            || '&confirm=1' AS "Restore"
+                    FROM ninja_agent_compliance.v_device_ignores_current
+                    ORDER BY updated_at DESC, client_name, display_name
+                    LIMIT 200
+                """,
+                0, 26, 24, 6,
             ),
         ],
     },

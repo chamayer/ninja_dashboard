@@ -36,9 +36,11 @@ from ingest.config import settings
 from ingest.activities import ingest as activities_ingest
 from ingest.agent_compliance import ingest as agent_compliance_ingest
 from ingest.agent_compliance.config_loader import (
+    add_device_ignore,
     add_org_exclude,
     promote_alignment_aliases,
     remove_org_exclude,
+    remove_device_ignore,
 )
 from ingest.core import (
     custom_fields,
@@ -319,6 +321,78 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 return
             if remove_org_exclude(pattern):
                 body = f"restored {pattern}\n".encode("utf-8")
+                self._respond(200, body)
+            else:
+                self._respond(404, b"not found or not removable\n")
+            return
+
+        if parsed.path == "/agent-compliance/action/ignore-device":
+            client_hex = params.get("client_hex", [""])[0]
+            host_hex = params.get("host_hex", [""])[0]
+            if not client_hex or not host_hex:
+                self._respond(400, b"missing client_hex or host_hex\n")
+                return
+            try:
+                client_name = bytes.fromhex(client_hex).decode("utf-8")
+                hostname = bytes.fromhex(host_hex).decode("utf-8")
+                with db.transaction() as cur:
+                    cur.execute(
+                        """
+                        SELECT client_id, norm_name
+                        FROM ninja_agent_compliance.compliance_matrix_current
+                        WHERE client_name = %s
+                          AND hostname = %s
+                        ORDER BY evaluated_at DESC
+                        LIMIT 1
+                        """,
+                        (client_name, hostname),
+                    )
+                    row = cur.fetchone()
+                if not row:
+                    self._respond(404, b"device not found\n")
+                    return
+                client_id, norm_name = row
+            except ValueError:
+                self._respond(400, b"invalid device reference\n")
+                return
+            if add_device_ignore(client_id, norm_name, display_name=hostname):
+                body = f"ignored {norm_name}\n".encode("utf-8")
+                self._respond(200, body)
+            else:
+                self._respond(400, b"blank norm_name\n")
+            return
+
+        if parsed.path == "/agent-compliance/action/unignore-device":
+            client_hex = params.get("client_hex", [""])[0]
+            host_hex = params.get("host_hex", [""])[0]
+            if not client_hex or not host_hex:
+                self._respond(400, b"missing client_hex or host_hex\n")
+                return
+            try:
+                client_name = bytes.fromhex(client_hex).decode("utf-8")
+                hostname = bytes.fromhex(host_hex).decode("utf-8")
+                with db.transaction() as cur:
+                    cur.execute(
+                        """
+                        SELECT client_id, norm_name
+                        FROM ninja_agent_compliance.compliance_matrix_current
+                        WHERE client_name = %s
+                          AND hostname = %s
+                        ORDER BY evaluated_at DESC
+                        LIMIT 1
+                        """,
+                        (client_name, hostname),
+                    )
+                    row = cur.fetchone()
+                if not row:
+                    self._respond(404, b"device not found\n")
+                    return
+                client_id, norm_name = row
+            except ValueError:
+                self._respond(400, b"invalid device reference\n")
+                return
+            if remove_device_ignore(client_id, norm_name):
+                body = f"restored {norm_name}\n".encode("utf-8")
                 self._respond(200, body)
             else:
                 self._respond(404, b"not found or not removable\n")

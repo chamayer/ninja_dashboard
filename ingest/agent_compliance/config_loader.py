@@ -102,6 +102,7 @@ def load_clients() -> dict[int, ClientConfig]:
             SELECT client_id, client_name, default_max_age_days
             FROM ninja_agent_compliance.clients
             WHERE enabled
+              AND source <> 'alignment'
             """
         )
         rows = cur.fetchall()
@@ -256,54 +257,26 @@ def sync_clients_from_observations(
                 canonical_norm_by_norm[norm] = candidates[0]
 
         canonical_names: dict[str, str] = {}
-        canonical_source_by_norm: dict[str, str] = {}
         candidate_rows: list[tuple[str, str, str, str, int, datetime, datetime]] = []
-        new_ninja_clients: set[str] = set()
         run_seen_at = observed_at or datetime.now(timezone.utc)
         for norm, entries in by_norm.items():
             explicit = explicit_by_norm.get(norm)
             if explicit:
                 canonical_names[norm] = explicit[1]
-                canonical_source_by_norm[norm] = explicit[2]
                 continue
-            ninja_name = next((entry_name for platform, entry_name in entries if platform == "Ninja"), None)
-            if ninja_name:
-                preferred_existing = known_client_by_norm.get(normalize_org_name(ninja_name))
+            for preferred_platform in ("Ninja", "SentinelOne", "LogMeIn"):
+                candidate_name = next((entry_name for platform, entry_name in entries if platform == preferred_platform), None)
+                if not candidate_name:
+                    continue
+                preferred_existing = known_client_by_norm.get(normalize_org_name(candidate_name))
                 if preferred_existing:
                     canonical_names[norm] = preferred_existing[1]
-                    canonical_source_by_norm[norm] = preferred_existing[2]
-                else:
-                    canonical_names[norm] = ninja_name
-                    canonical_source_by_norm[norm] = "ninja"
-                    new_ninja_clients.add(ninja_name)
-                continue
-            for platform, name in entries:
-                candidate_rows.append((
-                    norm,
-                    name,
-                    platform,
-                    name,
-                    sum(1 for p, candidate_name in entries if p == platform and candidate_name == name),
-                    run_seen_at,
-                    run_seen_at,
-                ))
+                    break
         for norm, canonical_norm in canonical_norm_by_norm.items():
             if norm in explicit_by_norm:
                 continue
             if canonical_norm != norm and canonical_norm in canonical_names:
                 canonical_names[norm] = canonical_names[canonical_norm]
-                canonical_source_by_norm[norm] = canonical_source_by_norm.get(canonical_norm, "ninja")
-
-        if new_ninja_clients:
-            cur.executemany(
-                """
-                INSERT INTO ninja_agent_compliance.clients
-                    (client_name, default_max_age_days, source, notes)
-                VALUES (%s, 30, 'ninja', 'Discovered from Ninja canonical org observations')
-                ON CONFLICT (client_name) DO NOTHING
-                """,
-                [(name,) for name in sorted(new_ninja_clients)],
-            )
         cur.execute(
             """
             SELECT client_id, client_name, source
@@ -322,9 +295,29 @@ def sync_clients_from_observations(
         for norm, entries in by_norm.items():
             canonical_name = canonical_names.get(norm)
             if not canonical_name:
+                for platform, name in entries:
+                    candidate_rows.append((
+                        norm,
+                        name,
+                        platform,
+                        name,
+                        sum(1 for p, candidate_name in entries if p == platform and candidate_name == name),
+                        run_seen_at,
+                        run_seen_at,
+                    ))
                 continue
             canonical = client_by_name.get(canonical_name.strip().lower())
             if not canonical:
+                for platform, name in entries:
+                    candidate_rows.append((
+                        norm,
+                        name,
+                        platform,
+                        name,
+                        sum(1 for p, candidate_name in entries if p == platform and candidate_name == name),
+                        run_seen_at,
+                        run_seen_at,
+                    ))
                 continue
             client_id = canonical[0]
             if canonical_norm_by_norm.get(norm, norm) != norm:
@@ -624,6 +617,67 @@ def add_org_exclude(pattern: str, updated_by: str = "agent_compliance", notes: s
             (normalized, notes, updated_by),
         )
     return True
+
+
+def add_device_ignore(
+    client_id: int,
+    norm_name: str,
+    updated_by: str = "agent_compliance",
+    reason: str | None = None,
+    display_name: str | None = None,
+) -> bool:
+    normalized = norm_name.strip().lower()
+    if not normalized:
+        return False
+    with db.transaction() as cur:
+        cur.execute(
+            """
+            INSERT INTO ninja_agent_compliance.alert_suppressions
+                (client_id, norm_name, display_name, finding_type, affected_platform, reason, enabled, updated_by)
+            VALUES (%s, %s, %s, NULL, NULL, %s, true, %s)
+            ON CONFLICT (
+                COALESCE(client_id, 0),
+                COALESCE(norm_name, ''),
+                COALESCE(finding_type, ''),
+                COALESCE(affected_platform, '')
+            ) DO UPDATE SET
+                display_name = COALESCE(EXCLUDED.display_name, ninja_agent_compliance.alert_suppressions.display_name),
+                reason = EXCLUDED.reason,
+                enabled = true,
+                updated_at = now(),
+                updated_by = EXCLUDED.updated_by
+            """,
+            (
+                client_id,
+                normalized,
+                display_name,
+                reason or "Ignored from device issues dashboard",
+                updated_by,
+            ),
+        )
+    return True
+
+
+def remove_device_ignore(client_id: int, norm_name: str, updated_by: str = "agent_compliance") -> bool:
+    normalized = norm_name.strip().lower()
+    if not normalized:
+        return False
+    with db.transaction() as cur:
+        cur.execute(
+            """
+            UPDATE ninja_agent_compliance.alert_suppressions
+            SET enabled = false,
+                updated_at = now(),
+                updated_by = %s
+            WHERE client_id = %s
+              AND norm_name = %s
+              AND finding_type IS NULL
+              AND affected_platform IS NULL
+              AND enabled
+            """,
+            (updated_by, client_id, normalized),
+        )
+        return cur.rowcount > 0
 
 
 def remove_org_exclude(pattern: str, updated_by: str = "agent_compliance") -> bool:

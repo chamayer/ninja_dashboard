@@ -31,6 +31,8 @@ Actions should be short and obvious:
 
 - open device;
 - review finding;
+- ignore device;
+- restore device;
 - add alias;
 - exclude org;
 - acknowledge source issue.
@@ -164,6 +166,8 @@ Primary CTAs should be short and consistent:
 
 - Add alias
 - Exclude org
+- Ignore device
+- Restore device
 - Open device
 - Review source
 - Refresh data
