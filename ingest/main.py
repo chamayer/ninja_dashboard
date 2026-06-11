@@ -42,6 +42,7 @@ from ingest.agent_compliance.config_loader import (
     remove_org_exclude,
     remove_device_ignore,
 )
+from ingest.url_utils import redact_url
 from ingest.core import (
     custom_fields,
     device_health,
@@ -148,7 +149,7 @@ def bootstrap_metabase() -> None:
         )
         return
 
-    log.info("Waiting for Metabase at %s", url)
+    log.info("Waiting for Metabase at %s", redact_url(url))
     if not _wait_for_metabase(url, timeout=300):
         log.warning("Metabase not reachable after 5 min — skipping bootstrap")
         return

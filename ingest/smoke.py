@@ -15,6 +15,7 @@ import sys
 from ingest import db, migrations
 from ingest.config import settings
 from ingest.ninja_client import NinjaClient
+from ingest.url_utils import redact_url
 
 
 def main() -> int:
@@ -43,7 +44,7 @@ def main() -> int:
     log.info("Migrations: %d pending applied", len(applied))
 
     # 3. Ninja API auth + one read
-    log.info("Ninja API: %s", settings.NINJA_BASE_URL)
+    log.info("Ninja API: %s", redact_url(settings.NINJA_BASE_URL))
     with NinjaClient(
         base_url=settings.NINJA_BASE_URL,
         token_url=settings.NINJA_TOKEN_URL,

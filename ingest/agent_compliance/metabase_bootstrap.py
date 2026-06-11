@@ -436,7 +436,7 @@ def run_bootstrap(url: str, user: str, password: str, db_name: str = "Ninja") ->
             dashboard = _upsert_dashboard(client, dash_spec["name"], collection_id)
             dash_id_by_name[dash_spec["name"]] = int(dashboard["id"])
             dash_obj_by_name[dash_spec["name"]] = dashboard
-            urls.append(f"{url}/dashboard/{dashboard['id']}  ({dash_spec['name']})")
+            urls.append(f"dashboard/{dashboard['id']}  ({dash_spec['name']})")
 
         for dash_spec in DASHBOARDS:
             nav_md = _build_nav_markdown(dash_spec["name"], dash_id_by_name)
