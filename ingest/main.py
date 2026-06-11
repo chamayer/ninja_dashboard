@@ -242,7 +242,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 self._respond(200, b"ready\n")
             else:
                 self._respond(503, b"starting\n")
-        elif self.path.startswith("/agent-compliance/action/"):
+        elif self.path.startswith("/agent-compliance/action/") or self.path.startswith("/a/"):
             self._handle_agent_compliance_action()
         else:
             self.send_error(404)
