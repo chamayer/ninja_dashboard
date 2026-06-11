@@ -111,7 +111,8 @@ Typical route:
 - Zendesk when vendor/support action is needed.
 
 Source failure should suppress false missing-platform alerts for that
-source rather than flooding the operator with bad downstream findings.
+source rather than flooding the person using the dashboard with bad
+downstream findings.
 
 ### System Alert
 

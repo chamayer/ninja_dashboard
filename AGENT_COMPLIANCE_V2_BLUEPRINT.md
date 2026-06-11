@@ -127,8 +127,8 @@ Good idea for v2, with limits:
      - setup views for org/system configuration;
      - debug views for raw internal state.
 
-See `AGENT_COMPLIANCE_OPERATOR_UI.md` for the main-view
-navigation and wording contract.
+See the main-view navigation and wording contract for the human-facing
+dashboard shape.
 See `AGENT_COMPLIANCE_ALERT_WORKFLOW.md` for the alert taxonomy and
 route behavior.
 
