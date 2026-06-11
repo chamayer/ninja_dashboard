@@ -17,21 +17,18 @@ COLLECTION_NAME = "Agent Compliance"
 
 DASH_COMMAND = "Agent Compliance - Today"
 DASH_DEVICES = "Agent Compliance - Devices"
-DASH_ORG = "Agent Compliance - Review"
 DASH_SOURCE = "Agent Compliance - Health"
 DASH_DEBUG = "Agent Compliance - Debug"
 
 NAV_ORDER = [
     DASH_COMMAND,
     DASH_DEVICES,
-    DASH_ORG,
     DASH_SOURCE,
     DASH_DEBUG,
 ]
 NAV_DISPLAY_NAMES = {
     DASH_COMMAND: "Home",
     DASH_DEVICES: "Devices",
-    DASH_ORG: "Map",
     DASH_SOURCE: "Health",
     DASH_DEBUG: "Debug",
 }
@@ -153,7 +150,7 @@ DASHBOARDS = [
                       AND COALESCE(BTRIM(suggested_config), '') <> ''
                 """,
                 0, 16, 4, 4,
-                click_behavior={"target": DASH_ORG},
+                click_behavior={"target": DASH_SOURCE},
             ),
             _card(
                 "unresolved_names",
@@ -180,7 +177,7 @@ DASHBOARDS = [
                     ) unresolved_groups
                 """,
                 0, 20, 4, 4,
-                click_behavior={"target": DASH_ORG},
+                click_behavior={"target": DASH_SOURCE},
             ),
         ],
     },
@@ -203,12 +200,12 @@ DASHBOARDS = [
                             ELSE 'Needs review'
                         END AS "Status",
                         org_align_status AS "Alignment",
-                        CASE WHEN s1_exempt THEN 'Yes' ELSE 'No' END AS "AV exempt",
-                        '{ACTION_BASE_URL}/agent-compliance/action/ignore-device?client_hex='
+                        CASE WHEN s1_exempt THEN 'Yes' ELSE 'No' END AS "AV",
+                        '{ACTION_BASE_URL}/a/ig?client_hex='
                             || encode(convert_to(client_name, 'UTF8'), 'hex')
                             || '&host_hex='
                             || encode(convert_to(hostname, 'UTF8'), 'hex')
-                            || '&confirm=1' AS "Ignore"
+                            || '&confirm=1' AS "Skip"
                     FROM ninja_agent_compliance.v_remediation_candidates
                     ORDER BY client_name, hostname
                     LIMIT 500
@@ -251,11 +248,11 @@ DASHBOARDS = [
                         hostname AS "Device",
                         summary AS "Summary",
                         last_seen_at AS "Last seen",
-                        '{ACTION_BASE_URL}/agent-compliance/action/ignore-device?client_hex='
+                        '{ACTION_BASE_URL}/a/ig?client_hex='
                             || encode(convert_to(client_name, 'UTF8'), 'hex')
                             || '&host_hex='
                             || encode(convert_to(hostname, 'UTF8'), 'hex')
-                            || '&confirm=1' AS "Ignore"
+                            || '&confirm=1' AS "Skip"
                     FROM ninja_agent_compliance.v_active_findings
                     ORDER BY severity DESC, client_name, hostname
                     LIMIT 500
@@ -272,7 +269,7 @@ DASHBOARDS = [
                         COALESCE(NULLIF(display_name, ''), norm_name) AS "Device",
                         COALESCE(NULLIF(reason, ''), 'Ignored') AS "Reason",
                         COALESCE(TO_CHAR(updated_at, 'YYYY-MM-DD HH24:MI'), 'Unknown') AS "Updated",
-                        '{ACTION_BASE_URL}/agent-compliance/action/unignore-device?client_hex='
+                        '{ACTION_BASE_URL}/a/ui?client_hex='
                             || encode(convert_to(client_name, 'UTF8'), 'hex')
                             || '&host_hex='
                             || encode(convert_to(norm_name, 'UTF8'), 'hex')
@@ -282,140 +279,6 @@ DASHBOARDS = [
                     LIMIT 200
                 """,
                 0, 26, 24, 6,
-            ),
-        ],
-    },
-    {
-        "name": DASH_ORG,
-        "cards": [
-            _card(
-                "alignment_mismatches",
-                "Names to map",
-                "table",
-                f"""
-                    SELECT
-                        org_name AS "Name",
-                        overall_status AS "Status",
-                        COALESCE(NULLIF(ninja_platform_name, ''), 'No name') AS "Ninja",
-                        COALESCE(NULLIF(s1_platform_name, ''), 'No name') AS "SentinelOne",
-                        COALESCE(NULLIF(lmi_platform_name, ''), 'No name') AS "LogMeIn",
-                        COALESCE(NULLIF(suggested_config, ''), 'No suggestion') AS "Suggested",
-                        CASE
-                            WHEN ninja_status = 'MISSING'
-                                 AND COALESCE(NULLIF(ninja_platform_name, ''), '') <> '' THEN
-                                '{ACTION_BASE_URL}/agent-compliance/action/add-alias?client_id='
-                                || client_id::text
-                                || '&platform=Ninja&alias_hex='
-                                || encode(convert_to(ninja_platform_name, 'UTF8'), 'hex')
-                                || '&confirm=1'
-                        END AS "Use Ninja name",
-                        CASE
-                            WHEN s1_status = 'MISSING'
-                                 AND COALESCE(NULLIF(s1_platform_name, ''), '') <> '' THEN
-                                '{ACTION_BASE_URL}/agent-compliance/action/add-alias?client_id='
-                                || client_id::text
-                                || '&platform=SentinelOne&alias_hex='
-                                || encode(convert_to(s1_platform_name, 'UTF8'), 'hex')
-                                || '&confirm=1'
-                        END AS "Use SentinelOne name",
-                        CASE
-                            WHEN lmi_status = 'MISSING'
-                                 AND COALESCE(NULLIF(lmi_platform_name, ''), '') <> '' THEN
-                                '{ACTION_BASE_URL}/agent-compliance/action/add-alias?client_id='
-                                || client_id::text
-                                || '&platform=LogMeIn&alias_hex='
-                                || encode(convert_to(lmi_platform_name, 'UTF8'), 'hex')
-                                || '&confirm=1'
-                        END AS "Use LogMeIn name",
-                        '{ACTION_BASE_URL}/agent-compliance/action/exclude-org?pattern_hex='
-                            || encode(convert_to(org_name, 'UTF8'), 'hex')
-                            || '&confirm=1' AS "Ignore this name"
-                    FROM ninja_agent_compliance.org_alignment_current
-                    WHERE overall_status NOT LIKE 'OK%'
-                      AND COALESCE(BTRIM(suggested_config), '') <> ''
-                    ORDER BY org_name
-                    LIMIT 500
-                """,
-                0, 0, 24, 8,
-            ),
-            _card(
-                "unresolved_observations",
-                "Unmatched names",
-                "table",
-                f"""
-                    SELECT
-                        source_name AS "Source",
-                        platform AS "Platform",
-                        COALESCE(NULLIF(platform_group_name, ''), 'No group name') AS "Group",
-                        COALESCE(NULLIF(platform_group_id, ''), 'No group id') AS "Group ID",
-                        COUNT(*) AS "Devices",
-                        MAX(observed_at) AS "Last seen",
-                        MIN(CASE
-                            WHEN COALESCE(NULLIF(platform_group_name, ''), '') <> '' THEN
-                                '{ACTION_BASE_URL}/agent-compliance/action/exclude-org?pattern_hex='
-                                || encode(convert_to(platform_group_name, 'UTF8'), 'hex')
-                                || '&confirm=1'
-                        END) AS "Ignore this name"
-                    FROM ninja_agent_compliance.platform_observations
-                    WHERE resolved_client_id IS NULL
-                      AND observed_at > now() - INTERVAL '7 days'
-                      AND NOT EXISTS (
-                            SELECT 1
-                            FROM ninja_agent_compliance.org_excludes e
-                            WHERE e.enabled
-                              AND lower(trim(COALESCE(platform_group_name, ''))) = e.pattern
-                      )
-                    GROUP BY
-                        source_name,
-                        platform,
-                        COALESCE(NULLIF(platform_group_name, ''), 'No group name'),
-                        COALESCE(NULLIF(platform_group_id, ''), 'No group id')
-                    ORDER BY "Devices" DESC, source_name
-                    LIMIT 200
-                """,
-                0, 8, 24, 8,
-            ),
-            _card(
-                "known_exclusions",
-                "Ignored names",
-                "table",
-                f"""
-                    SELECT
-                        pattern AS "Org",
-                        source AS "Source",
-                        COALESCE(NULLIF(notes, ''), 'No notes') AS "Notes",
-                        COALESCE(TO_CHAR(updated_at, 'YYYY-MM-DD HH24:MI'), 'Unknown') AS "Updated",
-                        CASE
-                            WHEN source = 'manual' THEN
-                                '{ACTION_BASE_URL}/agent-compliance/action/unexclude-org?pattern_hex='
-                                || encode(convert_to(pattern, 'UTF8'), 'hex')
-                                || '&confirm=1'
-                            ELSE NULL
-                        END AS "Restore"
-                    FROM ninja_agent_compliance.org_excludes
-                    WHERE enabled
-                    ORDER BY source, pattern
-                    LIMIT 200
-                """,
-                0, 16, 24, 6,
-            ),
-            _card(
-                "org_candidates",
-                "New Names",
-                "table",
-                """
-                    SELECT
-                        candidate_name AS "Candidate",
-                        platform AS "Platform",
-                        observed_count AS "Hits",
-                        COALESCE(NULLIF(source_name, ''), 'Unknown') AS "Source",
-                        COALESCE(NULLIF(suggested_target, ''), 'Review needed') AS "Suggested target",
-                        COALESCE(TO_CHAR(last_seen_at, 'YYYY-MM-DD HH24:MI'), 'Unknown') AS "Last seen"
-                    FROM ninja_agent_compliance.v_org_candidates_current
-                    ORDER BY last_seen_at DESC, candidate_name
-                    LIMIT 200
-                """,
-                0, 22, 24, 6,
             ),
         ],
     },
@@ -452,6 +315,56 @@ DASHBOARDS = [
                     ORDER BY platform, source_name
                 """,
                 0, 12, 12, 8,
+            ),
+            _card(
+                "alignment_mismatches",
+                "Names to map",
+                "table",
+                f"""
+                    SELECT
+                        org_name AS "Name",
+                        overall_status AS "Status",
+                        COALESCE(NULLIF(ninja_platform_name, ''), 'No name') AS "Ninja",
+                        COALESCE(NULLIF(s1_platform_name, ''), 'No name') AS "S1",
+                        COALESCE(NULLIF(lmi_platform_name, ''), 'No name') AS "LMI",
+                        COALESCE(NULLIF(suggested_config, ''), 'No suggestion') AS "Suggested",
+                        CASE
+                            WHEN ninja_status = 'MISSING'
+                                 AND COALESCE(NULLIF(ninja_platform_name, ''), '') <> '' THEN
+                                '{ACTION_BASE_URL}/a/aa?client_id='
+                                || client_id::text
+                                || '&platform=Ninja&alias_hex='
+                                || encode(convert_to(ninja_platform_name, 'UTF8'), 'hex')
+                                || '&confirm=1'
+                        END AS "N",
+                        CASE
+                            WHEN s1_status = 'MISSING'
+                                 AND COALESCE(NULLIF(s1_platform_name, ''), '') <> '' THEN
+                                '{ACTION_BASE_URL}/a/aa?client_id='
+                                || client_id::text
+                                || '&platform=SentinelOne&alias_hex='
+                                || encode(convert_to(s1_platform_name, 'UTF8'), 'hex')
+                                || '&confirm=1'
+                        END AS "S1",
+                        CASE
+                            WHEN lmi_status = 'MISSING'
+                                 AND COALESCE(NULLIF(lmi_platform_name, ''), '') <> '' THEN
+                                '{ACTION_BASE_URL}/a/aa?client_id='
+                                || client_id::text
+                                || '&platform=LogMeIn&alias_hex='
+                                || encode(convert_to(lmi_platform_name, 'UTF8'), 'hex')
+                                || '&confirm=1'
+                        END AS "LMI",
+                        '{ACTION_BASE_URL}/a/eo?pattern_hex='
+                            || encode(convert_to(org_name, 'UTF8'), 'hex')
+                            || '&confirm=1' AS "Skip"
+                    FROM ninja_agent_compliance.org_alignment_current
+                    WHERE overall_status NOT LIKE 'OK%'
+                      AND COALESCE(BTRIM(suggested_config), '') <> ''
+                    ORDER BY org_name
+                    LIMIT 500
+                """,
+                0, 20, 24, 8,
             ),
         ],
     },
@@ -496,6 +409,48 @@ DASHBOARDS = [
                     LIMIT 500
                 """,
                 0, 12, 24, 8,
+            ),
+            _card(
+                "known_exclusions",
+                "Ignored names",
+                "table",
+                f"""
+                    SELECT
+                        pattern AS "Org",
+                        source AS "Source",
+                        COALESCE(NULLIF(notes, ''), 'No notes') AS "Notes",
+                        COALESCE(TO_CHAR(updated_at, 'YYYY-MM-DD HH24:MI'), 'Unknown') AS "Updated",
+                        CASE
+                            WHEN source = 'manual' THEN
+                                '{ACTION_BASE_URL}/a/ue?pattern_hex='
+                                || encode(convert_to(pattern, 'UTF8'), 'hex')
+                                || '&confirm=1'
+                            ELSE NULL
+                        END AS "Restore"
+                    FROM ninja_agent_compliance.org_excludes
+                    WHERE enabled
+                    ORDER BY source, pattern
+                    LIMIT 200
+                """,
+                0, 20, 24, 4,
+            ),
+            _card(
+                "org_candidates",
+                "New Names",
+                "table",
+                """
+                    SELECT
+                        candidate_name AS "Candidate",
+                        platform AS "Platform",
+                        observed_count AS "Hits",
+                        COALESCE(NULLIF(source_name, ''), 'Unknown') AS "Source",
+                        COALESCE(NULLIF(suggested_target, ''), 'Review needed') AS "Suggested target",
+                        COALESCE(TO_CHAR(last_seen_at, 'YYYY-MM-DD HH24:MI'), 'Unknown') AS "Last seen"
+                    FROM ninja_agent_compliance.v_org_candidates_current
+                    ORDER BY last_seen_at DESC, candidate_name
+                    LIMIT 200
+                """,
+                0, 24, 24, 4,
             ),
         ],
     },

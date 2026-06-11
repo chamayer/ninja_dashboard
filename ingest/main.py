@@ -277,13 +277,20 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._respond(503, b"still starting - try again shortly\n")
             return
         parsed = urlparse(self.path)
+        path = {
+            "/a/aa": "/agent-compliance/action/add-alias",
+            "/a/eo": "/agent-compliance/action/exclude-org",
+            "/a/ue": "/agent-compliance/action/unexclude-org",
+            "/a/ig": "/agent-compliance/action/ignore-device",
+            "/a/ui": "/agent-compliance/action/unignore-device",
+        }.get(parsed.path, parsed.path)
         params = parse_qs(parsed.query)
         confirm = params.get("confirm", ["0"])[0]
         if confirm != "1":
             self._respond(400, b"missing confirm=1\n")
             return
 
-        if parsed.path == "/agent-compliance/action/add-alias":
+        if path == "/agent-compliance/action/add-alias":
             client_id_value = params.get("client_id", [""])[0]
             try:
                 client_id = int(client_id_value)
@@ -307,7 +314,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._respond(200, body)
             return
 
-        if parsed.path == "/agent-compliance/action/exclude-org":
+        if path == "/agent-compliance/action/exclude-org":
             pattern_hex = params.get("pattern_hex", [""])[0]
             if not pattern_hex:
                 self._respond(400, b"missing pattern_hex\n")
@@ -324,7 +331,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 self._respond(400, b"blank pattern\n")
             return
 
-        if parsed.path == "/agent-compliance/action/unexclude-org":
+        if path == "/agent-compliance/action/unexclude-org":
             pattern_hex = params.get("pattern_hex", [""])[0]
             if not pattern_hex:
                 self._respond(400, b"missing pattern_hex\n")
@@ -341,7 +348,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 self._respond(404, b"not found or not removable\n")
             return
 
-        if parsed.path == "/agent-compliance/action/ignore-device":
+        if path == "/agent-compliance/action/ignore-device":
             client_hex = params.get("client_hex", [""])[0]
             host_hex = params.get("host_hex", [""])[0]
             if not client_hex or not host_hex:
@@ -377,7 +384,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 self._respond(400, b"blank norm_name\n")
             return
 
-        if parsed.path == "/agent-compliance/action/unignore-device":
+        if path == "/agent-compliance/action/unignore-device":
             client_hex = params.get("client_hex", [""])[0]
             host_hex = params.get("host_hex", [""])[0]
             if not client_hex or not host_hex:
