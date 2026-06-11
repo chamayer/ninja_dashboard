@@ -377,7 +377,10 @@ def sync_clients_from_observations(
                     last_seen_at = GREATEST(ninja_agent_compliance.org_candidates.last_seen_at, EXCLUDED.last_seen_at),
                     updated_at = now(),
                     updated_by = EXCLUDED.updated_by,
-                    enabled = true
+                    enabled = CASE
+                        WHEN ninja_agent_compliance.org_candidates.status = 'open' THEN true
+                        ELSE ninja_agent_compliance.org_candidates.enabled
+                    END
                 """,
                 candidate_rows,
             )
@@ -617,6 +620,13 @@ def promote_alignment_aliases(
                     updated_by,
                 ),
             )
+            _close_org_candidates(
+                cur,
+                status="promoted",
+                candidate_names=[alias_value],
+                platform=platform,
+                updated_by=updated_by,
+            )
             return 1
 
     with db.transaction() as cur:
@@ -669,6 +679,12 @@ def promote_alignment_aliases(
                 for client_id, platform_name, alias_type, value, notes in alias_rows
             ],
         )
+        _close_org_candidates(
+            cur,
+            status="promoted",
+            candidate_names=[value for _, _, _, value, _ in alias_rows],
+            updated_by=updated_by,
+        )
         return len(alias_rows)
 
 
@@ -692,7 +708,43 @@ def add_org_exclude(pattern: str, updated_by: str = "agent_compliance", notes: s
             """,
             (normalized, notes, updated_by),
         )
+        _close_org_candidates(
+            cur,
+            status="ignored",
+            candidate_names=[pattern],
+            updated_by=updated_by,
+        )
     return True
+
+
+def _close_org_candidates(
+    cur: Any,
+    status: str,
+    candidate_names: list[str],
+    updated_by: str,
+    platform: str | None = None,
+) -> None:
+    names = [name.strip().lower() for name in candidate_names if name and name.strip()]
+    if not names:
+        return
+    params: list[Any] = [status, updated_by, names]
+    platform_filter = ""
+    if platform:
+        platform_filter = " AND platform = %s"
+        params.append(platform)
+    cur.execute(
+        f"""
+        UPDATE ninja_agent_compliance.org_candidates
+        SET status = %s,
+            enabled = false,
+            updated_at = now(),
+            updated_by = %s
+        WHERE lower(trim(candidate_name)) = ANY(%s::text[])
+          AND enabled
+          {platform_filter}
+        """,
+        params,
+    )
 
 
 def add_device_ignore(

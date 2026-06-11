@@ -137,12 +137,11 @@ DASHBOARDS = [
             ),
             _card(
                 "sources_down",
-                "Sources down",
+                "Source work",
                 "scalar",
                 """
-                    SELECT COUNT(*) AS "Sources down"
-                    FROM ninja_agent_compliance.v_source_health_current
-                    WHERE enabled AND status = 'failed'
+                    SELECT COUNT(*) AS "Source work"
+                    FROM ninja_agent_compliance.v_source_work_current
                 """,
                 0, 10, 5, 4,
                 click_behavior=_dashboard_link(DASH_HEALTH),
@@ -251,22 +250,38 @@ DASHBOARDS = [
                 0, 0, 12, 8,
             ),
             _card(
+                "source_work",
+                "Source work",
+                "table",
+                """
+                    SELECT
+                        work_type AS "Work",
+                        platform AS "Platform",
+                        source_name AS "Source",
+                        COALESCE(NULLIF(client_name, ''), 'Shared') AS "Org",
+                        rows_observed AS "Rows",
+                        COALESCE(NULLIF(issue, ''), 'OK') AS "Issue"
+                    FROM ninja_agent_compliance.v_source_work_current
+                    ORDER BY severity DESC, platform, source_name
+                """,
+                0, 12, 12, 8,
+            ),
+            _card(
                 "source_health",
-                "Source health",
+                "All sources",
                 "table",
                 """
                     SELECT
                         source_name AS "Source",
                         platform AS "Platform",
                         COALESCE(NULLIF(client_name, ''), 'Shared') AS "Org",
-                        status AS "Status",
+                        status AS "State",
                         rows_observed AS "Rows",
-                        COALESCE(TO_CHAR(finished_at, 'YYYY-MM-DD HH24:MI'), 'Unknown') AS "Finished",
-                        COALESCE(NULLIF(error_text, ''), 'OK') AS "Issue"
+                        COALESCE(TO_CHAR(finished_at, 'YYYY-MM-DD HH24:MI'), 'Unknown') AS "Finished"
                     FROM ninja_agent_compliance.v_source_health_current
                     ORDER BY platform, source_name
                 """,
-                0, 12, 12, 8,
+                8, 0, 24, 6,
             ),
             _card(
                 "new_names",
@@ -285,7 +300,7 @@ DASHBOARDS = [
                     ORDER BY last_seen_at DESC, candidate_name
                     LIMIT 200
                 """,
-                0, 20, 24, 8,
+                14, 0, 24, 8,
                 column_click_behaviors={
                     "Action": {
                         "url_template": _url_template(
@@ -571,6 +586,10 @@ def _set_layout(
     if nav_markdown is not None:
         dashcards.append(_nav_dashcard(nav_markdown))
     for i, spec in enumerate(specs):
+        dashcard_viz: dict[str, Any] = {}
+        column_settings = _build_column_settings(spec)
+        if column_settings:
+            dashcard_viz["column_settings"] = column_settings
         dashcards.append({
             "id": -(i + 2),
             "card_id": card_ids[spec["key"]],
@@ -579,7 +598,7 @@ def _set_layout(
             "size_x": spec["size_x"],
             "size_y": spec["size_y"],
             "parameter_mappings": [],
-            "visualization_settings": {},
+            "visualization_settings": dashcard_viz,
         })
     resp = client.put(f"/api/dashboard/{dashboard['id']}", json={"dashcards": dashcards})
     resp.raise_for_status()
@@ -619,6 +638,15 @@ def _apply_click_behaviors(
                 json={"visualization_settings": current},
             )
             r.raise_for_status()
+
+
+def _build_column_settings(spec: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    column_settings: dict[str, dict[str, Any]] = {}
+    for col, col_spec in (spec.get("column_click_behaviors") or {}).items():
+        cb = _build_click_behavior_json(col_spec, {})
+        if cb:
+            column_settings[f'["name","{col}"]'] = {"click_behavior": cb}
+    return column_settings
 
 
 def _set_custom_homepage(client: httpx.Client, dashboard_id: int | None) -> None:
