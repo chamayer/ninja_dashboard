@@ -881,6 +881,83 @@ def set_customer_requirement(
         return ", ".join(platforms)
 
 
+def set_customer_max_age(
+    customer_name: str,
+    scope: str,
+    days: int | str,
+    updated_by: str = "agent_compliance",
+) -> int | None:
+    """Override `max_age_days` for one customer + scope. If no override
+    row exists yet for that scope, seed one from the global default
+    profile so the operator doesn't have to pick a platform combo just
+    to change the staleness window."""
+    customer = customer_name.strip()
+    scope_value = _normalize_requirement_scope(scope)
+    if not customer or scope_value is None:
+        return None
+    try:
+        days_value = int(days)
+    except (TypeError, ValueError):
+        return None
+    if days_value < 1 or days_value > 365:
+        return None
+    with db.transaction() as cur:
+        cur.execute(
+            """
+            SELECT client_id
+            FROM ninja_agent_compliance.clients
+            WHERE client_name = %s
+              AND enabled
+            ORDER BY client_id
+            LIMIT 1
+            """,
+            (customer,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+        client_id = row[0]
+        cur.execute(
+            """
+            INSERT INTO ninja_agent_compliance.platform_requirements
+                (client_id, device_scope, required_platforms, max_age_days,
+                 notes, source, updated_by)
+            SELECT
+                %s,
+                %s,
+                COALESCE(
+                    (SELECT required_platforms
+                     FROM ninja_agent_compliance.platform_requirements
+                     WHERE client_id IS NULL
+                       AND device_scope = %s
+                       AND enabled
+                     LIMIT 1),
+                    (SELECT required_platforms
+                     FROM ninja_agent_compliance.platform_requirements
+                     WHERE client_id IS NULL
+                       AND device_scope = 'all'
+                       AND enabled
+                     LIMIT 1),
+                    ARRAY['Ninja']::text[]
+                ),
+                %s,
+                'Manual max age override',
+                'manual',
+                %s
+            ON CONFLICT (COALESCE(client_id, 0), device_scope) DO UPDATE
+            SET max_age_days = EXCLUDED.max_age_days,
+                source = 'manual',
+                enabled = true,
+                updated_at = now(),
+                updated_by = EXCLUDED.updated_by
+            RETURNING max_age_days
+            """,
+            (client_id, scope_value, scope_value, days_value, updated_by),
+        )
+        result = cur.fetchone()
+        return int(result[0]) if result else None
+
+
 def _normalize_requirement_scope(scope: str) -> str | None:
     normalized = scope.strip().lower().replace("_", " ")
     if normalized in {"all", "all devices", "all device"}:

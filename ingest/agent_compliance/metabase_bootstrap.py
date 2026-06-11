@@ -812,6 +812,9 @@ DASHBOARDS = [
                         'Set' AS "Ninja + LMI",
                         'Set' AS "Ninja + S1 + LMI",
                         'Set' AS "Ninja + S1 + SC",
+                        '7d' AS "Age 7d",
+                        '30d' AS "Age 30d",
+                        '90d' AS "Age 90d",
                         CASE
                             WHEN source_client_id IS NOT NULL AND source_scope = device_scope THEN 'Use default'
                             ELSE ''
@@ -834,6 +837,15 @@ DASHBOARDS = [
                     },
                     "Ninja + S1 + SC": {
                         "url_template": f"{ACTION_BASE_URL}/a/sr?customer={{{{Customer}}}}&scope={{{{Applies to}}}}&profile=ninja_s1_sc&confirm=1",
+                    },
+                    "Age 7d": {
+                        "url_template": f"{ACTION_BASE_URL}/a/sd?customer={{{{Customer}}}}&scope={{{{Applies to}}}}&days=7&confirm=1",
+                    },
+                    "Age 30d": {
+                        "url_template": f"{ACTION_BASE_URL}/a/sd?customer={{{{Customer}}}}&scope={{{{Applies to}}}}&days=30&confirm=1",
+                    },
+                    "Age 90d": {
+                        "url_template": f"{ACTION_BASE_URL}/a/sd?customer={{{{Customer}}}}&scope={{{{Applies to}}}}&days=90&confirm=1",
                     },
                     "Default": {
                         "url_template": f"{ACTION_BASE_URL}/a/sr?customer={{{{Customer}}}}&scope={{{{Applies to}}}}&profile=default&confirm=1",

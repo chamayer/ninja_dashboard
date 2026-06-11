@@ -44,6 +44,7 @@ from ingest.agent_compliance.config_loader import (
     promote_alignment_aliases,
     remove_org_exclude,
     remove_device_ignore,
+    set_customer_max_age,
     set_customer_requirement,
 )
 from ingest.agent_compliance.normalize import is_placeholder_org_name
@@ -289,6 +290,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             "/a/ig": "/agent-compliance/action/ignore-device",
             "/a/ui": "/agent-compliance/action/unignore-device",
             "/a/bs": "/agent-compliance/action/bulk-ignore-stale",
+            "/a/sd": "/agent-compliance/action/set-max-age",
         }.get(parsed.path, parsed.path)
         params = parse_qs(parsed.query)
         confirm = params.get("confirm", ["0"])[0]
@@ -436,6 +438,23 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 self._respond(200, body)
             else:
                 self._respond(400, b"blank norm_name\n")
+            return
+
+        if path == "/agent-compliance/action/set-max-age":
+            customer_name = _text_param("customer", "client_name", hex_names=("customer_hex", "client_hex"))
+            scope = _text_param("scope") or ""
+            days_value = _text_param("days") or ""
+            if not customer_name or not scope or not days_value:
+                self._respond(400, b"missing customer, scope, or days\n")
+                return
+            result = set_customer_max_age(
+                customer_name, scope, days_value, updated_by="operator_dashboard",
+            )
+            if result is None:
+                self._respond(400, b"invalid customer, scope, or days (1-365)\n")
+                return
+            body = f"set {customer_name} {scope} max age to {result} days\n".encode("utf-8")
+            self._respond(200, body)
             return
 
         if path == "/agent-compliance/action/bulk-ignore-stale":
