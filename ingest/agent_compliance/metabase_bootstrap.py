@@ -94,7 +94,7 @@ DASHBOARDS = [
         "cards": [
             _card(
                 "compliance_percent",
-                "Compliance %",
+                "Compliant %",
                 "scalar",
                 """
                     SELECT ROUND(
@@ -108,7 +108,7 @@ DASHBOARDS = [
             ),
             _card(
                 "devices_needing_action",
-                "Need Action",
+                "Devices to fix",
                 "scalar",
                 """
                     SELECT COUNT(*) AS devices
@@ -120,7 +120,7 @@ DASHBOARDS = [
             ),
             _card(
                 "active_findings",
-                "Degraded",
+                "Degraded devices",
                 "scalar",
                 """
                     SELECT COUNT(*) AS degraded_devices
@@ -132,7 +132,7 @@ DASHBOARDS = [
             ),
             _card(
                 "source_issues",
-                "Source Down",
+                "Services down",
                 "scalar",
                 """
                     SELECT COUNT(*) AS source_issues
@@ -144,7 +144,7 @@ DASHBOARDS = [
             ),
             _card(
                 "org_review_queue",
-                "Needs Review",
+                "Review list",
                 "scalar",
                 """
                     SELECT COUNT(*) AS orgs
@@ -156,7 +156,7 @@ DASHBOARDS = [
             ),
             _card(
                 "unresolved_names",
-                "New Names",
+                "Unmatched names",
                 "scalar",
                 """
                     SELECT COUNT(*) AS unresolved_groups
@@ -188,7 +188,7 @@ DASHBOARDS = [
         "cards": [
             _card(
                 "remediation_candidates",
-                "Need Action",
+                "Devices to fix",
                 "table",
                 """
                     SELECT
@@ -202,12 +202,12 @@ DASHBOARDS = [
                             ELSE 'Needs review'
                         END AS "Status",
                         org_align_status AS "Alignment",
-                        CASE WHEN s1_exempt THEN 'Yes' ELSE 'No' END AS "S1 exempt",
+                        CASE WHEN s1_exempt THEN 'Yes' ELSE 'No' END AS "AV exempt",
                         '{ACTION_BASE_URL}/agent-compliance/action/ignore-device?client_hex='
                             || encode(convert_to(client_name, 'UTF8'), 'hex')
                             || '&host_hex='
                             || encode(convert_to(hostname, 'UTF8'), 'hex')
-                            || '&confirm=1' AS "Ignore device"
+                            || '&confirm=1' AS "Ignore"
                     FROM ninja_agent_compliance.v_remediation_candidates
                     ORDER BY client_name, hostname
                     LIMIT 500
@@ -216,7 +216,7 @@ DASHBOARDS = [
             ),
             _card(
                 "degraded_devices",
-                "Degraded",
+                "Degraded devices",
                 "table",
                 f"""
                     SELECT
@@ -239,7 +239,7 @@ DASHBOARDS = [
             ),
             _card(
                 "active_findings_table",
-                "Current Issues",
+                "Open issues",
                 "table",
                 f"""
                     SELECT
@@ -254,7 +254,7 @@ DASHBOARDS = [
                             || encode(convert_to(client_name, 'UTF8'), 'hex')
                             || '&host_hex='
                             || encode(convert_to(hostname, 'UTF8'), 'hex')
-                            || '&confirm=1' AS "Ignore device"
+                            || '&confirm=1' AS "Ignore"
                     FROM ninja_agent_compliance.v_active_findings
                     ORDER BY severity DESC, client_name, hostname
                     LIMIT 500
@@ -263,7 +263,7 @@ DASHBOARDS = [
             ),
             _card(
                 "ignored_devices",
-                "Ignored",
+                "Ignored items",
                 "table",
                 f"""
                     SELECT
@@ -289,7 +289,7 @@ DASHBOARDS = [
         "cards": [
             _card(
                 "alignment_mismatches",
-                "Org Alignment",
+                "Review list",
                 "table",
                 f"""
                     SELECT
@@ -308,7 +308,7 @@ DASHBOARDS = [
                                 || '&platform=Ninja&alias_hex='
                                 || encode(convert_to(ninja_platform_name, 'UTF8'), 'hex')
                                 || '&confirm=1'
-                        END AS "Fix Ninja",
+                        END AS "Use Ninja name",
                         CASE
                             WHEN s1_status = 'MISSING'
                                  AND COALESCE(NULLIF(s1_platform_name, ''), '') <> '' THEN
@@ -317,7 +317,7 @@ DASHBOARDS = [
                                 || '&platform=SentinelOne&alias_hex='
                                 || encode(convert_to(s1_platform_name, 'UTF8'), 'hex')
                                 || '&confirm=1'
-                        END AS "Fix SentinelOne",
+                        END AS "Use SentinelOne name",
                         CASE
                             WHEN lmi_status = 'MISSING'
                                  AND COALESCE(NULLIF(lmi_platform_name, ''), '') <> '' THEN
@@ -326,10 +326,10 @@ DASHBOARDS = [
                                 || '&platform=LogMeIn&alias_hex='
                                 || encode(convert_to(lmi_platform_name, 'UTF8'), 'hex')
                                 || '&confirm=1'
-                        END AS "Fix LogMeIn",
+                        END AS "Use LogMeIn name",
                         '{ACTION_BASE_URL}/agent-compliance/action/exclude-org?pattern_hex='
                             || encode(convert_to(org_name, 'UTF8'), 'hex')
-                            || '&confirm=1' AS "Exclude org"
+                            || '&confirm=1' AS "Ignore this name"
                     FROM ninja_agent_compliance.org_alignment_current
                     WHERE overall_status NOT LIKE 'OK%'
                     ORDER BY org_name
@@ -339,7 +339,7 @@ DASHBOARDS = [
             ),
             _card(
                 "unresolved_observations",
-                "Unresolved Observations",
+                "Unmatched names",
                 "table",
                 f"""
                     SELECT
@@ -354,7 +354,7 @@ DASHBOARDS = [
                                 '{ACTION_BASE_URL}/agent-compliance/action/exclude-org?pattern_hex='
                                 || encode(convert_to(platform_group_name, 'UTF8'), 'hex')
                                 || '&confirm=1'
-                        END) AS "Exclude org"
+                        END) AS "Ignore this name"
                     FROM ninja_agent_compliance.platform_observations
                     WHERE resolved_client_id IS NULL
                       AND observed_at > now() - INTERVAL '7 days'
@@ -376,7 +376,7 @@ DASHBOARDS = [
             ),
             _card(
                 "known_exclusions",
-                "Suppressed Names",
+                "Ignored names",
                 "table",
                 f"""
                     SELECT
@@ -617,7 +617,7 @@ def _build_nav_markdown(current_dash_name: str, dash_id_by_name: dict[str, int])
         if dash_id is None:
             continue
         parts.append(f"[{label}](/dashboard/{dash_id})")
-    return "**Navigate:** " + " &nbsp;&nbsp;•&nbsp;&nbsp; ".join(parts)
+    return " ".join(parts)
 
 
 def _nav_dashcard(text: str) -> dict[str, Any]:
