@@ -250,22 +250,73 @@ def sync_clients_from_observations(
             for norm, entries in by_norm.items()
         }
         canonical_norm_by_norm = {norm: norm for norm in by_norm}
-        ninja_norms = [
-            norm for norm, platforms in platforms_by_norm.items()
-            if "Ninja" in platforms
-        ]
-        for norm, platforms in platforms_by_norm.items():
-            if "Ninja" in platforms or len(norm) < 4:
+
+        ninja_accept_rows: list[tuple[str, str]] = []
+        accepted_norms: set[str] = set()
+        for norm, entries in by_norm.items():
+            if norm in known_client_by_norm:
                 continue
-            candidates = [
-                ninja_norm for ninja_norm in ninja_norms
-                if ninja_norm != norm
-                and len(ninja_norm) >= 4
-                and (ninja_norm in norm or norm in ninja_norm)
-                and not (platforms & platforms_by_norm[ninja_norm])
-            ]
-            if len(candidates) == 1:
-                canonical_norm_by_norm[norm] = candidates[0]
+            ninja_name = next((name for platform, name in entries if platform == "Ninja"), None)
+            if not ninja_name:
+                continue
+            accepted_norms.add(norm)
+            ninja_accept_rows.append((
+                ninja_name,
+                (
+                    "Auto accepted from Ninja observation. Logic: Ninja is the "
+                    "authoritative customer source; aliases from other platforms "
+                    "are automatic only when the normalized name matches exactly."
+                ),
+            ))
+        if ninja_accept_rows:
+            cur.executemany(
+                """
+                INSERT INTO ninja_agent_compliance.clients
+                    (client_name, enabled, source, notes, updated_by)
+                VALUES (%s, true, 'ninja', %s, 'agent_compliance')
+                ON CONFLICT (client_name) DO UPDATE SET
+                    enabled = true,
+                    source = CASE
+                        WHEN ninja_agent_compliance.clients.source IN ('manual', 'seed') THEN ninja_agent_compliance.clients.source
+                        ELSE 'ninja'
+                    END,
+                    notes = CASE
+                        WHEN ninja_agent_compliance.clients.source IN ('manual', 'seed') THEN ninja_agent_compliance.clients.notes
+                        ELSE EXCLUDED.notes
+                    END,
+                    updated_at = now(),
+                    updated_by = EXCLUDED.updated_by
+                """,
+                ninja_accept_rows,
+            )
+            cur.execute(
+                """
+                SELECT client_id, client_name, source
+                FROM ninja_agent_compliance.clients
+                WHERE enabled
+                """
+            )
+            clients = [row for row in cur.fetchall() if not is_placeholder_org_name(row[1])]
+            authoritative_clients = {
+                normalize_org_name(row[1]): (row[0], row[1], row[2])
+                for row in clients
+                if row[2] != "alignment"
+            }
+            known_client_by_norm = dict(authoritative_clients)
+            cur.execute(
+                """
+                SELECT c.client_id, c.client_name, a.alias_value
+                FROM ninja_agent_compliance.client_aliases a
+                JOIN ninja_agent_compliance.clients c ON c.client_id = a.client_id
+                WHERE a.enabled
+                  AND a.source IN ('manual', 'seed', 'ninja')
+                """
+            )
+            for client_id, client_name, alias_value in cur.fetchall():
+                known_client_by_norm.setdefault(normalize_org_name(client_name), (client_id, client_name))
+                if is_placeholder_org_name(alias_value):
+                    continue
+                known_client_by_norm.setdefault(normalize_org_name(alias_value), (client_id, client_name))
 
         canonical_names: dict[str, str] = {}
         candidate_rows: list[tuple[str, str, str, str, int, datetime, datetime]] = []
@@ -349,14 +400,26 @@ def sync_clients_from_observations(
                     platform,
                     alias_type,
                     name,
-                    "Generated from PowerShell-style org alignment",
+                    (
+                        "Auto accepted from Ninja authoritative customer name"
+                        if norm in accepted_norms and platform == "Ninja"
+                        else "Auto alias: exact normalized name match to accepted customer"
+                    ),
                 ))
         if alias_rows:
             cur.executemany(
                 """
                 INSERT INTO ninja_agent_compliance.client_aliases
                     (client_id, platform, alias_type, alias_value, source, notes, updated_by)
-                VALUES (%s, %s, %s, %s, 'alignment', %s, 'agent_compliance')
+                VALUES (
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    CASE WHEN %s LIKE 'Auto accepted from Ninja%%' THEN 'ninja' ELSE 'alignment' END,
+                    %s,
+                    'agent_compliance'
+                )
                 ON CONFLICT (client_id, platform, (COALESCE(source_id, 0)), alias_type, alias_value)
                 DO UPDATE SET
                     enabled = true,
@@ -364,7 +427,10 @@ def sync_clients_from_observations(
                     updated_at = now(),
                     updated_by = EXCLUDED.updated_by
                 """,
-                alias_rows,
+                [
+                    (client_id, platform, alias_type, name, notes, notes)
+                    for client_id, platform, alias_type, name, notes in alias_rows
+                ],
             )
         if candidate_rows:
             cur.executemany(

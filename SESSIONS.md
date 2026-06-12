@@ -58,6 +58,27 @@ PowerShell-derived seed, let discovery rebuild from scratch.
 - After first post-reset run, snapshot the review queue and audit
   whether discovery picked up everything the operator expects.
 
+## 2026-06-12 — v0.21.3 Ninja-authoritative customer discovery
+
+**Why:** After the clean reset, the system correctly preserved only
+the 27 PowerShell-seeded customers, but every non-seeded Ninja org
+landed in review. Operator decision: Ninja is authoritative for
+customer names. If a name exists in Ninja, it should become a customer
+automatically. Non-Ninja names should only auto-alias when they match
+that customer exactly after normalization; fuzzy/prefix cases stay in
+review.
+
+**Done:**
+- `sync_clients_from_observations` now auto-creates enabled clients
+  with `source='ninja'` when the name is observed in Ninja and is not
+  excluded/placeholder noise.
+- Auto-created customers include notes documenting the data source and
+  logic that made them customers.
+- Ninja aliases for those customers use `source='ninja'`; exact
+  normalized S1/LMI aliases use the existing alignment alias path.
+- Removed the conservative fuzzy/prefix auto-alias behavior from the
+  discovery step so ambiguous names remain operator review work.
+
 ## 2026-06-12 — v0.20.0 Alerts surface
 
 **Why:** With routes still off, there was no way to see what *would*

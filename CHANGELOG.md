@@ -2,6 +2,18 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.21.3] — 2026-06-12
+
+### Changed
+- Agent Compliance customer discovery now accepts Ninja-observed
+  customer names automatically. Accepted rows use `clients.source =
+  'ninja'` and notes that explain the logic: Ninja is authoritative
+  for customer names, while non-Ninja platform names auto-alias only
+  when their normalized name matches exactly.
+- Fuzzy/prefix platform-name absorption no longer auto-aliases into a
+  Ninja customer. Those cases remain in the customer-name review queue
+  for an operator decision.
+
 ## [0.21.2] — 2026-06-12
 
 ### Added
