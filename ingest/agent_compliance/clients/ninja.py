@@ -57,6 +57,15 @@ def fetch(source: SourceConfig, observed_at: datetime) -> list[dict]:
                     LIMIT 1
                 ) s ON true
                 WHERE d.is_current = true
+                  -- PowerShell parity: only AgentDevice records count for
+                  -- agent compliance. Skip Hyper-V/VMware guests
+                  -- (HYPERV_VMM_GUEST, VMWARE_VM_GUEST), NMS_* network
+                  -- monitoring targets, CLOUD_MONITOR_TARGET, etc. These
+                  -- have no agent installed — they're inventory entries
+                  -- pulled from a host or probe and were inflating
+                  -- counts + breaking NO AV detection when a hostname
+                  -- collided with an agent device.
+                  AND d.data->>'deviceType' = 'AgentDevice'
                 """
             )
             rows = cur.fetchall()

@@ -232,7 +232,16 @@ def _build_matrix_and_findings(
         req = get_requirement(requirements, client_id, device_scope)
         max_age_days = req.max_age_days or client.default_max_age_days
         latest_by_platform = _latest_by_platform(obs_rows)
-        no_av_exempt = _has_no_av_exemption(latest_by_platform.get("Ninja"))
+        # If a host has multiple Ninja device records (same hostname,
+        # different device IDs — e.g. host + Hyper-V guest), the
+        # latest-wins collapse can drop the exempt marker. NO AV
+        # exemption is sticky: if *any* Ninja observation for this
+        # (client, host) reports exempt, the host is exempt.
+        no_av_exempt = any(
+            _has_no_av_exemption(row)
+            for row in obs_rows
+            if row.get("platform") == "Ninja"
+        )
         required = tuple(
             platform for platform in req.required_platforms
             if not (platform == "SentinelOne" and no_av_exempt)
