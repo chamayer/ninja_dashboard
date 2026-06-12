@@ -2,6 +2,16 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.21.1] — 2026-06-12
+
+### Added
+- Migration `031_clean_reset_by_name.sql` — completes migration 030 by
+  deleting "ghost-seeded" clients that pre-v0.16.4 dynamic discovery
+  inserted without setting `source` explicitly. Those rows inherited
+  the column DEFAULT of `'seed'` and survived migration 030's
+  source-flag filter. Migration 031 cleans up by explicit name list
+  matching the migration 019 PS seed.
+
 ## [0.21.0] — 2026-06-12
 
 ### Added
