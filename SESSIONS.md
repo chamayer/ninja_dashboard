@@ -5,6 +5,40 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-12 — v0.20.0 Alerts surface
+
+**Why:** With routes still off, there was no way to see what *would*
+fire if alerts were enabled. The `would-fire` SQL preview from the
+previous session made the data accessible via psql but didn't surface
+on the dashboard.
+
+**Done:**
+- Added an `Active alerts` KPI on Today (click-through to the new
+  Alerts dashboard).
+- Built `Agent Compliance — Alerts` in the top nav with three
+  sections (Would fire / Active findings / Recent deliveries) and
+  Customer / Severity / Finding type filters using the same
+  parameter infrastructure introduced in v0.18.0–v0.19.0.
+- The `Would fire on next run` table mirrors `alerts.py:_event_type`
+  semantics so the operator can pre-validate dispatcher behavior
+  before flipping `AGENT_COMPLIANCE_ALERTS_ENABLED` on.
+
+**Validation:**
+- `python -m compileall ingest/agent_compliance/metabase_bootstrap.py`
+  passes.
+- Live host run pending: redeploy ingest, `POST /bootstrap-metabase`,
+  confirm Alerts is in the nav, filters render, "Would fire" returns
+  rows for active findings whose route would be enabled.
+
+**Pending follow-ups:**
+- Wire the first webhook URL → flip the seed `default_webhook` route
+  enabled, set `AGENT_COMPLIANCE_ALERT_WEBHOOK_URL` + flip
+  `AGENT_COMPLIANCE_ALERTS_ENABLED=true`, trigger
+  `/run/agent-compliance`, watch `Recent deliveries` populate.
+- Reset migration (clean-slate request from previous session) still
+  pending the three yes/no decisions on Star Funding canonical,
+  re-promote list, and additional `org_excludes`.
+
 ## 2026-06-11 — v0.19.0 Devices redesign + drilldown + NO AV fix
 
 **Why:** v0.18.0 shipped the filters but operator review surfaced

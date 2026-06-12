@@ -31,6 +31,7 @@ COLLECTION_NAME = "Agent Compliance"
 DASH_TODAY = "Agent Compliance - Today"
 DASH_DEVICES = "Agent Compliance - Devices"
 DASH_DEVICE_DRILLDOWN = "Agent Compliance - Device drilldown"
+DASH_ALERTS = "Agent Compliance - Alerts"
 DASH_CUSTOMERS = "Agent Compliance - Customers"
 DASH_HEALTH = "Agent Compliance - Health"
 DASH_DEBUG = "Agent Compliance - Debug"
@@ -47,14 +48,27 @@ PARAM_AV_EXEMPT = "p_dev_av"
 PARAM_DD_CUSTOMER = "p_dd_customer"
 PARAM_DD_HOST = "p_dd_host"
 
+# Alerts dashboard.
+PARAM_AL_CUSTOMER = "p_al_customer"
+PARAM_AL_SEVERITY = "p_al_severity"
+PARAM_AL_TYPE = "p_al_type"
+
 PLATFORM_VALUES = ["Ninja", "ScreenConnect", "SentinelOne", "LogMeIn"]
 STATE_VALUES = ["Stale", "Degraded", "Review"]
 AV_EXEMPT_VALUES = ["Yes", "No"]
+SEVERITY_VALUES = ["critical", "high", "medium", "info"]
+FINDING_TYPE_VALUES = [
+    "missing_required_platform",
+    "stale_required_platform",
+    "cross_client_conflict",
+    "source_failure",
+]
 
-NAV_ORDER = [DASH_TODAY, DASH_DEVICES, DASH_CUSTOMERS, DASH_HEALTH, DASH_DEBUG]
+NAV_ORDER = [DASH_TODAY, DASH_DEVICES, DASH_ALERTS, DASH_CUSTOMERS, DASH_HEALTH, DASH_DEBUG]
 NAV_LABELS = {
     DASH_TODAY: "Today",
     DASH_DEVICES: "Devices",
+    DASH_ALERTS: "Alerts",
     DASH_CUSTOMERS: "Customers",
     DASH_HEALTH: "Health",
     DASH_DEBUG: "Debug",
@@ -254,6 +268,21 @@ _DRILLDOWN_FILTER_TAGS = {
 }
 
 
+def _build_alerts_parameters() -> list[dict[str, Any]]:
+    return [
+        _param_multiselect(PARAM_AL_CUSTOMER, "Customer", "customer", _fetch_customer_values()),
+        _param_multiselect(PARAM_AL_SEVERITY, "Severity", "severity", SEVERITY_VALUES),
+        _param_multiselect(PARAM_AL_TYPE, "Finding type", "finding_type", FINDING_TYPE_VALUES),
+    ]
+
+
+_ALERTS_FILTER_TAGS = {
+    "customer": _tag("customer", "Customer"),
+    "severity": _tag("severity", "Severity"),
+    "finding_type": _tag("finding_type", "Finding type"),
+}
+
+
 DASHBOARDS = [
     {
         "name": DASH_TODAY,
@@ -269,7 +298,7 @@ DASHBOARDS = [
                     ) AS "Compliant %"
                     FROM ninja_agent_compliance.v_compliance_matrix_current
                 """,
-                0, 0, 5, 4,
+                0, 0, 4, 4,
                 click_behavior=_dashboard_link(DASH_DEVICES),
             ),
             _card(
@@ -280,7 +309,7 @@ DASHBOARDS = [
                     SELECT COUNT(*) AS "Devices to fix"
                     FROM ninja_agent_compliance.v_remediation_candidates
                 """,
-                0, 5, 5, 4,
+                0, 4, 4, 4,
                 click_behavior=_dashboard_link(DASH_DEVICES),
             ),
             _card(
@@ -291,7 +320,7 @@ DASHBOARDS = [
                     SELECT COUNT(*) AS "Source work"
                     FROM ninja_agent_compliance.v_source_work_current
                 """,
-                0, 10, 5, 4,
+                0, 8, 4, 4,
                 click_behavior=_dashboard_link(DASH_HEALTH),
             ),
             _card(
@@ -302,8 +331,19 @@ DASHBOARDS = [
                     SELECT COUNT(*) AS "Customer names to review"
                     FROM ninja_agent_compliance.v_org_candidates_current
                 """,
-                0, 15, 5, 4,
+                0, 12, 4, 4,
                 click_behavior=_dashboard_link(DASH_CUSTOMERS),
+            ),
+            _card(
+                "active_alerts",
+                "Active alerts",
+                "scalar",
+                """
+                    SELECT COUNT(*) AS "Active alerts"
+                    FROM ninja_agent_compliance.v_active_findings
+                """,
+                0, 20, 4, 4,
+                click_behavior=_dashboard_link(DASH_ALERTS),
             ),
             _card(
                 "ignored_devices_count",
@@ -313,7 +353,7 @@ DASHBOARDS = [
                     SELECT COUNT(*) AS "Ignored devices"
                     FROM ninja_agent_compliance.v_device_ignores_current
                 """,
-                0, 20, 4, 4,
+                0, 16, 4, 4,
                 click_behavior=_dashboard_link(DASH_DEVICES),
             ),
             _card(
@@ -854,6 +894,178 @@ DASHBOARDS = [
                 param_mappings={
                     PARAM_DD_CUSTOMER: _mapping("customer"),
                     PARAM_DD_HOST: _mapping("host"),
+                },
+            ),
+        ],
+    },
+    {
+        "name": DASH_ALERTS,
+        "parameters_builder": _build_alerts_parameters,
+        "section_headers": [
+            {"row": 0, "text": "### Would fire on next run"},
+            {"row": 10, "text": "### Active findings"},
+            {"row": 22, "text": "### Recent deliveries"},
+        ],
+        "cards": [
+            _card(
+                "alerts_would_fire",
+                "Would fire on next run",
+                "table",
+                """
+                    WITH active AS (
+                        SELECT f.*
+                        FROM ninja_agent_compliance.compliance_findings f
+                        WHERE f.status = 'active'
+                          AND NOT EXISTS (
+                              SELECT 1 FROM ninja_agent_compliance.alert_suppressions s
+                              WHERE s.enabled
+                                AND (s.client_id IS NULL OR s.client_id = f.client_id)
+                                AND (s.norm_name IS NULL OR s.norm_name = f.norm_name)
+                                AND (s.finding_type IS NULL OR s.finding_type = f.finding_type)
+                                AND (s.affected_platform IS NULL OR s.affected_platform = f.affected_platform)
+                                AND (s.expires_at IS NULL OR s.expires_at > now())
+                          )
+                    )
+                    SELECT
+                        a.severity AS "Severity",
+                        a.client_name AS "Customer",
+                        COALESCE(a.hostname, '-') AS "Device",
+                        a.finding_type AS "Type",
+                        COALESCE(a.affected_platform, '-') AS "Platform",
+                        COALESCE(nr.display_name, 'NO ROUTE') AS "Route",
+                        CASE WHEN nr.enabled THEN 'enabled' WHEN nr.enabled IS FALSE THEN 'DISABLED' ELSE '-' END AS "Route state",
+                        CASE
+                            WHEN r.rule_id IS NULL THEN 'no rule'
+                            WHEN nr.enabled IS NOT TRUE THEN 'route off'
+                            WHEN s.finding_signature IS NULL OR s.status = 'resolved' THEN 'NEW'
+                            WHEN s.last_alerted_at IS NULL THEN 'NEW (never alerted)'
+                            WHEN now() - s.last_alerted_at >= (r.cooldown_hours * INTERVAL '1 hour') THEN 'REPEAT-DUE'
+                            ELSE 'cooldown ' || ((r.cooldown_hours - EXTRACT(EPOCH FROM (now() - s.last_alerted_at)) / 3600)::int)::text || 'h'
+                        END AS "Status",
+                        a.summary AS "Summary"
+                    FROM active a
+                    LEFT JOIN LATERAL (
+                        SELECT r.rule_id, r.rule_key, r.cooldown_hours, r.route_id
+                        FROM ninja_agent_compliance.alert_rules r
+                        WHERE r.enabled
+                          AND r.finding_type = a.finding_type
+                          AND (r.affected_platform IS NULL OR r.affected_platform = a.affected_platform)
+                          AND (r.client_id IS NULL OR r.client_id = a.client_id)
+                          AND (r.device_scope IS NULL OR r.device_scope IN ('all', a.device_type))
+                        ORDER BY r.client_id NULLS LAST, r.affected_platform NULLS LAST, r.device_scope NULLS LAST
+                        LIMIT 1
+                    ) r ON true
+                    LEFT JOIN ninja_agent_compliance.notification_routes nr ON nr.route_id = r.route_id
+                    LEFT JOIN ninja_agent_compliance.alert_state s ON s.finding_signature = a.finding_signature
+                    WHERE 1=1
+                      [[AND a.client_name IN ({{customer}})]]
+                      [[AND a.severity IN ({{severity}})]]
+                      [[AND a.finding_type IN ({{finding_type}})]]
+                      AND (
+                          r.rule_id IS NOT NULL
+                          AND nr.enabled IS TRUE
+                          AND (
+                              s.finding_signature IS NULL
+                              OR s.status = 'resolved'
+                              OR s.last_alerted_at IS NULL
+                              OR now() - s.last_alerted_at >= (r.cooldown_hours * INTERVAL '1 hour')
+                          )
+                      )
+                    ORDER BY
+                        CASE a.severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
+                        a.client_name, a.hostname
+                    LIMIT 200
+                """,
+                0, 0, 24, 10,
+                template_tags={
+                    "customer": _ALERTS_FILTER_TAGS["customer"],
+                    "severity": _ALERTS_FILTER_TAGS["severity"],
+                    "finding_type": _ALERTS_FILTER_TAGS["finding_type"],
+                },
+                param_mappings={
+                    PARAM_AL_CUSTOMER: _mapping("customer"),
+                    PARAM_AL_SEVERITY: _mapping("severity"),
+                    PARAM_AL_TYPE: _mapping("finding_type"),
+                },
+            ),
+            _card(
+                "alerts_active_findings",
+                "Active findings",
+                "table",
+                """
+                    SELECT
+                        f.severity AS "Severity",
+                        f.client_name AS "Customer",
+                        COALESCE(f.hostname, '-') AS "Device",
+                        f.finding_type AS "Type",
+                        COALESCE(f.affected_platform, '-') AS "Platform",
+                        TO_CHAR(f.first_seen_at, 'YYYY-MM-DD HH24:MI') AS "First seen",
+                        TO_CHAR(f.last_seen_at, 'YYYY-MM-DD HH24:MI') AS "Last seen",
+                        COALESCE(TO_CHAR(s.last_alerted_at, 'YYYY-MM-DD HH24:MI'), 'never') AS "Last alerted",
+                        s.repeat_count AS "Repeats",
+                        f.summary AS "Summary"
+                    FROM ninja_agent_compliance.v_active_findings f
+                    LEFT JOIN ninja_agent_compliance.alert_state s
+                           ON s.finding_signature = f.finding_signature
+                    WHERE 1=1
+                      [[AND f.client_name IN ({{customer}})]]
+                      [[AND f.severity IN ({{severity}})]]
+                      [[AND f.finding_type IN ({{finding_type}})]]
+                    ORDER BY
+                        CASE f.severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
+                        f.last_seen_at DESC
+                    LIMIT 500
+                """,
+                10, 0, 24, 12,
+                template_tags={
+                    "customer": _ALERTS_FILTER_TAGS["customer"],
+                    "severity": _ALERTS_FILTER_TAGS["severity"],
+                    "finding_type": _ALERTS_FILTER_TAGS["finding_type"],
+                },
+                param_mappings={
+                    PARAM_AL_CUSTOMER: _mapping("customer"),
+                    PARAM_AL_SEVERITY: _mapping("severity"),
+                    PARAM_AL_TYPE: _mapping("finding_type"),
+                },
+            ),
+            _card(
+                "alerts_recent_deliveries",
+                "Recent deliveries",
+                "table",
+                """
+                    SELECT
+                        TO_CHAR(ae.attempted_at, 'YYYY-MM-DD HH24:MI') AS "When",
+                        ae.event_type AS "Event",
+                        ae.status AS "Status",
+                        COALESCE(ae.response_code::text, '-') AS "Code",
+                        COALESCE(nr.display_name, '-') AS "Route",
+                        f.severity AS "Severity",
+                        COALESCE(f.client_name, '-') AS "Customer",
+                        COALESCE(f.hostname, '-') AS "Device",
+                        f.finding_type AS "Type",
+                        COALESCE(f.affected_platform, '-') AS "Platform"
+                    FROM ninja_agent_compliance.alert_events ae
+                    LEFT JOIN ninja_agent_compliance.notification_routes nr
+                           ON nr.route_id = ae.route_id
+                    LEFT JOIN ninja_agent_compliance.compliance_findings f
+                           ON f.finding_id = ae.finding_id
+                    WHERE 1=1
+                      [[AND f.client_name IN ({{customer}})]]
+                      [[AND f.severity IN ({{severity}})]]
+                      [[AND f.finding_type IN ({{finding_type}})]]
+                    ORDER BY ae.attempted_at DESC
+                    LIMIT 100
+                """,
+                22, 0, 24, 8,
+                template_tags={
+                    "customer": _ALERTS_FILTER_TAGS["customer"],
+                    "severity": _ALERTS_FILTER_TAGS["severity"],
+                    "finding_type": _ALERTS_FILTER_TAGS["finding_type"],
+                },
+                param_mappings={
+                    PARAM_AL_CUSTOMER: _mapping("customer"),
+                    PARAM_AL_SEVERITY: _mapping("severity"),
+                    PARAM_AL_TYPE: _mapping("finding_type"),
                 },
             ),
         ],

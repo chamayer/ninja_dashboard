@@ -2,6 +2,31 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.20.0] — 2026-06-12
+
+### Added
+- **`Active alerts` KPI on Today** — count of unsuppressed active
+  findings (`v_active_findings`) with click-through to the new
+  Alerts dashboard.
+- **`Agent Compliance — Alerts` dashboard** in the top nav,
+  organized into three sections with filters for Customer, Severity,
+  and Finding type:
+  - **Would fire on next run** — preview that mirrors the
+    `alerts.py` dispatcher logic: shows only findings whose route is
+    enabled, a rule matches, and the dedup state would resolve to
+    `new` / `changed` / `repeat-due` (i.e. not in cooldown).
+  - **Active findings** — every unsuppressed active finding joined
+    to `alert_state` so first-seen, last-seen, last-alerted-at, and
+    repeat-count are visible.
+  - **Recent deliveries** — the last 100 `alert_events` rows with
+    status, response code, route, and the underlying finding.
+
+### Notes
+- No schema migrations.
+- Today KPI widths compressed from 5- to 4-wide to fit the sixth
+  scalar without overflow.
+- Commit: `TBD`
+
 ## [0.19.0] — 2026-06-11
 
 ### Added
