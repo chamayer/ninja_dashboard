@@ -2,6 +2,22 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.21.2] — 2026-06-12
+
+### Added
+- Migration `032_retry_clean_reset_by_name.sql` — idempotent retry of
+  the corrected name-based reset for hosts where `031` is already
+  recorded as applied. It re-clears Agent Compliance runtime state,
+  identifies ghost-seeded clients from the current DB, deletes
+  dependent aliases/requirements/sources/suppressions/rules, then
+  deletes the ghost clients.
+
+### Notes
+- This migration tolerates partial manual cleanup. If the manual SQL
+  already removed some rows, those deletes simply affect zero rows.
+- A fresh `/run/agent-compliance` is required after deploy because the
+  migration intentionally clears current runtime state again.
+
 ## [0.21.1] — 2026-06-12
 
 ### Added

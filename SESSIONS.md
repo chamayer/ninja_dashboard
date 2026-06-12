@@ -28,6 +28,9 @@ PowerShell-derived seed, let discovery rebuild from scratch.
   `031` was corrected to re-truncate runtime state first, then delete
   the ghost-seeded aliases, requirements, sources, suppressions, and
   clients.
+- Migration `032_retry_clean_reset_by_name.sql` exists because the
+  host may already have `031` marked applied. It repeats the corrected
+  cleanup idempotently and tolerates partial manual SQL cleanup.
 - The PS seed (source='seed') and any operator-manual rows
   (source='manual') from migrations 019/021/029 stay.
 - Shared `platform_sources`, `notification_routes`, `alert_rules`,
