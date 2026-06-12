@@ -12,6 +12,13 @@ All notable changes to this project follow [Semantic Versioning](https://semver.
   source-flag filter. Migration 031 cleans up by explicit name list
   matching the migration 019 PS seed.
 
+### Fixed
+- `031_clean_reset_by_name.sql` now re-truncates compliance runtime
+  state before deleting ghost-seeded clients. This handles the live
+  failure where a scheduled discovery run repopulated
+  `org_alignment_current` between migration 030 and 031, leaving FK
+  references to clients that 031 needed to delete.
+
 ## [0.21.0] — 2026-06-12
 
 ### Added

@@ -6,16 +6,32 @@
 -- ghost-seeded discovery rows is the explicit name list from
 -- migration 019.
 --
--- Same preservation rules as 030: keep PS-seeded canonicals and
--- operator-manual rows. Wipe everything else, including any rows
--- mis-tagged as 'seed' that aren't actually in the migration 019
--- name list.
+-- The previous attempt at this migration failed because a scheduled
+-- discovery cycle re-populated org_alignment_current between the
+-- 030 deploy and this one, leaving FKs to ghost-seeded clients.
+-- This version TRUNCATEs the same state tables 030 cleared, then
+-- does the name-based DELETE — idempotent and safe to re-run.
 --
 -- Discovery will re-surface every non-PS Ninja org on the next
 -- run; LMI/S1/SC observations route via the PS alias map; the
 -- review queue absorbs the rest.
 
--- 1. FK cleanup: alert_suppressions, platform_sources tied to
+-- 1. Re-truncate compliance state — discovery may have re-populated
+--    these between migration 030 applying and this one starting.
+TRUNCATE
+    ninja_agent_compliance.alert_events,
+    ninja_agent_compliance.alert_state,
+    ninja_agent_compliance.compliance_findings,
+    ninja_agent_compliance.compliance_matrix_current,
+    ninja_agent_compliance.compliance_matrix_history,
+    ninja_agent_compliance.org_alignment_current,
+    ninja_agent_compliance.org_alignment_history,
+    ninja_agent_compliance.platform_observations,
+    ninja_agent_compliance.source_runs,
+    ninja_agent_compliance.org_candidates
+    RESTART IDENTITY;
+
+-- 2. FK cleanup: alert_suppressions, platform_sources tied to
 --    soon-to-be-deleted clients.
 DELETE FROM ninja_agent_compliance.alert_suppressions
  WHERE client_id IN (
@@ -87,7 +103,7 @@ DELETE FROM ninja_agent_compliance.platform_sources
         )
  );
 
--- 2. Drop ghost-seeded clients + their aliases + their requirements.
+-- 3. Drop ghost-seeded clients + their aliases + their requirements.
 DELETE FROM ninja_agent_compliance.client_aliases
  WHERE client_id IN (
      SELECT client_id FROM ninja_agent_compliance.clients

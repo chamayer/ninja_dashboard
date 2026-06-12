@@ -22,6 +22,12 @@ PowerShell-derived seed, let discovery rebuild from scratch.
   history, observations, source runs, org candidates) and DELETEs
   dynamic-discovery rows from `client_aliases`, `platform_requirements`,
   `clients`, and per-client `platform_sources`.
+- Migration `031_clean_reset_by_name.sql` follows up with explicit
+  name-list cleanup for ghost-seeded clients that inherited the
+  default `source='seed'` before v0.16.4. After live FK failures,
+  `031` was corrected to re-truncate runtime state first, then delete
+  the ghost-seeded aliases, requirements, sources, suppressions, and
+  clients.
 - The PS seed (source='seed') and any operator-manual rows
   (source='manual') from migrations 019/021/029 stay.
 - Shared `platform_sources`, `notification_routes`, `alert_rules`,
