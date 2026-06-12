@@ -31,20 +31,7 @@ WHERE oc.enabled
   );
 
 CREATE OR REPLACE VIEW ninja_agent_compliance.v_org_candidates_current AS
-SELECT
-    oc.candidate_id,
-    oc.norm_name,
-    oc.candidate_name,
-    oc.platform,
-    oc.source_name,
-    oc.observed_count,
-    oc.status,
-    oc.suggested_target,
-    oc.notes,
-    oc.first_seen_at,
-    oc.last_seen_at,
-    oc.updated_at,
-    oc.updated_by
+SELECT oc.*
 FROM ninja_agent_compliance.org_candidates oc
 WHERE oc.enabled
   AND oc.status = 'open'
@@ -64,4 +51,5 @@ WHERE oc.enabled
         AND c.enabled
         AND c.source <> 'alignment'
         AND lower(regexp_replace(a.alias_value, '[[:space:]_.-]', '', 'g')) = oc.norm_name
-  );
+  )
+ORDER BY oc.last_seen_at DESC, oc.candidate_name;
