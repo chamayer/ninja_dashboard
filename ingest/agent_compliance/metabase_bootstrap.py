@@ -54,7 +54,7 @@ PARAM_AL_SEVERITY = "p_al_severity"
 PARAM_AL_TYPE = "p_al_type"
 
 PLATFORM_VALUES = ["Ninja", "ScreenConnect", "SentinelOne", "LogMeIn"]
-STATE_VALUES = ["Stale", "Degraded", "Review"]
+STATE_VALUES = ["Good", "Review", "Stale", "Degraded", "Unknown"]
 AV_EXEMPT_VALUES = ["Yes", "No"]
 SEVERITY_VALUES = ["critical", "high", "medium", "info"]
 FINDING_TYPE_VALUES = [
@@ -385,6 +385,7 @@ DASHBOARDS = [
             {"row": 0,  "text": "### Triage"},
             {"row": 16, "text": "### Gap analysis"},
             {"row": 32, "text": "### Maintenance"},
+            {"row": 40, "text": "### Full device list"},
         ],
         "cards": [
             _card(
@@ -470,6 +471,101 @@ DASHBOARDS = [
                             [("client", "Customer"), ("host", "Device")],
                         ),
                     },
+                },
+                template_tags={
+                    "customer": _DEVICES_FILTER_TAGS["customer"],
+                    "missing": _DEVICES_FILTER_TAGS["missing"],
+                    "online_in": _DEVICES_FILTER_TAGS["online_in"],
+                    "state": _DEVICES_FILTER_TAGS["state"],
+                    "av": _DEVICES_FILTER_TAGS["av"],
+                },
+                param_mappings={
+                    PARAM_CUSTOMER: _mapping("customer"),
+                    PARAM_MISSING: _mapping("missing"),
+                    PARAM_ONLINE_IN: _mapping("online_in"),
+                    PARAM_STATE: _mapping("state"),
+                    PARAM_AV_EXEMPT: _mapping("av"),
+                },
+            ),
+            _card(
+                "all_current_devices",
+                "All current devices",
+                "table",
+                """
+                    WITH devices AS (
+                        SELECT
+                            m.*,
+                            ARRAY_REMOVE(ARRAY[
+                                CASE WHEN m.ninja_online THEN 'Ninja' END,
+                                CASE WHEN m.screenconnect_online THEN 'ScreenConnect' END,
+                                CASE WHEN m.sentinelone_online THEN 'SentinelOne' END,
+                                CASE WHEN m.logmein_online THEN 'LogMeIn' END
+                            ], NULL) AS online_now,
+                            GREATEST(
+                                m.ninja_last_seen,
+                                m.screenconnect_last_seen,
+                                m.sentinelone_last_seen,
+                                m.logmein_last_seen
+                            ) AS last_seen_anywhere,
+                            EXISTS (
+                                SELECT 1
+                                FROM ninja_agent_compliance.alert_suppressions s
+                                WHERE s.enabled
+                                  AND (s.client_id IS NULL OR s.client_id = m.client_id)
+                                  AND (s.norm_name IS NULL OR s.norm_name = m.norm_name)
+                                  AND (s.expires_at IS NULL OR s.expires_at > now())
+                            ) AS ignored
+                        FROM ninja_agent_compliance.compliance_matrix_current m
+                    )
+                    SELECT
+                        client_name AS "Customer",
+                        hostname AS "Device",
+                        device_type AS "Type",
+                        CASE
+                            WHEN is_unknown THEN 'Unknown'
+                            WHEN is_degraded THEN 'Degraded'
+                            WHEN is_stale THEN 'Stale'
+                            WHEN NOT is_compliant THEN 'Review'
+                            ELSE 'Good'
+                        END AS "State",
+                        CASE WHEN ignored THEN 'Yes' ELSE 'No' END AS "Ignored",
+                        CASE WHEN s1_exempt THEN 'Yes' ELSE 'No' END AS "NO AV",
+                        COALESCE(array_to_string(missing_required_platforms, ', '), 'None') AS "Missing",
+                        COALESCE(array_to_string(observed_platforms, ', '), '-') AS "Found in",
+                        COALESCE(array_to_string(online_now, ', '), '-') AS "Online in",
+                        COALESCE(TO_CHAR(last_seen_anywhere, 'YYYY-MM-DD HH24:MI'), 'never') AS "Last seen"
+                    FROM devices
+                    WHERE 1=1
+                      [[AND client_name IN ({{customer}})]]
+                      [[AND EXISTS (
+                          SELECT 1
+                          FROM unnest(missing_required_platforms) AS missing_filter(platform)
+                          WHERE missing_filter.platform IN ({{missing}})
+                      )]]
+                      [[AND EXISTS (
+                          SELECT 1
+                          FROM unnest(online_now) AS online_filter(platform)
+                          WHERE online_filter.platform IN ({{online_in}})
+                      )]]
+                      [[AND (
+                          CASE
+                              WHEN is_unknown THEN 'Unknown'
+                              WHEN is_degraded THEN 'Degraded'
+                              WHEN is_stale THEN 'Stale'
+                              WHEN NOT is_compliant THEN 'Review'
+                              ELSE 'Good'
+                          END
+                      ) IN ({{state}})]]
+                      [[AND (CASE WHEN s1_exempt THEN 'Yes' ELSE 'No' END) IN ({{av}})]]
+                    ORDER BY client_name, hostname
+                    LIMIT 1000
+                """,
+                41, 0, 24, 8,
+                column_click_behaviors={
+                    "Device": _dashboard_link(
+                        DASH_DEVICE_DRILLDOWN,
+                        params=[("customer", "Customer"), ("host", "Device")],
+                    ),
                 },
                 template_tags={
                     "customer": _DEVICES_FILTER_TAGS["customer"],
@@ -933,11 +1029,112 @@ DASHBOARDS = [
         "name": DASH_ALERTS,
         "parameters_builder": _build_alerts_parameters,
         "section_headers": [
-            {"row": 0, "text": "### Would fire on next run"},
-            {"row": 10, "text": "### Active findings"},
-            {"row": 22, "text": "### Recent deliveries"},
+            {"row": 0, "text": "### Alert rules"},
+            {"row": 8, "text": "### Customer alert setup"},
+            {"row": 18, "text": "### Would fire on next run"},
+            {"row": 28, "text": "### Active findings"},
+            {"row": 40, "text": "### Recent deliveries"},
         ],
         "cards": [
+            _card(
+                "alert_rules",
+                "Alert rules",
+                "table",
+                """
+                    SELECT
+                        r.rule_key AS "Rule",
+                        CASE
+                            WHEN r.finding_type = 'missing_required_platform'
+                                THEN COALESCE(r.affected_platform, 'Required platform') || ' missing'
+                            WHEN r.finding_type = 'stale_required_platform'
+                                THEN COALESCE(r.affected_platform, 'Required platform') || ' stale'
+                            WHEN r.finding_type = 'source_failure'
+                                THEN 'Collector failed'
+                            WHEN r.finding_type = 'cross_client_conflict'
+                                THEN 'Device appears under multiple customers'
+                            ELSE r.finding_type
+                        END AS "Alert",
+                        COALESCE(c.client_name, 'All customers') AS "Customer",
+                        COALESCE(r.device_scope, 'any device') AS "Applies to",
+                        r.severity AS "Severity",
+                        COALESCE(nr.display_name, 'No route') AS "Route",
+                        CASE WHEN nr.enabled THEN 'On' WHEN nr.enabled IS FALSE THEN 'Off' ELSE 'No route' END AS "Route state",
+                        r.cooldown_hours::text || 'h' AS "Repeat after",
+                        CASE WHEN r.enabled THEN 'On' ELSE 'Off' END AS "Rule state",
+                        CASE WHEN r.enabled THEN 'Turn off' ELSE '' END AS "Turn off",
+                        CASE WHEN NOT r.enabled THEN 'Turn on' ELSE '' END AS "Turn on"
+                    FROM ninja_agent_compliance.alert_rules r
+                    LEFT JOIN ninja_agent_compliance.clients c
+                           ON c.client_id = r.client_id
+                    LEFT JOIN ninja_agent_compliance.notification_routes nr
+                           ON nr.route_id = r.route_id
+                    ORDER BY
+                        CASE WHEN r.enabled THEN 0 ELSE 1 END,
+                        CASE r.severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
+                        "Alert",
+                        "Customer"
+                """,
+                0, 0, 24, 8,
+                column_click_behaviors={
+                    "Turn off": {
+                        "url_template": f"{ACTION_BASE_URL}/a/tr?rule={{{{Rule}}}}&state=off&confirm=1",
+                    },
+                    "Turn on": {
+                        "url_template": f"{ACTION_BASE_URL}/a/tr?rule={{{{Rule}}}}&state=on&confirm=1",
+                    },
+                },
+            ),
+            _card(
+                "customer_alert_rules",
+                "Customer alert setup",
+                "table",
+                """
+                    WITH alert_types(alert_key, finding_type, affected_platform, alert_name) AS (
+                        VALUES
+                            ('missing_ninja', 'missing_required_platform', 'Ninja', 'Ninja missing'),
+                            ('missing_sentinelone', 'missing_required_platform', 'SentinelOne', 'SentinelOne missing'),
+                            ('missing_logmein', 'missing_required_platform', 'LogMeIn', 'LogMeIn missing'),
+                            ('missing_screenconnect', 'missing_required_platform', 'ScreenConnect', 'ScreenConnect missing'),
+                            ('stale', 'stale_required_platform', NULL, 'Required platform stale')
+                    )
+                    SELECT
+                        c.client_name AS "Customer",
+                        a.alert_key AS "Alert key",
+                        a.alert_name AS "Alert",
+                        CASE WHEN cr.enabled THEN 'On' WHEN cr.rule_id IS NOT NULL THEN 'Off' ELSE 'Not set' END AS "Customer rule",
+                        CASE WHEN gr.enabled THEN 'On' ELSE 'Off' END AS "Global rule",
+                        CASE
+                            WHEN cr.enabled THEN 'On for this customer'
+                            WHEN gr.enabled THEN 'On from global rule'
+                            ELSE 'Off'
+                        END AS "Effective",
+                        CASE WHEN cr.enabled IS NOT TRUE THEN 'Turn on' ELSE '' END AS "Turn on",
+                        CASE WHEN cr.enabled THEN 'Turn off' ELSE '' END AS "Turn off"
+                    FROM ninja_agent_compliance.clients c
+                    CROSS JOIN alert_types a
+                    LEFT JOIN ninja_agent_compliance.alert_rules cr
+                           ON cr.client_id = c.client_id
+                          AND cr.finding_type = a.finding_type
+                          AND cr.affected_platform IS NOT DISTINCT FROM a.affected_platform
+                    LEFT JOIN ninja_agent_compliance.alert_rules gr
+                           ON gr.client_id IS NULL
+                          AND gr.finding_type = a.finding_type
+                          AND gr.affected_platform IS NOT DISTINCT FROM a.affected_platform
+                    WHERE c.enabled
+                      AND c.source NOT IN ('alignment', 'demoted')
+                    ORDER BY c.client_name, a.alert_name
+                    LIMIT 500
+                """,
+                8, 0, 24, 10,
+                column_click_behaviors={
+                    "Turn on": {
+                        "url_template": f"{ACTION_BASE_URL}/a/sca?customer={{{{Customer}}}}&alert={{{{Alert key}}}}&state=on&confirm=1",
+                    },
+                    "Turn off": {
+                        "url_template": f"{ACTION_BASE_URL}/a/sca?customer={{{{Customer}}}}&alert={{{{Alert key}}}}&state=off&confirm=1",
+                    },
+                },
+            ),
             _card(
                 "alerts_would_fire",
                 "Would fire on next run",
@@ -961,8 +1158,17 @@ DASHBOARDS = [
                         a.severity AS "Severity",
                         a.client_name AS "Customer",
                         COALESCE(a.hostname, '-') AS "Device",
-                        a.finding_type AS "Type",
-                        COALESCE(a.affected_platform, '-') AS "Platform",
+                        CASE
+                            WHEN a.finding_type = 'missing_required_platform'
+                                THEN COALESCE(a.affected_platform, 'Required platform') || ' missing'
+                            WHEN a.finding_type = 'stale_required_platform'
+                                THEN COALESCE(a.affected_platform, 'Required platform') || ' stale'
+                            WHEN a.finding_type = 'source_failure'
+                                THEN 'Collector failed'
+                            WHEN a.finding_type = 'cross_client_conflict'
+                                THEN 'Device appears under multiple customers'
+                            ELSE a.finding_type
+                        END AS "Issue",
                         COALESCE(nr.display_name, 'NO ROUTE') AS "Route",
                         CASE WHEN nr.enabled THEN 'enabled' WHEN nr.enabled IS FALSE THEN 'DISABLED' ELSE '-' END AS "Route state",
                         CASE
@@ -1007,7 +1213,7 @@ DASHBOARDS = [
                         a.client_name, a.hostname
                     LIMIT 200
                 """,
-                0, 0, 24, 10,
+                18, 0, 24, 10,
                 template_tags={
                     "customer": _ALERTS_FILTER_TAGS["customer"],
                     "severity": _ALERTS_FILTER_TAGS["severity"],
@@ -1028,8 +1234,17 @@ DASHBOARDS = [
                         f.severity AS "Severity",
                         f.client_name AS "Customer",
                         COALESCE(f.hostname, '-') AS "Device",
-                        f.finding_type AS "Type",
-                        COALESCE(f.affected_platform, '-') AS "Platform",
+                        CASE
+                            WHEN f.finding_type = 'missing_required_platform'
+                                THEN COALESCE(f.affected_platform, 'Required platform') || ' missing'
+                            WHEN f.finding_type = 'stale_required_platform'
+                                THEN COALESCE(f.affected_platform, 'Required platform') || ' stale'
+                            WHEN f.finding_type = 'source_failure'
+                                THEN 'Collector failed'
+                            WHEN f.finding_type = 'cross_client_conflict'
+                                THEN 'Device appears under multiple customers'
+                            ELSE f.finding_type
+                        END AS "Issue",
                         TO_CHAR(f.first_seen_at, 'YYYY-MM-DD HH24:MI') AS "First seen",
                         TO_CHAR(f.last_seen_at, 'YYYY-MM-DD HH24:MI') AS "Last seen",
                         COALESCE(TO_CHAR(s.last_alerted_at, 'YYYY-MM-DD HH24:MI'), 'never') AS "Last alerted",
@@ -1047,7 +1262,7 @@ DASHBOARDS = [
                         f.last_seen_at DESC
                     LIMIT 500
                 """,
-                10, 0, 24, 12,
+                28, 0, 24, 12,
                 template_tags={
                     "customer": _ALERTS_FILTER_TAGS["customer"],
                     "severity": _ALERTS_FILTER_TAGS["severity"],
@@ -1073,8 +1288,17 @@ DASHBOARDS = [
                         f.severity AS "Severity",
                         COALESCE(f.client_name, '-') AS "Customer",
                         COALESCE(f.hostname, '-') AS "Device",
-                        f.finding_type AS "Type",
-                        COALESCE(f.affected_platform, '-') AS "Platform"
+                        CASE
+                            WHEN f.finding_type = 'missing_required_platform'
+                                THEN COALESCE(f.affected_platform, 'Required platform') || ' missing'
+                            WHEN f.finding_type = 'stale_required_platform'
+                                THEN COALESCE(f.affected_platform, 'Required platform') || ' stale'
+                            WHEN f.finding_type = 'source_failure'
+                                THEN 'Collector failed'
+                            WHEN f.finding_type = 'cross_client_conflict'
+                                THEN 'Device appears under multiple customers'
+                            ELSE f.finding_type
+                        END AS "Issue"
                     FROM ninja_agent_compliance.alert_events ae
                     LEFT JOIN ninja_agent_compliance.notification_routes nr
                            ON nr.route_id = ae.route_id
@@ -1087,7 +1311,7 @@ DASHBOARDS = [
                     ORDER BY ae.attempted_at DESC
                     LIMIT 100
                 """,
-                22, 0, 24, 8,
+                40, 0, 24, 8,
                 template_tags={
                     "customer": _ALERTS_FILTER_TAGS["customer"],
                     "severity": _ALERTS_FILTER_TAGS["severity"],
@@ -1384,6 +1608,21 @@ DASHBOARDS = [
                         COUNT(*) AS "Devices"
                     FROM ninja_agent_compliance.v_compliance_matrix_current m
                     CROSS JOIN LATERAL unnest(m.missing_required_platforms) AS platform
+                    WHERE NOT (platform = 'SentinelOne' AND m.s1_exempt)
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM ninja_agent_compliance.alert_suppressions s
+                          WHERE s.enabled
+                            AND (s.client_id IS NULL OR s.client_id = m.client_id)
+                            AND (s.norm_name IS NULL OR s.norm_name = m.norm_name)
+                            AND (s.expires_at IS NULL OR s.expires_at > now())
+                      )
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM ninja_agent_compliance.org_excludes e
+                          WHERE e.enabled
+                            AND e.pattern = lower(trim(m.client_name))
+                      )
                     GROUP BY platform
                     ORDER BY "Devices" DESC
                 """,

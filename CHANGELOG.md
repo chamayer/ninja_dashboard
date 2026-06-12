@@ -2,6 +2,31 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.21.6] — 2026-06-12
+
+### Changed
+- Agent Compliance alert dashboards now present platform-specific
+  human labels such as `SentinelOne missing` and `LogMeIn stale`
+  instead of showing the generic internal finding type.
+- Added an `Alert rules` card to the Agent Compliance Alerts dashboard
+  showing rule state, route state, severity, cooldown, customer scope,
+  and device scope.
+- Added dashboard action links to turn individual alert rules on or
+  off through the existing ingest action endpoint pattern.
+- Added `Customer alert setup` on the Alerts dashboard. It creates or
+  updates customer-scoped alert rules so device alerts can be enabled
+  per customer and per alert type.
+- Added migration `034_customer_opt_in_device_alerts.sql`, which turns
+  off global device-alert rules. Source/system alert rules are left
+  alone. This makes device alerting opt-in by customer instead of
+  enabled by default with suppressions.
+- The Health dashboard `Missing by platform` count now excludes ignored
+  devices, excluded customer names, and SentinelOne `NO AV` exemptions.
+- Added `All current devices` at the bottom of the Devices dashboard as
+  the manual-filter escape hatch. Metabase does not support a reliable
+  dashboard-card collapsed-by-default state through the API, so the
+  card is placed last under `Full device list`.
+
 ## [0.21.5] — 2026-06-12
 
 ### Fixed

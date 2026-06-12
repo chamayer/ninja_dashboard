@@ -291,6 +291,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             "/a/ui": "/agent-compliance/action/unignore-device",
             "/a/bs": "/agent-compliance/action/bulk-ignore-stale",
             "/a/sd": "/agent-compliance/action/set-max-age",
+            "/a/tr": "/agent-compliance/action/toggle-alert-rule",
+            "/a/sca": "/agent-compliance/action/set-customer-alert",
         }.get(parsed.path, parsed.path)
         params = parse_qs(parsed.query)
         confirm = params.get("confirm", ["0"])[0]
@@ -502,6 +504,128 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 self._respond(200, body)
             else:
                 self._respond(404, b"not found or not removable\n")
+            return
+
+        if path == "/agent-compliance/action/toggle-alert-rule":
+            rule_key = _text_param("rule", "rule_key", hex_names=("rule_hex",))
+            state = (_text_param("state") or "").lower()
+            if not rule_key or state not in {"on", "off"}:
+                self._respond(400, b"missing rule or invalid state\n")
+                return
+            enabled = state == "on"
+            with db.transaction() as cur:
+                cur.execute(
+                    """
+                    UPDATE ninja_agent_compliance.alert_rules
+                    SET enabled = %s,
+                        updated_at = now(),
+                        updated_by = 'operator_dashboard'
+                    WHERE rule_key = %s
+                    RETURNING rule_key
+                    """,
+                    (enabled, rule_key),
+                )
+                row = cur.fetchone()
+            if not row:
+                self._respond(404, b"alert rule not found\n")
+                return
+            body = f"alert rule {rule_key} turned {state}\n".encode("utf-8")
+            self._respond(200, body)
+            return
+
+        if path == "/agent-compliance/action/set-customer-alert":
+            customer_name = _text_param("customer", "client_name", hex_names=("customer_hex", "client_hex"))
+            alert_key = (_text_param("alert") or "").lower()
+            state = (_text_param("state") or "").lower()
+            profiles = {
+                "missing_ninja": ("missing_required_platform", "Ninja", "critical"),
+                "missing_sentinelone": ("missing_required_platform", "SentinelOne", "critical"),
+                "missing_logmein": ("missing_required_platform", "LogMeIn", "high"),
+                "missing_screenconnect": ("missing_required_platform", "ScreenConnect", "high"),
+                "stale": ("stale_required_platform", None, "medium"),
+            }
+            if not customer_name or alert_key not in profiles or state not in {"on", "off"}:
+                self._respond(400, b"missing customer, alert, or valid state\n")
+                return
+            finding_type, affected_platform, severity = profiles[alert_key]
+            enabled = state == "on"
+            with db.transaction() as cur:
+                cur.execute(
+                    """
+                    SELECT client_id
+                    FROM ninja_agent_compliance.clients
+                    WHERE enabled
+                      AND client_name = %s
+                    ORDER BY client_id
+                    LIMIT 1
+                    """,
+                    (customer_name,),
+                )
+                client_row = cur.fetchone()
+                if not client_row:
+                    self._respond(404, b"customer not found\n")
+                    return
+                client_id = int(client_row[0])
+                cur.execute(
+                    """
+                    SELECT r.cooldown_hours, r.route_id
+                    FROM ninja_agent_compliance.alert_rules r
+                    WHERE r.client_id IS NULL
+                      AND r.finding_type = %s
+                      AND r.affected_platform IS NOT DISTINCT FROM %s
+                    ORDER BY r.rule_id
+                    LIMIT 1
+                    """,
+                    (finding_type, affected_platform),
+                )
+                default_row = cur.fetchone()
+                cooldown_hours = int(default_row[0]) if default_row else 24
+                route_id = default_row[1] if default_row else None
+                if route_id is None:
+                    cur.execute(
+                        """
+                        SELECT route_id
+                        FROM ninja_agent_compliance.notification_routes
+                        WHERE route_key = 'default_webhook'
+                        LIMIT 1
+                        """
+                    )
+                    route_row = cur.fetchone()
+                    route_id = route_row[0] if route_row else None
+                rule_key = f"customer_{client_id}_{alert_key}"
+                cur.execute(
+                    """
+                    INSERT INTO ninja_agent_compliance.alert_rules (
+                        rule_key, finding_type, affected_platform, client_id,
+                        device_scope, severity, cooldown_hours, route_id,
+                        enabled, updated_by
+                    )
+                    VALUES (%s, %s, %s, %s, 'all', %s, %s, %s, %s, 'operator_dashboard')
+                    ON CONFLICT (rule_key) DO UPDATE
+                    SET finding_type = EXCLUDED.finding_type,
+                        affected_platform = EXCLUDED.affected_platform,
+                        client_id = EXCLUDED.client_id,
+                        device_scope = EXCLUDED.device_scope,
+                        severity = EXCLUDED.severity,
+                        cooldown_hours = EXCLUDED.cooldown_hours,
+                        route_id = EXCLUDED.route_id,
+                        enabled = EXCLUDED.enabled,
+                        updated_at = now(),
+                        updated_by = 'operator_dashboard'
+                    """,
+                    (
+                        rule_key,
+                        finding_type,
+                        affected_platform,
+                        client_id,
+                        severity,
+                        cooldown_hours,
+                        route_id,
+                        enabled,
+                    ),
+                )
+            body = f"{customer_name} {alert_key} alerts turned {state}\n".encode("utf-8")
+            self._respond(200, body)
             return
 
         self.send_error(404)

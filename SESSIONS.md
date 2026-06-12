@@ -5,6 +5,47 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-12 — v0.21.6 Alert rule controls
+
+**Why:** The Alerts dashboard showed generic internal finding names
+and did not expose alert-rule state clearly. Operator asked whether
+alerts could be platform-specific, visible in the dashboard, toggled
+per rule, and enabled per customer.
+
+**Done:**
+- Alert rows now display human labels such as `SentinelOne missing`
+  and `LogMeIn stale`; the underlying finding type remains unchanged.
+- Added an Alerts dashboard `Alert rules` card showing global/customer
+  scope, severity, route, route state, cooldown, and rule state.
+- Added action links to turn individual alert rules on/off through
+  `/a/tr`.
+- Added `Customer alert setup` with `/a/sca` action links to create or
+  update customer-scoped alert rules. This supports controlled opt-in:
+  global device rules off, selected customers on per alert type.
+- Added migration `034_customer_opt_in_device_alerts.sql` to turn off
+  global device-alert rules (`missing_required_platform`,
+  `stale_required_platform`, and `cross_client_conflict`) while leaving
+  source/system alerts untouched.
+- Updated Health `Missing by platform` to exclude ignored devices,
+  excluded customer names, and S1 `NO AV` exemptions.
+- Added `All current devices` at the bottom of Devices as the
+  manual-filter escape hatch. Metabase dashboard cards cannot be
+  reliably set to collapsed-by-default through the API, so this is
+  placed last under `Full device list`.
+
+**Behavior notes:**
+- Missing-platform findings are already one finding per affected
+  platform; the UI now reflects that explicitly.
+- Stale platform findings are alertable through the
+  `stale_required_platform` rule.
+- Ignored devices suppress active findings and alert delivery via
+  `alert_suppressions`.
+- Excluded customer names are filtered before they become managed
+  customer/device work.
+- Customer alert control is opt-in via customer-scoped alert rules, not
+  suppressions. If a global device rule is manually turned back on, it
+  can still alert for all matching customers.
+
 ## 2026-06-12 — v0.21.0 Clean reset migration
 
 **Why:** The previous session's audit revealed that dynamic discovery
