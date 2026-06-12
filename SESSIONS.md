@@ -5,6 +5,50 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-12 — v0.21.0 Clean reset migration
+
+**Why:** The previous session's audit revealed that dynamic discovery
+(pre-v0.16.4) had created duplicate canonical clients (GGI vs
+GGI International, BH vs BH Management, City Painting (CPS) vs CPS,
+Trimworx-Deco-BGG vs Deco/Trimworx) and demoted legitimate ones
+(Bobov45 with 1094 Ninja devices). The matrix also carried stale
+observations and exempt flags from before the v0.19.0 NO AV fix.
+Operator decision: wipe runtime state + dynamic cruft, keep the
+PowerShell-derived seed, let discovery rebuild from scratch.
+
+**Done:**
+- Migration `030_clean_reset.sql` TRUNCATEs all compliance state
+  (matrix current/history, findings, alert state/events, alignment
+  history, observations, source runs, org candidates) and DELETEs
+  dynamic-discovery rows from `client_aliases`, `platform_requirements`,
+  `clients`, and per-client `platform_sources`.
+- The PS seed (source='seed') and any operator-manual rows
+  (source='manual') from migrations 019/021/029 stay.
+- Shared `platform_sources`, `notification_routes`, `alert_rules`,
+  and `alert_suppressions` for PS-seeded clients are preserved.
+
+**Scope discipline:**
+- No promote/demote of clients outside the PS seed — operator
+  handles those manually via the Customers review queue after first
+  discovery cycle.
+- No name changes (typos like Park Bookeeping stay; LMI/S1
+  variants are already aliased to it).
+- No proactive `org_excludes` additions (Unknown / Various /
+  Default site stay in the review queue, operator decides per row).
+
+**Expected outcome after deploy:**
+- Bobov45, Glas, D Miller Books, etc. resurface in
+  `Customer names to review`.
+- The duplicate-canonical collisions resolve (only PS-seeded sides
+  remain; PS aliases route observations correctly).
+- Compliance matrix rebuilds clean with the v0.19/v0.20 NO AV +
+  AgentDevice fixes applied from the start.
+
+**Pending follow-ups:**
+- First end-to-end webhook delivery (still waiting on a sink URL).
+- After first post-reset run, snapshot the review queue and audit
+  whether discovery picked up everything the operator expects.
+
 ## 2026-06-12 — v0.20.0 Alerts surface
 
 **Why:** With routes still off, there was no way to see what *would*

@@ -2,6 +2,37 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.21.0] — 2026-06-12
+
+### Added
+- Migration `030_clean_reset.sql` — wipes compliance state and
+  dynamic-discovery cruft while preserving the PowerShell-derived
+  seed (`source='seed'`) and operator-manual rows (`source='manual'`).
+
+### Notes
+- This is a destructive migration applied at the next ingest start.
+  All compliance matrix history, findings, alert state, alert events,
+  alignment history, platform observations, source runs, and
+  org_candidates are truncated.
+- All dynamic-discovery clients (Bobov45, Glas, D Miller Books,
+  Silk Edge, Silvercup, Ready, TSK, plus collision-duplicates GGI,
+  BH, City Painting (CPS), Trimworx-Deco-BGG, and any other
+  alignment-source rows) are deleted. Their observations will
+  surface them in the review queue on next run for explicit
+  operator triage.
+- All PowerShell-derived canonicals, aliases, requirements, and
+  org_excludes from migrations 019/021/029 are untouched.
+- Per-customer ScreenConnect `platform_sources` rows tied to
+  deleted dynamic clients are also removed.
+- Commit: `TBD`
+- Deploy sequence:
+  ```
+  cd /amr-ch-01_data/ninja-dashboard && git pull
+  docker compose up -d ingest
+  curl -fsS -X POST http://127.0.0.1:8090/run/agent-compliance
+  curl -fsS -X POST http://127.0.0.1:8090/bootstrap-metabase
+  ```
+
 ## [0.20.0] — 2026-06-12
 
 ### Added
