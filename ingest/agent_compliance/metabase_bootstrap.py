@@ -392,43 +392,62 @@ DASHBOARDS = [
                 "Need action",
                 "table",
                 """
+                    WITH queue AS (
+                        SELECT
+                            m.*,
+                            ARRAY_REMOVE(ARRAY[
+                                CASE WHEN m.ninja_online THEN 'Ninja' END,
+                                CASE WHEN m.screenconnect_online THEN 'ScreenConnect' END,
+                                CASE WHEN m.sentinelone_online THEN 'SentinelOne' END,
+                                CASE WHEN m.logmein_online THEN 'LogMeIn' END
+                            ], NULL) AS online_now,
+                            GREATEST(
+                                m.ninja_last_seen,
+                                m.screenconnect_last_seen,
+                                m.sentinelone_last_seen,
+                                m.logmein_last_seen
+                            ) AS last_seen_anywhere
+                        FROM ninja_agent_compliance.compliance_matrix_current m
+                        WHERE NOT m.is_unknown
+                          -- Include both noncompliant and degraded-but-compliant rows.
+                          AND (NOT m.is_compliant OR m.is_degraded)
+                          AND NOT EXISTS (
+                              SELECT 1
+                              FROM ninja_agent_compliance.alert_suppressions s
+                              WHERE s.enabled
+                                AND (s.client_id IS NULL OR s.client_id = m.client_id)
+                                AND (s.norm_name IS NULL OR s.norm_name = m.norm_name)
+                                AND (s.expires_at IS NULL OR s.expires_at > now())
+                          )
+                    )
                     SELECT
-                        m.client_name AS "Customer",
-                        m.hostname AS "Device",
-                        m.device_type AS "Type",
-                        COALESCE(array_to_string(m.missing_required_platforms, ', '), 'None') AS "Need",
+                        client_name AS "Customer",
+                        hostname AS "Device",
+                        device_type AS "Type",
+                        COALESCE(array_to_string(missing_required_platforms, ', '), 'None') AS "Need",
+                        COALESCE(array_to_string(observed_platforms, ', '), '-') AS "Found in",
+                        COALESCE(TO_CHAR(last_seen_anywhere, 'YYYY-MM-DD HH24:MI'), 'never') AS "Last seen",
                         CASE
-                            WHEN m.is_degraded THEN 'Degraded'
-                            WHEN m.is_stale THEN 'Stale'
+                            WHEN is_degraded THEN 'Degraded'
+                            WHEN is_stale THEN 'Stale'
                             ELSE 'Review'
                         END AS "State",
-                        CASE WHEN m.s1_exempt THEN 'Yes' ELSE 'No' END AS "NO AV",
+                        CASE WHEN s1_exempt THEN 'Yes' ELSE 'No' END AS "NO AV",
                         'Ignore' AS "Action"
-                    FROM ninja_agent_compliance.compliance_matrix_current m
-                    WHERE NOT m.is_unknown
-                      -- Include both noncompliant and degraded-but-compliant rows.
-                      -- Degraded = compliant overall but at least one required
-                      -- platform is offline; PowerShell parity surfaces these in
-                      -- the operator queue, not only the strict noncompliant set.
-                      AND (NOT m.is_compliant OR m.is_degraded)
-                      AND NOT EXISTS (
-                          SELECT 1
-                          FROM ninja_agent_compliance.alert_suppressions s
-                          WHERE s.enabled
-                            AND (s.client_id IS NULL OR s.client_id = m.client_id)
-                            AND (s.norm_name IS NULL OR s.norm_name = m.norm_name)
-                            AND (s.expires_at IS NULL OR s.expires_at > now())
-                      )
-                      [[AND m.client_name IN ({{customer}})]]
+                    FROM queue
+                    WHERE 1=1
+                      [[AND client_name IN ({{customer}})]]
+                      [[AND missing_required_platforms && ARRAY[{{missing}}]::text[]]]
+                      [[AND online_now && ARRAY[{{online_in}}]::text[]]]
                       [[AND (
                           CASE
-                              WHEN m.is_degraded THEN 'Degraded'
-                              WHEN m.is_stale THEN 'Stale'
+                              WHEN is_degraded THEN 'Degraded'
+                              WHEN is_stale THEN 'Stale'
                               ELSE 'Review'
                           END
                       ) IN ({{state}})]]
-                      [[AND (CASE WHEN m.s1_exempt THEN 'Yes' ELSE 'No' END) IN ({{av}})]]
-                    ORDER BY m.client_name, m.hostname
+                      [[AND (CASE WHEN s1_exempt THEN 'Yes' ELSE 'No' END) IN ({{av}})]]
+                    ORDER BY client_name, hostname
                     LIMIT 500
                 """,
                 0, 0, 24, 10,
@@ -446,11 +465,15 @@ DASHBOARDS = [
                 },
                 template_tags={
                     "customer": _DEVICES_FILTER_TAGS["customer"],
+                    "missing": _DEVICES_FILTER_TAGS["missing"],
+                    "online_in": _DEVICES_FILTER_TAGS["online_in"],
                     "state": _DEVICES_FILTER_TAGS["state"],
                     "av": _DEVICES_FILTER_TAGS["av"],
                 },
                 param_mappings={
                     PARAM_CUSTOMER: _mapping("customer"),
+                    PARAM_MISSING: _mapping("missing"),
+                    PARAM_ONLINE_IN: _mapping("online_in"),
                     PARAM_STATE: _mapping("state"),
                     PARAM_AV_EXEMPT: _mapping("av"),
                 },
