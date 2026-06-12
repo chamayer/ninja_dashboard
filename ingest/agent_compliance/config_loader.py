@@ -291,6 +291,18 @@ def sync_clients_from_observations(
             )
             cur.execute(
                 """
+                UPDATE ninja_agent_compliance.org_candidates oc
+                SET status = 'promoted',
+                    enabled = false,
+                    updated_at = now(),
+                    updated_by = 'agent_compliance'
+                WHERE oc.enabled
+                  AND oc.norm_name = ANY(%s::text[])
+                """,
+                (list(accepted_norms),),
+            )
+            cur.execute(
+                """
                 SELECT client_id, client_name, source
                 FROM ninja_agent_compliance.clients
                 WHERE enabled

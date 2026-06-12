@@ -2,6 +2,24 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.21.5] — 2026-06-12
+
+### Fixed
+- `Need action` on the Agent Compliance Devices dashboard no longer
+  uses `ARRAY[{{missing}}]` / `ARRAY[{{online_in}}]` filter syntax.
+  Those multi-select predicates could render invalid SQL in Metabase
+  with `syntax error at or near "]"`. The card now uses
+  `EXISTS ... IN ({{filter}})` predicates instead.
+
+## [0.21.4] — 2026-06-12
+
+### Fixed
+- `Customer names to review` no longer shows names that already map to
+  an enabled customer or enabled customer alias. Migration
+  `033_filter_accepted_org_candidates.sql` closes stale open
+  candidate rows as `promoted` and makes
+  `v_org_candidates_current` filter accepted names defensively.
+
 ## [0.21.3] — 2026-06-12
 
 ### Changed

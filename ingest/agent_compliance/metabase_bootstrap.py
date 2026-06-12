@@ -437,8 +437,16 @@ DASHBOARDS = [
                     FROM queue
                     WHERE 1=1
                       [[AND client_name IN ({{customer}})]]
-                      [[AND missing_required_platforms && ARRAY[{{missing}}]::text[]]]
-                      [[AND online_now && ARRAY[{{online_in}}]::text[]]]
+                      [[AND EXISTS (
+                          SELECT 1
+                          FROM unnest(missing_required_platforms) AS missing_filter(platform)
+                          WHERE missing_filter.platform IN ({{missing}})
+                      )]]
+                      [[AND EXISTS (
+                          SELECT 1
+                          FROM unnest(online_now) AS online_filter(platform)
+                          WHERE online_filter.platform IN ({{online_in}})
+                      )]]
                       [[AND (
                           CASE
                               WHEN is_degraded THEN 'Degraded'

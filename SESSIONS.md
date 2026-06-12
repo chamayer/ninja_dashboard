@@ -79,6 +79,32 @@ review.
 - Removed the conservative fuzzy/prefix auto-alias behavior from the
   discovery step so ambiguous names remain operator review work.
 
+## 2026-06-12 — v0.21.4 Review queue cleanup
+
+**Why:** After Ninja-authoritative discovery, Today still showed Ninja
+rows in `New customer names found` / `Customer names to review`.
+Those were stale open `org_candidates` rows from before the customer
+was accepted, not real unresolved customer names.
+
+**Done:**
+- Auto-accepted Ninja customer names now close matching open
+  `org_candidates` rows in the same run.
+- Migration `033_filter_accepted_org_candidates.sql` closes existing
+  stale candidates and changes `v_org_candidates_current` to hide any
+  candidate already accepted by customer name or alias.
+
+## 2026-06-12 — v0.21.5 Devices Need action SQL fix
+
+**Why:** The `Need action` card on Devices threw
+`ERROR: syntax error at or near "]"`. The likely cause was Metabase
+rendering the multi-select array-overlap clauses around
+`ARRAY[{{missing}}]` / `ARRAY[{{online_in}}]` into invalid SQL.
+
+**Done:**
+- Rewrote those two filters as `EXISTS ... IN ({{filter}})` clauses.
+  This preserves the dashboard filters without using array-literal
+  syntax around Metabase variables.
+
 ## 2026-06-12 — v0.20.0 Alerts surface
 
 **Why:** With routes still off, there was no way to see what *would*
