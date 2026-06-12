@@ -53,6 +53,10 @@ PARAM_AL_CUSTOMER = "p_al_customer"
 PARAM_AL_SEVERITY = "p_al_severity"
 PARAM_AL_TYPE = "p_al_type"
 
+# Customers dashboard.
+PARAM_CU_REVIEW_NAME = "p_cu_review_name"
+PARAM_CU_TARGET = "p_cu_target"
+
 PLATFORM_VALUES = ["Ninja", "ScreenConnect", "SentinelOne", "LogMeIn"]
 STATE_VALUES = ["Good", "Review", "Stale", "Degraded", "Unknown"]
 AV_EXEMPT_VALUES = ["Yes", "No"]
@@ -274,6 +278,19 @@ def _build_alerts_parameters() -> list[dict[str, Any]]:
         _param_multiselect(PARAM_AL_SEVERITY, "Severity", "severity", SEVERITY_VALUES),
         _param_multiselect(PARAM_AL_TYPE, "Finding type", "finding_type", FINDING_TYPE_VALUES),
     ]
+
+
+def _build_customers_parameters() -> list[dict[str, Any]]:
+    return [
+        _param_text(PARAM_CU_REVIEW_NAME, "Name to review", "review_name"),
+        _param_multiselect(PARAM_CU_TARGET, "Alias target", "target_customer", _fetch_customer_values()),
+    ]
+
+
+_CUSTOMERS_FILTER_TAGS = {
+    "review_name": _tag("review_name", "Name to review"),
+    "target_customer": _tag("target_customer", "Alias target"),
+}
 
 
 _ALERTS_FILTER_TAGS = {
@@ -1327,6 +1344,7 @@ DASHBOARDS = [
     },
     {
         "name": DASH_CUSTOMERS,
+        "parameters_builder": _build_customers_parameters,
         "cards": [
             _card(
                 "customer_directory",
@@ -1392,11 +1410,34 @@ DASHBOARDS = [
                           ON lr.source_run_id = po.source_run_id
                         WHERE COALESCE(NULLIF(po.platform_group_name, ''), '') <> ''
                         GROUP BY po.platform, lower(trim(po.platform_group_name))
+                    ),
+                    suggestions AS (
+                        SELECT DISTINCT ON (c.candidate_id)
+                            c.candidate_id,
+                            t.client_name AS suggested_customer
+                        FROM ninja_agent_compliance.v_org_candidates_current c
+                        JOIN ninja_agent_compliance.clients t
+                          ON t.enabled
+                         AND t.source NOT IN ('alignment', 'demoted')
+                         AND lower(trim(t.client_name)) NOT IN ('default site', 'unknown', 'various', '.default')
+                        WHERE lower(regexp_replace(c.candidate_name, '[[:space:]_.-]', '', 'g'))
+                                  <> lower(regexp_replace(t.client_name, '[[:space:]_.-]', '', 'g'))
+                          AND (
+                              lower(regexp_replace(c.candidate_name, '[[:space:]_.-]', '', 'g'))
+                                  LIKE lower(regexp_replace(t.client_name, '[[:space:]_.-]', '', 'g')) || '%'
+                              OR lower(regexp_replace(t.client_name, '[[:space:]_.-]', '', 'g'))
+                                  LIKE lower(regexp_replace(c.candidate_name, '[[:space:]_.-]', '', 'g')) || '%'
+                          )
+                        ORDER BY
+                            c.candidate_id,
+                            ABS(length(t.client_name) - length(c.candidate_name)),
+                            t.client_name
                     )
                     SELECT
                         c.candidate_name AS "Customer name",
                         c.platform AS "Found in",
                         COALESCE(l.latest_devices, 0) AS "Current devices",
+                        COALESCE(NULLIF(c.suggested_target, ''), s.suggested_customer, '') AS "Suggested customer",
                         COALESCE(NULLIF(c.source_name, ''), 'Unknown') AS "Source",
                         COALESCE(TO_CHAR(c.last_seen_at, 'YYYY-MM-DD HH24:MI'), 'Unknown') AS "Last seen",
                         'This is a customer' AS "Approve",
@@ -1405,6 +1446,10 @@ DASHBOARDS = [
                     LEFT JOIN latest_counts l
                       ON l.platform = c.platform
                      AND l.norm_name = lower(trim(c.candidate_name))
+                    LEFT JOIN suggestions s
+                      ON s.candidate_id = c.candidate_id
+                    WHERE 1=1
+                      [[AND c.candidate_name ILIKE '%' || {{review_name}} || '%']]
                     ORDER BY c.last_seen_at DESC, c.candidate_name
                     LIMIT 200
                 """,
@@ -1422,6 +1467,96 @@ DASHBOARDS = [
                             [("pattern", "Customer name")],
                         ),
                     },
+                },
+                template_tags={
+                    "review_name": _CUSTOMERS_FILTER_TAGS["review_name"],
+                },
+                param_mappings={
+                    PARAM_CU_REVIEW_NAME: _mapping("review_name"),
+                },
+            ),
+            _card(
+                "alias_customer_name",
+                "Alias customer name",
+                "table",
+                """
+                    WITH candidates AS (
+                        SELECT
+                            c.candidate_id,
+                            c.candidate_name,
+                            c.platform,
+                            c.last_seen_at,
+                            lower(regexp_replace(c.candidate_name, '[[:space:]_.-]', '', 'g')) AS candidate_norm
+                        FROM ninja_agent_compliance.v_org_candidates_current c
+                        WHERE 1=1
+                          [[AND c.candidate_name ILIKE '%' || {{review_name}} || '%']]
+                    ),
+                    targets AS (
+                        SELECT
+                            client_id,
+                            client_name,
+                            lower(regexp_replace(client_name, '[[:space:]_.-]', '', 'g')) AS target_norm
+                        FROM ninja_agent_compliance.clients
+                        WHERE enabled
+                          AND source NOT IN ('alignment', 'demoted')
+                          AND lower(trim(client_name)) NOT IN ('default site', 'unknown', 'various', '.default')
+                          [[AND client_name IN ({{target_customer}})]]
+                    ),
+                    choices AS (
+                        SELECT
+                            c.candidate_name,
+                            c.platform,
+                            t.client_name,
+                            c.last_seen_at,
+                            CASE
+                                WHEN c.candidate_norm LIKE t.target_norm || '%' THEN 80
+                                WHEN t.target_norm LIKE c.candidate_norm || '%' THEN 70
+                                ELSE 0
+                            END AS score
+                        FROM candidates c
+                        CROSS JOIN targets t
+                        WHERE c.candidate_norm <> t.target_norm
+                          AND (
+                              c.candidate_norm LIKE t.target_norm || '%'
+                              OR t.target_norm LIKE c.candidate_norm || '%'
+                              [[OR t.client_name IN ({{target_customer}})]]
+                          )
+                    )
+                    SELECT
+                        candidate_name AS "Customer name",
+                        platform AS "Found in",
+                        client_name AS "Alias to customer",
+                        CASE
+                            WHEN score >= 80 THEN 'Suggested'
+                            WHEN score >= 70 THEN 'Possible'
+                            ELSE 'Manual choice'
+                        END AS "Match",
+                        COALESCE(TO_CHAR(last_seen_at, 'YYYY-MM-DD HH24:MI'), 'Unknown') AS "Last seen",
+                        'Alias' AS "Action"
+                    FROM choices
+                    ORDER BY score DESC, candidate_name, client_name
+                    LIMIT 300
+                """,
+                18, 0, 24, 8,
+                column_click_behaviors={
+                    "Action": {
+                        "url_template": _url_template(
+                            "/a/aa",
+                            [
+                                ("client_name", "Alias to customer"),
+                                ("platform", "Found in"),
+                                ("alias", "Customer name"),
+                            ],
+                        ),
+                    },
+                },
+                template_tags={
+                    "review_name": _CUSTOMERS_FILTER_TAGS["review_name"],
+                    "target_customer": _CUSTOMERS_FILTER_TAGS["target_customer"],
+                },
+                param_mappings={
+                    PARAM_CU_REVIEW_NAME: _mapping("review_name"),
+                    PARAM_CU_TARGET: _mapping("target_customer"),
                 },
             ),
             _card(
@@ -1450,7 +1585,7 @@ DASHBOARDS = [
                     ORDER BY c.client_name, a.platform, a.alias_value
                     LIMIT 500
                 """,
-                22, 0, 24, 8,
+                26, 0, 24, 8,
             ),
             _card(
                 "customer_requirements",
@@ -1539,7 +1674,7 @@ DASHBOARDS = [
                         CASE device_scope WHEN 'all' THEN 0 WHEN 'server' THEN 1 ELSE 2 END
                     LIMIT 500
                 """,
-                30, 0, 24, 10,
+                36, 0, 24, 10,
                 column_click_behaviors={
                     "Ninja + S1": {
                         "url_template": f"{ACTION_BASE_URL}/a/sr?customer={{{{Customer}}}}&scope={{{{Applies to}}}}&profile=ninja_s1&confirm=1",
@@ -1583,7 +1718,7 @@ DASHBOARDS = [
                     ORDER BY source, pattern
                     LIMIT 200
                 """,
-                40, 0, 24, 4,
+                48, 0, 24, 4,
                 column_click_behaviors={
                     "Action": {
                         "url_template": _url_template(

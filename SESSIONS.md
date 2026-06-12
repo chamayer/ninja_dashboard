@@ -5,6 +5,27 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-12 — v0.21.7 Customer-name alias review
+
+**Why:** `Customer names to review` only offered `Approve` or
+`Ignore`, but the common PowerShell workflow is often a third option:
+this name belongs to an existing customer.
+
+**Done:**
+- Added suggested-customer visibility to `Customer names to review`.
+- Added `Alias customer name`, a manual alias workflow that lets the
+  operator choose any existing customer as the target. Suggestions are
+  listed first, but selecting the `Alias target` dashboard filter
+  allows an explicit manual choice even when no suggestion exists.
+- Updated alias promotion so it works for any enabled customer, not
+  only customers currently represented in `org_alignment_current`.
+
+**Operator flow:**
+- If the name is a real new customer: click `This is a customer`.
+- If the name is noise: click `Ignore name`.
+- If the name belongs to an existing customer: filter/select the target
+  in `Alias customer name` and click `Alias`.
+
 ## 2026-06-12 — v0.21.6 Alert rule controls
 
 **Why:** The Alerts dashboard showed generic internal finding names

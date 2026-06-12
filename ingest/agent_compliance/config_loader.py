@@ -657,6 +657,7 @@ def promote_alignment_aliases(
             "Ninja": "org_name",
             "SentinelOne": "site_name",
             "LogMeIn": "group_name",
+            "ScreenConnect": "group_name",
         }
         alias_type = alias_type_by_platform.get(platform)
         if alias_type is None:
@@ -664,9 +665,10 @@ def promote_alignment_aliases(
         with db.transaction() as cur:
             cur.execute(
                 """
-                SELECT org_name
-                FROM ninja_agent_compliance.org_alignment_current
+                SELECT client_name
+                FROM ninja_agent_compliance.clients
                 WHERE client_id = %s
+                  AND enabled
                 """,
                 (client_id,),
             )

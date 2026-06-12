@@ -2,6 +2,17 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.21.7] — 2026-06-12
+
+### Changed
+- Customer name review now exposes the alias workflow. The review card
+  shows a suggested customer when one can be inferred, and a new
+  `Alias customer name` card lets the operator map any reviewed name to
+  any existing customer using dashboard filters.
+- Alias promotion now works against the enabled customer list directly
+  instead of requiring the target customer to have a current alignment
+  row.
+
 ## [0.21.6] — 2026-06-12
 
 ### Changed
