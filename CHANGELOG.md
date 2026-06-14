@@ -2,6 +2,37 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.22.0] — 2026-06-14
+
+### Changed
+- Rebuilt Agent Compliance around Level 1 human operations queues:
+  `v_device_work_queue`, `v_all_devices_human`,
+  `v_notification_queue`, `v_notifications_ready`,
+  `v_customer_name_queue`, `v_required_platforms_effective`,
+  `v_customer_alert_setup`, `v_alert_rules_human`,
+  `v_notification_routes_human`, and `v_system_health_queue`.
+- Added a dedicated `Agent Compliance - Setup` dashboard and moved
+  configuration work there: required platforms, customer alert setup,
+  alert rules, notification routes, and source setup.
+- Reworked `Agent Compliance - Alerts` so it starts with notification
+  operations, not config. The primary tables are now `Notifications
+  ready to send`, `Open issues not notifying`, `Recently notified`, and
+  `Open device issues`.
+- Reworked `Agent Compliance - Devices` to read from the device work
+  queue and use concise columns: customer, device, issue, seen online
+  in, missing, last seen, state, and action.
+- Reworked `Agent Compliance - Customers` to focus only on customer
+  names and aliases: customer directory, names to review, platform names,
+  and ignored customer names.
+- Reworked `Agent Compliance - Health` to answer whether the data is
+  trustworthy: collection/delivery problems, source status, current
+  device gaps, and names needing review by platform.
+- Renamed human-facing alert concepts: the old `Would fire on next run`
+  concept is now `Notifications ready to send`, and active finding
+  review is presented as `Open device issues`.
+- New device ignore and bulk stale-ignore actions now default to a
+  90-day expiry while remaining reversible from the dashboard.
+
 ## [0.21.10] — 2026-06-14
 
 ### Fixed

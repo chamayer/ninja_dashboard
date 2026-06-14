@@ -25,6 +25,20 @@ The intent is to keep the dashboard actionable:
 7. Route only state changes and important recoveries.
 8. Show the same state in Metabase with concise human labels.
 
+## Dashboard Terms
+
+Use these labels in the dashboard:
+
+- `Open device issues`: current problems found in the data.
+- `Notifications ready to send`: open issues that match enabled alert
+  rules, enabled customer alerting, enabled routes, and cooldown rules.
+- `Open issues not notifying`: current issues blocked by setup, route,
+  cooldown, ignore, exemption, or source confidence.
+- `Recently notified`: delivery attempts that already happened.
+
+Do not use `Would fire on next run` in the UI. It is technically
+accurate but not understandable to normal operators.
+
 ## Alert Levels
 
 ### Device Alert
@@ -107,7 +121,7 @@ What it should look like:
 
 Typical route:
 
-- Source Health dashboard;
+- Health dashboard;
 - setup/system email;
 - Zendesk when vendor/support action is needed.
 

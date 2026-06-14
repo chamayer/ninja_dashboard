@@ -1191,16 +1191,22 @@ def add_device_ignore(
     updated_by: str = "agent_compliance",
     reason: str | None = None,
     display_name: str | None = None,
+    expires_days: int | None = 90,
 ) -> bool:
     normalized = norm_name.strip().lower()
     if not normalized:
         return False
+    days = expires_days if expires_days and expires_days > 0 else None
     with db.transaction() as cur:
         cur.execute(
             """
             INSERT INTO ninja_agent_compliance.alert_suppressions
-                (client_id, norm_name, display_name, finding_type, affected_platform, reason, enabled, updated_by)
-            VALUES (%s, %s, %s, NULL, NULL, %s, true, %s)
+                (client_id, norm_name, display_name, finding_type, affected_platform, reason, expires_at, enabled, updated_by)
+            VALUES (
+                %s, %s, %s, NULL, NULL, %s,
+                CASE WHEN %s::integer IS NULL THEN NULL ELSE now() + (%s::integer * INTERVAL '1 day') END,
+                true, %s
+            )
             ON CONFLICT (
                 COALESCE(client_id, 0),
                 COALESCE(norm_name, ''),
@@ -1209,6 +1215,7 @@ def add_device_ignore(
             ) DO UPDATE SET
                 display_name = COALESCE(EXCLUDED.display_name, ninja_agent_compliance.alert_suppressions.display_name),
                 reason = EXCLUDED.reason,
+                expires_at = EXCLUDED.expires_at,
                 enabled = true,
                 updated_at = now(),
                 updated_by = EXCLUDED.updated_by
@@ -1217,7 +1224,9 @@ def add_device_ignore(
                 client_id,
                 normalized,
                 display_name,
-                reason or "Ignored from device issues dashboard",
+                reason or f"Ignored from device issues dashboard for {days or 'no expiry'} day(s)",
+                days,
+                days,
                 updated_by,
             ),
         )
@@ -1229,6 +1238,7 @@ def bulk_ignore_devices(
     kind: str,
     updated_by: str = "agent_compliance",
     reason: str | None = None,
+    expires_days: int | None = 90,
 ) -> int | None:
     """Ignore a guarded set of current device findings.
 
@@ -1239,11 +1249,12 @@ def bulk_ignore_devices(
     normalized_kind = kind.strip().lower().replace("_", "-")
     if not customer or normalized_kind != "stale":
         return None
+    days = expires_days if expires_days and expires_days > 0 else None
     with db.transaction() as cur:
         cur.execute(
             """
             INSERT INTO ninja_agent_compliance.alert_suppressions
-                (client_id, norm_name, display_name, finding_type, affected_platform, reason, enabled, updated_by)
+                (client_id, norm_name, display_name, finding_type, affected_platform, reason, expires_at, enabled, updated_by)
             SELECT
                 client_id,
                 norm_name,
@@ -1251,11 +1262,12 @@ def bulk_ignore_devices(
                 NULL,
                 NULL,
                 %s,
+                CASE WHEN %s::integer IS NULL THEN NULL ELSE now() + (%s::integer * INTERVAL '1 day') END,
                 true,
                 %s
-            FROM ninja_agent_compliance.v_remediation_candidates
+            FROM ninja_agent_compliance.v_device_work_queue
             WHERE client_name = %s
-              AND is_stale
+              AND work_state = 'Stale'
               AND norm_name IS NOT NULL
             ON CONFLICT (
                 COALESCE(client_id, 0),
@@ -1265,12 +1277,15 @@ def bulk_ignore_devices(
             ) WHERE enabled DO UPDATE SET
                 display_name = COALESCE(EXCLUDED.display_name, ninja_agent_compliance.alert_suppressions.display_name),
                 reason = EXCLUDED.reason,
+                expires_at = EXCLUDED.expires_at,
                 enabled = true,
                 updated_at = now(),
                 updated_by = EXCLUDED.updated_by
             """,
             (
-                reason or "Bulk ignored stale devices from dashboard",
+                reason or f"Bulk ignored stale devices from dashboard for {days or 'no expiry'} day(s)",
+                days,
+                days,
                 updated_by,
                 customer,
             ),

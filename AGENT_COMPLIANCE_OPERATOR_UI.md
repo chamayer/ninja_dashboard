@@ -69,8 +69,11 @@ Recommended dashboard set:
 
 1. Today
 2. Devices
-3. Health
-4. Debug
+3. Alerts
+4. Customers
+5. Setup
+6. Health
+7. Debug
 
 The primary landing page should be Today.
 
@@ -132,13 +135,44 @@ Suggested hidden or secondary fields:
 
 The setup review dashboard should show:
 
-- alignment mismatches;
-- alias candidates;
-- excludes;
-- source setup;
 - per-client platform requirements;
+- customer alert enablement;
+- alert rules;
+- notification routes;
+- source setup.
+
+The customer-name review dashboard should show:
+
+- new customer names found;
+- suggested customer aliases;
+- manual alias action;
+- ignored customer names;
+- customer/platform name directory.
+
+Setup changes configuration. Customer-name review changes mapping.
+Device pages should not require either workflow for daily remediation.
+
+## Alerts Dashboard Content
+
+The alerts dashboard should show:
+
+- notifications ready to send;
+- open issues that are not notifying and why;
+- recent notification delivery attempts;
+- open device issues as supporting context.
+
+Alert rules and per-customer alert setup belong in Setup, not at the top
+of Alerts.
+
+## Health Dashboard Content
+
+The health dashboard should show:
+
 - source-run failures;
-- unresolved mappings.
+- delivery failures;
+- source rows observed;
+- whether device coverage data can be trusted;
+- unresolved-name volume by platform.
 
 This dashboard can be more verbose than the primary view, but still
 should not dump raw payloads by default.

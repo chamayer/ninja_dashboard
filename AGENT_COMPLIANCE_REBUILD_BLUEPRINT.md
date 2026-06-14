@@ -40,6 +40,9 @@ These should be plain labels, not metric jargon.
 Recommended labels:
 - Today
 - Devices
+- Alerts
+- Customers
+- Setup
 - Health
 - Debug
 
@@ -56,7 +59,7 @@ It should show:
 
 The table should be short and obvious.
 
-### Mapping
+### Customers
 
 This is not the primary queue.
 
@@ -68,13 +71,42 @@ It is for real names that need a decision:
 
 It should not be polluted by placeholders or leftover audit rows.
 
-In the rebuilt dashboard, mapping work belongs in the supporting views,
-not as a separate noisy top-level page. The main operator path is:
+In the rebuilt dashboard, customer-name work belongs in a supporting
+workflow, not in the daily device queue. The main operator path is:
 
 1. Today for the summary.
 2. Devices for device work.
-3. Health for source health and new names.
-4. Debug for leftovers and admin-only mapping cleanup.
+3. Alerts for notifications and delivery state.
+4. Customers for name review and aliases.
+5. Setup for requirements and alert enablement.
+6. Health for source health and data confidence.
+7. Debug for leftovers and admin-only cleanup.
+
+### Alerts
+
+This is the notification operations page.
+
+It should show:
+- notifications ready to send;
+- open issues that are not notifying and why;
+- recent delivery attempts;
+- open device issues as supporting context.
+
+Alert configuration does not belong at the top of this page. It belongs
+in Setup.
+
+### Setup
+
+This is the control page.
+
+It should show:
+- required platforms by customer and device scope;
+- customer alert enablement;
+- alert rules;
+- notification routes;
+- source setup.
+
+Changing configuration belongs here, not on the daily operator pages.
 
 ### Health
 
@@ -147,6 +179,7 @@ The rebuild should keep these ideas separate:
 - ignored names;
 - ignored devices;
 - current device findings;
+- notification readiness;
 - source health;
 - debug leftovers.
 

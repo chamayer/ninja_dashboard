@@ -5,6 +5,48 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-14 — v0.22.0 Agent Compliance Level 1 operations rebuild
+
+**Why:** The dashboard was technically improving but still mixed daily
+device work, alert configuration, customer-name cleanup, and raw system
+plumbing. A human operator or admin could not quickly tell what needed
+action, what would notify someone, or why an issue was not notifying.
+
+**Done:**
+- Added migration `037_agent_compliance_level1_queues.sql` with
+  purpose-built human queues:
+  - `v_device_work_queue`
+  - `v_all_devices_human`
+  - `v_device_gap_summary`
+  - `v_notification_queue`
+  - `v_notifications_ready`
+  - `v_customer_name_queue`
+  - `v_required_platforms_effective`
+  - `v_customer_alert_setup`
+  - `v_alert_rules_human`
+  - `v_notification_routes_human`
+  - `v_system_health_queue`
+- Added `Agent Compliance - Setup` to the top nav.
+- Rebuilt the active dashboard spec around:
+  `Today | Devices | Alerts | Customers | Setup | Health | Debug`.
+- Moved alert rules, customer alert setup, required platforms,
+  notification routes, and source setup to `Setup`.
+- Reworked `Alerts` so it shows notification operations first:
+  `Notifications ready to send`, `Open issues not notifying`,
+  `Recently notified`, and `Open device issues`.
+- Reworked `Devices` to use the device work queue, hide source-failed
+  false gaps from device work, honor S1 `NO AV` exemptions, and keep the
+  full manual-filter device table at the bottom.
+- Reworked `Customers` to focus on customer names and aliases only.
+- Reworked `Health` to focus on data confidence: collection/delivery
+  problems, source health, current gaps, and name-review volume.
+- Device ignore and bulk stale-ignore actions now default to 90-day
+  expiring suppressions while staying reversible.
+
+**Intentional boundary:**
+- This is Level 1 only. It does not rebuild device identity or create a
+  canonical device-linking layer across Ninja/S1/LMI/ScreenConnect IDs.
+
 ## 2026-06-14 — v0.21.10 Current findings cleanup
 
 **Why:** The Today dashboard showed 29k+ active alerts/findings. That

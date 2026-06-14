@@ -5,8 +5,10 @@ human workflow:
 
 * Today: what needs attention right now.
 * Devices: device-level fixes and ignore/restore.
+* Alerts: notification readiness and delivery history.
 * Customers: customer names across platforms and customer-name review.
-* Health: source health and system-level collection work.
+* Setup: requirements, alert enablement, routes, and sources.
+* Health: source health and data confidence.
 * Debug: raw leftovers and low-level troubleshooting.
 
 No visible table field should contain a raw URL. Action cells are plain
@@ -33,6 +35,7 @@ DASH_DEVICES = "Agent Compliance - Devices"
 DASH_DEVICE_DRILLDOWN = "Agent Compliance - Device drilldown"
 DASH_ALERTS = "Agent Compliance - Alerts"
 DASH_CUSTOMERS = "Agent Compliance - Customers"
+DASH_SETUP = "Agent Compliance - Setup"
 DASH_HEALTH = "Agent Compliance - Health"
 DASH_DEBUG = "Agent Compliance - Debug"
 
@@ -57,7 +60,7 @@ PARAM_AL_TYPE = "p_al_type"
 PARAM_CU_REVIEW_NAME = "p_cu_review_name"
 
 PLATFORM_VALUES = ["Ninja", "ScreenConnect", "SentinelOne", "LogMeIn"]
-STATE_VALUES = ["Good", "Review", "Stale", "Degraded", "Unknown"]
+STATE_VALUES = ["Fix now", "Review", "Stale", "Degraded", "Conflict", "Good", "Ignored", "Unknown"]
 AV_EXEMPT_VALUES = ["Yes", "No"]
 SEVERITY_VALUES = ["critical", "high", "medium", "info"]
 FINDING_TYPE_VALUES = [
@@ -67,12 +70,13 @@ FINDING_TYPE_VALUES = [
     "source_failure",
 ]
 
-NAV_ORDER = [DASH_TODAY, DASH_DEVICES, DASH_ALERTS, DASH_CUSTOMERS, DASH_HEALTH, DASH_DEBUG]
+NAV_ORDER = [DASH_TODAY, DASH_DEVICES, DASH_ALERTS, DASH_CUSTOMERS, DASH_SETUP, DASH_HEALTH, DASH_DEBUG]
 NAV_LABELS = {
     DASH_TODAY: "Today",
     DASH_DEVICES: "Devices",
     DASH_ALERTS: "Alerts",
     DASH_CUSTOMERS: "Customers",
+    DASH_SETUP: "Setup",
     DASH_HEALTH: "Health",
     DASH_DEBUG: "Debug",
 }
@@ -297,7 +301,7 @@ _ALERTS_FILTER_TAGS = {
 }
 
 
-DASHBOARDS = [
+_LEGACY_DASHBOARDS_UNUSED = [
     {
         "name": DASH_TODAY,
         "cards": [
@@ -1762,6 +1766,1100 @@ DASHBOARDS = [
         ],
     },
 ]
+
+
+def _level1_dashboards() -> list[dict[str, Any]]:
+    """Active Level 1 workflow dashboards.
+
+    The earlier dashboard spec is intentionally superseded here so the
+    operational UI is driven by the queue views added in migration 037.
+    This keeps the bootstrap helpers stable while making the active
+    surface human/workflow-first.
+    """
+    return [
+        {
+            "name": DASH_TODAY,
+            "cards": [
+                _card(
+                    "today_compliant_percent",
+                    "Compliant %",
+                    "scalar",
+                    """
+                        SELECT ROUND(
+                            COUNT(*) FILTER (WHERE state = 'Good') * 100.0 / NULLIF(COUNT(*), 0),
+                            1
+                        ) AS "Compliant %"
+                        FROM ninja_agent_compliance.v_all_devices_human
+                    """,
+                    0, 0, 4, 4,
+                    click_behavior=_dashboard_link(DASH_DEVICES),
+                ),
+                _card(
+                    "today_devices_to_fix",
+                    "Devices to fix",
+                    "scalar",
+                    """
+                        SELECT COUNT(*) AS "Devices to fix"
+                        FROM ninja_agent_compliance.v_device_work_queue
+                    """,
+                    0, 4, 4, 4,
+                    click_behavior=_dashboard_link(DASH_DEVICES),
+                ),
+                _card(
+                    "today_notifications_ready",
+                    "Notifications ready",
+                    "scalar",
+                    """
+                        SELECT COUNT(*) AS "Notifications ready"
+                        FROM ninja_agent_compliance.v_notifications_ready
+                    """,
+                    0, 8, 4, 4,
+                    click_behavior=_dashboard_link(DASH_ALERTS),
+                ),
+                _card(
+                    "today_collection_problems",
+                    "Collection problems",
+                    "scalar",
+                    """
+                        SELECT COUNT(*) AS "Collection problems"
+                        FROM ninja_agent_compliance.v_system_health_queue
+                    """,
+                    0, 12, 4, 4,
+                    click_behavior=_dashboard_link(DASH_HEALTH),
+                ),
+                _card(
+                    "today_names_to_review",
+                    "Names to review",
+                    "scalar",
+                    """
+                        SELECT COUNT(*) AS "Names to review"
+                        FROM ninja_agent_compliance.v_customer_name_queue
+                    """,
+                    0, 16, 4, 4,
+                    click_behavior=_dashboard_link(DASH_CUSTOMERS),
+                ),
+                _card(
+                    "today_ignored_devices",
+                    "Ignored devices",
+                    "scalar",
+                    """
+                        SELECT COUNT(*) AS "Ignored devices"
+                        FROM ninja_agent_compliance.v_device_ignores_current
+                    """,
+                    0, 20, 4, 4,
+                    click_behavior=_dashboard_link(DASH_DEVICES),
+                ),
+                _card(
+                    "today_top_device_issues",
+                    "Top device issues",
+                    "table",
+                    """
+                        SELECT
+                            client_name AS "Customer",
+                            hostname AS "Device",
+                            issue AS "Issue",
+                            COALESCE(array_to_string(online_platforms, ', '), '-') AS "Seen online in",
+                            COALESCE(TO_CHAR(last_seen_anywhere, 'YYYY-MM-DD HH24:MI'), 'Never') AS "Last seen",
+                            work_state AS "State"
+                        FROM ninja_agent_compliance.v_device_work_queue
+                        ORDER BY
+                            CASE work_state
+                                WHEN 'Fix now' THEN 0
+                                WHEN 'Conflict' THEN 1
+                                WHEN 'Degraded' THEN 2
+                                WHEN 'Review' THEN 3
+                                WHEN 'Stale' THEN 4
+                                ELSE 5
+                            END,
+                            client_name,
+                            hostname
+                        LIMIT 25
+                    """,
+                    4, 0, 24, 8,
+                    column_click_behaviors={
+                        "Device": _dashboard_link(
+                            DASH_DEVICE_DRILLDOWN,
+                            params=[("customer", "Customer"), ("host", "Device")],
+                        ),
+                    },
+                ),
+                _card(
+                    "today_customer_names",
+                    "Customer names needing review",
+                    "table",
+                    """
+                        SELECT
+                            candidate_name AS "Name found",
+                            platform AS "Found in",
+                            current_devices AS "Devices",
+                            COALESCE(NULLIF(suggested_customer, ''), '-') AS "Suggested customer",
+                            review_reason AS "Why review",
+                            'Review' AS "Action"
+                        FROM ninja_agent_compliance.v_customer_name_queue
+                        ORDER BY current_devices DESC, candidate_name
+                        LIMIT 15
+                    """,
+                    12, 0, 12, 6,
+                    column_click_behaviors={
+                        "Action": _dashboard_link(DASH_CUSTOMERS),
+                    },
+                ),
+                _card(
+                    "today_health_problems",
+                    "Collection and delivery problems",
+                    "table",
+                    """
+                        SELECT
+                            work_type AS "Problem",
+                            platform AS "Area",
+                            source_name AS "Source",
+                            customer_name AS "Customer",
+                            issue AS "Issue"
+                        FROM ninja_agent_compliance.v_system_health_queue
+                        ORDER BY severity DESC, platform, source_name
+                        LIMIT 15
+                    """,
+                    12, 12, 12, 6,
+                    column_click_behaviors={
+                        "Problem": _dashboard_link(DASH_HEALTH),
+                    },
+                ),
+            ],
+        },
+        {
+            "name": DASH_DEVICES,
+            "parameters_builder": _build_devices_parameters,
+            "section_headers": [
+                {"row": 0, "text": "### Fix now"},
+                {"row": 18, "text": "### Platform gaps"},
+                {"row": 32, "text": "### Stale and ignored"},
+                {"row": 44, "text": "### All devices"},
+            ],
+            "cards": [
+                _card(
+                    "devices_work_queue",
+                    "Devices needing action",
+                    "table",
+                    """
+                        SELECT
+                            client_name AS "Customer",
+                            hostname AS "Device",
+                            issue AS "Issue",
+                            COALESCE(array_to_string(online_platforms, ', '), '-') AS "Seen online in",
+                            COALESCE(array_to_string(missing_platforms, ', '), '-') AS "Missing",
+                            COALESCE(TO_CHAR(last_seen_anywhere, 'YYYY-MM-DD HH24:MI'), 'Never') AS "Last seen",
+                            work_state AS "State",
+                            'Ignore 90d' AS "Action"
+                        FROM ninja_agent_compliance.v_device_work_queue
+                        WHERE 1=1
+                          [[AND client_name IN ({{customer}})]]
+                          [[AND EXISTS (
+                              SELECT 1 FROM unnest(missing_platforms) AS p
+                              WHERE p IN ({{missing}})
+                          )]]
+                          [[AND EXISTS (
+                              SELECT 1 FROM unnest(online_platforms) AS p
+                              WHERE p IN ({{online_in}})
+                          )]]
+                          [[AND work_state IN ({{state}})]]
+                          [[AND (CASE WHEN s1_exempt THEN 'Yes' ELSE 'No' END) IN ({{av}})]]
+                        ORDER BY
+                            CASE work_state
+                                WHEN 'Fix now' THEN 0
+                                WHEN 'Conflict' THEN 1
+                                WHEN 'Degraded' THEN 2
+                                WHEN 'Review' THEN 3
+                                WHEN 'Stale' THEN 4
+                                ELSE 5
+                            END,
+                            client_name,
+                            hostname
+                        LIMIT 500
+                    """,
+                    0, 0, 24, 12,
+                    column_click_behaviors={
+                        "Device": _dashboard_link(
+                            DASH_DEVICE_DRILLDOWN,
+                            params=[("customer", "Customer"), ("host", "Device")],
+                        ),
+                        "Action": {
+                            "url_template": _url_template(
+                                "/a/ig",
+                                [("client", "Customer"), ("host", "Device")],
+                            ),
+                        },
+                    },
+                    template_tags=_DEVICES_FILTER_TAGS,
+                    param_mappings={
+                        PARAM_CUSTOMER: _mapping("customer"),
+                        PARAM_MISSING: _mapping("missing"),
+                        PARAM_ONLINE_IN: _mapping("online_in"),
+                        PARAM_STATE: _mapping("state"),
+                        PARAM_AV_EXEMPT: _mapping("av"),
+                    },
+                ),
+                _card(
+                    "devices_gap_summary",
+                    "Missing but seen online somewhere else",
+                    "table",
+                    """
+                        SELECT
+                            missing_platform AS "Missing",
+                            online_platform AS "Seen online in",
+                            devices AS "Devices"
+                        FROM ninja_agent_compliance.v_device_gap_summary
+                        WHERE 1=1
+                          [[AND missing_platform IN ({{missing}})]]
+                          [[AND online_platform IN ({{online_in}})]]
+                        ORDER BY devices DESC, missing_platform, online_platform
+                    """,
+                    18, 0, 12, 6,
+                    click_behavior=_dashboard_link(
+                        DASH_DEVICES,
+                        params=[("missing", "Missing"), ("online_in", "Seen online in")],
+                    ),
+                    template_tags={
+                        "missing": _DEVICES_FILTER_TAGS["missing"],
+                        "online_in": _DEVICES_FILTER_TAGS["online_in"],
+                    },
+                    param_mappings={
+                        PARAM_MISSING: _mapping("missing"),
+                        PARAM_ONLINE_IN: _mapping("online_in"),
+                    },
+                ),
+                _card(
+                    "devices_missing_by_platform",
+                    "Devices by missing platform",
+                    "bar",
+                    """
+                        SELECT
+                            p AS "Missing",
+                            COUNT(DISTINCT (client_id, norm_name)) AS "Devices"
+                        FROM ninja_agent_compliance.v_device_work_queue q
+                        CROSS JOIN LATERAL unnest(q.missing_platforms) AS p
+                        WHERE 1=1
+                          [[AND client_name IN ({{customer}})]]
+                          [[AND p IN ({{missing}})]]
+                        GROUP BY p
+                        ORDER BY "Devices" DESC
+                    """,
+                    18, 12, 12, 6,
+                    click_behavior=_dashboard_link(DASH_DEVICES, params=[("missing", "Missing")]),
+                    template_tags={
+                        "customer": _DEVICES_FILTER_TAGS["customer"],
+                        "missing": _DEVICES_FILTER_TAGS["missing"],
+                    },
+                    param_mappings={
+                        PARAM_CUSTOMER: _mapping("customer"),
+                        PARAM_MISSING: _mapping("missing"),
+                    },
+                ),
+                _card(
+                    "devices_stale_by_customer",
+                    "Stale devices by customer",
+                    "table",
+                    """
+                        SELECT
+                            client_name AS "Customer",
+                            COUNT(*) AS "Stale devices",
+                            COALESCE(TO_CHAR(MAX(last_seen_anywhere), 'YYYY-MM-DD HH24:MI'), 'Never') AS "Last seen",
+                            'Ignore 90d' AS "Action"
+                        FROM ninja_agent_compliance.v_device_work_queue
+                        WHERE work_state = 'Stale'
+                          [[AND client_name IN ({{customer}})]]
+                        GROUP BY client_name
+                        ORDER BY "Stale devices" DESC, client_name
+                        LIMIT 100
+                    """,
+                    32, 0, 12, 6,
+                    column_click_behaviors={
+                        "Action": {
+                            "url_template": _url_template(
+                                "/a/bs",
+                                [("client", "Customer")],
+                            ),
+                        },
+                    },
+                    template_tags={"customer": _DEVICES_FILTER_TAGS["customer"]},
+                    param_mappings={PARAM_CUSTOMER: _mapping("customer")},
+                ),
+                _card(
+                    "devices_ignored",
+                    "Ignored devices",
+                    "table",
+                    """
+                        SELECT
+                            client_name AS "Customer",
+                            COALESCE(NULLIF(display_name, ''), norm_name) AS "Device",
+                            COALESCE(NULLIF(reason, ''), 'Ignored') AS "Reason",
+                            expires AS "Expires",
+                            COALESCE(TO_CHAR(updated_at, 'YYYY-MM-DD HH24:MI'), 'Unknown') AS "Updated",
+                            'Restore' AS "Action"
+                        FROM ninja_agent_compliance.v_device_ignores_current
+                        WHERE 1=1
+                          [[AND client_name IN ({{customer}})]]
+                        ORDER BY updated_at DESC, client_name, display_name
+                        LIMIT 200
+                    """,
+                    32, 12, 12, 6,
+                    column_click_behaviors={
+                        "Device": _dashboard_link(
+                            DASH_DEVICE_DRILLDOWN,
+                            params=[("customer", "Customer"), ("host", "Device")],
+                        ),
+                        "Action": {
+                            "url_template": _url_template(
+                                "/a/ui",
+                                [("client", "Customer"), ("host", "Device")],
+                            ),
+                        },
+                    },
+                    template_tags={"customer": _DEVICES_FILTER_TAGS["customer"]},
+                    param_mappings={PARAM_CUSTOMER: _mapping("customer")},
+                ),
+                _card(
+                    "devices_all",
+                    "All devices",
+                    "table",
+                    """
+                        SELECT
+                            client_name AS "Customer",
+                            hostname AS "Device",
+                            state AS "State",
+                            issue AS "Issue",
+                            COALESCE(array_to_string(found_platforms, ', '), '-') AS "Found in",
+                            COALESCE(array_to_string(online_platforms, ', '), '-') AS "Online in",
+                            COALESCE(array_to_string(missing_platforms, ', '), '-') AS "Missing",
+                            CASE WHEN ignored THEN 'Yes' ELSE 'No' END AS "Ignored",
+                            COALESCE(TO_CHAR(last_seen_anywhere, 'YYYY-MM-DD HH24:MI'), 'Never') AS "Last seen"
+                        FROM ninja_agent_compliance.v_all_devices_human
+                        WHERE 1=1
+                          [[AND client_name IN ({{customer}})]]
+                          [[AND EXISTS (
+                              SELECT 1 FROM unnest(missing_platforms) AS p
+                              WHERE p IN ({{missing}})
+                          )]]
+                          [[AND EXISTS (
+                              SELECT 1 FROM unnest(online_platforms) AS p
+                              WHERE p IN ({{online_in}})
+                          )]]
+                          [[AND state IN ({{state}})]]
+                          [[AND (CASE WHEN s1_exempt THEN 'Yes' ELSE 'No' END) IN ({{av}})]]
+                        ORDER BY client_name, hostname
+                        LIMIT 1000
+                    """,
+                    44, 0, 24, 8,
+                    column_click_behaviors={
+                        "Device": _dashboard_link(
+                            DASH_DEVICE_DRILLDOWN,
+                            params=[("customer", "Customer"), ("host", "Device")],
+                        ),
+                    },
+                    template_tags=_DEVICES_FILTER_TAGS,
+                    param_mappings={
+                        PARAM_CUSTOMER: _mapping("customer"),
+                        PARAM_MISSING: _mapping("missing"),
+                        PARAM_ONLINE_IN: _mapping("online_in"),
+                        PARAM_STATE: _mapping("state"),
+                        PARAM_AV_EXEMPT: _mapping("av"),
+                    },
+                ),
+            ],
+        },
+        {
+            "name": DASH_DEVICE_DRILLDOWN,
+            "parameters_builder": _build_drilldown_parameters,
+            "section_headers": [
+                {"row": 0, "text": "### Current device"},
+                {"row": 8, "text": "### History"},
+                {"row": 18, "text": "### Notifications and ignores"},
+            ],
+            "cards": [
+                _card(
+                    "drilldown_current",
+                    "Current device state",
+                    "table",
+                    """
+                        SELECT
+                            client_name AS "Customer",
+                            hostname AS "Device",
+                            state AS "State",
+                            issue AS "Issue",
+                            COALESCE(array_to_string(required_platforms, ', '), '-') AS "Required",
+                            COALESCE(array_to_string(found_platforms, ', '), '-') AS "Found in",
+                            COALESCE(array_to_string(online_platforms, ', '), '-') AS "Online in",
+                            COALESCE(TO_CHAR(last_seen_anywhere, 'YYYY-MM-DD HH24:MI'), 'Never') AS "Last seen"
+                        FROM ninja_agent_compliance.v_all_devices_human
+                        WHERE client_name = {{customer}}
+                          AND hostname = {{host}}
+                        ORDER BY evaluated_at DESC
+                        LIMIT 1
+                    """,
+                    0, 0, 24, 6,
+                    template_tags=_DRILLDOWN_FILTER_TAGS,
+                    param_mappings={
+                        PARAM_DD_CUSTOMER: _mapping("customer"),
+                        PARAM_DD_HOST: _mapping("host"),
+                    },
+                ),
+                _card(
+                    "drilldown_history",
+                    "Recent state history",
+                    "table",
+                    """
+                        SELECT
+                            TO_CHAR(evaluated_at, 'YYYY-MM-DD HH24:MI') AS "When",
+                            CASE WHEN is_compliant THEN 'Good' ELSE 'Needs review' END AS "State",
+                            COALESCE(array_to_string(missing_required_platforms, ', '), '-') AS "Missing",
+                            COALESCE(array_to_string(observed_platforms, ', '), '-') AS "Found in",
+                            COALESCE(array_to_string(source_failed_platforms, ', '), '-') AS "Source issue"
+                        FROM ninja_agent_compliance.compliance_matrix_history
+                        WHERE client_name = {{customer}}
+                          AND hostname = {{host}}
+                        ORDER BY evaluated_at DESC
+                        LIMIT 50
+                    """,
+                    8, 0, 24, 8,
+                    template_tags=_DRILLDOWN_FILTER_TAGS,
+                    param_mappings={
+                        PARAM_DD_CUSTOMER: _mapping("customer"),
+                        PARAM_DD_HOST: _mapping("host"),
+                    },
+                ),
+                _card(
+                    "drilldown_findings",
+                    "Open and recent issues",
+                    "table",
+                    """
+                        SELECT
+                            severity AS "Severity",
+                            CASE
+                                WHEN finding_type = 'missing_required_platform'
+                                    THEN COALESCE(affected_platform, 'Required platform') || ' missing'
+                                WHEN finding_type = 'stale_required_platform'
+                                    THEN COALESCE(affected_platform, 'Required platform') || ' stale'
+                                WHEN finding_type = 'source_failure'
+                                    THEN 'Collector failed'
+                                ELSE finding_type
+                            END AS "Issue",
+                            status AS "State",
+                            TO_CHAR(first_seen_at, 'YYYY-MM-DD HH24:MI') AS "First seen",
+                            TO_CHAR(last_seen_at, 'YYYY-MM-DD HH24:MI') AS "Last seen",
+                            summary AS "Summary"
+                        FROM ninja_agent_compliance.compliance_findings
+                        WHERE client_name = {{customer}}
+                          AND hostname = {{host}}
+                        ORDER BY last_seen_at DESC
+                        LIMIT 50
+                    """,
+                    18, 0, 12, 8,
+                    template_tags=_DRILLDOWN_FILTER_TAGS,
+                    param_mappings={
+                        PARAM_DD_CUSTOMER: _mapping("customer"),
+                        PARAM_DD_HOST: _mapping("host"),
+                    },
+                ),
+                _card(
+                    "drilldown_suppressions",
+                    "Ignores for this device",
+                    "table",
+                    """
+                        SELECT
+                            client_name AS "Customer",
+                            COALESCE(NULLIF(display_name, ''), norm_name) AS "Device",
+                            COALESCE(NULLIF(reason, ''), 'Ignored') AS "Reason",
+                            expires AS "Expires",
+                            TO_CHAR(updated_at, 'YYYY-MM-DD HH24:MI') AS "Updated",
+                            'Restore' AS "Action"
+                        FROM ninja_agent_compliance.v_device_ignores_current
+                        WHERE client_name = {{customer}}
+                          AND display_name = {{host}}
+                        ORDER BY updated_at DESC
+                        LIMIT 20
+                    """,
+                    18, 12, 12, 8,
+                    column_click_behaviors={
+                        "Action": {
+                            "url_template": _url_template(
+                                "/a/ui",
+                                [("client", "Customer"), ("host", "Device")],
+                            ),
+                        },
+                    },
+                    template_tags=_DRILLDOWN_FILTER_TAGS,
+                    param_mappings={
+                        PARAM_DD_CUSTOMER: _mapping("customer"),
+                        PARAM_DD_HOST: _mapping("host"),
+                    },
+                ),
+            ],
+        },
+        {
+            "name": DASH_ALERTS,
+            "parameters_builder": _build_alerts_parameters,
+            "section_headers": [
+                {"row": 0, "text": "### Ready to notify"},
+                {"row": 12, "text": "### Not notifying"},
+                {"row": 24, "text": "### Delivery history"},
+                {"row": 34, "text": "### Open issues"},
+            ],
+            "cards": [
+                _card(
+                    "alerts_ready",
+                    "Notifications ready to send",
+                    "table",
+                    """
+                        SELECT
+                            severity AS "Severity",
+                            client_name AS "Customer",
+                            COALESCE(hostname, '-') AS "Device",
+                            issue AS "Issue",
+                            COALESCE(route_name, 'No route') AS "Route",
+                            notification_status AS "Why",
+                            summary AS "Summary"
+                        FROM ninja_agent_compliance.v_notifications_ready
+                        WHERE 1=1
+                          [[AND client_name IN ({{customer}})]]
+                          [[AND severity IN ({{severity}})]]
+                          [[AND finding_type IN ({{finding_type}})]]
+                        ORDER BY
+                            CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
+                            client_name,
+                            hostname
+                        LIMIT 300
+                    """,
+                    0, 0, 24, 10,
+                    template_tags=_ALERTS_FILTER_TAGS,
+                    param_mappings={
+                        PARAM_AL_CUSTOMER: _mapping("customer"),
+                        PARAM_AL_SEVERITY: _mapping("severity"),
+                        PARAM_AL_TYPE: _mapping("finding_type"),
+                    },
+                ),
+                _card(
+                    "alerts_not_notifying",
+                    "Open issues not notifying",
+                    "table",
+                    """
+                        SELECT
+                            severity AS "Severity",
+                            client_name AS "Customer",
+                            COALESCE(hostname, '-') AS "Device",
+                            issue AS "Issue",
+                            notification_status AS "Why not notifying",
+                            COALESCE(route_name, 'No route') AS "Route",
+                            summary AS "Summary"
+                        FROM ninja_agent_compliance.v_notification_queue
+                        WHERE NOT ready_to_notify
+                          [[AND client_name IN ({{customer}})]]
+                          [[AND severity IN ({{severity}})]]
+                          [[AND finding_type IN ({{finding_type}})]]
+                        ORDER BY
+                            CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
+                            client_name,
+                            hostname
+                        LIMIT 300
+                    """,
+                    12, 0, 24, 10,
+                    template_tags=_ALERTS_FILTER_TAGS,
+                    param_mappings={
+                        PARAM_AL_CUSTOMER: _mapping("customer"),
+                        PARAM_AL_SEVERITY: _mapping("severity"),
+                        PARAM_AL_TYPE: _mapping("finding_type"),
+                    },
+                ),
+                _card(
+                    "alerts_recent_deliveries_l1",
+                    "Recently notified",
+                    "table",
+                    """
+                        SELECT
+                            TO_CHAR(ae.attempted_at, 'YYYY-MM-DD HH24:MI') AS "When",
+                            ae.event_type AS "Event",
+                            ae.status AS "Result",
+                            COALESCE(nr.display_name, '-') AS "Route",
+                            COALESCE(f.client_name, '-') AS "Customer",
+                            COALESCE(f.hostname, '-') AS "Device",
+                            COALESCE(f.summary, ae.response_preview, '-') AS "Summary"
+                        FROM ninja_agent_compliance.alert_events ae
+                        LEFT JOIN ninja_agent_compliance.notification_routes nr ON nr.route_id = ae.route_id
+                        LEFT JOIN ninja_agent_compliance.compliance_findings f ON f.finding_id = ae.finding_id
+                        WHERE 1=1
+                          [[AND f.client_name IN ({{customer}})]]
+                          [[AND f.severity IN ({{severity}})]]
+                          [[AND f.finding_type IN ({{finding_type}})]]
+                        ORDER BY ae.attempted_at DESC
+                        LIMIT 150
+                    """,
+                    24, 0, 24, 8,
+                    template_tags=_ALERTS_FILTER_TAGS,
+                    param_mappings={
+                        PARAM_AL_CUSTOMER: _mapping("customer"),
+                        PARAM_AL_SEVERITY: _mapping("severity"),
+                        PARAM_AL_TYPE: _mapping("finding_type"),
+                    },
+                ),
+                _card(
+                    "alerts_open_issues",
+                    "Open device issues",
+                    "table",
+                    """
+                        SELECT
+                            severity AS "Severity",
+                            client_name AS "Customer",
+                            COALESCE(hostname, '-') AS "Device",
+                            issue AS "Issue",
+                            summary AS "Summary",
+                            notification_status AS "Notification status"
+                        FROM ninja_agent_compliance.v_notification_queue
+                        WHERE 1=1
+                          [[AND client_name IN ({{customer}})]]
+                          [[AND severity IN ({{severity}})]]
+                          [[AND finding_type IN ({{finding_type}})]]
+                        ORDER BY
+                            CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
+                            last_seen_at DESC
+                        LIMIT 500
+                    """,
+                    34, 0, 24, 10,
+                    template_tags=_ALERTS_FILTER_TAGS,
+                    param_mappings={
+                        PARAM_AL_CUSTOMER: _mapping("customer"),
+                        PARAM_AL_SEVERITY: _mapping("severity"),
+                        PARAM_AL_TYPE: _mapping("finding_type"),
+                    },
+                ),
+            ],
+        },
+        {
+            "name": DASH_CUSTOMERS,
+            "parameters_builder": _build_customers_parameters,
+            "cards": [
+                _card(
+                    "customers_directory_l1",
+                    "Customers and platform names",
+                    "table",
+                    """
+                        WITH names AS (
+                            SELECT
+                                c.client_id,
+                                c.client_name,
+                                STRING_AGG(DISTINCT a.alias_value, ', ' ORDER BY a.alias_value)
+                                    FILTER (WHERE a.enabled AND a.platform = 'Ninja') AS ninja_names,
+                                STRING_AGG(DISTINCT a.alias_value, ', ' ORDER BY a.alias_value)
+                                    FILTER (WHERE a.enabled AND a.platform = 'SentinelOne') AS s1_names,
+                                STRING_AGG(DISTINCT a.alias_value, ', ' ORDER BY a.alias_value)
+                                    FILTER (WHERE a.enabled AND a.platform = 'LogMeIn') AS lmi_names,
+                                STRING_AGG(DISTINCT a.alias_value, ', ' ORDER BY a.alias_value)
+                                    FILTER (WHERE a.enabled AND a.platform = 'ScreenConnect') AS sc_names
+                            FROM ninja_agent_compliance.clients c
+                            LEFT JOIN ninja_agent_compliance.client_aliases a ON a.client_id = c.client_id
+                            WHERE c.enabled
+                              AND c.source NOT IN ('alignment', 'demoted')
+                              AND lower(trim(c.client_name)) NOT IN ('default site', 'unknown', 'various', '.default')
+                            GROUP BY c.client_id, c.client_name
+                        )
+                        SELECT
+                            client_name AS "Customer",
+                            COALESCE(NULLIF(ninja_names, ''), '-') AS "Ninja",
+                            COALESCE(NULLIF(s1_names, ''), '-') AS "SentinelOne",
+                            COALESCE(NULLIF(lmi_names, ''), '-') AS "LogMeIn",
+                            COALESCE(NULLIF(sc_names, ''), '-') AS "ScreenConnect"
+                        FROM names
+                        ORDER BY client_name
+                        LIMIT 300
+                    """,
+                    0, 0, 24, 10,
+                ),
+                _card(
+                    "customers_names_to_review_l1",
+                    "Customer names to review",
+                    "table",
+                    """
+                        SELECT
+                            candidate_name AS "Name found",
+                            platform AS "Found in",
+                            current_devices AS "Devices",
+                            COALESCE(NULLIF(suggested_customer, ''), '-') AS "Suggested customer",
+                            review_reason AS "Why review",
+                            'Add customer' AS "Add",
+                            CASE WHEN suggested_customer <> '' THEN 'Alias suggestion' ELSE '' END AS "Alias suggestion",
+                            'Choose customer' AS "Choose customer",
+                            'Ignore name' AS "Ignore"
+                        FROM ninja_agent_compliance.v_customer_name_queue
+                        WHERE 1=1
+                          [[AND candidate_name ILIKE '%' || {{review_name}} || '%']]
+                        ORDER BY current_devices DESC, candidate_name
+                        LIMIT 200
+                    """,
+                    10, 0, 24, 8,
+                    column_click_behaviors={
+                        "Add": {
+                            "url_template": _url_template("/a/ac", [("name", "Name found")]),
+                        },
+                        "Alias suggestion": {
+                            "url_template": _url_template(
+                                "/a/aa",
+                                [
+                                    ("client_name", "Suggested customer"),
+                                    ("platform", "Found in"),
+                                    ("alias", "Name found"),
+                                ],
+                            ),
+                        },
+                        "Choose customer": {
+                            "url_template": _url_template(
+                                "/a/ma",
+                                [("platform", "Found in"), ("alias", "Name found")],
+                            ),
+                        },
+                        "Ignore": {
+                            "url_template": _url_template("/a/eo", [("pattern", "Name found")]),
+                        },
+                    },
+                    template_tags={"review_name": _CUSTOMERS_FILTER_TAGS["review_name"]},
+                    param_mappings={PARAM_CU_REVIEW_NAME: _mapping("review_name")},
+                ),
+                _card(
+                    "customers_platform_names_l1",
+                    "Platform names by customer",
+                    "table",
+                    """
+                        SELECT
+                            c.client_name AS "Customer",
+                            a.platform AS "Platform",
+                            a.alias_value AS "Name used there",
+                            COALESCE(TO_CHAR(a.updated_at, 'YYYY-MM-DD HH24:MI'), 'Unknown') AS "Updated"
+                        FROM ninja_agent_compliance.client_aliases a
+                        JOIN ninja_agent_compliance.clients c ON c.client_id = a.client_id
+                        WHERE a.enabled
+                          AND c.enabled
+                          AND c.source NOT IN ('alignment', 'demoted')
+                        ORDER BY c.client_name, a.platform, a.alias_value
+                        LIMIT 500
+                    """,
+                    18, 0, 24, 8,
+                ),
+                _card(
+                    "customers_ignored_names_l1",
+                    "Ignored customer names",
+                    "table",
+                    """
+                        SELECT
+                            pattern AS "Name",
+                            COALESCE(NULLIF(notes, ''), 'No notes') AS "Reason",
+                            COALESCE(TO_CHAR(updated_at, 'YYYY-MM-DD HH24:MI'), 'Unknown') AS "Updated",
+                            CASE WHEN source = 'manual' THEN 'Restore' ELSE '' END AS "Action"
+                        FROM ninja_agent_compliance.org_excludes
+                        WHERE enabled
+                        ORDER BY source, pattern
+                        LIMIT 200
+                    """,
+                    26, 0, 24, 5,
+                    column_click_behaviors={
+                        "Action": {
+                            "url_template": _url_template("/a/ue", [("pattern", "Name")]),
+                        },
+                    },
+                ),
+            ],
+        },
+        {
+            "name": DASH_SETUP,
+            "section_headers": [
+                {"row": 0, "text": "### Required platforms"},
+                {"row": 12, "text": "### Alert setup"},
+                {"row": 30, "text": "### Routes and sources"},
+            ],
+            "cards": [
+                _card(
+                    "setup_required_platforms",
+                    "Required platforms",
+                    "table",
+                    """
+                        SELECT
+                            client_name AS "Customer",
+                            label AS "Applies to",
+                            ninja_required AS "Ninja",
+                            sentinelone_required AS "SentinelOne",
+                            logmein_required AS "LogMeIn",
+                            screenconnect_required AS "ScreenConnect",
+                            max_age_days AS "Max age",
+                            setting_source AS "Setting",
+                            '7d' AS "Age 7d",
+                            '30d' AS "Age 30d",
+                            '90d' AS "Age 90d",
+                            CASE WHEN can_use_default THEN 'Use default' ELSE '' END AS "Default"
+                        FROM ninja_agent_compliance.v_required_platforms_effective
+                        ORDER BY client_name, CASE label WHEN 'All devices' THEN 0 WHEN 'Servers' THEN 1 ELSE 2 END
+                        LIMIT 500
+                    """,
+                    0, 0, 24, 10,
+                    column_click_behaviors={
+                        "Ninja": {
+                            "url_template": f"{ACTION_BASE_URL}/a/tp?customer={{{{Customer}}}}&scope={{{{Applies to}}}}&platform=Ninja&confirm=1",
+                        },
+                        "SentinelOne": {
+                            "url_template": f"{ACTION_BASE_URL}/a/tp?customer={{{{Customer}}}}&scope={{{{Applies to}}}}&platform=SentinelOne&confirm=1",
+                        },
+                        "LogMeIn": {
+                            "url_template": f"{ACTION_BASE_URL}/a/tp?customer={{{{Customer}}}}&scope={{{{Applies to}}}}&platform=LogMeIn&confirm=1",
+                        },
+                        "ScreenConnect": {
+                            "url_template": f"{ACTION_BASE_URL}/a/tp?customer={{{{Customer}}}}&scope={{{{Applies to}}}}&platform=ScreenConnect&confirm=1",
+                        },
+                        "Age 7d": {
+                            "url_template": f"{ACTION_BASE_URL}/a/sd?customer={{{{Customer}}}}&scope={{{{Applies to}}}}&days=7&confirm=1",
+                        },
+                        "Age 30d": {
+                            "url_template": f"{ACTION_BASE_URL}/a/sd?customer={{{{Customer}}}}&scope={{{{Applies to}}}}&days=30&confirm=1",
+                        },
+                        "Age 90d": {
+                            "url_template": f"{ACTION_BASE_URL}/a/sd?customer={{{{Customer}}}}&scope={{{{Applies to}}}}&days=90&confirm=1",
+                        },
+                        "Default": {
+                            "url_template": f"{ACTION_BASE_URL}/a/sr?customer={{{{Customer}}}}&scope={{{{Applies to}}}}&profile=default&confirm=1",
+                        },
+                    },
+                ),
+                _card(
+                    "setup_customer_alerts",
+                    "Customer alert setup",
+                    "table",
+                    """
+                        SELECT
+                            client_name AS "Customer",
+                            alert_key AS "Alert key",
+                            alert_name AS "Alert",
+                            customer_alert AS "State",
+                            route_name AS "Route",
+                            route_state AS "Route state",
+                            CASE WHEN NOT enabled_for_customer THEN 'Turn on' ELSE '' END AS "Turn on",
+                            CASE WHEN enabled_for_customer THEN 'Turn off' ELSE '' END AS "Turn off"
+                        FROM ninja_agent_compliance.v_customer_alert_setup
+                        ORDER BY client_name, alert_name
+                        LIMIT 500
+                    """,
+                    12, 0, 24, 10,
+                    column_click_behaviors={
+                        "Turn on": {
+                            "url_template": f"{ACTION_BASE_URL}/a/sca?customer={{{{Customer}}}}&alert={{{{Alert key}}}}&state=on&confirm=1",
+                        },
+                        "Turn off": {
+                            "url_template": f"{ACTION_BASE_URL}/a/sca?customer={{{{Customer}}}}&alert={{{{Alert key}}}}&state=off&confirm=1",
+                        },
+                    },
+                ),
+                _card(
+                    "setup_alert_rules",
+                    "Alert rules",
+                    "table",
+                    """
+                        SELECT
+                            rule_key AS "Rule",
+                            alert_name AS "Alert",
+                            customer_name AS "Customer",
+                            applies_to AS "Applies to",
+                            severity AS "Severity",
+                            route_name AS "Route",
+                            route_state AS "Route state",
+                            cooldown_hours::text || 'h' AS "Repeat after",
+                            rule_state AS "State",
+                            CASE WHEN enabled THEN 'Turn off' ELSE '' END AS "Turn off",
+                            CASE WHEN NOT enabled THEN 'Turn on' ELSE '' END AS "Turn on"
+                        FROM ninja_agent_compliance.v_alert_rules_human
+                        ORDER BY
+                            CASE WHEN rule_state = 'On' THEN 0 ELSE 1 END,
+                            alert_name,
+                            customer_name
+                        LIMIT 300
+                    """,
+                    22, 0, 24, 8,
+                    column_click_behaviors={
+                        "Turn off": {
+                            "url_template": f"{ACTION_BASE_URL}/a/tr?rule={{{{Rule}}}}&state=off&confirm=1",
+                        },
+                        "Turn on": {
+                            "url_template": f"{ACTION_BASE_URL}/a/tr?rule={{{{Rule}}}}&state=on&confirm=1",
+                        },
+                    },
+                ),
+                _card(
+                    "setup_routes",
+                    "Notification routes",
+                    "table",
+                    """
+                        SELECT
+                            display_name AS "Route",
+                            route_type AS "Type",
+                            state AS "State",
+                            setting AS "Configured from",
+                            updated AS "Updated"
+                        FROM ninja_agent_compliance.v_notification_routes_human
+                        ORDER BY "Type", "Route"
+                    """,
+                    30, 0, 12, 6,
+                ),
+                _card(
+                    "setup_sources",
+                    "Sources",
+                    "table",
+                    """
+                        SELECT
+                            source_name AS "Source",
+                            platform AS "Platform",
+                            COALESCE(NULLIF(client_name, ''), 'Shared') AS "Customer",
+                            CASE WHEN enabled THEN 'On' ELSE 'Off' END AS "State",
+                            CASE
+                                WHEN base_url IS NULL OR base_url = '' THEN 'No URL'
+                                ELSE 'URL set'
+                            END AS "Connection"
+                        FROM ninja_agent_compliance.platform_sources ps
+                        LEFT JOIN ninja_agent_compliance.clients c ON c.client_id = ps.client_id
+                        ORDER BY platform, source_name
+                    """,
+                    30, 12, 12, 6,
+                ),
+            ],
+        },
+        {
+            "name": DASH_HEALTH,
+            "cards": [
+                _card(
+                    "health_problems",
+                    "Collection and delivery problems",
+                    "table",
+                    """
+                        SELECT
+                            work_type AS "Problem",
+                            platform AS "Area",
+                            source_name AS "Source",
+                            customer_name AS "Customer",
+                            rows_observed AS "Rows",
+                            issue AS "Issue"
+                        FROM ninja_agent_compliance.v_system_health_queue
+                        ORDER BY severity DESC, platform, source_name, customer_name
+                        LIMIT 200
+                    """,
+                    0, 0, 24, 8,
+                ),
+                _card(
+                    "health_sources",
+                    "All sources",
+                    "table",
+                    """
+                        SELECT
+                            source_name AS "Source",
+                            platform AS "Platform",
+                            COALESCE(NULLIF(client_name, ''), 'Shared') AS "Customer",
+                            status AS "State",
+                            rows_observed AS "Rows",
+                            COALESCE(TO_CHAR(finished_at, 'YYYY-MM-DD HH24:MI'), 'Unknown') AS "Finished",
+                            COALESCE(NULLIF(error_text, ''), '-') AS "Issue"
+                        FROM ninja_agent_compliance.v_source_health_current
+                        ORDER BY platform, source_name
+                    """,
+                    8, 0, 24, 8,
+                ),
+                _card(
+                    "health_missing_by_platform",
+                    "Current device gaps",
+                    "bar",
+                    """
+                        SELECT
+                            p AS "Missing",
+                            COUNT(DISTINCT (client_id, norm_name)) AS "Devices"
+                        FROM ninja_agent_compliance.v_device_work_queue q
+                        CROSS JOIN LATERAL unnest(q.missing_platforms) AS p
+                        GROUP BY p
+                        ORDER BY "Devices" DESC
+                    """,
+                    16, 0, 12, 6,
+                ),
+                _card(
+                    "health_names_by_platform",
+                    "Names needing review by platform",
+                    "bar",
+                    """
+                        SELECT
+                            platform AS "Platform",
+                            COUNT(*) AS "Names"
+                        FROM ninja_agent_compliance.v_customer_name_queue
+                        GROUP BY platform
+                        ORDER BY "Names" DESC
+                    """,
+                    16, 12, 12, 6,
+                ),
+            ],
+        },
+        {
+            "name": DASH_DEBUG,
+            "cards": [
+                _card(
+                    "debug_raw_observations",
+                    "Raw observations",
+                    "table",
+                    """
+                        SELECT
+                            observed_at AS "Seen",
+                            platform AS "Platform",
+                            source_name AS "Source",
+                            COALESCE(NULLIF(resolved_client_name, ''), 'Unresolved') AS "Customer",
+                            hostname AS "Device",
+                            COALESCE(NULLIF(platform_group_name, ''), 'Unknown') AS "Group",
+                            COALESCE(NULLIF(platform_group_id, ''), 'Unknown') AS "Group ID",
+                            raw_data AS "Raw data"
+                        FROM ninja_agent_compliance.platform_observations
+                        ORDER BY observed_at DESC
+                        LIMIT 200
+                    """,
+                    0, 0, 24, 10,
+                ),
+                _card(
+                    "debug_cross_customer_conflicts",
+                    "Same device under multiple customers",
+                    "table",
+                    """
+                        SELECT
+                            norm_name AS "Match key",
+                            client_name AS "Customer",
+                            hostname AS "Device",
+                            COALESCE(NULLIF(os_name, ''), '') AS "OS",
+                            COALESCE(array_to_string(observed_platforms, ', '), '') AS "Found in",
+                            COALESCE(array_to_string(missing_required_platforms, ', '), '') AS "Missing"
+                        FROM ninja_agent_compliance.v_cross_client_conflicts
+                        ORDER BY norm_name, client_name, hostname
+                        LIMIT 300
+                    """,
+                    10, 0, 24, 8,
+                ),
+                _card(
+                    "debug_notification_queue",
+                    "Notification decision details",
+                    "table",
+                    """
+                        SELECT
+                            finding_signature AS "Signature",
+                            client_name AS "Customer",
+                            COALESCE(hostname, '-') AS "Device",
+                            finding_type AS "Finding type",
+                            COALESCE(affected_platform, '-') AS "Platform",
+                            ready_to_notify AS "Ready",
+                            notification_status AS "Decision",
+                            COALESCE(rule_key, '-') AS "Rule",
+                            COALESCE(route_name, '-') AS "Route"
+                        FROM ninja_agent_compliance.v_notification_queue
+                        ORDER BY ready_to_notify DESC, client_name, hostname
+                        LIMIT 300
+                    """,
+                    18, 0, 24, 8,
+                ),
+            ],
+        },
+    ]
+
+
+DASHBOARDS = _level1_dashboards()
 
 
 def run_bootstrap(url: str, user: str, password: str, db_name: str = "Ninja") -> list[str]:

@@ -499,8 +499,14 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         if path == "/agent-compliance/action/ignore-device":
             client_name = _text_param("client", "client_name", hex_names=("client_hex",))
             hostname = _text_param("host", "hostname", hex_names=("host_hex",))
+            days_value = _text_param("days") or "90"
             if not client_name or not hostname:
                 self._respond(400, b"missing client or host\n")
+                return
+            try:
+                expires_days = int(days_value)
+            except ValueError:
+                self._respond(400, b"invalid days\n")
                 return
             with db.transaction() as cur:
                 cur.execute(
@@ -519,8 +525,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 self._respond(404, b"device not found\n")
                 return
             client_id, norm_name = row
-            if add_device_ignore(client_id, norm_name, display_name=hostname):
-                body = f"ignored {norm_name}\n".encode("utf-8")
+            if add_device_ignore(client_id, norm_name, display_name=hostname, expires_days=expires_days):
+                body = f"ignored {norm_name} for {expires_days} day(s)\n".encode("utf-8")
                 self._respond(200, body)
             else:
                 self._respond(400, b"blank norm_name\n")
@@ -545,18 +551,25 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
         if path == "/agent-compliance/action/bulk-ignore-stale":
             client_name = _text_param("client", "client_name", "customer", hex_names=("client_hex", "customer_hex"))
+            days_value = _text_param("days") or "90"
             if not client_name:
                 self._respond(400, b"missing client\n")
+                return
+            try:
+                expires_days = int(days_value)
+            except ValueError:
+                self._respond(400, b"invalid days\n")
                 return
             count = bulk_ignore_devices(
                 client_name,
                 kind="stale",
                 updated_by="operator_dashboard",
+                expires_days=expires_days,
             )
             if count is None:
                 self._respond(400, b"invalid client or kind\n")
                 return
-            body = f"bulk ignored {count} stale device(s) for {client_name}\n".encode("utf-8")
+            body = f"bulk ignored {count} stale device(s) for {client_name} for {expires_days} day(s)\n".encode("utf-8")
             self._respond(200, body)
             return
 
