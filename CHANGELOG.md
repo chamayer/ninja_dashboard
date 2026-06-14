@@ -2,6 +2,20 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.21.8] — 2026-06-13
+
+### Changed
+- Reworked customer-name review so the primary queue has the full
+  decision set in one row: approve as customer, alias to suggestion,
+  manually choose alias target, or ignore.
+- Removed the separate `Alias customer name` dashboard card to reduce
+  clutter.
+- Removed low-value `Source` columns from the customer-name dashboard
+  tables.
+- Added a small controlled manual-alias picker page from the review row
+  so an operator can choose any existing customer without exposing raw
+  SQL or adding a cross-joined dashboard table.
+
 ## [0.21.7] — 2026-06-12
 
 ### Changed

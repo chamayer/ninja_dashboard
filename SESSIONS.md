@@ -5,6 +5,30 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-13 — v0.21.8 Customer review actions
+
+**Why:** The separate alias card added in v0.21.7 did not match the
+operator workflow. Customer-name review needs the decision directly on
+the review row: add, alias, or ignore.
+
+**Done:**
+- Removed the separate `Alias customer name` dashboard card.
+- `Customer names to review` now shows:
+  - `This is a customer`
+  - `Alias suggestion` when a suggestion exists
+  - `Manual alias`
+  - `Ignore name`
+- `Manual alias` opens a small controlled picker page where the
+  operator selects the existing customer target.
+- Removed low-value `Source` columns from the customer-name dashboard
+  tables.
+
+**Design note:**
+- Metabase cannot safely pass an arbitrary dashboard dropdown value
+  into a row action URL without either duplicate rows or brittle SQL.
+  The manual alias picker keeps the main dashboard clean while still
+  allowing any target customer to be chosen.
+
 ## 2026-06-12 — v0.21.7 Customer-name alias review
 
 **Why:** `Customer names to review` only offered `Approve` or

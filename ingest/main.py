@@ -20,12 +20,13 @@ Boot sequence:
 
 from __future__ import annotations
 
+from html import escape
 import http.server
 import logging
 import socketserver
 import threading
 import time
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote, urlparse
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -293,6 +294,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             "/a/sd": "/agent-compliance/action/set-max-age",
             "/a/tr": "/agent-compliance/action/toggle-alert-rule",
             "/a/sca": "/agent-compliance/action/set-customer-alert",
+            "/a/ma": "/agent-compliance/action/manual-alias",
         }.get(parsed.path, parsed.path)
         params = parse_qs(parsed.query)
         confirm = params.get("confirm", ["0"])[0]
@@ -315,6 +317,66 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                     self._respond(400, f"invalid {name}\n".encode("utf-8"))
                     return None
             return None
+
+        if path == "/agent-compliance/action/manual-alias":
+            platform = _text_param("platform") or ""
+            alias_value = _text_param("alias", "alias_value", hex_names=("alias_hex",)) or ""
+            if not platform or not alias_value:
+                self._respond(400, b"missing platform or alias\n")
+                return
+            with db.transaction() as cur:
+                cur.execute(
+                    """
+                    SELECT client_name
+                    FROM ninja_agent_compliance.clients
+                    WHERE enabled
+                      AND source NOT IN ('alignment', 'demoted')
+                      AND lower(trim(client_name)) NOT IN ('default site', 'unknown', 'various', '.default')
+                    ORDER BY client_name
+                    """
+                )
+                customers = [row[0] for row in cur.fetchall()]
+            rows = []
+            for customer in customers:
+                href = (
+                    "/a/aa?"
+                    f"client_name={quote(customer, safe='')}"
+                    f"&platform={quote(platform, safe='')}"
+                    f"&alias={quote(alias_value, safe='')}"
+                    "&confirm=1"
+                )
+                rows.append(
+                    "<tr>"
+                    f"<td>{escape(customer)}</td>"
+                    f"<td><a href=\"{href}\">Alias here</a></td>"
+                    "</tr>"
+                )
+            body = f"""
+                <!doctype html>
+                <html>
+                <head>
+                  <meta charset="utf-8">
+                  <title>Alias customer name</title>
+                  <style>
+                    body {{ font-family: sans-serif; margin: 24px; color: #1f2933; }}
+                    table {{ border-collapse: collapse; min-width: 520px; }}
+                    th, td {{ border-bottom: 1px solid #d9e2ec; padding: 8px 10px; text-align: left; }}
+                    a {{ color: #0b69a3; font-weight: 600; }}
+                    .hint {{ color: #52606d; margin-bottom: 16px; }}
+                  </style>
+                </head>
+                <body>
+                  <h2>Alias customer name</h2>
+                  <p class="hint">Map <strong>{escape(alias_value)}</strong> from <strong>{escape(platform)}</strong> to an existing customer.</p>
+                  <table>
+                    <thead><tr><th>Customer</th><th>Action</th></tr></thead>
+                    <tbody>{''.join(rows)}</tbody>
+                  </table>
+                </body>
+                </html>
+            """.encode("utf-8")
+            self._respond_html(200, body)
+            return
 
         if path == "/agent-compliance/action/add-alias":
             client_id_value = params.get("client_id", [""])[0]
@@ -633,6 +695,13 @@ class _Handler(http.server.BaseHTTPRequestHandler):
     def _respond(self, code: int, body: bytes) -> None:
         self.send_response(code)
         self.send_header("Content-Type", "text/plain")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _respond_html(self, code: int, body: bytes) -> None:
+        self.send_response(code)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
