@@ -662,6 +662,16 @@ def _write_matrix(run_id: int, rows: list[dict[str, Any]]) -> None:
 
 def _write_findings(rows: list[dict[str, Any]]) -> None:
     with db.transaction() as cur:
+        # Findings are a current snapshot with optional delivery history,
+        # not an ever-growing active queue. Close the previous snapshot
+        # first so dashboard counts stay actionable.
+        cur.execute(
+            """
+            UPDATE ninja_agent_compliance.compliance_findings
+            SET status = 'resolved'
+            WHERE status = 'active'
+            """
+        )
         if not rows:
             return
         columns = list(rows[0].keys())

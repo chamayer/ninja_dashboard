@@ -2,6 +2,22 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.21.10] — 2026-06-14
+
+### Fixed
+- Agent Compliance active alert/finding counts no longer use the raw
+  append-only finding history. Migration
+  `035_current_active_findings.sql` changes `v_active_findings` to keep
+  only the latest row per finding signature with suppressions applied.
+- Migration `036_cleanup_duplicate_findings.sql` deletes old
+  unreferenced duplicate finding rows and marks older active rows
+  resolved.
+- Future agent-compliance runs now close the previous active finding
+  snapshot before inserting the new current snapshot, preventing the
+  historical active-count problem from returning.
+- The Today KPI now says `Current findings` instead of `Active alerts`;
+  alert delivery remains represented by `Would fire on next run`.
+
 ## [0.21.9] — 2026-06-13
 
 ### Changed

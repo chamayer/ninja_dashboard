@@ -350,10 +350,10 @@ DASHBOARDS = [
             ),
             _card(
                 "active_alerts",
-                "Active alerts",
+                "Current findings",
                 "scalar",
                 """
-                    SELECT COUNT(*) AS "Active alerts"
+                    SELECT COUNT(*) AS "Current findings"
                     FROM ninja_agent_compliance.v_active_findings
                 """,
                 0, 20, 4, 4,
@@ -1156,17 +1156,7 @@ DASHBOARDS = [
                 """
                     WITH active AS (
                         SELECT f.*
-                        FROM ninja_agent_compliance.compliance_findings f
-                        WHERE f.status = 'active'
-                          AND NOT EXISTS (
-                              SELECT 1 FROM ninja_agent_compliance.alert_suppressions s
-                              WHERE s.enabled
-                                AND (s.client_id IS NULL OR s.client_id = f.client_id)
-                                AND (s.norm_name IS NULL OR s.norm_name = f.norm_name)
-                                AND (s.finding_type IS NULL OR s.finding_type = f.finding_type)
-                                AND (s.affected_platform IS NULL OR s.affected_platform = f.affected_platform)
-                                AND (s.expires_at IS NULL OR s.expires_at > now())
-                          )
+                        FROM ninja_agent_compliance.v_active_findings f
                     )
                     SELECT
                         a.severity AS "Severity",

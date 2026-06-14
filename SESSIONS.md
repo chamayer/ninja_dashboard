@@ -5,6 +5,32 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-14 — v0.21.10 Current findings cleanup
+
+**Why:** The Today dashboard showed 29k+ active alerts/findings. That
+was not actionable. Root cause: `compliance_findings` was append-only
+per run while old rows stayed `active`, so dashboard counts accumulated
+historical duplicate rows.
+
+**Done:**
+- Added migration `035_current_active_findings.sql` to redefine
+  `v_active_findings` as the latest active row per finding signature,
+  with suppressions applied.
+- Added migration `036_cleanup_duplicate_findings.sql` to delete old
+  unreferenced duplicate finding rows while preserving rows referenced
+  by alert delivery history.
+- Updated ingestion so each new findings write resolves the previous
+  active snapshot before inserting the new current snapshot.
+- Renamed the Today KPI from `Active alerts` to `Current findings`.
+- Changed `Would fire on next run` to read from the deduped current
+  findings view.
+
+**Alert behavior:**
+- Alert state is not reset by this cleanup, so existing alert cooldown
+  state should prevent mass re-fire.
+- If a finding never had `alert_state`, it may still alert as new if it
+  is eligible under an enabled alert rule.
+
 ## 2026-06-13 — v0.21.9 Per-platform requirement toggles
 
 **Why:** Required coverage was shown as a few preset combinations. That
