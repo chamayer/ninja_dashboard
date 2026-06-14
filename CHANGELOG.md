@@ -2,6 +2,17 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.21.9] — 2026-06-13
+
+### Changed
+- Replaced `Required coverage` combo buttons with one column per
+  platform: `Ninja`, `SentinelOne`, `LogMeIn`, and `ScreenConnect`.
+  Each column shows `On` or `Off` and clicking the cell flips only that
+  one platform for that customer/scope.
+- Added `/a/tp` / `toggle-platform-requirement` action. If no exact
+  customer/scope override exists, it seeds the override from the
+  currently effective requirement and then flips the selected platform.
+
 ## [0.21.8] — 2026-06-13
 
 ### Changed

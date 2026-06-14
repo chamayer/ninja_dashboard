@@ -961,6 +961,112 @@ def set_customer_requirement(
         return ", ".join(platforms)
 
 
+def toggle_customer_required_platform(
+    customer_name: str,
+    scope: str,
+    platform: str,
+    updated_by: str = "agent_compliance",
+) -> str | None:
+    """Flip one required platform for one customer/scope.
+
+    If the customer has no exact override for the scope yet, seed from
+    the currently effective requirement, then change only the selected
+    platform.
+    """
+    customer = customer_name.strip()
+    scope_value = _normalize_requirement_scope(scope)
+    platform_value = canonical_platform(platform.strip())
+    allowed_platforms = {"Ninja", "SentinelOne", "LogMeIn", "ScreenConnect"}
+    if not customer or scope_value is None or platform_value not in allowed_platforms:
+        return None
+    with db.transaction() as cur:
+        cur.execute(
+            """
+            SELECT client_id
+            FROM ninja_agent_compliance.clients
+            WHERE client_name = %s
+              AND enabled
+            ORDER BY client_id
+            LIMIT 1
+            """,
+            (customer,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+        client_id = row[0]
+        cur.execute(
+            """
+            WITH effective AS (
+                SELECT
+                    pr.required_platforms,
+                    COALESCE(pr.max_age_days, 30) AS max_age_days
+                FROM ninja_agent_compliance.platform_requirements pr
+                WHERE pr.enabled
+                  AND (
+                      (pr.client_id = %s AND pr.device_scope = %s)
+                      OR (pr.client_id = %s AND pr.device_scope = 'all')
+                      OR (pr.client_id IS NULL AND pr.device_scope = %s)
+                      OR (pr.client_id IS NULL AND pr.device_scope = 'all')
+                  )
+                ORDER BY
+                    CASE
+                        WHEN pr.client_id = %s AND pr.device_scope = %s THEN 0
+                        WHEN pr.client_id = %s AND pr.device_scope = 'all' THEN 1
+                        WHEN pr.client_id IS NULL AND pr.device_scope = %s THEN 2
+                        ELSE 3
+                    END
+                LIMIT 1
+            )
+            SELECT
+                COALESCE(required_platforms, ARRAY['Ninja']::text[]),
+                COALESCE(max_age_days, 30)
+            FROM effective
+            UNION ALL
+            SELECT ARRAY['Ninja']::text[], 30
+            LIMIT 1
+            """,
+            (
+                client_id,
+                scope_value,
+                client_id,
+                scope_value,
+                client_id,
+                scope_value,
+                client_id,
+                scope_value,
+            ),
+        )
+        effective_row = cur.fetchone()
+        required = list(effective_row[0]) if effective_row else ["Ninja"]
+        max_age_days = int(effective_row[1]) if effective_row else 30
+        normalized = [canonical_platform(p) for p in required if canonical_platform(p) in allowed_platforms]
+        current = set(normalized)
+        if platform_value in current:
+            current.remove(platform_value)
+        else:
+            current.add(platform_value)
+        ordered = [p for p in ["Ninja", "SentinelOne", "LogMeIn", "ScreenConnect"] if p in current]
+        cur.execute(
+            """
+            INSERT INTO ninja_agent_compliance.platform_requirements
+                (client_id, device_scope, required_platforms, max_age_days, notes, source, updated_by)
+            VALUES (%s, %s, %s, %s, 'Manual platform toggle', 'manual', %s)
+            ON CONFLICT (COALESCE(client_id, 0), device_scope)
+            DO UPDATE SET
+                required_platforms = EXCLUDED.required_platforms,
+                max_age_days = EXCLUDED.max_age_days,
+                notes = EXCLUDED.notes,
+                source = 'manual',
+                enabled = true,
+                updated_at = now(),
+                updated_by = EXCLUDED.updated_by
+            """,
+            (client_id, scope_value, ordered, max_age_days, updated_by),
+        )
+        return ", ".join(ordered) if ordered else "none"
+
+
 def set_customer_max_age(
     customer_name: str,
     scope: str,

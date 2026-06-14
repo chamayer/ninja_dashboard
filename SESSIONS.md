@@ -5,6 +5,21 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-13 — v0.21.9 Per-platform requirement toggles
+
+**Why:** Required coverage was shown as a few preset combinations. That
+made one-off platform changes hard to understand and harder to audit.
+
+**Done:**
+- `Required coverage` now shows one column per platform:
+  `Ninja`, `SentinelOne`, `LogMeIn`, `ScreenConnect`.
+- Each platform cell shows `On` or `Off` and flips only that platform.
+- Added `/a/tp` to toggle a single platform for a customer/scope.
+- If the customer/scope has no exact override, the action copies the
+  effective requirement first, then applies the single-platform flip.
+- Existing preset endpoint `/a/sr` remains for compatibility but is no
+  longer shown in the dashboard.
+
 ## 2026-06-13 — v0.21.8 Customer review actions
 
 **Why:** The separate alias card added in v0.21.7 did not match the

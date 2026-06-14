@@ -1578,7 +1578,10 @@ DASHBOARDS = [
                     SELECT
                         client_name AS "Customer",
                         label AS "Applies to",
-                        array_to_string(required_platforms, ', ') AS "Required",
+                        CASE WHEN 'Ninja' = ANY(required_platforms) THEN 'On' ELSE 'Off' END AS "Ninja",
+                        CASE WHEN 'SentinelOne' = ANY(required_platforms) THEN 'On' ELSE 'Off' END AS "SentinelOne",
+                        CASE WHEN 'LogMeIn' = ANY(required_platforms) THEN 'On' ELSE 'Off' END AS "LogMeIn",
+                        CASE WHEN 'ScreenConnect' = ANY(required_platforms) THEN 'On' ELSE 'Off' END AS "ScreenConnect",
                         COALESCE(max_age_days, 30) AS "Max age",
                         CASE
                             WHEN source_client_id IS NULL THEN 'Default'
@@ -1588,10 +1591,6 @@ DASHBOARDS = [
                             WHEN source = 'seed' THEN 'Built in'
                             ELSE source
                         END AS "Source",
-                        'Set' AS "Ninja + S1",
-                        'Set' AS "Ninja + LMI",
-                        'Set' AS "Ninja + S1 + LMI",
-                        'Set' AS "Ninja + S1 + SC",
                         '7d' AS "Age 7d",
                         '30d' AS "Age 30d",
                         '90d' AS "Age 90d",
@@ -1606,17 +1605,17 @@ DASHBOARDS = [
                 """,
                 36, 0, 24, 10,
                 column_click_behaviors={
-                    "Ninja + S1": {
-                        "url_template": f"{ACTION_BASE_URL}/a/sr?customer={{{{Customer}}}}&scope={{{{Applies to}}}}&profile=ninja_s1&confirm=1",
+                    "Ninja": {
+                        "url_template": f"{ACTION_BASE_URL}/a/tp?customer={{{{Customer}}}}&scope={{{{Applies to}}}}&platform=Ninja&confirm=1",
                     },
-                    "Ninja + LMI": {
-                        "url_template": f"{ACTION_BASE_URL}/a/sr?customer={{{{Customer}}}}&scope={{{{Applies to}}}}&profile=ninja_lmi&confirm=1",
+                    "SentinelOne": {
+                        "url_template": f"{ACTION_BASE_URL}/a/tp?customer={{{{Customer}}}}&scope={{{{Applies to}}}}&platform=SentinelOne&confirm=1",
                     },
-                    "Ninja + S1 + LMI": {
-                        "url_template": f"{ACTION_BASE_URL}/a/sr?customer={{{{Customer}}}}&scope={{{{Applies to}}}}&profile=ninja_s1_lmi&confirm=1",
+                    "LogMeIn": {
+                        "url_template": f"{ACTION_BASE_URL}/a/tp?customer={{{{Customer}}}}&scope={{{{Applies to}}}}&platform=LogMeIn&confirm=1",
                     },
-                    "Ninja + S1 + SC": {
-                        "url_template": f"{ACTION_BASE_URL}/a/sr?customer={{{{Customer}}}}&scope={{{{Applies to}}}}&profile=ninja_s1_sc&confirm=1",
+                    "ScreenConnect": {
+                        "url_template": f"{ACTION_BASE_URL}/a/tp?customer={{{{Customer}}}}&scope={{{{Applies to}}}}&platform=ScreenConnect&confirm=1",
                     },
                     "Age 7d": {
                         "url_template": f"{ACTION_BASE_URL}/a/sd?customer={{{{Customer}}}}&scope={{{{Applies to}}}}&days=7&confirm=1",

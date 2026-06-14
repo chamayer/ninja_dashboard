@@ -47,6 +47,7 @@ from ingest.agent_compliance.config_loader import (
     remove_device_ignore,
     set_customer_max_age,
     set_customer_requirement,
+    toggle_customer_required_platform,
 )
 from ingest.agent_compliance.normalize import is_placeholder_org_name
 from ingest.url_utils import redact_url
@@ -295,6 +296,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             "/a/tr": "/agent-compliance/action/toggle-alert-rule",
             "/a/sca": "/agent-compliance/action/set-customer-alert",
             "/a/ma": "/agent-compliance/action/manual-alias",
+            "/a/tp": "/agent-compliance/action/toggle-platform-requirement",
         }.get(parsed.path, parsed.path)
         params = parse_qs(parsed.query)
         confirm = params.get("confirm", ["0"])[0]
@@ -447,6 +449,26 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 self._respond(400, b"invalid customer, scope, or profile\n")
                 return
             body = f"set {customer_name} {scope} coverage to {result}\n".encode("utf-8")
+            self._respond(200, body)
+            return
+
+        if path == "/agent-compliance/action/toggle-platform-requirement":
+            customer_name = _text_param("customer", "client_name", hex_names=("customer_hex", "client_hex"))
+            scope = _text_param("scope") or ""
+            platform = _text_param("platform") or ""
+            if not customer_name or not scope or not platform:
+                self._respond(400, b"missing customer, scope, or platform\n")
+                return
+            result = toggle_customer_required_platform(
+                customer_name,
+                scope,
+                platform,
+                updated_by="operator_dashboard",
+            )
+            if result is None:
+                self._respond(400, b"invalid customer, scope, or platform\n")
+                return
+            body = f"set {customer_name} {scope} required platforms to {result}\n".encode("utf-8")
             self._respond(200, body)
             return
 
