@@ -5,6 +5,24 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-15 — v0.26.2 Compliance KPI excludes stale devices
+
+**Why:** The operator clarified that compliance means "for devices I
+care about, does it have everything needed?" Stale devices are usually
+offline/decommissioned candidates and should be counted separately
+rather than pulling down compliance percentage.
+
+**Done:**
+- Changed Today `Compliant %` to calculate compliant non-stale,
+  non-ignored devices divided by all non-stale, non-ignored devices.
+- Added `Stale` to the first Today KPI row.
+- Reflowed the top KPIs to: `Total devices`, `Compliant %`, `Fix now`,
+  `Review`, `Stale`.
+
+**Pending:**
+- Bootstrap Metabase and visually confirm the first KPI row.
+- Compare `Compliant %` against host SQL after deployment.
+
 ## 2026-06-15 — v0.26.1 Actionable cross-customer device rule
 
 **Why:** The operator clarified that same-name cross-customer collisions

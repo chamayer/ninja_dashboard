@@ -1,30 +1,29 @@
 # Goal
-Show both sides of a cross-customer device match in the existing device drilldown current-state table.
+Make the Today KPI row match the operator compliance model.
 
 # Why
-When a device is missing a platform that is found under another customer,
-the drilldown only filters by exact hostname. That can hide the matching
-row because the other platform may report a longer or different hostname
-with the same normalized identity.
+Compliance means devices that are still in scope have all required
+platforms. Stale devices are usually offline/decommissioned candidates,
+so they should be counted separately and not pull down compliance
+percentage.
 
 # Scope
-- Change only the active Level 1 `drilldown_current` card.
-- Resolve the clicked row to its normalized device identity.
-- Return all current device rows sharing that normalized identity.
-- Preserve ordinary single-device drilldown behavior.
-- Do not add another card.
+- Change only the active Level 1 Today top KPI row.
+- Add Stale as a first-row KPI.
+- Calculate Compliant % as compliant / non-stale, non-ignored devices.
+- Keep Ready to notify, Names to review, and Collection issues on row 2.
 - Do not change compliance evaluation logic.
 
 # Files to change
-- `ingest/agent_compliance/metabase_bootstrap.py` - current device drilldown query.
+- `ingest/agent_compliance/metabase_bootstrap.py` - Today KPI queries and layout.
 - `CHANGELOG.md` - note dashboard behavior.
 - `SESSIONS.md` - session note.
 
 # Steps
-1. Anchor the selected device by `(customer, host)` when customer is present.
-2. Fall back to host-only when customer is not present.
-3. Return all `v_all_devices_human` rows with the anchor `norm_name`.
-4. Keep useful columns in the existing current-state table.
+1. Change Compliant % to divide by non-stale, non-ignored devices.
+2. Add Stale KPI to row 1.
+3. Reflow row 1 to five cards and row 2 to three cards.
+4. Move lower Today cards down to avoid overlap.
 5. Run syntax and diff checks.
 
 # Open questions

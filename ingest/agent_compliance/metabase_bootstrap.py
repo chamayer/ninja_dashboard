@@ -1778,7 +1778,7 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                         SELECT COUNT(*) AS "Total devices"
                         FROM ninja_agent_compliance.v_all_devices_human
                     """,
-                    0, 0, 6, 4,
+                    0, 0, 5, 4,
                     click_behavior=_dashboard_link(DASH_DEVICES),
                 ),
                 _card(
@@ -1787,12 +1787,13 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                     "scalar",
                     """
                         SELECT ROUND(
-                            COUNT(*) FILTER (WHERE state = 'Good') * 100.0 / NULLIF(COUNT(*), 0),
+                            COUNT(*) FILTER (WHERE is_compliant AND state <> 'Stale' AND NOT ignored) * 100.0
+                                / NULLIF(COUNT(*) FILTER (WHERE state <> 'Stale' AND NOT ignored), 0),
                             1
                         ) AS "Compliant %"
                         FROM ninja_agent_compliance.v_all_devices_human
                     """,
-                    0, 6, 6, 4,
+                    0, 5, 5, 4,
                     click_behavior=_dashboard_link(DASH_DEVICES),
                 ),
                 _card(
@@ -1804,7 +1805,7 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                         FROM ninja_agent_compliance.v_device_work_queue
                         WHERE work_state = 'Fix now'
                     """,
-                    0, 12, 6, 4,
+                    0, 10, 5, 4,
                     click_behavior=_dashboard_link(DASH_DEVICES),
                 ),
                 _card(
@@ -1816,7 +1817,19 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                         FROM ninja_agent_compliance.v_device_work_queue
                         WHERE work_state = 'Review'
                     """,
-                    0, 18, 6, 4,
+                    0, 15, 5, 4,
+                    click_behavior=_dashboard_link(DASH_DEVICES),
+                ),
+                _card(
+                    "today_stale",
+                    "Stale",
+                    "scalar",
+                    """
+                        SELECT COUNT(*) AS "Stale"
+                        FROM ninja_agent_compliance.v_device_work_queue
+                        WHERE work_state = 'Stale'
+                    """,
+                    0, 20, 4, 4,
                     click_behavior=_dashboard_link(DASH_DEVICES),
                 ),
                 _card(

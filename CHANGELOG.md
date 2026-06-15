@@ -2,6 +2,17 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.26.2] — 2026-06-15
+
+### Changed
+- Agent Compliance Today KPI row now separates `Stale` from compliance:
+  first row is `Total devices`, `Compliant %`, `Fix now`, `Review`,
+  and `Stale`.
+- `Compliant %` is now calculated as compliant non-stale, non-ignored
+  devices divided by all non-stale, non-ignored devices, so stale/offline
+  and ignored/decommission candidates do not pull down platform coverage
+  compliance.
+
 ## [0.26.1] — 2026-06-15
 
 ### Changed
