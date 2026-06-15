@@ -1825,6 +1825,72 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                     click_behavior=_dashboard_link(DASH_HEALTH),
                 ),
                 _card(
+                    "today_fix_now_by_customer",
+                    "Fix now by customer",
+                    "table",
+                    """
+                        SELECT
+                            client_name AS "Customer",
+                            COUNT(*) AS "Devices",
+                            'Fix now' AS "State"
+                        FROM ninja_agent_compliance.v_device_work_queue
+                        WHERE work_state = 'Fix now'
+                        GROUP BY client_name
+                        ORDER BY COUNT(*) DESC, client_name
+                        LIMIT 5
+                    """,
+                    4, 0, 12, 6,
+                    click_behavior=_dashboard_link(
+                        DASH_DEVICES,
+                        params=[("customer", "Customer"), ("state", "State")],
+                    ),
+                    column_widths={
+                        "Customer": 280,
+                        "Devices": 100,
+                        "State": 60,
+                    },
+                ),
+                _card(
+                    "today_fix_now_by_issue_type",
+                    "Fix now by issue type",
+                    "table",
+                    """
+                        WITH classified AS (
+                            SELECT
+                                CASE
+                                    WHEN cardinality(cross_customer_actionable_platforms) > 0
+                                        THEN 'Cross-customer same name'
+                                    WHEN 'Ninja' = ANY(missing_platforms) THEN 'Missing Ninja'
+                                    WHEN 'SentinelOne' = ANY(missing_platforms) THEN 'Missing SentinelOne'
+                                    WHEN 'ScreenConnect' = ANY(missing_platforms) THEN 'Missing ScreenConnect'
+                                    WHEN 'LogMeIn' = ANY(missing_platforms) THEN 'Missing LogMeIn'
+                                    WHEN is_degraded THEN 'Agent degraded'
+                                    ELSE 'Other'
+                                END AS issue_type
+                            FROM ninja_agent_compliance.v_device_work_queue
+                            WHERE work_state = 'Fix now'
+                        )
+                        SELECT
+                            issue_type AS "Issue type",
+                            COUNT(*) AS "Devices",
+                            'Fix now' AS "State"
+                        FROM classified
+                        GROUP BY issue_type
+                        ORDER BY COUNT(*) DESC, issue_type
+                        LIMIT 5
+                    """,
+                    4, 12, 12, 6,
+                    click_behavior=_dashboard_link(
+                        DASH_DEVICES,
+                        params=[("state", "State")],
+                    ),
+                    column_widths={
+                        "Issue type": 280,
+                        "Devices": 100,
+                        "State": 60,
+                    },
+                ),
+                _card(
                     "today_top_device_issues",
                     "Top device issues",
                     "table",
@@ -1849,7 +1915,7 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                             hostname
                         LIMIT 25
                     """,
-                    4, 0, 24, 8,
+                    10, 0, 24, 8,
                     column_click_behaviors={
                         "Device": _dashboard_link(
                             DASH_DEVICE_DRILLDOWN,
@@ -1873,7 +1939,7 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                         ORDER BY current_devices DESC, candidate_name
                         LIMIT 15
                     """,
-                    12, 0, 12, 6,
+                    18, 0, 12, 6,
                     column_click_behaviors={
                         "Action": _dashboard_link(DASH_CUSTOMERS),
                     },
@@ -1893,7 +1959,7 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                         ORDER BY severity DESC, platform, source_name
                         LIMIT 15
                     """,
-                    12, 12, 12, 6,
+                    18, 12, 12, 6,
                     column_click_behaviors={
                         "Problem": _dashboard_link(DASH_HEALTH),
                     },
@@ -1910,6 +1976,78 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                 {"row": 44, "text": "### All devices"},
             ],
             "cards": [
+                _card(
+                    "devices_fix_now_by_customer",
+                    "Fix now by customer",
+                    "table",
+                    """
+                        SELECT
+                            client_name AS "Customer",
+                            COUNT(*) AS "Devices",
+                            'Fix now' AS "State"
+                        FROM ninja_agent_compliance.v_device_work_queue
+                        WHERE work_state = 'Fix now'
+                          [[AND client_name IN ({{customer}})]]
+                        GROUP BY client_name
+                        ORDER BY COUNT(*) DESC, client_name
+                        LIMIT 5
+                    """,
+                    12, 0, 12, 6,
+                    click_behavior=_dashboard_link(
+                        DASH_DEVICES,
+                        params=[("customer", "Customer"), ("state", "State")],
+                    ),
+                    column_widths={
+                        "Customer": 280,
+                        "Devices": 100,
+                        "State": 60,
+                    },
+                    template_tags={"customer": _DEVICES_FILTER_TAGS["customer"]},
+                    param_mappings={PARAM_CUSTOMER: _mapping("customer")},
+                ),
+                _card(
+                    "devices_fix_now_by_issue_type",
+                    "Fix now by issue type",
+                    "table",
+                    """
+                        WITH classified AS (
+                            SELECT
+                                CASE
+                                    WHEN cardinality(cross_customer_actionable_platforms) > 0
+                                        THEN 'Cross-customer same name'
+                                    WHEN 'Ninja' = ANY(missing_platforms) THEN 'Missing Ninja'
+                                    WHEN 'SentinelOne' = ANY(missing_platforms) THEN 'Missing SentinelOne'
+                                    WHEN 'ScreenConnect' = ANY(missing_platforms) THEN 'Missing ScreenConnect'
+                                    WHEN 'LogMeIn' = ANY(missing_platforms) THEN 'Missing LogMeIn'
+                                    WHEN is_degraded THEN 'Agent degraded'
+                                    ELSE 'Other'
+                                END AS issue_type
+                            FROM ninja_agent_compliance.v_device_work_queue
+                            WHERE work_state = 'Fix now'
+                              [[AND client_name IN ({{customer}})]]
+                        )
+                        SELECT
+                            issue_type AS "Issue type",
+                            COUNT(*) AS "Devices",
+                            'Fix now' AS "State"
+                        FROM classified
+                        GROUP BY issue_type
+                        ORDER BY COUNT(*) DESC, issue_type
+                        LIMIT 5
+                    """,
+                    12, 12, 12, 6,
+                    click_behavior=_dashboard_link(
+                        DASH_DEVICES,
+                        params=[("state", "State")],
+                    ),
+                    column_widths={
+                        "Issue type": 280,
+                        "Devices": 100,
+                        "State": 60,
+                    },
+                    template_tags={"customer": _DEVICES_FILTER_TAGS["customer"]},
+                    param_mappings={PARAM_CUSTOMER: _mapping("customer")},
+                ),
                 _card(
                     "devices_work_queue",
                     "Devices needing action",

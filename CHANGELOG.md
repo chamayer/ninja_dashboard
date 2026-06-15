@@ -2,6 +2,24 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.24.0] — 2026-06-15
+
+### Added
+- Today dashboard: two top-5 cards — `Fix now by customer` and
+  `Fix now by issue type` — placed between the KPI strip and the
+  `Top device issues` table. Each row click opens the Devices dashboard
+  pre-filtered (`state=Fix now` plus customer or platform where
+  applicable).
+- Devices dashboard: same two breakdown cards placed in the gap
+  between the `Fix now` queue and the `Platform gaps` section. They
+  respect the dashboard's `Customer` filter and click-set state /
+  customer on the same page so they act as in-page filter chips.
+
+### Changed
+- Today dashboard rows shifted: `Top device issues` moves from row 4
+  to row 10; `Customer names needing review` and `Collection and
+  delivery problems` move from row 12 to row 18.
+
 ## [0.23.9] — 2026-06-15
 
 ### Fixed

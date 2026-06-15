@@ -5,6 +5,32 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-15 — v0.24.0 Fix now breakdown cards (Today + Devices)
+
+**Why:** Operators wanted a fast read of where today's Fix now work
+is concentrated — by customer (who needs my time) and by issue type
+(systemic vs. one-off). The Fix now queue alone forced the operator
+to scan rows to spot concentration.
+
+**Done:**
+- Added `Fix now by customer` and `Fix now by issue type` top-5 cards
+  to both Today and Devices dashboards.
+- On Today they sit between the KPI strip and `Top device issues`;
+  each row links to Devices pre-filtered with `state=Fix now` plus the
+  clicked customer.
+- On Devices they sit in the previously empty gap at row 12 and act
+  as in-page filter chips — clicking a row sets the same dashboard's
+  customer / state filters. They respect the existing `Customer`
+  filter so the breakdown narrows alongside the queue below.
+- Issue-type buckets: `Cross-customer same name`, `Missing Ninja`,
+  `Missing SentinelOne`, `Missing ScreenConnect`, `Missing LogMeIn`,
+  `Agent degraded`, `Other`. Each Fix now device is bucketed in
+  priority order so the totals add up to the Fix now count.
+
+**Validation pending:**
+- Portainer redeploy + Metabase bootstrap re-run, then visual check
+  in the dashboard.
+
 ## 2026-06-15 — v0.23.9 Fix broken cross-customer migration
 
 **Why:** Container was crash-looping on `am-ch-01` with
