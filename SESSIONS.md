@@ -5,6 +5,18 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-15 — v0.23.4 Cross-customer platform detail
+
+**Why:** Same names across customers are common MSP data. The conflict
+card needed to show the involved customers and platforms without making
+the operator hunt through drilldowns.
+
+**Done:**
+- Renamed the card to `Same name across customers`.
+- Added `Platforms seen` to the conflict summary.
+- Kept the actionable `Fix now` logic separate from cross-customer
+  collisions.
+
 ## 2026-06-15 — v0.23.3 Cross-customer conflict drilldown
 
 **Why:** Cross-customer conflicts were visible, but the operator did not

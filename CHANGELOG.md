@@ -2,6 +2,14 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.23.4] — 2026-06-15
+
+### Changed
+- Renamed the cross-customer conflict card to `Same name across
+  customers`.
+- Added platform detail to the conflict card so operators can see
+  which platforms reported the same name.
+
 ## [0.23.3] — 2026-06-15
 
 ### Changed

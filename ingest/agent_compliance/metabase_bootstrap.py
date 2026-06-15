@@ -1707,21 +1707,24 @@ _LEGACY_DASHBOARDS_UNUSED = [
             ),
                 _card(
                     "cross_customer_conflicts",
-                    "Same device under multiple customers",
+                    "Same name across customers",
                     "table",
                     """
                     WITH conflicts AS (
                         SELECT
                             norm_name,
                             string_agg(DISTINCT client_name, ', ' ORDER BY client_name) AS customers,
-                            string_agg(DISTINCT hostname, ', ' ORDER BY hostname) AS devices
+                            string_agg(DISTINCT hostname, ', ' ORDER BY hostname) AS devices,
+                            string_agg(DISTINCT platform_name, ', ' ORDER BY platform_name) AS platforms_seen
                         FROM ninja_agent_compliance.v_cross_client_conflicts
+                        CROSS JOIN LATERAL unnest(observed_platforms) AS p(platform_name)
                         GROUP BY norm_name
                     )
                     SELECT
                         norm_name AS "Match key",
                         customers AS "Customers",
-                        devices AS "Device"
+                        devices AS "Device",
+                        COALESCE(platforms_seen, '-') AS "Platforms seen"
                     FROM conflicts
                     ORDER BY norm_name
                     LIMIT 300
@@ -2812,21 +2815,24 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                 ),
                 _card(
                     "debug_cross_customer_conflicts",
-                    "Same device under multiple customers",
+                    "Same name across customers",
                     "table",
                     """
                         WITH conflicts AS (
                             SELECT
                                 norm_name,
                                 string_agg(DISTINCT client_name, ', ' ORDER BY client_name) AS customers,
-                                string_agg(DISTINCT hostname, ', ' ORDER BY hostname) AS devices
+                                string_agg(DISTINCT hostname, ', ' ORDER BY hostname) AS devices,
+                                string_agg(DISTINCT platform_name, ', ' ORDER BY platform_name) AS platforms_seen
                             FROM ninja_agent_compliance.v_cross_client_conflicts
+                            CROSS JOIN LATERAL unnest(observed_platforms) AS p(platform_name)
                             GROUP BY norm_name
                         )
                         SELECT
                             norm_name AS "Match key",
                             customers AS "Customers",
-                            devices AS "Device"
+                            devices AS "Device",
+                            COALESCE(platforms_seen, '-') AS "Platforms seen"
                         FROM conflicts
                         ORDER BY norm_name
                         LIMIT 300
