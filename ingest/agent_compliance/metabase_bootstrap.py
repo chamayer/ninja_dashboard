@@ -1781,6 +1781,17 @@ def _level1_dashboards() -> list[dict[str, Any]]:
             "name": DASH_TODAY,
             "cards": [
                 _card(
+                    "today_total_devices",
+                    "Total devices",
+                    "scalar",
+                    """
+                        SELECT COUNT(*) AS "Total devices"
+                        FROM ninja_agent_compliance.v_all_devices_human
+                    """,
+                    0, 0, 4, 4,
+                    click_behavior=_dashboard_link(DASH_DEVICES),
+                ),
+                _card(
                     "today_compliant_percent",
                     "Compliant %",
                     "scalar",
@@ -1791,7 +1802,7 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                         ) AS "Compliant %"
                         FROM ninja_agent_compliance.v_all_devices_human
                     """,
-                    0, 0, 4, 4,
+                    0, 4, 4, 4,
                     click_behavior=_dashboard_link(DASH_DEVICES),
                 ),
                 _card(
@@ -1802,7 +1813,7 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                         SELECT COUNT(*) AS "Devices to fix"
                         FROM ninja_agent_compliance.v_device_work_queue
                     """,
-                    0, 4, 4, 4,
+                    0, 8, 4, 4,
                     click_behavior=_dashboard_link(DASH_DEVICES),
                 ),
                 _card(
@@ -1813,19 +1824,8 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                         SELECT COUNT(*) AS "Notifications ready"
                         FROM ninja_agent_compliance.v_notifications_ready
                     """,
-                    0, 8, 4, 4,
-                    click_behavior=_dashboard_link(DASH_ALERTS),
-                ),
-                _card(
-                    "today_collection_problems",
-                    "Collection problems",
-                    "scalar",
-                    """
-                        SELECT COUNT(*) AS "Collection problems"
-                        FROM ninja_agent_compliance.v_system_health_queue
-                    """,
                     0, 12, 4, 4,
-                    click_behavior=_dashboard_link(DASH_HEALTH),
+                    click_behavior=_dashboard_link(DASH_ALERTS),
                 ),
                 _card(
                     "today_names_to_review",
@@ -1839,15 +1839,15 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                     click_behavior=_dashboard_link(DASH_CUSTOMERS),
                 ),
                 _card(
-                    "today_ignored_devices",
-                    "Ignored devices",
+                    "today_collection_problems",
+                    "Collection problems",
                     "scalar",
                     """
-                        SELECT COUNT(*) AS "Ignored devices"
-                        FROM ninja_agent_compliance.v_device_ignores_current
+                        SELECT COUNT(*) AS "Collection problems"
+                        FROM ninja_agent_compliance.v_system_health_queue
                     """,
                     0, 20, 4, 4,
-                    click_behavior=_dashboard_link(DASH_DEVICES),
+                    click_behavior=_dashboard_link(DASH_HEALTH),
                 ),
                 _card(
                     "today_top_device_issues",

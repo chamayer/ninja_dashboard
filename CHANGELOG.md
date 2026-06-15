@@ -2,6 +2,15 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.22.1] — 2026-06-15
+
+### Changed
+- Reordered the Agent Compliance Today top cards for human triage:
+  `Total devices`, `Compliant %`, `Devices to fix`,
+  `Notifications ready`, `Names to review`, and `Collection problems`.
+- Removed `Ignored devices` from the Today top row. Ignored devices
+  remain visible and restorable on the Devices dashboard.
+
 ## [0.22.0] — 2026-06-14
 
 ### Changed

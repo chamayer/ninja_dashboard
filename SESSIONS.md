@@ -5,6 +5,20 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-15 — v0.22.1 Today card order
+
+**Why:** The Today top row should start with total inventory context,
+then compliance and action counts. `Ignored devices` is useful but not
+important enough for the landing-page KPI row.
+
+**Done:**
+- Added `Total devices` as the first Today KPI.
+- Reordered Today KPIs:
+  `Total devices`, `Compliant %`, `Devices to fix`,
+  `Notifications ready`, `Names to review`, `Collection problems`.
+- Removed `Ignored devices` from the Today top row. It remains visible
+  on Devices under ignored/restorable devices.
+
 ## 2026-06-14 — v0.22.0 Agent Compliance Level 1 operations rebuild
 
 **Why:** The dashboard was technically improving but still mixed daily
