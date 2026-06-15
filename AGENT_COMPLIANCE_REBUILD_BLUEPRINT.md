@@ -22,6 +22,27 @@ It should not force a person to understand the internal plumbing first.
 6. Placeholder names are noise unless explicitly reviewed.
 7. Canonical orgs are not created from random observations.
 8. Device ignore/restore must remain reversible and visible.
+9. Vendor ingest collects facts; compliance evaluation decides what
+   those facts mean for the current configuration.
+
+## Compliance Evaluation Model
+
+Agent Compliance has two paths:
+
+- Full collection: scheduled every few hours and calls Ninja,
+  SentinelOne, LogMeIn, and ScreenConnect.
+- Evaluate-only: reloads the latest successful stored observations per
+  source, re-applies current customer aliases and requirements, then
+  rebuilds the current compliance matrix and device findings.
+
+Dashboard configuration actions should use evaluate-only whenever the
+underlying vendor facts did not change. Examples: changing required
+platforms, approving a customer name, adding an alias, excluding a
+placeholder name, changing stale thresholds, or ignoring/restoring a
+device.
+
+This keeps the UI responsive without turning every button click into a
+vendor API collection run.
 
 ## What Metabase Should Show
 

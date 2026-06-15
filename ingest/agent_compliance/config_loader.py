@@ -1191,7 +1191,7 @@ def add_device_ignore(
     updated_by: str = "agent_compliance",
     reason: str | None = None,
     display_name: str | None = None,
-    expires_days: int | None = 90,
+    expires_days: int | None = 30,
 ) -> bool:
     normalized = norm_name.strip().lower()
     if not normalized:
@@ -1238,7 +1238,7 @@ def bulk_ignore_devices(
     kind: str,
     updated_by: str = "agent_compliance",
     reason: str | None = None,
-    expires_days: int | None = 90,
+    expires_days: int | None = 30,
 ) -> int | None:
     """Ignore a guarded set of current device findings.
 

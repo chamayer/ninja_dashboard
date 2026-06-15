@@ -108,6 +108,23 @@ def run_agent_compliance_once() -> None:
     log.info("Agent compliance run complete")
 
 
+def run_agent_compliance_evaluate_once() -> None:
+    if not settings.AGENT_COMPLIANCE_ENABLED:
+        log.info("Agent compliance disabled; skipping evaluate")
+        return
+    log.info("Agent compliance evaluate starting")
+    agent_compliance_ingest.evaluate(send_alerts=False)
+    log.info("Agent compliance evaluate complete")
+
+
+def schedule_agent_compliance_evaluate(reason: str) -> bool:
+    if not settings.AGENT_COMPLIANCE_ENABLED or not _READY.is_set():
+        return False
+    log.info("Scheduling agent compliance evaluate: %s", reason)
+    threading.Thread(target=run_agent_compliance_evaluate_once, daemon=True).start()
+    return True
+
+
 def _safe(name: str, func, *args) -> None:
     try:
         func(*args)
@@ -270,6 +287,12 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 return
             threading.Thread(target=run_agent_compliance_once, daemon=True).start()
             self._respond(202, b"agent compliance run scheduled\n")
+        elif self.path == "/run/agent-compliance-evaluate":
+            if not _READY.is_set():
+                self._respond(503, b"still starting - try again shortly\n")
+                return
+            threading.Thread(target=run_agent_compliance_evaluate_once, daemon=True).start()
+            self._respond(202, b"agent compliance evaluate scheduled\n")
         elif self.path == "/bootstrap-metabase":
             threading.Thread(target=bootstrap_metabase, daemon=True).start()
             self._respond(202, b"metabase bootstrap scheduled\n")
@@ -300,9 +323,6 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         }.get(parsed.path, parsed.path)
         params = parse_qs(parsed.query)
         confirm = params.get("confirm", ["0"])[0]
-        if confirm != "1":
-            self._respond(400, b"missing confirm=1\n")
-            return
 
         def _text_param(*names: str, hex_names: tuple[str, ...] = ()) -> str | None:
             for name in names:
@@ -319,6 +339,53 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                     self._respond(400, f"invalid {name}\n".encode("utf-8"))
                     return None
             return None
+
+        if path == "/agent-compliance/action/ignore-device" and confirm != "1":
+            client_name = _text_param("client", "client_name", hex_names=("client_hex",)) or ""
+            hostname = _text_param("host", "hostname", hex_names=("host_hex",)) or ""
+            if not client_name or not hostname:
+                self._respond(400, b"missing client or host\n")
+                return
+            body = f"""
+                <!doctype html>
+                <html>
+                <head>
+                  <meta charset="utf-8">
+                  <title>Ignore device issue</title>
+                  <style>
+                    body {{ font-family: sans-serif; margin: 24px; color: #1f2933; }}
+                    label {{ display: block; font-weight: 700; margin: 16px 0 6px; }}
+                    input {{ font-size: 16px; padding: 8px 10px; width: 120px; }}
+                    button {{ margin-top: 18px; padding: 9px 14px; font-weight: 700; }}
+                    .hint {{ color: #52606d; max-width: 620px; }}
+                  </style>
+                </head>
+                <body>
+                  <h2>Ignore device issue</h2>
+                  <p class="hint">Hide <strong>{escape(hostname)}</strong> for <strong>{escape(client_name)}</strong> from device issue queues. This is reversible from the Devices dashboard.</p>
+                  <form method="get" action="/a/ig">
+                    <input type="hidden" name="client" value="{escape(client_name)}">
+                    <input type="hidden" name="host" value="{escape(hostname)}">
+                    <input type="hidden" name="confirm" value="1">
+                    <label for="days">Ignore for days</label>
+                    <input id="days" name="days" type="number" min="1" max="365" value="30" required>
+                    <br>
+                    <button type="submit">Ignore device</button>
+                  </form>
+                </body>
+                </html>
+            """.encode("utf-8")
+            self._respond_html(200, body)
+            return
+
+        if confirm != "1":
+            self._respond(400, b"missing confirm=1\n")
+            return
+
+        def _respond_with_refresh(message: str, reason: str) -> None:
+            scheduled = schedule_agent_compliance_evaluate(reason)
+            suffix = "; compliance refresh scheduled" if scheduled else ""
+            self._respond(200, f"{message}{suffix}\n".encode("utf-8"))
 
         if path == "/agent-compliance/action/manual-alias":
             platform = _text_param("platform") or ""
@@ -416,8 +483,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 self._respond(400, b"placeholder names are not valid aliases\n")
                 return
             count = promote_alignment_aliases(client_id, platform=platform, alias_value=alias_value)
-            body = f"added {count} alias row(s)\n".encode("utf-8")
-            self._respond(200, body)
+            _respond_with_refresh(f"added {count} alias row(s)", "alias added")
             return
 
         if path == "/agent-compliance/action/approve-customer":
@@ -426,8 +492,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 self._respond(400, b"missing customer name\n")
                 return
             if approve_customer_name(customer_name, updated_by="operator_dashboard"):
-                body = f"approved customer {customer_name}\n".encode("utf-8")
-                self._respond(200, body)
+                _respond_with_refresh(f"approved customer {customer_name}", "customer approved")
             else:
                 self._respond(400, b"blank or placeholder customer name\n")
             return
@@ -448,8 +513,10 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             if result is None:
                 self._respond(400, b"invalid customer, scope, or profile\n")
                 return
-            body = f"set {customer_name} {scope} coverage to {result}\n".encode("utf-8")
-            self._respond(200, body)
+            _respond_with_refresh(
+                f"set {customer_name} {scope} coverage to {result}",
+                "required coverage changed",
+            )
             return
 
         if path == "/agent-compliance/action/toggle-platform-requirement":
@@ -468,8 +535,10 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             if result is None:
                 self._respond(400, b"invalid customer, scope, or platform\n")
                 return
-            body = f"set {customer_name} {scope} required platforms to {result}\n".encode("utf-8")
-            self._respond(200, body)
+            _respond_with_refresh(
+                f"set {customer_name} {scope} required platforms to {result}",
+                "required platform changed",
+            )
             return
 
         if path == "/agent-compliance/action/exclude-org":
@@ -478,8 +547,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 self._respond(400, b"missing pattern\n")
                 return
             if add_org_exclude(pattern, notes="Added from operator dashboard"):
-                body = f"excluded {pattern}\n".encode("utf-8")
-                self._respond(200, body)
+                _respond_with_refresh(f"excluded {pattern}", "customer name excluded")
             else:
                 self._respond(400, b"blank pattern\n")
             return
@@ -490,8 +558,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 self._respond(400, b"missing pattern\n")
                 return
             if remove_org_exclude(pattern):
-                body = f"restored {pattern}\n".encode("utf-8")
-                self._respond(200, body)
+                _respond_with_refresh(f"restored {pattern}", "customer name restored")
             else:
                 self._respond(404, b"not found or not removable\n")
             return
@@ -499,7 +566,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         if path == "/agent-compliance/action/ignore-device":
             client_name = _text_param("client", "client_name", hex_names=("client_hex",))
             hostname = _text_param("host", "hostname", hex_names=("host_hex",))
-            days_value = _text_param("days") or "90"
+            days_value = _text_param("days") or "30"
             if not client_name or not hostname:
                 self._respond(400, b"missing client or host\n")
                 return
@@ -507,6 +574,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 expires_days = int(days_value)
             except ValueError:
                 self._respond(400, b"invalid days\n")
+                return
+            if expires_days < 1 or expires_days > 365:
+                self._respond(400, b"days must be between 1 and 365\n")
                 return
             with db.transaction() as cur:
                 cur.execute(
@@ -526,8 +596,10 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 return
             client_id, norm_name = row
             if add_device_ignore(client_id, norm_name, display_name=hostname, expires_days=expires_days):
-                body = f"ignored {norm_name} for {expires_days} day(s)\n".encode("utf-8")
-                self._respond(200, body)
+                _respond_with_refresh(
+                    f"ignored {norm_name} for {expires_days} day(s)",
+                    "device ignored",
+                )
             else:
                 self._respond(400, b"blank norm_name\n")
             return
@@ -545,13 +617,15 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             if result is None:
                 self._respond(400, b"invalid customer, scope, or days (1-365)\n")
                 return
-            body = f"set {customer_name} {scope} max age to {result} days\n".encode("utf-8")
-            self._respond(200, body)
+            _respond_with_refresh(
+                f"set {customer_name} {scope} max age to {result} days",
+                "stale threshold changed",
+            )
             return
 
         if path == "/agent-compliance/action/bulk-ignore-stale":
             client_name = _text_param("client", "client_name", "customer", hex_names=("client_hex", "customer_hex"))
-            days_value = _text_param("days") or "90"
+            days_value = _text_param("days") or "30"
             if not client_name:
                 self._respond(400, b"missing client\n")
                 return
@@ -559,6 +633,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 expires_days = int(days_value)
             except ValueError:
                 self._respond(400, b"invalid days\n")
+                return
+            if expires_days < 1 or expires_days > 365:
+                self._respond(400, b"days must be between 1 and 365\n")
                 return
             count = bulk_ignore_devices(
                 client_name,
@@ -569,8 +646,10 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             if count is None:
                 self._respond(400, b"invalid client or kind\n")
                 return
-            body = f"bulk ignored {count} stale device(s) for {client_name} for {expires_days} day(s)\n".encode("utf-8")
-            self._respond(200, body)
+            _respond_with_refresh(
+                f"bulk ignored {count} stale device(s) for {client_name} for {expires_days} day(s)",
+                "bulk stale devices ignored",
+            )
             return
 
         if path == "/agent-compliance/action/unignore-device":
@@ -597,8 +676,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 return
             client_id, norm_name = row
             if remove_device_ignore(client_id, norm_name):
-                body = f"restored {norm_name}\n".encode("utf-8")
-                self._respond(200, body)
+                _respond_with_refresh(f"restored {norm_name}", "device ignore removed")
             else:
                 self._respond(404, b"not found or not removable\n")
             return
@@ -757,7 +835,7 @@ def _start_http_server() -> _ThreadingServer:
     log.info(
         "HTTP server listening on %s:%d "
         "(/healthz liveness, /readyz readiness, /run, /run/patches, "
-        "/run/agent-compliance, /bootstrap-metabase)",
+        "/run/agent-compliance, /run/agent-compliance-evaluate, /bootstrap-metabase)",
         *addr,
     )
     return httpd

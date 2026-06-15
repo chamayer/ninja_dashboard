@@ -95,6 +95,7 @@ def _card(
     size_y: int,
     click_behavior: dict[str, Any] | None = None,
     column_click_behaviors: dict[str, dict[str, Any]] | None = None,
+    column_widths: dict[str, int] | None = None,
     template_tags: dict[str, dict[str, Any]] | None = None,
     param_mappings: dict[str, list[Any]] | None = None,
 ) -> dict[str, Any]:
@@ -112,6 +113,8 @@ def _card(
         card["click_behavior"] = click_behavior
     if column_click_behaviors is not None:
         card["column_click_behaviors"] = column_click_behaviors
+    if column_widths is not None:
+        card["column_widths"] = column_widths
     if template_tags is not None:
         card["template_tags"] = template_tags
     if param_mappings is not None:
@@ -132,9 +135,12 @@ def _dashboard_link(
     return spec
 
 
-def _url_template(path: str, params: list[tuple[str, str]]) -> str:
+def _url_template(path: str, params: list[tuple[str, str]], confirm: bool = True) -> str:
     query = "&".join(f"{key}={{{{{field}}}}}" for key, field in params)
-    suffix = f"?{query}&confirm=1" if query else "?confirm=1"
+    if confirm:
+        suffix = f"?{query}&confirm=1" if query else "?confirm=1"
+    else:
+        suffix = f"?{query}" if query else ""
     return f"{ACTION_BASE_URL}{path}{suffix}"
 
 
@@ -1949,7 +1955,7 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                             COALESCE(array_to_string(missing_platforms, ', '), '-') AS "Missing",
                             COALESCE(TO_CHAR(last_seen_anywhere, 'YYYY-MM-DD HH24:MI'), 'Never') AS "Last seen",
                             work_state AS "State",
-                            'Ignore 90d' AS "Action"
+                            'Ignore' AS "Action"
                         FROM ninja_agent_compliance.v_device_work_queue
                         WHERE 1=1
                           [[AND client_name IN ({{customer}})]]
@@ -1984,8 +1990,19 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                             "url_template": _url_template(
                                 "/a/ig",
                                 [("client", "Customer"), ("host", "Device")],
+                                confirm=False,
                             ),
                         },
+                    },
+                    column_widths={
+                        "Customer": 220,
+                        "Device": 180,
+                        "Issue": 340,
+                        "Seen online in": 170,
+                        "Missing": 180,
+                        "Last seen": 150,
+                        "State": 100,
+                        "Action": 90,
                     },
                     template_tags=_DEVICES_FILTER_TAGS,
                     param_mappings={
@@ -2061,7 +2078,7 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                             client_name AS "Customer",
                             COUNT(*) AS "Stale devices",
                             COALESCE(TO_CHAR(MAX(last_seen_anywhere), 'YYYY-MM-DD HH24:MI'), 'Never') AS "Last seen",
-                            'Ignore 90d' AS "Action"
+                            'Ignore 30d' AS "Action"
                         FROM ninja_agent_compliance.v_device_work_queue
                         WHERE work_state = 'Stale'
                           [[AND client_name IN ({{customer}})]]
@@ -2327,6 +2344,15 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                         LIMIT 300
                     """,
                     0, 0, 24, 10,
+                    column_widths={
+                        "Severity": 90,
+                        "Customer": 220,
+                        "Device": 180,
+                        "Issue": 300,
+                        "Route": 180,
+                        "Why": 260,
+                        "Summary": 420,
+                    },
                     template_tags=_ALERTS_FILTER_TAGS,
                     param_mappings={
                         PARAM_AL_CUSTOMER: _mapping("customer"),
@@ -2345,8 +2371,7 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                             COALESCE(hostname, '-') AS "Device",
                             issue AS "Issue",
                             notification_status AS "Why not notifying",
-                            COALESCE(route_name, 'No route') AS "Route",
-                            summary AS "Summary"
+                            COALESCE(TO_CHAR(last_seen_at, 'YYYY-MM-DD HH24:MI'), 'Unknown') AS "Last seen"
                         FROM ninja_agent_compliance.v_notification_queue
                         WHERE NOT ready_to_notify
                           [[AND client_name IN ({{customer}})]]
@@ -2359,6 +2384,14 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                         LIMIT 300
                     """,
                     12, 0, 24, 10,
+                    column_widths={
+                        "Severity": 90,
+                        "Customer": 220,
+                        "Device": 180,
+                        "Issue": 300,
+                        "Why not notifying": 420,
+                        "Last seen": 150,
+                    },
                     template_tags=_ALERTS_FILTER_TAGS,
                     param_mappings={
                         PARAM_AL_CUSTOMER: _mapping("customer"),
@@ -3183,10 +3216,12 @@ def _build_column_settings(
     dash_id_by_name: dict[str, int] | None = None,
 ) -> dict[str, dict[str, Any]]:
     column_settings: dict[str, dict[str, Any]] = {}
+    for col, width in (spec.get("column_widths") or {}).items():
+        column_settings[f'["name","{col}"]'] = {"column_width": int(width)}
     for col, col_spec in (spec.get("column_click_behaviors") or {}).items():
         cb = _build_click_behavior_json(col_spec, dash_id_by_name or {})
         if cb:
-            column_settings[f'["name","{col}"]'] = {"click_behavior": cb}
+            column_settings.setdefault(f'["name","{col}"]', {})["click_behavior"] = cb
     return column_settings
 
 

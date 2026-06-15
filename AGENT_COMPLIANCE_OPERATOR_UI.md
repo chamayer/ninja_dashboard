@@ -31,7 +31,8 @@ Actions should be short and obvious:
 
 - open device;
 - review finding;
-- ignore device;
+- ignore device, defaulting to 30 days but allowing the person to enter
+  another duration;
 - restore device;
 - add alias;
 - exclude org;

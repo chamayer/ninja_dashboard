@@ -2,6 +2,26 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.23.0] — 2026-06-15
+
+### Changed
+- Split Agent Compliance into two operational paths:
+  full collection still pulls vendor data, while evaluate-only refreshes
+  the current compliance model from the latest stored observations.
+- Added `POST /run/agent-compliance-evaluate` for quick compliance
+  refreshes without calling Ninja, SentinelOne, LogMeIn, or
+  ScreenConnect.
+- Customer/alias/requirement/exclusion/stale-threshold/device-ignore
+  dashboard actions now schedule an evaluate-only refresh so the
+  dashboard reflects configuration changes without waiting for the next
+  vendor collection cycle.
+- Evaluate-only re-resolves latest observations against current aliases
+  and customer config before rebuilding the compliance matrix.
+- Device ignore actions now default to 30 days and open a small duration
+  form instead of hard-coding a 90-day ignore from the table.
+- Tightened table column widths on primary device and alert work queues,
+  and removed low-value route detail from `Open issues not notifying`.
+
 ## [0.22.2] — 2026-06-15
 
 ### Changed

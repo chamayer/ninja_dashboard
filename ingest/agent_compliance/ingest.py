@@ -94,6 +94,124 @@ def run() -> tuple[int, int]:
         return len(matrix_rows), len(finding_rows)
 
 
+def evaluate(send_alerts: bool = False) -> tuple[int, int]:
+    """Recalculate compliance from the latest stored observations.
+
+    This is intentionally not a collector. It does not call vendor APIs
+    or create source_runs. It lets policy/alias/ignore changes refresh
+    the current compliance model quickly while scheduled full runs keep
+    raw facts fresh.
+    """
+    observed_at = datetime.now(timezone.utc)
+    with run_log("agent_compliance.evaluate") as stats:
+        run_id = stats["run_id"]
+        sources = load_sources()
+        requirements = load_requirements()
+        clients = load_clients()
+        aliases = load_aliases()
+        observations = _resolve_latest_observations(sources, clients, aliases)
+        source_status = _load_latest_source_status()
+        alignment_by_client = _load_alignment_by_client()
+
+        matrix_rows, finding_rows = _build_matrix_and_findings(
+            run_id=run_id,
+            observed_at=observed_at,
+            observations=observations,
+            clients=clients,
+            requirements=requirements,
+            sources=sources,
+            source_status=source_status,
+            alignment_by_client=alignment_by_client,
+        )
+        _write_matrix(run_id, matrix_rows)
+        _write_findings(finding_rows)
+        alerts_sent = alerts.process_alerts(run_id, observed_at) if send_alerts else 0
+
+        stats["rows_inserted"] = len(matrix_rows) + len(finding_rows)
+        stats["rows_upserted"] = len(matrix_rows)
+        stats["alerts_sent"] = alerts_sent
+        return len(matrix_rows), len(finding_rows)
+
+
+def _load_latest_observations() -> list[dict[str, Any]]:
+    """Load latest successful observation set per source.
+
+    If a source's latest run failed, the last successful observations
+    are still useful facts for identity/device context; source health is
+    applied separately via `_load_latest_source_status`.
+    """
+    with db.transaction() as cur:
+        cur.execute(
+            """
+            WITH latest_ok_runs AS (
+                SELECT DISTINCT ON (sr.source_id)
+                    sr.source_id,
+                    sr.source_run_id
+                FROM ninja_agent_compliance.source_runs sr
+                WHERE sr.status = 'ok'
+                ORDER BY sr.source_id, sr.started_at DESC
+            )
+            SELECT
+                po.observed_at,
+                po.platform,
+                po.source_id,
+                po.source_name,
+                po.source_client_name,
+                po.resolved_client_id,
+                po.resolved_client_name,
+                po.platform_group_name,
+                po.platform_group_id,
+                po.platform_device_id,
+                po.hostname,
+                po.norm_name,
+                po.match_name,
+                po.device_type,
+                po.os_name,
+                po.domain_name,
+                po.is_online,
+                po.last_seen_at,
+                po.resolution_method,
+                po.confidence,
+                po.raw_data
+            FROM ninja_agent_compliance.platform_observations po
+            JOIN latest_ok_runs lr ON lr.source_run_id = po.source_run_id
+            ORDER BY po.platform, po.source_id, po.hostname
+            """
+        )
+        columns = [desc.name for desc in cur.description]
+        return [dict(zip(columns, row, strict=True)) for row in cur.fetchall()]
+
+
+def _resolve_latest_observations(
+    sources: list[SourceConfig],
+    clients: dict[int, Any],
+    aliases: dict[tuple[str, str, str], int],
+) -> list[dict[str, Any]]:
+    source_by_id = {source.source_id: source for source in sources}
+    rows_by_source: dict[int, list[dict[str, Any]]] = {}
+    for obs in _load_latest_observations():
+        source_id = obs.get("source_id")
+        if source_id in source_by_id:
+            rows_by_source.setdefault(source_id, []).append(obs)
+
+    resolved: list[dict[str, Any]] = []
+    for source_id, rows in rows_by_source.items():
+        resolved.extend(_resolve_observations(rows, source_by_id[source_id], clients, aliases))
+    return resolved
+
+
+def _load_latest_source_status() -> dict[int, str]:
+    with db.transaction() as cur:
+        cur.execute(
+            """
+            SELECT source_id, status
+            FROM ninja_agent_compliance.v_source_health_current
+            WHERE enabled
+            """
+        )
+        return {int(row[0]): row[1] for row in cur.fetchall()}
+
+
 def _clear_stuck_source_runs() -> None:
     """Reap source_runs left in 'running' from a prior crash.
 

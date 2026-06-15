@@ -5,6 +5,28 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-15 — v0.23.0 Agent Compliance evaluate-only refresh
+
+**Why:** Required-platform and alias changes should not wait for the
+next multi-hour vendor collection cycle. Ingest should collect facts;
+the compliance model should be able to re-evaluate those facts whenever
+configuration changes.
+
+**Done:**
+- Added an evaluate-only Agent Compliance path that rebuilds the current
+  compliance matrix and findings from the latest successful stored
+  observations per source.
+- Evaluate-only re-resolves stored observations against current customer
+  and alias config before writing the matrix, so alias/customer changes
+  take effect without a full vendor pull.
+- Added `POST /run/agent-compliance-evaluate`.
+- Customer, alias, requirement, exclusion, stale-threshold, and
+  device-ignore actions now schedule an evaluate-only refresh.
+- Device ignore defaults changed from 90 days to 30 days, with a small
+  duration form when clicking `Ignore`.
+- Cleaned primary table ergonomics: fixed important column widths and
+  removed the low-value route column from `Open issues not notifying`.
+
 ## 2026-06-15 — v0.22.2 Today actionable device count
 
 **Why:** `Devices to fix` on Today still included stale-only devices,
