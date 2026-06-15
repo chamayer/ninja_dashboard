@@ -1,33 +1,30 @@
 # Goal
-Make the Today KPI row match the operator compliance model.
+Fix and complete the Today compliance KPIs.
 
 # Why
-Compliance means devices that are still in scope have all required
-platforms. Stale devices are usually offline/decommissioned candidates,
-so they should be counted separately and not pull down compliance
-percentage.
+The Compliant % card used `is_compliant`, but `v_all_devices_human` does
+not expose that column. The operator also wants to see the compliant
+device count, not only a percentage.
 
 # Scope
-- Change only the active Level 1 Today top KPI row.
-- Add Stale as a first-row KPI.
-- Calculate Compliant % as compliant / non-stale, non-ignored devices.
-- Keep Ready to notify, Names to review, and Collection issues on row 2.
-- Do not change compliance evaluation logic.
+- Change only the active Level 1 Today Compliant % query.
+- Add a `Compliant devices` KPI beside `Compliant %`.
+- Keep stale and ignored devices out of the denominator.
+- Do not change compliance evaluation logic or dashboard layout.
 
 # Files to change
-- `ingest/agent_compliance/metabase_bootstrap.py` - Today KPI queries and layout.
+- `ingest/agent_compliance/metabase_bootstrap.py` - Today compliance KPI queries.
 - `CHANGELOG.md` - note dashboard behavior.
 - `SESSIONS.md` - session note.
 
 # Steps
-1. Change Compliant % to divide by non-stale, non-ignored devices.
-2. Add Stale KPI to row 1.
-3. Reflow row 1 to five cards and row 2 to three cards.
-4. Move lower Today cards down to avoid overlap.
-5. Run syntax and diff checks.
+1. Replace `is_compliant` with exposed `state = 'Good'`.
+2. Add `Compliant devices` using `state = 'Good' AND NOT ignored`.
+3. Keep denominator as non-stale, non-ignored devices.
+4. Run syntax and diff checks.
 
 # Open questions
 - None for this pass.
 
 # Status
-done - pending review/commit
+done - pending commit

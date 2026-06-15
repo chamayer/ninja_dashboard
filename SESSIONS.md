@@ -5,6 +5,21 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-15 — v0.26.3 Compliant KPI query fix
+
+**Why:** The Today `Compliant %` card used `is_compliant`, but
+`v_all_devices_human` does not expose that column.
+
+**Done:**
+- Changed the KPI numerator to `state = 'Good' AND NOT ignored`.
+- Kept the denominator as non-stale, non-ignored devices so stale
+  devices do not pull down compliance.
+- Added `Compliant devices` next to `Compliant %` in the first Today
+  KPI row.
+
+**Pending:**
+- Bootstrap Metabase and confirm the card loads.
+
 ## 2026-06-15 — v0.26.2 Compliance KPI excludes stale devices
 
 **Why:** The operator clarified that compliance means "for devices I

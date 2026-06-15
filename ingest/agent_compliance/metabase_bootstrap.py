@@ -1778,7 +1778,20 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                         SELECT COUNT(*) AS "Total devices"
                         FROM ninja_agent_compliance.v_all_devices_human
                     """,
-                    0, 0, 5, 4,
+                    0, 0, 4, 4,
+                    click_behavior=_dashboard_link(DASH_DEVICES),
+                ),
+                _card(
+                    "today_compliant_devices",
+                    "Compliant devices",
+                    "scalar",
+                    """
+                        SELECT COUNT(*) AS "Compliant devices"
+                        FROM ninja_agent_compliance.v_all_devices_human
+                        WHERE state = 'Good'
+                          AND NOT ignored
+                    """,
+                    0, 4, 4, 4,
                     click_behavior=_dashboard_link(DASH_DEVICES),
                 ),
                 _card(
@@ -1787,13 +1800,13 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                     "scalar",
                     """
                         SELECT ROUND(
-                            COUNT(*) FILTER (WHERE is_compliant AND state <> 'Stale' AND NOT ignored) * 100.0
+                            COUNT(*) FILTER (WHERE state = 'Good' AND NOT ignored) * 100.0
                                 / NULLIF(COUNT(*) FILTER (WHERE state <> 'Stale' AND NOT ignored), 0),
                             1
                         ) AS "Compliant %"
                         FROM ninja_agent_compliance.v_all_devices_human
                     """,
-                    0, 5, 5, 4,
+                    0, 8, 4, 4,
                     click_behavior=_dashboard_link(DASH_DEVICES),
                 ),
                 _card(
@@ -1805,7 +1818,7 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                         FROM ninja_agent_compliance.v_device_work_queue
                         WHERE work_state = 'Fix now'
                     """,
-                    0, 10, 5, 4,
+                    0, 12, 4, 4,
                     click_behavior=_dashboard_link(DASH_DEVICES),
                 ),
                 _card(
@@ -1817,7 +1830,7 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                         FROM ninja_agent_compliance.v_device_work_queue
                         WHERE work_state = 'Review'
                     """,
-                    0, 15, 5, 4,
+                    0, 16, 4, 4,
                     click_behavior=_dashboard_link(DASH_DEVICES),
                 ),
                 _card(

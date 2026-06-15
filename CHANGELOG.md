@@ -2,6 +2,15 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.26.3] — 2026-06-15
+
+### Fixed
+- Fixed the Today `Compliant %` card to use columns exposed by
+  `v_all_devices_human`. The formula still excludes stale and ignored
+  devices from the denominator.
+- Added a first-row `Compliant devices` KPI next to `Compliant %` so
+  operators can see both the raw count and the percentage.
+
 ## [0.26.2] — 2026-06-15
 
 ### Changed
