@@ -2,6 +2,35 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.26.0] — 2026-06-15
+
+### Added
+- Review digest: daily cron job that rolls all current Review-class
+  findings (`confirmed_gap = false` on missing / stale required
+  platform) into one notification delivered via a new `review_digest`
+  notification route. Distinct from the first-success per-finding
+  alerts in `alerts.py` so judgment-call work gets one summary
+  instead of being paged.
+- New module `ingest.agent_compliance.review_digest` with
+  `send_review_digest(now)`.
+- New scheduled job `agent_compliance_review_digest` (cron, daily at
+  `AGENT_COMPLIANCE_REVIEW_DIGEST_HOUR` UTC, default 08).
+- New endpoint `POST /run/agent-compliance-review-digest` for manual
+  trigger / testing.
+- Migration 046 seeds the `review_digest` row in
+  `notification_routes` (disabled by default; turn on once
+  `AGENT_COMPLIANCE_REVIEW_DIGEST_WEBHOOK_URL` is set on the host).
+- Settings: `AGENT_COMPLIANCE_REVIEW_DIGEST_ENABLED`,
+  `AGENT_COMPLIANCE_REVIEW_DIGEST_HOUR`, and the matching env-var ref
+  for the webhook URL.
+
+### Notes
+- Digest payload includes `total_open`, breakdowns by customer and
+  finding type, and up to 100 sample items. Delivery is recorded in
+  `alert_events` with `event_type='review_digest'` and a synthetic
+  finding signature `review_digest:YYYY-MM-DDTHH` so it lives
+  alongside per-finding events on the Alerts dashboard.
+
 ## [0.25.1] — 2026-06-15
 
 ### Changed

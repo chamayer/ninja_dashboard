@@ -5,6 +5,40 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-15 — v0.26.0 Review digest (Phase 2)
+
+**Why:** Operator direction: confirmed gaps page (Phase 1), Review-
+class items get one daily summary instead. This completes the alert
+policy: Fix-now → first-success per-finding alerts, Review → daily
+digest.
+
+**Done:**
+- Added `ingest.agent_compliance.review_digest.send_review_digest()`
+  which loads active findings with `confirmed_gap = false` and finding
+  type in `missing_required_platform` / `stale_required_platform`,
+  composes a JSON payload (totals, by-customer, by-finding-type,
+  sample items), and POSTs to the `review_digest` notification route.
+- Cron scheduled in `main.py` (daily at
+  `AGENT_COMPLIANCE_REVIEW_DIGEST_HOUR` UTC, default 08:00). Guarded
+  by `AGENT_COMPLIANCE_REVIEW_DIGEST_ENABLED`.
+- Manual trigger via `POST /run/agent-compliance-review-digest`.
+- Migration 046 inserts the `review_digest` row in
+  `notification_routes` (disabled by default; target_ref points at
+  `AGENT_COMPLIANCE_REVIEW_DIGEST_WEBHOOK_URL`). Operator enables
+  via Setup once the env var is set.
+- Delivery recorded in `alert_events` with a synthetic finding
+  signature `review_digest:YYYY-MM-DDTHH` so historical digests show
+  up on the Alerts dashboard alongside per-finding events.
+
+**Operator workflow to enable:**
+1. Set `AGENT_COMPLIANCE_REVIEW_DIGEST_WEBHOOK_URL=...` and
+   `AGENT_COMPLIANCE_REVIEW_DIGEST_ENABLED=true` in
+   `/amr-ch-01_data/ninja-dashboard/.env`.
+2. Redeploy.
+3. Turn on the `review_digest` route in the Setup dashboard.
+4. Test with `curl -X POST
+   http://10.61.50.28:8090/run/agent-compliance-review-digest`.
+
 ## 2026-06-15 — v0.25.1 KPI split + breakdown reconciliation (Phase 3)
 
 **Why:** The breakdown sums did not match the `Devices to fix` KPI

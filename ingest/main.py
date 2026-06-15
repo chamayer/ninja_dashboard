@@ -37,6 +37,8 @@ from ingest.config import settings
 from ingest.logging_utils import install_log_safety
 from ingest.activities import ingest as activities_ingest
 from ingest.agent_compliance import ingest as agent_compliance_ingest
+from ingest.agent_compliance import review_digest
+from ingest.runlog import run_log
 from ingest.agent_compliance.config_loader import (
     add_device_ignore,
     add_org_exclude,
@@ -136,6 +138,20 @@ def schedule_agent_compliance_evaluate(reason: str) -> bool:
     log.info("Scheduling agent compliance evaluate: %s", reason)
     threading.Thread(target=run_agent_compliance_evaluate_once, daemon=True).start()
     return True
+
+
+def run_review_digest_once() -> None:
+    if not settings.AGENT_COMPLIANCE_ENABLED:
+        log.info("Agent compliance disabled; skipping review digest")
+        return
+    if not settings.AGENT_COMPLIANCE_REVIEW_DIGEST_ENABLED:
+        log.info("Review digest disabled; skipping")
+        return
+    log.info("Review digest starting")
+    with run_log("agent_compliance.review_digest") as stats:
+        sent = review_digest.send_review_digest(datetime.now(timezone.utc))
+        stats["alerts_sent"] = sent
+    log.info("Review digest complete")
 
 
 def _safe(name: str, func, *args) -> None:
@@ -306,6 +322,12 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 return
             threading.Thread(target=run_agent_compliance_evaluate_once, daemon=True).start()
             self._respond(202, b"agent compliance evaluate scheduled\n")
+        elif self.path == "/run/agent-compliance-review-digest":
+            if not _READY.is_set():
+                self._respond(503, b"still starting - try again shortly\n")
+                return
+            threading.Thread(target=run_review_digest_once, daemon=True).start()
+            self._respond(202, b"review digest scheduled\n")
         elif self.path == "/bootstrap-metabase":
             threading.Thread(target=bootstrap_metabase, daemon=True).start()
             self._respond(202, b"metabase bootstrap scheduled\n")
@@ -898,6 +920,15 @@ def main() -> None:
             id="agent_compliance_evaluate_cycle",
             max_instances=1,
         )
+        if settings.AGENT_COMPLIANCE_REVIEW_DIGEST_ENABLED:
+            scheduler.add_job(
+                run_review_digest_once,
+                "cron",
+                hour=settings.AGENT_COMPLIANCE_REVIEW_DIGEST_HOUR,
+                minute=0,
+                id="agent_compliance_review_digest",
+                max_instances=1,
+            )
     scheduler.start()
     log.info(
         "Patch scheduler started (every %dh)",
@@ -912,6 +943,11 @@ def main() -> None:
             "Agent compliance evaluate scheduler started (every %dm)",
             settings.AGENT_COMPLIANCE_EVALUATE_SCHEDULE_MINUTES,
         )
+        if settings.AGENT_COMPLIANCE_REVIEW_DIGEST_ENABLED:
+            log.info(
+                "Review digest scheduler started (daily at %02d:00 UTC)",
+                settings.AGENT_COMPLIANCE_REVIEW_DIGEST_HOUR,
+            )
 
     if should_catch_up("patches", settings.patch_ingest_schedule_hours):
         log.info(
