@@ -2,6 +2,19 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.22.2] — 2026-06-15
+
+### Changed
+- The Today `Devices to fix` KPI now counts only active online/actionable
+  work states: `Fix now` and `Review`.
+- Stale-only devices remain visible on the Devices dashboard under stale
+  maintenance, but no longer inflate the Today landing-page action count
+  or top device preview.
+- Simplified device workflow states to `Fix now`, `Review`, `Stale`,
+  `Ignored`, and `Good`. Degraded agents, cross-customer conflicts, and
+  unknown states now appear as issue text instead of separate workflow
+  states.
+
 ## [0.22.1] — 2026-06-15
 
 ### Changed

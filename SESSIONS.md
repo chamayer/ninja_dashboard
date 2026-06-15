@@ -5,6 +5,23 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-15 — v0.22.2 Today actionable device count
+
+**Why:** `Devices to fix` on Today still included stale-only devices,
+which made the landing-page number too large and less actionable. Stale
+devices are maintenance work, not the same as an online device missing a
+required platform.
+
+**Done:**
+- Today `Devices to fix` now counts only `Fix now` and `Review`.
+- Today `Top device issues` uses the same active-work filter.
+- Stale-only devices remain visible on Devices under stale maintenance.
+- Added migration `038_agent_compliance_simplify_device_states.sql`.
+- Simplified workflow states to `Fix now`, `Review`, `Stale`,
+  `Ignored`, and `Good`.
+- Degraded agents, cross-customer conflicts, and unknown states are now
+  issue details under `Review`, not separate state/filter values.
+
 ## 2026-06-15 — v0.22.1 Today card order
 
 **Why:** The Today top row should start with total inventory context,

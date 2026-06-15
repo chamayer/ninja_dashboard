@@ -60,7 +60,7 @@ PARAM_AL_TYPE = "p_al_type"
 PARAM_CU_REVIEW_NAME = "p_cu_review_name"
 
 PLATFORM_VALUES = ["Ninja", "ScreenConnect", "SentinelOne", "LogMeIn"]
-STATE_VALUES = ["Fix now", "Review", "Stale", "Degraded", "Conflict", "Good", "Ignored", "Unknown"]
+STATE_VALUES = ["Fix now", "Review", "Stale", "Ignored", "Good"]
 AV_EXEMPT_VALUES = ["Yes", "No"]
 SEVERITY_VALUES = ["critical", "high", "medium", "info"]
 FINDING_TYPE_VALUES = [
@@ -1812,6 +1812,7 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                     """
                         SELECT COUNT(*) AS "Devices to fix"
                         FROM ninja_agent_compliance.v_device_work_queue
+                        WHERE work_state IN ('Fix now', 'Review')
                     """,
                     0, 8, 4, 4,
                     click_behavior=_dashboard_link(DASH_DEVICES),
@@ -1862,13 +1863,12 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                             COALESCE(TO_CHAR(last_seen_anywhere, 'YYYY-MM-DD HH24:MI'), 'Never') AS "Last seen",
                             work_state AS "State"
                         FROM ninja_agent_compliance.v_device_work_queue
+                        WHERE work_state IN ('Fix now', 'Review')
                         ORDER BY
                             CASE work_state
                                 WHEN 'Fix now' THEN 0
-                                WHEN 'Conflict' THEN 1
-                                WHEN 'Degraded' THEN 2
-                                WHEN 'Review' THEN 3
-                                WHEN 'Stale' THEN 4
+                                WHEN 'Review' THEN 1
+                                WHEN 'Stale' THEN 2
                                 ELSE 5
                             END,
                             client_name,
@@ -1966,10 +1966,8 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                         ORDER BY
                             CASE work_state
                                 WHEN 'Fix now' THEN 0
-                                WHEN 'Conflict' THEN 1
-                                WHEN 'Degraded' THEN 2
-                                WHEN 'Review' THEN 3
-                                WHEN 'Stale' THEN 4
+                                WHEN 'Review' THEN 1
+                                WHEN 'Stale' THEN 2
                                 ELSE 5
                             END,
                             client_name,
