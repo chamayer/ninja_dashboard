@@ -1055,7 +1055,7 @@ _LEGACY_DASHBOARDS_UNUSED = [
         "section_headers": [
             {"row": 0, "text": "### Alert rules"},
             {"row": 8, "text": "### Customer alert setup"},
-            {"row": 18, "text": "### Would fire on next run"},
+            {"row": 18, "text": "### First notifications ready"},
             {"row": 28, "text": "### Active findings"},
             {"row": 40, "text": "### Recent deliveries"},
         ],
@@ -1083,7 +1083,6 @@ _LEGACY_DASHBOARDS_UNUSED = [
                         r.severity AS "Severity",
                         COALESCE(nr.display_name, 'No route') AS "Route",
                         CASE WHEN nr.enabled THEN 'On' WHEN nr.enabled IS FALSE THEN 'Off' ELSE 'No route' END AS "Route state",
-                        r.cooldown_hours::text || 'h' AS "Repeat after",
                         CASE WHEN r.enabled THEN 'On' ELSE 'Off' END AS "Rule state",
                         CASE WHEN r.enabled THEN 'Turn off' ELSE '' END AS "Turn off",
                         CASE WHEN NOT r.enabled THEN 'Turn on' ELSE '' END AS "Turn on"
@@ -1161,70 +1160,25 @@ _LEGACY_DASHBOARDS_UNUSED = [
             ),
             _card(
                 "alerts_would_fire",
-                "Would fire on next run",
+                "First notifications ready",
                 "table",
                 """
-                    WITH active AS (
-                        SELECT f.*
-                        FROM ninja_agent_compliance.v_active_findings f
-                    )
                     SELECT
-                        a.severity AS "Severity",
-                        a.client_name AS "Customer",
-                        COALESCE(a.hostname, '-') AS "Device",
-                        CASE
-                            WHEN a.finding_type = 'missing_required_platform'
-                                THEN COALESCE(a.affected_platform, 'Required platform') || ' missing'
-                            WHEN a.finding_type = 'stale_required_platform'
-                                THEN COALESCE(a.affected_platform, 'Required platform') || ' stale'
-                            WHEN a.finding_type = 'source_failure'
-                                THEN 'Collector failed'
-                            WHEN a.finding_type = 'cross_client_conflict'
-                                THEN 'Device appears under multiple customers'
-                            ELSE a.finding_type
-                        END AS "Issue",
-                        COALESCE(nr.display_name, 'NO ROUTE') AS "Route",
-                        CASE WHEN nr.enabled THEN 'enabled' WHEN nr.enabled IS FALSE THEN 'DISABLED' ELSE '-' END AS "Route state",
-                        CASE
-                            WHEN r.rule_id IS NULL THEN 'no rule'
-                            WHEN nr.enabled IS NOT TRUE THEN 'route off'
-                            WHEN s.finding_signature IS NULL OR s.status = 'resolved' THEN 'NEW'
-                            WHEN s.last_alerted_at IS NULL THEN 'NEW (never alerted)'
-                            WHEN now() - s.last_alerted_at >= (r.cooldown_hours * INTERVAL '1 hour') THEN 'REPEAT-DUE'
-                            ELSE 'cooldown ' || ((r.cooldown_hours - EXTRACT(EPOCH FROM (now() - s.last_alerted_at)) / 3600)::int)::text || 'h'
-                        END AS "Status",
-                        a.summary AS "Summary"
-                    FROM active a
-                    LEFT JOIN LATERAL (
-                        SELECT r.rule_id, r.rule_key, r.cooldown_hours, r.route_id
-                        FROM ninja_agent_compliance.alert_rules r
-                        WHERE r.enabled
-                          AND r.finding_type = a.finding_type
-                          AND (r.affected_platform IS NULL OR r.affected_platform = a.affected_platform)
-                          AND (r.client_id IS NULL OR r.client_id = a.client_id)
-                          AND (r.device_scope IS NULL OR r.device_scope IN ('all', a.device_type))
-                        ORDER BY r.client_id NULLS LAST, r.affected_platform NULLS LAST, r.device_scope NULLS LAST
-                        LIMIT 1
-                    ) r ON true
-                    LEFT JOIN ninja_agent_compliance.notification_routes nr ON nr.route_id = r.route_id
-                    LEFT JOIN ninja_agent_compliance.alert_state s ON s.finding_signature = a.finding_signature
+                        severity AS "Severity",
+                        client_name AS "Customer",
+                        COALESCE(hostname, '-') AS "Device",
+                        issue AS "Issue",
+                        COALESCE(route_name, 'No route') AS "Route",
+                        notification_status AS "Status",
+                        summary AS "Summary"
+                    FROM ninja_agent_compliance.v_notifications_ready
                     WHERE 1=1
-                      [[AND a.client_name IN ({{customer}})]]
-                      [[AND a.severity IN ({{severity}})]]
-                      [[AND a.finding_type IN ({{finding_type}})]]
-                      AND (
-                          r.rule_id IS NOT NULL
-                          AND nr.enabled IS TRUE
-                          AND (
-                              s.finding_signature IS NULL
-                              OR s.status = 'resolved'
-                              OR s.last_alerted_at IS NULL
-                              OR now() - s.last_alerted_at >= (r.cooldown_hours * INTERVAL '1 hour')
-                          )
-                      )
+                      [[AND client_name IN ({{customer}})]]
+                      [[AND severity IN ({{severity}})]]
+                      [[AND finding_type IN ({{finding_type}})]]
                     ORDER BY
-                        CASE a.severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
-                        a.client_name, a.hostname
+                        CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
+                        client_name, hostname
                     LIMIT 200
                 """,
                 18, 0, 24, 10,
@@ -1261,8 +1215,8 @@ _LEGACY_DASHBOARDS_UNUSED = [
                         END AS "Issue",
                         TO_CHAR(f.first_seen_at, 'YYYY-MM-DD HH24:MI') AS "First seen",
                         TO_CHAR(f.last_seen_at, 'YYYY-MM-DD HH24:MI') AS "Last seen",
-                        COALESCE(TO_CHAR(s.last_alerted_at, 'YYYY-MM-DD HH24:MI'), 'never') AS "Last alerted",
-                        s.repeat_count AS "Repeats",
+                        COALESCE(TO_CHAR(s.last_alerted_at, 'YYYY-MM-DD HH24:MI'), 'never') AS "Last notified",
+                        CASE WHEN s.last_alerted_at IS NULL THEN 'No' ELSE 'Yes' END AS "Notified",
                         f.summary AS "Summary"
                     FROM ninja_agent_compliance.v_active_findings f
                     LEFT JOIN ninja_agent_compliance.alert_state s
@@ -1825,10 +1779,10 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                 ),
                 _card(
                     "today_notifications_ready",
-                    "Notifications ready",
+                    "First notifications ready",
                     "scalar",
                     """
-                        SELECT COUNT(*) AS "Notifications ready"
+                        SELECT COUNT(*) AS "First notifications ready"
                         FROM ninja_agent_compliance.v_notifications_ready
                     """,
                     0, 12, 4, 4,
@@ -2321,7 +2275,7 @@ def _level1_dashboards() -> list[dict[str, Any]]:
             "cards": [
                 _card(
                     "alerts_ready",
-                    "Notifications ready to send",
+                    "First notifications ready to send",
                     "table",
                     """
                         SELECT
@@ -2362,7 +2316,7 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                 ),
                 _card(
                     "alerts_not_notifying",
-                    "Open issues not notifying",
+                    "Open issues not sending a first notification",
                     "table",
                     """
                         SELECT
@@ -2694,7 +2648,6 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                             severity AS "Severity",
                             route_name AS "Route",
                             route_state AS "Route state",
-                            cooldown_hours::text || 'h' AS "Repeat after",
                             rule_state AS "State",
                             CASE WHEN enabled THEN 'Turn off' ELSE '' END AS "Turn off",
                             CASE WHEN NOT enabled THEN 'Turn on' ELSE '' END AS "Turn on"

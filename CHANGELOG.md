@@ -2,6 +2,22 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.23.1] — 2026-06-15
+
+### Changed
+- Agent Compliance alert delivery is now first-success only: a finding
+  signature sends at most once after a successful delivery.
+- Failed notification delivery remains retryable on later evaluations
+  until one delivery succeeds.
+- Alert dispatch now runs after evaluation, including scheduled
+  evaluate-only refreshes and configuration-triggered refreshes.
+- Added a 30-minute evaluate-only scheduler via
+  `AGENT_COMPLIANCE_EVALUATE_SCHEDULE_MINUTES`.
+- Added an Agent Compliance job lock so collection and evaluate-only
+  runs do not write the compliance matrix at the same time.
+- Updated notification queue views and dashboard wording to remove
+  cooldown/repeat language from the active workflow.
+
 ## [0.23.0] — 2026-06-15
 
 ### Changed

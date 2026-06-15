@@ -7,7 +7,7 @@ import json
 import logging
 import os
 import smtplib
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from email.message import EmailMessage
 from typing import Any
 
@@ -53,14 +53,16 @@ def process_alerts(run_id: int, now: datetime) -> int:
     sent = 0
     for finding in findings:
         rule = _match_rule(finding)
-        cooldown_hours = rule["cooldown_hours"] if rule else settings.AGENT_COMPLIANCE_ALERT_COOLDOWN_HOURS
-        route = _load_route(rule["route_id"] if rule else None)
-        summary_hash = _summary_hash(finding)
-        state = _get_state(finding["finding_signature"])
-        event_type = _event_type(state, summary_hash, now, cooldown_hours)
-        _upsert_state(finding, summary_hash, now, event_type)
-        if not event_type:
+        if not rule:
             continue
+        route = _load_route(rule["route_id"] if rule else None)
+        if not route:
+            continue
+        summary_hash = _summary_hash(finding)
+        _upsert_state(finding, summary_hash, now)
+        if _has_successful_delivery(finding["finding_signature"]):
+            continue
+        event_type = "new"
         payload = _payload(finding, event_type)
         status, response_code, response_preview = _send_route(route, payload)
         _record_event(
@@ -74,6 +76,7 @@ def process_alerts(run_id: int, now: datetime) -> int:
             now=now,
         )
         if status == "sent":
+            _mark_notified(finding["finding_signature"], now)
             sent += 1
     _mark_resolved(now)
     return sent
@@ -142,29 +145,27 @@ def _get_state(signature: str) -> dict[str, Any] | None:
             return cur.fetchone()
 
 
-def _event_type(
-    state: dict[str, Any] | None,
-    summary_hash: str,
-    now: datetime,
-    cooldown_hours: int,
-) -> str | None:
-    if state is None or state["status"] == "resolved":
-        return "new"
-    if state["summary_hash"] != summary_hash:
-        return "changed"
-    last_alerted = state["last_alerted_at"]
-    if last_alerted and now - last_alerted >= timedelta(hours=cooldown_hours):
-        return "repeat"
-    return None
+def _has_successful_delivery(signature: str) -> bool:
+    with db.pool.connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT 1
+                FROM ninja_agent_compliance.alert_events
+                WHERE finding_signature = %s
+                  AND status = 'sent'
+                LIMIT 1
+                """,
+                (signature,),
+            )
+            return cur.fetchone() is not None
 
 
 def _upsert_state(
     finding: dict[str, Any],
     summary_hash: str,
     now: datetime,
-    event_type: str | None,
 ) -> None:
-    last_alerted = now if event_type else None
     with db.transaction() as cur:
         cur.execute(
             """
@@ -180,12 +181,7 @@ def _upsert_state(
                 severity = EXCLUDED.severity,
                 summary_hash = EXCLUDED.summary_hash,
                 last_seen_at = EXCLUDED.last_seen_at,
-                last_alerted_at = COALESCE(EXCLUDED.last_alerted_at, alert_state.last_alerted_at),
                 status = 'active',
-                repeat_count = CASE
-                    WHEN EXCLUDED.last_alerted_at IS NULL THEN alert_state.repeat_count
-                    ELSE alert_state.repeat_count + 1
-                END,
                 resolved_at = NULL
             """,
             (
@@ -196,9 +192,24 @@ def _upsert_state(
                 summary_hash,
                 now,
                 now,
-                last_alerted,
-                1 if event_type else 0,
+                None,
+                0,
             ),
+        )
+
+
+def _mark_notified(signature: str, now: datetime) -> None:
+    with db.transaction() as cur:
+        cur.execute(
+            """
+            UPDATE ninja_agent_compliance.alert_state
+            SET last_alerted_at = %s,
+                repeat_count = repeat_count + 1,
+                status = 'active',
+                resolved_at = NULL
+            WHERE finding_signature = %s
+            """,
+            (now, signature),
         )
 
 

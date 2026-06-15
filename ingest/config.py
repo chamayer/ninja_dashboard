@@ -37,6 +37,7 @@ class Settings(BaseSettings):
     PATCH_INGEST_SCHEDULE_HOURS: int | None = Field(default=None, ge=1, le=24)
     AGENT_COMPLIANCE_ENABLED: bool = False
     AGENT_COMPLIANCE_SCHEDULE_HOURS: int = Field(default=4, ge=1, le=24)
+    AGENT_COMPLIANCE_EVALUATE_SCHEDULE_MINUTES: int = Field(default=30, ge=5, le=1440)
     INGEST_LOG_LEVEL: str = "INFO"
     INGEST_HTTP_PORT: int = 8090
 

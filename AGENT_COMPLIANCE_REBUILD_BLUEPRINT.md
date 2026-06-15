@@ -44,6 +44,12 @@ device.
 This keeps the UI responsive without turning every button click into a
 vendor API collection run.
 
+Alert dispatch runs after evaluation. It does not discover issues on
+its own; it reads the current findings produced by evaluation. A finding
+signature should notify only until one delivery succeeds. After that,
+the same signature should not notify again automatically. Failed
+delivery can retry on later evaluations.
+
 ## What Metabase Should Show
 
 ### Home

@@ -94,7 +94,7 @@ def run() -> tuple[int, int]:
         return len(matrix_rows), len(finding_rows)
 
 
-def evaluate(send_alerts: bool = False) -> tuple[int, int]:
+def evaluate(send_alerts: bool = True) -> tuple[int, int]:
     """Recalculate compliance from the latest stored observations.
 
     This is intentionally not a collector. It does not call vendor APIs

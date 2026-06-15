@@ -5,6 +5,27 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-15 — v0.23.1 First-success alert dispatch
+
+**Why:** Alerting should not be a timer that repeatedly scans unchanged
+issues. Issues are found through collection plus evaluation, so alerting
+should run after evaluation and only notify once for a given issue.
+
+**Done:**
+- Changed Agent Compliance alert delivery to first-success only.
+- Failed deliveries can retry on later evaluations until one delivery
+  succeeds.
+- Scheduled evaluate-only refresh now runs every 30 minutes by default
+  with `AGENT_COMPLIANCE_EVALUATE_SCHEDULE_MINUTES`.
+- Config-triggered and manual evaluate-only refreshes dispatch alerts
+  after rebuilding current findings.
+- Added an Agent Compliance lock so full collection and evaluate-only
+  refreshes do not overlap matrix writes.
+- Added migration `039_agent_compliance_first_time_alerts.sql` to align
+  notification queue views with first-success alerting.
+- Updated dashboard wording from generic/repeat semantics to first
+  notification semantics.
+
 ## 2026-06-15 — v0.23.0 Agent Compliance evaluate-only refresh
 
 **Why:** Required-platform and alias changes should not wait for the

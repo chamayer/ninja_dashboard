@@ -65,6 +65,7 @@ from ingest.patches import ingest as patches_ingest
 from ingest.summary_views import refresh_device_troubleshooting_signal
 
 log = logging.getLogger("ingest.main")
+_AGENT_COMPLIANCE_LOCK = threading.Lock()
 
 
 def run_once() -> None:
@@ -103,8 +104,14 @@ def run_agent_compliance_once() -> None:
     if not settings.AGENT_COMPLIANCE_ENABLED:
         log.info("Agent compliance disabled; skipping run")
         return
+    if not _AGENT_COMPLIANCE_LOCK.acquire(blocking=False):
+        log.info("Agent compliance run skipped; another agent compliance job is running")
+        return
     log.info("Agent compliance run starting")
-    agent_compliance_ingest.run()
+    try:
+        agent_compliance_ingest.run()
+    finally:
+        _AGENT_COMPLIANCE_LOCK.release()
     log.info("Agent compliance run complete")
 
 
@@ -112,8 +119,14 @@ def run_agent_compliance_evaluate_once() -> None:
     if not settings.AGENT_COMPLIANCE_ENABLED:
         log.info("Agent compliance disabled; skipping evaluate")
         return
+    if not _AGENT_COMPLIANCE_LOCK.acquire(blocking=False):
+        log.info("Agent compliance evaluate skipped; another agent compliance job is running")
+        return
     log.info("Agent compliance evaluate starting")
-    agent_compliance_ingest.evaluate(send_alerts=False)
+    try:
+        agent_compliance_ingest.evaluate(send_alerts=True)
+    finally:
+        _AGENT_COMPLIANCE_LOCK.release()
     log.info("Agent compliance evaluate complete")
 
 
@@ -704,8 +717,10 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             if not row:
                 self._respond(404, b"alert rule not found\n")
                 return
-            body = f"alert rule {rule_key} turned {state}\n".encode("utf-8")
-            self._respond(200, body)
+            _respond_with_refresh(
+                f"alert rule {rule_key} turned {state}",
+                "alert rule changed",
+            )
             return
 
         if path == "/agent-compliance/action/set-customer-alert":
@@ -799,8 +814,10 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                         enabled,
                     ),
                 )
-            body = f"{customer_name} {alert_key} alerts turned {state}\n".encode("utf-8")
-            self._respond(200, body)
+            _respond_with_refresh(
+                f"{customer_name} {alert_key} alerts turned {state}",
+                "customer alert setting changed",
+            )
             return
 
         self.send_error(404)
@@ -872,6 +889,14 @@ def main() -> None:
             "interval",
             hours=settings.AGENT_COMPLIANCE_SCHEDULE_HOURS,
             id="agent_compliance_cycle",
+            max_instances=1,
+        )
+        scheduler.add_job(
+            run_agent_compliance_evaluate_once,
+            "interval",
+            minutes=settings.AGENT_COMPLIANCE_EVALUATE_SCHEDULE_MINUTES,
+            id="agent_compliance_evaluate_cycle",
+            max_instances=1,
         )
     scheduler.start()
     log.info(
@@ -882,6 +907,10 @@ def main() -> None:
         log.info(
             "Agent compliance scheduler started (every %dh)",
             settings.AGENT_COMPLIANCE_SCHEDULE_HOURS,
+        )
+        log.info(
+            "Agent compliance evaluate scheduler started (every %dm)",
+            settings.AGENT_COMPLIANCE_EVALUATE_SCHEDULE_MINUTES,
         )
 
     if should_catch_up("patches", settings.patch_ingest_schedule_hours):

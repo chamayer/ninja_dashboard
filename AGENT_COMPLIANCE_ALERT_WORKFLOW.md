@@ -21,8 +21,8 @@ The intent is to keep the dashboard actionable:
 3. Build or refresh org alignment.
 4. Evaluate the compliance matrix.
 5. Derive findings from the matrix and source health.
-6. Deduplicate against prior state.
-7. Route only state changes and important recoveries.
+6. Deduplicate against prior successful deliveries.
+7. Route only first successful notifications for each issue signature.
 8. Show the same state in Metabase with concise human labels.
 
 ## Dashboard Terms
@@ -30,10 +30,12 @@ The intent is to keep the dashboard actionable:
 Use these labels in the dashboard:
 
 - `Open device issues`: current problems found in the data.
-- `Notifications ready to send`: open issues that match enabled alert
-  rules, enabled customer alerting, enabled routes, and cooldown rules.
-- `Open issues not notifying`: current issues blocked by setup, route,
-  cooldown, ignore, exemption, or source confidence.
+- `First notifications ready to send`: open issues that match enabled
+  alert rules, enabled customer alerting, enabled routes, and have never
+  been successfully notified before.
+- `Open issues not sending a first notification`: current issues blocked
+  by setup, route, ignore, exemption, source confidence, or already
+  notified status.
 - `Recently notified`: delivery attempts that already happened.
 
 Do not use `Would fire on next run` in the UI. It is technically
@@ -52,7 +54,7 @@ Trigger examples:
 - degraded device;
 - cross-client or wrong-tenant conflict;
 - `NO AV` exemption not present when expected to be present;
-- device-level finding changed severity or combo.
+- device-level finding that has not been successfully notified before.
 
 What it should look like:
 
@@ -107,8 +109,7 @@ Trigger examples:
 - source timed out;
 - source rate-limited;
 - source returned zero rows unexpectedly;
-- source health changed from ok to failed;
-- source health recovered from failed to ok.
+- source health issue that has not been successfully notified before.
 
 What it should look like:
 
@@ -165,12 +166,14 @@ These are dashboard review items, not alerts by themselves:
 - known excludes that are already filtered;
 - ignored devices that are intentionally suppressed;
 - raw observation noise with no action needed;
-- repeated findings that have already been acknowledged and are
-  unchanged inside cooldown.
+- repeated findings that have already had one successful notification.
 
 ## Dedupe Rules
 
-Use dedupe to keep alerts stable.
+Use dedupe to keep alerts stable. Agent Compliance alerting is
+first-success only: after a finding signature has one successful
+delivery, that same signature should not notify again automatically.
+Failed deliveries may retry on later evaluations until one succeeds.
 
 Suggested key dimensions:
 
@@ -185,7 +188,7 @@ Alert state should record:
 
 - first seen;
 - last seen;
-- last routed;
+- last successfully routed;
 - current status;
 - route used;
 - resolution time.
