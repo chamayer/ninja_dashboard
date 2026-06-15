@@ -2,6 +2,31 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.24.1] — 2026-06-15
+
+### Added
+- `os_family` derived column on `v_device_work_queue` and
+  `v_all_devices_human` (migration 044). Buckets Windows 7/8/8.1/10/11
+  and Windows Server 2008-2025 by ILIKE on `os_name`; "Windows (other)"
+  / "Windows Server (other)" / "Unknown" / "Other" cover the long
+  tail.
+- Two new Devices dashboard parameters: `OS family` and `Device type`
+  (Workstation / Server). Wired into the Fix-now queue and All devices
+  tables.
+- "OS / Type" column on the Fix-now queue, All devices table, and
+  Today's Top device issues card. Abbreviated form (`Win 11 · WS`,
+  `Srv 2022 · SRV`).
+- Two new breakdown cards on both Today and Devices:
+  `Fix now by OS family` and `Fix now by device type`. Layout is now
+  a 2x2 grid of breakdowns under the KPI strip / Fix-now queue.
+
+### Changed
+- Today rows shifted: `Top device issues` 10→16; `Customer names
+  needing review` and `Collection and delivery problems` 18→24.
+- Devices section headers shifted: Platform gaps 18→24; Stale and
+  ignored 32→38; All devices 44→50. Cards in those sections moved to
+  match.
+
 ## [0.24.0] — 2026-06-15
 
 ### Added

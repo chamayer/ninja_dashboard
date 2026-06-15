@@ -5,6 +5,36 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-15 — v0.24.1 OS family + device type — filter, column, breakdown
+
+**Why:** Grouping Fix-now work by OS family (Windows 7/10/11/Server
+2022/etc.) and by workstation vs. server lets operators target patch
+cycles and platform-specific maintenance without scanning the queue.
+
+**Done:**
+- Migration 044 appends a derived `os_family` column to
+  `v_device_work_queue` and `v_all_devices_human`. Buckets are driven
+  by `ILIKE` against `os_name` against the actual values present in
+  the deployed DB (Win 7/8/8.1/10/11, Srv 2008/2008 R2/2012/2012 R2/
+  2016/2019/2022/2025, plus `Windows (other)`, `Windows Server
+  (other)`, `Unknown`, `Other`).
+- Added Devices dashboard params `OS family` and `Device type`. The
+  Fix-now queue and All-devices table both pick them up.
+- Added "OS / Type" column (abbreviated: `Win 11 · WS`, `Srv 2022 ·
+  SRV`) to the Fix-now queue, All-devices table, and the Today Top
+  device issues card.
+- Added breakdown cards `Fix now by OS family` and `Fix now by device
+  type` on both Today and Devices, giving a 2x2 grid (Customer / Issue
+  type / OS family / Device type). Each card links to Devices with the
+  matching filter + `state=Fix now` applied.
+
+**Validation pending:**
+- Portainer redeploy. Migration 044 should apply cleanly (column
+  appended at the end of each view).
+- Metabase bootstrap re-run, then visual check that the new column,
+  params, and breakdown cards render and that clicking a breakdown
+  row scopes the queue correctly.
+
 ## 2026-06-15 — v0.24.0 Fix now breakdown cards (Today + Devices)
 
 **Why:** Operators wanted a fast read of where today's Fix now work

@@ -46,6 +46,8 @@ PARAM_MISSING = "p_dev_missing"
 PARAM_ONLINE_IN = "p_dev_online_in"
 PARAM_STATE = "p_dev_state"
 PARAM_AV_EXEMPT = "p_dev_av"
+PARAM_OS_FAMILY = "p_dev_os_family"
+PARAM_DEVICE_TYPE = "p_dev_device_type"
 
 # Device drilldown — dashboard scoped to one (customer, host) pair.
 PARAM_DD_CUSTOMER = "p_dd_customer"
@@ -62,6 +64,16 @@ PARAM_CU_REVIEW_NAME = "p_cu_review_name"
 PLATFORM_VALUES = ["Ninja", "ScreenConnect", "SentinelOne", "LogMeIn"]
 STATE_VALUES = ["Fix now", "Review", "Stale", "Ignored", "Good"]
 AV_EXEMPT_VALUES = ["Yes", "No"]
+OS_FAMILY_VALUES = [
+    "Windows 11", "Windows 10", "Windows 8.1", "Windows 8", "Windows 7",
+    "Windows (other)",
+    "Windows Server 2025", "Windows Server 2022", "Windows Server 2019",
+    "Windows Server 2016", "Windows Server 2012 R2", "Windows Server 2012",
+    "Windows Server 2008 R2", "Windows Server 2008",
+    "Windows Server (other)",
+    "Unknown", "Other",
+]
+DEVICE_TYPE_VALUES = ["Workstation", "Server"]
 SEVERITY_VALUES = ["critical", "high", "medium", "info"]
 FINDING_TYPE_VALUES = [
     "missing_required_platform",
@@ -253,6 +265,8 @@ def _build_devices_parameters() -> list[dict[str, Any]]:
         _param_multiselect(PARAM_ONLINE_IN, "Online in", "online_in", PLATFORM_VALUES),
         _param_multiselect(PARAM_STATE, "State", "state", STATE_VALUES),
         _param_multiselect(PARAM_AV_EXEMPT, "NO AV", "av", AV_EXEMPT_VALUES),
+        _param_multiselect(PARAM_OS_FAMILY, "OS family", "os_family", OS_FAMILY_VALUES),
+        _param_multiselect(PARAM_DEVICE_TYPE, "Device type", "device_type", DEVICE_TYPE_VALUES),
     ]
 
 
@@ -265,6 +279,8 @@ _DEVICES_FILTER_TAGS = {
     "online_in": _tag("online_in", "Online in"),
     "state": _tag("state", "State"),
     "av": _tag("av", "NO AV"),
+    "os_family": _tag("os_family", "OS family"),
+    "device_type": _tag("device_type", "Device type"),
 }
 
 
@@ -1891,6 +1907,57 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                     },
                 ),
                 _card(
+                    "today_fix_now_by_os_family",
+                    "Fix now by OS family",
+                    "table",
+                    """
+                        SELECT
+                            os_family AS "OS family",
+                            COUNT(*) AS "Devices",
+                            'Fix now' AS "State"
+                        FROM ninja_agent_compliance.v_device_work_queue
+                        WHERE work_state = 'Fix now'
+                        GROUP BY os_family
+                        ORDER BY COUNT(*) DESC, os_family
+                        LIMIT 5
+                    """,
+                    10, 0, 12, 6,
+                    click_behavior=_dashboard_link(
+                        DASH_DEVICES,
+                        params=[("os_family", "OS family"), ("state", "State")],
+                    ),
+                    column_widths={
+                        "OS family": 280,
+                        "Devices": 100,
+                        "State": 60,
+                    },
+                ),
+                _card(
+                    "today_fix_now_by_device_type",
+                    "Fix now by device type",
+                    "table",
+                    """
+                        SELECT
+                            INITCAP(device_type) AS "Device type",
+                            COUNT(*) AS "Devices",
+                            'Fix now' AS "State"
+                        FROM ninja_agent_compliance.v_device_work_queue
+                        WHERE work_state = 'Fix now'
+                        GROUP BY device_type
+                        ORDER BY COUNT(*) DESC, device_type
+                    """,
+                    10, 12, 12, 6,
+                    click_behavior=_dashboard_link(
+                        DASH_DEVICES,
+                        params=[("device_type", "Device type"), ("state", "State")],
+                    ),
+                    column_widths={
+                        "Device type": 280,
+                        "Devices": 100,
+                        "State": 60,
+                    },
+                ),
+                _card(
                     "today_top_device_issues",
                     "Top device issues",
                     "table",
@@ -1898,6 +1965,13 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                         SELECT
                             client_name AS "Customer",
                             hostname AS "Device",
+                            CASE
+                                WHEN os_family LIKE 'Windows Server %' THEN REPLACE(os_family, 'Windows Server ', 'Srv ')
+                                WHEN os_family = 'Windows Server (other)' THEN 'Srv ?'
+                                WHEN os_family LIKE 'Windows %' THEN REPLACE(os_family, 'Windows ', 'Win ')
+                                WHEN os_family = 'Windows (other)' THEN 'Win ?'
+                                ELSE os_family
+                            END || ' · ' || CASE WHEN device_type = 'server' THEN 'SRV' ELSE 'WS' END AS "OS / Type",
                             issue AS "Issue",
                             COALESCE(array_to_string(online_platforms, ', '), '-') AS "Online in",
                             COALESCE(TO_CHAR(last_seen_anywhere, 'YYYY-MM-DD HH24:MI'), 'Never') AS "Last seen",
@@ -1915,7 +1989,7 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                             hostname
                         LIMIT 25
                     """,
-                    10, 0, 24, 8,
+                    16, 0, 24, 8,
                     column_click_behaviors={
                         "Device": _dashboard_link(
                             DASH_DEVICE_DRILLDOWN,
@@ -1939,7 +2013,7 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                         ORDER BY current_devices DESC, candidate_name
                         LIMIT 15
                     """,
-                    18, 0, 12, 6,
+                    24, 0, 12, 6,
                     column_click_behaviors={
                         "Action": _dashboard_link(DASH_CUSTOMERS),
                     },
@@ -1959,7 +2033,7 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                         ORDER BY severity DESC, platform, source_name
                         LIMIT 15
                     """,
-                    18, 12, 12, 6,
+                    24, 12, 12, 6,
                     column_click_behaviors={
                         "Problem": _dashboard_link(DASH_HEALTH),
                     },
@@ -1971,9 +2045,9 @@ def _level1_dashboards() -> list[dict[str, Any]]:
             "parameters_builder": _build_devices_parameters,
             "section_headers": [
                 {"row": 0, "text": "### Fix now"},
-                {"row": 18, "text": "### Platform gaps"},
-                {"row": 32, "text": "### Stale and ignored"},
-                {"row": 44, "text": "### All devices"},
+                {"row": 24, "text": "### Platform gaps"},
+                {"row": 38, "text": "### Stale and ignored"},
+                {"row": 50, "text": "### All devices"},
             ],
             "cards": [
                 _card(
@@ -2049,6 +2123,63 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                     param_mappings={PARAM_CUSTOMER: _mapping("customer")},
                 ),
                 _card(
+                    "devices_fix_now_by_os_family",
+                    "Fix now by OS family",
+                    "table",
+                    """
+                        SELECT
+                            os_family AS "OS family",
+                            COUNT(*) AS "Devices",
+                            'Fix now' AS "State"
+                        FROM ninja_agent_compliance.v_device_work_queue
+                        WHERE work_state = 'Fix now'
+                          [[AND client_name IN ({{customer}})]]
+                        GROUP BY os_family
+                        ORDER BY COUNT(*) DESC, os_family
+                        LIMIT 5
+                    """,
+                    18, 0, 12, 6,
+                    click_behavior=_dashboard_link(
+                        DASH_DEVICES,
+                        params=[("os_family", "OS family"), ("state", "State")],
+                    ),
+                    column_widths={
+                        "OS family": 280,
+                        "Devices": 100,
+                        "State": 60,
+                    },
+                    template_tags={"customer": _DEVICES_FILTER_TAGS["customer"]},
+                    param_mappings={PARAM_CUSTOMER: _mapping("customer")},
+                ),
+                _card(
+                    "devices_fix_now_by_device_type",
+                    "Fix now by device type",
+                    "table",
+                    """
+                        SELECT
+                            INITCAP(device_type) AS "Device type",
+                            COUNT(*) AS "Devices",
+                            'Fix now' AS "State"
+                        FROM ninja_agent_compliance.v_device_work_queue
+                        WHERE work_state = 'Fix now'
+                          [[AND client_name IN ({{customer}})]]
+                        GROUP BY device_type
+                        ORDER BY COUNT(*) DESC, device_type
+                    """,
+                    18, 12, 12, 6,
+                    click_behavior=_dashboard_link(
+                        DASH_DEVICES,
+                        params=[("device_type", "Device type"), ("state", "State")],
+                    ),
+                    column_widths={
+                        "Device type": 280,
+                        "Devices": 100,
+                        "State": 60,
+                    },
+                    template_tags={"customer": _DEVICES_FILTER_TAGS["customer"]},
+                    param_mappings={PARAM_CUSTOMER: _mapping("customer")},
+                ),
+                _card(
                     "devices_work_queue",
                     "Devices needing action",
                     "table",
@@ -2056,6 +2187,13 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                         SELECT
                             client_name AS "Customer",
                             hostname AS "Device",
+                            CASE
+                                WHEN os_family LIKE 'Windows Server %' THEN REPLACE(os_family, 'Windows Server ', 'Srv ')
+                                WHEN os_family = 'Windows Server (other)' THEN 'Srv ?'
+                                WHEN os_family LIKE 'Windows %' THEN REPLACE(os_family, 'Windows ', 'Win ')
+                                WHEN os_family = 'Windows (other)' THEN 'Win ?'
+                                ELSE os_family
+                            END || ' · ' || CASE WHEN device_type = 'server' THEN 'SRV' ELSE 'WS' END AS "OS / Type",
                             issue AS "Issue",
                             COALESCE(array_to_string(online_platforms, ', '), '-') AS "Online in",
                             COALESCE(array_to_string(missing_platforms, ', '), '-') AS "Missing",
@@ -2075,6 +2213,8 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                           )]]
                           [[AND work_state IN ({{state}})]]
                           [[AND (CASE WHEN s1_exempt THEN 'Yes' ELSE 'No' END) IN ({{av}})]]
+                          [[AND os_family IN ({{os_family}})]]
+                          [[AND INITCAP(device_type) IN ({{device_type}})]]
                         ORDER BY
                             CASE work_state
                                 WHEN 'Fix now' THEN 0
@@ -2101,14 +2241,15 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                         },
                     },
                     column_widths={
-                        "Customer": 220,
-                        "Device": 180,
-                        "Issue": 340,
-                        "Online in": 170,
-                        "Missing": 180,
-                        "Last seen": 150,
-                        "State": 100,
-                        "Action": 90,
+                        "Customer": 200,
+                        "Device": 160,
+                        "OS / Type": 130,
+                        "Issue": 320,
+                        "Online in": 150,
+                        "Missing": 160,
+                        "Last seen": 140,
+                        "State": 90,
+                        "Action": 80,
                     },
                     template_tags=_DEVICES_FILTER_TAGS,
                     param_mappings={
@@ -2117,6 +2258,8 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                         PARAM_ONLINE_IN: _mapping("online_in"),
                         PARAM_STATE: _mapping("state"),
                         PARAM_AV_EXEMPT: _mapping("av"),
+                        PARAM_OS_FAMILY: _mapping("os_family"),
+                        PARAM_DEVICE_TYPE: _mapping("device_type"),
                     },
                 ),
                 _card(
@@ -2134,7 +2277,7 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                           [[AND online_platform IN ({{online_in}})]]
                         ORDER BY devices DESC, missing_platform, online_platform
                     """,
-                    18, 0, 12, 6,
+                    24, 0, 12, 6,
                     click_behavior=_dashboard_link(
                         DASH_DEVICES,
                         params=[("missing", "Missing"), ("online_in", "Online in")],
@@ -2164,7 +2307,7 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                         GROUP BY p
                         ORDER BY "Devices" DESC
                     """,
-                    18, 12, 12, 6,
+                    24, 12, 12, 6,
                     click_behavior=_dashboard_link(DASH_DEVICES, params=[("missing", "Missing")]),
                     template_tags={
                         "customer": _DEVICES_FILTER_TAGS["customer"],
@@ -2192,7 +2335,7 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                         ORDER BY "Stale devices" DESC, client_name
                         LIMIT 100
                     """,
-                    32, 0, 12, 6,
+                    38, 0, 12, 6,
                     column_click_behaviors={
                         "Action": {
                             "url_template": _url_template(
@@ -2222,7 +2365,7 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                         ORDER BY updated_at DESC, client_name, display_name
                         LIMIT 200
                     """,
-                    32, 12, 12, 6,
+                    38, 12, 12, 6,
                     column_click_behaviors={
                         "Device": _dashboard_link(
                             DASH_DEVICE_DRILLDOWN,
@@ -2246,6 +2389,13 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                         SELECT
                             client_name AS "Customer",
                             hostname AS "Device",
+                            CASE
+                                WHEN os_family LIKE 'Windows Server %' THEN REPLACE(os_family, 'Windows Server ', 'Srv ')
+                                WHEN os_family = 'Windows Server (other)' THEN 'Srv ?'
+                                WHEN os_family LIKE 'Windows %' THEN REPLACE(os_family, 'Windows ', 'Win ')
+                                WHEN os_family = 'Windows (other)' THEN 'Win ?'
+                                ELSE os_family
+                            END || ' · ' || CASE WHEN device_type = 'server' THEN 'SRV' ELSE 'WS' END AS "OS / Type",
                             state AS "State",
                             issue AS "Issue",
                             COALESCE(array_to_string(found_platforms, ', '), '-') AS "Found in",
@@ -2266,10 +2416,12 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                           )]]
                           [[AND state IN ({{state}})]]
                           [[AND (CASE WHEN s1_exempt THEN 'Yes' ELSE 'No' END) IN ({{av}})]]
+                          [[AND os_family IN ({{os_family}})]]
+                          [[AND INITCAP(device_type) IN ({{device_type}})]]
                         ORDER BY client_name, hostname
                         LIMIT 1000
                     """,
-                    44, 0, 24, 8,
+                    50, 0, 24, 8,
                     column_click_behaviors={
                         "Device": _dashboard_link(
                             DASH_DEVICE_DRILLDOWN,
@@ -2283,6 +2435,8 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                         PARAM_ONLINE_IN: _mapping("online_in"),
                         PARAM_STATE: _mapping("state"),
                         PARAM_AV_EXEMPT: _mapping("av"),
+                        PARAM_OS_FAMILY: _mapping("os_family"),
+                        PARAM_DEVICE_TYPE: _mapping("device_type"),
                     },
                 ),
             ],
