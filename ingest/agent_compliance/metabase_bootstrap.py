@@ -768,7 +768,7 @@ _LEGACY_DASHBOARDS_UNUSED = [
                         CASE WHEN s1_exempt THEN 'Yes' ELSE 'No' END AS "NO AV",
                         missing_platform AS "Missing",
                         online_platform AS "Online in",
-                        COALESCE(TO_CHAR(last_seen_at, 'YYYY-MM-DD HH24:MI'), 'Unknown') AS "Seen there",
+                        COALESCE(TO_CHAR(last_seen_at, 'YYYY-MM-DD HH24:MI'), 'Unknown') AS "Last online",
                         COALESCE(array_to_string(required_platforms, ', '), '') AS "Required",
                         COALESCE(array_to_string(observed_platforms, ', '), '') AS "Found in",
                         'Ignore' AS "Action"
@@ -1819,7 +1819,7 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                             client_name AS "Customer",
                             hostname AS "Device",
                             issue AS "Issue",
-                            COALESCE(array_to_string(online_platforms, ', '), '-') AS "Seen online in",
+                            COALESCE(array_to_string(online_platforms, ', '), '-') AS "Online in",
                             COALESCE(TO_CHAR(last_seen_anywhere, 'YYYY-MM-DD HH24:MI'), 'Never') AS "Last seen",
                             work_state AS "State"
                         FROM ninja_agent_compliance.v_device_work_queue
@@ -1905,7 +1905,7 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                             client_name AS "Customer",
                             hostname AS "Device",
                             issue AS "Issue",
-                            COALESCE(array_to_string(online_platforms, ', '), '-') AS "Seen online in",
+                            COALESCE(array_to_string(online_platforms, ', '), '-') AS "Online in",
                             COALESCE(array_to_string(missing_platforms, ', '), '-') AS "Missing",
                             COALESCE(TO_CHAR(last_seen_anywhere, 'YYYY-MM-DD HH24:MI'), 'Never') AS "Last seen",
                             work_state AS "State",
@@ -1952,7 +1952,7 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                         "Customer": 220,
                         "Device": 180,
                         "Issue": 340,
-                        "Seen online in": 170,
+                        "Online in": 170,
                         "Missing": 180,
                         "Last seen": 150,
                         "State": 100,
@@ -1969,12 +1969,12 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                 ),
                 _card(
                     "devices_gap_summary",
-                    "Missing but seen online somewhere else",
+                    "Missing but online somewhere else",
                     "table",
                     """
                         SELECT
                             missing_platform AS "Missing",
-                            online_platform AS "Seen online in",
+                            online_platform AS "Online in",
                             devices AS "Devices"
                         FROM ninja_agent_compliance.v_device_gap_summary
                         WHERE 1=1
@@ -1985,7 +1985,7 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                     18, 0, 12, 6,
                     click_behavior=_dashboard_link(
                         DASH_DEVICES,
-                        params=[("missing", "Missing"), ("online_in", "Seen online in")],
+                        params=[("missing", "Missing"), ("online_in", "Online in")],
                     ),
                     template_tags={
                         "missing": _DEVICES_FILTER_TAGS["missing"],

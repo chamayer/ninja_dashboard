@@ -5,6 +5,20 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-15 — v0.23.2 Agent Compliance wording cleanup
+
+**Why:** The phrase `Seen online in` was unnecessarily wordy for the
+device workflow. The table already communicates platform presence, so
+`Online in` is clearer.
+
+**Done:**
+- Renamed dashboard columns and filters from `Seen online in` to
+  `Online in`.
+- Renamed `Missing but seen online somewhere else` to
+  `Missing but online somewhere else`.
+- Added migration `040_agent_compliance_online_in_wording.sql` so the
+  generated issue text says `online in`, not `seen online in`.
+
 ## 2026-06-15 — v0.23.1 First-success alert dispatch
 
 **Why:** Alerting should not be a timer that repeatedly scans unchanged

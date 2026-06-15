@@ -2,6 +2,15 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.23.2] — 2026-06-15
+
+### Changed
+- Shortened Agent Compliance device wording from `Seen online in` to
+  `Online in` across the Today and Devices dashboards.
+- Updated the device work-queue issue sentence from `seen online in`
+  to `online in` via migration
+  `040_agent_compliance_online_in_wording.sql`.
+
 ## [0.23.1] — 2026-06-15
 
 ### Changed
