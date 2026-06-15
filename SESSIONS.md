@@ -14,6 +14,11 @@ platform is visible under another customer with the same normalized
 name.
 
 **Done:**
+- Updated the Device drilldown `Current device state` table to anchor
+  the clicked row by normalized device identity, then show all current
+  rows with that identity. This lets a cross-customer missing-platform
+  case show both the selected customer and the customer where the
+  missing platform was found.
 - Reworked `sql/migrations/041_agent_compliance_demote_cross_client_conflicts.sql`
   so `v_device_work_queue` and `v_all_devices_human` compute an
   actionable cross-customer platform list and only show those cases in

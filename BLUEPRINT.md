@@ -1,24 +1,31 @@
 # Goal
-Make the top seven Agent Compliance Today cards readable without removing any of them.
+Show both sides of a cross-customer device match in the existing device drilldown current-state table.
 
 # Why
-The current top row is too condensed: seven KPI cards are visually cramped and titles are being cut off.
+When a device is missing a platform that is found under another customer,
+the drilldown only filters by exact hostname. That can hide the matching
+row because the other platform may report a longer or different hostname
+with the same normalized identity.
 
 # Scope
-- Keep all seven top KPI cards.
-- Shorten only the long labels.
-- Reposition the top seven into a readable two-row layout.
-- Do not change lower Today tables.
-- Do not change device compliance logic.
+- Change only the active Level 1 `drilldown_current` card.
+- Resolve the clicked row to its normalized device identity.
+- Return all current device rows sharing that normalized identity.
+- Preserve ordinary single-device drilldown behavior.
+- Do not add another card.
+- Do not change compliance evaluation logic.
 
 # Files to change
-- `ingest/agent_compliance/metabase_bootstrap.py` - Today dashboard card titles and row/column positions.
+- `ingest/agent_compliance/metabase_bootstrap.py` - current device drilldown query.
+- `CHANGELOG.md` - note dashboard behavior.
+- `SESSIONS.md` - session note.
 
 # Steps
-1. Update top seven KPI labels.
-2. Set the summary layout to four cards on the first row and three cards on the second row.
-3. Move the lower Today cards down so they do not overlap the second KPI row.
-4. Run syntax and diff checks.
+1. Anchor the selected device by `(customer, host)` when customer is present.
+2. Fall back to host-only when customer is not present.
+3. Return all `v_all_devices_human` rows with the anchor `norm_name`.
+4. Keep useful columns in the existing current-state table.
+5. Run syntax and diff checks.
 
 # Open questions
 - None for this pass.

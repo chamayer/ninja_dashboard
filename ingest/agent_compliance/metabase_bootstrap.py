@@ -2461,6 +2461,16 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                     "Current device state",
                     "table",
                     """
+                        WITH anchor AS (
+                            SELECT norm_name
+                            FROM ninja_agent_compliance.v_all_devices_human
+                            WHERE hostname = {{host}}
+                              [[AND client_name = {{customer}}]]
+                            ORDER BY
+                                [[CASE WHEN client_name = {{customer}} THEN 0 ELSE 1 END,]]
+                                evaluated_at DESC
+                            LIMIT 1
+                        )
                         SELECT
                             client_name AS "Customer",
                             hostname AS "Device",
@@ -2469,12 +2479,11 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                             COALESCE(array_to_string(required_platforms, ', '), '-') AS "Required",
                             COALESCE(array_to_string(found_platforms, ', '), '-') AS "Found in",
                             COALESCE(array_to_string(online_platforms, ', '), '-') AS "Online in",
+                            COALESCE(array_to_string(missing_platforms, ', '), '-') AS "Missing",
                             COALESCE(TO_CHAR(last_seen_anywhere, 'YYYY-MM-DD HH24:MI'), 'Never') AS "Last seen"
                         FROM ninja_agent_compliance.v_all_devices_human
-                        WHERE hostname = {{host}}
-                          [[AND client_name = {{customer}}]]
-                        ORDER BY evaluated_at DESC
-                        LIMIT 1
+                        WHERE norm_name = (SELECT norm_name FROM anchor)
+                        ORDER BY client_name, hostname
                     """,
                     0, 0, 24, 6,
                     template_tags=_DRILLDOWN_FILTER_TAGS,

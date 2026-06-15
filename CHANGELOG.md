@@ -5,6 +5,10 @@ All notable changes to this project follow [Semantic Versioning](https://semver.
 ## [0.26.1] — 2026-06-15
 
 ### Changed
+- Device drilldown current-state table now expands by normalized device
+  identity, so cross-customer missing-platform cases show both the
+  selected customer row and the matching row found under another
+  customer.
 - Cross-customer collisions stay out of the primary device workflow
   unless the same missing platform is also observed under another
   customer for the same normalized device name.
