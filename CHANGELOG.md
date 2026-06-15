@@ -2,6 +2,14 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.23.3] — 2026-06-15
+
+### Changed
+- Cross-customer conflict rows now roll up to one line per device and
+  show the customer list plus the platforms seen.
+- Device drilldown now works with `host` alone; `customer` is optional
+  so conflict rows can open a full multi-customer view.
+
 ## [0.23.2] — 2026-06-15
 
 ### Changed

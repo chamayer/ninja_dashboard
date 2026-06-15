@@ -1705,23 +1705,41 @@ _LEGACY_DASHBOARDS_UNUSED = [
                 """,
                 0, 0, 24, 10,
             ),
-            _card(
-                "cross_customer_conflicts",
-                "Same device under multiple customers",
-                "table",
-                """
+                _card(
+                    "cross_customer_conflicts",
+                    "Same device under multiple customers",
+                    "table",
+                    """
+                    WITH conflicts AS (
+                        SELECT
+                            norm_name,
+                            string_agg(DISTINCT client_name, ', ' ORDER BY client_name) AS customers,
+                            string_agg(DISTINCT hostname, ', ' ORDER BY hostname) AS devices,
+                            array_remove(array[
+                                CASE WHEN bool_or(ninja_online) THEN 'Ninja' END,
+                                CASE WHEN bool_or(screenconnect_online) THEN 'ScreenConnect' END,
+                                CASE WHEN bool_or(sentinelone_online) THEN 'SentinelOne' END,
+                                CASE WHEN bool_or(logmein_online) THEN 'LogMeIn' END
+                            ], NULL)::text[] AS online_platforms
+                        FROM ninja_agent_compliance.v_cross_client_conflicts
+                        GROUP BY norm_name
+                    )
                     SELECT
                         norm_name AS "Match key",
-                        client_name AS "Customer",
-                        hostname AS "Device",
-                        COALESCE(NULLIF(os_name, ''), '') AS "OS",
-                        COALESCE(array_to_string(observed_platforms, ', '), '') AS "Found in",
-                        COALESCE(array_to_string(missing_required_platforms, ', '), '') AS "Missing"
-                    FROM ninja_agent_compliance.v_cross_client_conflicts
-                    ORDER BY norm_name, client_name, hostname
+                        customers AS "Customers",
+                        devices AS "Device",
+                        COALESCE(array_to_string(online_platforms, ', '), '-') AS "Online in"
+                    FROM conflicts
+                    ORDER BY norm_name
                     LIMIT 300
                 """,
                 10, 0, 24, 8,
+                column_click_behaviors={
+                    "Device": _dashboard_link(
+                        DASH_DEVICE_DRILLDOWN,
+                        params=[("host", "Device")],
+                    ),
+                },
             ),
         ],
     },
@@ -2159,8 +2177,8 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                             COALESCE(array_to_string(online_platforms, ', '), '-') AS "Online in",
                             COALESCE(TO_CHAR(last_seen_anywhere, 'YYYY-MM-DD HH24:MI'), 'Never') AS "Last seen"
                         FROM ninja_agent_compliance.v_all_devices_human
-                        WHERE client_name = {{customer}}
-                          AND hostname = {{host}}
+                        WHERE hostname = {{host}}
+                          [[AND client_name = {{customer}}]]
                         ORDER BY evaluated_at DESC
                         LIMIT 1
                     """,
@@ -2183,8 +2201,8 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                             COALESCE(array_to_string(observed_platforms, ', '), '-') AS "Found in",
                             COALESCE(array_to_string(source_failed_platforms, ', '), '-') AS "Source issue"
                         FROM ninja_agent_compliance.compliance_matrix_history
-                        WHERE client_name = {{customer}}
-                          AND hostname = {{host}}
+                        WHERE hostname = {{host}}
+                          [[AND client_name = {{customer}}]]
                         ORDER BY evaluated_at DESC
                         LIMIT 50
                     """,
@@ -2216,8 +2234,8 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                             TO_CHAR(last_seen_at, 'YYYY-MM-DD HH24:MI') AS "Last seen",
                             summary AS "Summary"
                         FROM ninja_agent_compliance.compliance_findings
-                        WHERE client_name = {{customer}}
-                          AND hostname = {{host}}
+                        WHERE hostname = {{host}}
+                          [[AND client_name = {{customer}}]]
                         ORDER BY last_seen_at DESC
                         LIMIT 50
                     """,
@@ -2241,8 +2259,8 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                             TO_CHAR(updated_at, 'YYYY-MM-DD HH24:MI') AS "Updated",
                             'Restore' AS "Action"
                         FROM ninja_agent_compliance.v_device_ignores_current
-                        WHERE client_name = {{customer}}
-                          AND display_name = {{host}}
+                        WHERE display_name = {{host}}
+                          [[AND client_name = {{customer}}]]
                         ORDER BY updated_at DESC
                         LIMIT 20
                     """,
@@ -2804,18 +2822,36 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                     "Same device under multiple customers",
                     "table",
                     """
+                        WITH conflicts AS (
+                            SELECT
+                                norm_name,
+                                string_agg(DISTINCT client_name, ', ' ORDER BY client_name) AS customers,
+                                string_agg(DISTINCT hostname, ', ' ORDER BY hostname) AS devices,
+                                array_remove(array[
+                                    CASE WHEN bool_or(ninja_online) THEN 'Ninja' END,
+                                    CASE WHEN bool_or(screenconnect_online) THEN 'ScreenConnect' END,
+                                    CASE WHEN bool_or(sentinelone_online) THEN 'SentinelOne' END,
+                                    CASE WHEN bool_or(logmein_online) THEN 'LogMeIn' END
+                                ], NULL)::text[] AS online_platforms
+                            FROM ninja_agent_compliance.v_cross_client_conflicts
+                            GROUP BY norm_name
+                        )
                         SELECT
                             norm_name AS "Match key",
-                            client_name AS "Customer",
-                            hostname AS "Device",
-                            COALESCE(NULLIF(os_name, ''), '') AS "OS",
-                            COALESCE(array_to_string(observed_platforms, ', '), '') AS "Found in",
-                            COALESCE(array_to_string(missing_required_platforms, ', '), '') AS "Missing"
-                        FROM ninja_agent_compliance.v_cross_client_conflicts
-                        ORDER BY norm_name, client_name, hostname
+                            customers AS "Customers",
+                            devices AS "Device",
+                            COALESCE(array_to_string(online_platforms, ', '), '-') AS "Online in"
+                        FROM conflicts
+                        ORDER BY norm_name
                         LIMIT 300
                     """,
                     10, 0, 24, 8,
+                    column_click_behaviors={
+                        "Device": _dashboard_link(
+                            DASH_DEVICE_DRILLDOWN,
+                            params=[("host", "Device")],
+                        ),
+                    },
                 ),
                 _card(
                     "debug_notification_queue",

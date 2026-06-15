@@ -5,6 +5,20 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-15 — v0.23.3 Cross-customer conflict drilldown
+
+**Why:** Cross-customer conflicts were visible, but the operator did not
+have a single place to see the device plus the involved customers and
+platforms, and the drilldown required customer context even when the
+conflict itself was enough to identify the device.
+
+**Done:**
+- Rolled the cross-customer conflict cards up to one row per device.
+- Added the customer list and online-platform list directly to the
+  conflict table.
+- Made the device drilldown host-first so it can open from a conflict
+  row without requiring a customer value.
+
 ## 2026-06-15 — v0.23.2 Agent Compliance wording cleanup
 
 **Why:** The phrase `Seen online in` was unnecessarily wordy for the
