@@ -2,6 +2,14 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.23.5] — 2026-06-15
+
+### Changed
+- Cross-customer name collisions were removed from the primary device
+  work queue and all-devices human view.
+- The customer/debug collision summary remains available with platform
+  detail.
+
 ## [0.23.4] — 2026-06-15
 
 ### Changed

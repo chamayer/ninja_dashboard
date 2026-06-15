@@ -5,6 +5,17 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-15 — v0.23.5 Demote cross-customer collisions
+
+**Why:** Same names across customers are expected MSP data. They should
+not appear like a device fix item in the primary workflow.
+
+**Done:**
+- Removed cross-customer collisions from the device work queue.
+- Removed the collision state from the all-devices human view.
+- Kept the collision summary on the customer/debug side with platform
+  detail.
+
 ## 2026-06-15 — v0.23.4 Cross-customer platform detail
 
 **Why:** Same names across customers are common MSP data. The conflict
