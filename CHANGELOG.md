@@ -2,6 +2,23 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.26.1] — 2026-06-15
+
+### Changed
+- Cross-customer collisions stay out of the primary device workflow
+  unless the same missing platform is also observed under another
+  customer for the same normalized device name.
+- Device-facing work queue and human device view now surface only the
+  actionable cross-customer case; generic same-name collisions remain
+  in debug/customer summaries.
+- Agent Compliance Today top KPIs now use a two-row layout so the
+  seven required summary cards are readable. Long labels were shortened:
+  `First notifications ready` is now `Ready to notify`, and
+  `Collection problems` is now `Collection issues`.
+- Cross-customer actionable issue text now says `found under another
+  customer` so the operator sees the missing-platform condition instead
+  of reading the same-name collision as the issue.
+
 ## [0.26.0] — 2026-06-15
 
 ### Added

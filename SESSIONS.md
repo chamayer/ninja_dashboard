@@ -5,6 +5,39 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-15 — v0.26.1 Actionable cross-customer device rule
+
+**Why:** The operator clarified that same-name cross-customer collisions
+are expected MSP noise. They should only become device-level work when
+the current customer is missing a required platform and that same
+platform is visible under another customer with the same normalized
+name.
+
+**Done:**
+- Reworked `sql/migrations/041_agent_compliance_demote_cross_client_conflicts.sql`
+  so `v_device_work_queue` and `v_all_devices_human` compute an
+  actionable cross-customer platform list and only show those cases in
+  device-facing output.
+- Left generic collision visibility for debug/customer summaries.
+- Reworked the Agent Compliance Today top KPI strip so all seven
+  required cards remain visible but no longer sit in one cramped row.
+  The layout is now four cards on the first row and three on the
+  second row.
+- Shortened the two longest KPI labels: `First notifications ready`
+  to `Ready to notify`, and `Collection problems` to
+  `Collection issues`.
+- Changed actionable cross-customer wording from same-name language to
+  `found under another customer`, and grouped those rows in breakdowns
+  as `Missing platform found elsewhere`.
+- Appended the resumption note to `DEVELOPMENT.md` for future handoff.
+
+**Pending:**
+- Redeploy ingest so the new view definitions take effect.
+- Confirm the device queue only surfaces cross-customer rows when a
+  missing platform is present under another customer.
+- Run the Metabase bootstrap and visually confirm the Today KPI row
+  titles are no longer cut off.
+
 ## 2026-06-15 — v0.26.0 Review digest (Phase 2)
 
 **Why:** Operator direction: confirmed gaps page (Phase 1), Review-

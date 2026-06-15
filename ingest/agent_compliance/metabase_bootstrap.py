@@ -1778,7 +1778,7 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                         SELECT COUNT(*) AS "Total devices"
                         FROM ninja_agent_compliance.v_all_devices_human
                     """,
-                    0, 0, 3, 4,
+                    0, 0, 6, 4,
                     click_behavior=_dashboard_link(DASH_DEVICES),
                 ),
                 _card(
@@ -1792,7 +1792,7 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                         ) AS "Compliant %"
                         FROM ninja_agent_compliance.v_all_devices_human
                     """,
-                    0, 3, 3, 4,
+                    0, 6, 6, 4,
                     click_behavior=_dashboard_link(DASH_DEVICES),
                 ),
                 _card(
@@ -1804,7 +1804,7 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                         FROM ninja_agent_compliance.v_device_work_queue
                         WHERE work_state = 'Fix now'
                     """,
-                    0, 6, 3, 4,
+                    0, 12, 6, 4,
                     click_behavior=_dashboard_link(DASH_DEVICES),
                 ),
                 _card(
@@ -1816,18 +1816,18 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                         FROM ninja_agent_compliance.v_device_work_queue
                         WHERE work_state = 'Review'
                     """,
-                    0, 9, 3, 4,
+                    0, 18, 6, 4,
                     click_behavior=_dashboard_link(DASH_DEVICES),
                 ),
                 _card(
                     "today_notifications_ready",
-                    "First notifications ready",
+                    "Ready to notify",
                     "scalar",
                     """
-                        SELECT COUNT(*) AS "First notifications ready"
+                        SELECT COUNT(*) AS "Ready to notify"
                         FROM ninja_agent_compliance.v_notifications_ready
                     """,
-                    0, 12, 3, 4,
+                    4, 0, 8, 4,
                     click_behavior=_dashboard_link(DASH_ALERTS),
                 ),
                 _card(
@@ -1838,18 +1838,18 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                         SELECT COUNT(*) AS "Names to review"
                         FROM ninja_agent_compliance.v_customer_name_queue
                     """,
-                    0, 15, 3, 4,
+                    4, 8, 8, 4,
                     click_behavior=_dashboard_link(DASH_CUSTOMERS),
                 ),
                 _card(
                     "today_collection_problems",
-                    "Collection problems",
+                    "Collection issues",
                     "scalar",
                     """
-                        SELECT COUNT(*) AS "Collection problems"
+                        SELECT COUNT(*) AS "Collection issues"
                         FROM ninja_agent_compliance.v_system_health_queue
                     """,
-                    0, 18, 3, 4,
+                    4, 16, 8, 4,
                     click_behavior=_dashboard_link(DASH_HEALTH),
                 ),
                 _card(
@@ -1866,7 +1866,7 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                         GROUP BY client_name
                         ORDER BY COUNT(*) DESC, client_name
                     """,
-                    4, 0, 12, 6,
+                    8, 0, 12, 6,
                     click_behavior=_dashboard_link(
                         DASH_DEVICES,
                         params=[("customer", "Customer"), ("state", "State")],
@@ -1886,7 +1886,7 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                             SELECT
                                 CASE
                                     WHEN cardinality(cross_customer_actionable_platforms) > 0
-                                        THEN 'Cross-customer same name'
+                                        THEN 'Missing platform found elsewhere'
                                     WHEN 'Ninja' = ANY(missing_platforms) THEN 'Missing Ninja'
                                     WHEN 'SentinelOne' = ANY(missing_platforms) THEN 'Missing SentinelOne'
                                     WHEN 'ScreenConnect' = ANY(missing_platforms) THEN 'Missing ScreenConnect'
@@ -1905,7 +1905,7 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                         GROUP BY issue_type
                         ORDER BY COUNT(*) DESC, issue_type
                     """,
-                    4, 12, 12, 6,
+                    8, 12, 12, 6,
                     click_behavior=_dashboard_link(
                         DASH_DEVICES,
                         params=[("state", "State")],
@@ -1930,7 +1930,7 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                         GROUP BY os_family
                         ORDER BY COUNT(*) DESC, os_family
                     """,
-                    10, 0, 12, 6,
+                    14, 0, 12, 6,
                     click_behavior=_dashboard_link(
                         DASH_DEVICES,
                         params=[("os_family", "OS family"), ("state", "State")],
@@ -1955,7 +1955,7 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                         GROUP BY device_type
                         ORDER BY COUNT(*) DESC, device_type
                     """,
-                    10, 12, 12, 6,
+                    14, 12, 12, 6,
                     click_behavior=_dashboard_link(
                         DASH_DEVICES,
                         params=[("device_type", "Device type"), ("state", "State")],
@@ -1998,7 +1998,7 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                             hostname
                         LIMIT 25
                     """,
-                    16, 0, 24, 8,
+                    20, 0, 24, 8,
                     column_click_behaviors={
                         "Device": _dashboard_link(
                             DASH_DEVICE_DRILLDOWN,
@@ -2022,7 +2022,7 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                         ORDER BY current_devices DESC, candidate_name
                         LIMIT 15
                     """,
-                    24, 0, 12, 6,
+                    28, 0, 12, 6,
                     column_click_behaviors={
                         "Action": _dashboard_link(DASH_CUSTOMERS),
                     },
@@ -2042,7 +2042,7 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                         ORDER BY severity DESC, platform, source_name
                         LIMIT 15
                     """,
-                    24, 12, 12, 6,
+                    28, 12, 12, 6,
                     column_click_behaviors={
                         "Problem": _dashboard_link(DASH_HEALTH),
                     },
@@ -2096,7 +2096,7 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                             SELECT
                                 CASE
                                     WHEN cardinality(cross_customer_actionable_platforms) > 0
-                                        THEN 'Cross-customer same name'
+                                        THEN 'Missing platform found elsewhere'
                                     WHEN 'Ninja' = ANY(missing_platforms) THEN 'Missing Ninja'
                                     WHEN 'SentinelOne' = ANY(missing_platforms) THEN 'Missing SentinelOne'
                                     WHEN 'ScreenConnect' = ANY(missing_platforms) THEN 'Missing ScreenConnect'

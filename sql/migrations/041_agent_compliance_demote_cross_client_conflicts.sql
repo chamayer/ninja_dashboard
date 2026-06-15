@@ -1,7 +1,9 @@
 -- Cross-customer name collisions are expected MSP noise.
 --
--- Keep them visible in customer/debug summaries, but remove them from the
--- primary device workflow so they do not read like a fix-now item.
+-- Keep generic collisions visible in customer/debug summaries, but only
+-- promote them into the primary device workflow when a required platform is
+-- missing on the current customer and that same platform is observed under
+-- another customer with the same normalized device name.
 
 CREATE OR REPLACE VIEW ninja_agent_compliance.v_device_work_queue AS
 WITH base AS (
@@ -52,30 +54,53 @@ WITH base AS (
           AND e.pattern = lower(trim(m.client_name))
     )
 ),
-classified AS (
+prepared AS (
     SELECT
         b.*,
+        COALESCE(x.cross_customer_actionable_platforms, '{}'::text[]) AS cross_customer_actionable_platforms
+    FROM base b
+    LEFT JOIN LATERAL (
+        SELECT ARRAY(
+            SELECT DISTINCT p
+            FROM unnest(b.action_missing_platforms) AS p
+            WHERE EXISTS (
+                SELECT 1
+                FROM ninja_agent_compliance.compliance_matrix_current other
+                WHERE other.norm_name = b.norm_name
+                  AND other.client_id <> b.client_id
+                  AND p = ANY(other.observed_platforms)
+            )
+        )::text[] AS cross_customer_actionable_platforms
+    ) x ON TRUE
+),
+classified AS (
+    SELECT
+        p.*,
         CASE
-            WHEN cardinality(b.action_missing_platforms) > 0
-                 AND cardinality(b.online_platforms) > 0
-                THEN 'Missing ' || array_to_string(b.action_missing_platforms, ', ')
-                     || '; seen online in ' || array_to_string(b.online_platforms, ', ')
-            WHEN cardinality(b.action_missing_platforms) > 0
-                THEN 'Missing ' || array_to_string(b.action_missing_platforms, ', ')
-            WHEN cardinality(b.action_stale_platforms) > 0
-                THEN 'Stale ' || array_to_string(b.action_stale_platforms, ', ')
-            WHEN b.is_degraded THEN 'Agent looks degraded'
+            WHEN cardinality(p.cross_customer_actionable_platforms) > 0
+                THEN 'Missing ' || array_to_string(p.cross_customer_actionable_platforms, ', ')
+                     || '; found under another customer'
+            WHEN cardinality(p.action_missing_platforms) > 0
+                 AND cardinality(p.online_platforms) > 0
+                THEN 'Missing ' || array_to_string(p.action_missing_platforms, ', ')
+                     || '; online in ' || array_to_string(p.online_platforms, ', ')
+            WHEN cardinality(p.action_missing_platforms) > 0
+                THEN 'Missing ' || array_to_string(p.action_missing_platforms, ', ')
+            WHEN cardinality(p.action_stale_platforms) > 0
+                THEN 'Stale ' || array_to_string(p.action_stale_platforms, ', ')
+            WHEN p.is_degraded THEN 'Agent looks degraded'
             ELSE 'Needs review'
         END AS issue,
         CASE
-            WHEN cardinality(b.action_missing_platforms) > 0
-                 AND cardinality(b.online_platforms) > 0 THEN 'Fix now'
-            WHEN cardinality(b.action_missing_platforms) > 0 THEN 'Review'
-            WHEN b.is_degraded THEN 'Review'
-            WHEN cardinality(b.action_stale_platforms) > 0 THEN 'Stale'
+            WHEN cardinality(p.cross_customer_actionable_platforms) > 0 THEN 'Fix now'
+            WHEN cardinality(p.action_missing_platforms) > 0
+                 AND cardinality(p.online_platforms) > 0 THEN 'Fix now'
+            WHEN cardinality(p.action_missing_platforms) > 0 THEN 'Review'
+            WHEN p.is_degraded THEN 'Review'
+            WHEN cardinality(p.action_stale_platforms) > 0 THEN 'Stale'
             ELSE 'Review'
         END AS work_state
-    FROM base b
+    FROM prepared p
 )
 SELECT
     client_id,
@@ -92,6 +117,7 @@ SELECT
     source_failed_platforms,
     online_platforms,
     last_seen_anywhere,
+    cross_customer_actionable_platforms,
     issue,
     work_state,
     s1_exempt,
@@ -104,7 +130,8 @@ FROM classified
 WHERE NOT ignored
   AND NOT is_unknown
   AND (
-      cardinality(action_missing_platforms) > 0
+      cardinality(cross_customer_actionable_platforms) > 0
+      OR cardinality(action_missing_platforms) > 0
       OR cardinality(action_stale_platforms) > 0
       OR is_degraded
   )
@@ -160,6 +187,25 @@ WITH base AS (
               AND (s.expires_at IS NULL OR s.expires_at > now())
         ) AS ignored
     FROM ninja_agent_compliance.compliance_matrix_current m
+),
+prepared AS (
+    SELECT
+        b.*,
+        COALESCE(x.cross_customer_actionable_platforms, '{}'::text[]) AS cross_customer_actionable_platforms
+    FROM base b
+    LEFT JOIN LATERAL (
+        SELECT ARRAY(
+            SELECT DISTINCT p
+            FROM unnest(b.action_missing_platforms) AS p
+            WHERE EXISTS (
+                SELECT 1
+                FROM ninja_agent_compliance.compliance_matrix_current other
+                WHERE other.norm_name = b.norm_name
+                  AND other.client_id <> b.client_id
+                  AND p = ANY(other.observed_platforms)
+            )
+        )::text[] AS cross_customer_actionable_platforms
+    ) x ON TRUE
 )
 SELECT
     client_id,
@@ -176,8 +222,10 @@ SELECT
     source_failed_platforms,
     online_platforms,
     last_seen_anywhere,
+    cross_customer_actionable_platforms,
     CASE
         WHEN ignored THEN 'Ignored'
+        WHEN cardinality(cross_customer_actionable_platforms) > 0 THEN 'Fix now'
         WHEN cardinality(action_missing_platforms) > 0
              AND cardinality(online_platforms) > 0 THEN 'Fix now'
         WHEN cardinality(action_missing_platforms) > 0 THEN 'Review'
@@ -189,6 +237,9 @@ SELECT
     END AS state,
     CASE
         WHEN ignored THEN 'Ignored'
+        WHEN cardinality(cross_customer_actionable_platforms) > 0 THEN
+            'Missing ' || array_to_string(cross_customer_actionable_platforms, ', ')
+            || '; found under another customer'
         WHEN cardinality(action_missing_platforms) > 0 THEN 'Missing ' || array_to_string(action_missing_platforms, ', ')
         WHEN is_degraded THEN 'Agent looks degraded'
         WHEN is_unknown THEN 'Unknown device state'
@@ -198,6 +249,7 @@ SELECT
     END AS issue,
     s1_exempt,
     ignored,
+    cross_client_conflict,
     evaluated_at
-FROM base
+FROM prepared
 ORDER BY client_name, hostname;
