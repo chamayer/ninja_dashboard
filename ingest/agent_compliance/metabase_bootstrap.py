@@ -1714,21 +1714,14 @@ _LEGACY_DASHBOARDS_UNUSED = [
                         SELECT
                             norm_name,
                             string_agg(DISTINCT client_name, ', ' ORDER BY client_name) AS customers,
-                            string_agg(DISTINCT hostname, ', ' ORDER BY hostname) AS devices,
-                            array_remove(array[
-                                CASE WHEN bool_or(ninja_online) THEN 'Ninja' END,
-                                CASE WHEN bool_or(screenconnect_online) THEN 'ScreenConnect' END,
-                                CASE WHEN bool_or(sentinelone_online) THEN 'SentinelOne' END,
-                                CASE WHEN bool_or(logmein_online) THEN 'LogMeIn' END
-                            ], NULL)::text[] AS online_platforms
+                            string_agg(DISTINCT hostname, ', ' ORDER BY hostname) AS devices
                         FROM ninja_agent_compliance.v_cross_client_conflicts
                         GROUP BY norm_name
                     )
                     SELECT
                         norm_name AS "Match key",
                         customers AS "Customers",
-                        devices AS "Device",
-                        COALESCE(array_to_string(online_platforms, ', '), '-') AS "Online in"
+                        devices AS "Device"
                     FROM conflicts
                     ORDER BY norm_name
                     LIMIT 300
@@ -2826,21 +2819,14 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                             SELECT
                                 norm_name,
                                 string_agg(DISTINCT client_name, ', ' ORDER BY client_name) AS customers,
-                                string_agg(DISTINCT hostname, ', ' ORDER BY hostname) AS devices,
-                                array_remove(array[
-                                    CASE WHEN bool_or(ninja_online) THEN 'Ninja' END,
-                                    CASE WHEN bool_or(screenconnect_online) THEN 'ScreenConnect' END,
-                                    CASE WHEN bool_or(sentinelone_online) THEN 'SentinelOne' END,
-                                    CASE WHEN bool_or(logmein_online) THEN 'LogMeIn' END
-                                ], NULL)::text[] AS online_platforms
+                                string_agg(DISTINCT hostname, ', ' ORDER BY hostname) AS devices
                             FROM ninja_agent_compliance.v_cross_client_conflicts
                             GROUP BY norm_name
                         )
                         SELECT
                             norm_name AS "Match key",
                             customers AS "Customers",
-                            devices AS "Device",
-                            COALESCE(array_to_string(online_platforms, ', '), '-') AS "Online in"
+                            devices AS "Device"
                         FROM conflicts
                         ORDER BY norm_name
                         LIMIT 300
