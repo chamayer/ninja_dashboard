@@ -1,10 +1,7 @@
--- Cross-customer name collisions are expected MSP noise unless the same
--- device name is also missing a platform under one customer while that
--- platform is present under another customer.
+-- Cross-customer name collisions are expected MSP noise.
 --
--- Keep the broad collision summary visible in customer/debug summaries,
--- but only promote the actionable cross-customer case into the device
--- workflow.
+-- Keep them visible in customer/debug summaries, but remove them from the
+-- primary device workflow so they do not read like a fix-now item.
 
 CREATE OR REPLACE VIEW ninja_agent_compliance.v_device_work_queue AS
 WITH base AS (
@@ -58,47 +55,7 @@ WITH base AS (
 classified AS (
     SELECT
         b.*,
-        ARRAY(
-            SELECT DISTINCT p
-            FROM unnest(b.action_missing_platforms) AS p
-            WHERE EXISTS (
-                SELECT 1
-                FROM ninja_agent_compliance.compliance_matrix_current other
-                WHERE other.norm_name = b.norm_name
-                  AND other.client_id <> b.client_id
-                  AND p = ANY(other.observed_platforms)
-            )
-        )::text[] AS cross_customer_actionable_platforms,
         CASE
-            WHEN cardinality(
-                ARRAY(
-                    SELECT DISTINCT p
-                    FROM unnest(b.action_missing_platforms) AS p
-                    WHERE EXISTS (
-                        SELECT 1
-                        FROM ninja_agent_compliance.compliance_matrix_current other
-                        WHERE other.norm_name = b.norm_name
-                          AND other.client_id <> b.client_id
-                          AND p = ANY(other.observed_platforms)
-                    )
-                )::text[]
-            ) > 0
-                THEN 'Missing '
-                     || array_to_string(
-                         ARRAY(
-                             SELECT DISTINCT p
-                             FROM unnest(b.action_missing_platforms) AS p
-                             WHERE EXISTS (
-                                 SELECT 1
-                                 FROM ninja_agent_compliance.compliance_matrix_current other
-                                 WHERE other.norm_name = b.norm_name
-                                   AND other.client_id <> b.client_id
-                                   AND p = ANY(other.observed_platforms)
-                             )
-                         )::text[],
-                         ', '
-                     )
-                     || '; same name seen under another customer'
             WHEN cardinality(b.action_missing_platforms) > 0
                  AND cardinality(b.online_platforms) > 0
                 THEN 'Missing ' || array_to_string(b.action_missing_platforms, ', ')
@@ -111,7 +68,6 @@ classified AS (
             ELSE 'Needs review'
         END AS issue,
         CASE
-            WHEN cardinality(cross_customer_actionable_platforms) > 0 THEN 'Fix now'
             WHEN cardinality(b.action_missing_platforms) > 0
                  AND cardinality(b.online_platforms) > 0 THEN 'Fix now'
             WHEN cardinality(b.action_missing_platforms) > 0 THEN 'Review'
@@ -136,7 +92,6 @@ SELECT
     source_failed_platforms,
     online_platforms,
     last_seen_anywhere,
-    cross_customer_actionable_platforms,
     issue,
     work_state,
     s1_exempt,
@@ -152,7 +107,6 @@ WHERE NOT ignored
       cardinality(action_missing_platforms) > 0
       OR cardinality(action_stale_platforms) > 0
       OR is_degraded
-      OR cardinality(cross_customer_actionable_platforms) > 0
   )
 ORDER BY
     CASE work_state
@@ -222,10 +176,8 @@ SELECT
     source_failed_platforms,
     online_platforms,
     last_seen_anywhere,
-    cross_customer_actionable_platforms,
     CASE
         WHEN ignored THEN 'Ignored'
-        WHEN cardinality(cross_customer_actionable_platforms) > 0 THEN 'Fix now'
         WHEN cardinality(action_missing_platforms) > 0
              AND cardinality(online_platforms) > 0 THEN 'Fix now'
         WHEN cardinality(action_missing_platforms) > 0 THEN 'Review'
@@ -237,9 +189,6 @@ SELECT
     END AS state,
     CASE
         WHEN ignored THEN 'Ignored'
-        WHEN cardinality(cross_customer_actionable_platforms) > 0 THEN
-            'Missing ' || array_to_string(cross_customer_actionable_platforms, ', ')
-            || '; same name seen under another customer'
         WHEN cardinality(action_missing_platforms) > 0 THEN 'Missing ' || array_to_string(action_missing_platforms, ', ')
         WHEN is_degraded THEN 'Agent looks degraded'
         WHEN is_unknown THEN 'Unknown device state'
@@ -251,17 +200,4 @@ SELECT
     ignored,
     evaluated_at
 FROM base
-LEFT JOIN LATERAL (
-    SELECT ARRAY(
-        SELECT DISTINCT p
-        FROM unnest(base.action_missing_platforms) AS p
-        WHERE EXISTS (
-            SELECT 1
-            FROM ninja_agent_compliance.compliance_matrix_current other
-            WHERE other.norm_name = base.norm_name
-              AND other.client_id <> base.client_id
-              AND p = ANY(other.observed_platforms)
-        )
-    )::text[] AS cross_customer_actionable_platforms
-) x ON TRUE
 ORDER BY client_name, hostname;

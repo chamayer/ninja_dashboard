@@ -5,6 +5,34 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-15 — v0.23.9 Fix broken cross-customer migration
+
+**Why:** Container was crash-looping on `am-ch-01` with
+`column "cross_customer_actionable_platforms" does not exist` while
+applying migration 041. v0.23.6 and v0.23.7 both put the new column as
+a sibling alias in the same SELECT list and referenced it from another
+CASE expression in the same SELECT — PostgreSQL does not allow that.
+Neither 041 (my edit) nor 042 ever applied.
+
+**Done:**
+- Reverted migration 041 to the original demote-only definition shipped
+  by v0.23.5 (1372a37). Codex's version applies cleanly.
+- Rewrote migration 042 with a `with_actionable` CTE so the
+  work-state CASE references the column from a parent CTE.
+- Appended `cross_customer_actionable_platforms` at the END of both
+  `v_device_work_queue` and `v_all_devices_human` SELECT lists, so
+  `CREATE OR REPLACE` is column-compatible with what migration 040 /
+  041 produced.
+
+**Validation pending:**
+- Portainer redeploy. Container should reach READY without migration
+  errors.
+- After deploy:
+  `docker exec -it ninja-postgres psql -U postgres -d ninja -c
+   "\d ninja_agent_compliance.v_device_work_queue" | tail -5`
+  should show `cross_customer_actionable_platforms` as the last
+  column.
+
 ## 2026-06-15 — v0.23.8 Stop emitting generic cross-customer findings
 
 **Why:** v0.23.5/v0.23.6 removed generic cross-customer collisions from

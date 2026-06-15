@@ -2,6 +2,23 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.23.9] — 2026-06-15
+
+### Fixed
+- Migration 041 (v0.23.6) and migration 042 (v0.23.7) both failed on
+  the deployed DB with
+  `column "cross_customer_actionable_platforms" does not exist`. The
+  CASE expressions in the same SELECT list referenced a sibling column
+  alias, which PostgreSQL does not allow. Container was crash-looping
+  on startup.
+- Reverted migration 041 to the original demote-only definition shipped
+  by v0.23.5 (1372a37). Migration 041 now applies cleanly.
+- Rewrote migration 042 with a `with_actionable` CTE so the work-state
+  CASE references the column from a parent CTE, not a sibling alias.
+- Appended `cross_customer_actionable_platforms` at the END of both
+  view column lists so `CREATE OR REPLACE` is compatible with the
+  prior column order.
+
 ## [0.23.8] — 2026-06-15
 
 ### Fixed
