@@ -4,6 +4,26 @@ Project reference for the commands that keep coming up in this repo.
 Assumes you are on the Docker host `am-ch-01` and the stack is running
 under Portainer.
 
+## Deploy
+
+Pull the latest code on the Docker host:
+
+```bash
+cd /amr-ch-01_data/ninja-dashboard && git pull
+```
+
+Rebuild and restart ingest:
+
+```bash
+cd /amr-ch-01_data/ninja-dashboard && docker compose build ingest && docker compose up -d ingest
+```
+
+Check running container port binding:
+
+```bash
+docker ps --format 'table {{.Names}}\t{{.Ports}}' | grep ninja-ingest
+```
+
 ## Ingest
 
 Run a full ingest cycle:
@@ -12,10 +32,107 @@ Run a full ingest cycle:
 curl -X POST http://127.0.0.1:8090/run
 ```
 
+Run patching ingest only:
+
+```bash
+curl -fsS -X POST http://127.0.0.1:8090/run/patches
+```
+
 Run the Metabase bootstrap:
 
 ```bash
 curl -X POST http://127.0.0.1:8090/bootstrap-metabase
+```
+
+Check ingest liveness:
+
+```bash
+curl -fsS http://127.0.0.1:8090/healthz
+```
+
+Check ingest readiness:
+
+```bash
+curl -fsS http://127.0.0.1:8090/readyz
+```
+
+## Agent Compliance
+
+Run a full Agent Compliance collection. This calls Ninja, SentinelOne,
+LogMeIn, and ScreenConnect, then evaluates compliance and dispatches
+first-time notifications if alerting is enabled:
+
+```bash
+curl -fsS -X POST http://127.0.0.1:8090/run/agent-compliance
+```
+
+Run Agent Compliance evaluate-only. This does not call vendor APIs; it
+rebuilds the current compliance model from the latest stored
+observations, applies current customer/alias/config rules, and dispatches
+first-time notifications if alerting is enabled:
+
+```bash
+curl -fsS -X POST http://127.0.0.1:8090/run/agent-compliance-evaluate
+```
+
+Check recent Agent Compliance runs:
+
+```bash
+docker exec ninja-postgres psql -U ninja -d ninja -c "SELECT domain,status,rows_upserted,rows_inserted,started_at,finished_at,error_text FROM ninja_core.run_log WHERE domain LIKE 'agent_compliance%' ORDER BY started_at DESC LIMIT 10;"
+```
+
+Check Agent Compliance source health:
+
+```bash
+docker exec ninja-postgres psql -U ninja -d ninja -c "SELECT platform,source_name,status,rows_observed,LEFT(COALESCE(error_text,''),160) AS error_text FROM ninja_agent_compliance.v_source_health_current ORDER BY platform,source_name;"
+```
+
+Check current device work queue:
+
+```bash
+docker exec ninja-postgres psql -U ninja -d ninja -c "SELECT work_state,COUNT(*) FROM ninja_agent_compliance.v_device_work_queue GROUP BY work_state ORDER BY COUNT(*) DESC;"
+```
+
+Check devices to fix:
+
+```bash
+docker exec ninja-postgres psql -U ninja -d ninja -c "SELECT COUNT(*) AS devices_to_fix FROM ninja_agent_compliance.v_device_work_queue WHERE work_state IN ('Fix now','Review');"
+```
+
+Check notification readiness:
+
+```bash
+docker exec ninja-postgres psql -U ninja -d ninja -c "SELECT ready_to_notify,notification_status,COUNT(*) FROM ninja_agent_compliance.v_notification_queue GROUP BY ready_to_notify,notification_status ORDER BY ready_to_notify DESC,COUNT(*) DESC;"
+```
+
+Check customer-name review queue:
+
+```bash
+docker exec ninja-postgres psql -U ninja -d ninja -c "SELECT candidate_name,platform,current_devices,suggested_customer,review_reason FROM ninja_agent_compliance.v_customer_name_queue ORDER BY current_devices DESC,candidate_name LIMIT 50;"
+```
+
+Check customer mapping status:
+
+```bash
+docker exec ninja-postgres psql -U ninja -d ninja -c "SELECT overall_status,COUNT(*) FROM ninja_agent_compliance.v_org_alignment_current GROUP BY overall_status ORDER BY COUNT(*) DESC;"
+```
+
+Check latest Agent Compliance migration:
+
+```bash
+docker exec ninja-postgres psql -U ninja -d ninja -c "SELECT version,applied_at FROM ninja_core.schema_migrations WHERE version LIKE '%agent_compliance%' ORDER BY applied_at DESC LIMIT 10;"
+```
+
+Watch Agent Compliance logs:
+
+```bash
+docker logs --tail 150 ninja-ingest | awk '/agent compliance|Agent compliance|Dashboard ready|ERROR|Traceback/ {print}'
+```
+
+Verify the current dashboard wording migration:
+
+```bash
+docker exec ninja-postgres psql -U ninja -d ninja -c "SELECT version,applied_at FROM ninja_core.schema_migrations WHERE version = '040_agent_compliance_online_in_wording';"
 ```
 
 Check the current custom-field allowlist seen by the running container:
