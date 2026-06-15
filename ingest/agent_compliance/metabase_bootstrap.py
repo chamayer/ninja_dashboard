@@ -1778,7 +1778,7 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                         SELECT COUNT(*) AS "Total devices"
                         FROM ninja_agent_compliance.v_all_devices_human
                     """,
-                    0, 0, 4, 4,
+                    0, 0, 3, 4,
                     click_behavior=_dashboard_link(DASH_DEVICES),
                 ),
                 _card(
@@ -1792,19 +1792,31 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                         ) AS "Compliant %"
                         FROM ninja_agent_compliance.v_all_devices_human
                     """,
-                    0, 4, 4, 4,
+                    0, 3, 3, 4,
                     click_behavior=_dashboard_link(DASH_DEVICES),
                 ),
                 _card(
-                    "today_devices_to_fix",
-                    "Devices to fix",
+                    "today_fix_now",
+                    "Fix now",
                     "scalar",
                     """
-                        SELECT COUNT(*) AS "Devices to fix"
+                        SELECT COUNT(*) AS "Fix now"
                         FROM ninja_agent_compliance.v_device_work_queue
-                        WHERE work_state IN ('Fix now', 'Review')
+                        WHERE work_state = 'Fix now'
                     """,
-                    0, 8, 4, 4,
+                    0, 6, 3, 4,
+                    click_behavior=_dashboard_link(DASH_DEVICES),
+                ),
+                _card(
+                    "today_review",
+                    "Review",
+                    "scalar",
+                    """
+                        SELECT COUNT(*) AS "Review"
+                        FROM ninja_agent_compliance.v_device_work_queue
+                        WHERE work_state = 'Review'
+                    """,
+                    0, 9, 3, 4,
                     click_behavior=_dashboard_link(DASH_DEVICES),
                 ),
                 _card(
@@ -1815,7 +1827,7 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                         SELECT COUNT(*) AS "First notifications ready"
                         FROM ninja_agent_compliance.v_notifications_ready
                     """,
-                    0, 12, 4, 4,
+                    0, 12, 3, 4,
                     click_behavior=_dashboard_link(DASH_ALERTS),
                 ),
                 _card(
@@ -1826,7 +1838,7 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                         SELECT COUNT(*) AS "Names to review"
                         FROM ninja_agent_compliance.v_customer_name_queue
                     """,
-                    0, 16, 4, 4,
+                    0, 15, 3, 4,
                     click_behavior=_dashboard_link(DASH_CUSTOMERS),
                 ),
                 _card(
@@ -1837,7 +1849,7 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                         SELECT COUNT(*) AS "Collection problems"
                         FROM ninja_agent_compliance.v_system_health_queue
                     """,
-                    0, 20, 4, 4,
+                    0, 18, 3, 4,
                     click_behavior=_dashboard_link(DASH_HEALTH),
                 ),
                 _card(
@@ -1853,7 +1865,6 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                         WHERE work_state = 'Fix now'
                         GROUP BY client_name
                         ORDER BY COUNT(*) DESC, client_name
-                        LIMIT 5
                     """,
                     4, 0, 12, 6,
                     click_behavior=_dashboard_link(
@@ -1893,7 +1904,6 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                         FROM classified
                         GROUP BY issue_type
                         ORDER BY COUNT(*) DESC, issue_type
-                        LIMIT 5
                     """,
                     4, 12, 12, 6,
                     click_behavior=_dashboard_link(
@@ -1919,7 +1929,6 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                         WHERE work_state = 'Fix now'
                         GROUP BY os_family
                         ORDER BY COUNT(*) DESC, os_family
-                        LIMIT 5
                     """,
                     10, 0, 12, 6,
                     click_behavior=_dashboard_link(
@@ -2064,7 +2073,6 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                           [[AND client_name IN ({{customer}})]]
                         GROUP BY client_name
                         ORDER BY COUNT(*) DESC, client_name
-                        LIMIT 5
                     """,
                     12, 0, 12, 6,
                     click_behavior=_dashboard_link(
@@ -2107,7 +2115,6 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                         FROM classified
                         GROUP BY issue_type
                         ORDER BY COUNT(*) DESC, issue_type
-                        LIMIT 5
                     """,
                     12, 12, 12, 6,
                     click_behavior=_dashboard_link(
@@ -2136,7 +2143,6 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                           [[AND client_name IN ({{customer}})]]
                         GROUP BY os_family
                         ORDER BY COUNT(*) DESC, os_family
-                        LIMIT 5
                     """,
                     18, 0, 12, 6,
                     click_behavior=_dashboard_link(

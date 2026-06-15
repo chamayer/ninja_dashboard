@@ -2,6 +2,18 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.25.1] — 2026-06-15
+
+### Changed
+- Today KPI strip split: `Devices to fix` (Fix now + Review) → `Fix now`
+  + `Review` as two separate scalar tiles. All seven KPIs now sit in
+  one row at 3-wide each. Breakdowns scope to Fix now only (matches
+  the alert gating shipped in v0.25.0).
+- Dropped `LIMIT 5` from all four breakdown cards on both Today and
+  Devices (Customer / Issue type / OS family / Device type). Each
+  card now reconciles to the `Fix now` KPI total; long breakdowns
+  scroll within the card.
+
 ## [0.25.0] — 2026-06-15
 
 ### Changed (behavioral)

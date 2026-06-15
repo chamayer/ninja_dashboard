@@ -5,6 +5,25 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-15 — v0.25.1 KPI split + breakdown reconciliation (Phase 3)
+
+**Why:** The breakdown sums did not match the `Devices to fix` KPI
+because the KPI included Review while breakdowns showed Fix now only,
+and LIMIT 5 truncated the long tail. Now that alerts only fire on
+Fix now (v0.25.0), the headline KPI should match what the breakdowns
+group.
+
+**Done:**
+- Replaced the `Devices to fix` KPI with two scalars: `Fix now` and
+  `Review`. The seven KPIs now sit in one row at 3-wide each.
+- Dropped `LIMIT 5` from all four breakdown cards on Today and
+  Devices. Cards scroll internally when the long tail is large;
+  totals always reconcile to the Fix-now KPI.
+
+**Next:**
+- Phase 2 (Review digest): daily 08:00 cron that rolls Review-class
+  findings into one notification via a `review_digest` route.
+
 ## 2026-06-15 — v0.25.0 Alerts gated to confirmed gaps only (Phase 1)
 
 **Why:** Per operator direction — alerts should only fire on
