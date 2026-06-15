@@ -5,6 +5,30 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-15 — v0.23.6 Promote actionable cross-customer cases
+
+**Why:** v0.23.5 removed all cross-customer name collisions from the
+device work queue, but the operationally important case — same device
+name missing a required platform under customer A while that platform
+is observed under customer B — should remain a `Fix now` item. The
+generic same-name-across-customers noise stays demoted.
+
+**Done:**
+- Refined migration
+  `041_agent_compliance_demote_cross_client_conflicts.sql` to add a
+  `cross_customer_actionable_platforms` array on the device work queue
+  and the all-devices human view.
+- Devices with one or more actionable cross-customer platforms are
+  classified as `Fix now` with issue text
+  `Missing <platforms>; same name seen under another customer`.
+- Non-actionable cross-customer collisions stay out of the device
+  queue and remain visible in the customer/debug summary.
+
+**Validation pending:**
+- Portainer redeploy + `\d ninja_agent_compliance.v_device_work_queue`
+  on `am-ch-01` to confirm the new column, and a spot check that
+  representative devices show as `Fix now` with the new issue text.
+
 ## 2026-06-15 — v0.23.5 Demote cross-customer collisions
 
 **Why:** Same names across customers are expected MSP data. They should

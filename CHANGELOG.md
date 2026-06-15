@@ -2,6 +2,21 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.23.6] — 2026-06-15
+
+### Changed
+- Cross-customer name collisions are promoted back into the device
+  work queue (`Fix now`) only for the actionable case: the same device
+  name is missing a required platform under one customer while that
+  platform is observed under another customer.
+- The general cross-customer collision summary remains in the
+  customer/debug view and is not treated as a device fix item.
+- The work-queue issue text for the actionable case reads
+  `Missing <platforms>; same name seen under another customer`.
+- Refined migration
+  `041_agent_compliance_demote_cross_client_conflicts.sql` view
+  definitions.
+
 ## [0.23.5] — 2026-06-15
 
 ### Changed
