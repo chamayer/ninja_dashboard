@@ -658,12 +658,6 @@ def _findings_for_matrix(
             f"{matrix['hostname']} has stale {platform} check-in data",
             {"stale_platform": platform},
         ))
-    if matrix["cross_client_conflict"]:
-        findings.append(_finding(
-            run_id, matrix, now, "cross_client_conflict", None, "high",
-            f"{matrix['hostname']} appears under multiple clients",
-            {"norm_name": matrix["norm_name"]},
-        ))
     return findings
 
 

@@ -2,6 +2,37 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.23.8] — 2026-06-15
+
+### Fixed
+- `Device appears under more than one customer` no longer appears as an
+  Issue / Notification finding. v0.23.5/v0.23.6 demoted the case in the
+  device work queue, but the underlying `cross_client_conflict` finding
+  was still emitted by the Python evaluator, surfacing the noise in
+  `v_active_findings` and the Issues / Notifications Metabase cards.
+
+### Removed
+- `_findings_for_matrix` no longer emits `cross_client_conflict`
+  findings. The actionable cross-customer case is covered by the
+  existing `missing_required_platform` finding plus the work-queue
+  promotion shipped in v0.23.6.
+
+### Changed
+- Added migration
+  `043_agent_compliance_disable_cross_client_conflict_rule.sql` that
+  disables the `cross_client_conflict` row in `alert_rules` so a route
+  accidentally enabled on it cannot fire. The row is left in place.
+
+### Preserved (debug surface)
+- The `cross_client_conflict` boolean on
+  `compliance_matrix_current` and the `v_cross_client_conflicts` view
+  remain untouched.
+- Customer / debug Metabase cards that surface raw cross-customer name
+  collisions remain unchanged.
+- Metabase CASE branches that label historical
+  `cross_client_conflict` alert events stay so the alert-history table
+  still renders a human label.
+
 ## [0.23.7] — 2026-06-15
 
 ### Fixed

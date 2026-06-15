@@ -5,6 +5,42 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-15 — v0.23.8 Stop emitting generic cross-customer findings
+
+**Why:** v0.23.5/v0.23.6 removed generic cross-customer collisions from
+the device work queue and promoted only the actionable subset. Full
+review caught that the Python evaluator was still emitting a
+`cross_client_conflict` finding (severity `high`) for every collision,
+so the noisy `Device appears under more than one customer` text was
+still leaking into `v_active_findings`, the Issues card, and the
+notification queue. Operator confirmed seeing it.
+
+**Done:**
+- Removed the unconditional `cross_client_conflict` finding emission
+  from `_findings_for_matrix` in `ingest/agent_compliance/ingest.py`.
+- Added migration
+  `043_agent_compliance_disable_cross_client_conflict_rule.sql` that
+  disables the `alert_rules` row for `cross_client_conflict` so a
+  route accidentally enabled on it cannot fire.
+
+**Debug surface preserved:**
+- `compliance_matrix_current.cross_client_conflict` boolean stays.
+- `v_cross_client_conflicts` view stays.
+- Customer / debug Metabase cards that surface raw name collisions
+  stay.
+- Metabase CASE branches that label historical
+  `cross_client_conflict` alert events stay so the alert-history table
+  still renders a human label.
+
+**Validation pending:**
+- Portainer redeploy then on `am-ch-01`:
+  `docker exec -it ninja-postgres psql -U postgres -d ninja -c
+   "SELECT COUNT(*) FROM ninja_agent_compliance.compliance_findings
+    WHERE finding_type='cross_client_conflict' AND status='active';"`
+  should drop to 0 after the next collection or evaluate run.
+- Issues / Notifications cards in Metabase no longer show
+  `Device appears under multiple customers` rows.
+
 ## 2026-06-15 — v0.23.7 Fix wording regression + dead-code cleanup
 
 **Why:** Code review of the codex commits from earlier today found:
