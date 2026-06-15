@@ -135,16 +135,6 @@ def _summary_hash(finding: dict[str, Any]) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-def _get_state(signature: str) -> dict[str, Any] | None:
-    with db.pool.connection() as conn:
-        with conn.cursor(row_factory=dict_row) as cur:
-            cur.execute(
-                "SELECT * FROM ninja_agent_compliance.alert_state WHERE finding_signature = %s",
-                (signature,),
-            )
-            return cur.fetchone()
-
-
 def _has_successful_delivery(signature: str) -> bool:
     with db.pool.connection() as conn:
         with conn.cursor() as cur:

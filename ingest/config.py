@@ -76,7 +76,6 @@ class Settings(BaseSettings):
 
     # ── Agent compliance alerts ──────────────────────────────────────
     AGENT_COMPLIANCE_ALERTS_ENABLED: bool = False
-    AGENT_COMPLIANCE_ALERT_COOLDOWN_HOURS: int = Field(default=24, ge=1, le=168)
     AGENT_COMPLIANCE_ALERT_WEBHOOK_URL_REF: str = "AGENT_COMPLIANCE_ALERT_WEBHOOK_URL"
     AGENT_COMPLIANCE_ALERT_EMAIL_FROM: str = ""
     AGENT_COMPLIANCE_ALERT_EMAIL_TO: str = ""

@@ -5,6 +5,34 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-15 — v0.23.7 Fix wording regression + dead-code cleanup
+
+**Why:** Code review of the codex commits from earlier today found:
+1. Migration 041 (v0.23.5) rebuilt `v_device_work_queue` and
+   `v_all_devices_human` from an older copy and reintroduced
+   `seen online in`, undoing the wording fix shipped by migration 040
+   (v0.23.2).
+2. The first-success alert refactor (v0.23.1) left
+   `AGENT_COMPLIANCE_ALERT_COOLDOWN_HOURS` and the `_get_state` helper
+   behind with no remaining readers.
+
+**Done:**
+- Added migration
+  `042_agent_compliance_restore_online_in_wording.sql` that
+  `CREATE OR REPLACE`s both views with the corrected literals:
+  `online in` and `same name under another customer`.
+- Removed `AGENT_COMPLIANCE_ALERT_COOLDOWN_HOURS` from
+  `ingest/config.py` and `.env.example`.
+- Removed the orphan `_get_state` function from
+  `ingest/agent_compliance/alerts.py`.
+
+**Validation pending:**
+- Portainer redeploy then verify on `am-ch-01`:
+  `SELECT DISTINCT issue FROM ninja_agent_compliance.v_device_work_queue
+   WHERE issue LIKE '%online in%' OR issue LIKE '%under another customer%';`
+  should show only `online in` (no `seen online in`) and
+  `same name under another customer` (no `seen`).
+
 ## 2026-06-15 — v0.23.6 Promote actionable cross-customer cases
 
 **Why:** v0.23.5 removed all cross-customer name collisions from the

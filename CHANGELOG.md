@@ -2,6 +2,26 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.23.7] — 2026-06-15
+
+### Fixed
+- Restored the shorter `online in` wording on the device work-queue and
+  all-devices views. Migration 041 rebuilt the views from an older copy
+  and reintroduced `seen online in`, undoing migration 040 (v0.23.2).
+
+### Changed
+- Cross-customer actionable issue text now reads
+  `Missing <platforms>; same name under another customer` (dropped
+  `seen`) for vocabulary consistency with the rest of the workflow.
+- Added migration
+  `042_agent_compliance_restore_online_in_wording.sql`.
+
+### Removed
+- `AGENT_COMPLIANCE_ALERT_COOLDOWN_HOURS` setting and the matching line
+  in `.env.example` (unused since first-success alert dispatch landed
+  in v0.23.1).
+- Dead `_get_state` helper in `ingest/agent_compliance/alerts.py`.
+
 ## [0.23.6] — 2026-06-15
 
 ### Changed
