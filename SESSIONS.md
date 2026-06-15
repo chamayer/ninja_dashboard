@@ -5,6 +5,44 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-15 — v0.25.0 Alerts gated to confirmed gaps only (Phase 1)
+
+**Why:** Per operator direction — alerts should only fire on
+confirmed gaps, not Review-state judgment calls. Review and Stale
+work belongs in a separate digest (Phase 2). Stops paging on
+"missing platform but device offline / agent degraded" cases.
+
+**Done:**
+- Migration 045 adds `confirmed_gap boolean NOT NULL DEFAULT false`
+  to `compliance_findings` and an index on
+  `(run_id, status, confirmed_gap)`.
+- `_findings_for_matrix` now indexes observed platforms per
+  (norm_name, client_id) once per evaluate, then sets `confirmed_gap`
+  per finding:
+    * `missing_required_platform`: true when the device has any
+      online platform OR the missing platform is observed under the
+      same normalized hostname for a different customer.
+    * `stale_required_platform`: false (digest only).
+- `_source_failure_findings`: `confirmed_gap = true` (operational).
+- `alerts.process_alerts` SELECT adds `AND f.confirmed_gap`.
+
+**Next:**
+- Phase 3 (KPI split + breakdown reconciliation) so Today shows
+  `Fix now` and `Review` as separate KPIs and breakdowns reconcile
+  to the Fix-now total. Drop the LIMIT 5 truncation in favor of top
+  5 + Other row.
+- Phase 2 (review digest): daily 08:00 cron that summarizes current
+  Review-class findings into one rolled-up notification.
+
+**Validation pending:**
+- Portainer redeploy + evaluate-only run, then:
+  `docker exec -it ninja-postgres psql -U ninja -d ninja -c
+   "SELECT finding_type, confirmed_gap, COUNT(*)
+    FROM ninja_agent_compliance.compliance_findings
+    WHERE status='active' GROUP BY 1,2 ORDER BY 1,2;"`
+- Spot-check `v_notifications_ready` no longer shows offline / Review
+  rows.
+
 ## 2026-06-15 — v0.24.1 OS family + device type — filter, column, breakdown
 
 **Why:** Grouping Fix-now work by OS family (Windows 7/10/11/Server

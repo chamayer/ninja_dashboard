@@ -2,6 +2,33 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.25.0] — 2026-06-15
+
+### Changed (behavioral)
+- Alerts now fire only on **confirmed gaps**. A `missing_required_platform`
+  finding is confirmed when either: the device has at least one online
+  platform somewhere, OR the missing platform is observed under the
+  same normalized hostname for a different customer (the Fix-now
+  conditions). Review-state findings (missing but device fully offline)
+  no longer trigger alerts.
+- `stale_required_platform` findings never fire alerts. They are
+  intended for a forthcoming daily Review digest (Phase 2).
+- `source_failure` findings remain alertable (operational, not a
+  judgment call).
+
+### Added
+- `confirmed_gap` boolean column on `compliance_findings` (migration
+  045), set at emission time in `_findings_for_matrix` and
+  `_source_failure_findings`. New per-(run_id, status, confirmed_gap)
+  index supports the alert filter.
+- `alerts.process_alerts` adds `AND f.confirmed_gap` to its SELECT.
+
+### Notes
+- The `compliance_matrix_current.cross_client_conflict` boolean and
+  `v_cross_client_conflicts` debug surface stay as-is.
+- Existing finding rows default `confirmed_gap` to false; the next
+  collection or evaluate-only run re-emits with the correct flag.
+
 ## [0.24.1] — 2026-06-15
 
 ### Added

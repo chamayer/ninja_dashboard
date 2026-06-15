@@ -34,6 +34,7 @@ def process_alerts(run_id: int, now: datetime) -> int:
                 FROM ninja_agent_compliance.compliance_findings f
                 WHERE f.run_id = %s
                   AND f.status = 'active'
+                  AND f.confirmed_gap
                   AND NOT EXISTS (
                       SELECT 1
                       FROM ninja_agent_compliance.alert_suppressions s

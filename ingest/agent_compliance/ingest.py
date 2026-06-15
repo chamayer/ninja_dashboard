@@ -467,10 +467,30 @@ def _build_matrix_and_findings(
             "evaluated_at": observed_at,
         }
         matrix_rows.append(matrix)
-        finding_rows.extend(_findings_for_matrix(run_id, matrix, observed_at))
+
+    observed_by_norm_client = _build_observed_by_norm_client(matrix_rows)
+    for matrix in matrix_rows:
+        finding_rows.extend(
+            _findings_for_matrix(run_id, matrix, observed_by_norm_client, observed_at)
+        )
 
     finding_rows.extend(_source_failure_findings(run_id, sources, source_status, observed_at))
     return matrix_rows, finding_rows
+
+
+def _build_observed_by_norm_client(
+    matrix_rows: list[dict[str, Any]],
+) -> dict[str, dict[int, set[str]]]:
+    """Index of normalized hostname → client_id → observed platforms.
+
+    Used to decide whether a missing-platform finding is "confirmed"
+    via the cross-customer-actionable case: the same hostname is
+    observed running that platform under a different customer.
+    """
+    idx: dict[str, dict[int, set[str]]] = {}
+    for m in matrix_rows:
+        idx.setdefault(m["norm_name"], {})[m["client_id"]] = set(m["observed_platforms"])
+    return idx
 
 
 def _source_failure_platforms(
@@ -641,15 +661,31 @@ def _screenconnect_dup(row: dict[str, Any] | None) -> bool:
 def _findings_for_matrix(
     run_id: int,
     matrix: dict[str, Any],
+    observed_by_norm_client: dict[str, dict[int, set[str]]],
     now: datetime,
 ) -> list[dict[str, Any]]:
     findings: list[dict[str, Any]] = []
+    device_has_online = any([
+        matrix.get("ninja_online"),
+        matrix.get("screenconnect_online"),
+        matrix.get("sentinelone_online"),
+        matrix.get("logmein_online"),
+    ])
+    other_clients_observed = {
+        cid: observed
+        for cid, observed in observed_by_norm_client.get(matrix["norm_name"], {}).items()
+        if cid != matrix["client_id"]
+    }
     for platform in matrix["missing_required_platforms"]:
+        confirmed = device_has_online or any(
+            platform in observed for observed in other_clients_observed.values()
+        )
         findings.append(_finding(
             run_id, matrix, now, "missing_required_platform", platform,
             _severity("missing_required_platform", platform),
             f"{matrix['hostname']} is missing required {platform}",
             {"missing_platform": platform},
+            confirmed_gap=confirmed,
         ))
     for platform in matrix["stale_required_platforms"]:
         findings.append(_finding(
@@ -657,6 +693,7 @@ def _findings_for_matrix(
             _severity("stale_required_platform", platform),
             f"{matrix['hostname']} has stale {platform} check-in data",
             {"stale_platform": platform},
+            confirmed_gap=False,
         ))
     return findings
 
@@ -693,6 +730,7 @@ def _source_failure_findings(
             "status": "active",
             "first_seen_at": now,
             "last_seen_at": now,
+            "confirmed_gap": True,
         })
     return rows
 
@@ -706,6 +744,7 @@ def _finding(
     severity: str,
     summary: str,
     details: dict[str, Any],
+    confirmed_gap: bool,
 ) -> dict[str, Any]:
     signature = _hash("|".join([
         finding_type,
@@ -734,6 +773,7 @@ def _finding(
         "status": "active",
         "first_seen_at": now,
         "last_seen_at": now,
+        "confirmed_gap": confirmed_gap,
     }
 
 
