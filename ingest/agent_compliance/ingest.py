@@ -86,12 +86,73 @@ def run() -> tuple[int, int]:
         )
         _write_matrix(run_id, matrix_rows)
         _write_findings(finding_rows)
+        source_run_ids = [sr_id for sr_id, _, _ in fetched_sources]
+        renames_detected = _detect_device_renames(run_id, source_run_ids)
+        if renames_detected:
+            log.info("Agent compliance detected %d device renames", renames_detected)
         alerts_sent = alerts.process_alerts(run_id, observed_at)
 
         stats["rows_inserted"] = len(all_observations) + len(matrix_rows) + len(finding_rows)
         stats["rows_upserted"] = len(matrix_rows)
         stats["alerts_sent"] = alerts_sent
         return len(matrix_rows), len(finding_rows)
+
+
+def _detect_device_renames(run_id: int, source_run_ids: list[int]) -> int:
+    """Detect hostname renames by matching `platform_device_id` across
+    collections. A (client_id, platform, platform_device_id) that
+    reappears with a different `norm_name` than its most recent prior
+    observation is recorded in `device_renames`. Idempotent: once a
+    rename is logged, subsequent collections see the new name on both
+    sides of the comparison and do not re-log."""
+    if not source_run_ids:
+        return 0
+    with db.transaction() as cur:
+        cur.execute(
+            """
+            WITH current_run AS (
+                SELECT DISTINCT ON (resolved_client_id, platform, platform_device_id)
+                    resolved_client_id, resolved_client_name, platform,
+                    platform_device_id, norm_name, hostname, observed_at
+                FROM ninja_agent_compliance.platform_observations
+                WHERE source_run_id = ANY(%s)
+                  AND resolved_client_id IS NOT NULL
+                  AND platform_device_id IS NOT NULL
+                  AND platform_device_id <> ''
+                ORDER BY resolved_client_id, platform, platform_device_id, observed_at DESC
+            )
+            INSERT INTO ninja_agent_compliance.device_renames (
+                client_id, client_name, platform, platform_device_id,
+                old_norm_name, old_hostname, new_norm_name, new_hostname,
+                detected_at, run_id
+            )
+            SELECT
+                cur.resolved_client_id,
+                cur.resolved_client_name,
+                cur.platform,
+                cur.platform_device_id,
+                prev.norm_name,
+                prev.hostname,
+                cur.norm_name,
+                cur.hostname,
+                cur.observed_at,
+                %s
+            FROM current_run cur
+            JOIN LATERAL (
+                SELECT po.norm_name, po.hostname
+                FROM ninja_agent_compliance.platform_observations po
+                WHERE po.resolved_client_id = cur.resolved_client_id
+                  AND po.platform = cur.platform
+                  AND po.platform_device_id = cur.platform_device_id
+                  AND po.source_run_id <> ALL(%s)
+                ORDER BY po.observed_at DESC
+                LIMIT 1
+            ) prev ON true
+            WHERE cur.norm_name <> prev.norm_name
+            """,
+            (source_run_ids, run_id, source_run_ids),
+        )
+        return cur.rowcount or 0
 
 
 def evaluate(send_alerts: bool = True) -> tuple[int, int]:

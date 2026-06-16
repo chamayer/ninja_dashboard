@@ -3324,6 +3324,24 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                     """,
                     18, 0, 24, 8,
                 ),
+                _card(
+                    "debug_device_renames",
+                    "Recent device renames",
+                    "table",
+                    """
+                        SELECT
+                            TO_CHAR(detected_at, 'YYYY-MM-DD HH24:MI') AS "Detected",
+                            client_name AS "Customer",
+                            platform AS "Platform",
+                            old_hostname AS "Old hostname",
+                            new_hostname AS "New hostname",
+                            platform_device_id AS "Device ID"
+                        FROM ninja_agent_compliance.device_renames
+                        ORDER BY detected_at DESC, client_name
+                        LIMIT 300
+                    """,
+                    26, 0, 24, 8,
+                ),
             ],
         },
     ]

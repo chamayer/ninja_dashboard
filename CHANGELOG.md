@@ -2,6 +2,31 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.29.1] — 2026-06-16
+
+### Added
+- Device rename detection. At the end of each full
+  `agent_compliance.run()`, the ingest compares this run's
+  observations to the latest prior observation per
+  `(client_id, platform, platform_device_id)`. When the `norm_name`
+  differs, a row is inserted into a new `device_renames` table
+  recording old/new hostnames, platform, and device id.
+- Migration 050 creates `device_renames` plus indexes on
+  `(client_id, platform, platform_device_id)` and `detected_at DESC`.
+- Debug dashboard gains a `Recent device renames` card showing the
+  last 300 detections.
+
+### Notes
+- Detection is idempotent — once a rename is recorded, the next run
+  sees the new hostname on both sides of the comparison.
+- Migration 050 also runs a one-time historical backfill comparing
+  the latest two observations per key, so renames already in
+  history (e.g., the All Data Health `0115Y25 → ADH-RE03` batch)
+  register immediately after deploy.
+- No findings, no alerts. Compliance state under the new hostname
+  remains the source of truth. The Debug card is purely
+  investigative.
+
 ## [0.29.0] — 2026-06-16
 
 ### Changed (semantic)

@@ -47,6 +47,45 @@ places.
   against the KPI strip; confirm Alerts page Finding type dropdown
   shows the friendly labels and filtering works.
 
+## 2026-06-16 — v0.29.1 Device rename detection
+
+**Why:** Operator hit a "vanished device" mystery (`0115Y25`) and we
+traced it to a bulk rename in Ninja — the device was now `ADH-RE03`
+with the same `platform_device_id`. The system had the data to match
+across renames but nothing recorded it, so the operator had to do a
+manual cross-reference. Surfacing renames on Debug closes the gap
+without polluting workflow surfaces.
+
+**Done:**
+- Migration 050 creates `device_renames` table
+  (`client_id, client_name, platform, platform_device_id,
+  old_norm_name, old_hostname, new_norm_name, new_hostname,
+  detected_at, run_id`).
+- `_detect_device_renames(run_id, source_run_ids)` runs at the end
+  of `agent_compliance_ingest.run()` after observations are
+  persisted. Single SQL: pick latest observation per
+  `(client_id, platform, platform_device_id)` from this run's
+  source_runs, LATERAL join the most recent prior observation for
+  the same key, insert when `norm_name` differs.
+- Detection is idempotent: once the rename row exists, the next
+  collection's prior-observation lookup hits the new name and the
+  comparison matches.
+- Debug dashboard gets a `Recent device renames` card.
+
+**Out of scope:** no findings, no alerts, no canonical alias merge.
+If full historical-continuity-across-renames is needed later
+(e.g., for SLA reporting), a separate canonical alias layer would
+build on top of this signal.
+
+**Validation pending:**
+- Portainer redeploy + Metabase bootstrap re-run.
+- Migration 050 includes a one-time historical backfill (compare
+  latest vs second-latest observation per
+  `(client_id, platform, platform_device_id)`) so the All Data
+  Health renames already in history register immediately. Expect
+  ~10 rows for the `0115Y25 → ADH-RE03` batch plus anything similar
+  in other customers' history.
+
 ## 2026-06-16 — v0.29.0 Broaden offline-platforms semantics
 
 **Why:** Operator hit a device (`0115Y25`, customer All Data Health)
