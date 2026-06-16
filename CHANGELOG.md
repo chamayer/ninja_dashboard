@@ -2,6 +2,28 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.31.0] — 2026-06-16
+
+### Added
+- Operator form for adding a per-customer ScreenConnect source.
+  - New endpoint `GET /agent-compliance/action/add-source` (alias
+    `/a/as`). Without `confirm=1` it renders an HTML form: customer
+    dropdown, source slug, display name, base URL. With `confirm=1`
+    it inserts the `platform_sources` row (platform=`ScreenConnect`,
+    `is_shared=false`, env var refs computed from the slug) and
+    returns a success page with the exact env var names the operator
+    must set in `/amr-ch-01_data/ninja-dashboard/.env`.
+  - Setup dashboard gains a `Add a per-customer ScreenConnect source`
+    card under Routes and sources; clicking it opens the form.
+
+### Notes
+- Secrets do not pass through the form. The form only records env
+  var names (`SC_<SLUG>_EXT_GUID`, `SC_<SLUG>_SECRET_KEY`); the
+  actual values stay on the host in `.env`.
+- v1 covers ScreenConnect only since that's the per-customer
+  tenant case. Other platforms (Ninja, SentinelOne, LogMeIn) are
+  typically shared and rarely added.
+
 ## [0.30.0] — 2026-06-16
 
 ### Added

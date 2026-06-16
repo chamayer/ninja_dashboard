@@ -3155,6 +3155,24 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                     """,
                     30, 12, 12, 6,
                 ),
+                _card(
+                    "setup_add_screenconnect",
+                    "Add a per-customer ScreenConnect source",
+                    "table",
+                    """
+                        SELECT 'Add ScreenConnect source' AS "Open form"
+                    """,
+                    36, 12, 12, 2,
+                    column_click_behaviors={
+                        "Open form": {
+                            "url_template": _url_template(
+                                "/agent-compliance/action/add-source",
+                                [],
+                                confirm=False,
+                            ),
+                        },
+                    },
+                ),
             ],
         },
         {

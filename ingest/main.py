@@ -357,6 +357,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             "/a/sca": "/agent-compliance/action/set-customer-alert",
             "/a/ma": "/agent-compliance/action/manual-alias",
             "/a/tp": "/agent-compliance/action/toggle-platform-requirement",
+            "/a/as": "/agent-compliance/action/add-source",
         }.get(parsed.path, parsed.path)
         params = parse_qs(parsed.query)
         confirm = params.get("confirm", ["0"])[0]
@@ -376,6 +377,71 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                     self._respond(400, f"invalid {name}\n".encode("utf-8"))
                     return None
             return None
+
+        if path == "/agent-compliance/action/add-source" and confirm != "1":
+            # Load active customer names for the dropdown.
+            with db.transaction() as cur:
+                cur.execute(
+                    """
+                    SELECT client_name
+                    FROM ninja_agent_compliance.clients
+                    WHERE enabled
+                      AND source NOT IN ('alignment', 'demoted')
+                    ORDER BY client_name
+                    """
+                )
+                customers = [r[0] for r in cur.fetchall() if r[0]]
+            options = "\n".join(
+                f'<option value="{escape(c)}">{escape(c)}</option>'
+                for c in customers
+            )
+            body = f"""
+                <!doctype html>
+                <html>
+                <head>
+                  <meta charset="utf-8">
+                  <title>Add ScreenConnect source</title>
+                  <style>
+                    body {{ font-family: sans-serif; margin: 24px; color: #1f2933; max-width: 720px; }}
+                    label {{ display: block; font-weight: 700; margin: 16px 0 6px; }}
+                    input, select {{ font-size: 16px; padding: 8px 10px; width: 100%; box-sizing: border-box; }}
+                    button {{ margin-top: 18px; padding: 9px 14px; font-weight: 700; }}
+                    .hint {{ color: #52606d; font-size: 14px; }}
+                    .secret-note {{ background: #fef9c3; padding: 12px; border-radius: 4px; margin-top: 24px; }}
+                    pre {{ background: #f3f4f6; padding: 10px; border-radius: 4px; }}
+                  </style>
+                </head>
+                <body>
+                  <h2>Add ScreenConnect source</h2>
+                  <p class="hint">
+                    Adds a per-customer ScreenConnect tenant to
+                    <code>platform_sources</code>. The EXT_GUID and
+                    SECRET_KEY values stay on the host in
+                    <code>.env</code>; this form only references env
+                    var names. The next screen tells you exactly which
+                    vars to set.
+                  </p>
+                  <form method="get" action="/a/as">
+                    <input type="hidden" name="confirm" value="1">
+                    <label for="customer">Customer</label>
+                    <select id="customer" name="customer" required>
+                      <option value="">— select —</option>
+                      {options}
+                    </select>
+                    <label for="source_slug">Source slug</label>
+                    <input id="source_slug" name="source_slug" placeholder="bobov45" required pattern="[a-z0-9_]+" minlength="2" maxlength="40">
+                    <p class="hint">Lowercase letters, digits, underscores. Used for the source key and env var names.</p>
+                    <label for="source_name">Display name</label>
+                    <input id="source_name" name="source_name" placeholder="Bobov45 ScreenConnect" required maxlength="100">
+                    <label for="base_url">Base URL</label>
+                    <input id="base_url" name="base_url" type="url" placeholder="https://bobov45.screenconnect.com" required>
+                    <button type="submit">Add source</button>
+                  </form>
+                </body>
+                </html>
+            """.encode("utf-8")
+            self._respond_html(200, body)
+            return
 
         if path == "/agent-compliance/action/ignore-device" and confirm != "1":
             client_name = _text_param("client", "client_name", hex_names=("client_hex",)) or ""
@@ -423,6 +489,92 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             scheduled = schedule_agent_compliance_evaluate(reason)
             suffix = "; compliance refresh scheduled" if scheduled else ""
             self._respond(200, f"{message}{suffix}\n".encode("utf-8"))
+
+        if path == "/agent-compliance/action/add-source":
+            import re as _re
+            customer = _text_param("customer") or ""
+            source_slug = (_text_param("source_slug") or "").strip().lower()
+            source_name = _text_param("source_name") or ""
+            base_url = (_text_param("base_url") or "").strip()
+            if not customer or not source_slug or not source_name or not base_url:
+                self._respond(400, b"missing field\n")
+                return
+            if not _re.match(r"^[a-z0-9_]{2,40}$", source_slug):
+                self._respond(400, b"invalid slug (lowercase letters/digits/_, 2-40 chars)\n")
+                return
+            if not (base_url.startswith("http://") or base_url.startswith("https://")):
+                self._respond(400, b"base_url must start with http:// or https://\n")
+                return
+            slug_upper = source_slug.upper()
+            ext_guid_ref = f"SC_{slug_upper}_EXT_GUID"
+            secret_key_ref = f"SC_{slug_upper}_SECRET_KEY"
+            source_key = f"sc_{source_slug}"
+            with db.transaction() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO ninja_agent_compliance.platform_sources (
+                        source_key, platform, source_name, client_id,
+                        is_shared, enabled, base_url,
+                        ext_guid_secret_ref, secret_key_secret_ref,
+                        source, updated_by
+                    )
+                    SELECT %s, 'ScreenConnect', %s, c.client_id,
+                           false, true, %s,
+                           %s, %s,
+                           'operator', 'operator_dashboard'
+                    FROM ninja_agent_compliance.clients c
+                    WHERE c.client_name = %s
+                    ON CONFLICT (source_key) DO NOTHING
+                    RETURNING source_id
+                    """,
+                    (source_key, source_name, base_url, ext_guid_ref, secret_key_ref, customer),
+                )
+                row = cur.fetchone()
+            if not row:
+                self._respond(
+                    400,
+                    f"customer '{customer}' not found, or source_key '{source_key}' already exists\n".encode("utf-8"),
+                )
+                return
+            body = f"""
+                <!doctype html>
+                <html>
+                <head>
+                  <meta charset="utf-8">
+                  <title>ScreenConnect source added</title>
+                  <style>
+                    body {{ font-family: sans-serif; margin: 24px; color: #1f2933; max-width: 720px; }}
+                    .ok {{ background: #dcfce7; padding: 12px; border-radius: 4px; }}
+                    .secret-note {{ background: #fef9c3; padding: 16px; border-radius: 4px; margin-top: 18px; }}
+                    pre {{ background: #1f2933; color: #f0fdf4; padding: 14px; border-radius: 4px; font-size: 15px; }}
+                    code {{ background: #f3f4f6; padding: 1px 6px; border-radius: 3px; }}
+                    a.button {{ display: inline-block; margin-top: 18px; padding: 9px 14px; background: #1d4ed8; color: white; text-decoration: none; border-radius: 4px; }}
+                  </style>
+                </head>
+                <body>
+                  <h2>ScreenConnect source added</h2>
+                  <p class="ok">Added <strong>{escape(source_name)}</strong> for <strong>{escape(customer)}</strong> (source_id <code>{row[0]}</code>).</p>
+
+                  <div class="secret-note">
+                    <strong>Next: set the secrets on the host.</strong>
+                    <p>Edit <code>/amr-ch-01_data/ninja-dashboard/.env</code> and add:</p>
+                    <pre>{escape(ext_guid_ref)}=&lt;extension GUID from SC API extension&gt;
+{escape(secret_key_ref)}=&lt;secret key from SC API extension&gt;</pre>
+                    <p>Then redeploy via Portainer so the container picks up the new env vars.</p>
+                    <p>Once redeployed, trigger a collection:</p>
+                    <pre>curl -X POST http://10.61.50.28:8090/run/agent-compliance</pre>
+                    <p>And verify the new source_run:</p>
+                    <pre>docker exec -it ninja-postgres psql -U ninja -d ninja -c \\
+  "SELECT source_id, status, rows_observed, error_text
+   FROM ninja_agent_compliance.source_runs
+   WHERE source_id = {row[0]} ORDER BY started_at DESC LIMIT 3;"</pre>
+                  </div>
+                  <a class="button" href="/a/as">Add another</a>
+                </body>
+                </html>
+            """.encode("utf-8")
+            self._respond_html(200, body)
+            return
 
         if path == "/agent-compliance/action/manual-alias":
             platform = _text_param("platform") or ""

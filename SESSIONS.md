@@ -47,6 +47,43 @@ places.
   against the KPI strip; confirm Alerts page Finding type dropdown
   shows the friendly labels and filtering works.
 
+## 2026-06-16 — v0.31.0 Add-source form for ScreenConnect
+
+**Why:** Operator asked for a self-serve way to add a new
+per-customer ScreenConnect tenant rather than hand-writing SQL.
+The pattern already exists in the codebase
+(`/agent-compliance/action/ignore-device` style HTML form), so
+reuse it.
+
+**Done:**
+- New endpoint `/agent-compliance/action/add-source` (`/a/as`).
+  GET without `confirm=1` returns an HTML form: customer dropdown
+  populated from active clients, source slug (validated regex
+  `[a-z0-9_]{2,40}`), display name, base URL. GET with `confirm=1`
+  inserts `platform_sources` (`is_shared=false`, `source_key =
+  sc_<slug>`, env var refs `SC_<SLUG>_EXT_GUID` /
+  `SC_<SLUG>_SECRET_KEY`) and returns a success page with the env
+  var names the operator must set on the host.
+- Setup dashboard gets a
+  `Add a per-customer ScreenConnect source` card under Routes and
+  sources (row 36, col 12). Clicking the only cell opens the form.
+
+**Design constraint preserved:**
+- Secrets do not pass through the form. Only env var names are
+  written to the DB. Real `EXT_GUID` / `SECRET_KEY` values stay
+  in `/amr-ch-01_data/ninja-dashboard/.env` on the host.
+
+**Out of scope for v1:**
+- Ninja / SentinelOne / LogMeIn add-source forms. Those are
+  typically shared sources, rarely added.
+
+**Validation pending:**
+- Portainer redeploy + Metabase bootstrap re-run.
+- Open Setup → click the new card → fill form → confirm the
+  `platform_sources` row exists with the expected slug-based env
+  var refs. Set env vars on host, redeploy, trigger collection,
+  confirm a `source_runs` row with `status='ok'`.
+
 ## 2026-06-16 — v0.30.0 Unresolved evidence + macOS/Linux OS family
 
 **Why:** Operator investigation on `RUBYPH-F020` showed it was
