@@ -2,6 +2,13 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.28.1] — 2026-06-16
+
+### Changed
+- Narrowed the first column on `Needs attention by customer`
+  (Customer 220→160) and `Needs attention by OS family` (OS family
+  220→180) on both Today and Devices. Numeric columns unchanged.
+
 ## [0.28.0] — 2026-06-16
 
 ### Changed

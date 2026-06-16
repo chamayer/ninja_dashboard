@@ -1912,7 +1912,7 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                         params=[("customer", "Customer")],
                     ),
                     column_widths={
-                        "Customer": 220,
+                        "Customer": 160,
                         "Missing": 80,
                         "Offline": 80,
                         "Stale": 80,
@@ -1981,7 +1981,7 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                         params=[("os_family", "OS family")],
                     ),
                     column_widths={
-                        "OS family": 220,
+                        "OS family": 180,
                         "Missing": 80,
                         "Offline": 80,
                         "Stale": 80,
@@ -2140,7 +2140,7 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                         params=[("customer", "Customer")],
                     ),
                     column_widths={
-                        "Customer": 220,
+                        "Customer": 160,
                         "Missing": 80,
                         "Offline": 80,
                         "Stale": 80,
@@ -2215,7 +2215,7 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                         params=[("os_family", "OS family")],
                     ),
                     column_widths={
-                        "OS family": 220,
+                        "OS family": 180,
                         "Missing": 80,
                         "Offline": 80,
                         "Stale": 80,
