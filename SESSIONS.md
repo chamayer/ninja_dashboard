@@ -47,6 +47,67 @@ places.
   against the KPI strip; confirm Alerts page Finding type dropdown
   shows the friendly labels and filtering works.
 
+## 2026-06-16 — v0.30.0 Unresolved evidence + macOS/Linux OS family
+
+**Why:** Operator investigation on `RUBYPH-F020` showed it was
+actively checking in to SentinelOne every few hours, but under
+SentinelOne's `Default site` (no resolved client). Our cross-customer
+review logic only joins `compliance_matrix_current`, which excludes
+unresolved observations — so the device looked cleanly `Missing
+SentinelOne` with no signal that the agent was running but
+mis-mapped. The operator would never know to fix the SentinelOne
+site assignment.
+
+Separately, the operator asked whether Mac Ninja devices were being
+ingested. They were (no platform filter in the agent_compliance
+Ninja fetcher), but the `os_family` CASE only knew Windows, so all
+Macs were bucketed as `Other` and invisible on the OS family
+filter/breakdown.
+
+**Done:**
+- Migration 051 rewrites `v_device_state_current`:
+  - New `unresolved_evidence` CTE joins recent
+    `platform_observations` where `resolved_client_id IS NULL` and
+    `norm_name` matches a device's `norm_name` for one of its
+    `action_missing_platforms`. Exposes `unresolved_matches` (jsonb)
+    and `unresolved_platforms` (text[]) at the end of the view.
+  - `needs_review` and `review_reason` now also include the
+    unresolved-evidence case. Operator sees
+    `Found under unresolved group — fix site/alias mapping`.
+  - `state_reason` for `Missing` devices appends `; also under
+    unresolved (<platforms>) — fix site/alias mapping` when
+    unresolved evidence exists.
+  - `recommended_action` for that case reads `Fix the site/alias
+    mapping so the unresolved observation maps to this customer`.
+  - `os_family` CASE expanded with macOS major-version buckets
+    (`macOS 10` through `macOS 15`, `macOS 26`, `macOS (other)`)
+    plus a single `Linux` bucket.
+- `OS_FAMILY_VALUES` in
+  `ingest/agent_compliance/metabase_bootstrap.py` updated so the
+  dashboard `OS family` dropdown lists the new buckets.
+
+**Out of scope (follow-up):**
+- Per-OS `required_platforms` overrides (e.g. Macs shouldn't
+  require LogMeIn). Currently inherits the client's full list, so
+  Macs may show false-positive Missing on LogMeIn.
+- Linux variant breakdown (Ubuntu vs CentOS vs RHEL etc.).
+
+**Validation pending:**
+- Portainer redeploy + Metabase bootstrap re-run.
+- Spot-check `RUBYPH-F020`:
+  `SELECT hostname, device_state, missing_platforms,
+   unresolved_platforms, review_reason, state_reason
+   FROM ninja_agent_compliance.v_device_state_current
+   WHERE hostname = 'RUBYPH-F020';`
+  Should now show `needs_review = true`,
+  `unresolved_platforms = {SentinelOne}`, and the operator-facing
+  text pointing at the unresolved SentinelOne site.
+- Check OS family on Mac devices:
+  `SELECT os_name, os_family, COUNT(*)
+   FROM ninja_agent_compliance.v_device_state_current
+   WHERE os_name ILIKE '%mac%'
+   GROUP BY os_name, os_family;`
+
 ## 2026-06-16 — v0.29.1 Device rename detection
 
 **Why:** Operator hit a "vanished device" mystery (`0115Y25`) and we

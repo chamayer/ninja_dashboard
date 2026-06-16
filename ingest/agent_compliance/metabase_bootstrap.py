@@ -72,6 +72,9 @@ OS_FAMILY_VALUES = [
     "Windows Server 2016", "Windows Server 2012 R2", "Windows Server 2012",
     "Windows Server 2008 R2", "Windows Server 2008",
     "Windows Server (other)",
+    "macOS 26", "macOS 15", "macOS 14", "macOS 13", "macOS 12",
+    "macOS 11", "macOS 10", "macOS (other)",
+    "Linux",
     "Unknown", "Other",
 ]
 DEVICE_TYPE_VALUES = ["Workstation", "Server"]

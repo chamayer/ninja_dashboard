@@ -2,6 +2,41 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.30.0] — 2026-06-16
+
+### Added
+- Unresolved-group evidence in `v_device_state_current` (migration
+  051). A new `unresolved_evidence` CTE scans recent
+  `platform_observations` where `resolved_client_id IS NULL` and
+  surfaces `unresolved_matches` (jsonb) and `unresolved_platforms`
+  (text[]) at the end of the view. A device classified `Missing`
+  that is actually checking in under, say, SentinelOne's `Default
+  site` (not mapped to a customer) now reads
+  `Missing X; also under unresolved (SentinelOne) — fix site/alias
+  mapping` and gets `needs_review = true` with `review_reason =
+  'Found under unresolved group — fix site/alias mapping'`.
+- macOS family detection in `os_family`: explicit buckets for
+  `macOS 10` through `macOS 15`, plus `macOS 26` and
+  `macOS (other)`. macOS / OS X / Darwin variants all map cleanly.
+- Linux family detection: single `Linux` bucket covering Linux /
+  Ubuntu / CentOS / Debian / Red Hat strings.
+- Added the new OS family values to `OS_FAMILY_VALUES` in
+  `metabase_bootstrap.py` so the Devices dashboard `OS family`
+  filter dropdown lists them.
+
+### Notes
+- Macs were already being ingested (no platform filter in the
+  agent_compliance Ninja fetcher) — they were just bucketed as
+  `Other` until this commit.
+- Per-OS required_platforms is **not** changed here. Macs / Linux
+  still inherit the client's required platform list, so Macs that
+  shouldn't have LogMeIn (for example) will still show as Missing
+  until per-OS overrides land. Tracked as a follow-up.
+- New columns (`unresolved_matches`, `unresolved_platforms`) are
+  appended at the end of the view, so downstream views
+  (`v_device_work_queue`, `v_all_devices_human`) keep working
+  without rebuild.
+
 ## [0.29.1] — 2026-06-16
 
 ### Added
