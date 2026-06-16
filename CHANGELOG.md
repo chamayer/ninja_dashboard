@@ -2,6 +2,31 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.29.0] — 2026-06-16
+
+### Changed (semantic)
+- `v_device_state_current.action_offline_platforms` now means
+  **required + present + not currently online** rather than
+  **stale required**. Previously a device with required Ninja+LogMeIn
+  present but not actively checking in (last seen 14 days under a
+  30-day threshold) showed empty `Online in` and empty `Offline`
+  columns — the operator could not see where the device existed.
+  Migration 049 broadens the definition to surface those platforms.
+- For `Missing` state, the `Issue` text now appends
+  `; offline in <platforms>` when other required platforms are
+  present but not actively checking in. Operators viewing a device
+  like `0115Y25` (missing SentinelOne, Ninja+LogMeIn present but
+  offline) now read
+  `Missing SentinelOne; offline in Ninja, LogMeIn` instead of
+  just `Missing SentinelOne`.
+- Side effect: devices with all required platforms present but one
+  not currently checking in will now classify as `Offline` state
+  instead of `Compliant`. This matches operator intuition (the
+  agent isn't actively reporting) and the staleness-based alerting
+  is unaffected — alerts still gate on Python's
+  `stale_required_platforms` (over-threshold), not the broadened
+  view.
+
 ## [0.28.3] — 2026-06-16
 
 ### Changed

@@ -47,6 +47,45 @@ places.
   against the KPI strip; confirm Alerts page Finding type dropdown
   shows the friendly labels and filtering works.
 
+## 2026-06-16 — v0.29.0 Broaden offline-platforms semantics
+
+**Why:** Operator hit a device (`0115Y25`, customer All Data Health)
+showing state `Missing` with both `Online in` and `Offline` columns
+blank. Investigation showed Ninja+LogMeIn were required + present +
+not currently online (last seen 14 days ago) but the 30-day
+staleness threshold meant they didn't qualify as
+`stale_required_platforms`. The `Offline` column on the work queue
+is derived from `action_offline_platforms` which was scoped to stale
+only — present-but-not-active platforms within threshold had no
+visible home.
+
+**Done:**
+- Migration 049 rewrites `v_device_state_current` so
+  `action_offline_platforms` = required + present + not currently
+  online (regardless of stale threshold). Keeps the s1_exempt and
+  source_failed exclusions.
+- Same migration updates the `Missing` state_reason text to append
+  `; offline in <platforms>` when other required platforms are
+  present but offline. For 0115Y25 the Issue text now reads
+  `Missing SentinelOne; offline in Ninja, LogMeIn`.
+- Downstream views unchanged structurally (`v_device_work_queue`
+  and `v_all_devices_human` still alias `offline_platforms AS
+  stale_platforms`; the column shape stayed the same).
+- Alert findings still come from Python `stale_required_platforms`
+  (over-threshold), so alerting is unaffected by the broader view
+  definition.
+
+**Side effect (intentional):** devices with all required platforms
+present but one or more not currently checking in will now classify
+as `Offline` state rather than `Compliant`. Matches operator
+intuition.
+
+**Validation pending:**
+- Portainer redeploy + Metabase bootstrap re-run.
+- Spot-check 0115Y25: should still show state `Missing`, but the
+  `Offline` column now reads `Ninja, LogMeIn` and the Issue column
+  surfaces both pieces of info.
+
 ## 2026-06-16 — v0.27.3 Drop v_notification_queue before recreate
 
 **Why:** v0.27.2 fixed `v_active_findings` to expose `confirmed_gap`,
