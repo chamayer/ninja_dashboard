@@ -5,6 +5,27 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-16 — v0.27.2 Refresh v_active_findings to pick up confirmed_gap
+
+**Why:** Migration 048 (v0.27.1) crash-looped the container with
+`column f.confirmed_gap does not exist`. `v_active_findings` was
+created in migration 035 with `SELECT f.*` from compliance_findings,
+and PostgreSQL fixes a view's column list at CREATE time —
+migration 045's `ALTER TABLE ... ADD COLUMN confirmed_gap` did not
+flow into the existing view.
+
+**Done:**
+- Added a `CREATE OR REPLACE VIEW v_active_findings` step at the top
+  of migration 048 (same SQL as 035 — `f.*` re-expands to include
+  `confirmed_gap` at the end, which CREATE OR REPLACE permits).
+- The rest of migration 048 (notification queue / readiness, customer
+  alert setup, alert rules human view) now resolves `f.confirmed_gap`
+  correctly.
+
+**Validation pending:**
+- Portainer redeploy. Migration 048 should now apply on the next
+  startup; container should reach READY without the crash loop.
+
 ## 2026-06-16 — v0.27.1 Offline becomes alertable when confirmed
 
 **Why:** Operator direction continuing from v0.27.0 — `Offline`

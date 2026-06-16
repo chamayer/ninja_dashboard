@@ -3,6 +3,34 @@
 -- Missing and Offline are alertable only when the finding is confirmed.
 -- Review and fully Stale devices are not alertable. The Python sender has
 -- always filtered on confirmed_gap; this makes Metabase show the same reality.
+--
+-- v_active_findings was defined in migration 035 with `SELECT f.*` from
+-- compliance_findings. PostgreSQL fixes a view's column list at CREATE time,
+-- so migration 045's `ALTER TABLE ... ADD COLUMN confirmed_gap` did not
+-- propagate. CREATE OR REPLACE here re-expands `f.*` (new columns at the
+-- end are permitted) so downstream views can reference confirmed_gap.
+
+CREATE OR REPLACE VIEW ninja_agent_compliance.v_active_findings AS
+WITH latest AS (
+    SELECT DISTINCT ON (f.finding_signature)
+        f.*
+    FROM ninja_agent_compliance.compliance_findings f
+    WHERE f.status = 'active'
+    ORDER BY f.finding_signature, f.last_seen_at DESC, f.finding_id DESC
+)
+SELECT f.*
+FROM latest f
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM ninja_agent_compliance.alert_suppressions s
+    WHERE s.enabled
+      AND (s.client_id IS NULL OR s.client_id = f.client_id)
+      AND (s.norm_name IS NULL OR s.norm_name = f.norm_name)
+      AND (s.finding_type IS NULL OR s.finding_type = f.finding_type)
+      AND (s.affected_platform IS NULL OR s.affected_platform = f.affected_platform)
+      AND (s.expires_at IS NULL OR s.expires_at > now())
+)
+ORDER BY severity DESC, last_seen_at DESC;
 
 DROP VIEW IF EXISTS ninja_agent_compliance.v_notifications_ready;
 

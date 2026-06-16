@@ -2,6 +2,20 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.27.2] — 2026-06-16
+
+### Fixed
+- Migration 048 was failing on the deployed DB with
+  `column f.confirmed_gap does not exist`. `v_active_findings` was
+  defined in migration 035 with `SELECT f.*`; PostgreSQL froze the
+  view's column list at CREATE time, so migration 045's
+  `ALTER TABLE compliance_findings ADD COLUMN confirmed_gap` never
+  propagated into the view. Added a `CREATE OR REPLACE VIEW
+  v_active_findings` step at the top of migration 048 — re-expanding
+  `f.*` picks up the new column (PostgreSQL allows columns added at
+  the end). Downstream views in 048 can now reference
+  `f.confirmed_gap`.
+
 ## [0.27.1] — 2026-06-16
 
 ### Changed
