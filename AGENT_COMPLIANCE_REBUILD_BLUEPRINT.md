@@ -319,6 +319,11 @@ Alerts:
 
 - notification readiness, sent history, blocked reasons.
 - alert config belongs in Setup, not Alerts.
+- alert readiness must match the sender exactly: only confirmed alertable findings appear in the notification queue.
+- `Missing` is alertable when confirmed.
+- `Offline` is alertable when the device is still active/recent somewhere else.
+- `Stale`, `Review`, ignored devices, excluded customers, and unresolved cross-customer ambiguity are not alertable.
+- alerting is first-success only for a finding signature.
 
 Health:
 

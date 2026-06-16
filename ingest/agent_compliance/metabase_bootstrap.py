@@ -1900,22 +1900,26 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                     """
                         SELECT
                             client_name AS "Customer",
-                            COUNT(*) AS "Devices",
-                            work_state AS "State"
+                            COUNT(*) FILTER (WHERE work_state = 'Missing') AS "Missing",
+                            COUNT(*) FILTER (WHERE work_state = 'Offline') AS "Offline",
+                            COUNT(*) FILTER (WHERE work_state = 'Review') AS "Review",
+                            COUNT(*) AS "Total"
                         FROM ninja_agent_compliance.v_device_work_queue
                         WHERE work_state IN ('Missing', 'Offline', 'Review')
-                        GROUP BY client_name, work_state
+                        GROUP BY client_name
                         ORDER BY COUNT(*) DESC, client_name
                     """,
                     8, 0, 12, 6,
                     click_behavior=_dashboard_link(
                         DASH_DEVICES,
-                        params=[("customer", "Customer"), ("state", "State")],
+                        params=[("customer", "Customer")],
                     ),
                     column_widths={
                         "Customer": 280,
-                        "Devices": 100,
-                        "State": 60,
+                        "Missing": 100,
+                        "Offline": 100,
+                        "Review": 100,
+                        "Total": 100,
                     },
                 ),
                 _card(
@@ -1942,21 +1946,22 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                         )
                         SELECT
                             issue_type AS "Issue type",
-                            COUNT(*) AS "Devices",
-                            work_state AS "State"
+                            COUNT(*) FILTER (WHERE work_state = 'Missing') AS "Missing",
+                            COUNT(*) FILTER (WHERE work_state = 'Offline') AS "Offline",
+                            COUNT(*) FILTER (WHERE work_state = 'Review') AS "Review",
+                            COUNT(*) AS "Total"
                         FROM classified
-                        GROUP BY issue_type, work_state
+                        GROUP BY issue_type
                         ORDER BY COUNT(*) DESC, issue_type
                     """,
                     8, 12, 12, 6,
-                    click_behavior=_dashboard_link(
-                        DASH_DEVICES,
-                        params=[("state", "State")],
-                    ),
+                    click_behavior=_dashboard_link(DASH_DEVICES),
                     column_widths={
                         "Issue type": 280,
-                        "Devices": 100,
-                        "State": 60,
+                        "Missing": 100,
+                        "Offline": 100,
+                        "Review": 100,
+                        "Total": 100,
                     },
                 ),
                 _card(
@@ -1966,22 +1971,24 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                     """
                         SELECT
                             os_family AS "OS family",
-                            COUNT(*) AS "Devices",
-                            work_state AS "State"
+                            COUNT(*) FILTER (WHERE work_state = 'Missing') AS "Missing",
+                            COUNT(*) FILTER (WHERE work_state = 'Offline') AS "Offline",
+                            COUNT(*) AS "Total"
                         FROM ninja_agent_compliance.v_device_work_queue
-                        WHERE work_state IN ('Missing', 'Offline', 'Review')
-                        GROUP BY os_family, work_state
+                        WHERE work_state IN ('Missing', 'Offline')
+                        GROUP BY os_family
                         ORDER BY COUNT(*) DESC, os_family
                     """,
                     14, 0, 12, 6,
                     click_behavior=_dashboard_link(
                         DASH_DEVICES,
-                        params=[("os_family", "OS family"), ("state", "State")],
+                        params=[("os_family", "OS family")],
                     ),
                     column_widths={
                         "OS family": 280,
-                        "Devices": 100,
-                        "State": 60,
+                        "Missing": 100,
+                        "Offline": 100,
+                        "Total": 100,
                     },
                 ),
                 _card(
@@ -1991,22 +1998,24 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                     """
                         SELECT
                             INITCAP(device_type) AS "Device type",
-                            COUNT(*) AS "Devices",
-                            work_state AS "State"
+                            COUNT(*) FILTER (WHERE work_state = 'Missing') AS "Missing",
+                            COUNT(*) FILTER (WHERE work_state = 'Offline') AS "Offline",
+                            COUNT(*) AS "Total"
                         FROM ninja_agent_compliance.v_device_work_queue
-                        WHERE work_state IN ('Missing', 'Offline', 'Review')
-                        GROUP BY device_type, work_state
+                        WHERE work_state IN ('Missing', 'Offline')
+                        GROUP BY device_type
                         ORDER BY COUNT(*) DESC, device_type
                     """,
                     14, 12, 12, 6,
                     click_behavior=_dashboard_link(
                         DASH_DEVICES,
-                        params=[("device_type", "Device type"), ("state", "State")],
+                        params=[("device_type", "Device type")],
                     ),
                     column_widths={
                         "Device type": 280,
-                        "Devices": 100,
-                        "State": 60,
+                        "Missing": 100,
+                        "Offline": 100,
+                        "Total": 100,
                     },
                 ),
                 _card(
@@ -2155,21 +2164,22 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                         )
                         SELECT
                             issue_type AS "Issue type",
-                            COUNT(*) AS "Devices",
-                            'Needs attention' AS "State"
+                            COUNT(*) FILTER (WHERE work_state = 'Missing') AS "Missing",
+                            COUNT(*) FILTER (WHERE work_state = 'Offline') AS "Offline",
+                            COUNT(*) FILTER (WHERE work_state = 'Review') AS "Review",
+                            COUNT(*) AS "Total"
                         FROM classified
                         GROUP BY issue_type
                         ORDER BY COUNT(*) DESC, issue_type
                     """,
                     12, 12, 12, 6,
-                    click_behavior=_dashboard_link(
-                        DASH_DEVICES,
-                        params=[("state", "State")],
-                    ),
+                    click_behavior=_dashboard_link(DASH_DEVICES),
                     column_widths={
                         "Issue type": 280,
-                        "Devices": 100,
-                        "State": 60,
+                        "Missing": 100,
+                        "Offline": 100,
+                        "Review": 100,
+                        "Total": 100,
                     },
                     template_tags={"customer": _DEVICES_FILTER_TAGS["customer"]},
                     param_mappings={PARAM_CUSTOMER: _mapping("customer")},
@@ -2181,10 +2191,11 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                     """
                         SELECT
                             os_family AS "OS family",
-                            COUNT(*) AS "Devices",
-                            'Needs attention' AS "State"
+                            COUNT(*) FILTER (WHERE work_state = 'Missing') AS "Missing",
+                            COUNT(*) FILTER (WHERE work_state = 'Offline') AS "Offline",
+                            COUNT(*) AS "Total"
                         FROM ninja_agent_compliance.v_device_work_queue
-                        WHERE work_state IN ('Missing', 'Offline', 'Review')
+                        WHERE work_state IN ('Missing', 'Offline')
                           [[AND client_name IN ({{customer}})]]
                         GROUP BY os_family
                         ORDER BY COUNT(*) DESC, os_family
@@ -2192,12 +2203,13 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                     18, 0, 12, 6,
                     click_behavior=_dashboard_link(
                         DASH_DEVICES,
-                        params=[("os_family", "OS family"), ("state", "State")],
+                        params=[("os_family", "OS family")],
                     ),
                     column_widths={
                         "OS family": 280,
-                        "Devices": 100,
-                        "State": 60,
+                        "Missing": 100,
+                        "Offline": 100,
+                        "Total": 100,
                     },
                     template_tags={"customer": _DEVICES_FILTER_TAGS["customer"]},
                     param_mappings={PARAM_CUSTOMER: _mapping("customer")},
@@ -2209,10 +2221,11 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                     """
                         SELECT
                             INITCAP(device_type) AS "Device type",
-                            COUNT(*) AS "Devices",
-                            'Needs attention' AS "State"
+                            COUNT(*) FILTER (WHERE work_state = 'Missing') AS "Missing",
+                            COUNT(*) FILTER (WHERE work_state = 'Offline') AS "Offline",
+                            COUNT(*) AS "Total"
                         FROM ninja_agent_compliance.v_device_work_queue
-                        WHERE work_state IN ('Missing', 'Offline', 'Review')
+                        WHERE work_state IN ('Missing', 'Offline')
                           [[AND client_name IN ({{customer}})]]
                         GROUP BY device_type
                         ORDER BY COUNT(*) DESC, device_type
@@ -2220,12 +2233,13 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                     18, 12, 12, 6,
                     click_behavior=_dashboard_link(
                         DASH_DEVICES,
-                        params=[("device_type", "Device type"), ("state", "State")],
+                        params=[("device_type", "Device type")],
                     ),
                     column_widths={
                         "Device type": 280,
-                        "Devices": 100,
-                        "State": 60,
+                        "Missing": 100,
+                        "Offline": 100,
+                        "Total": 100,
                     },
                     template_tags={"customer": _DEVICES_FILTER_TAGS["customer"]},
                     param_mappings={PARAM_CUSTOMER: _mapping("customer")},
@@ -2624,7 +2638,7 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                                 WHEN finding_type = 'missing_required_platform'
                                     THEN COALESCE(affected_platform, 'Required platform') || ' missing'
                                 WHEN finding_type = 'stale_required_platform'
-                                    THEN COALESCE(affected_platform, 'Required platform') || ' stale'
+                                    THEN COALESCE(affected_platform, 'Required platform') || ' offline'
                                 WHEN finding_type = 'source_failure'
                                     THEN 'Collector failed'
                                 ELSE finding_type
@@ -2734,7 +2748,7 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                 ),
                 _card(
                     "alerts_not_notifying",
-                    "Open issues not sending a first notification",
+                    "Alertable issues not sending a first notification",
                     "table",
                     """
                         SELECT
@@ -2804,7 +2818,7 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                 ),
                 _card(
                     "alerts_open_issues",
-                    "Open device issues",
+                    "Open alertable device issues",
                     "table",
                     """
                         SELECT
@@ -3165,18 +3179,42 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                 ),
                 _card(
                     "health_missing_by_platform",
-                    "Current device gaps",
-                    "bar",
+                    "Device issues by platform",
+                    "table",
                     """
+                        WITH platform_counts AS (
+                            SELECT
+                                p AS platform,
+                                COUNT(DISTINCT (client_id, norm_name)) AS missing_devices,
+                                0::bigint AS offline_devices
+                            FROM ninja_agent_compliance.v_device_work_queue q
+                            CROSS JOIN LATERAL unnest(q.missing_platforms) AS p
+                            GROUP BY p
+                            UNION ALL
+                            SELECT
+                                p AS platform,
+                                0::bigint AS missing_devices,
+                                COUNT(DISTINCT (client_id, norm_name)) AS offline_devices
+                            FROM ninja_agent_compliance.v_device_work_queue q
+                            CROSS JOIN LATERAL unnest(q.stale_platforms) AS p
+                            GROUP BY p
+                        )
                         SELECT
-                            p AS "Missing",
-                            COUNT(DISTINCT (client_id, norm_name)) AS "Devices"
-                        FROM ninja_agent_compliance.v_device_work_queue q
-                        CROSS JOIN LATERAL unnest(q.missing_platforms) AS p
-                        GROUP BY p
-                        ORDER BY "Devices" DESC
+                            platform AS "Platform",
+                            SUM(missing_devices) AS "Missing",
+                            SUM(offline_devices) AS "Offline",
+                            SUM(missing_devices + offline_devices) AS "Total"
+                        FROM platform_counts
+                        GROUP BY platform
+                        ORDER BY "Total" DESC, platform
                     """,
                     16, 0, 12, 6,
+                    column_widths={
+                        "Platform": 180,
+                        "Missing": 100,
+                        "Offline": 100,
+                        "Total": 100,
+                    },
                 ),
                 _card(
                     "health_names_by_platform",

@@ -719,12 +719,13 @@ def _findings_for_matrix(
             confirmed_gap=confirmed,
         ))
     for platform in matrix["stale_required_platforms"]:
+        confirmed = not matrix.get("is_stale", False)
         findings.append(_finding(
             run_id, matrix, now, "stale_required_platform", platform,
             _severity("stale_required_platform", platform),
-            f"{matrix['hostname']} has stale {platform} check-in data",
+            f"{matrix['hostname']} is offline in required {platform}",
             {"stale_platform": platform},
-            confirmed_gap=False,
+            confirmed_gap=confirmed,
         ))
     return findings
 

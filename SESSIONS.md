@@ -5,6 +5,81 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-16 — v0.27.1 Offline becomes alertable when confirmed
+
+**Why:** Operator direction continuing from v0.27.0 — `Offline`
+should be alertable when the device is still active/recent
+somewhere else, while fully `Stale` devices stay out of alert
+readiness. Metabase notification readiness was showing rows the
+sender would never process; bring the view into reality.
+
+**Done:**
+- Migration 048 (`048_agent_compliance_offline_alerts.sql`):
+  - `v_notification_queue` now filters `f.confirmed_gap` so Metabase
+    shows exactly what `alerts.process_alerts` will process.
+  - Human-facing wording renamed from `stale` to `offline` across
+    notification-queue and rules views.
+  - Added `v_customer_alert_setup` (includes the new `offline`
+    alert row alongside the `missing_*` ones) and
+    `v_alert_rules_human`.
+- `ingest/agent_compliance/ingest.py`: `_findings_for_matrix` now
+  sets `confirmed_gap = not matrix["is_stale"]` for
+  `stale_required_platform`, so offline-but-recent devices become
+  alertable and fully stale devices stay in the digest path. Summary
+  text reads `is offline in required <platform>`.
+- `ingest/main.py`: operator `set-customer-alert` endpoint adds an
+  `offline` alert_key mapped to `stale_required_platform` (uses
+  `stale` as the rule_key suffix so it shares storage with existing
+  rules).
+- `ingest/agent_compliance/metabase_bootstrap.py`: all four
+  breakdown cards on Today and Devices restructured per the earlier
+  directive — `Missing` / `Offline` / `Review` / `Total` are
+  separate columns now instead of separate rows per state.
+- `AGENT_COMPLIANCE_REBUILD_BLUEPRINT.md`: added explicit alert
+  readiness rules (`Missing` alertable when confirmed; `Offline`
+  alertable when device is still active/recent somewhere else;
+  `Stale`/`Review`/ignored/excluded/cross-customer-ambiguous are
+  not alertable; first-success only).
+
+**Validation pending:**
+- Portainer redeploy. Migration 047 (shipped in v0.27.0) plus 048
+  should apply cleanly.
+- After deploy: confirm Metabase notification readiness matches the
+  set that the next evaluate-only run actually sends; spot-check a
+  device with `Offline` state under the customer alert setup.
+
+## 2026-06-16 — v0.27.0 Human device state model
+
+**Why:** Operator-led rebuild of how Agent Compliance describes
+device state. The earlier `Fix now / Review / Stale / Good`
+breakdown mixed urgency with reason; the new model splits state
+into operator-meaningful categories: `Compliant`, `Missing`,
+`Offline`, `Stale`, `Review`, `Ignored`.
+
+**Done:**
+- Added `ninja_agent_compliance.v_device_state_current` as the
+  authoritative reporting contract for device state, reason,
+  recommended action, missing platforms, offline platforms, active
+  platforms, and cross-customer review evidence.
+- Added `ninja_agent_compliance.v_device_platform_detail_current`
+  for the device drilldown — one row per platform rather than only
+  the aggregate device row.
+- Added the `human_decisions` table and the `Confirm missing`
+  action path for cross-customer review cases.
+- Added `Offline platform` as a Devices dashboard filter.
+- Reworked active dashboard cards from `Fix now` wording to the new
+  state model.
+- Cross-customer same-name cases remain `Missing` but now carry
+  review evidence and are no longer treated as fully confirmed
+  unless an operator records a `Confirm missing` / `Not same
+  device` decision.
+- Missing-platform alerts no longer treat cross-customer ambiguity
+  as confirmed without an operator decision.
+- Migration 047 (`047_agent_compliance_device_state_model.sql`)
+  carries the schema and view changes.
+
+**Committed as:** `641cc48`.
+
 ## 2026-06-15 — v0.26.3 Compliant KPI query fix
 
 **Why:** The Today `Compliant %` card used `is_compliant`, but

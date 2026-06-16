@@ -2,6 +2,16 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.27.1] — 2026-06-16
+
+### Changed
+- Made Agent Compliance `Offline` findings alertable when the device is
+  still active/recent somewhere else.
+- Kept fully `Stale` devices out of alert readiness.
+- Updated notification readiness views so Metabase shows the same
+  confirmed alertable findings that the sender will actually process.
+- Updated alert-facing wording from stale platform to offline platform.
+
 ## [0.27.0] — 2026-06-16
 
 ### Added

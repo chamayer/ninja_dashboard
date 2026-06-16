@@ -801,11 +801,13 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 "missing_logmein": ("missing_required_platform", "LogMeIn", "high"),
                 "missing_screenconnect": ("missing_required_platform", "ScreenConnect", "high"),
                 "stale": ("stale_required_platform", None, "medium"),
+                "offline": ("stale_required_platform", None, "medium"),
             }
             if not customer_name or alert_key not in profiles or state not in {"on", "off"}:
                 self._respond(400, b"missing customer, alert, or valid state\n")
                 return
             finding_type, affected_platform, severity = profiles[alert_key]
+            rule_key_suffix = "stale" if alert_key == "offline" else alert_key
             enabled = state == "on"
             with db.transaction() as cur:
                 cur.execute(
@@ -850,7 +852,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                     )
                     route_row = cur.fetchone()
                     route_id = route_row[0] if route_row else None
-                rule_key = f"customer_{client_id}_{alert_key}"
+                rule_key = f"customer_{client_id}_{rule_key_suffix}"
                 cur.execute(
                     """
                     INSERT INTO ninja_agent_compliance.alert_rules (
