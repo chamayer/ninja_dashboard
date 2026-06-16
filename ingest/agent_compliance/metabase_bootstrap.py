@@ -1906,18 +1906,18 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                         GROUP BY client_name
                         ORDER BY COUNT(*) DESC, client_name
                     """,
-                    8, 0, 12, 6,
+                    8, 0, 24, 6,
                     click_behavior=_dashboard_link(
                         DASH_DEVICES,
                         params=[("customer", "Customer")],
                     ),
                     column_widths={
-                        "Customer": 140,
-                        "Missing": 65,
-                        "Offline": 65,
-                        "Stale": 65,
-                        "Review": 65,
-                        "Total": 65,
+                        "Customer": 280,
+                        "Missing": 110,
+                        "Offline": 110,
+                        "Stale": 110,
+                        "Review": 110,
+                        "Total": 110,
                     },
                 ),
                 _card(
@@ -1950,7 +1950,7 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                         GROUP BY issue_type
                         ORDER BY COUNT(*) DESC, issue_type
                     """,
-                    8, 12, 12, 6,
+                    20, 0, 12, 6,
                     click_behavior=_dashboard_link(DASH_DEVICES),
                     column_widths={
                         "Issue type": 340,
@@ -1975,18 +1975,18 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                         GROUP BY os_family
                         ORDER BY COUNT(*) DESC, os_family
                     """,
-                    14, 0, 12, 6,
+                    14, 0, 24, 6,
                     click_behavior=_dashboard_link(
                         DASH_DEVICES,
                         params=[("os_family", "OS family")],
                     ),
                     column_widths={
-                        "OS family": 160,
-                        "Missing": 65,
-                        "Offline": 65,
-                        "Stale": 65,
-                        "Review": 65,
-                        "Total": 65,
+                        "OS family": 280,
+                        "Missing": 110,
+                        "Offline": 110,
+                        "Stale": 110,
+                        "Review": 110,
+                        "Total": 110,
                     },
                 ),
                 _card(
@@ -2007,18 +2007,18 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                         GROUP BY device_type
                         ORDER BY COUNT(*) DESC, device_type
                     """,
-                    14, 12, 12, 6,
+                    20, 12, 12, 6,
                     click_behavior=_dashboard_link(
                         DASH_DEVICES,
                         params=[("device_type", "Device type")],
                     ),
                     column_widths={
-                        "Device type": 220,
-                        "Missing": 80,
-                        "Offline": 80,
-                        "Stale": 80,
-                        "Review": 80,
-                        "Total": 80,
+                        "Device type": 200,
+                        "Missing": 70,
+                        "Offline": 70,
+                        "Stale": 70,
+                        "Review": 70,
+                        "Total": 70,
                     },
                 ),
                 _card(
@@ -2054,7 +2054,7 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                             hostname
                         LIMIT 25
                     """,
-                    20, 0, 24, 8,
+                    26, 0, 24, 8,
                     column_click_behaviors={
                         "Device": _dashboard_link(
                             DASH_DEVICE_DRILLDOWN,
@@ -2078,7 +2078,7 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                         ORDER BY current_devices DESC, candidate_name
                         LIMIT 15
                     """,
-                    28, 0, 12, 6,
+                    34, 0, 12, 6,
                     column_click_behaviors={
                         "Action": _dashboard_link(DASH_CUSTOMERS),
                     },
@@ -2098,7 +2098,7 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                         ORDER BY severity DESC, platform, source_name
                         LIMIT 15
                     """,
-                    28, 12, 12, 6,
+                    34, 12, 12, 6,
                     column_click_behaviors={
                         "Problem": _dashboard_link(DASH_HEALTH),
                     },
@@ -2110,9 +2110,9 @@ def _level1_dashboards() -> list[dict[str, Any]]:
             "parameters_builder": _build_devices_parameters,
             "section_headers": [
                 {"row": 0, "text": "### Needs attention"},
-                {"row": 24, "text": "### Platform gaps"},
-                {"row": 38, "text": "### Stale and ignored"},
-                {"row": 50, "text": "### All devices"},
+                {"row": 30, "text": "### Platform gaps"},
+                {"row": 44, "text": "### Stale and ignored"},
+                {"row": 56, "text": "### All devices"},
             ],
             "cards": [
                 _card(
@@ -2134,18 +2134,18 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                         GROUP BY client_name
                         ORDER BY COUNT(*) DESC, client_name
                     """,
-                    12, 0, 12, 6,
+                    12, 0, 24, 6,
                     click_behavior=_dashboard_link(
                         DASH_DEVICES,
                         params=[("customer", "Customer")],
                     ),
                     column_widths={
-                        "Customer": 140,
-                        "Missing": 65,
-                        "Offline": 65,
-                        "Stale": 65,
-                        "Review": 65,
-                        "Total": 65,
+                        "Customer": 280,
+                        "Missing": 110,
+                        "Offline": 110,
+                        "Stale": 110,
+                        "Review": 110,
+                        "Total": 110,
                     },
                     template_tags={"customer": _DEVICES_FILTER_TAGS["customer"]},
                     param_mappings={PARAM_CUSTOMER: _mapping("customer")},
@@ -2181,7 +2181,7 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                         GROUP BY issue_type
                         ORDER BY COUNT(*) DESC, issue_type
                     """,
-                    12, 12, 12, 6,
+                    24, 0, 12, 6,
                     click_behavior=_dashboard_link(DASH_DEVICES),
                     column_widths={
                         "Issue type": 340,
@@ -2209,18 +2209,18 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                         GROUP BY os_family
                         ORDER BY COUNT(*) DESC, os_family
                     """,
-                    18, 0, 12, 6,
+                    18, 0, 24, 6,
                     click_behavior=_dashboard_link(
                         DASH_DEVICES,
                         params=[("os_family", "OS family")],
                     ),
                     column_widths={
-                        "OS family": 160,
-                        "Missing": 65,
-                        "Offline": 65,
-                        "Stale": 65,
-                        "Review": 65,
-                        "Total": 65,
+                        "OS family": 280,
+                        "Missing": 110,
+                        "Offline": 110,
+                        "Stale": 110,
+                        "Review": 110,
+                        "Total": 110,
                     },
                     template_tags={"customer": _DEVICES_FILTER_TAGS["customer"]},
                     param_mappings={PARAM_CUSTOMER: _mapping("customer")},
@@ -2244,18 +2244,18 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                         GROUP BY device_type
                         ORDER BY COUNT(*) DESC, device_type
                     """,
-                    18, 12, 12, 6,
+                    24, 12, 12, 6,
                     click_behavior=_dashboard_link(
                         DASH_DEVICES,
                         params=[("device_type", "Device type")],
                     ),
                     column_widths={
-                        "Device type": 220,
-                        "Missing": 80,
-                        "Offline": 80,
-                        "Stale": 80,
-                        "Review": 80,
-                        "Total": 80,
+                        "Device type": 200,
+                        "Missing": 70,
+                        "Offline": 70,
+                        "Stale": 70,
+                        "Review": 70,
+                        "Total": 70,
                     },
                     template_tags={"customer": _DEVICES_FILTER_TAGS["customer"]},
                     param_mappings={PARAM_CUSTOMER: _mapping("customer")},
@@ -2377,7 +2377,7 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                           [[AND online_platform IN ({{online_in}})]]
                         ORDER BY devices DESC, missing_platform, online_platform
                     """,
-                    24, 0, 12, 6,
+                    30, 0, 12, 6,
                     click_behavior=_dashboard_link(
                         DASH_DEVICES,
                         params=[("missing", "Missing"), ("online_in", "Online in")],
@@ -2407,7 +2407,7 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                         GROUP BY p
                         ORDER BY "Devices" DESC
                     """,
-                    24, 12, 12, 6,
+                    30, 12, 12, 6,
                     click_behavior=_dashboard_link(DASH_DEVICES, params=[("missing", "Missing")]),
                     template_tags={
                         "customer": _DEVICES_FILTER_TAGS["customer"],
@@ -2435,7 +2435,7 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                         ORDER BY "Stale devices" DESC, client_name
                         LIMIT 100
                     """,
-                    38, 0, 12, 6,
+                    44, 0, 12, 6,
                     column_click_behaviors={
                         "Action": {
                             "url_template": _url_template(
@@ -2465,7 +2465,7 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                         ORDER BY updated_at DESC, client_name, display_name
                         LIMIT 200
                     """,
-                    38, 12, 12, 6,
+                    44, 12, 12, 6,
                     column_click_behaviors={
                         "Device": _dashboard_link(
                             DASH_DEVICE_DRILLDOWN,
@@ -2526,7 +2526,7 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                         ORDER BY client_name, hostname
                         LIMIT 1000
                     """,
-                    50, 0, 24, 8,
+                    56, 0, 24, 8,
                     column_click_behaviors={
                         "Device": _dashboard_link(
                             DASH_DEVICE_DRILLDOWN,

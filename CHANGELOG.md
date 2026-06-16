@@ -2,6 +2,22 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.28.3] — 2026-06-16
+
+### Changed
+- Promoted `Needs attention by customer` and `Needs attention by OS
+  family` to full-width (24w) on both Today and Devices so the
+  6-column tables (label + Missing/Offline/Stale/Review/Total) fit
+  without horizontal scroll. Column widths restored to comfortable
+  values (label 280, numeric 110).
+- `Needs attention by issue type` + `Needs attention by device type`
+  now share the row below at 12w each.
+- Today rows below shifted down 6: Top device issues 20→26,
+  Customer names review + Health problems 28→34.
+- Devices section headers shifted: Platform gaps 24→30, Stale and
+  ignored 38→44, All devices 50→56. Cards in those sections moved
+  to match.
+
 ## [0.28.2] — 2026-06-16
 
 ### Changed
