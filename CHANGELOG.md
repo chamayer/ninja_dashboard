@@ -2,6 +2,14 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.28.2] — 2026-06-16
+
+### Changed
+- Further trimmed the `Needs attention by customer` and `Needs
+  attention by OS family` cards to remove horizontal scroll at the
+  12-wide grid. Customer label 160→140, OS family label 180→160,
+  numeric columns 80→65. Both cards now total well under 500px.
+
 ## [0.28.1] — 2026-06-16
 
 ### Changed
