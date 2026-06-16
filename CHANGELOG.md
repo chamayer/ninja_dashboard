@@ -2,6 +2,31 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.28.0] — 2026-06-16
+
+### Changed
+- Breakdown cards (Today + Devices, Customer / OS family / Device type)
+  now read from `v_device_state_current` and show columns
+  `Missing | Offline | Stale | Review | Total`. `Review` broadened to
+  `device_state = 'Review' OR needs_review` so cross-customer
+  ambiguity surfaces. Other state filters exclude `needs_review` rows
+  so each device is counted exactly once across the row.
+- `Needs attention by issue type` (Today + Devices) collapsed to a
+  single `Devices` count. The row label already encodes the state, so
+  per-state columns were noise. Added `No recent activity` (Stale) and
+  split out `Missing — needs cross-customer review`.
+- Scope on all four breakdowns extended to
+  `device_state IN ('Missing','Offline','Stale','Review') AND NOT
+  ignored` so the visible totals reconcile.
+- Devices dashboard card key `devices_missing_by_customer` renamed to
+  `devices_attention_by_customer` to match the column structure.
+- Alerts dashboard `Finding type` filter now uses operator-facing
+  labels (`Missing`, `Offline`, `Collector failed`) instead of raw
+  finding_type strings, and dropped the dead `cross_client_conflict`
+  value. Card WHERE clauses translate via CASE.
+- Devices dashboard `NO AV` filter renamed to `S1 exempt` (label
+  only; underlying logic unchanged).
+
 ## [0.27.3] — 2026-06-16
 
 ### Fixed

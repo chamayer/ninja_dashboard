@@ -5,6 +5,48 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-16 — v0.28.0 Align breakdowns + filters with state model
+
+**Why:** Operator hit two ergonomic problems on the new state model:
+the `Needs attention by issue type` card had Missing/Offline columns
+that duplicated information already on the row label; the `Needs
+attention by customer` card had a `Review` column that read 0 across
+the fleet because only `device_state='Review'` (degraded/unknown)
+qualified, while the cross-customer ambiguity work was hidden under
+the `needs_review` boolean on Missing rows. Filters on the Devices
+and Alerts pages still used the pre-state-model vocabulary in
+places.
+
+**Done:**
+- All four Today breakdowns and all four Devices breakdowns now read
+  from `v_device_state_current`. Customer / OS family / Device type
+  cards show `Missing | Offline | Stale | Review | Total` columns;
+  `Review` is `device_state = 'Review' OR needs_review` and the
+  other state filters add `AND NOT needs_review` so each device is
+  counted once across the row. Issue type card collapsed to a single
+  `Devices` count, with new rows for `No recent activity` (Stale)
+  and `Missing — needs cross-customer review`.
+- Scope extended to
+  `device_state IN ('Missing','Offline','Stale','Review') AND NOT
+  ignored` so visible totals reconcile to the KPI strip.
+- Renamed `devices_missing_by_customer` card key →
+  `devices_attention_by_customer`.
+- Alerts page `Finding type` dropdown now uses
+  `["Missing", "Offline", "Collector failed"]` instead of raw
+  `*_required_platform` strings, and dropped the dead
+  `cross_client_conflict` value (we stopped emitting these in
+  v0.23.8). All seven card WHERE clauses on `{{finding_type}}`
+  rewritten to translate via inline CASE so the dropdown labels map
+  to the stored finding_type values.
+- Devices page `NO AV` filter relabeled to `S1 exempt` (label only,
+  underlying `s1_exempt` boolean logic unchanged).
+
+**Validation pending:**
+- Portainer redeploy + Metabase bootstrap re-run, then visual sweep
+  of the new breakdown columns; spot check that totals reconcile
+  against the KPI strip; confirm Alerts page Finding type dropdown
+  shows the friendly labels and filtering works.
+
 ## 2026-06-16 — v0.27.3 Drop v_notification_queue before recreate
 
 **Why:** v0.27.2 fixed `v_active_findings` to expose `confirmed_gap`,
