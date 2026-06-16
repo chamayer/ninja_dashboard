@@ -41,6 +41,7 @@ from ingest.agent_compliance import review_digest
 from ingest.runlog import run_log
 from ingest.agent_compliance.config_loader import (
     add_device_ignore,
+    add_human_decision,
     add_org_exclude,
     approve_customer_name,
     bulk_ignore_devices,
@@ -349,6 +350,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             "/a/ue": "/agent-compliance/action/unexclude-org",
             "/a/ig": "/agent-compliance/action/ignore-device",
             "/a/ui": "/agent-compliance/action/unignore-device",
+            "/a/cm": "/agent-compliance/action/confirm-missing",
             "/a/bs": "/agent-compliance/action/bulk-ignore-stale",
             "/a/sd": "/agent-compliance/action/set-max-age",
             "/a/tr": "/agent-compliance/action/toggle-alert-rule",
@@ -637,6 +639,50 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 )
             else:
                 self._respond(400, b"blank norm_name\n")
+            return
+
+        if path == "/agent-compliance/action/confirm-missing":
+            client_name = _text_param("client", "client_name", hex_names=("client_hex",))
+            hostname = _text_param("host", "hostname", hex_names=("host_hex",))
+            platform = _text_param("platform")
+            if not client_name or not hostname:
+                self._respond(400, b"missing client or host\n")
+                return
+            with db.transaction() as cur:
+                cur.execute(
+                    """
+                    SELECT client_id, norm_name, missing_platforms
+                    FROM ninja_agent_compliance.v_device_state_current
+                    WHERE client_name = %s
+                      AND hostname = %s
+                    ORDER BY evaluated_at DESC
+                    LIMIT 1
+                    """,
+                    (client_name, hostname),
+                )
+                row = cur.fetchone()
+            if not row:
+                self._respond(404, b"device not found\n")
+                return
+            client_id, norm_name, missing_platforms = row
+            platforms = [platform] if platform else list(missing_platforms or [])
+            if not platforms:
+                self._respond(400, b"no missing platform to confirm\n")
+                return
+            for item in platforms:
+                add_human_decision(
+                    "confirm_missing",
+                    client_id,
+                    norm_name,
+                    platform=item,
+                    hostname=hostname,
+                    updated_by="operator_dashboard",
+                    notes="Confirmed as missing after cross-customer review",
+                )
+            _respond_with_refresh(
+                f"confirmed missing for {norm_name}: {', '.join(platforms)}",
+                "missing device confirmed",
+            )
             return
 
         if path == "/agent-compliance/action/set-max-age":

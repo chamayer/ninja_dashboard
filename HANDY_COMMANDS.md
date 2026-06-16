@@ -194,6 +194,56 @@ Open a SQL shell:
 docker exec -it ninja-postgres psql -U ninja -d ninja
 ```
 
+## Agent Compliance
+
+Run collection:
+
+```bash
+curl -fsS -X POST http://127.0.0.1:8090/run/agent-compliance
+```
+
+Run evaluation only:
+
+```bash
+curl -fsS -X POST http://127.0.0.1:8090/run/agent-compliance-evaluate
+```
+
+Refresh Metabase cards:
+
+```bash
+curl -fsS -X POST http://127.0.0.1:8090/bootstrap-metabase
+```
+
+Check applied device-state migration:
+
+```bash
+docker exec ninja-postgres psql -U ninja -d ninja -c "SELECT version, applied_at FROM ninja_core.schema_migrations WHERE version = '047_agent_compliance_device_state_model';"
+```
+
+Check device state counts:
+
+```bash
+docker exec ninja-postgres psql -U ninja -d ninja -c "SELECT device_state, COUNT(*) FROM ninja_agent_compliance.v_device_state_current GROUP BY device_state ORDER BY COUNT(*) DESC;"
+```
+
+Check work queue state counts:
+
+```bash
+docker exec ninja-postgres psql -U ninja -d ninja -c "SELECT work_state, COUNT(*) FROM ninja_agent_compliance.v_device_work_queue GROUP BY work_state ORDER BY COUNT(*) DESC;"
+```
+
+Check platform-level drilldown rows for one device:
+
+```bash
+docker exec ninja-postgres psql -U ninja -d ninja -c "SELECT client_name, hostname, platform, required, found, platform_status, age_text, platform_customer, platform_hostname, notes FROM ninja_agent_compliance.v_device_platform_detail_current WHERE hostname = '<DEVICE_NAME>' ORDER BY client_name, hostname, platform;"
+```
+
+Check cross-customer review decisions:
+
+```bash
+docker exec ninja-postgres psql -U ninja -d ninja -c "SELECT decision_type, client_id, norm_name, platform, hostname, notes, created_at FROM ninja_agent_compliance.v_human_decisions_current ORDER BY created_at DESC LIMIT 50;"
+```
+
 Clear the custom-field ingest table before a clean re-ingest:
 
 ```bash

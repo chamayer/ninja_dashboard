@@ -469,9 +469,12 @@ def _build_matrix_and_findings(
         matrix_rows.append(matrix)
 
     observed_by_norm_client = _build_observed_by_norm_client(matrix_rows)
+    confirmed_missing = _load_confirmed_missing_decisions()
     for matrix in matrix_rows:
         finding_rows.extend(
-            _findings_for_matrix(run_id, matrix, observed_by_norm_client, observed_at)
+            _findings_for_matrix(
+                run_id, matrix, observed_by_norm_client, observed_at, confirmed_missing,
+            )
         )
 
     finding_rows.extend(_source_failure_findings(run_id, sources, source_status, observed_at))
@@ -491,6 +494,27 @@ def _build_observed_by_norm_client(
     for m in matrix_rows:
         idx.setdefault(m["norm_name"], {})[m["client_id"]] = set(m["observed_platforms"])
     return idx
+
+
+def _load_confirmed_missing_decisions() -> set[tuple[int, str, str]]:
+    try:
+        with db.transaction() as cur:
+            cur.execute(
+                """
+                SELECT client_id, norm_name, platform
+                FROM ninja_agent_compliance.v_human_decisions_current
+                WHERE decision_type IN ('confirm_missing', 'not_same_device')
+                  AND client_id IS NOT NULL
+                  AND norm_name IS NOT NULL
+                  AND platform IS NOT NULL
+                """
+            )
+            return {
+                (int(row[0]), str(row[1]).strip().lower(), str(row[2]))
+                for row in cur.fetchall()
+            }
+    except Exception:
+        return set()
 
 
 def _source_failure_platforms(
@@ -663,6 +687,7 @@ def _findings_for_matrix(
     matrix: dict[str, Any],
     observed_by_norm_client: dict[str, dict[int, set[str]]],
     now: datetime,
+    confirmed_missing: set[tuple[int, str, str]],
 ) -> list[dict[str, Any]]:
     findings: list[dict[str, Any]] = []
     device_has_online = any([
@@ -677,9 +702,15 @@ def _findings_for_matrix(
         if cid != matrix["client_id"]
     }
     for platform in matrix["missing_required_platforms"]:
-        confirmed = device_has_online or any(
+        cross_customer_match = any(
             platform in observed for observed in other_clients_observed.values()
         )
+        manually_confirmed = (
+            matrix["client_id"],
+            str(matrix["norm_name"]).strip().lower(),
+            platform,
+        ) in confirmed_missing
+        confirmed = manually_confirmed or (device_has_online and not cross_customer_match)
         findings.append(_finding(
             run_id, matrix, now, "missing_required_platform", platform,
             _severity("missing_required_platform", platform),

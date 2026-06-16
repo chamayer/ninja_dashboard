@@ -1233,6 +1233,47 @@ def add_device_ignore(
     return True
 
 
+def add_human_decision(
+    decision_type: str,
+    client_id: int,
+    norm_name: str,
+    platform: str | None = None,
+    hostname: str | None = None,
+    updated_by: str = "agent_compliance",
+    notes: str | None = None,
+) -> bool:
+    normalized = norm_name.strip().lower()
+    if not normalized:
+        return False
+    allowed = {
+        "confirm_missing",
+        "same_device",
+        "not_same_device",
+        "ignore_device",
+        "ignore_finding",
+    }
+    if decision_type not in allowed:
+        return False
+    with db.transaction() as cur:
+        cur.execute(
+            """
+            INSERT INTO ninja_agent_compliance.human_decisions
+                (decision_type, client_id, norm_name, hostname, platform, notes, enabled, updated_by)
+            VALUES (%s, %s, %s, %s, %s, %s, true, %s)
+            """,
+            (
+                decision_type,
+                client_id,
+                normalized,
+                hostname,
+                platform,
+                notes,
+                updated_by,
+            ),
+        )
+    return True
+
+
 def bulk_ignore_devices(
     client_name: str,
     kind: str,

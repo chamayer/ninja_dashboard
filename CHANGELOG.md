@@ -2,6 +2,31 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.27.0] — 2026-06-16
+
+### Added
+- Added the Agent Compliance human device-state model:
+  `Compliant`, `Missing`, `Offline`, `Stale`, `Review`, and `Ignored`.
+- Added `ninja_agent_compliance.v_device_state_current` as the clean
+  reporting contract for device state, reason, recommended action,
+  missing platforms, offline platforms, active platforms, and
+  cross-customer review evidence.
+- Added `ninja_agent_compliance.v_device_platform_detail_current` for
+  the device drilldown, with one row per platform instead of only an
+  aggregate device row.
+- Added `ninja_agent_compliance.human_decisions` and the `Confirm
+  missing` action path for cross-customer review cases.
+- Added `Offline platform` as a Devices dashboard filter.
+
+### Changed
+- Reworked active Agent Compliance dashboard cards from `Fix now`
+  wording to the new state model.
+- Cross-customer same-name cases remain `Missing`, but now carry
+  review evidence instead of being treated as fully confirmed.
+- Missing-platform alerts no longer treat cross-customer ambiguity as
+  confirmed unless an operator records a confirm-missing/not-same-device
+  decision.
+
 ## [0.26.3] — 2026-06-15
 
 ### Fixed

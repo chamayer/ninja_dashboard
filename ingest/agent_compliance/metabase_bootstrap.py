@@ -43,6 +43,7 @@ DASH_DEBUG = "Agent Compliance - Debug"
 # These slugs also act as URL query keys for cross-card drill-through.
 PARAM_CUSTOMER = "p_dev_customer"
 PARAM_MISSING = "p_dev_missing"
+PARAM_OFFLINE = "p_dev_offline"
 PARAM_ONLINE_IN = "p_dev_online_in"
 PARAM_STATE = "p_dev_state"
 PARAM_AV_EXEMPT = "p_dev_av"
@@ -62,7 +63,7 @@ PARAM_AL_TYPE = "p_al_type"
 PARAM_CU_REVIEW_NAME = "p_cu_review_name"
 
 PLATFORM_VALUES = ["Ninja", "ScreenConnect", "SentinelOne", "LogMeIn"]
-STATE_VALUES = ["Fix now", "Review", "Stale", "Ignored", "Good"]
+STATE_VALUES = ["Missing", "Offline", "Review", "Stale", "Ignored", "Compliant"]
 AV_EXEMPT_VALUES = ["Yes", "No"]
 OS_FAMILY_VALUES = [
     "Windows 11", "Windows 10", "Windows 8.1", "Windows 8", "Windows 7",
@@ -262,6 +263,7 @@ def _build_devices_parameters() -> list[dict[str, Any]]:
     return [
         _param_multiselect(PARAM_CUSTOMER, "Customer", "customer", customer_values),
         _param_multiselect(PARAM_MISSING, "Missing platform", "missing", PLATFORM_VALUES),
+        _param_multiselect(PARAM_OFFLINE, "Offline platform", "offline", PLATFORM_VALUES),
         _param_multiselect(PARAM_ONLINE_IN, "Online in", "online_in", PLATFORM_VALUES),
         _param_multiselect(PARAM_STATE, "State", "state", STATE_VALUES),
         _param_multiselect(PARAM_AV_EXEMPT, "NO AV", "av", AV_EXEMPT_VALUES),
@@ -276,6 +278,7 @@ def _build_devices_parameters() -> list[dict[str, Any]]:
 _DEVICES_FILTER_TAGS = {
     "customer": _tag("customer", "Customer"),
     "missing": _tag("missing", "Missing platform"),
+    "offline": _tag("offline", "Offline platform"),
     "online_in": _tag("online_in", "Online in"),
     "state": _tag("state", "State"),
     "av": _tag("av", "NO AV"),
@@ -1788,7 +1791,7 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                     """
                         SELECT COUNT(*) AS "Compliant devices"
                         FROM ninja_agent_compliance.v_all_devices_human
-                        WHERE state = 'Good'
+                        WHERE state = 'Compliant'
                           AND NOT ignored
                     """,
                     0, 4, 4, 4,
@@ -1800,7 +1803,7 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                     "scalar",
                     """
                         SELECT ROUND(
-                            COUNT(*) FILTER (WHERE state = 'Good' AND NOT ignored) * 100.0
+                            COUNT(*) FILTER (WHERE state = 'Compliant' AND NOT ignored) * 100.0
                                 / NULLIF(COUNT(*) FILTER (WHERE state <> 'Stale' AND NOT ignored), 0),
                             1
                         ) AS "Compliant %"
@@ -1810,15 +1813,27 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                     click_behavior=_dashboard_link(DASH_DEVICES),
                 ),
                 _card(
-                    "today_fix_now",
-                    "Fix now",
+                    "today_missing",
+                    "Missing",
                     "scalar",
                     """
-                        SELECT COUNT(*) AS "Fix now"
+                        SELECT COUNT(*) AS "Missing"
                         FROM ninja_agent_compliance.v_device_work_queue
-                        WHERE work_state = 'Fix now'
+                        WHERE work_state = 'Missing'
                     """,
                     0, 12, 4, 4,
+                    click_behavior=_dashboard_link(DASH_DEVICES),
+                ),
+                _card(
+                    "today_offline",
+                    "Offline",
+                    "scalar",
+                    """
+                        SELECT COUNT(*) AS "Offline"
+                        FROM ninja_agent_compliance.v_device_work_queue
+                        WHERE work_state = 'Offline'
+                    """,
+                    0, 16, 4, 4,
                     click_behavior=_dashboard_link(DASH_DEVICES),
                 ),
                 _card(
@@ -1830,7 +1845,7 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                         FROM ninja_agent_compliance.v_device_work_queue
                         WHERE work_state = 'Review'
                     """,
-                    0, 16, 4, 4,
+                    4, 0, 4, 4,
                     click_behavior=_dashboard_link(DASH_DEVICES),
                 ),
                 _card(
@@ -1853,7 +1868,7 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                         SELECT COUNT(*) AS "Ready to notify"
                         FROM ninja_agent_compliance.v_notifications_ready
                     """,
-                    4, 0, 8, 4,
+                    4, 4, 8, 4,
                     click_behavior=_dashboard_link(DASH_ALERTS),
                 ),
                 _card(
@@ -1864,7 +1879,7 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                         SELECT COUNT(*) AS "Names to review"
                         FROM ninja_agent_compliance.v_customer_name_queue
                     """,
-                    4, 8, 8, 4,
+                    4, 12, 6, 4,
                     click_behavior=_dashboard_link(DASH_CUSTOMERS),
                 ),
                 _card(
@@ -1875,21 +1890,21 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                         SELECT COUNT(*) AS "Collection issues"
                         FROM ninja_agent_compliance.v_system_health_queue
                     """,
-                    4, 16, 8, 4,
+                    4, 18, 6, 4,
                     click_behavior=_dashboard_link(DASH_HEALTH),
                 ),
                 _card(
-                    "today_fix_now_by_customer",
-                    "Fix now by customer",
+                    "today_attention_by_customer",
+                    "Needs attention by customer",
                     "table",
                     """
                         SELECT
                             client_name AS "Customer",
                             COUNT(*) AS "Devices",
-                            'Fix now' AS "State"
+                            work_state AS "State"
                         FROM ninja_agent_compliance.v_device_work_queue
-                        WHERE work_state = 'Fix now'
-                        GROUP BY client_name
+                        WHERE work_state IN ('Missing', 'Offline', 'Review')
+                        GROUP BY client_name, work_state
                         ORDER BY COUNT(*) DESC, client_name
                     """,
                     8, 0, 12, 6,
@@ -1904,31 +1919,33 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                     },
                 ),
                 _card(
-                    "today_fix_now_by_issue_type",
-                    "Fix now by issue type",
+                    "today_attention_by_issue_type",
+                    "Needs attention by issue type",
                     "table",
                     """
                         WITH classified AS (
                             SELECT
                                 CASE
                                     WHEN cardinality(cross_customer_actionable_platforms) > 0
-                                        THEN 'Missing platform found elsewhere'
+                                        THEN 'Missing with customer-name review'
                                     WHEN 'Ninja' = ANY(missing_platforms) THEN 'Missing Ninja'
                                     WHEN 'SentinelOne' = ANY(missing_platforms) THEN 'Missing SentinelOne'
                                     WHEN 'ScreenConnect' = ANY(missing_platforms) THEN 'Missing ScreenConnect'
                                     WHEN 'LogMeIn' = ANY(missing_platforms) THEN 'Missing LogMeIn'
+                                    WHEN cardinality(stale_platforms) > 0 THEN 'Offline platform'
                                     WHEN is_degraded THEN 'Agent degraded'
                                     ELSE 'Other'
-                                END AS issue_type
+                                END AS issue_type,
+                                work_state
                             FROM ninja_agent_compliance.v_device_work_queue
-                            WHERE work_state = 'Fix now'
+                            WHERE work_state IN ('Missing', 'Offline', 'Review')
                         )
                         SELECT
                             issue_type AS "Issue type",
                             COUNT(*) AS "Devices",
-                            'Fix now' AS "State"
+                            work_state AS "State"
                         FROM classified
-                        GROUP BY issue_type
+                        GROUP BY issue_type, work_state
                         ORDER BY COUNT(*) DESC, issue_type
                     """,
                     8, 12, 12, 6,
@@ -1943,17 +1960,17 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                     },
                 ),
                 _card(
-                    "today_fix_now_by_os_family",
-                    "Fix now by OS family",
+                    "today_attention_by_os_family",
+                    "Needs attention by OS family",
                     "table",
                     """
                         SELECT
                             os_family AS "OS family",
                             COUNT(*) AS "Devices",
-                            'Fix now' AS "State"
+                            work_state AS "State"
                         FROM ninja_agent_compliance.v_device_work_queue
-                        WHERE work_state = 'Fix now'
-                        GROUP BY os_family
+                        WHERE work_state IN ('Missing', 'Offline', 'Review')
+                        GROUP BY os_family, work_state
                         ORDER BY COUNT(*) DESC, os_family
                     """,
                     14, 0, 12, 6,
@@ -1968,17 +1985,17 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                     },
                 ),
                 _card(
-                    "today_fix_now_by_device_type",
-                    "Fix now by device type",
+                    "today_attention_by_device_type",
+                    "Needs attention by device type",
                     "table",
                     """
                         SELECT
                             INITCAP(device_type) AS "Device type",
                             COUNT(*) AS "Devices",
-                            'Fix now' AS "State"
+                            work_state AS "State"
                         FROM ninja_agent_compliance.v_device_work_queue
-                        WHERE work_state = 'Fix now'
-                        GROUP BY device_type
+                        WHERE work_state IN ('Missing', 'Offline', 'Review')
+                        GROUP BY device_type, work_state
                         ORDER BY COUNT(*) DESC, device_type
                     """,
                     14, 12, 12, 6,
@@ -2012,12 +2029,13 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                             COALESCE(TO_CHAR(last_seen_anywhere, 'YYYY-MM-DD HH24:MI'), 'Never') AS "Last seen",
                             work_state AS "State"
                         FROM ninja_agent_compliance.v_device_work_queue
-                        WHERE work_state IN ('Fix now', 'Review')
+                        WHERE work_state IN ('Missing', 'Offline', 'Review')
                         ORDER BY
                             CASE work_state
-                                WHEN 'Fix now' THEN 0
-                                WHEN 'Review' THEN 1
-                                WHEN 'Stale' THEN 2
+                                WHEN 'Missing' THEN 0
+                                WHEN 'Offline' THEN 1
+                                WHEN 'Review' THEN 2
+                                WHEN 'Stale' THEN 3
                                 ELSE 5
                             END,
                             client_name,
@@ -2079,23 +2097,23 @@ def _level1_dashboards() -> list[dict[str, Any]]:
             "name": DASH_DEVICES,
             "parameters_builder": _build_devices_parameters,
             "section_headers": [
-                {"row": 0, "text": "### Fix now"},
+                {"row": 0, "text": "### Needs attention"},
                 {"row": 24, "text": "### Platform gaps"},
                 {"row": 38, "text": "### Stale and ignored"},
                 {"row": 50, "text": "### All devices"},
             ],
             "cards": [
                 _card(
-                    "devices_fix_now_by_customer",
-                    "Fix now by customer",
+                    "devices_missing_by_customer",
+                    "Missing by customer",
                     "table",
                     """
                         SELECT
                             client_name AS "Customer",
                             COUNT(*) AS "Devices",
-                            'Fix now' AS "State"
+                            'Missing' AS "State"
                         FROM ninja_agent_compliance.v_device_work_queue
-                        WHERE work_state = 'Fix now'
+                        WHERE work_state = 'Missing'
                           [[AND client_name IN ({{customer}})]]
                         GROUP BY client_name
                         ORDER BY COUNT(*) DESC, client_name
@@ -2114,30 +2132,31 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                     param_mappings={PARAM_CUSTOMER: _mapping("customer")},
                 ),
                 _card(
-                    "devices_fix_now_by_issue_type",
-                    "Fix now by issue type",
+                    "devices_attention_by_issue_type",
+                    "Needs attention by issue type",
                     "table",
                     """
                         WITH classified AS (
                             SELECT
                                 CASE
                                     WHEN cardinality(cross_customer_actionable_platforms) > 0
-                                        THEN 'Missing platform found elsewhere'
+                                        THEN 'Missing with customer-name review'
                                     WHEN 'Ninja' = ANY(missing_platforms) THEN 'Missing Ninja'
                                     WHEN 'SentinelOne' = ANY(missing_platforms) THEN 'Missing SentinelOne'
                                     WHEN 'ScreenConnect' = ANY(missing_platforms) THEN 'Missing ScreenConnect'
                                     WHEN 'LogMeIn' = ANY(missing_platforms) THEN 'Missing LogMeIn'
+                                    WHEN cardinality(stale_platforms) > 0 THEN 'Offline platform'
                                     WHEN is_degraded THEN 'Agent degraded'
                                     ELSE 'Other'
                                 END AS issue_type
                             FROM ninja_agent_compliance.v_device_work_queue
-                            WHERE work_state = 'Fix now'
+                            WHERE work_state IN ('Missing', 'Offline', 'Review')
                               [[AND client_name IN ({{customer}})]]
                         )
                         SELECT
                             issue_type AS "Issue type",
                             COUNT(*) AS "Devices",
-                            'Fix now' AS "State"
+                            'Needs attention' AS "State"
                         FROM classified
                         GROUP BY issue_type
                         ORDER BY COUNT(*) DESC, issue_type
@@ -2156,16 +2175,16 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                     param_mappings={PARAM_CUSTOMER: _mapping("customer")},
                 ),
                 _card(
-                    "devices_fix_now_by_os_family",
-                    "Fix now by OS family",
+                    "devices_attention_by_os_family",
+                    "Needs attention by OS family",
                     "table",
                     """
                         SELECT
                             os_family AS "OS family",
                             COUNT(*) AS "Devices",
-                            'Fix now' AS "State"
+                            'Needs attention' AS "State"
                         FROM ninja_agent_compliance.v_device_work_queue
-                        WHERE work_state = 'Fix now'
+                        WHERE work_state IN ('Missing', 'Offline', 'Review')
                           [[AND client_name IN ({{customer}})]]
                         GROUP BY os_family
                         ORDER BY COUNT(*) DESC, os_family
@@ -2184,16 +2203,16 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                     param_mappings={PARAM_CUSTOMER: _mapping("customer")},
                 ),
                 _card(
-                    "devices_fix_now_by_device_type",
-                    "Fix now by device type",
+                    "devices_attention_by_device_type",
+                    "Needs attention by device type",
                     "table",
                     """
                         SELECT
                             INITCAP(device_type) AS "Device type",
                             COUNT(*) AS "Devices",
-                            'Fix now' AS "State"
+                            'Needs attention' AS "State"
                         FROM ninja_agent_compliance.v_device_work_queue
-                        WHERE work_state = 'Fix now'
+                        WHERE work_state IN ('Missing', 'Offline', 'Review')
                           [[AND client_name IN ({{customer}})]]
                         GROUP BY device_type
                         ORDER BY COUNT(*) DESC, device_type
@@ -2229,6 +2248,11 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                             issue AS "Issue",
                             COALESCE(array_to_string(online_platforms, ', '), '-') AS "Online in",
                             COALESCE(array_to_string(missing_platforms, ', '), '-') AS "Missing",
+                            COALESCE(array_to_string(stale_platforms, ', '), '-') AS "Offline",
+                            CASE
+                                WHEN cardinality(cross_customer_actionable_platforms) > 0 THEN 'Confirm missing'
+                                ELSE ''
+                            END AS "Review decision",
                             COALESCE(TO_CHAR(last_seen_anywhere, 'YYYY-MM-DD HH24:MI'), 'Never') AS "Last seen",
                             work_state AS "State",
                             'Ignore' AS "Action"
@@ -2240,6 +2264,10 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                               WHERE p IN ({{missing}})
                           )]]
                           [[AND EXISTS (
+                              SELECT 1 FROM unnest(stale_platforms) AS p
+                              WHERE p IN ({{offline}})
+                          )]]
+                          [[AND EXISTS (
                               SELECT 1 FROM unnest(online_platforms) AS p
                               WHERE p IN ({{online_in}})
                           )]]
@@ -2249,9 +2277,10 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                           [[AND INITCAP(device_type) IN ({{device_type}})]]
                         ORDER BY
                             CASE work_state
-                                WHEN 'Fix now' THEN 0
-                                WHEN 'Review' THEN 1
-                                WHEN 'Stale' THEN 2
+                                WHEN 'Missing' THEN 0
+                                WHEN 'Offline' THEN 1
+                                WHEN 'Review' THEN 2
+                                WHEN 'Stale' THEN 3
                                 ELSE 5
                             END,
                             client_name,
@@ -2271,6 +2300,12 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                                 confirm=False,
                             ),
                         },
+                        "Review decision": {
+                            "url_template": _url_template(
+                                "/a/cm",
+                                [("client", "Customer"), ("host", "Device")],
+                            ),
+                        },
                     },
                     column_widths={
                         "Customer": 200,
@@ -2279,6 +2314,8 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                         "Issue": 320,
                         "Online in": 150,
                         "Missing": 160,
+                        "Offline": 160,
+                        "Review decision": 140,
                         "Last seen": 140,
                         "State": 90,
                         "Action": 80,
@@ -2287,6 +2324,7 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                     param_mappings={
                         PARAM_CUSTOMER: _mapping("customer"),
                         PARAM_MISSING: _mapping("missing"),
+                        PARAM_OFFLINE: _mapping("offline"),
                         PARAM_ONLINE_IN: _mapping("online_in"),
                         PARAM_STATE: _mapping("state"),
                         PARAM_AV_EXEMPT: _mapping("av"),
@@ -2433,6 +2471,7 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                             COALESCE(array_to_string(found_platforms, ', '), '-') AS "Found in",
                             COALESCE(array_to_string(online_platforms, ', '), '-') AS "Online in",
                             COALESCE(array_to_string(missing_platforms, ', '), '-') AS "Missing",
+                            COALESCE(array_to_string(stale_platforms, ', '), '-') AS "Offline",
                             CASE WHEN ignored THEN 'Yes' ELSE 'No' END AS "Ignored",
                             COALESCE(TO_CHAR(last_seen_anywhere, 'YYYY-MM-DD HH24:MI'), 'Never') AS "Last seen"
                         FROM ninja_agent_compliance.v_all_devices_human
@@ -2441,6 +2480,10 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                           [[AND EXISTS (
                               SELECT 1 FROM unnest(missing_platforms) AS p
                               WHERE p IN ({{missing}})
+                          )]]
+                          [[AND EXISTS (
+                              SELECT 1 FROM unnest(stale_platforms) AS p
+                              WHERE p IN ({{offline}})
                           )]]
                           [[AND EXISTS (
                               SELECT 1 FROM unnest(online_platforms) AS p
@@ -2464,6 +2507,7 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                     param_mappings={
                         PARAM_CUSTOMER: _mapping("customer"),
                         PARAM_MISSING: _mapping("missing"),
+                        PARAM_OFFLINE: _mapping("offline"),
                         PARAM_ONLINE_IN: _mapping("online_in"),
                         PARAM_STATE: _mapping("state"),
                         PARAM_AV_EXEMPT: _mapping("av"),
@@ -2484,12 +2528,12 @@ def _level1_dashboards() -> list[dict[str, Any]]:
             "cards": [
                 _card(
                     "drilldown_current",
-                    "Current device state",
+                    "Platform status",
                     "table",
                     """
                         WITH anchor AS (
                             SELECT norm_name
-                            FROM ninja_agent_compliance.v_all_devices_human
+                            FROM ninja_agent_compliance.v_device_state_current
                             WHERE hostname = {{host}}
                               [[AND client_name = {{customer}}]]
                             ORDER BY
@@ -2500,18 +2544,45 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                         SELECT
                             client_name AS "Customer",
                             hostname AS "Device",
-                            state AS "State",
-                            issue AS "Issue",
-                            COALESCE(array_to_string(required_platforms, ', '), '-') AS "Required",
-                            COALESCE(array_to_string(found_platforms, ', '), '-') AS "Found in",
-                            COALESCE(array_to_string(online_platforms, ', '), '-') AS "Online in",
-                            COALESCE(array_to_string(missing_platforms, ', '), '-') AS "Missing",
-                            COALESCE(TO_CHAR(last_seen_anywhere, 'YYYY-MM-DD HH24:MI'), 'Never') AS "Last seen"
-                        FROM ninja_agent_compliance.v_all_devices_human
+                            device_state AS "State",
+                            platform AS "Platform",
+                            CASE WHEN required THEN 'Yes' ELSE 'No' END AS "Required",
+                            CASE WHEN found THEN 'Yes' ELSE 'No' END AS "Found",
+                            platform_status AS "Platform status",
+                            COALESCE(TO_CHAR(last_seen_at, 'YYYY-MM-DD HH24:MI'), 'Never') AS "Last seen",
+                            age_text AS "Age",
+                            COALESCE(NULLIF(platform_customer, ''), '-') AS "Customer in platform",
+                            COALESCE(NULLIF(platform_hostname, ''), '-') AS "Device name in platform",
+                            COALESCE(NULLIF(notes, ''), '-') AS "Notes"
+                        FROM ninja_agent_compliance.v_device_platform_detail_current
                         WHERE norm_name = (SELECT norm_name FROM anchor)
-                        ORDER BY client_name, hostname
+                          [[AND client_name = {{customer}}]]
+                        ORDER BY
+                            client_name,
+                            hostname,
+                            CASE platform
+                                WHEN 'Ninja' THEN 1
+                                WHEN 'SentinelOne' THEN 2
+                                WHEN 'LogMeIn' THEN 3
+                                WHEN 'ScreenConnect' THEN 4
+                                ELSE 9
+                            END
                     """,
-                    0, 0, 24, 6,
+                    0, 0, 24, 8,
+                    column_widths={
+                        "Customer": 180,
+                        "Device": 160,
+                        "State": 100,
+                        "Platform": 120,
+                        "Required": 90,
+                        "Found": 80,
+                        "Platform status": 140,
+                        "Last seen": 140,
+                        "Age": 110,
+                        "Customer in platform": 180,
+                        "Device name in platform": 190,
+                        "Notes": 260,
+                    },
                     template_tags=_DRILLDOWN_FILTER_TAGS,
                     param_mappings={
                         PARAM_DD_CUSTOMER: _mapping("customer"),
@@ -2525,7 +2596,7 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                     """
                         SELECT
                             TO_CHAR(evaluated_at, 'YYYY-MM-DD HH24:MI') AS "When",
-                            CASE WHEN is_compliant THEN 'Good' ELSE 'Needs review' END AS "State",
+                            CASE WHEN is_compliant THEN 'Compliant' ELSE 'Needs review' END AS "State",
                             COALESCE(array_to_string(missing_required_platforms, ', '), '-') AS "Missing",
                             COALESCE(array_to_string(observed_platforms, ', '), '-') AS "Found in",
                             COALESCE(array_to_string(source_failed_platforms, ', '), '-') AS "Source issue"

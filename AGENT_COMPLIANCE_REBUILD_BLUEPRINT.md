@@ -222,3 +222,112 @@ The rebuild is acceptable when:
 4. Placeholder names are not part of the main flow.
 5. No table field shows a raw action URL.
 6. Debug still exposes the raw data when needed.
+
+## Agreed Device State Model
+
+Each device should have one primary human state:
+
+- `Compliant`: the device is active/recent and has every required platform in a healthy state.
+- `Missing`: the device is active/recent in at least one platform and absent from one or more required platforms.
+- `Offline`: the device is active/recent in at least one platform and present-but-offline/stale in one or more required platforms.
+- `Stale`: the device has not been recently seen in any platform.
+- `Review`: the evidence is ambiguous or needs human confirmation.
+- `Ignored`: a human decision hides the device/finding from active work.
+
+Important detail: a device that is missing a platform but has the same normalized name under another customer remains `Missing`, but gets `needs_review = true` and `review_reason = Found under another customer`. This keeps possible real missing-device risk visible while warning the operator to confirm before remediation.
+
+## State Evidence Fields
+
+The evaluation layer should expose:
+
+- `device_state`
+- `needs_review`
+- `review_reason`
+- `state_reason`
+- `recommended_action`
+- `missing_platforms`
+- `offline_platforms`
+- `active_platforms`
+- `present_platforms`
+- `last_seen_anywhere`
+- `cross_customer_matches`
+
+Offline and stale messages must include age, such as `last seen 12 days ago` or `last seen on 2026-06-03`.
+
+## Drilldown Requirement
+
+The device drilldown must show platform-level evidence, not only an aggregate device row.
+
+Required table shape:
+
+- `Platform`
+- `Required`
+- `Found`
+- `Current status`
+- `Last seen`
+- `Customer in platform`
+- `Device name in platform`
+- `Notes`
+
+The aggregate state summary may remain at the top, but platform-by-platform status is the main evidence table.
+
+## Human Decisions
+
+Use shared decision infrastructure, but keep human workflows separate.
+
+Decision types needed for this phase:
+
+- `ignore_device`
+- `ignore_finding`
+- `confirm_missing`
+- `same_device`
+- `not_same_device`
+- `accept_customer_name`
+- `alias_customer_name`
+- `ignore_customer_name`
+- `platform_required_on`
+- `platform_required_off`
+
+Cross-customer review outcomes:
+
+- `confirm_missing` or `not_same_device`: remove the review flag and keep the row as `Missing`.
+- mapping/alias correction: resolves naturally on the next evaluation.
+
+## Dashboard Target
+
+Today:
+
+- top cards: `Total devices`, `Compliant devices`, `Compliant %`, `Missing`, `Offline`, `Stale`, `Review`.
+- supporting tables: needs attention by customer, needs attention by platform, recent notification activity.
+
+Devices:
+
+- state-driven work tables and filters.
+- filters should include customer, state, missing platform, offline platform, active in, device type, OS family, ignored.
+
+Customers:
+
+- customer-name recognition, add/alias/ignore, aliases, recognized names.
+
+Setup:
+
+- required platforms by customer.
+- alert enrollment by customer.
+- source/route setup.
+
+Alerts:
+
+- notification readiness, sent history, blocked reasons.
+- alert config belongs in Setup, not Alerts.
+
+Health:
+
+- source health, collection/evaluation freshness, data confidence.
+
+Debug:
+
+- raw observations and low-level diagnostics only.
+
+Deferred:
+
+- ownership and routing are deferred until issue identification and actionability are trustworthy.
