@@ -5,6 +5,27 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-16 — v0.27.3 Drop v_notification_queue before recreate
+
+**Why:** v0.27.2 fixed `v_active_findings` to expose `confirmed_gap`,
+but the downstream `v_notification_queue` then failed on its
+CREATE OR REPLACE with
+`cannot change name of view column "rule_id" to "confirmed_gap"`.
+Because `v_notification_queue` selects `a.*` from `v_active_findings`,
+the new `a.*` is one column wider — shifting every named column
+after it (rule_id, rule_key, etc.) right by one. CREATE OR REPLACE
+cannot rename existing view columns, only append new ones at the
+end.
+
+**Done:**
+- Added `DROP VIEW IF EXISTS ninja_agent_compliance.v_notification_queue`
+  to migration 048 (right after the existing
+  `v_notifications_ready` drop) so the next CREATE statement starts
+  from a clean slate.
+
+**Validation pending:**
+- Portainer redeploy. Migration 048 should now apply on next start.
+
 ## 2026-06-16 — v0.27.2 Refresh v_active_findings to pick up confirmed_gap
 
 **Why:** Migration 048 (v0.27.1) crash-looped the container with

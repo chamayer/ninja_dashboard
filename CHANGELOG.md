@@ -2,6 +2,21 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.27.3] — 2026-06-16
+
+### Fixed
+- Migration 048 still failed after v0.27.2 with
+  `cannot change name of view column "rule_id" to "confirmed_gap"`.
+  v0.27.2 refreshed `v_active_findings` so it picks up the new
+  `confirmed_gap` column at the end, but the downstream
+  `v_notification_queue` (from migration 039) selects `a.*` from
+  `v_active_findings` and was being updated via CREATE OR REPLACE.
+  Since `a.*` now expands one column wider, every column after that
+  shifts right by one — including `rule_id`, which collides with the
+  new `confirmed_gap` in the same slot. CREATE OR REPLACE does not
+  allow column-name swaps. Added `DROP VIEW IF EXISTS
+  v_notification_queue` before the recreate.
+
 ## [0.27.2] — 2026-06-16
 
 ### Fixed

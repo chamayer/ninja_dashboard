@@ -32,7 +32,12 @@ WHERE NOT EXISTS (
 )
 ORDER BY severity DESC, last_seen_at DESC;
 
+-- v_notification_queue must be dropped (not CREATE OR REPLACE'd) because
+-- its column shape changes: SELECT a.* from v_active_findings now expands
+-- to include confirmed_gap, which shifts rule_id and the rest one position
+-- to the right. CREATE OR REPLACE only allows appending columns at the end.
 DROP VIEW IF EXISTS ninja_agent_compliance.v_notifications_ready;
+DROP VIEW IF EXISTS ninja_agent_compliance.v_notification_queue;
 
 CREATE OR REPLACE VIEW ninja_agent_compliance.v_notification_queue AS
 WITH active AS (
