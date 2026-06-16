@@ -15,6 +15,24 @@ _(empty — drop free-form items here)_
 
 ### Agent compliance domain
 
+- [ ] **Per-OS required_platforms overrides.** Macs (and Linux)
+      currently inherit the client's full `[Ninja, SentinelOne,
+      LogMeIn]` requirement. LogMeIn likely isn't on Macs by policy,
+      so they show as Missing forever. Add an OS-aware overlay to
+      the requirements model: either a `platform_requirements` row
+      keyed by `(client_id, device_scope, os_family_pattern)` or a
+      `required_platforms_by_os` jsonb on `clients`. Shipped
+      alongside v0.30.0 (`051_agent_compliance_unresolved_and_macos.sql`)
+      where macOS / Linux became visible in `os_family`.
+
+- [ ] **Linux distro split in `os_family`.** v0.30.0 lumps all
+      Linux variants (Ubuntu, CentOS, Debian, RHEL, etc.) into a
+      single `Linux` bucket. Operators may want distro-level
+      breakdown for patch cadence and agent compatibility reasons.
+      Cheap to add as a CASE expansion in `v_device_state_current`.
+
+
+
 - [ ] **First end-to-end alert** — pick one finding type (e.g.
       `missing_required_platform` for a known noncompliant device),
       enable a notification route in
