@@ -1048,6 +1048,17 @@ def approve_customer_name(name: str, updated_by: str = "agent_compliance") -> bo
             candidate_names=[customer_name],
             updated_by=updated_by,
         )
+        cur.execute(
+            """
+            UPDATE ninja_agent_compliance.org_excludes
+            SET enabled = false,
+                updated_at = now(),
+                updated_by = %s
+            WHERE lower(trim(pattern)) = lower(trim(%s))
+              AND enabled
+            """,
+            (updated_by, customer_name),
+        )
     return True
 
 
@@ -1519,7 +1530,7 @@ def remove_device_ignore(client_id: int, norm_name: str, updated_by: str = "agen
 
 
 def remove_org_exclude(pattern: str, updated_by: str = "agent_compliance") -> bool:
-    """Disable a manual org exclude without removing seed parity rows."""
+    """Disable an active org exclude. Rows are retained for audit history."""
     normalized = pattern.strip().lower()
     if not normalized:
         return False
@@ -1531,7 +1542,7 @@ def remove_org_exclude(pattern: str, updated_by: str = "agent_compliance") -> bo
                 updated_at = now(),
                 updated_by = %s
             WHERE pattern = %s
-              AND source = 'manual'
+              AND enabled
             """,
             (updated_by, normalized),
         )

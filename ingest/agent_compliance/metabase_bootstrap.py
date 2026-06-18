@@ -1637,23 +1637,51 @@ _LEGACY_DASHBOARDS_UNUSED = [
                 "Ignored customer names",
                 "table",
                 """
+                    WITH latest_seen AS (
+                        SELECT
+                            lower(trim(platform_group_name)) AS pattern,
+                            STRING_AGG(DISTINCT platform, ', ' ORDER BY platform) AS platforms,
+                            STRING_AGG(DISTINCT platform_group_name, ', ' ORDER BY platform_group_name) AS names_seen,
+                            STRING_AGG(DISTINCT NULLIF(platform_group_id, ''), ', ' ORDER BY NULLIF(platform_group_id, '')) AS group_ids,
+                            COUNT(*) AS devices_24h,
+                            MAX(observed_at) AS last_seen_at
+                        FROM ninja_agent_compliance.platform_observations
+                        WHERE observed_at > now() - interval '24 hours'
+                          AND COALESCE(NULLIF(platform_group_name, ''), '') <> ''
+                        GROUP BY lower(trim(platform_group_name))
+                    )
                     SELECT
-                        pattern AS "Name",
-                        source AS "Source",
-                        COALESCE(NULLIF(notes, ''), 'No notes') AS "Notes",
-                        COALESCE(TO_CHAR(updated_at, 'YYYY-MM-DD HH24:MI'), 'Unknown') AS "Updated",
-                        CASE WHEN source = 'manual' THEN 'Restore' ELSE '' END AS "Action"
-                    FROM ninja_agent_compliance.org_excludes
-                    WHERE enabled
-                    ORDER BY source, pattern
+                        e.pattern AS "Name",
+                        COALESCE(ls.platforms, 'Not seen in last 24h') AS "Found in",
+                        COALESCE(ls.names_seen, e.pattern) AS "Name seen",
+                        COALESCE(ls.group_ids, '-') AS "Group IDs",
+                        COALESCE(ls.devices_24h, 0) AS "Devices 24h",
+                        CASE
+                            WHEN e.source = 'manual' THEN COALESCE(NULLIF(e.notes, ''), 'Manually ignored by operator')
+                            WHEN e.pattern IN ('unknown', 'various', 'default', 'default site') THEN 'Placeholder customer/group name; visible here so it is not hidden by code'
+                            ELSE COALESCE(NULLIF(e.notes, ''), 'Seed ignore rule')
+                        END AS "Reason",
+                        COALESCE(TO_CHAR(GREATEST(e.updated_at, COALESCE(ls.last_seen_at, e.updated_at)), 'YYYY-MM-DD HH24:MI'), 'Unknown') AS "Updated",
+                        'Restore' AS "Restore",
+                        'Promote' AS "Promote"
+                    FROM ninja_agent_compliance.org_excludes e
+                    LEFT JOIN latest_seen ls ON ls.pattern = e.pattern
+                    WHERE e.enabled
+                    ORDER BY e.source, e.pattern
                     LIMIT 200
                 """,
                 48, 0, 24, 4,
                 column_click_behaviors={
-                    "Action": {
+                    "Restore": {
                         "url_template": _url_template(
                             "/a/ue",
                             [("pattern", "Name")],
+                        ),
+                    },
+                    "Promote": {
+                        "url_template": _url_template(
+                            "/a/ac",
+                            [("name", "Name")],
                         ),
                     },
                 },
@@ -3043,20 +3071,46 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                     "Ignored customer names",
                     "table",
                     """
+                        WITH latest_seen AS (
+                            SELECT
+                                lower(trim(platform_group_name)) AS pattern,
+                                STRING_AGG(DISTINCT platform, ', ' ORDER BY platform) AS platforms,
+                                STRING_AGG(DISTINCT platform_group_name, ', ' ORDER BY platform_group_name) AS names_seen,
+                                STRING_AGG(DISTINCT NULLIF(platform_group_id, ''), ', ' ORDER BY NULLIF(platform_group_id, '')) AS group_ids,
+                                COUNT(*) AS devices_24h,
+                                MAX(observed_at) AS last_seen_at
+                            FROM ninja_agent_compliance.platform_observations
+                            WHERE observed_at > now() - interval '24 hours'
+                              AND COALESCE(NULLIF(platform_group_name, ''), '') <> ''
+                            GROUP BY lower(trim(platform_group_name))
+                        )
                         SELECT
-                            pattern AS "Name",
-                            COALESCE(NULLIF(notes, ''), 'No notes') AS "Reason",
-                            COALESCE(TO_CHAR(updated_at, 'YYYY-MM-DD HH24:MI'), 'Unknown') AS "Updated",
-                            CASE WHEN source = 'manual' THEN 'Restore' ELSE '' END AS "Action"
-                        FROM ninja_agent_compliance.org_excludes
-                        WHERE enabled
-                        ORDER BY source, pattern
+                            e.pattern AS "Name",
+                            COALESCE(ls.platforms, 'Not seen in last 24h') AS "Found in",
+                            COALESCE(ls.names_seen, e.pattern) AS "Name seen",
+                            COALESCE(ls.group_ids, '-') AS "Group IDs",
+                            COALESCE(ls.devices_24h, 0) AS "Devices 24h",
+                            CASE
+                                WHEN e.source = 'manual' THEN COALESCE(NULLIF(e.notes, ''), 'Manually ignored by operator')
+                                WHEN e.pattern IN ('unknown', 'various', 'default', 'default site') THEN 'Placeholder customer/group name; visible here so it is not hidden by code'
+                                ELSE COALESCE(NULLIF(e.notes, ''), 'Seed ignore rule')
+                            END AS "Reason",
+                            COALESCE(TO_CHAR(GREATEST(e.updated_at, COALESCE(ls.last_seen_at, e.updated_at)), 'YYYY-MM-DD HH24:MI'), 'Unknown') AS "Updated",
+                            'Restore' AS "Restore",
+                            'Promote' AS "Promote"
+                        FROM ninja_agent_compliance.org_excludes e
+                        LEFT JOIN latest_seen ls ON ls.pattern = e.pattern
+                        WHERE e.enabled
+                        ORDER BY e.source, e.pattern
                         LIMIT 200
                     """,
                     26, 0, 24, 5,
                     column_click_behaviors={
-                        "Action": {
+                        "Restore": {
                             "url_template": _url_template("/a/ue", [("pattern", "Name")]),
+                        },
+                        "Promote": {
+                            "url_template": _url_template("/a/ac", [("name", "Name")]),
                         },
                     },
                 ),

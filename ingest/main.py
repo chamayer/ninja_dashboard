@@ -52,7 +52,6 @@ from ingest.agent_compliance.config_loader import (
     set_customer_requirement,
     toggle_customer_required_platform,
 )
-from ingest.agent_compliance.normalize import is_placeholder_org_name
 from ingest.url_utils import redact_url
 from ingest.core import (
     custom_fields,
@@ -668,9 +667,6 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                     self._respond(404, b"client not found\n")
                     return
                 client_id = int(row[0])
-            if alias_value and is_placeholder_org_name(alias_value):
-                self._respond(400, b"placeholder names are not valid aliases\n")
-                return
             count = promote_alignment_aliases(client_id, platform=platform, alias_value=alias_value)
             _respond_with_refresh(f"added {count} alias row(s)", "alias added")
             return
@@ -683,7 +679,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             if approve_customer_name(customer_name, updated_by="operator_dashboard"):
                 _respond_with_refresh(f"approved customer {customer_name}", "customer approved")
             else:
-                self._respond(400, b"blank or placeholder customer name\n")
+                self._respond(400, b"blank customer name\n")
             return
 
         if path == "/agent-compliance/action/set-requirement":

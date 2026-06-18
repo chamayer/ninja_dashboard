@@ -2,6 +2,21 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.32.6] — 2026-06-18
+
+### Changed
+- Ignored customer names now show where the name was observed in the
+  last 24 hours, including platform, source group IDs, observed name,
+  and device count. Placeholder reasons are written in operator-facing
+  language instead of internal migration wording.
+- Ignored customer names now expose both `Restore` and `Promote`
+  actions, including seeded placeholder rows. Restoring disables the
+  exclude row but keeps audit history; promoting creates/accepts a real
+  customer.
+- Removed the UI-only block that prevented placeholder-looking names
+  from being added as aliases. Explicit operator actions now win over
+  code placeholder policy.
+
 ## [0.32.5] — 2026-06-18
 
 ### Changed
