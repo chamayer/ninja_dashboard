@@ -140,17 +140,20 @@ def load_aliases() -> dict[tuple[str, str, str], int]:
     with db.transaction() as cur:
         cur.execute(
             """
-            SELECT platform, alias_type, alias_value, client_id
-            FROM ninja_agent_compliance.client_aliases
-            WHERE enabled
+            SELECT a.platform, a.alias_type, a.alias_value, a.client_id
+            FROM ninja_agent_compliance.client_aliases a
+            JOIN ninja_agent_compliance.clients c ON c.client_id = a.client_id
+            WHERE a.enabled
+              AND c.enabled
+              AND c.source <> 'demoted'
             ORDER BY
-                CASE source
+                CASE a.source
                     WHEN 'manual' THEN 0
                     WHEN 'seed' THEN 1
                     WHEN 'alignment' THEN 2
                     ELSE 3
                 END,
-                alias_id
+                a.alias_id
             """
         )
         rows = cur.fetchall()

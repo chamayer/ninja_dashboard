@@ -2,6 +2,16 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.32.4] — 2026-06-18
+
+### Fixed
+- Disabled aliases owned by demoted clients and removed stale
+  `org_alignment_current` rows whose `org_name` no longer matches
+  the enabled canonical client. This prevents preserved duplicate
+  rows like client_id 1300 from appearing in matching/display paths.
+- Alias loading now ignores aliases whose owning client is disabled
+  or demoted, while leaving aliases on active clients unchanged.
+
 ## [0.32.3] — 2026-06-18
 
 ### Fixed
