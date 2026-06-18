@@ -13,6 +13,13 @@
 --     same name-refresh rule.
 --   * Close any org_candidates rows superseded by the new id-link
 --     mapping.
+--
+-- Important sequencing note: `clients` has a UNIQUE constraint on
+-- client_name. The 3 duplicate rows currently hold the canonical
+-- names (`PCHC - Parent Care`, `City Painting`,
+-- `GF Supplies / Sigo Signs`) that we want to assign to the kept
+-- clients. We must first rename the duplicates with a `[demoted ...]`
+-- suffix to release the unique names, then rename the keepers.
 
 BEGIN;
 
@@ -84,7 +91,46 @@ ON CONFLICT (platform, platform_group_id, COALESCE(source_id, 0))
 DO NOTHING;
 
 -- ---------------------------------------------------------------
--- Step 2: refresh client_name on kept clients (Ninja-authoritative)
+-- Step 2: rename the 3 duplicate clients with a suffix so we can
+-- free the canonical names for the kept clients. Also demotes them
+-- (enabled=false, source='demoted') in the same statement.
+-- ---------------------------------------------------------------
+UPDATE ninja_agent_compliance.clients
+SET client_name = client_name ||
+                  ' [demoted 2026-06-18 dup of #' ||
+                  CASE client_id
+                      WHEN 1299 THEN '22'
+                      WHEN 1300 THEN '7'
+                      WHEN 1301 THEN '10'
+                  END || ']',
+    enabled = false,
+    source = 'demoted',
+    notes = COALESCE(notes, '') ||
+            CASE WHEN COALESCE(notes, '') = '' THEN '' ELSE E'\n' END ||
+            'Demoted 2026-06-18 by migration 053: duplicate of client_id ' ||
+            CASE client_id
+                WHEN 1299 THEN '22 (PCHC) -- rename of Ninja org 15'
+                WHEN 1300 THEN '7 (City Painting / CPS) -- rename of Ninja org 32'
+                WHEN 1301 THEN '10 (GF Supplies) -- rename of Ninja org 34'
+            END,
+    updated_at = now(),
+    updated_by = 'id_link_migration'
+WHERE client_id IN (1299, 1300, 1301)
+  AND client_name NOT LIKE '%[demoted%';
+
+-- ---------------------------------------------------------------
+-- Step 3: drop duplicate matrix rows owned by the demoted clients.
+-- Kept clients already hold rows for the same norm_names; UPDATE of
+-- client_id would PK-conflict, so we delete and let the next
+-- /run/agent-compliance rebuild them under the kept client_ids.
+-- ---------------------------------------------------------------
+DELETE FROM ninja_agent_compliance.compliance_matrix_current
+WHERE client_id IN (1299, 1300, 1301);
+
+-- ---------------------------------------------------------------
+-- Step 4: refresh client_name on kept clients (Ninja-authoritative).
+-- Safe now -- duplicates were renamed in Step 2 and no longer hold
+-- the unique canonical name slot.
 -- ---------------------------------------------------------------
 UPDATE ninja_agent_compliance.clients
 SET client_name = 'PCHC - Parent Care',
@@ -104,7 +150,7 @@ SET client_name = 'GF Supplies / Sigo Signs',
     updated_by = 'id_link_migration'
 WHERE client_id = 10 AND client_name <> 'GF Supplies / Sigo Signs';
 
--- Ninja casing-only change for org id 7 (GoFlow → Goflow)
+-- Ninja casing-only change for org id 7 (GoFlow -> Goflow)
 UPDATE ninja_agent_compliance.clients
 SET client_name = 'Goflow',
     updated_at = now(),
@@ -112,9 +158,9 @@ SET client_name = 'Goflow',
 WHERE client_id = 1273 AND client_name <> 'Goflow';
 
 -- ---------------------------------------------------------------
--- Step 3: also refresh the matrix view's denormalized client_name
--- so dashboards reflect the rename immediately (next ingest run
--- will also upsert these but operators see it sooner this way).
+-- Step 5: refresh the matrix view's denormalized client_name so
+-- dashboards reflect the rename immediately. Next ingest run will
+-- also upsert these, but operators see it sooner this way.
 -- ---------------------------------------------------------------
 UPDATE ninja_agent_compliance.compliance_matrix_current
 SET client_name = 'PCHC - Parent Care' WHERE client_id = 22;
@@ -124,35 +170,6 @@ UPDATE ninja_agent_compliance.compliance_matrix_current
 SET client_name = 'GF Supplies / Sigo Signs' WHERE client_id = 10;
 UPDATE ninja_agent_compliance.compliance_matrix_current
 SET client_name = 'Goflow' WHERE client_id = 1273;
-
--- ---------------------------------------------------------------
--- Step 4: drop duplicate matrix rows owned by the soon-to-be
--- demoted client_ids. The kept clients already hold rows for the
--- same norm_names; we cannot UPDATE client_id (PK conflict), so we
--- delete and let the next /run/agent-compliance rebuild.
--- ---------------------------------------------------------------
-DELETE FROM ninja_agent_compliance.compliance_matrix_current
-WHERE client_id IN (1299, 1300, 1301);
-
--- ---------------------------------------------------------------
--- Step 5: demote the duplicate client rows so dashboards stop
--- showing them in the customer dropdown.
--- ---------------------------------------------------------------
-UPDATE ninja_agent_compliance.clients
-SET enabled = false,
-    source = 'demoted',
-    notes = COALESCE(notes, '') ||
-            CASE WHEN COALESCE(notes, '') = '' THEN '' ELSE E'\n' END ||
-            'Demoted 2026-06-18 by migration 053: duplicate of client_id ' ||
-            CASE client_id
-                WHEN 1299 THEN '22 (PCHC) — rename of Ninja org 15'
-                WHEN 1300 THEN '7 (City Painting / CPS) — rename of Ninja org 32'
-                WHEN 1301 THEN '10 (GF Supplies) — rename of Ninja org 34'
-                ELSE 'unknown'
-            END,
-    updated_at = now(),
-    updated_by = 'id_link_migration'
-WHERE client_id IN (1299, 1300, 1301);
 
 -- ---------------------------------------------------------------
 -- Step 6: close org_candidates rows whose (platform, name) now

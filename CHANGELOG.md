@@ -2,6 +2,16 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.32.1] — 2026-06-18
+
+### Fixed
+- Migration 053 hit `UNIQUE(clients.client_name)` when renaming the
+  kept client (e.g., client 22 → `PCHC - Parent Care`) because the
+  duplicate (client 1299) still held that name. Reordered the
+  migration: rename + demote duplicates first (suffix
+  `[demoted ... dup of #N]`) to free the canonical names, then
+  rename the kept clients. Behavior otherwise unchanged.
+
 ## [0.32.0] — 2026-06-18
 
 ### Added
