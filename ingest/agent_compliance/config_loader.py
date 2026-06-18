@@ -646,9 +646,10 @@ def _write_alignment_rows(
 
     # PowerShell parity (Get-OrgAlignmentMap, lines 972-987): the "expected"
     # platform name comes from explicit OrgConfig FIRST, observed FIRST-norm-match
-    # SECOND, org_name THIRD. In our schema, OrgConfig is the manual/seed alias
-    # table — 'org_name' for Ninja, 'site_name' for S1, 'group_name' for LMI.
-    # Manual outranks seed; we ignore source='alignment' to avoid feedback loop.
+    # SECOND, org_name THIRD. In our schema, only manual aliases are treated as
+    # explicit config. Seed aliases are historical bootstrap hints; after
+    # id-links exist, current upstream link names must outrank stale seed names
+    # from pre-rename customers (for example CPS -> City Painting).
     alias_type_for_platform = {
         "Ninja": "org_name",
         "SentinelOne": "site_name",
@@ -664,12 +665,31 @@ def _write_alignment_rows(
             alias_id
         """
     )
-    configured_name_by_client: dict[tuple[int, str], str] = {}
-    for client_id, platform, alias_type, alias_value, _source in cur.fetchall():
+    manual_name_by_client: dict[tuple[int, str], str] = {}
+    seed_name_by_client: dict[tuple[int, str], str] = {}
+    for client_id, platform, alias_type, alias_value, source in cur.fetchall():
         canon_platform = canonical_platform(platform)
         if alias_type_for_platform.get(canon_platform) != alias_type:
             continue
-        configured_name_by_client.setdefault((client_id, canon_platform), alias_value)
+        target = manual_name_by_client if source == "manual" else seed_name_by_client
+        target.setdefault((client_id, canon_platform), alias_value)
+
+    cur.execute(
+        """
+        SELECT DISTINCT ON (client_id, platform)
+            client_id,
+            platform,
+            COALESCE(NULLIF(last_seen_name, ''), NULLIF(first_seen_name, '')) AS platform_name
+        FROM ninja_agent_compliance.client_platform_links
+        WHERE COALESCE(NULLIF(last_seen_name, ''), NULLIF(first_seen_name, '')) IS NOT NULL
+        ORDER BY client_id, platform, last_seen_at DESC, updated_at DESC
+        """
+    )
+    link_name_by_client: dict[tuple[int, str], str] = {
+        (int(client_id), canonical_platform(platform)): platform_name
+        for client_id, platform, platform_name in cur.fetchall()
+        if platform_name
+    }
 
     norm_maps = {"Ninja": {}, "SentinelOne": {}, "LogMeIn": {}}
     for entries in by_norm.values():
@@ -685,18 +705,24 @@ def _write_alignment_rows(
             continue
         required = required_by_client.get(client_id, default_required)
         expected_ninja = (
-            configured_name_by_client.get((client_id, "Ninja"))
+            manual_name_by_client.get((client_id, "Ninja"))
+            or link_name_by_client.get((client_id, "Ninja"))
             or names.get("Ninja")
+            or seed_name_by_client.get((client_id, "Ninja"))
             or org_name
         )
         expected_s1 = (
-            configured_name_by_client.get((client_id, "SentinelOne"))
+            manual_name_by_client.get((client_id, "SentinelOne"))
+            or link_name_by_client.get((client_id, "SentinelOne"))
             or names.get("SentinelOne")
+            or seed_name_by_client.get((client_id, "SentinelOne"))
             or org_name
         )
         expected_lmi = (
-            configured_name_by_client.get((client_id, "LogMeIn"))
+            manual_name_by_client.get((client_id, "LogMeIn"))
+            or link_name_by_client.get((client_id, "LogMeIn"))
             or names.get("LogMeIn")
+            or seed_name_by_client.get((client_id, "LogMeIn"))
             or org_name
         )
         statuses = {

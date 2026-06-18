@@ -1319,26 +1319,56 @@ _LEGACY_DASHBOARDS_UNUSED = [
                 "Customers and platform names",
                 "table",
                 """
-                    WITH names AS (
+                    WITH link_names AS (
+                        SELECT
+                            client_id,
+                            STRING_AGG(DISTINCT platform_name, ', ' ORDER BY platform_name)
+                                FILTER (WHERE platform = 'Ninja') AS ninja_names,
+                            STRING_AGG(DISTINCT platform_name, ', ' ORDER BY platform_name)
+                                FILTER (WHERE platform = 'SentinelOne') AS s1_names,
+                            STRING_AGG(DISTINCT platform_name, ', ' ORDER BY platform_name)
+                                FILTER (WHERE platform = 'LogMeIn') AS lmi_names,
+                            STRING_AGG(DISTINCT platform_name, ', ' ORDER BY platform_name)
+                                FILTER (WHERE platform = 'ScreenConnect') AS sc_names
+                        FROM (
+                            SELECT DISTINCT
+                                client_id,
+                                platform,
+                                COALESCE(NULLIF(last_seen_name, ''), NULLIF(first_seen_name, '')) AS platform_name
+                            FROM ninja_agent_compliance.client_platform_links
+                            WHERE COALESCE(NULLIF(last_seen_name, ''), NULLIF(first_seen_name, '')) IS NOT NULL
+                        ) l
+                        GROUP BY client_id
+                    ),
+                    alias_names AS (
+                        SELECT
+                            client_id,
+                            STRING_AGG(DISTINCT alias_value, ', ' ORDER BY alias_value)
+                                FILTER (WHERE enabled AND platform = 'Ninja') AS ninja_names,
+                            STRING_AGG(DISTINCT alias_value, ', ' ORDER BY alias_value)
+                                FILTER (WHERE enabled AND platform = 'SentinelOne') AS s1_names,
+                            STRING_AGG(DISTINCT alias_value, ', ' ORDER BY alias_value)
+                                FILTER (WHERE enabled AND platform = 'LogMeIn') AS lmi_names,
+                            STRING_AGG(DISTINCT alias_value, ', ' ORDER BY alias_value)
+                                FILTER (WHERE enabled AND platform = 'ScreenConnect') AS sc_names
+                        FROM ninja_agent_compliance.client_aliases
+                        WHERE source IN ('manual', 'seed', 'alignment')
+                        GROUP BY client_id
+                    ),
+                    names AS (
                         SELECT
                             c.client_id,
                             c.client_name,
-                            STRING_AGG(DISTINCT a.alias_value, ', ' ORDER BY a.alias_value)
-                                FILTER (WHERE a.enabled AND a.platform = 'Ninja') AS ninja_names,
-                            STRING_AGG(DISTINCT a.alias_value, ', ' ORDER BY a.alias_value)
-                                FILTER (WHERE a.enabled AND a.platform = 'SentinelOne') AS s1_names,
-                            STRING_AGG(DISTINCT a.alias_value, ', ' ORDER BY a.alias_value)
-                                FILTER (WHERE a.enabled AND a.platform = 'LogMeIn') AS lmi_names,
-                            STRING_AGG(DISTINCT a.alias_value, ', ' ORDER BY a.alias_value)
-                                FILTER (WHERE a.enabled AND a.platform = 'ScreenConnect') AS sc_names
+                            COALESCE(ln.ninja_names, an.ninja_names) AS ninja_names,
+                            COALESCE(ln.s1_names, an.s1_names) AS s1_names,
+                            COALESCE(ln.lmi_names, an.lmi_names) AS lmi_names,
+                            COALESCE(ln.sc_names, an.sc_names) AS sc_names
                         FROM ninja_agent_compliance.clients c
-                        LEFT JOIN ninja_agent_compliance.client_aliases a
-                          ON a.client_id = c.client_id
-                         AND a.source IN ('manual', 'seed', 'alignment')
+                        LEFT JOIN link_names ln ON ln.client_id = c.client_id
+                        LEFT JOIN alias_names an ON an.client_id = c.client_id
                         WHERE c.enabled
                           AND c.source NOT IN ('alignment', 'demoted')
                           AND lower(trim(c.client_name)) NOT IN ('default site', 'unknown', 'various', '.default')
-                        GROUP BY c.client_id, c.client_name
                     )
                     SELECT
                         n.client_name AS "Customer",
@@ -2876,24 +2906,56 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                     "Customers and platform names",
                     "table",
                     """
-                        WITH names AS (
+                        WITH link_names AS (
+                            SELECT
+                                client_id,
+                                STRING_AGG(DISTINCT platform_name, ', ' ORDER BY platform_name)
+                                    FILTER (WHERE platform = 'Ninja') AS ninja_names,
+                                STRING_AGG(DISTINCT platform_name, ', ' ORDER BY platform_name)
+                                    FILTER (WHERE platform = 'SentinelOne') AS s1_names,
+                                STRING_AGG(DISTINCT platform_name, ', ' ORDER BY platform_name)
+                                    FILTER (WHERE platform = 'LogMeIn') AS lmi_names,
+                                STRING_AGG(DISTINCT platform_name, ', ' ORDER BY platform_name)
+                                    FILTER (WHERE platform = 'ScreenConnect') AS sc_names
+                            FROM (
+                                SELECT DISTINCT
+                                    client_id,
+                                    platform,
+                                    COALESCE(NULLIF(last_seen_name, ''), NULLIF(first_seen_name, '')) AS platform_name
+                                FROM ninja_agent_compliance.client_platform_links
+                                WHERE COALESCE(NULLIF(last_seen_name, ''), NULLIF(first_seen_name, '')) IS NOT NULL
+                            ) l
+                            GROUP BY client_id
+                        ),
+                        alias_names AS (
+                            SELECT
+                                client_id,
+                                STRING_AGG(DISTINCT alias_value, ', ' ORDER BY alias_value)
+                                    FILTER (WHERE enabled AND platform = 'Ninja') AS ninja_names,
+                                STRING_AGG(DISTINCT alias_value, ', ' ORDER BY alias_value)
+                                    FILTER (WHERE enabled AND platform = 'SentinelOne') AS s1_names,
+                                STRING_AGG(DISTINCT alias_value, ', ' ORDER BY alias_value)
+                                    FILTER (WHERE enabled AND platform = 'LogMeIn') AS lmi_names,
+                                STRING_AGG(DISTINCT alias_value, ', ' ORDER BY alias_value)
+                                    FILTER (WHERE enabled AND platform = 'ScreenConnect') AS sc_names
+                            FROM ninja_agent_compliance.client_aliases
+                            WHERE source IN ('manual', 'seed', 'alignment')
+                            GROUP BY client_id
+                        ),
+                        names AS (
                             SELECT
                                 c.client_id,
                                 c.client_name,
-                                STRING_AGG(DISTINCT a.alias_value, ', ' ORDER BY a.alias_value)
-                                    FILTER (WHERE a.enabled AND a.platform = 'Ninja') AS ninja_names,
-                                STRING_AGG(DISTINCT a.alias_value, ', ' ORDER BY a.alias_value)
-                                    FILTER (WHERE a.enabled AND a.platform = 'SentinelOne') AS s1_names,
-                                STRING_AGG(DISTINCT a.alias_value, ', ' ORDER BY a.alias_value)
-                                    FILTER (WHERE a.enabled AND a.platform = 'LogMeIn') AS lmi_names,
-                                STRING_AGG(DISTINCT a.alias_value, ', ' ORDER BY a.alias_value)
-                                    FILTER (WHERE a.enabled AND a.platform = 'ScreenConnect') AS sc_names
+                                COALESCE(ln.ninja_names, an.ninja_names) AS ninja_names,
+                                COALESCE(ln.s1_names, an.s1_names) AS s1_names,
+                                COALESCE(ln.lmi_names, an.lmi_names) AS lmi_names,
+                                COALESCE(ln.sc_names, an.sc_names) AS sc_names
                             FROM ninja_agent_compliance.clients c
-                            LEFT JOIN ninja_agent_compliance.client_aliases a ON a.client_id = c.client_id
+                            LEFT JOIN link_names ln ON ln.client_id = c.client_id
+                            LEFT JOIN alias_names an ON an.client_id = c.client_id
                             WHERE c.enabled
                               AND c.source NOT IN ('alignment', 'demoted')
                               AND lower(trim(c.client_name)) NOT IN ('default site', 'unknown', 'various', '.default')
-                            GROUP BY c.client_id, c.client_name
                         )
                         SELECT
                             client_name AS "Customer",

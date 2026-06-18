@@ -2,6 +2,19 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.32.3] — 2026-06-18
+
+### Fixed
+- Customer/platform-name dashboard tables now display current
+  `client_platform_links` names before falling back to aliases, so
+  stale generated aliases like Ninja `CPS` no longer appear as the
+  current Ninja name for City Painting after the stable ID link has
+  been repaired.
+- Alignment rebuild now treats only manual aliases as explicit
+  operator config. Current ID-link names outrank old seed aliases,
+  preventing pre-rename seed data from overriding the current upstream
+  Ninja name.
+
 ## [0.32.2] — 2026-06-18
 
 ### Fixed
