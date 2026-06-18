@@ -2,6 +2,30 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.32.2] — 2026-06-18
+
+### Fixed
+- Migration 053's backfill cross-contaminated `client_platform_links`
+  because it joined `platform_observations` to
+  `compliance_matrix_current` on `norm_name` alone (no client_id).
+  Any hostname collision between unrelated customers attributed the
+  upstream `platform_group_id` to whichever client had the lowest
+  `client_id` after the `ORDER BY client_id ASC` tiebreak. In
+  practice, client_id 7 (City Painting) was attached to Abco - Omni
+  Dental, Landau Realty, and Prompt across all three platforms.
+- Migration 054 TRUNCATEs `client_platform_links` and re-backfills
+  using each observation's at-ingest `resolved_client_id` from
+  observations recorded BEFORE migration 053 applied (pre-053
+  resolutions used name-only matching and are not contaminated).
+  Tiebreak is now `COUNT(*) DESC, client_id ASC` so the majority
+  owner of each `(platform, group_id)` wins. Historic resolutions
+  to demoted client_ids (1299/1300/1301) are remapped to the kept
+  ones (22/7/10).
+- Matrix repair is automatic: `_write_matrix` deletes and
+  re-inserts `compliance_matrix_current` on every run, so the
+  next `/run/agent-compliance` rebuilds it correctly against the
+  repaired link table. No manual matrix cleanup needed.
+
 ## [0.32.1] — 2026-06-18
 
 ### Fixed
