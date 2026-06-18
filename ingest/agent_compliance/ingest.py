@@ -17,10 +17,12 @@ from ingest.agent_compliance.config_loader import (
     get_requirement,
     load_aliases,
     load_clients,
+    load_id_links,
     load_requirements,
     load_sources,
     resolve_client_id,
     sync_clients_from_observations,
+    upsert_id_links_from_observations,
 )
 from ingest.runlog import run_log
 
@@ -67,11 +69,21 @@ def run() -> tuple[int, int]:
         ], run_id=run_id, observed_at=observed_at)
         clients = load_clients()
         aliases = load_aliases()
+        id_links = load_id_links()
         for source_run_id, source, rows in fetched_sources:
-            resolved = _resolve_observations(rows, source, clients, aliases)
+            resolved = _resolve_observations(rows, source, clients, aliases, id_links=id_links)
             _insert_observations(source_run_id, resolved)
             _finish_source_run(source_run_id, "ok", len(resolved), None)
             all_observations.extend(resolved)
+        # Maintain the id-link table from this run's resolutions: any
+        # (platform, platform_group_id) that resolved to a client_id
+        # gets an up-to-date link row. Also refreshes
+        # clients.client_name from Ninja observations whose name has
+        # changed upstream (per BLUEPRINT decision #2).
+        upsert_id_links_from_observations(all_observations)
+        # Re-read clients so the matrix builder writes the freshly
+        # refreshed client_name into compliance_matrix_current.
+        clients = load_clients()
         alignment_by_client = _load_alignment_by_client()
 
         matrix_rows, finding_rows = _build_matrix_and_findings(
@@ -336,6 +348,7 @@ def _resolve_observations(
     source: SourceConfig,
     clients: dict[int, Any],
     aliases: dict[tuple[str, str, str], int],
+    id_links: dict[tuple[str, str, int], int] | None = None,
 ) -> list[dict[str, Any]]:
     resolved: list[dict[str, Any]] = []
     for obs in observations:
@@ -348,6 +361,8 @@ def _resolve_observations(
                 source.platform,
                 obs.get("platform_group_name"),
                 obs.get("platform_group_id"),
+                id_links=id_links,
+                source_id=source.source_id,
             )
         client = clients.get(client_id) if client_id else None
         obs["resolved_client_id"] = client_id

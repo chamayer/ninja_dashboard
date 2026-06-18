@@ -7,7 +7,18 @@ Read Inbox at the start of every session.
 
 ## Inbox
 
-_(empty — drop free-form items here)_
+- [ ] After v0.32.0 redeploys, run `/run/agent-compliance` and
+      execute the new validation queries (HANDY_COMMANDS.md
+      "id-link sanity") to confirm no
+      `(platform, platform_group_id)` maps to multiple client_ids.
+- [ ] SC session `YLSedison` (UTA, session id
+      `f2499b9f-0ff7-4fb9-a336-45f0008e31a8`) has empty `GuestInfo`
+      so it does not collapse with the `NJ3` device that Ninja now
+      reports. Operator action: either rename the SC session to
+      `NJ3` in the SC console, or uninstall + reinstall the SC
+      client on the box using the standard installer (not a
+      pre-named one) so SC captures `MachineName=NJ3` on
+      registration. Not a code task.
 
 ---
 
@@ -185,6 +196,22 @@ _(empty — drop free-form items here)_
   dashboards, do NOT add a user-name lookup, do NOT bring it up
   again.**
 
+- **`device_aliases` mapping table** — proposed 2026-06-18 in
+  response to a single SC session (`YLSedison` / `NJ3`) with empty
+  `GuestInfo`. Investigation showed: 958 of 960 SC sessions report
+  `MachineName` correctly; only orphan / pre-named sessions miss it.
+  Building a schema + UI to handle 2 cases in 960 is
+  over-engineering. Operator fix at SC (rename session or
+  re-enroll agent) is the answer when this comes up. **Do NOT
+  re-propose unless multiple legitimate cases appear that cannot be
+  fixed at the source.**
+
+- **Per-platform aliases as a rename-mitigation mechanism** —
+  superseded by `client_platform_links` (id-link table, v0.32.0).
+  Aliases stay only for cross-platform identity glue. Adding alias
+  rows to fix a rename inside a single platform is the wrong layer.
+  **Do NOT re-propose; the id-link makes it unnecessary.**
+
 ### Active priority
 
 - [x] **Activities ingest** — done in 0.6.0.
@@ -201,6 +228,10 @@ _(empty — drop free-form items here)_
       ops but get destroyed by explicit "remove stack WITH volumes"
       or `docker compose down -v`. External requires pre-creating
       the volumes with `docker volume create` but won't auto-delete.
+      Bumped in priority 2026-06-17: Metabase public-share link UUIDs
+      live in the `metabase_app` DB on `postgres-data`. If the volume
+      is nuked, every shared URL dies and the team has to be re-sent
+      new links. Worth doing before we hand more public links out.
 - [ ] `backup-db.sh` — nightly `pg_dump` of `ninja` DB to
       `/amr-ch-01_data/ninja-dashboard/backups/`, 14-day retention.
 - [ ] `PROCESS.md` — host setup steps, first deploy, secrets

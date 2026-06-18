@@ -2,6 +2,46 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.32.0] — 2026-06-18
+
+### Added
+- `ninja_agent_compliance.client_platform_links` table — stable
+  mapping of `(platform, platform_group_id, source_id)` →
+  `client_id`. Replaces name-matching as the primary identity
+  mechanism for cross-run customer continuity. Migration 052.
+- Backfill migration 053 populates link rows from the last 30 days
+  of observations + matrix, then resolves the three duplicate Ninja
+  client pairs that name-only discovery created during the
+  2026-06-18 platform renames (PCHC, City Painting via CPS, GF
+  Supplies).
+- `load_id_links()` and `upsert_id_links_from_observations()` in
+  `ingest/agent_compliance/config_loader.py`.
+
+### Changed
+- `resolve_client_id()` now consults `client_platform_links` before
+  falling back to name/alias lookups. Existing alias data is
+  unaffected.
+- `sync_clients_from_observations()` will no longer mint a duplicate
+  `clients` row when an upstream rename produces a new
+  `platform_group_name` for an already-linked `platform_group_id`.
+  The existing client_id is reused and its `client_name` is
+  refreshed from the latest Ninja observation (Ninja is
+  authoritative when platforms disagree).
+- Every `/run/agent-compliance` now maintains the link table from
+  resolved observations and refreshes `clients.client_name` from
+  current Ninja names. Re-loads `clients` before matrix build so
+  the rename propagates to `compliance_matrix_current.client_name`
+  in the same run.
+
+### Notes
+- Aliases (`client_aliases`) retain their role for **cross-platform
+  identity glue** (e.g., S1 group id ↔ Ninja org id ↔ same
+  customer). They are no longer the rename-mitigation mechanism.
+- Operator action after Portainer redeploy: run
+  `curl -fsS -X POST http://127.0.0.1:8090/run/agent-compliance`,
+  then verify with the new validation queries in
+  `HANDY_COMMANDS.md`.
+
 ## [0.31.0] — 2026-06-16
 
 ### Added

@@ -167,6 +167,123 @@ def load_aliases() -> dict[tuple[str, str, str], int]:
     return aliases
 
 
+def load_id_links() -> dict[tuple[str, str, int], int]:
+    """Return {(platform, platform_group_id, source_id_or_0): client_id}.
+
+    Stable id mapping from upstream platforms (Ninja org id, S1 group
+    id, LMI group id, SC source-bound id) to our client_id. Survives
+    upstream renames — the link stays put when the display name
+    changes. Source_id is bucketed by COALESCE(source_id, 0) to match
+    the unique-index definition; lookup callers should try the
+    source-specific key first and fall back to the global key.
+    """
+    with db.transaction() as cur:
+        cur.execute(
+            """
+            SELECT platform, platform_group_id,
+                   COALESCE(source_id, 0), client_id
+            FROM ninja_agent_compliance.client_platform_links
+            """
+        )
+        rows = cur.fetchall()
+    return {
+        (canonical_platform(p), gid, int(sid)): cid
+        for p, gid, sid, cid in rows
+    }
+
+
+def upsert_id_links_from_observations(
+    observations: list[dict[str, Any]],
+) -> int:
+    """Refresh client_platform_links + clients.client_name from a
+    batch of resolved observations.
+
+    For every observation with a non-empty (platform, platform_group_id)
+    and a resolved_client_id, upsert a link row keyed on
+    (platform, platform_group_id, COALESCE(source_id, 0)). Conflict
+    handler preserves the existing client_id (the link is the source
+    of truth; new client_ids never overwrite established mappings),
+    refreshes last_seen_name and last_seen_at.
+
+    On Ninja observations, also refreshes `clients.client_name` to
+    the latest observed `platform_group_name` when it differs from
+    the canonical record. Ninja wins per BLUEPRINT.md decision #2;
+    other platforms do not drive name refresh.
+    """
+    if not observations:
+        return 0
+    link_rows: list[tuple[int, str, str, int | None, str, datetime]] = []
+    ninja_name_updates: dict[int, str] = {}
+    for obs in observations:
+        client_id = obs.get("resolved_client_id")
+        if not client_id:
+            continue
+        platform = canonical_platform(obs.get("platform") or "")
+        if not platform:
+            continue
+        group_id = (obs.get("platform_group_id") or "").strip()
+        if not group_id:
+            continue
+        name = (obs.get("platform_group_name") or "").strip()
+        if is_placeholder_org_name(name):
+            name = ""
+        source_id = obs.get("source_id")
+        observed_at = obs.get("observed_at") or datetime.now(timezone.utc)
+        link_rows.append((client_id, platform, group_id, source_id, name, observed_at))
+        if platform == "Ninja" and name:
+            ninja_name_updates[client_id] = name
+    if not link_rows and not ninja_name_updates:
+        return 0
+    with db.transaction() as cur:
+        if link_rows:
+            cur.executemany(
+                """
+                INSERT INTO ninja_agent_compliance.client_platform_links
+                    (client_id, platform, platform_group_id, source_id,
+                     first_seen_name, last_seen_name,
+                     first_seen_at, last_seen_at, updated_by)
+                VALUES (%s, %s, %s, %s, NULLIF(%s, ''), NULLIF(%s, ''),
+                        %s, %s, 'agent_compliance')
+                ON CONFLICT (platform, platform_group_id, COALESCE(source_id, 0))
+                DO UPDATE SET
+                    last_seen_name = COALESCE(
+                        NULLIF(EXCLUDED.last_seen_name, ''),
+                        ninja_agent_compliance.client_platform_links.last_seen_name
+                    ),
+                    last_seen_at = GREATEST(
+                        EXCLUDED.last_seen_at,
+                        ninja_agent_compliance.client_platform_links.last_seen_at
+                    ),
+                    updated_at = now(),
+                    updated_by = EXCLUDED.updated_by
+                """,
+                [
+                    (cid, plat, gid, sid, name, name, ts, ts)
+                    for cid, plat, gid, sid, name, ts in link_rows
+                ],
+            )
+        for cid, new_name in ninja_name_updates.items():
+            cur.execute(
+                """
+                UPDATE ninja_agent_compliance.clients
+                SET client_name = %s,
+                    updated_at = now(),
+                    updated_by = 'id_link_refresh'
+                WHERE client_id = %s
+                  AND client_name <> %s
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM ninja_agent_compliance.clients other
+                      WHERE other.client_id <> %s
+                        AND other.enabled
+                        AND lower(trim(other.client_name)) = lower(trim(%s))
+                  )
+                """,
+                (new_name, cid, new_name, cid, new_name),
+            )
+    return len(link_rows)
+
+
 def sync_clients_from_observations(
     observations: list[dict[str, Any]],
     run_id: int | None = None,
@@ -179,6 +296,12 @@ def sync_clients_from_observations(
         "SentinelOne": "site_name",
         "LogMeIn": "group_name",
     }
+    # Load id-links up front. Norms whose observations carry a
+    # platform_group_id with an existing link already have a stable
+    # client_id; skip the Ninja-auto-mint path for those so renames
+    # don't recreate duplicate `clients` rows.
+    id_links = load_id_links()
+    linked_norm_to_client: dict[str, int] = {}
     by_norm: dict[str, list[tuple[str, str]]] = {}
     for obs in observations:
         platform = canonical_platform(obs.get("platform") or "")
@@ -193,6 +316,15 @@ def sync_clients_from_observations(
         if not norm:
             continue
         by_norm.setdefault(norm, []).append((platform, name))
+        group_id = (obs.get("platform_group_id") or "").strip()
+        if group_id:
+            sid = obs.get("source_id") or 0
+            cid = (
+                id_links.get((platform, group_id, int(sid)))
+                or id_links.get((platform, group_id, 0))
+            )
+            if cid is not None:
+                linked_norm_to_client[norm] = cid
     if not by_norm:
         return 0
 
@@ -244,6 +376,20 @@ def sync_clients_from_observations(
             if is_placeholder_org_name(alias_value):
                 continue
             known_client_by_norm.setdefault(normalize_org_name(alias_value), (client_id, client_name))
+
+        # Norms already pinned by an id-link to an existing client_id
+        # are treated as known. The Ninja-auto-accept path below must
+        # not create a duplicate `clients` row for an upstream rename
+        # whose stable id is already mapped.
+        clients_by_id = {row[0]: (row[1], row[2]) for row in clients}
+        for norm, cid in linked_norm_to_client.items():
+            if norm in known_client_by_norm:
+                continue
+            client_info = clients_by_id.get(cid)
+            if not client_info:
+                continue
+            existing_name = client_info[0]
+            known_client_by_norm[norm] = (cid, existing_name)
 
         platforms_by_norm = {
             norm: {platform for platform, _ in entries}
@@ -1421,8 +1567,20 @@ def resolve_client_id(
     platform: str,
     group_name: str | None,
     group_id: str | None,
+    id_links: dict[tuple[str, str, int], int] | None = None,
+    source_id: int | None = None,
 ) -> tuple[int | None, str]:
     platform = canonical_platform(platform)
+    # Stable id-link lookup takes priority over name-based resolution.
+    # An upstream rename leaves the link untouched and `clients.client_name`
+    # auto-refreshes downstream.
+    if id_links and group_id:
+        gid = group_id.strip()
+        if gid:
+            sid = int(source_id) if source_id else 0
+            client_id = id_links.get((platform, gid, sid)) or id_links.get((platform, gid, 0))
+            if client_id:
+                return client_id, "id_link"
     candidates: list[tuple[str, str | None]] = [
         ("group_name", group_name),
         ("org_name", group_name),

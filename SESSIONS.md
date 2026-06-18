@@ -5,6 +5,68 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-06-18 — v0.32.0 id-link model + duplicate-client cleanup
+
+**Why:** Operator renamed three customers in Ninja (PCHC, City
+Painting via CPS, GF Supplies). Discovery was name-keyed: it saw the
+new `platform_group_name` and minted three new `clients` rows
+(1299, 1300, 1301) sitting alongside the old client_ids (22, 7, 10).
+Filters showed both, matrix rows split, every renamed customer felt
+"missing" on the platforms that had already caught up. Diagnostic
+query against `platform_observations` confirmed the same Ninja
+`platform_group_id` had been observed under two names — definitive
+rename signature.
+
+**Decision:** Stop using names as identity. Add a
+`client_platform_links` table that maps
+`(platform, platform_group_id, source_id)` → `client_id`. Discovery
+consults it before name/alias matching. Aliases stay only for
+cross-platform identity glue. Locked in BLUEPRINT.md: keep OLD
+client_ids, auto-refresh `client_name` from upstream Ninja name on
+every link match.
+
+**What landed:**
+- Migration 052 — `client_platform_links` table + unique index.
+- Migration 053 — backfill links from observations, demote
+  1299/1300/1301, rename clients 22/7/10/1273 to current Ninja
+  names, drop duplicate matrix rows, close superseded
+  org_candidates.
+- `config_loader.py` — `load_id_links()`,
+  `upsert_id_links_from_observations()`; `resolve_client_id()`
+  consults links first; `sync_clients_from_observations()` skips
+  auto-mint when (platform, group_id) is already linked.
+- `ingest.py` — `_resolve_observations()` accepts id_links; after
+  all sources resolve, links are upserted and `clients.client_name`
+  is refreshed from Ninja; `clients` reloaded before matrix build so
+  the new names propagate to `compliance_matrix_current` the same
+  run.
+
+**Verification plan (after Portainer redeploy):**
+1. Apply migrations via the next `/run/agent-compliance`.
+2. Confirm no `(platform, platform_group_id)` maps to multiple
+   client_ids in the link table.
+3. Confirm clients 22/7/10/1273 show the current names; 1299/1300/
+   1301 are `enabled=false`, `source='demoted'`, zero matrix rows.
+4. Spot-check Metabase customer filter — only the consolidated
+   names appear.
+
+**Side notes captured this session:**
+- Multiple customers reported as missing across platforms are
+  almost always upstream rename drift, not real enrollment gaps —
+  the device alias proposal was rejected; id-link is the right
+  level of abstraction.
+- ScreenConnect's `GetSessionsByFilter` returns sessions with
+  empty `GuestInfo.MachineName` when the session was created in
+  the console with a pre-set name rather than enrolled cleanly.
+  Affects ~2 of 960 UTA sessions; documented as an operator action
+  item (rename session in SC console or re-enroll), not a code
+  change.
+- NJ3 case: confirmed NJ3 is enrolled in Ninja now; the SC session
+  `YLSedison` for the same box has empty GuestInfo so it does not
+  collapse with `nj3`. Out of scope for this session.
+
+---
+
 ## 2026-06-16 — v0.28.0 Align breakdowns + filters with state model
 
 **Why:** Operator hit two ergonomic problems on the new state model:

@@ -129,6 +129,31 @@ Watch Agent Compliance logs:
 docker logs --tail 150 ninja-ingest | awk '/agent compliance|Agent compliance|Dashboard ready|ERROR|Traceback/ {print}'
 ```
 
+### id-link sanity (v0.32.0+)
+
+Confirm no `(platform, platform_group_id)` is mapped to more than one
+client_id. Expected output: 0 rows.
+
+```bash
+docker exec ninja-postgres psql -U ninja -d ninja -c "SELECT platform, platform_group_id, array_agg(client_id) AS client_ids FROM ninja_agent_compliance.client_platform_links GROUP BY platform, platform_group_id HAVING COUNT(DISTINCT client_id) > 1;"
+```
+
+Confirm every (platform, platform_group_id) that observations report
+has a link row. Expected output: 0 rows.
+
+```bash
+docker exec ninja-postgres psql -U ninja -d ninja -c "SELECT po.platform, po.platform_group_id, COUNT(*) FROM ninja_agent_compliance.platform_observations po LEFT JOIN ninja_agent_compliance.client_platform_links l ON l.platform = po.platform AND l.platform_group_id = po.platform_group_id WHERE po.platform_group_id IS NOT NULL AND po.platform_group_id <> '' AND po.observed_at > now() - interval '24 hours' AND l.link_id IS NULL GROUP BY po.platform, po.platform_group_id ORDER BY po.platform, po.platform_group_id;"
+```
+
+Spot-check a renamed customer end-to-end. Expected: client_id 22
+shows `client_name='PCHC - Parent Care'` and a link row for
+`Ninja / 15`.
+
+```bash
+docker exec ninja-postgres psql -U ninja -d ninja -c "SELECT c.client_id, c.client_name, c.enabled, c.source, l.platform, l.platform_group_id, l.last_seen_name FROM ninja_agent_compliance.clients c LEFT JOIN ninja_agent_compliance.client_platform_links l ON l.client_id = c.client_id WHERE c.client_id IN (7, 10, 22, 26, 1273, 1299, 1300, 1301) ORDER BY c.client_id, l.platform;"
+```
+
+
 Verify the current dashboard wording migration:
 
 ```bash
