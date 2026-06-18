@@ -10,7 +10,6 @@ from typing import Any
 from ingest import db
 from ingest.agent_compliance.normalize import (
     canonical_platform,
-    is_placeholder_org_name,
     normalize_org_name,
 )
 
@@ -74,10 +73,7 @@ def load_sources() -> list[SourceConfig]:
             ORDER BY ps.platform, ps.source_name
             """
         )
-        rows = [
-            row for row in cur.fetchall()
-            if not is_placeholder_org_name(row[5])
-        ]
+        rows = cur.fetchall()
     return [
         SourceConfig(
             source_id=row[0],
@@ -112,7 +108,7 @@ def load_clients() -> dict[int, ClientConfig]:
               AND source <> 'alignment'
             """
         )
-        rows = [row for row in cur.fetchall() if not is_placeholder_org_name(row[1])]
+        rows = cur.fetchall()
     return {
         row[0]: ClientConfig(
             client_id=row[0],
@@ -159,8 +155,6 @@ def load_aliases() -> dict[tuple[str, str, str], int]:
         rows = cur.fetchall()
     aliases: dict[tuple[str, str, str], int] = {}
     for platform, alias_type, alias_value, client_id in rows:
-        if is_placeholder_org_name(alias_value):
-            continue
         platform = canonical_platform(platform)
         exact = alias_value.strip().lower()
         aliases.setdefault((platform, alias_type, exact), client_id)
@@ -228,8 +222,6 @@ def upsert_id_links_from_observations(
         if not group_id:
             continue
         name = (obs.get("platform_group_name") or "").strip()
-        if is_placeholder_org_name(name):
-            name = ""
         source_id = obs.get("source_id")
         observed_at = obs.get("observed_at") or datetime.now(timezone.utc)
         link_rows.append((client_id, platform, group_id, source_id, name, observed_at))
@@ -311,7 +303,7 @@ def sync_clients_from_observations(
         if platform not in platform_alias_types:
             continue
         name = (obs.get("platform_group_name") or "").strip()
-        if not name or is_placeholder_org_name(name):
+        if not name:
             continue
         if name.lower() in org_excludes:
             continue
@@ -339,7 +331,7 @@ def sync_clients_from_observations(
             WHERE enabled
             """
         )
-        clients = [row for row in cur.fetchall() if not is_placeholder_org_name(row[1])]
+        clients = cur.fetchall()
         authoritative_clients = {
             normalize_org_name(row[1]): (row[0], row[1], row[2])
             for row in clients
@@ -376,8 +368,6 @@ def sync_clients_from_observations(
         )
         for client_id, client_name, alias_value in cur.fetchall():
             known_client_by_norm.setdefault(normalize_org_name(client_name), (client_id, client_name))
-            if is_placeholder_org_name(alias_value):
-                continue
             known_client_by_norm.setdefault(normalize_org_name(alias_value), (client_id, client_name))
 
         # Norms already pinned by an id-link to an existing client_id
@@ -457,7 +447,7 @@ def sync_clients_from_observations(
                 WHERE enabled
                 """
             )
-            clients = [row for row in cur.fetchall() if not is_placeholder_org_name(row[1])]
+            clients = cur.fetchall()
             authoritative_clients = {
                 normalize_org_name(row[1]): (row[0], row[1], row[2])
                 for row in clients
@@ -475,8 +465,6 @@ def sync_clients_from_observations(
             )
             for client_id, client_name, alias_value in cur.fetchall():
                 known_client_by_norm.setdefault(normalize_org_name(client_name), (client_id, client_name))
-                if is_placeholder_org_name(alias_value):
-                    continue
                 known_client_by_norm.setdefault(normalize_org_name(alias_value), (client_id, client_name))
 
         canonical_names: dict[str, str] = {}
@@ -510,7 +498,6 @@ def sync_clients_from_observations(
         client_by_name = {
             row[1].strip().lower(): (row[0], row[1], row[2])
             for row in cur.fetchall()
-            if not is_placeholder_org_name(row[1])
         }
 
         alias_rows: list[tuple[int, str, str, str, str]] = []
@@ -975,7 +962,7 @@ def add_org_exclude(pattern: str, updated_by: str = "agent_compliance", notes: s
 def approve_customer_name(name: str, updated_by: str = "agent_compliance") -> bool:
     """Approve a reviewed customer name as a real managed customer."""
     customer_name = name.strip()
-    if not customer_name or is_placeholder_org_name(customer_name):
+    if not customer_name:
         return False
     alias_type_by_platform = {
         "Ninja": "org_name",

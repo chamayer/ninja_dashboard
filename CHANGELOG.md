@@ -2,6 +2,17 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.32.5] — 2026-06-18
+
+### Changed
+- Customer/org names are no longer dropped from discovery solely
+  because code classifies them as placeholders. Names now fall into
+  an explicit bucket: active client/link, candidate/review queue, or
+  `org_excludes`.
+- Seeded `default site`, `default`, `unknown`, and `various` into
+  `org_excludes` so hardcoded placeholder names are visible in the
+  ignored customer names table instead of being hidden by code.
+
 ## [0.32.4] — 2026-06-18
 
 ### Fixed
