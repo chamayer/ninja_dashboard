@@ -131,12 +131,17 @@ def load_org_excludes() -> set[str]:
         return {row[0].strip().lower() for row in cur.fetchall()}
 
 
-def load_aliases() -> dict[tuple[str, str, str], int]:
-    """Return exact and normalized (platform, alias_type, value) aliases."""
+def load_aliases() -> dict[tuple[str, str, str], tuple[int, str]]:
+    """Return exact and normalized aliases.
+
+    Values are `(client_id, source)`. If the same alias key points at
+    more than one active client, leave it unresolved. A customer-name
+    collision must surface as review work, not silently merge devices.
+    """
     with db.transaction() as cur:
         cur.execute(
             """
-            SELECT a.platform, a.alias_type, a.alias_value, a.client_id
+            SELECT a.platform, a.alias_type, a.alias_value, a.client_id, a.source
             FROM ninja_agent_compliance.client_aliases a
             JOIN ninja_agent_compliance.clients c ON c.client_id = a.client_id
             WHERE a.enabled
@@ -153,14 +158,22 @@ def load_aliases() -> dict[tuple[str, str, str], int]:
             """
         )
         rows = cur.fetchall()
-    aliases: dict[tuple[str, str, str], int] = {}
-    for platform, alias_type, alias_value, client_id in rows:
+    candidates: dict[tuple[str, str, str], list[tuple[int, str]]] = {}
+    for platform, alias_type, alias_value, client_id, source in rows:
         platform = canonical_platform(platform)
         exact = alias_value.strip().lower()
-        aliases.setdefault((platform, alias_type, exact), client_id)
+        candidates.setdefault((platform, alias_type, exact), []).append((client_id, source))
         normalized = normalize_org_name(alias_value)
         if normalized:
-            aliases.setdefault((platform, f"{alias_type}_norm", normalized), client_id)
+            candidates.setdefault((platform, f"{alias_type}_norm", normalized), []).append(
+                (client_id, source)
+            )
+    aliases: dict[tuple[str, str, str], tuple[int, str]] = {}
+    for key, values in candidates.items():
+        client_ids = {cid for cid, _source in values}
+        if len(client_ids) > 1:
+            continue
+        aliases[key] = values[0]
     return aliases
 
 
@@ -1590,7 +1603,7 @@ def get_requirement(
 
 
 def resolve_client_id(
-    aliases: dict[tuple[str, str, str], int],
+    aliases: dict[tuple[str, str, str], tuple[int, str]],
     platform: str,
     group_name: str | None,
     group_id: str | None,
@@ -1607,7 +1620,7 @@ def resolve_client_id(
             sid = int(source_id) if source_id else 0
             client_id = id_links.get((platform, gid, sid)) or id_links.get((platform, gid, 0))
             if client_id:
-                return client_id, "id_link"
+                return client_id, "platform_id"
     candidates: list[tuple[str, str | None]] = [
         ("group_name", group_name),
         ("org_name", group_name),
@@ -1620,14 +1633,28 @@ def resolve_client_id(
         if not value:
             continue
         exact_value = value.strip().lower()
-        client_id = aliases.get((platform, alias_type, exact_value))
-        if client_id:
-            return client_id, "alias"
+        alias_match = aliases.get((platform, alias_type, exact_value))
+        if alias_match:
+            client_id, source = alias_match
+            return client_id, _alias_resolution_method(source)
         normalized_value = normalize_org_name(value)
-        client_id = aliases.get((platform, f"{alias_type}_norm", normalized_value))
-        if client_id:
-            return client_id, "alias_norm"
+        alias_match = aliases.get((platform, f"{alias_type}_norm", normalized_value))
+        if alias_match:
+            client_id, source = alias_match
+            return client_id, f"{_alias_resolution_method(source)}_norm"
     return None, "unresolved"
+
+
+def _alias_resolution_method(source: str | None) -> str:
+    if source == "manual":
+        return "manual_alias"
+    if source == "seed":
+        return "seed_alias"
+    if source == "alignment":
+        return "alignment_alias"
+    if source == "ninja":
+        return "ninja_alias"
+    return "alias"
 
 
 def json_default(value: Any) -> str:

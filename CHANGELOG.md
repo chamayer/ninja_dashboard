@@ -2,6 +2,28 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.32.7] — 2026-06-18
+
+### Changed
+- Enforced the client-id-first matching model in both full collection
+  and evaluate-only runs. Evaluate now consults
+  `client_platform_links` before aliases, preventing renamed customers
+  from being split by stale display names.
+- Alias resolution now records source-aware methods
+  (`manual_alias`, `seed_alias`, `alignment_alias`, etc.) and refuses
+  ambiguous active alias keys instead of silently choosing the first
+  matching customer.
+- Finding signatures now use `client_id` instead of customer display
+  name, so customer renames do not create new finding identities.
+- Resolution confidence now reflects match strength: platform ID /
+  source-bound matches score highest, followed by manual, seed, and
+  generated aliases.
+
+### Added
+- Identity guardrail views for alias collisions, platform-link
+  collisions, cross-customer hostnames, native platform device IDs seen
+  under multiple customers, and unmapped platform customer names.
+
 ## [0.32.6] — 2026-06-18
 
 ### Changed

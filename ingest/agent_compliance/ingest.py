@@ -182,7 +182,8 @@ def evaluate(send_alerts: bool = True) -> tuple[int, int]:
         requirements = load_requirements()
         clients = load_clients()
         aliases = load_aliases()
-        observations = _resolve_latest_observations(sources, clients, aliases)
+        id_links = load_id_links()
+        observations = _resolve_latest_observations(sources, clients, aliases, id_links)
         source_status = _load_latest_source_status()
         alignment_by_client = _load_alignment_by_client()
 
@@ -258,7 +259,8 @@ def _load_latest_observations() -> list[dict[str, Any]]:
 def _resolve_latest_observations(
     sources: list[SourceConfig],
     clients: dict[int, Any],
-    aliases: dict[tuple[str, str, str], int],
+    aliases: dict[tuple[str, str, str], tuple[int, str]],
+    id_links: dict[tuple[str, str, int], int],
 ) -> list[dict[str, Any]]:
     source_by_id = {source.source_id: source for source in sources}
     rows_by_source: dict[int, list[dict[str, Any]]] = {}
@@ -269,7 +271,15 @@ def _resolve_latest_observations(
 
     resolved: list[dict[str, Any]] = []
     for source_id, rows in rows_by_source.items():
-        resolved.extend(_resolve_observations(rows, source_by_id[source_id], clients, aliases))
+        resolved.extend(
+            _resolve_observations(
+                rows,
+                source_by_id[source_id],
+                clients,
+                aliases,
+                id_links=id_links,
+            )
+        )
     return resolved
 
 
@@ -347,14 +357,14 @@ def _resolve_observations(
     observations: list[dict[str, Any]],
     source: SourceConfig,
     clients: dict[int, Any],
-    aliases: dict[tuple[str, str, str], int],
+    aliases: dict[tuple[str, str, str], tuple[int, str]],
     id_links: dict[tuple[str, str, int], int] | None = None,
 ) -> list[dict[str, Any]]:
     resolved: list[dict[str, Any]] = []
     for obs in observations:
         if source.platform == "ScreenConnect" and source.client_id:
             client_id = source.client_id
-            method = "source"
+            method = "source_bound"
         else:
             client_id, method = resolve_client_id(
                 aliases,
@@ -368,9 +378,25 @@ def _resolve_observations(
         obs["resolved_client_id"] = client_id
         obs["resolved_client_name"] = client.client_name if client else None
         obs["resolution_method"] = method
-        obs["confidence"] = 100 if client_id else 0
+        obs["confidence"] = _resolution_confidence(method, client_id)
         resolved.append(obs)
     return resolved
+
+
+def _resolution_confidence(method: str, client_id: int | None) -> int:
+    if not client_id:
+        return 0
+    if method in {"platform_id", "source_bound"}:
+        return 100
+    if method.startswith("manual_alias"):
+        return 90
+    if method.startswith("seed_alias"):
+        return 80
+    if method.startswith("ninja_alias"):
+        return 75
+    if method.startswith("alignment_alias"):
+        return 60
+    return 50
 
 
 def _insert_observations(source_run_id: int, rows: list[dict[str, Any]]) -> None:
@@ -480,7 +506,7 @@ def _build_matrix_and_findings(
         is_compliant = not missing and not unknown
         alignment = alignment_by_client.get(client_id, {})
         signature = _hash("|".join([
-            client.client_name,
+            str(client_id),
             norm,
             ",".join(required),
             ",".join(missing),
@@ -856,7 +882,7 @@ def _finding(
 ) -> dict[str, Any]:
     signature = _hash("|".join([
         finding_type,
-        matrix["client_name"],
+        str(matrix["client_id"]),
         matrix["norm_name"],
         affected_platform or "multiple",
     ]))
