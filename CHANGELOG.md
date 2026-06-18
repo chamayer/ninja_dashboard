@@ -2,6 +2,15 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.32.8] — 2026-06-18
+
+### Changed
+- `v_native_device_customer_conflicts` and
+  `v_unmapped_platform_customers` now evaluate only each source's
+  latest successful run. Historical pre-id-link observations remain in
+  raw history, but operational guardrail counts now reflect current
+  state instead of old contamination.
+
 ## [0.32.7] — 2026-06-18
 
 ### Changed
