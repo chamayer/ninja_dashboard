@@ -223,6 +223,9 @@ def bootstrap_metabase() -> None:
         from ingest.agent_compliance.metabase_bootstrap import (
             run_bootstrap as run_agent_compliance_bootstrap,
         )
+        from ingest.inventory.metabase_bootstrap import (
+            run_bootstrap as run_inventory_bootstrap,
+        )
         urls = run_bootstrap(
             url=url,
             user=user,
@@ -231,6 +234,12 @@ def bootstrap_metabase() -> None:
         )
         if settings.AGENT_COMPLIANCE_ENABLED:
             urls.extend(run_agent_compliance_bootstrap(
+                url=url,
+                user=user,
+                password=password,
+                db_name=settings.MB_BOOTSTRAP_DB_NAME,
+            ))
+            urls.extend(run_inventory_bootstrap(
                 url=url,
                 user=user,
                 password=password,

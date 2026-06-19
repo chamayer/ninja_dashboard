@@ -24,6 +24,15 @@ Read Inbox at the start of every session.
 
 ## Backlog
 
+### Ingest domain split
+
+- [ ] Split the ingest runtime into domain packages with explicit
+      entrypoints for patching, compliance, and inventory. v0.33.0
+      adds the Inventory package and standalone Metabase bootstrap, but
+      the shared service still owns scheduling and startup orchestration.
+      Next step: extract shared scheduler/bootstrap plumbing and move
+      patch/compliance entrypoints behind the same domain boundary.
+
 ### Agent compliance domain
 
 - [ ] **Per-OS required_platforms overrides.** Macs (and Linux)

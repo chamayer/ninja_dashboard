@@ -2,6 +2,21 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.33.0] — 2026-06-19
+
+### Added
+- Added a separate Inventory module backed by the new `ninja_inventory`
+  schema. Inventory views now surface current source observations,
+  resolved inventory devices, unresolved/excluded source records,
+  serial quality, identity conflicts, and serial-based merge candidates
+  without hiding placeholder or invalid serial values in code.
+- Added a standalone Inventory Metabase collection with Overview,
+  Devices, Identity Review, Serial Quality, and Source Records
+  dashboards. Compliance dashboards are left in place.
+- Added an inventory-domain bootstrap module so future ingest/bootstrap
+  separation can proceed by domain instead of adding inventory cards to
+  the compliance bootstrap.
+
 ## [0.32.9] — 2026-06-19
 
 ### Added
