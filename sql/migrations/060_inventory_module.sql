@@ -408,14 +408,18 @@ platform_id_cross_customer AS (
       AND COALESCE(NULLIF(platform_device_id, ''), '') <> ''
     GROUP BY platform, platform_device_id
     HAVING COUNT(DISTINCT customer_id) > 1
+),
+all_conflicts AS (
+    SELECT * FROM serial_cross_customer
+    UNION ALL
+    SELECT * FROM serial_same_platform
+    UNION ALL
+    SELECT * FROM hostname_cross_customer
+    UNION ALL
+    SELECT * FROM platform_id_cross_customer
 )
-SELECT * FROM serial_cross_customer
-UNION ALL
-SELECT * FROM serial_same_platform
-UNION ALL
-SELECT * FROM hostname_cross_customer
-UNION ALL
-SELECT * FROM platform_id_cross_customer
+SELECT *
+FROM all_conflicts
 ORDER BY
     CASE conflict_type
         WHEN 'platform_device_customer_conflict' THEN 0
