@@ -17,6 +17,7 @@ from ingest.agent_compliance.config_loader import (
     get_requirement,
     load_aliases,
     load_clients,
+    load_device_merge_decisions,
     load_id_links,
     load_requirements,
     load_sources,
@@ -24,6 +25,7 @@ from ingest.agent_compliance.config_loader import (
     sync_clients_from_observations,
     upsert_id_links_from_observations,
 )
+from ingest.agent_compliance.normalize import is_macos_name, normalize_loose_hostname
 from ingest.runlog import run_log
 
 log = logging.getLogger(__name__)
@@ -85,6 +87,7 @@ def run() -> tuple[int, int]:
         # refreshed client_name into compliance_matrix_current.
         clients = load_clients()
         alignment_by_client = _load_alignment_by_client()
+        device_merge_decisions = load_device_merge_decisions()
 
         matrix_rows, finding_rows = _build_matrix_and_findings(
             run_id=run_id,
@@ -95,6 +98,7 @@ def run() -> tuple[int, int]:
             sources=sources,
             source_status=source_status,
             alignment_by_client=alignment_by_client,
+            device_merge_decisions=device_merge_decisions,
         )
         _write_matrix(run_id, matrix_rows)
         _write_findings(finding_rows)
@@ -186,6 +190,7 @@ def evaluate(send_alerts: bool = True) -> tuple[int, int]:
         observations = _resolve_latest_observations(sources, clients, aliases, id_links)
         source_status = _load_latest_source_status()
         alignment_by_client = _load_alignment_by_client()
+        device_merge_decisions = load_device_merge_decisions()
 
         matrix_rows, finding_rows = _build_matrix_and_findings(
             run_id=run_id,
@@ -196,6 +201,7 @@ def evaluate(send_alerts: bool = True) -> tuple[int, int]:
             sources=sources,
             source_status=source_status,
             alignment_by_client=alignment_by_client,
+            device_merge_decisions=device_merge_decisions,
         )
         _write_matrix(run_id, matrix_rows)
         _write_findings(finding_rows)
@@ -429,7 +435,10 @@ def _build_matrix_and_findings(
     sources: list[SourceConfig],
     source_status: dict[int, str],
     alignment_by_client: dict[int, dict[str, Any]],
+    device_merge_decisions: dict[tuple[int, str], str],
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    observations = _apply_manual_device_merges(observations, device_merge_decisions)
+    observations = _apply_mac_safe_matches(observations)
     observations = _apply_prefix_matches(observations)
     by_client_norm: dict[tuple[int, str], list[dict[str, Any]]] = {}
     clients_by_norm: dict[str, set[int]] = {}
@@ -596,6 +605,84 @@ def _build_observed_by_norm_client(
     for m in matrix_rows:
         idx.setdefault(m["norm_name"], {})[m["client_id"]] = set(m["observed_platforms"])
     return idx
+
+
+def _apply_manual_device_merges(
+    observations: list[dict[str, Any]],
+    decisions: dict[tuple[int, str], str],
+) -> list[dict[str, Any]]:
+    if not decisions:
+        return observations
+    merged: list[dict[str, Any]] = []
+    for obs in observations:
+        client_id = obs.get("resolved_client_id")
+        norm = obs.get("norm_name")
+        if not client_id or not norm:
+            merged.append(obs)
+            continue
+        canonical = decisions.get((int(client_id), str(norm).strip().lower()))
+        if canonical and canonical != norm:
+            obs = dict(obs)
+            obs["match_name"] = canonical
+            obs["norm_name"] = canonical
+        merged.append(obs)
+    return merged
+
+
+def _apply_mac_safe_matches(observations: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Collapse Mac hostname separator variants only when evidence is unique.
+
+    This catches pairs like `GCNY-25s-iMac.local` and `GCNY-25's iMac`
+    without changing the global hostname normalizer. A loose key is
+    promoted only when it appears in more than one platform and no
+    single platform has multiple device IDs under that key.
+    """
+    grouped: dict[tuple[int, str], list[dict[str, Any]]] = {}
+    for obs in observations:
+        client_id = obs.get("resolved_client_id")
+        hostname = obs.get("hostname")
+        os_name = obs.get("os_name")
+        if not client_id or not hostname or not is_macos_name(os_name):
+            continue
+        loose = normalize_loose_hostname(str(hostname))
+        if not loose or len(loose) < 6:
+            continue
+        grouped.setdefault((int(client_id), loose), []).append(obs)
+
+    canonical_by_client_norm: dict[tuple[int, str], str] = {}
+    for (client_id, loose), rows in grouped.items():
+        platforms = {row.get("platform") for row in rows if row.get("platform")}
+        if len(platforms) < 2:
+            continue
+        ids_by_platform: dict[str, set[str]] = {}
+        for row in rows:
+            platform = str(row.get("platform") or "")
+            device_id = str(row.get("platform_device_id") or row.get("hostname") or "")
+            if platform and device_id:
+                ids_by_platform.setdefault(platform, set()).add(device_id)
+        if any(len(device_ids) > 1 for device_ids in ids_by_platform.values()):
+            continue
+        for row in rows:
+            norm = str(row.get("norm_name") or "")
+            if norm and norm != loose:
+                canonical_by_client_norm[(client_id, norm)] = loose
+
+    if not canonical_by_client_norm:
+        return observations
+
+    merged: list[dict[str, Any]] = []
+    for obs in observations:
+        client_id = obs.get("resolved_client_id")
+        norm = obs.get("norm_name")
+        canonical = None
+        if client_id and norm:
+            canonical = canonical_by_client_norm.get((int(client_id), str(norm)))
+        if canonical:
+            obs = dict(obs)
+            obs["match_name"] = canonical
+            obs["norm_name"] = canonical
+        merged.append(obs)
+    return merged
 
 
 def _load_confirmed_missing_decisions() -> set[tuple[int, str, str]]:

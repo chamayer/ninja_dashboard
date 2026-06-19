@@ -2,6 +2,25 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.32.9] — 2026-06-19
+
+### Added
+- Mac device reconciliation now applies a conservative separator-free
+  match key when the same loose hostname is observed under multiple
+  platforms for the same customer and no platform has duplicate device
+  IDs under that key. This collapses pairs such as
+  `GCNY-25s-iMac.local` and `GCNY-25's iMac` without changing raw
+  platform observation history.
+- Added operator-controlled device-name merge decisions using the
+  existing `human_decisions` table (`same_device`). The Devices
+  dashboard now includes suggested device name merges with a `Merge`
+  action, and `/a/md` records manual merges for future evaluations.
+
+### Changed
+- Device platform drilldown now resolves raw observation evidence
+  through raw, stored, Mac-safe, and manual match keys so merged device
+  rows still show per-platform hostnames and IDs.
+
 ## [0.32.8] — 2026-06-18
 
 ### Changed

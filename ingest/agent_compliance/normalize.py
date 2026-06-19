@@ -8,6 +8,7 @@ from typing import Any
 
 _TRAILING_PARENS_RE = re.compile(r"\s*\(.*?\)\s*$")
 _HOST_STRIP_CHARS_RE = re.compile(r"[\s'`\u2018\u2019]")
+_HOST_LOOSE_CHARS_RE = re.compile(r"[^a-z0-9]")
 _ORG_STRIP_CHARS_RE = re.compile(r"[\s\-_.]")
 _PLACEHOLDER_ORG_NAMES = {
     "defaultsite",
@@ -38,6 +39,21 @@ def normalize_hostname(name: str | None) -> str:
     clean = _TRAILING_PARENS_RE.sub("", name)
     short = clean.split(".", 1)[0].lower().strip()
     return _HOST_STRIP_CHARS_RE.sub("", short)
+
+
+def normalize_loose_hostname(name: str | None) -> str:
+    if not name:
+        return ""
+    clean = _TRAILING_PARENS_RE.sub("", name)
+    short = clean.split(".", 1)[0].lower().strip()
+    return _HOST_LOOSE_CHARS_RE.sub("", short)
+
+
+def is_macos_name(os_name: str | None) -> bool:
+    if not os_name:
+        return False
+    value = os_name.lower()
+    return "macos" in value or "os x" in value or "darwin" in value
 
 
 def normalize_org_name(name: str | None) -> str:

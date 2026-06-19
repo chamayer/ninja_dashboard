@@ -2480,6 +2480,46 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                     },
                 ),
                 _card(
+                    "devices_merge_candidates",
+                    "Suggested device name merges",
+                    "table",
+                    """
+                        SELECT
+                            client_name AS "Customer",
+                            source_hostname AS "Source device",
+                            target_hostname AS "Target device",
+                            COALESCE(array_to_string(platforms, ', '), '-') AS "Platforms",
+                            COALESCE(array_to_string(norm_names, ', '), '-') AS "Match keys",
+                            COALESCE(TO_CHAR(last_seen_at, 'YYYY-MM-DD HH24:MI'), 'Never') AS "Last seen",
+                            'Merge' AS "Action"
+                        FROM ninja_agent_compliance.v_device_merge_candidates
+                        WHERE 1=1
+                          [[AND client_name IN ({{customer}})]]
+                        ORDER BY client_name, source_hostname
+                        LIMIT 200
+                    """,
+                    36, 0, 24, 8,
+                    column_click_behaviors={
+                        "Action": {
+                            "url_template": _url_template(
+                                "/a/md",
+                                [("client", "Customer"), ("source", "Source device"), ("target", "Target device")],
+                            ),
+                        },
+                    },
+                    column_widths={
+                        "Customer": 200,
+                        "Source device": 220,
+                        "Target device": 220,
+                        "Platforms": 180,
+                        "Match keys": 280,
+                        "Last seen": 140,
+                        "Action": 90,
+                    },
+                    template_tags={"customer": _DEVICES_FILTER_TAGS["customer"]},
+                    param_mappings={PARAM_CUSTOMER: _mapping("customer")},
+                ),
+                _card(
                     "devices_stale_by_customer",
                     "Stale devices by customer",
                     "table",

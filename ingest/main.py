@@ -41,6 +41,7 @@ from ingest.agent_compliance import review_digest
 from ingest.runlog import run_log
 from ingest.agent_compliance.config_loader import (
     add_device_ignore,
+    add_device_merge_decision,
     add_human_decision,
     add_org_exclude,
     approve_customer_name,
@@ -348,6 +349,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             "/a/sr": "/agent-compliance/action/set-requirement",
             "/a/ue": "/agent-compliance/action/unexclude-org",
             "/a/ig": "/agent-compliance/action/ignore-device",
+            "/a/md": "/agent-compliance/action/merge-device",
             "/a/ui": "/agent-compliance/action/unignore-device",
             "/a/cm": "/agent-compliance/action/confirm-missing",
             "/a/bs": "/agent-compliance/action/bulk-ignore-stale",
@@ -473,6 +475,44 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                     <input id="days" name="days" type="number" min="1" max="365" value="30" required>
                     <br>
                     <button type="submit">Ignore device</button>
+                  </form>
+                </body>
+                </html>
+            """.encode("utf-8")
+            self._respond_html(200, body)
+            return
+
+        if path == "/agent-compliance/action/merge-device" and confirm != "1":
+            client_name = _text_param("client", "client_name", hex_names=("client_hex",)) or ""
+            source_hostname = _text_param("source", "source_host", "host", "hostname", hex_names=("source_hex", "host_hex")) or ""
+            target_hostname = _text_param("target", "target_host", hex_names=("target_hex",)) or ""
+            if not client_name or not source_hostname:
+                self._respond(400, b"missing client or source host\n")
+                return
+            body = f"""
+                <!doctype html>
+                <html>
+                <head>
+                  <meta charset="utf-8">
+                  <title>Merge device names</title>
+                  <style>
+                    body {{ font-family: sans-serif; margin: 24px; color: #1f2933; max-width: 720px; }}
+                    label {{ display: block; font-weight: 700; margin: 16px 0 6px; }}
+                    input {{ font-size: 16px; padding: 8px 10px; width: 100%; box-sizing: border-box; }}
+                    button {{ margin-top: 18px; padding: 9px 14px; font-weight: 700; }}
+                    .hint {{ color: #52606d; max-width: 620px; }}
+                  </style>
+                </head>
+                <body>
+                  <h2>Merge device names</h2>
+                  <p class="hint">Treat <strong>{escape(source_hostname)}</strong> as the same device as the target hostname for <strong>{escape(client_name)}</strong>. This affects matching only; platform device IDs and raw observations are preserved.</p>
+                  <form method="get" action="/a/md">
+                    <input type="hidden" name="client" value="{escape(client_name)}">
+                    <input type="hidden" name="source" value="{escape(source_hostname)}">
+                    <input type="hidden" name="confirm" value="1">
+                    <label for="target">Target device name</label>
+                    <input id="target" name="target" value="{escape(target_hostname)}" required>
+                    <button type="submit">Merge device names</button>
                   </form>
                 </body>
                 </html>
@@ -830,6 +870,29 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             _respond_with_refresh(
                 f"confirmed missing for {norm_name}: {', '.join(platforms)}",
                 "missing device confirmed",
+            )
+            return
+
+        if path == "/agent-compliance/action/merge-device":
+            client_name = _text_param("client", "client_name", hex_names=("client_hex",))
+            source_hostname = _text_param("source", "source_host", "host", "hostname", hex_names=("source_hex", "host_hex"))
+            target_hostname = _text_param("target", "target_host", hex_names=("target_hex",))
+            if not client_name or not source_hostname or not target_hostname:
+                self._respond(400, b"missing client, source host, or target host\n")
+                return
+            result = add_device_merge_decision(
+                client_name,
+                source_hostname,
+                target_hostname,
+                updated_by="operator_dashboard",
+            )
+            if result is None:
+                self._respond(400, b"invalid merge request\n")
+                return
+            source_norm, target_norm = result
+            _respond_with_refresh(
+                f"merged {source_norm} into {target_norm}",
+                "device merge added",
             )
             return
 

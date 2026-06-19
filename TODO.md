@@ -196,15 +196,10 @@ Read Inbox at the start of every session.
   dashboards, do NOT add a user-name lookup, do NOT bring it up
   again.**
 
-- **`device_aliases` mapping table** — proposed 2026-06-18 in
-  response to a single SC session (`YLSedison` / `NJ3`) with empty
-  `GuestInfo`. Investigation showed: 958 of 960 SC sessions report
-  `MachineName` correctly; only orphan / pre-named sessions miss it.
-  Building a schema + UI to handle 2 cases in 960 is
-  over-engineering. Operator fix at SC (rename session or
-  re-enroll agent) is the answer when this comes up. **Do NOT
-  re-propose unless multiple legitimate cases appear that cannot be
-  fixed at the source.**
+- **Separate `device_aliases` mapping table** — superseded by
+  `human_decisions.decision_type = 'same_device'` in v0.32.9. Device
+  name merges are real operator decisions, but they stay in the shared
+  decision table instead of a new alias subsystem.
 
 - **Per-platform aliases as a rename-mitigation mechanism** —
   superseded by `client_platform_links` (id-link table, v0.32.0).

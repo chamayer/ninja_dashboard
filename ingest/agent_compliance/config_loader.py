@@ -10,6 +10,7 @@ from typing import Any
 from ingest import db
 from ingest.agent_compliance.normalize import (
     canonical_platform,
+    normalize_hostname,
     normalize_org_name,
 )
 
@@ -1458,6 +1459,78 @@ def add_human_decision(
             ),
         )
     return True
+
+
+def load_device_merge_decisions() -> dict[tuple[int, str], str]:
+    """Return operator-confirmed device-name aliases.
+
+    Keys are `(client_id, alias_norm_name)` and values are canonical
+    `norm_name` values used by the matrix builder.
+    """
+    with db.transaction() as cur:
+        cur.execute(
+            """
+            SELECT client_id, norm_name, candidate_name
+            FROM ninja_agent_compliance.v_human_decisions_current
+            WHERE decision_type = 'same_device'
+              AND client_id IS NOT NULL
+              AND norm_name IS NOT NULL
+              AND candidate_name IS NOT NULL
+            """
+        )
+        rows = cur.fetchall()
+    decisions: dict[tuple[int, str], str] = {}
+    for client_id, alias_norm, canonical_norm in rows:
+        alias = str(alias_norm or "").strip().lower()
+        canonical = str(canonical_norm or "").strip().lower()
+        if alias and canonical and alias != canonical:
+            decisions[(int(client_id), alias)] = canonical
+    return decisions
+
+
+def add_device_merge_decision(
+    client_name: str,
+    source_hostname: str,
+    target_hostname: str,
+    updated_by: str = "agent_compliance",
+) -> tuple[str, str] | None:
+    source_norm = normalize_hostname(source_hostname)
+    target_norm = normalize_hostname(target_hostname)
+    if not client_name.strip() or not source_norm or not target_norm or source_norm == target_norm:
+        return None
+    with db.transaction() as cur:
+        cur.execute(
+            """
+            SELECT client_id
+            FROM ninja_agent_compliance.clients
+            WHERE client_name = %s
+              AND enabled
+              AND source <> 'demoted'
+            ORDER BY client_id
+            LIMIT 1
+            """,
+            (client_name.strip(),),
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+        client_id = int(row[0])
+        cur.execute(
+            """
+            INSERT INTO ninja_agent_compliance.human_decisions
+                (decision_type, client_id, norm_name, hostname, candidate_name, notes, enabled, updated_by)
+            VALUES ('same_device', %s, %s, %s, %s, %s, true, %s)
+            """,
+            (
+                client_id,
+                source_norm,
+                source_hostname,
+                target_norm,
+                f"Merged with {target_hostname}",
+                updated_by,
+            ),
+        )
+    return source_norm, target_norm
 
 
 def bulk_ignore_devices(
