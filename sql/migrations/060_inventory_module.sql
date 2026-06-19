@@ -455,27 +455,51 @@ serial_groups AS (
     FROM src
     GROUP BY customer_id, customer_name, serial_number
     HAVING COUNT(DISTINCT platform || ':' || COALESCE(NULLIF(platform_device_id, ''), hostname)) > 1
+),
+serial_candidates AS (
+    SELECT
+        customer_id,
+        customer_name,
+        'serial_same_customer'::text AS candidate_type,
+        serial_number AS match_key,
+        platform_count,
+        norm_count,
+        record_count,
+        platforms,
+        hostnames,
+        norm_names,
+        COALESCE(platform_device_ids, ARRAY[]::text[]) AS platform_device_ids,
+        last_seen_at,
+        CASE
+            WHEN platform_count > 1 AND norm_count > 1 THEN 'Strong cross-platform same-device candidate by serial'
+            WHEN platform_count > 1 THEN 'Cross-platform serial match'
+            ELSE 'Same-platform serial duplicate; review stale/re-enrolled records'
+        END AS reason
+    FROM serial_groups
+),
+hostname_candidates AS (
+    SELECT
+        client_id AS customer_id,
+        client_name AS customer_name,
+        'hostname_same_customer'::text AS candidate_type,
+        loose_norm AS match_key,
+        cardinality(platforms) AS platform_count,
+        cardinality(norm_names) AS norm_count,
+        cardinality(hostnames) AS record_count,
+        platforms,
+        hostnames,
+        norm_names,
+        ARRAY[]::text[] AS platform_device_ids,
+        last_seen_at,
+        'Hostname/Mac-safe same-device candidate from inventory/compliance identity rules'::text AS reason
+    FROM ninja_agent_compliance.v_device_merge_candidates
 )
-SELECT
-    customer_id,
-    customer_name,
-    'serial_same_customer'::text AS candidate_type,
-    serial_number AS match_key,
-    platform_count,
-    norm_count,
-    record_count,
-    platforms,
-    hostnames,
-    norm_names,
-    COALESCE(platform_device_ids, ARRAY[]::text[]) AS platform_device_ids,
-    last_seen_at,
-    CASE
-        WHEN platform_count > 1 AND norm_count > 1 THEN 'Strong cross-platform same-device candidate by serial'
-        WHEN platform_count > 1 THEN 'Cross-platform serial match'
-        ELSE 'Same-platform serial duplicate; review stale/re-enrolled records'
-    END AS reason
-FROM serial_groups
-ORDER BY customer_name, serial_number;
+SELECT *
+FROM serial_candidates
+UNION ALL
+SELECT *
+FROM hostname_candidates
+ORDER BY customer_name, candidate_type, match_key;
 
 CREATE OR REPLACE VIEW ninja_inventory.v_inventory_summary_current AS
 SELECT 'Resolved devices'::text AS metric, COUNT(*)::bigint AS value

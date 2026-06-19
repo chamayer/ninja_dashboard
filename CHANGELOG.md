@@ -2,6 +2,14 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.33.1] — 2026-06-19
+
+### Changed
+- Inventory merge candidates now include hostname/Mac-safe same-device
+  candidates from the existing compliance identity rules, in addition
+  to serial-based candidates. Inventory Identity Review is now the
+  single dashboard queue for current same-device candidate evidence.
+
 ## [0.33.0] — 2026-06-19
 
 ### Added
