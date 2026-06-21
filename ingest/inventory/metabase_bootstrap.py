@@ -165,9 +165,8 @@ def _dashboards() -> list[dict[str, Any]]:
                     "Resolved devices",
                     "scalar",
                     """
-                    SELECT value AS "Resolved devices"
-                    FROM ninja_inventory.v_inventory_summary_current
-                    WHERE metric = 'Resolved devices'
+                    SELECT COUNT(*) AS "Resolved devices"
+                    FROM ninja_inventory.v_devices_current
                     """,
                     0, 0, 4, 4,
                     click_behavior=_dashboard_link(DASH_DEVICES),
@@ -177,9 +176,9 @@ def _dashboards() -> list[dict[str, Any]]:
                     "Managed devices",
                     "scalar",
                     """
-                    SELECT value AS "Managed devices"
-                    FROM ninja_inventory.v_inventory_summary_current
-                    WHERE metric = 'Managed devices'
+                    SELECT COUNT(*) AS "Managed devices"
+                    FROM ninja_inventory.v_devices_current
+                    WHERE inventory_state LIKE 'Managed%'
                     """,
                     0, 4, 4, 4,
                     click_behavior=_dashboard_link(DASH_DEVICES),
@@ -189,9 +188,9 @@ def _dashboards() -> list[dict[str, Any]]:
                     "Missing coverage",
                     "scalar",
                     """
-                    SELECT value AS "Missing coverage"
-                    FROM ninja_inventory.v_inventory_summary_current
-                    WHERE metric = 'Missing coverage'
+                    SELECT COUNT(*) AS "Missing coverage"
+                    FROM ninja_inventory.v_devices_current
+                    WHERE inventory_state = 'Missing Coverage'
                     """,
                     0, 8, 4, 4,
                     click_behavior=_dashboard_link(DASH_DEVICES),
@@ -201,9 +200,8 @@ def _dashboards() -> list[dict[str, Any]]:
                     "Unresolved records",
                     "scalar",
                     """
-                    SELECT value AS "Unresolved records"
-                    FROM ninja_inventory.v_inventory_summary_current
-                    WHERE metric = 'Unresolved source records'
+                    SELECT COUNT(*) AS "Unresolved records"
+                    FROM ninja_inventory.v_unresolved_source_records_current
                     """,
                     0, 12, 4, 4,
                     click_behavior=_dashboard_link(DASH_SOURCES),
@@ -213,9 +211,8 @@ def _dashboards() -> list[dict[str, Any]]:
                     "Identity conflicts",
                     "scalar",
                     """
-                    SELECT value AS "Identity conflicts"
-                    FROM ninja_inventory.v_inventory_summary_current
-                    WHERE metric = 'Identity conflicts'
+                    SELECT COUNT(*) AS "Identity conflicts"
+                    FROM ninja_inventory.v_identity_conflicts_current
                     """,
                     0, 16, 4, 4,
                     click_behavior=_dashboard_link(DASH_IDENTITY),
@@ -225,9 +222,8 @@ def _dashboards() -> list[dict[str, Any]]:
                     "Merge candidates",
                     "scalar",
                     """
-                    SELECT value AS "Merge candidates"
-                    FROM ninja_inventory.v_inventory_summary_current
-                    WHERE metric = 'Merge candidates'
+                    SELECT COUNT(*) AS "Merge candidates"
+                    FROM ninja_inventory.v_merge_candidates_current
                     """,
                     0, 20, 4, 4,
                     click_behavior=_dashboard_link(DASH_IDENTITY),
@@ -320,7 +316,7 @@ def _dashboards() -> list[dict[str, Any]]:
                           WHERE p IN ({{platform}})
                       )]]
                     ORDER BY customer_name, display_name
-                    LIMIT 1000
+                    LIMIT 500
                     """,
                     0, 0, 24, 14,
                     template_tags={
@@ -393,7 +389,7 @@ def _dashboards() -> list[dict[str, Any]]:
                         reason AS "Reason"
                     FROM ninja_inventory.v_identity_conflicts_current
                     ORDER BY customer_count DESC, record_count DESC, conflict_type, identity_key
-                    LIMIT 500
+                    LIMIT 300
                     """,
                     0, 0, 24, 10,
                     column_widths={
@@ -425,7 +421,7 @@ def _dashboards() -> list[dict[str, Any]]:
                     WHERE 1=1
                       [[AND customer_name IN ({{customer}})]]
                     ORDER BY customer_name, match_key
-                    LIMIT 500
+                    LIMIT 300
                     """,
                     12, 0, 24, 10,
                     template_tags={"customer": _FILTER_TAGS["customer"]},
@@ -496,7 +492,7 @@ def _dashboards() -> list[dict[str, Any]]:
                         platform,
                         customer_name,
                         hostname
-                    LIMIT 1000
+                    LIMIT 500
                     """,
                     0, 12, 12, 12,
                     template_tags={
@@ -542,7 +538,7 @@ def _dashboards() -> list[dict[str, Any]]:
                     WHERE 1=1
                       [[AND platform IN ({{platform}})]]
                     ORDER BY observed_at DESC, platform, platform_customer_name, hostname
-                    LIMIT 1000
+                    LIMIT 500
                     """,
                     0, 0, 24, 10,
                     template_tags={"platform": _FILTER_TAGS["platform"]},
@@ -575,7 +571,7 @@ def _dashboards() -> list[dict[str, Any]]:
                       [[AND COALESCE(customer_name, 'Unresolved') IN ({{customer}})]]
                       [[AND serial_quality IN ({{serial_quality}})]]
                     ORDER BY platform, source_name, "Resolved customer", hostname
-                    LIMIT 1000
+                    LIMIT 500
                     """,
                     10, 0, 24, 10,
                     template_tags={

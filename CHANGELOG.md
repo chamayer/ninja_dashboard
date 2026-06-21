@@ -2,6 +2,23 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.33.3] — 2026-06-21
+
+### Changed
+- Optimized Inventory Overview KPI cards to query their target current
+  views directly instead of repeatedly filtering the aggregate inventory
+  summary view.
+- Reduced initial row loads on broad Inventory detail cards so dashboard
+  navigation opens faster while keeping full filtering available.
+- Optimized Compliance Today summary cards to read from the current
+  device-state view instead of the human presentation view.
+- Reduced the default row load on the broad Patching patch-detail table
+  to improve initial dashboard navigation speed.
+
+### Added
+- Added dashboard performance indexes for shared platform observation
+  lookups used by Inventory and Compliance source/device matching views.
+
 ## [0.33.2] — 2026-06-21
 
 ### Fixed

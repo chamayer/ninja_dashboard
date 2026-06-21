@@ -1835,7 +1835,7 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                     "scalar",
                     """
                         SELECT COUNT(*) AS "Total devices"
-                        FROM ninja_agent_compliance.v_all_devices_human
+                        FROM ninja_agent_compliance.v_device_state_current
                     """,
                     0, 0, 4, 4,
                     click_behavior=_dashboard_link(DASH_DEVICES),
@@ -1846,8 +1846,8 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                     "scalar",
                     """
                         SELECT COUNT(*) AS "Compliant devices"
-                        FROM ninja_agent_compliance.v_all_devices_human
-                        WHERE state = 'Compliant'
+                        FROM ninja_agent_compliance.v_device_state_current
+                        WHERE device_state = 'Compliant'
                           AND NOT ignored
                     """,
                     0, 4, 4, 4,
@@ -1859,11 +1859,11 @@ def _level1_dashboards() -> list[dict[str, Any]]:
                     "scalar",
                     """
                         SELECT ROUND(
-                            COUNT(*) FILTER (WHERE state = 'Compliant' AND NOT ignored) * 100.0
-                                / NULLIF(COUNT(*) FILTER (WHERE state <> 'Stale' AND NOT ignored), 0),
+                            COUNT(*) FILTER (WHERE device_state = 'Compliant' AND NOT ignored) * 100.0
+                                / NULLIF(COUNT(*) FILTER (WHERE device_state <> 'Stale' AND NOT ignored), 0),
                             1
                         ) AS "Compliant %"
-                        FROM ninja_agent_compliance.v_all_devices_human
+                        FROM ninja_agent_compliance.v_device_state_current
                     """,
                     0, 8, 4, 4,
                     click_behavior=_dashboard_link(DASH_DEVICES),

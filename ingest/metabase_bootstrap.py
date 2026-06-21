@@ -2418,7 +2418,7 @@ JOIN ninja_core.organizations o  ON o.id = d.organization_id
 WHERE d.approval_status = 'APPROVED'
 {_FILTER_PREDICATES}
 ORDER BY cs.last_observed_at DESC, lio.installed_at DESC NULLS LAST
-LIMIT 1000
+LIMIT 500
 """,
     },
     # ── Patches by Type distribution ───────────────────────────────
