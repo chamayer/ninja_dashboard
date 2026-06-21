@@ -2381,7 +2381,7 @@ ORDER BY "Patches" DESC
     },
     {
         "key":            "detail_table",
-        "name":           "Patch Detail Table",
+        "name":           "Patch Detail Table (top 500)",
         "display":        "table",
         "row": 24, "col": 0, "size_x": 24, "size_y": 14,
         "template_tags":  _FILTER_TAGS,
@@ -2398,6 +2398,7 @@ ORDER BY "Patches" DESC
         "query": f"""
 {_CTE_CURRENT_STATE}
 SELECT
+    COUNT(*) OVER() AS "Total Matching Rows",
     o.name           AS organization,
     d.system_name    AS device,
     {DEVICE_TYPE_D} AS device_type,

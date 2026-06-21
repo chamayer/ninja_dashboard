@@ -292,10 +292,11 @@ def _dashboards() -> list[dict[str, Any]]:
             "cards": [
                 _card(
                     "inventory_devices",
-                    "Device inventory",
+                    "Device inventory (top 500)",
                     "table",
                     """
                     SELECT
+                        COUNT(*) OVER() AS "Total matching rows",
                         customer_name AS "Customer",
                         display_name AS "Device",
                         inventory_state AS "Inventory state",
@@ -339,10 +340,11 @@ def _dashboards() -> list[dict[str, Any]]:
                 ),
                 _card(
                     "inventory_devices_by_customer",
-                    "Inventory by customer",
+                    "Inventory by customer (top 300)",
                     "table",
                     """
                     SELECT
+                        COUNT(*) OVER() AS "Total matching rows",
                         customer_name AS "Customer",
                         COUNT(*) AS "Devices",
                         COUNT(*) FILTER (WHERE inventory_state LIKE 'Managed%') AS "Managed",
@@ -374,10 +376,11 @@ def _dashboards() -> list[dict[str, Any]]:
             "cards": [
                 _card(
                     "inventory_identity_conflicts",
-                    "Identity conflicts",
+                    "Identity conflicts (top 300)",
                     "table",
                     """
                     SELECT
+                        COUNT(*) OVER() AS "Total matching rows",
                         conflict_type AS "Conflict",
                         identity_key AS "Key",
                         customer_count AS "Customers",
@@ -402,10 +405,11 @@ def _dashboards() -> list[dict[str, Any]]:
                 ),
                 _card(
                     "inventory_merge_candidates",
-                    "Merge candidates",
+                    "Merge candidates (top 300)",
                     "table",
                     """
                     SELECT
+                        COUNT(*) OVER() AS "Total matching rows",
                         customer_name AS "Customer",
                         candidate_type AS "Candidate",
                         match_key AS "Key",
@@ -469,10 +473,11 @@ def _dashboards() -> list[dict[str, Any]]:
                 ),
                 _card(
                     "inventory_serial_quality_details",
-                    "Serial quality details",
+                    "Serial quality details (top 500)",
                     "table",
                     """
                     SELECT
+                        COUNT(*) OVER() AS "Total matching rows",
                         platform AS "Platform",
                         customer_name AS "Customer",
                         hostname AS "Device",
@@ -520,10 +525,11 @@ def _dashboards() -> list[dict[str, Any]]:
             "cards": [
                 _card(
                     "inventory_unresolved_source_records",
-                    "Unresolved / excluded source records",
+                    "Unresolved / excluded source records (top 500)",
                     "table",
                     """
                     SELECT
+                        COUNT(*) OVER() AS "Total matching rows",
                         record_state AS "State",
                         platform AS "Platform",
                         source_name AS "Source",
@@ -552,10 +558,11 @@ def _dashboards() -> list[dict[str, Any]]:
                 ),
                 _card(
                     "inventory_source_observations",
-                    "Current source observations",
+                    "Current source observations (top 500)",
                     "table",
                     """
                     SELECT
+                        COUNT(*) OVER() AS "Total matching rows",
                         platform AS "Platform",
                         source_name AS "Source",
                         COALESCE(customer_name, 'Unresolved') AS "Resolved customer",

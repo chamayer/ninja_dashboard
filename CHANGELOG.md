@@ -2,6 +2,14 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.33.4] — 2026-06-21
+
+### Changed
+- Added explicit row-cap context to capped Inventory and Patching detail
+  tables. Card names now show the cap, and result rows include the total
+  matching rows after filters so capped views are not mistaken for the
+  complete dataset.
+
 ## [0.33.3] — 2026-06-21
 
 ### Changed
