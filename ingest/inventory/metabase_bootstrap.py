@@ -221,7 +221,7 @@ def _dashboards() -> list[dict[str, Any]]:
                     click_behavior=_dashboard_link(DASH_IDENTITY),
                 ),
                 _card(
-                    "inventory_merge_candidates",
+                    "inventory_merge_candidates_count",
                     "Merge candidates",
                     "scalar",
                     """

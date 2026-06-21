@@ -2,6 +2,14 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.33.2] — 2026-06-21
+
+### Fixed
+- Fixed the Inventory Overview "Merge candidates" KPI using the same
+  internal card key as the Identity Review detail table. The top row
+  now keeps a scalar KPI, while the detail table remains on the
+  Identity Review dashboard.
+
 ## [0.33.1] — 2026-06-19
 
 ### Changed
