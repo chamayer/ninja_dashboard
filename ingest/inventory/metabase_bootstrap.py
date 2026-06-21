@@ -291,12 +291,57 @@ def _dashboards() -> list[dict[str, Any]]:
             "parameters_builder": _build_inventory_parameters,
             "cards": [
                 _card(
+                    "inventory_devices_total_matching",
+                    "Total matching devices",
+                    "scalar",
+                    """
+                    SELECT COUNT(*) AS "Total matching devices"
+                    FROM ninja_inventory.v_devices_current
+                    WHERE 1=1
+                      [[AND customer_name IN ({{customer}})]]
+                      [[AND inventory_state IN ({{state}})]]
+                      [[AND EXISTS (
+                          SELECT 1
+                          FROM unnest(present_platforms) p
+                          WHERE p IN ({{platform}})
+                      )]]
+                    """,
+                    0, 0, 4, 4,
+                    template_tags={
+                        "customer": _FILTER_TAGS["customer"],
+                        "state": _FILTER_TAGS["state"],
+                        "platform": _FILTER_TAGS["platform"],
+                    },
+                    param_mappings={
+                        PARAM_CUSTOMER: _mapping("customer"),
+                        PARAM_STATE: _mapping("state"),
+                        PARAM_PLATFORM: _mapping("platform"),
+                    },
+                ),
+                _card(
+                    "inventory_customers_total_matching",
+                    "Total matching customers",
+                    "scalar",
+                    """
+                    SELECT COUNT(*) AS "Total matching customers"
+                    FROM (
+                        SELECT customer_name
+                        FROM ninja_inventory.v_devices_current
+                        WHERE 1=1
+                          [[AND customer_name IN ({{customer}})]]
+                        GROUP BY customer_name
+                    ) customers
+                    """,
+                    0, 4, 4, 4,
+                    template_tags={"customer": _FILTER_TAGS["customer"]},
+                    param_mappings={PARAM_CUSTOMER: _mapping("customer")},
+                ),
+                _card(
                     "inventory_devices",
                     "Device inventory (top 500)",
                     "table",
                     """
                     SELECT
-                        COUNT(*) OVER() AS "Total matching rows",
                         customer_name AS "Customer",
                         display_name AS "Device",
                         inventory_state AS "Inventory state",
@@ -319,7 +364,7 @@ def _dashboards() -> list[dict[str, Any]]:
                     ORDER BY customer_name, display_name
                     LIMIT 500
                     """,
-                    0, 0, 24, 14,
+                    4, 0, 24, 14,
                     template_tags={
                         "customer": _FILTER_TAGS["customer"],
                         "state": _FILTER_TAGS["state"],
@@ -344,7 +389,6 @@ def _dashboards() -> list[dict[str, Any]]:
                     "table",
                     """
                     SELECT
-                        COUNT(*) OVER() AS "Total matching rows",
                         customer_name AS "Customer",
                         COUNT(*) AS "Devices",
                         COUNT(*) FILTER (WHERE inventory_state LIKE 'Managed%') AS "Managed",
@@ -358,7 +402,7 @@ def _dashboards() -> list[dict[str, Any]]:
                     ORDER BY "Devices" DESC, customer_name
                     LIMIT 300
                     """,
-                    14, 0, 24, 8,
+                    18, 0, 24, 8,
                     click_behavior=_dashboard_link(DASH_DEVICES, [("customer", "Customer")]),
                     template_tags={"customer": _FILTER_TAGS["customer"]},
                     param_mappings={PARAM_CUSTOMER: _mapping("customer")},
@@ -375,12 +419,21 @@ def _dashboards() -> list[dict[str, Any]]:
             ],
             "cards": [
                 _card(
+                    "inventory_identity_conflicts_total",
+                    "Total identity conflicts",
+                    "scalar",
+                    """
+                    SELECT COUNT(*) AS "Total identity conflicts"
+                    FROM ninja_inventory.v_identity_conflicts_current
+                    """,
+                    0, 0, 4, 4,
+                ),
+                _card(
                     "inventory_identity_conflicts",
                     "Identity conflicts (top 300)",
                     "table",
                     """
                     SELECT
-                        COUNT(*) OVER() AS "Total matching rows",
                         conflict_type AS "Conflict",
                         identity_key AS "Key",
                         customer_count AS "Customers",
@@ -394,7 +447,7 @@ def _dashboards() -> list[dict[str, Any]]:
                     ORDER BY customer_count DESC, record_count DESC, conflict_type, identity_key
                     LIMIT 300
                     """,
-                    0, 0, 24, 10,
+                    4, 0, 24, 8,
                     column_widths={
                         "Conflict": 240,
                         "Key": 220,
@@ -404,12 +457,25 @@ def _dashboards() -> list[dict[str, Any]]:
                     },
                 ),
                 _card(
+                    "inventory_merge_candidates_total",
+                    "Total merge candidates",
+                    "scalar",
+                    """
+                    SELECT COUNT(*) AS "Total merge candidates"
+                    FROM ninja_inventory.v_merge_candidates_current
+                    WHERE 1=1
+                      [[AND customer_name IN ({{customer}})]]
+                    """,
+                    12, 0, 4, 4,
+                    template_tags={"customer": _FILTER_TAGS["customer"]},
+                    param_mappings={PARAM_CUSTOMER: _mapping("customer")},
+                ),
+                _card(
                     "inventory_merge_candidates",
                     "Merge candidates (top 300)",
                     "table",
                     """
                     SELECT
-                        COUNT(*) OVER() AS "Total matching rows",
                         customer_name AS "Customer",
                         candidate_type AS "Candidate",
                         match_key AS "Key",
@@ -427,7 +493,7 @@ def _dashboards() -> list[dict[str, Any]]:
                     ORDER BY customer_name, match_key
                     LIMIT 300
                     """,
-                    12, 0, 24, 10,
+                    16, 0, 24, 8,
                     template_tags={"customer": _FILTER_TAGS["customer"]},
                     param_mappings={PARAM_CUSTOMER: _mapping("customer")},
                     column_widths={
@@ -472,12 +538,35 @@ def _dashboards() -> list[dict[str, Any]]:
                     },
                 ),
                 _card(
+                    "inventory_serial_quality_details_total",
+                    "Total matching serial records",
+                    "scalar",
+                    """
+                    SELECT COUNT(*) AS "Total matching serial records"
+                    FROM ninja_inventory.v_serial_quality_current
+                    WHERE 1=1
+                      [[AND platform IN ({{platform}})]]
+                      [[AND customer_name IN ({{customer}})]]
+                      [[AND serial_quality IN ({{serial_quality}})]]
+                    """,
+                    8, 0, 12, 4,
+                    template_tags={
+                        "platform": _FILTER_TAGS["platform"],
+                        "customer": _FILTER_TAGS["customer"],
+                        "serial_quality": _FILTER_TAGS["serial_quality"],
+                    },
+                    param_mappings={
+                        PARAM_PLATFORM: _mapping("platform"),
+                        PARAM_CUSTOMER: _mapping("customer"),
+                        PARAM_SERIAL_QUALITY: _mapping("serial_quality"),
+                    },
+                ),
+                _card(
                     "inventory_serial_quality_details",
                     "Serial quality details (top 500)",
                     "table",
                     """
                     SELECT
-                        COUNT(*) OVER() AS "Total matching rows",
                         platform AS "Platform",
                         customer_name AS "Customer",
                         hostname AS "Device",
@@ -524,12 +613,25 @@ def _dashboards() -> list[dict[str, Any]]:
             "parameters_builder": _build_inventory_parameters,
             "cards": [
                 _card(
+                    "inventory_unresolved_source_records_total",
+                    "Total unresolved / excluded records",
+                    "scalar",
+                    """
+                    SELECT COUNT(*) AS "Total unresolved / excluded records"
+                    FROM ninja_inventory.v_unresolved_source_records_current
+                    WHERE 1=1
+                      [[AND platform IN ({{platform}})]]
+                    """,
+                    0, 0, 6, 4,
+                    template_tags={"platform": _FILTER_TAGS["platform"]},
+                    param_mappings={PARAM_PLATFORM: _mapping("platform")},
+                ),
+                _card(
                     "inventory_unresolved_source_records",
                     "Unresolved / excluded source records (top 500)",
                     "table",
                     """
                     SELECT
-                        COUNT(*) OVER() AS "Total matching rows",
                         record_state AS "State",
                         platform AS "Platform",
                         source_name AS "Source",
@@ -546,7 +648,7 @@ def _dashboards() -> list[dict[str, Any]]:
                     ORDER BY observed_at DESC, platform, platform_customer_name, hostname
                     LIMIT 500
                     """,
-                    0, 0, 24, 10,
+                    4, 0, 24, 8,
                     template_tags={"platform": _FILTER_TAGS["platform"]},
                     param_mappings={PARAM_PLATFORM: _mapping("platform")},
                     column_widths={
@@ -557,12 +659,35 @@ def _dashboards() -> list[dict[str, Any]]:
                     },
                 ),
                 _card(
+                    "inventory_source_observations_total",
+                    "Total matching source observations",
+                    "scalar",
+                    """
+                    SELECT COUNT(*) AS "Total matching source observations"
+                    FROM ninja_inventory.v_source_observations_current
+                    WHERE 1=1
+                      [[AND platform IN ({{platform}})]]
+                      [[AND COALESCE(customer_name, 'Unresolved') IN ({{customer}})]]
+                      [[AND serial_quality IN ({{serial_quality}})]]
+                    """,
+                    12, 0, 6, 4,
+                    template_tags={
+                        "platform": _FILTER_TAGS["platform"],
+                        "customer": _FILTER_TAGS["customer"],
+                        "serial_quality": _FILTER_TAGS["serial_quality"],
+                    },
+                    param_mappings={
+                        PARAM_PLATFORM: _mapping("platform"),
+                        PARAM_CUSTOMER: _mapping("customer"),
+                        PARAM_SERIAL_QUALITY: _mapping("serial_quality"),
+                    },
+                ),
+                _card(
                     "inventory_source_observations",
                     "Current source observations (top 500)",
                     "table",
                     """
                     SELECT
-                        COUNT(*) OVER() AS "Total matching rows",
                         platform AS "Platform",
                         source_name AS "Source",
                         COALESCE(customer_name, 'Unresolved') AS "Resolved customer",
@@ -580,7 +705,7 @@ def _dashboards() -> list[dict[str, Any]]:
                     ORDER BY platform, source_name, "Resolved customer", hostname
                     LIMIT 500
                     """,
-                    10, 0, 24, 10,
+                    16, 0, 24, 8,
                     template_tags={
                         "platform": _FILTER_TAGS["platform"],
                         "customer": _FILTER_TAGS["customer"],

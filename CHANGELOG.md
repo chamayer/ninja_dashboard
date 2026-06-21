@@ -2,6 +2,14 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.33.5] — 2026-06-21
+
+### Changed
+- Moved exact row-count denominators for capped Inventory and Patching
+  detail tables into separate scalar cards. Limited tables no longer use
+  `COUNT(*) OVER()`, so they can return their first 300/500 rows without
+  waiting for the full matching result count.
+
 ## [0.33.4] — 2026-06-21
 
 ### Changed

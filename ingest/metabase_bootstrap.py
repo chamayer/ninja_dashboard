@@ -2380,10 +2380,29 @@ ORDER BY "Patches" DESC
 """,
     },
     {
+        "key":            "detail_table_total",
+        "name":           "Total matching patch rows",
+        "display":        "scalar",
+        "row": 24, "col": 0, "size_x": 4, "size_y": 4,
+        "template_tags":  _FILTER_TAGS,
+        "param_mappings": _FILTER_PARAM_MAPPINGS,
+        "query": f"""
+{_CTE_CURRENT_STATE}
+SELECT COUNT(*) AS "Total matching patch rows"
+FROM current_state cs
+LEFT JOIN latest_install_outcome lio
+  ON lio.device_id = cs.device_id AND lio.patch_uid = cs.patch_uid
+JOIN ninja_core.v_active_devices d ON d.id = cs.device_id
+JOIN ninja_core.organizations o  ON o.id = d.organization_id
+WHERE d.approval_status = 'APPROVED'
+{_FILTER_PREDICATES}
+""",
+    },
+    {
         "key":            "detail_table",
         "name":           "Patch Detail Table (top 500)",
         "display":        "table",
-        "row": 24, "col": 0, "size_x": 24, "size_y": 14,
+        "row": 28, "col": 0, "size_x": 24, "size_y": 14,
         "template_tags":  _FILTER_TAGS,
         "param_mappings": _FILTER_PARAM_MAPPINGS,
         "column_click_behaviors": {
@@ -2398,7 +2417,6 @@ ORDER BY "Patches" DESC
         "query": f"""
 {_CTE_CURRENT_STATE}
 SELECT
-    COUNT(*) OVER() AS "Total Matching Rows",
     o.name           AS organization,
     d.system_name    AS device,
     {DEVICE_TYPE_D} AS device_type,
@@ -2430,7 +2448,7 @@ LIMIT 500
         "key":            "detail_type_distribution",
         "name":           "Patches by Type",
         "display":        "pie",
-        "row": 38, "col": 0, "size_x": 24, "size_y": 8,
+        "row": 42, "col": 0, "size_x": 24, "size_y": 8,
         "viz_settings":   {
             "pie.dimension":       "Type",
             "pie.metric":          "Patches",
