@@ -2,6 +2,13 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.33.7] — 2026-06-22
+
+### Fixed
+- Refined Inventory merge candidates so a valid serial seen in multiple
+  platforms is treated as normal same-device evidence unless it maps to
+  more than one reconciled inventory device for the same customer.
+
 ## [0.33.6] — 2026-06-22
 
 ### Changed
