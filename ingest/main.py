@@ -38,6 +38,7 @@ from ingest.logging_utils import install_log_safety
 from ingest.activities import ingest as activities_ingest
 from ingest.agent_compliance import ingest as agent_compliance_ingest
 from ingest.agent_compliance import review_digest
+from ingest.inventory.refresh import refresh_current as refresh_inventory_current
 from ingest.runlog import run_log
 from ingest.agent_compliance.config_loader import (
     add_device_ignore,
@@ -100,7 +101,18 @@ def run_patching_once() -> None:
         _safe("patches",        patches_ingest.run, client, snapshot_at)
         _safe("activities",     activities_ingest.run, client)
         _safe("troubleshooting_signal", refresh_device_troubleshooting_signal)
+        _refresh_inventory_current("patch ingest")
     log.info("Patch ingest run complete")
+
+
+def _refresh_inventory_current(reason: str) -> None:
+    if not settings.AGENT_COMPLIANCE_ENABLED:
+        return
+    try:
+        log.info("Refreshing Inventory current facts after %s", reason)
+        refresh_inventory_current()
+    except Exception:
+        log.exception("Inventory current refresh failed after %s", reason)
 
 
 def run_agent_compliance_once() -> None:
@@ -113,6 +125,7 @@ def run_agent_compliance_once() -> None:
     log.info("Agent compliance run starting")
     try:
         agent_compliance_ingest.run()
+        _refresh_inventory_current("agent compliance run")
     finally:
         _AGENT_COMPLIANCE_LOCK.release()
     log.info("Agent compliance run complete")
@@ -128,6 +141,7 @@ def run_agent_compliance_evaluate_once() -> None:
     log.info("Agent compliance evaluate starting")
     try:
         agent_compliance_ingest.evaluate(send_alerts=True)
+        _refresh_inventory_current("agent compliance evaluate")
     finally:
         _AGENT_COMPLIANCE_LOCK.release()
     log.info("Agent compliance evaluate complete")

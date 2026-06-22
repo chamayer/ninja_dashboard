@@ -2,6 +2,16 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.33.6] — 2026-06-22
+
+### Changed
+- Materialized Inventory current facts so Metabase reads stored current
+  relations instead of recomputing source observations, serial quality,
+  identity conflicts, merge candidates, unresolved records, and summary
+  metrics on every dashboard load.
+- Inventory current facts now refresh after patch ingest, agent
+  compliance collection, and agent compliance evaluation.
+
 ## [0.33.5] — 2026-06-21
 
 ### Changed
