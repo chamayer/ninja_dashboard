@@ -68,6 +68,9 @@ DASH_DRILLDOWN   = "Ninja — Device Drilldown"
 DASH_PCOV        = "Ninja — Device Patching Status"
 DASH_ISSUES      = "Ninja — Issues"
 DASH_TRENDS      = "Ninja — Trends"
+DASH_UTILITY     = "Ninja — Utilities"
+
+NINJA_DEVICE_URL = "https://amrose.rmmservice.com/#/deviceDashboard/{{Device ID}}/overview"
 
 DEFAULT_STALE_PATCH_DAYS = 35
 
@@ -1999,6 +2002,16 @@ def _apply_click_behaviors(
             r = client.get(f"/api/card/{card_id}")
             r.raise_for_status()
             current = r.json().get("visualization_settings") or {}
+            # Deep-merge column_settings so per-column entries baked into
+            # the card spec (e.g. view_as: link for "Open in Ninja")
+            # survive when click-behavior pass writes its own per-column
+            # entries for different columns.
+            if (
+                "column_settings" in extra
+                and isinstance(current.get("column_settings"), dict)
+            ):
+                merged_cs = {**current["column_settings"], **extra["column_settings"]}
+                extra = {**extra, "column_settings": merged_cs}
             current.update(extra)
             r = client.put(
                 f"/api/card/{card_id}",
@@ -2546,6 +2559,44 @@ DEVICE_CARDS = [
         "row": 0, "col": 0, "size_x": 24, "size_y": 6,
         "template_tags":  DEVICE_TAGS,
         "param_mappings": DEVICE_PARAM_MAPPINGS,
+        "viz_settings": {
+            "table.columns": [
+                {"name": "Device",              "enabled": True},
+                {"name": "Open in Ninja",       "enabled": True},
+                {"name": "Organization",        "enabled": True},
+                {"name": "Policy",              "enabled": True},
+                {"name": "Health",              "enabled": True},
+                {"name": "Patching Scope",      "enabled": True},
+                {"name": "Patching Notes",      "enabled": True},
+                {"name": "Device Type",         "enabled": True},
+                {"name": "Operating System",    "enabled": True},
+                {"name": "Last Contact",        "enabled": True},
+                {"name": "Last Boot",           "enabled": True},
+                {"name": "Online?",             "enabled": True},
+                {"name": "Needs Reboot",        "enabled": True},
+                {"name": "Reboot Reason",       "enabled": True},
+                {"name": "Earliest Scan in DB", "enabled": True},
+                {"name": "Last Scan",           "enabled": True},
+                {"name": "Last Warning",        "enabled": True},
+                {"name": "Warnings (30d)",      "enabled": True},
+                {"name": "Failures (30d)",      "enabled": True},
+                {"name": "Ninja OS Pending",    "enabled": True},
+                {"name": "Ninja OS Failed",     "enabled": True},
+                {"name": "Alerts",              "enabled": True},
+                {"name": "Install Issues",      "enabled": True},
+                {"name": "Maintenance Status",  "enabled": True},
+                # Device ID stays in the result set so the link template
+                # can substitute {{Device ID}}, but is hidden from view.
+                {"name": "Device ID",           "enabled": False},
+            ],
+            "column_settings": {
+                '["name","Open in Ninja"]': {
+                    "view_as":   "link",
+                    "link_url":  NINJA_DEVICE_URL,
+                    "link_text": "Open in Ninja",
+                },
+            },
+        },
         "query": f"""
 WITH latest_snap AS (
     SELECT DISTINCT ON (device_id) *
@@ -2554,6 +2605,8 @@ WITH latest_snap AS (
 )
 SELECT
     d.system_name          AS "Device",
+    d.id                   AS "Device ID",
+    'Open in Ninja'        AS "Open in Ninja",
     o.name                 AS "Organization",
     COALESCE(role_policy.name, assigned_policy.name, '(none)') AS "Policy",
     ldh.health_status      AS "Health",
@@ -5044,6 +5097,120 @@ _cap_table_card_heights(
 )
 
 
+# ── Utility dashboard ───────────────────────────────────────────────
+#
+# Operator search across the raw activity feed. Free-text on subject /
+# message plus structured filters. Each row links into Ninja via the
+# external URL, and the device column drills into Device Drilldown.
+
+PARAM_UTIL_MESSAGE  = "p_util_message"
+PARAM_UTIL_SUBJECT  = "p_util_subject"
+PARAM_UTIL_TYPE     = "p_util_type"
+PARAM_UTIL_ORG      = "p_util_org"
+PARAM_UTIL_DEVICE   = "p_util_device"
+PARAM_UTIL_SEVERITY = "p_util_severity"
+PARAM_UTIL_DAYS     = "p_util_days"
+
+_UTIL_TAGS = {
+    "message":       {"id": "tt_util_message",       "name": "message",       "display-name": "Message contains", "type": "text"},
+    "subject":       {"id": "tt_util_subject",       "name": "subject",       "display-name": "Subject contains", "type": "text"},
+    "activity_type": {"id": "tt_util_activity_type", "name": "activity_type", "display-name": "Activity Type",    "type": "text"},
+    "org":           {"id": "tt_util_org",           "name": "org",           "display-name": "Organization",     "type": "text"},
+    "device":        {"id": "tt_util_device",        "name": "device",        "display-name": "Device",           "type": "text"},
+    "severity":      {"id": "tt_util_severity",      "name": "severity",      "display-name": "Severity",         "type": "text"},
+    "days": {
+        "id": "tt_util_days", "name": "days",
+        "display-name": "Timeline window (days)",
+        "type": "number", "default": "30", "required": True,
+    },
+}
+
+_UTIL_PARAM_MAPPINGS = {
+    PARAM_UTIL_MESSAGE:  ["variable", ["template-tag", "message"]],
+    PARAM_UTIL_SUBJECT:  ["variable", ["template-tag", "subject"]],
+    PARAM_UTIL_TYPE:     ["variable", ["template-tag", "activity_type"]],
+    PARAM_UTIL_ORG:      ["variable", ["template-tag", "org"]],
+    PARAM_UTIL_DEVICE:   ["variable", ["template-tag", "device"]],
+    PARAM_UTIL_SEVERITY: ["variable", ["template-tag", "severity"]],
+    PARAM_UTIL_DAYS:     ["variable", ["template-tag", "days"]],
+}
+
+
+def build_utility_parameters(
+    org_names: list[str], device_names: list[str],
+) -> list[dict]:
+    return [
+        _param_text(       PARAM_UTIL_MESSAGE,  "Message contains",       "message"),
+        _param_text(       PARAM_UTIL_SUBJECT,  "Subject contains",       "subject"),
+        _param_multiselect(PARAM_UTIL_TYPE,     "Activity Type",          "activity_type", list(_DRILLDOWN_ACTIVITY_CODES)),
+        _param_multiselect(PARAM_UTIL_ORG,      "Organization",           "org",           org_names),
+        _param_dropdown(   PARAM_UTIL_DEVICE,   "Device",                 "device",        device_names),
+        _param_multiselect(PARAM_UTIL_SEVERITY, "Severity",               "severity",      _SEVERITY_OPTIONS),
+        _param_number(     PARAM_UTIL_DAYS,     "Timeline window (days)", "days",          30),
+    ]
+
+
+UTILITY_CARDS = [
+    {
+        "key":            "util_activity_search",
+        "name":           "Activity Search",
+        "display":        "table",
+        "row": 0, "col": 0, "size_x": 24, "size_y": 16,
+        "template_tags":  _UTIL_TAGS,
+        "param_mappings": _UTIL_PARAM_MAPPINGS,
+        "viz_settings": {
+            "table.columns": [
+                {"name": "Activity Time", "enabled": True},
+                {"name": "Device",        "enabled": True},
+                {"name": "Organization",  "enabled": True},
+                {"name": "Activity Type", "enabled": True},
+                {"name": "Severity",      "enabled": True},
+                {"name": "Subject",       "enabled": True},
+                {"name": "Message",       "enabled": True},
+                {"name": "Open in Ninja", "enabled": True},
+                # Device ID stays in the result set so the link template
+                # can substitute {{Device ID}}, but is hidden from view.
+                {"name": "Device ID",     "enabled": False},
+            ],
+            "column_settings": {
+                '["name","Open in Ninja"]': {
+                    "view_as":   "link",
+                    "link_url":  NINJA_DEVICE_URL,
+                    "link_text": "Open in Ninja",
+                },
+            },
+        },
+        "column_click_behaviors": {
+            "Device": {"target": DASH_DRILLDOWN, "params": {"p_device": "Device"}},
+        },
+        "query": """
+SELECT
+    a.activity_time      AS "Activity Time",
+    d.system_name        AS "Device",
+    d.id                 AS "Device ID",
+    o.name               AS "Organization",
+    a.activity_type      AS "Activity Type",
+    a.severity           AS "Severity",
+    a.subject            AS "Subject",
+    a.message            AS "Message",
+    'Open in Ninja'      AS "Open in Ninja"
+FROM ninja_activities.activities a
+LEFT JOIN ninja_core.v_active_devices d ON d.id = a.device_id
+LEFT JOIN ninja_core.organizations    o ON o.id = d.organization_id
+WHERE a.activity_time > NOW() - (INTERVAL '1 day' * {{days}})
+  [[AND a.message       ILIKE '%' || {{message}} || '%']]
+  [[AND a.subject       ILIKE '%' || {{subject}} || '%']]
+  [[AND a.activity_type IN ({{activity_type}})]]
+  [[AND o.name          IN ({{org}})]]
+  [[AND d.system_name   = {{device}}]]
+  [[AND a.severity      IN ({{severity}})]]
+ORDER BY a.activity_time DESC
+LIMIT 1000
+""",
+    },
+]
+
+
 def build_dashboards(
     org_names: list[str], os_families: list[str], device_names: list[str],
     policy_names: list[str],
@@ -5109,6 +5276,11 @@ def build_dashboards(
             "name":       DASH_TRENDS,
             "parameters": build_trends_parameters(org_names),
             "cards":      TRENDS_CARDS,
+        },
+        {
+            "name":       DASH_UTILITY,
+            "parameters": build_utility_parameters(org_names, device_names),
+            "cards":      UTILITY_CARDS,
         },
     ]
 

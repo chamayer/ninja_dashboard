@@ -2,6 +2,25 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.34.0] — 2026-06-30
+
+### Added
+- New `Ninja — Utilities` dashboard with an Activity Search card.
+  Free-text filters on `message` and `subject`, plus multi-selects for
+  activity type, organization, severity, and a device dropdown.
+  Results link out to the Ninja device dashboard via a per-row
+  "Open in Ninja" link, and the device column drills into Device
+  Drilldown.
+- "Open in Ninja" link column added to the Device Drilldown's Device
+  Summary card. Uses the Ninja URL
+  `https://amrose.rmmservice.com/#/deviceDashboard/<id>/overview`.
+
+### Changed
+- Click-behavior pass now deep-merges `column_settings` so per-column
+  display settings baked into a card spec (e.g. `view_as: "link"`)
+  survive when per-column click behaviors are written for unrelated
+  columns on the same card.
+
 ## [0.33.7] — 2026-06-22
 
 ### Fixed
