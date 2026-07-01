@@ -5,6 +5,42 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-07-01 — v0.34.1 patch dashboard functional blueprint
+
+**Why:** The patch dashboards had the data to answer operational
+questions, but the first read still felt like disconnected counts. The
+desired view is functional, not role-based: Command Center for
+cross-customer health, Customer Health for one customer, Triage for
+device work, Device Drilldown for evidence, and Trends/Reporting for
+movement.
+
+**Decision:** Keep Metabase and preserve stored dashboard identities /
+click-through behavior. Rename visible navigation labels only:
+`Org Overview` becomes Customer Health and `Issues` becomes Triage.
+Use the existing `device_troubleshooting_signal` materialized view for
+the first implementation slice so landing cards stay fast without a new
+migration unless validation proves one is needed.
+
+**What landed:**
+- `BLUEPRINT.md` rewritten as the locked patch-operations dashboard
+  blueprint.
+- Command Center `Clients Needing Attention` now ranks customers by
+  health tier and reason.
+- Customer Health top band now shows health tier, patching-enabled
+  devices, successful scans in 30d, recent installs in 30d, and devices
+  needing attention.
+- Triage queue now exposes priority, blocker, full warning/failure
+  message text, and includes warning-only devices.
+- Triage filters now include `Message Contains` for finding multiple
+  devices with similar errors.
+
+**Pending validation:**
+- Bootstrap Metabase on the stack and verify dashboard load time,
+  click-through parameter propagation, and SQL execution against live
+  data.
+
+---
+
 ## 2026-06-18 — v0.32.0 id-link model + duplicate-client cleanup
 
 **Why:** Operator renamed three customers in Ninja (PCHC, City

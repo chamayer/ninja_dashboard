@@ -1,142 +1,273 @@
 # Goal
 
-Switch agent-compliance customer identity from name-matching to stable
-upstream id-matching, and clean up the duplicate clients that the
-name-only path created when customers were renamed in their platforms.
+Redesign the patching dashboards around fast, human-first patch
+operations reporting while preserving click-through filtering.
 
 # Why
 
-When Ninja renames an org (same `platform_group_id`, new
-`platform_group_name`), today's discovery treats the new name as an
-unknown customer and mints a new `clients` row. Result on 2026-06-18:
-client_ids 1299, 1300, 1301 were created as duplicates of existing
-clients 22, 7, 10 (PCHC, City Painting via CPS, GF Supplies). Matrix
-rows split, dashboards show both old and new entries, operators have
-to pick which to trust.
-
-The platforms (Ninja, S1, LMI, SC) all expose a stable per-customer id
-that never changes on rename. We already store it as
-`platform_observations.platform_group_id`. We just never used it for
-identity. This change makes that id the canonical join key and treats
-the display name as a refreshable label.
-
-Aliases (`client_aliases`) stay only for cross-platform identity glue
-(S1's group id ↔ Ninja's org id ↔ same customer). They are no longer a
-rename-mitigation mechanism.
+Current patching dashboards contain most of the needed signals, but the
+story is fragmented. Org Overview and other cards often present counts
+without making it obvious whether patching is healthy, what needs work,
+or why devices/customers are blocked.
 
 # Scope
 
-- New table `client_platform_links` recording
-  `(client_id, platform, platform_group_id)` mappings.
-- One migration to create the table; one migration (or script) to
-  backfill from existing observations and merge the 3 known duplicate
-  client_id pairs.
-- Ingest change: discovery looks up id-link first; falls back to
-  name/alias matching only when no link row exists.
-- On id-link match, `clients.client_name` auto-refreshes to the latest
-  observed name from the platform (Ninja wins on tie).
-- One-time cleanup of stale matrix rows and superseded
-  `org_candidates` rows.
+- Reframe patching around functional areas, not formal roles:
+  - Command Center: cross-customer health and exceptions.
+  - Customer Health: one-customer health report.
+  - Triage: device/action queue and failure investigation.
+  - Device Drilldown: full single-device evidence.
+  - Trends / Reporting: time-series and exportable evidence.
+- Keep Metabase as the reporting UI with limited feedback/actions.
+- Preserve and expand useful click-through filter behavior.
+- Make page load speed a hard requirement.
+- Design for an internal AMR operator wearing multiple hats in a small
+  MSP; customer-facing output is reporting/export evidence, not the
+  operational landing view.
 
 # Out of scope
 
-- No changes to compliance evaluation, finding signatures, or matrix
-  schemas.
-- No changes to operator dashboards or filters - `client_id` is still
-  the join key everywhere.
-- No removal of `client_aliases` table or existing alias rows. They
-  remain valid for cross-platform glue.
-- No retroactive rewrite of `compliance_matrix_history` -
-  historically accurate as-is.
-
-# Decisions locked in
-
-1. **Duplicate-pair winner:** keep the OLD client_ids (22, 7, 10).
-   Demote new ids (1299, 1300, 1301) to `enabled=false, source='demoted'`.
-   Reason: preserves run_log, snapshot, and alert continuity. Treat
-   the rename event as if it never minted duplicates.
-2. **Name refresh on every link match:** yes. Whenever the upstream
-   platform's `platform_group_name` differs from
-   `clients.client_name`, the canonical name updates to the
-   latest-observed value. Ninja is authoritative when multiple
-   platforms disagree.
-3. **Backfill scope:** write link rows for every distinct
-   `(platform, platform_group_id)` seen in `platform_observations`,
-   including S1 / LMI / SC even where they did not create duplicate
-   clients today.
-4. **Simplicity over clever:** GoFlow/Goflow casing and similar
-   normalize-collisions are not special-cased. Whatever Ninja last
-   reported wins.
+- No custom web app yet.
+- No broad workflow system with ownership, assignment, or ticket state.
+- No change to ingest cadence unless dashboard evidence proves it is
+  needed.
+- No removal of existing supporting dashboards until replacements prove
+  equivalent.
 
 # Files to change
 
-- `sql/migrations/052_client_platform_links.sql` - new table + PK +
-  indexes.
-- `sql/migrations/053_client_platform_links_backfill.sql` - backfill
-  + 3-pair merge + matrix cleanup + candidate cleanup.
-- `ingest/agent_compliance/config_loader.py` - discovery lookup
-  order: id-link → alias-by-name → mint new client.
-- `ingest/agent_compliance/ingest.py` - if the matrix builder or
-  observation processor reads `clients.client_name`, ensure it picks
-  up refreshed names.
-- `CHANGELOG.md` - v0.32.0 entry.
-- `VERSION` - bump to `0.32.0`.
-- `SESSIONS.md` - session note.
-- `TODO.md` - move "device aliases" idea to Permanently parked
-  (superseded by id-link model); mark the rename cleanup as done.
-- `HANDY_COMMANDS.md` - add a validation query to confirm link
-  coverage and zero remaining duplicate (platform, group_id) →
-  client_id pairs.
+- `ingest/metabase_bootstrap.py`
+  - Dashboard layout, filters, card SQL, click-through mappings.
+- Conditional: `sql/migrations/065_patch_operations_current.sql` or
+  similar
+  - Add canonical current reporting views/materialized views if the
+    baseline shows landing dashboards or repeated logic need them.
+- Conditional: `ingest/summary_views.py` or patch ingest refresh path
+  - Refresh new materialized views after patch/activity/core ingest if
+    new MVs are added.
+- `CHANGELOG.md`
+  - Record the dashboard redesign.
+- `SESSIONS.md`
+  - Record decisions and validation notes.
+- `TODO.md`
+  - Move superseded dashboard follow-ups or add deferred polish.
+- `VERSION`
+  - Bump version when implementation ships.
+
+# Design rules
+
+- Page load must be quick:
+  - Command Center and Customer Health should load under 4 seconds on a
+    broad/cold open and under 3 seconds p95 in normal filtered use.
+  - Individual card queries target under 1 second; anything over 2
+    seconds needs a fix or explicit justification.
+  - Canonical views/materialized views are presumed in-scope for
+    landing views unless the baseline proves direct card SQL already
+    meets target.
+  - Keep broad tables capped and show total matching row count in a
+    separate scalar when needed.
+  - Avoid `COUNT(*) OVER()` on large limited tables.
+  - Add indexes with any new reporting view that filters by customer,
+    device, policy, scope, issue, scan time, install time, or activity
+    time.
+- Human consumer first:
+  - Show work/health language, not database terms.
+  - Put decision columns before verbose evidence.
+  - Keep full raw/debug detail out of landing sections.
+  - Show full error text only where failure investigation needs it.
+- Click-throughs are part of the product:
+  - Customer row/cell opens Customer Health with organization filter.
+  - Bad customer/device category opens Triage with matching filters.
+  - Device opens Device Drilldown.
+  - KB opens Patch Detail.
+  - Error category opens Triage/failure section filtered to that error.
+  - OS, policy, scope, and issue fields self-filter where useful.
+  - Use stable lowercase SQL aliases for click-source columns.
+
+# Locked decisions
+
+- Preserve existing Metabase dashboard identities/IDs where practical;
+  update visible/nav labels to functional names.
+- `Org Overview` becomes visible as Customer Health if feasible without
+  breaking compatibility; otherwise the nav label says Customer Health
+  while the stored dashboard name remains stable.
+- Recent windows are dashboard parameters, defaulting to 30 days, not
+  hardcoded constants.
+- Replacement proves equivalent through an old-to-new functional mapping,
+  not equal card count. Do not remove or hide old cards/dashboards until
+  their operational answers and click-through paths have accepted new
+  homes.
+- Triage owns detailed Approval Backlog and Reboot Completion queues.
+  Customer Health may show customer-scoped summary counts/top blockers;
+  Command Center may show cross-customer summaries/ranking.
+
+# Customer health model
+
+Use a rule-stack/tier model for v1, not a weighted black-box score.
+Tiers must be explainable directly in the UI with `health_reason`.
+
+- `Broken`
+  - stale dashboard data;
+  - no scan coverage on included devices;
+  - active failures above the Step 1 threshold.
+- `At Risk`
+  - stalled/never-patched included devices above threshold;
+  - reboot blockers above threshold;
+  - manual approval backlog above threshold.
+- `Watch`
+  - warnings above threshold;
+  - delayed backlog above threshold;
+  - low recent-install activity below threshold.
+- `Healthy`
+  - enabled/included devices are scanning and patching recently;
+  - no material blockers.
+
+Step 1 must pin concrete thresholds for each placeholder above before
+Command Center is implemented. Within each tier, sort by severity inputs
+first, then affected device count, oldest blocker age, and customer name.
+
+# Triage ordering
+
+Triage queue priority order:
+
+1. Data confidence blockers.
+2. No successful scan on included devices.
+3. Active operational failures.
+4. Failed installs.
+5. Stalled / never-patched included devices.
+6. Reboot blockers.
+7. Manual approvals.
+8. Warnings / watch items.
+
+Each row should expose priority, customer, device, problem, likely
+cause, next step, last scan, last install attempt, last contact, and a
+click path to Ninja and Device Drilldown.
+
+# Target dashboards
+
+1. Command Center
+   - Cross-customer health ranking.
+   - Management summary band: healthy/watch/at-risk/broken customers,
+     data-confidence problems, customers needing follow-up.
+   - Patch progress pulse.
+   - Data confidence / ingest freshness.
+   - Top exceptions by customer and issue.
+   - Fast click-through into Customer Health or Triage.
+
+2. Customer Health
+   - Current Org Overview reshaped as a one-customer report.
+   - Patching enabled/included devices.
+   - Successful scan coverage and no-scan devices.
+   - Recently installed devices.
+   - Stalled / never-patched devices.
+   - Failures, warnings, reboot blockers, manual approvals.
+   - Top devices needing attention.
+   - Export-friendly evidence tables: installed recently, unresolved
+     blockers, exclusions, failures/warnings, reboot blockers.
+
+3. Triage
+   - Main device work queue.
+   - Scope / eligibility issues.
+   - Scan confidence issues.
+   - Failed installs and operational failures.
+   - Reboot completion blockers.
+   - Approval backlog.
+   - Search filters for device, KB, and error/message text.
+   - Full error message available in failure investigation tables.
+   - Blocker ownership/type: data confidence, MSP action, customer/user
+     action, policy/expected, offline/unreachable.
+
+4. Device Drilldown
+   - Full single-device context.
+   - Action summary at top: current problem, likely cause, suggested
+     next step, last scan, last install, last failure.
+   - Scope, policy, last contact, last scan, last install.
+   - Current patch state and install history.
+   - Warning/failure history with full or sufficiently long messages.
+   - Open in Ninja link.
+
+5. Trends / Reporting
+   - Installs over time.
+   - Failed installs over time.
+   - Operational failures and warnings over time.
+   - Active/stalled/never-patched movement.
+   - Customer/exportable evidence.
+
+Supporting dashboards:
+- Patch Detail remains the KB/current-state drill-through page.
+- Utilities remains broad activity search, but important search paths
+  should be reachable from Triage.
+
+# Functional coverage
+
+- Customer Health
+- Device Triage
+- Failure Investigation
+- Patch Progress
+- Scan / Inventory Confidence
+- Scope / Eligibility
+- Approval Backlog
+- Reboot Completion
+- Remediation Follow-Up
+- Reporting / Evidence
+
+# Acceptance checks
+
+- Command Center ranks customers by the documented tier rules and shows
+  the reason behind each tier.
+- Customer Health answers the same health questions for one customer as
+  an export-friendly report.
+- Triage uses the documented priority order and exposes enough evidence
+  for a junior tech to know what to check next.
+- Device Drilldown shows full scope, scan, install, warning/failure,
+  reboot, next-step, and Ninja-link evidence for the selected device.
+- Trends shows patch progress and failure movement over the selected
+  window.
+- A real operator walkthrough can answer: which customers are unhealthy,
+  which devices need work, what is blocking them, and where is the full
+  evidence, without schema explanation.
 
 # Steps
 
-1. Write migration 052 (table + PK + indexes).
-2. Write migration 053:
-   - INSERT INTO client_platform_links SELECT DISTINCT
-     latest-name-per-pair → most-recently-assigned client_id, per
-     `(platform, platform_group_id)`.
-   - For the 3 known Ninja conflict pairs: pick the old client_id as
-     winner, repoint compliance_matrix_current rows from
-     loser → winner (DELETE losing rows where winner already has
-     same norm_name), demote loser client.
-   - UPDATE clients.client_name on winners to the current Ninja name.
-   - Close superseded org_candidates rows.
-3. Patch `config_loader.py` discovery:
-   - Build an id-link cache at start of run.
-   - On each observation with a `platform_group_id`: lookup link;
-     match wins regardless of name.
-   - On match with name drift: schedule a `clients.client_name`
-     update (commit once per run, not per observation).
-   - On no link: existing alias/name path; on success, write the new
-     link row.
-4. Bump `VERSION` to `0.32.0`. Update CHANGELOG.
-5. Commit + push.
-6. Wait for Portainer to redeploy.
-7. Run `curl -fsS -X POST http://127.0.0.1:8090/run/agent-compliance`
-   on am-ch-01.
-8. Verify:
-   - `SELECT platform, platform_group_id, COUNT(DISTINCT client_id)
-      FROM platform_observations po JOIN client_platform_links USING
-      (platform, platform_group_id) GROUP BY 1,2 HAVING COUNT(DISTINCT
-      client_id) > 1;` returns 0 rows.
-   - Client 22 (PCHC) has the new name `PCHC - Parent Care`.
-   - Client 7 (City Painting) has the new name `City Painting`.
-   - Client 10 (GF Supplies) has the new name `GF Supplies / Sigo Signs`.
-   - Clients 1299, 1300, 1301 are disabled and have zero matrix rows.
-   - Dashboard customer filter shows only the consolidated names.
-9. Report the short commit hash in chat.
-
-# Open questions
-
-- Should the link row record the discovering `source_id` (FK to
-  platform_sources)? Useful for SC where the same client may have
-  multiple sources. Default in schema: nullable; PK uses
-  COALESCE(source_id, 0). Confirm during implementation.
-- Should we log every name refresh into a small audit table, or just
-  let `clients.updated_at / updated_by` reflect it? Default: rely on
-  `updated_by='id_link_refresh'` and updated_at; no audit table.
+1. Lock dashboard naming/identity strategy, deployment/bootstrap behavior,
+   old-to-new functional mapping, and speed baseline:
+   - current dashboard/card query timing;
+   - dashboard broad vs filtered load behavior;
+   - existing click-through paths to preserve;
+   - current bootstrap trigger after Portainer deploy;
+   - concrete health-tier thresholds;
+   - concrete within-tier customer ordering.
+2. Audit current card SQL and identify reusable canonical result shapes:
+   customer health, device triage, scan confidence, failure events.
+3. Decide which shapes need materialized views for speed.
+4. Add migration/view refresh plumbing if needed.
+5. Rework Command Center into cross-customer health and exceptions.
+6. Rework Org Overview into Customer Health while preserving existing
+   customer click-through behavior.
+7. Rework Issues/Device Patching Status into a sharper Triage workflow.
+8. Tighten Device Drilldown failure/warning detail and Ninja links.
+9. Adjust Trends only where reporting gaps remain.
+10. Run compile checks and dashboard spec build checks.
+11. Bootstrap Metabase on the stack and validate:
+    - page load speed;
+    - dashboard filters;
+    - click-through parameter propagation;
+    - capped table counts;
+    - full error/message visibility where intended;
+    - human-consumer walkthrough.
 
 # Status
 
-implemented - pending commit + Portainer redeploy + on-host
-verification
+first implementation slice complete locally:
+- visible navigation labels changed to Customer Health and Triage while
+  stored Metabase dashboard names remain stable;
+- Command Center customer ranking now uses health tier + reason;
+- Customer Health top band now answers enabled/scanned/installed/needs
+  attention;
+- Triage now has priority, blocker, warning-only rows, full messages,
+  and message-text search.
+
+Pending:
+- live Metabase bootstrap;
+- page-load timing;
+- click-through validation against the running stack.

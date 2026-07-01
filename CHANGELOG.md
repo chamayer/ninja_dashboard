@@ -2,6 +2,22 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.34.1] — 2026-07-01
+
+### Changed
+- Reframed patch dashboard navigation labels around functional areas:
+  `Org Overview` now appears as Customer Health and `Issues` appears
+  as Triage while preserving the stored Metabase dashboard identities.
+- Command Center's `Clients Needing Attention` table now ranks
+  customers by health tier and reason using scan, install, failure,
+  stalled, reboot, approval, and warning signals.
+- Customer Health's top band now answers the core operational questions:
+  health tier, patching-enabled devices, scanned successfully in 30d,
+  installed recently in 30d, and devices needing attention.
+- Triage queue now includes priority, blocker, full failure/warning
+  messages, and warning-only devices; issue filters include a free-text
+  `Message Contains` search for finding devices with similar errors.
+
 ## [0.34.0] — 2026-06-30
 
 ### Added

@@ -898,76 +898,111 @@ FROM (
         "display":        "table",
         "row": 11, "col": 0, "size_x": 24, "size_y": 10,
         "template_tags":  _CMD_TAGS,
-        "param_mappings": _CMD_PARAM_MAPPINGS_FULL,
+        "param_mappings": _CMD_PARAM_MAPPINGS,
         "column_click_behaviors": {
             "organization": {"target": DASH_ORG, "params": {"p_org": "organization"}},
         },
-        # Severity filter applied at CTE-level (not outer WHERE) so
-        # LEFT JOIN semantics are preserved — filtering severity in
-        # the outer WHERE would silently drop devices with no
-        # matching patch row.
         "query": f"""
-WITH current_state AS (
-    SELECT device_id, patch_uid, status, severity
-    FROM ninja_patches.current_patch_state
-    WHERE 1=1
-      [[AND severity IN ({{{{severity}}}})]]
-{_PATCH_TYPE_EXCLUDE}),
-latest_install_result AS (
-    SELECT device_id, patch_uid, status, severity
-    FROM ninja_patches.latest_install_outcome
-    WHERE 1=1
-      [[AND severity IN ({{{{severity}}}})]]
-{_PATCH_TYPE_EXCLUDE}),
-last_install AS (
+WITH org_rollup AS (
     SELECT
-        device_id,
-        ever_installed,
-        last_seen_at AS last_install_at
-    FROM ninja_patches.device_patch_signal
-),
-device_status AS (
-    SELECT
-        d.id,
-        d.organization_id,
-        CASE
-            WHEN NOT COALESCE(li.ever_installed, FALSE) THEN 'never'
-            WHEN li.last_install_at IS NULL THEN 'stale'
-            WHEN li.last_install_at < NOW() - (INTERVAL '1 day' * {DEFAULT_STALE_PATCH_DAYS}) THEN 'stale'
-            ELSE 'recent'
-        END AS patch_activity
-    FROM ninja_core.v_active_devices d
-    LEFT JOIN last_install li ON li.device_id = d.id
+        o.name AS organization,
+        COUNT(*) AS active_devices,
+        COUNT(*) FILTER (WHERE s.patching_scope = 'Included') AS included_devices,
+        COUNT(*) FILTER (
+            WHERE s.patching_scope = 'Included'
+              AND s.last_scan_completed >= NOW() - INTERVAL '30 days'
+        ) AS scanned_30d,
+        COUNT(*) FILTER (
+            WHERE s.patching_scope = 'Included'
+              AND s.last_install_attempt >= NOW() - INTERVAL '30 days'
+        ) AS installed_30d,
+        COUNT(*) FILTER (
+            WHERE s.patching_scope = 'Included'
+              AND (s.failed_installs > 0 OR s.patch_failure_events_30d > 0)
+        ) AS failure_devices,
+        COUNT(*) FILTER (
+            WHERE s.patching_scope = 'Included'
+              AND s.patch_status = 'stale_patch_data'
+        ) AS stalled_devices,
+        COUNT(*) FILTER (
+            WHERE s.patching_scope = 'Included'
+              AND s.patch_status = 'no_patch_data'
+        ) AS never_patched_devices,
+        COUNT(*) FILTER (
+            WHERE s.patching_scope = 'Included'
+              AND COALESCE(s.needs_reboot, FALSE)
+        ) AS reboot_devices,
+        COUNT(*) FILTER (
+            WHERE s.patching_scope = 'Included'
+              AND s.manual_patches > 0
+        ) AS manual_devices,
+        COUNT(*) FILTER (
+            WHERE s.patching_scope = 'Included'
+              AND s.warning_events_30d > 0
+        ) AS warning_devices
+    FROM ninja_core.device_troubleshooting_signal s
+    JOIN ninja_core.v_active_devices d ON d.id = s.device_id
+    JOIN ninja_core.organizations o ON o.id = s.organization_id
+    WHERE 1=1
+{_CMD_FILTERS_DEVICE}
+    GROUP BY o.name
 )
 SELECT
-    o.name AS organization,
-    COUNT(DISTINCT d.id) AS "Active Devices",
-    COUNT(*) FILTER (WHERE lio.status = 'FAILED') AS "Failed Patches",
-    COUNT(*) FILTER (WHERE cs.status = 'MANUAL') AS "Manual Approval Patches",
-    COUNT(*) FILTER (WHERE cs.status = 'DELAYED') AS "Delayed Install Patches",
-    COUNT(DISTINCT ds.id) FILTER (WHERE ds.patch_activity = 'stale') AS "Stalled Devices",
-    COUNT(DISTINCT ds.id) FILTER (WHERE ds.patch_activity = 'never') AS "Never-Patched Devices",
-    COUNT(DISTINCT d.id) FILTER (WHERE d.needs_reboot = TRUE) AS "Devices Needing Reboot"
-FROM ninja_core.v_active_devices d
-JOIN ninja_core.organizations o ON o.id = d.organization_id
-LEFT JOIN current_state cs ON cs.device_id = d.id
-LEFT JOIN latest_install_result lio
-  ON lio.device_id = cs.device_id AND lio.patch_uid = cs.patch_uid
-LEFT JOIN device_status ds ON ds.id = d.id
-WHERE 1=1
-{_CMD_FILTERS_DEVICE}
-GROUP BY o.name
-HAVING
-    COUNT(*) FILTER (WHERE lio.status = 'FAILED') > 0
-    OR COUNT(*) FILTER (WHERE cs.status IN ('MANUAL','DELAYED')) > 0
-    OR COUNT(DISTINCT ds.id) FILTER (WHERE ds.patch_activity IN ('stale','never')) > 0
-    OR COUNT(DISTINCT d.id) FILTER (WHERE d.needs_reboot = TRUE) > 0
+    organization,
+    CASE
+        WHEN included_devices = 0 THEN 'Watch'
+        WHEN scanned_30d = 0 THEN 'Broken'
+        WHEN failure_devices > 0 THEN 'Broken'
+        WHEN stalled_devices + never_patched_devices > 0 THEN 'At Risk'
+        WHEN reboot_devices > 0 THEN 'At Risk'
+        WHEN manual_devices > 0 THEN 'At Risk'
+        WHEN warning_devices > 0 THEN 'Watch'
+        WHEN installed_30d = 0 THEN 'Watch'
+        ELSE 'Healthy'
+    END AS "Tier",
+    CASE
+        WHEN included_devices = 0 THEN 'No included patching devices'
+        WHEN scanned_30d = 0 THEN 'No successful patch scans in 30d'
+        WHEN failure_devices > 0 THEN 'Patch failures'
+        WHEN stalled_devices + never_patched_devices > 0 THEN 'Stalled or never patched'
+        WHEN reboot_devices > 0 THEN 'Reboot blockers'
+        WHEN manual_devices > 0 THEN 'Manual approvals'
+        WHEN warning_devices > 0 THEN 'Patch warnings'
+        WHEN installed_30d = 0 THEN 'No installs in 30d'
+        ELSE 'No material blockers'
+    END AS "Why",
+    active_devices AS "Active Devices",
+    included_devices AS "Patching Enabled",
+    scanned_30d AS "Scanned 30d",
+    installed_30d AS "Installed 30d",
+    failure_devices AS "Failure Devices",
+    stalled_devices AS "Stalled",
+    never_patched_devices AS "Never Patched",
+    reboot_devices AS "Reboot",
+    manual_devices AS "Manual",
+    warning_devices AS "Warnings"
+FROM org_rollup
+WHERE included_devices = 0
+   OR scanned_30d = 0
+   OR failure_devices > 0
+   OR stalled_devices + never_patched_devices > 0
+   OR reboot_devices > 0
+   OR manual_devices > 0
+   OR warning_devices > 0
+   OR installed_30d = 0
 ORDER BY
-    "Failed Patches" DESC,
-    "Manual Approval Patches" DESC,
-    "Delayed Install Patches" DESC,
-    "Stalled Devices" DESC,
-    "Never-Patched Devices" DESC,
+    CASE
+        WHEN scanned_30d = 0 OR failure_devices > 0 THEN 0
+        WHEN stalled_devices + never_patched_devices > 0 OR reboot_devices > 0 OR manual_devices > 0 THEN 1
+        WHEN warning_devices > 0 OR installed_30d = 0 OR included_devices = 0 THEN 2
+        ELSE 3
+    END,
+    failure_devices DESC,
+    stalled_devices + never_patched_devices DESC,
+    reboot_devices DESC,
+    manual_devices DESC,
+    warning_devices DESC,
+    active_devices DESC,
     organization
 LIMIT 50
 """,
@@ -3053,11 +3088,13 @@ problem_devices AS (
             WHEN c.patch_status = 'stale_patch_data' AND COALESCE(c.failed_installs, 0) > 0 THEN 'Stalled with failures'
             WHEN c.patch_status = 'stale_patch_data' AND COALESCE(c.needs_reboot, FALSE) THEN 'Stalled with reboot pending'
             WHEN c.patch_status = 'stale_patch_data' AND COALESCE(c.manual_patches, 0) > 0 THEN 'Stalled with manual approvals'
+            WHEN c.patch_status = 'stale_patch_data' AND COALESCE(c.warning_events_30d, 0) > 0 THEN 'Stalled with warnings'
             WHEN c.patch_status = 'stale_patch_data' AND COALESCE(c.delayed_patches, 0) > 0 THEN 'Stalled with delayed patches'
             WHEN c.patch_status = 'stale_patch_data' AND COALESCE(c.approved_patches, 0) > 0 THEN 'Stalled with approved waiting'
             WHEN c.patch_status = 'stale_patch_data' THEN 'Stalled'
             WHEN COALESCE(c.failed_installs, 0) > 0 THEN 'Active with failures'
             WHEN COALESCE(c.needs_reboot, FALSE) THEN 'Reboot pending'
+            WHEN COALESCE(c.warning_events_30d, 0) > 0 THEN 'Active with warnings'
             WHEN COALESCE(c.manual_patches, 0) > 0 THEN 'Manual approvals'
             ELSE 'Review'
         END AS issue_type,
@@ -3076,11 +3113,13 @@ problem_devices AS (
             WHEN c.patch_status = 'stale_patch_data' AND COALESCE(c.failed_installs, 0) > 0 THEN 'Review failed install results'
             WHEN c.patch_status = 'stale_patch_data' AND COALESCE(c.needs_reboot, FALSE) THEN 'Reboot or confirm reboot policy'
             WHEN c.patch_status = 'stale_patch_data' AND COALESCE(c.manual_patches, 0) > 0 THEN 'Review manual approvals'
+            WHEN c.patch_status = 'stale_patch_data' AND COALESCE(c.warning_events_30d, 0) > 0 THEN 'Review recent OS patch warnings (Drilldown)'
             WHEN c.patch_status = 'stale_patch_data' AND COALESCE(c.delayed_patches, 0) > 0 THEN 'Review delay policy/window'
             WHEN c.patch_status = 'stale_patch_data' AND COALESCE(c.approved_patches, 0) > 0 THEN 'Check why approved patches are not installing'
             WHEN c.patch_status = 'stale_patch_data' THEN 'Check schedule, agent health, maintenance window, and policy'
             WHEN COALESCE(c.failed_installs, 0) > 0 THEN 'Review failed install results'
             WHEN COALESCE(c.needs_reboot, FALSE) THEN 'Reboot or confirm reboot policy'
+            WHEN COALESCE(c.warning_events_30d, 0) > 0 THEN 'Review recent OS patch warnings (Drilldown)'
             WHEN COALESCE(c.manual_patches, 0) > 0 THEN 'Review manual approvals'
             ELSE 'Open device drilldown'
         END AS suggested_action
@@ -3088,6 +3127,7 @@ problem_devices AS (
     WHERE c.patch_status IN ('no_patch_data', 'stale_patch_data')
        OR COALESCE(c.failed_installs, 0) > 0
        OR COALESCE(c.needs_reboot, FALSE)
+       OR COALESCE(c.warning_events_30d, 0) > 0
        OR COALESCE(c.manual_patches, 0) > 0
        OR c.patching_scope = 'Excluded'
 )
@@ -3455,6 +3495,7 @@ PARAM_ISSUE_FAILED = "p_issue_failed"
 PARAM_ISSUE_MISSING = "p_issue_missing"
 PARAM_ISSUE_STARTED_OPEN = "p_issue_started_open"
 PARAM_ISSUE_DAYS = "p_issue_days"
+PARAM_ISSUE_MESSAGE_TEXT = "p_issue_message_text"
 # Set by click-through from the Warnings by Category / Failures by
 # Error Code cards. Drives the "Devices Matching ..." drillthrough
 # tables added in 0.15.4.
@@ -3502,6 +3543,7 @@ def build_issue_parameters(
         _param_multiselect(PARAM_ISSUE_MISSING, "Has Missing Patches", "has_missing", _BOOL_OPTIONS),
         _param_multiselect(PARAM_ISSUE_STARTED_OPEN, "Started Without Completion", "started_open", _BOOL_OPTIONS),
         _param_number(PARAM_ISSUE_DAYS, "Stale threshold (days)", "issue_days", DEFAULT_STALE_PATCH_DAYS),
+        _param_text(PARAM_ISSUE_MESSAGE_TEXT, "Message Contains", "message_text"),
         _param_text(PARAM_ISSUE_WARNING_CAT, "Warning Category", "warning_category"),
         _param_text(PARAM_ISSUE_FAILURE_ERR, "Failure Error Type", "failure_error_type"),
     ]
@@ -3523,6 +3565,10 @@ _ISSUE_TAGS = {
         "id": "tt_issue_days", "name": "issue_days",
         "display-name": "Stale threshold (days)",
         "type": "number", "default": "35", "required": True,
+    },
+    "message_text": {
+        "id": "tt_issue_message_text", "name": "message_text",
+        "display-name": "Message Contains", "type": "text",
     },
     # Set by drillthrough from Warnings by Category / Failures by Error
     # Code cards; consumed by the device-list drillthrough tables.
@@ -3549,6 +3595,7 @@ _ISSUE_PARAM_MAPPINGS = {
     PARAM_ISSUE_MISSING: ["variable", ["template-tag", "has_missing"]],
     PARAM_ISSUE_STARTED_OPEN: ["variable", ["template-tag", "started_open"]],
     PARAM_ISSUE_DAYS: ["variable", ["template-tag", "issue_days"]],
+    PARAM_ISSUE_MESSAGE_TEXT: ["variable", ["template-tag", "message_text"]],
     PARAM_ISSUE_WARNING_CAT: ["variable", ["template-tag", "warning_category"]],
     PARAM_ISSUE_FAILURE_ERR: ["variable", ["template-tag", "failure_error_type"]],
 }
@@ -3565,6 +3612,11 @@ _ISSUE_FILTERS = f"""
   [[AND CASE WHEN p.failed_installs > 0 THEN 'Yes' ELSE 'No' END IN ({{{{has_failed}}}})]]
   [[AND CASE WHEN p.missing_patches > 0 THEN 'Yes' ELSE 'No' END IN ({{{{has_missing}}}})]]
   [[AND CASE WHEN COALESCE(p.started_without_completion, FALSE) THEN 'Yes' ELSE 'No' END IN ({{{{started_open}}}})]]
+  [[AND (
+      COALESCE(p.last_failure_message, '') ILIKE '%' || {{{{message_text}}}} || '%'
+      OR COALESCE(p.last_warning_message, '') ILIKE '%' || {{{{message_text}}}} || '%'
+      OR COALESCE(p.issue_type, '') ILIKE '%' || {{{{message_text}}}} || '%'
+  )]]
 """
 
 
@@ -3705,7 +3757,7 @@ WHERE COALESCE(p.patch_failure_events_30d, 0) > 0
     },
     {
         "key": "issues_queue",
-        "name": "Issue Queue",
+        "name": "Triage Queue",
         "display": "table",
         "row": 7, "col": 0, "size_x": 24, "size_y": 14,
         "template_tags": _ISSUE_TAGS,
@@ -3718,11 +3770,32 @@ WHERE COALESCE(p.patch_failure_events_30d, 0) > 0
         "query": f"""
 {_problem_devices_cte("issue_days")}
 SELECT
+    CASE
+        WHEN p.patch_status = 'no_patch_data' THEN 2
+        WHEN p.patch_status = 'stale_patch_data'
+            AND COALESCE(p.started_without_completion, FALSE) THEN 3
+        WHEN COALESCE(p.patch_failure_events_30d, 0) > 0 THEN 4
+        WHEN p.failed_installs > 0 THEN 5
+        WHEN p.patch_status = 'stale_patch_data' THEN 6
+        WHEN COALESCE(p.needs_reboot, FALSE) THEN 7
+        WHEN p.manual_patches > 0 THEN 8
+        WHEN COALESCE(p.warning_events_30d, 0) > 0 THEN 9
+        ELSE 99
+    END AS "Priority",
     p.system_name AS device,
     o.name AS organization,
-    p.assigned_policy AS "Policy",
     p.issue_type AS issue,
     p.suggested_action AS action,
+    CASE
+        WHEN COALESCE(p.offline, FALSE) THEN 'Device offline'
+        WHEN p.patching_scope = 'Excluded' THEN 'Scope/exclusion'
+        WHEN COALESCE(p.needs_reboot, FALSE) THEN 'Reboot/user'
+        WHEN p.manual_patches > 0 THEN 'Approval'
+        WHEN COALESCE(p.patch_failure_events_30d, 0) > 0 OR p.failed_installs > 0 THEN 'Patch failure'
+        WHEN COALESCE(p.warning_events_30d, 0) > 0 THEN 'Warning'
+        ELSE 'Patch flow'
+    END AS "Blocker",
+    p.assigned_policy AS "Policy",
     p.health_status AS "Health",
     CASE WHEN p.last_seen_at IS NULL THEN NULL
          ELSE EXTRACT(DAY FROM (NOW() - p.last_seen_at))::int
@@ -3740,6 +3813,8 @@ SELECT
     p.waiting_patches AS "Waiting",
     p.warning_events_30d AS "Warnings 30d",
     p.patch_failure_events_30d AS "Failures 30d",
+    p.last_failure_message AS "Last Failure Message",
+    p.last_warning_message AS "Last Warning Message",
     CASE WHEN p.last_warning_at IS NULL THEN NULL
          ELSE EXTRACT(DAY FROM (NOW() - p.last_warning_at))::int
     END AS "Days Since Warning",
@@ -3751,15 +3826,16 @@ WHERE 1=1
 {_ISSUE_FILTERS}
 ORDER BY
     CASE
-        WHEN p.patch_status = 'no_patch_data' THEN 0
-        WHEN p.patch_status = 'stale_patch_data' THEN 1
-        WHEN p.failed_installs > 0 THEN 2
-        WHEN COALESCE(p.needs_reboot, FALSE) THEN 3
+        WHEN p.patch_status = 'no_patch_data' THEN 2
+        WHEN p.patch_status = 'stale_patch_data'
+            AND COALESCE(p.started_without_completion, FALSE) THEN 3
         WHEN COALESCE(p.patch_failure_events_30d, 0) > 0 THEN 4
-        WHEN COALESCE(p.warning_events_30d, 0) > 0 THEN 5
-        WHEN p.manual_patches > 0 THEN 6
-        WHEN p.patching_scope = 'Excluded' THEN 7
-        ELSE 8
+        WHEN p.failed_installs > 0 THEN 5
+        WHEN p.patch_status = 'stale_patch_data' THEN 6
+        WHEN COALESCE(p.needs_reboot, FALSE) THEN 7
+        WHEN p.manual_patches > 0 THEN 8
+        WHEN COALESCE(p.warning_events_30d, 0) > 0 THEN 9
+        ELSE 99
     END,
     "Days Since Patch" DESC NULLS FIRST,
     p.failed_installs DESC,
@@ -4202,62 +4278,143 @@ WHERE 1=1
     },
     {
         "key":     "org_compliance",
-        "name":    "Actively patching %",
+        "name":    "Health Tier",
         "display": "scalar",
         "row": 0, "col": 0, "size_x": 8, "size_y": 3,
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS_FULL,
-        "query": _active_patching_scalar_query(_ORG_FILTERS_DEVICE),
+        "query": f"""
+WITH latest_run AS (
+    SELECT MAX(started_at) AS last_ok_run
+    FROM ninja_core.run_log
+    WHERE status = 'ok'
+),
+rollup AS (
+    SELECT
+        COUNT(*) FILTER (WHERE s.patching_scope = 'Included') AS included_devices,
+        COUNT(*) FILTER (
+            WHERE s.patching_scope = 'Included'
+              AND s.last_scan_completed >= NOW() - INTERVAL '30 days'
+        ) AS scanned_30d,
+        COUNT(*) FILTER (
+            WHERE s.patching_scope = 'Included'
+              AND (s.failed_installs > 0 OR s.patch_failure_events_30d > 0)
+        ) AS failure_devices,
+        COUNT(*) FILTER (
+            WHERE s.patching_scope = 'Included'
+              AND s.patch_status IN ('no_patch_data', 'stale_patch_data')
+        ) AS stalled_or_never,
+        COUNT(*) FILTER (
+            WHERE s.patching_scope = 'Included'
+              AND COALESCE(s.needs_reboot, FALSE)
+        ) AS reboot_devices,
+        COUNT(*) FILTER (
+            WHERE s.patching_scope = 'Included'
+              AND s.manual_patches > 0
+        ) AS manual_devices,
+        COUNT(*) FILTER (
+            WHERE s.patching_scope = 'Included'
+              AND s.warning_events_30d > 0
+        ) AS warning_devices,
+        COUNT(*) FILTER (
+            WHERE s.patching_scope = 'Included'
+              AND s.last_install_attempt >= NOW() - INTERVAL '30 days'
+        ) AS recent_install_devices
+    FROM ninja_core.device_troubleshooting_signal s
+    JOIN ninja_core.v_active_devices d ON d.id = s.device_id
+    JOIN ninja_core.organizations o ON o.id = s.organization_id
+    WHERE 1=1
+{_ORG_FILTERS_DEVICE}
+)
+SELECT
+    CASE
+        WHEN lr.last_ok_run IS NULL OR lr.last_ok_run < NOW() - INTERVAL '3 hours' THEN 'Broken - stale data'
+        WHEN r.included_devices = 0 THEN 'Watch - no included devices'
+        WHEN r.scanned_30d = 0 THEN 'Broken - no recent scans'
+        WHEN r.failure_devices > 0 THEN 'Broken - patch failures'
+        WHEN r.stalled_or_never > 0 THEN 'At Risk - stalled devices'
+        WHEN r.reboot_devices > 0 THEN 'At Risk - reboot blockers'
+        WHEN r.manual_devices > 0 THEN 'At Risk - approvals'
+        WHEN r.warning_devices > 0 THEN 'Watch - warnings'
+        WHEN r.recent_install_devices = 0 THEN 'Watch - no recent installs'
+        ELSE 'Healthy'
+    END AS health_tier
+FROM rollup r
+CROSS JOIN latest_run lr
+""",
     },
     {
         "key":     "org_progress",
-        "name":    "Fully patched % (patching devices)",
+        "name":    "Patching Enabled",
         "display": "scalar",
         "row": 0, "col": 8, "size_x": 8, "size_y": 3,
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS_FULL,
-        "query": _patching_device_compliance_scalar_query(_ORG_FILTERS_DEVICE),
+        "query": f"""
+SELECT COUNT(*) AS devices
+FROM ninja_core.device_troubleshooting_signal s
+JOIN ninja_core.v_active_devices d ON d.id = s.device_id
+JOIN ninja_core.organizations o ON o.id = s.organization_id
+WHERE s.patching_scope = 'Included'
+{_ORG_FILTERS_DEVICE}
+""",
     },
     {
         "key":     "org_active_count",
-        "name":    "Actively patching",
+        "name":    "Scanned Successfully (30d)",
         "display": "scalar",
         "row": 3, "col": 0, "size_x": 12, "size_y": 2,
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS_FULL,
-        "query": _active_patching_count_query(_ORG_FILTERS_DEVICE),
+        "query": f"""
+SELECT COUNT(*) AS devices
+FROM ninja_core.device_troubleshooting_signal s
+JOIN ninja_core.v_active_devices d ON d.id = s.device_id
+JOIN ninja_core.organizations o ON o.id = s.organization_id
+WHERE s.patching_scope = 'Included'
+  AND s.last_scan_completed >= NOW() - INTERVAL '30 days'
+{_ORG_FILTERS_DEVICE}
+""",
     },
     {
         "key":     "org_progress_count",
-        "name":    "Fully patched",
+        "name":    "Installed Recently (30d)",
         "display": "scalar",
         "row": 3, "col": 12, "size_x": 12, "size_y": 2,
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS_FULL,
-        "query": _patching_device_compliance_count_query(_ORG_FILTERS_DEVICE),
+        "query": f"""
+SELECT COUNT(*) AS devices
+FROM ninja_core.device_troubleshooting_signal s
+JOIN ninja_core.v_active_devices d ON d.id = s.device_id
+JOIN ninja_core.organizations o ON o.id = s.organization_id
+WHERE s.patching_scope = 'Included'
+  AND s.last_install_attempt >= NOW() - INTERVAL '30 days'
+{_ORG_FILTERS_DEVICE}
+""",
     },
     {
         "key":     "org_data_freshness",
-        "name":    "Data Freshness",
+        "name":    "Needs Attention",
         "display": "scalar",
         "row": 0, "col": 16, "size_x": 8, "size_y": 3,
-        "query": """
-SELECT
-    CASE
-        WHEN max_ts IS NULL THEN 'no ingest yet'
-        WHEN max_ts < NOW() - INTERVAL '3 hours' THEN
-            'STALE - last ok run ' ||
-            ROUND(EXTRACT(EPOCH FROM (NOW() - max_ts)) / 3600)::text ||
-            ' h ago'
-        ELSE
-            ROUND(EXTRACT(EPOCH FROM (NOW() - max_ts)) / 60)::text ||
-            ' min ago'
-    END AS data_freshness
-FROM (
-    SELECT MAX(started_at) AS max_ts
-    FROM ninja_core.run_log
-    WHERE status = 'ok'
-) latest
+        "template_tags":  _ORG_TAGS,
+        "param_mappings": _ORG_PARAM_MAPPINGS_FULL,
+        "query": f"""
+SELECT COUNT(*) AS devices
+FROM ninja_core.device_troubleshooting_signal s
+JOIN ninja_core.v_active_devices d ON d.id = s.device_id
+JOIN ninja_core.organizations o ON o.id = s.organization_id
+WHERE s.patching_scope = 'Included'
+  AND (
+      s.patch_status IN ('no_patch_data', 'stale_patch_data')
+      OR s.failed_installs > 0
+      OR s.patch_failure_events_30d > 0
+      OR COALESCE(s.needs_reboot, FALSE)
+      OR s.manual_patches > 0
+      OR s.warning_events_30d > 0
+  )
+{_ORG_FILTERS_DEVICE}
 """,
     },
     {
@@ -4624,9 +4781,13 @@ SELECT
     s.issue_type               AS issue,
     s.suggested_action         AS "Suggested Action",
     s.first_scan_started       AS "Earliest Scan",
+    s.last_scan_completed      AS "Last Successful Scan",
     s.last_seen_at             AS "Last Install",
+    s.last_install_attempt     AS "Last Install Attempt",
     s.warning_events_30d       AS "Warnings 30d",
     s.patch_failure_events_30d AS "Failures 30d",
+    s.last_failure_message     AS "Last Failure Message",
+    s.last_warning_message     AS "Last Warning Message",
     s.failed_installs          AS "Failed",
     s.manual_patches           AS "Manual",
     s.waiting_patches          AS "Waiting"
@@ -5247,7 +5408,7 @@ def build_dashboards(
             "parameters": build_org_parameters(org_names),
             "cards":      ORG_OVERVIEW_CARDS,
             "section_headers": [
-                {"row": 0, "text": "### Compliance"},
+                {"row": 0, "text": "### Customer Health"},
                 {"row": 6, "text": "### Devices"},
                 {"row": 11, "text": "### Patches"},
             ],
@@ -5462,8 +5623,8 @@ NAV_ORDER = [
 NAV_DISPLAY_NAMES = {
     DASH_COMMAND:   "Command Center",
     DASH_OVERVIEW:  "Overall Status",
-    DASH_ORG:       "Org Overview",
-    DASH_ISSUES:    "Issues",
+    DASH_ORG:       "Customer Health",
+    DASH_ISSUES:    "Triage",
     DASH_PCOV:      "Device Status",
     DASH_TRENDS:    "Trends",
     DASH_DETAIL:    "Patch Detail",
