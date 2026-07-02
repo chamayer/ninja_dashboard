@@ -2,6 +2,13 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.34.3] — 2026-07-02
+
+### Fixed
+- Patching/Stalled/Never-Patched scalar click-throughs now use dashboard
+  parameter mappings instead of URL-only presets, so current Client,
+  Device Type, and Patching Scope filters carry into Device Status.
+
 ## [0.34.2] — 2026-07-02
 
 ### Changed

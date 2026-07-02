@@ -5,6 +5,25 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-07-02 — v0.34.3 scalar click-through filter propagation
+
+**Why:** Clicking Command Center's Patching Devices card navigated to
+Device Status but did not carry the operator's current filters, so
+`Device Type = Windows Server` was lost.
+
+**Fix:** Replaced URL-only `pcov_status` presets on the patching,
+stalled, and never-patched scalar cards with dashboard parameter
+mappings. The scalar queries now expose a hidden `pcov_status` constant
+for the target status while the click behavior propagates matching
+source dashboard filters such as Client, Device Type, and Patching
+Scope.
+
+**Validation:** Local compile and generated click-behavior inspection
+confirm Command Center `Patching Devices` maps `p_pcov_status` from the
+card result and carries `p_cmd_class` into `p_pcov_class`.
+
+---
+
 ## 2026-07-02 — v0.34.2 client/status patch dashboard buildout
 
 **Why:** The first patch dashboard slice still sounded too formal and

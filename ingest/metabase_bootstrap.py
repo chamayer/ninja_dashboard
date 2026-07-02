@@ -686,9 +686,11 @@ WHERE 1=1
         "row": 0, "col": 8, "size_x": 4, "size_y": 3,
         "template_tags":  _CMD_TAGS,
         "param_mappings": _CMD_PARAM_MAPPINGS_FULL,
-        "click_behavior": {"target": DASH_PCOV, "preset": {"pcov_status": "Patching Devices"}},
+        "click_behavior": {"target": DASH_PCOV, "params": {"p_pcov_status": "pcov_status"}},
         "query": f"""
-SELECT COUNT(*) AS devices
+SELECT
+    COUNT(*) AS devices,
+    'Patching Devices' AS pcov_status
 FROM ninja_core.v_active_devices d
 JOIN ninja_core.organizations o ON o.id = d.organization_id
 JOIN ninja_patches.device_patch_signal dps ON dps.device_id = d.id
@@ -704,9 +706,11 @@ WHERE 1=1
         "row": 0, "col": 12, "size_x": 4, "size_y": 3,
         "template_tags":  _CMD_TAGS,
         "param_mappings": _CMD_PARAM_MAPPINGS_FULL,
-        "click_behavior": {"target": DASH_PCOV, "preset": {"pcov_status": "Stalled Devices"}},
+        "click_behavior": {"target": DASH_PCOV, "params": {"p_pcov_status": "pcov_status"}},
         "query": f"""
-SELECT COUNT(*) AS devices
+SELECT
+    COUNT(*) AS devices,
+    'Stalled Devices' AS pcov_status
 FROM ninja_core.v_active_devices d
 JOIN ninja_core.organizations o ON o.id = d.organization_id
 JOIN ninja_patches.device_patch_signal dps ON dps.device_id = d.id
@@ -722,9 +726,11 @@ WHERE 1=1
         "row": 0, "col": 16, "size_x": 4, "size_y": 3,
         "template_tags":  _CMD_TAGS,
         "param_mappings": _CMD_PARAM_MAPPINGS_FULL,
-        "click_behavior": {"target": DASH_PCOV, "preset": {"pcov_status": "Never-Patched Devices"}},
+        "click_behavior": {"target": DASH_PCOV, "params": {"p_pcov_status": "pcov_status"}},
         "query": f"""
-SELECT COUNT(*) AS devices
+SELECT
+    COUNT(*) AS devices,
+    'Never-Patched Devices' AS pcov_status
 FROM ninja_core.v_active_devices d
 JOIN ninja_core.organizations o ON o.id = d.organization_id
 LEFT JOIN ninja_patches.device_patch_signal dps ON dps.device_id = d.id
@@ -1537,10 +1543,12 @@ WHERE lir.status = 'FAILED'
         "param_mappings": _OVERALL_PARAM_MAPPINGS_FULL,
         "click_behavior": {
             "target": DASH_PCOV,
-            "preset": {"pcov_status": "Patching Devices"},
+            "params": {"p_pcov_status": "pcov_status"},
         },
         "query": f"""
-SELECT COUNT(*) AS active
+SELECT
+    COUNT(*) AS active,
+    'Patching Devices' AS pcov_status
 FROM ninja_core.v_active_devices d
 JOIN ninja_core.organizations o ON o.id = d.organization_id
 JOIN ninja_patches.device_patch_signal dps ON dps.device_id = d.id
@@ -1557,10 +1565,12 @@ WHERE dps.last_seen_at > NOW() - (INTERVAL '1 day' * {DEFAULT_STALE_PATCH_DAYS})
         "param_mappings": _OVERALL_PARAM_MAPPINGS_FULL,
         "click_behavior": {
             "target": DASH_PCOV,
-            "preset": {"pcov_status": "Stalled Devices"},
+            "params": {"p_pcov_status": "pcov_status"},
         },
         "query": f"""
-SELECT COUNT(*) AS stale
+SELECT
+    COUNT(*) AS stale,
+    'Stalled Devices' AS pcov_status
 FROM ninja_core.v_active_devices d
 JOIN ninja_core.organizations o ON o.id = d.organization_id
 JOIN ninja_patches.device_patch_signal dps ON dps.device_id = d.id
@@ -1577,10 +1587,12 @@ WHERE dps.last_seen_at <= NOW() - (INTERVAL '1 day' * {DEFAULT_STALE_PATCH_DAYS}
         "param_mappings": _OVERALL_PARAM_MAPPINGS_FULL,
         "click_behavior": {
             "target": DASH_PCOV,
-            "preset": {"pcov_status": "Never-Patched Devices"},
+            "params": {"p_pcov_status": "pcov_status"},
         },
         "query": f"""
-SELECT COUNT(*) AS no_data
+SELECT
+    COUNT(*) AS no_data,
+    'Never-Patched Devices' AS pcov_status
 FROM ninja_core.v_active_devices d
 JOIN ninja_core.organizations o ON o.id = d.organization_id
 LEFT JOIN ninja_patches.device_patch_signal dps ON dps.device_id = d.id
@@ -3185,11 +3197,13 @@ WHERE 1=1
         "param_mappings": _PCOV_PARAM_MAPPINGS,
         "click_behavior": {
             "target": DASH_PCOV,
-            "preset": {"pcov_status": "Patching Devices"},
+            "params": {PARAM_PCOV_STATUS: "pcov_status"},
         },
         "query": f"""
 {_PCOV_CTE}
-SELECT COUNT(*) AS active
+SELECT
+    COUNT(*) AS active,
+    'Patching Devices' AS pcov_status
 FROM classified c
 JOIN ninja_core.organizations o ON o.id = c.organization_id
 WHERE c.patch_status = 'active_patching'
@@ -3205,11 +3219,13 @@ WHERE c.patch_status = 'active_patching'
         "param_mappings": _PCOV_PARAM_MAPPINGS,
         "click_behavior": {
             "target": DASH_PCOV,
-            "preset": {"pcov_status": "Stalled Devices"},
+            "params": {PARAM_PCOV_STATUS: "pcov_status"},
         },
         "query": f"""
 {_PCOV_CTE}
-SELECT COUNT(*) AS stale
+SELECT
+    COUNT(*) AS stale,
+    'Stalled Devices' AS pcov_status
 FROM classified c
 JOIN ninja_core.organizations o ON o.id = c.organization_id
 WHERE c.patch_status = 'stale_patch_data'
@@ -3225,11 +3241,13 @@ WHERE c.patch_status = 'stale_patch_data'
         "param_mappings": _PCOV_PARAM_MAPPINGS,
         "click_behavior": {
             "target": DASH_PCOV,
-            "preset": {"pcov_status": "Never-Patched Devices"},
+            "params": {PARAM_PCOV_STATUS: "pcov_status"},
         },
         "query": f"""
 {_PCOV_CTE}
-SELECT COUNT(*) AS no_data
+SELECT
+    COUNT(*) AS no_data,
+    'Never-Patched Devices' AS pcov_status
 FROM classified c
 JOIN ninja_core.organizations o ON o.id = c.organization_id
 WHERE c.patch_status = 'no_patch_data'
