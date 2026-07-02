@@ -1122,39 +1122,30 @@ LIMIT 100
             "device":       {"target": DASH_DRILLDOWN, "params": {"p_device": "device"}},
         },
         "query": f"""
-WITH last_install AS (
-    SELECT pf.device_id,
-           MAX(pf.installed_at) AS last_install_at,
-           COUNT(*)             AS install_count
-    FROM ninja_patches.patch_facts pf
-    WHERE pf.fact_type = 'install_outcome'
-      AND pf.status    = 'INSTALLED'
-      AND pf.installed_at IS NOT NULL
-{_PATCH_TYPE_EXCLUDE_RAW}    GROUP BY pf.device_id
-),
-last_reboot AS (
-    SELECT device_id, MAX(activity_time) AS last_reboot_at
-    FROM ninja_activities.activities
-    WHERE activity_type = 'SYSTEM_REBOOTED'
-      AND device_id IS NOT NULL
-    GROUP BY device_id
-)
 SELECT
     o.name AS organization,
     d.system_name AS device,
     li.last_install_at AS "Last Install",
-    lr.last_reboot_at  AS "Last Reboot",
+    ar.last_reboot     AS "Last Reboot",
     li.install_count   AS "Installs",
     ROUND(EXTRACT(EPOCH FROM (NOW() - li.last_install_at))/3600)::int
         AS "Hours Since Install",
     ts.first_scan_started AS "Earliest Scan"
 FROM ninja_core.v_active_devices d
 JOIN ninja_core.organizations o ON o.id = d.organization_id
-JOIN last_install li ON li.device_id = d.id
-LEFT JOIN last_reboot lr ON lr.device_id = d.id
+JOIN LATERAL (
+    SELECT
+        MAX(lio.installed_at) AS last_install_at,
+        COUNT(*)             AS install_count
+    FROM ninja_patches.latest_install_outcome lio
+    WHERE lio.device_id = d.id
+      AND lio.status = 'INSTALLED'
+      AND lio.installed_at IS NOT NULL
+{_PATCH_TYPE_EXCLUDE}) li ON li.last_install_at IS NOT NULL
+LEFT JOIN ninja_activities.device_activity_signal ar ON ar.device_id = d.id
 LEFT JOIN ninja_core.device_troubleshooting_signal ts ON ts.device_id = d.id
 WHERE d.needs_reboot = TRUE
-  AND (lr.last_reboot_at IS NULL OR lr.last_reboot_at < li.last_install_at)
+  AND (ar.last_reboot IS NULL OR ar.last_reboot < li.last_install_at)
 {_CMD_FILTERS_DEVICE}
 ORDER BY li.last_install_at DESC
 LIMIT 100

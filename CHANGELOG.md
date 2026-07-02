@@ -2,6 +2,16 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.34.4] — 2026-07-02
+
+### Fixed
+- Rewrote Command Center's `Patches Installed Awaiting Reboot` card to
+  start from reboot-needed devices and use existing patch/activity
+  rollups instead of aggregating raw patch and activity tables on every
+  load.
+- Added an index for installed patch lookups by device on
+  `ninja_patches.latest_install_outcome`.
+
 ## [0.34.3] — 2026-07-02
 
 ### Fixed

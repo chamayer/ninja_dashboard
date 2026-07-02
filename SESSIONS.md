@@ -5,6 +5,24 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-07-02 — v0.34.4 Command Center reboot queue performance
+
+**Why:** Curl timing of Command Center showed the page shell and almost
+every card were fast, but `Patches Installed Awaiting Reboot` dominated
+dashboard load at roughly 11 seconds filtered and unfiltered.
+
+**Fix:** Rewrote the card to start from reboot-needed active devices,
+then use `ninja_patches.latest_install_outcome` and
+`ninja_activities.device_activity_signal` instead of aggregating raw
+`patch_facts` and `activities` every time. Added migration 065 with a
+supporting installed-outcome index for the device lookup path.
+
+**Validation:** The replacement SQL returned the same 87 unfiltered rows
+as the current card while dropping Metabase-reported query runtime from
+about 11,500 ms to about 126 ms before the new index is even deployed.
+
+---
+
 ## 2026-07-02 — v0.34.3 scalar click-through filter propagation
 
 **Why:** Clicking Command Center's Patching Devices card navigated to
