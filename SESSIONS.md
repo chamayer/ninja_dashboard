@@ -17,8 +17,12 @@ failure error, and matching-device raw activity cards. Added migration
 066 with a trigram index on `ninja_activities.activities.message` plus
 an activity type/time/device index for the 30-day patch activity paths.
 
-**Validation:** Pending local compile/spec checks and live retime after
-deployment.
+**Validation:** Local compile/spec checks passed. Live card SQL was
+updated to the v0.34.6 definitions through Metabase API while waiting
+for Portainer redeploy. The activity message indexes from migration 066
+exist on the live DB. Final retime: Client Patch Status slowest card was
+1,842 ms; Triage slowest card was 399 ms; `Message Contains = timeout`
+ran in 81-115 ms across the warning/error category detail cards.
 
 ---
 

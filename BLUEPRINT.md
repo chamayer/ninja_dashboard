@@ -276,19 +276,17 @@ Blueprint implemented locally:
 - click-through aliases were preserved on client, device, patch state,
   KB, and device type columns.
 
-Live validation completed through v0.34.4:
+Live validation completed:
 - Metabase bootstrap/deploy applied Command Center and Client Patch
   Status naming/filter changes;
 - Command Center page shell/API and all card runtimes meet the
   documented target;
 - live click-through mappings are present for Command Center, Client
   Patch Status, and Triage key cards;
-- Triage message search works on the main queue.
+- Triage message search works on the main queue and warning/error
+  category detail cards;
+- Client Patch Status and Triage full card sweeps meet the documented
+  per-card target after v0.34.6.
 
-Pending after v0.34.5 / v0.34.6 deploy:
-- retime Client Patch Status cards 232, 233, and 294;
-- retime Triage warning/error category message search cards 290, 291,
-  310, and 311;
-- confirm `Message Contains` is applied on those four category/detail
-  cards in live Metabase;
-- complete final operator walkthrough.
+Status: done — committed through 8c8c791, with live card SQL updated to
+the v0.34.6 definitions and validated against Metabase.

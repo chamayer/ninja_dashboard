@@ -7,10 +7,6 @@ Read Inbox at the start of every session.
 
 ## Inbox
 
-- [ ] After v0.34.2 deploys, run the Metabase bootstrap and validate
-      Command Center / Client Patch Status / Triage page load times,
-      dashboard filters, and click-through paths for client, device,
-      patch state, KB, device type, and message search.
 - [ ] After v0.32.0 redeploys, run `/run/agent-compliance` and
       execute the new validation queries (HANDY_COMMANDS.md
       "id-link sanity") to confirm no
@@ -291,6 +287,13 @@ Read Inbox at the start of every session.
 ---
 
 ## Completed
+
+### v0.34.6 — 2026-07-02
+
+- [x] Validated Command Center / Client Patch Status / Triage page load
+      times, dashboard filters, and click-through paths for client,
+      device, patch state, KB, device type, and message search. Final
+      pushed commits: `0d6ed03`, `de6b373`, `8c8c791`.
 
 ### v0.16.0 — 2026-06-10
 
