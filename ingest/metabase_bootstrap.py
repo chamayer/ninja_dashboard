@@ -356,6 +356,80 @@ WHERE d.approval_status = 'APPROVED'
 """
 
 
+def _patching_device_compliance_group_query(
+    group_expr: str, group_label: str, filters: str,
+) -> str:
+    """Fully patched device percentage grouped by a device dimension."""
+    return f"""
+WITH classified AS (
+    SELECT
+        d.id              AS device_id,
+        d.organization_id,
+        d.node_class,
+        d.os_name,
+        dps.ever_installed,
+        dps.last_seen_at,
+        CASE
+            WHEN NOT COALESCE(dps.ever_installed, FALSE) THEN 'no_patch_data'
+            WHEN dps.last_seen_at IS NULL THEN 'stale_patch_data'
+            WHEN dps.last_seen_at < NOW() - (INTERVAL '1 day' * {DEFAULT_STALE_PATCH_DAYS}) THEN 'stale_patch_data'
+            ELSE 'active_patching'
+        END AS patch_status
+    FROM ninja_core.v_active_devices d
+    LEFT JOIN ninja_patches.device_patch_signal dps ON dps.device_id = d.id
+    WHERE d.approval_status = 'APPROVED'
+      AND d.node_class IN ('WINDOWS_WORKSTATION', 'WINDOWS_SERVER')
+),
+installed_patches AS (
+    SELECT DISTINCT device_id, patch_uid
+    FROM ninja_patches.latest_install_outcome
+    WHERE status = 'INSTALLED'
+{_PATCH_TYPE_EXCLUDE}),
+current_patch_state AS (
+    SELECT device_id, patch_uid, status
+    FROM ninja_patches.current_patch_state
+    WHERE 1=1
+{_PATCH_TYPE_EXCLUDE}),
+missing_patches AS (
+    SELECT device_id, patch_uid
+    FROM current_patch_state
+    WHERE status IN ({COMPLIANCE_MISSING_SQL})
+),
+universe AS (
+    SELECT device_id, patch_uid FROM installed_patches
+    UNION
+    SELECT device_id, patch_uid FROM missing_patches
+),
+device_rollup AS (
+    SELECT
+        u.device_id,
+        COUNT(*) FILTER (WHERE mp.device_id IS NOT NULL) AS missing_count
+    FROM universe u
+    LEFT JOIN missing_patches mp USING (device_id, patch_uid)
+    GROUP BY u.device_id
+)
+SELECT
+    {group_expr} AS "{group_label}",
+    ROUND(
+        COUNT(*) FILTER (
+            WHERE c.patch_status = 'active_patching'
+              AND dr.device_id IS NOT NULL
+              AND dr.missing_count = 0
+        ) * 100.0
+        / NULLIF(COUNT(*) FILTER (WHERE c.patch_status = 'active_patching'), 0),
+        1
+    ) AS "Fully patched % (patching devices)"
+FROM classified c
+LEFT JOIN device_rollup dr ON dr.device_id = c.device_id
+JOIN ninja_core.v_active_devices d ON d.id = c.device_id
+JOIN ninja_core.organizations o ON o.id = c.organization_id
+WHERE d.approval_status = 'APPROVED'
+{filters}
+GROUP BY "{group_label}"
+ORDER BY "Fully patched % (patching devices)" ASC
+"""
+
+
 def _active_patching_count_query(filters: str) -> str:
     """Count of actively patching devices in the scoped fleet."""
     return f"""
@@ -4757,23 +4831,9 @@ ORDER BY "Patches" DESC
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS_FULL,
         "click_behavior": {"target": DASH_DETAIL, "params": {"p_class": "Device Type"}},
-        "query": f"""
-{_COMPLIANCE_CTES}
-SELECT
-    {DEVICE_TYPE_D} AS "Device Type",
-    ROUND(
-      COUNT(*) FILTER (WHERE ip.device_id IS NOT NULL) * 100.0
-      / NULLIF(COUNT(*), 0), 1
-    ) AS "Fully patched % (patching devices)"
-FROM universe u
-LEFT JOIN installed_patches ip USING (device_id, patch_uid)
-JOIN ninja_core.v_active_devices d ON d.id = u.device_id
-JOIN ninja_core.organizations o ON o.id = d.organization_id
-WHERE d.approval_status = 'APPROVED'
-{_ORG_FILTERS_DEVICE}
-GROUP BY "Device Type"
-ORDER BY "Fully patched % (patching devices)" ASC
-""",
+        "query": _patching_device_compliance_group_query(
+            DEVICE_TYPE_D, "Device Type", _ORG_FILTERS_DEVICE,
+        ),
     },
     {
         "key":     "org_os_family",
@@ -4784,23 +4844,9 @@ ORDER BY "Fully patched % (patching devices)" ASC
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS_FULL,
         "click_behavior": {"target": DASH_DETAIL, "params": {"p_os": "Operating System Family"}},
-        "query": f"""
-{_COMPLIANCE_CTES}
-SELECT
-    {OS_FAMILY_D} AS "Operating System Family",
-    ROUND(
-      COUNT(*) FILTER (WHERE ip.device_id IS NOT NULL) * 100.0
-      / NULLIF(COUNT(*), 0), 1
-    ) AS "Fully patched % (patching devices)"
-FROM universe u
-LEFT JOIN installed_patches ip USING (device_id, patch_uid)
-JOIN ninja_core.v_active_devices d ON d.id = u.device_id
-JOIN ninja_core.organizations o ON o.id = d.organization_id
-WHERE d.approval_status = 'APPROVED'
-{_ORG_FILTERS_DEVICE}
-GROUP BY "Operating System Family"
-ORDER BY "Fully patched % (patching devices)" ASC
-""",
+        "query": _patching_device_compliance_group_query(
+            OS_FAMILY_D, "Operating System Family", _ORG_FILTERS_DEVICE,
+        ),
     },
     {
         "key":     "org_failed_queue",
@@ -4891,12 +4937,11 @@ LIMIT 100
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS,
         "query": f"""
-SELECT COUNT(*) AS warnings
-FROM ninja_activities.activities a
-JOIN ninja_core.v_active_devices d ON d.id = a.device_id
+SELECT COALESCE(SUM(ar.warning_events_30d), 0) AS warnings
+FROM ninja_core.v_active_devices d
 JOIN ninja_core.organizations o ON o.id = d.organization_id
-WHERE a.activity_type IN ('PATCH_MANAGEMENT_MESSAGE', 'SOFTWARE_PATCH_MANAGEMENT_MESSAGE')
-  AND a.activity_time >= NOW() - INTERVAL '30 days'
+LEFT JOIN ninja_activities.device_activity_signal ar ON ar.device_id = d.id
+WHERE 1=1
 {_ORG_FILTERS_DEVICE}
 """,
     },

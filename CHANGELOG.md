@@ -2,6 +2,16 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.34.5] — 2026-07-02
+
+### Fixed
+- Reworked Client Patch Status device-type and OS fully-patched
+  breakdowns to use the device-level patching-device formula instead
+  of grouping the full patch universe directly in each chart.
+- Reworked the Client Patch Status warnings scalar to use
+  `ninja_activities.device_activity_signal.warning_events_30d` instead
+  of scanning raw activity rows on page load.
+
 ## [0.34.4] — 2026-07-02
 
 ### Fixed

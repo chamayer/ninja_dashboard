@@ -5,6 +5,25 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-07-02 — v0.34.5 Client Patch Status card performance
+
+**Why:** Live timing after the Command Center fix showed Triage was fast,
+but Client Patch Status still had three cards over the blueprint's
+per-card threshold: device-type fully-patched %, OS fully-patched %, and
+Warnings (30d).
+
+**Fix:** Moved the two fully-patched breakdowns to the same device-level
+patching-device formula used by the headline KPI, and changed Warnings
+(30d) to sum the existing `device_activity_signal.warning_events_30d`
+rollup.
+
+**Validation:** Local dashboard spec build still produces 9 dashboards
+and 123 cards. Candidate SQL tested through Metabase at about 1.7s for
+each fully-patched breakdown and 30ms for Warnings (30d), replacing live
+runtimes of about 2.1s, 3.4s, and 2.6s.
+
+---
+
 ## 2026-07-02 — v0.34.4 Command Center reboot queue performance
 
 **Why:** Curl timing of Command Center showed the page shell and almost
