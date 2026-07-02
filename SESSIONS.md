@@ -5,6 +5,27 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-07-02 — v0.34.7 Client Patch Status one-client guard
+
+**Why:** Operator feedback: Client Patch Status top cards were
+misleading when no client was selected. A card like `Needs Action -
+patch failures` looked like a client report but was actually showing
+all-client filtered device counts.
+
+**Fix:** Added a selected-client guard to the top Client Patch Status
+band. The status card now returns `Choose one client` unless exactly one
+client is selected. The top numeric device cards return blank in that
+state instead of fleet totals. Card titles now say what they count:
+client status, included devices, devices scanned, devices installed, and
+devices needing action.
+
+**Validation:** Generated dashboard spec still builds 9 dashboards and
+123 cards. Metabase dataset tests against the exact generated card SQL:
+no-client state returned `Choose one client` and blank numeric top
+cards; `Client = A.M. Rose` returned real client values, all under 80 ms.
+
+---
+
 ## 2026-07-02 — v0.34.6 Triage message search wiring
 
 **Why:** Live validation showed the main Triage queue honored

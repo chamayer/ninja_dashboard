@@ -4448,6 +4448,13 @@ _ORG_FILTER_PATCHING_SCOPE = (
 )
 _ORG_FILTER_SEV_CS      = "  [[AND cs.severity IN ({{severity}})]]\n"
 _ORG_FILTER_SEV_LIR     = "  [[AND lir.severity IN ({{severity}})]]\n"
+_ORG_SELECTED_CLIENTS_CTE = """
+selected_clients AS (
+    SELECT COUNT(*) AS client_count
+    FROM ninja_core.organizations o
+    WHERE 1=1
+      [[AND o.name IN ({{org}})]]
+)"""
 
 # Device-count cards (no severity context).
 _ORG_FILTERS_DEVICE = (
@@ -4483,7 +4490,7 @@ def build_org_parameters(org_names: list[str]) -> list[dict]:
 ORG_OVERVIEW_CARDS = [
     {
         "key":     "org_total_devices",
-        "name":    "Total Devices",
+        "name":    "Approved Windows Devices",
         "display": "scalar",
         "row": 6, "col": 0, "size_x": 5, "size_y": 3,
         "template_tags":  _ORG_TAGS,
@@ -4500,7 +4507,7 @@ WHERE d.is_current = TRUE
     },
     {
         "key":     "org_active_devices",
-        "name":    "Active Devices",
+        "name":    "Active Windows Devices",
         "display": "scalar",
         "row": 6, "col": 5, "size_x": 5, "size_y": 3,
         "template_tags":  _ORG_TAGS,
@@ -4515,13 +4522,14 @@ WHERE 1=1
     },
     {
         "key":     "org_compliance",
-        "name":    "Client Patch Status",
+        "name":    "Client Status",
         "display": "scalar",
         "row": 0, "col": 0, "size_x": 8, "size_y": 3,
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS_FULL,
         "query": f"""
-WITH latest_run AS (
+WITH {_ORG_SELECTED_CLIENTS_CTE},
+latest_run AS (
     SELECT MAX(started_at) AS last_ok_run
     FROM ninja_core.run_log
     WHERE status = 'ok'
@@ -4565,93 +4573,127 @@ rollup AS (
 )
 SELECT
     CASE
+        WHEN sc.client_count <> 1 THEN 'Choose one client'
         WHEN lr.last_ok_run IS NULL OR lr.last_ok_run < NOW() - INTERVAL '3 hours' THEN 'Data stale'
         WHEN r.included_devices = 0 THEN 'Watch - no included devices'
-        WHEN r.scanned_30d = 0 THEN 'Needs Action - no recent scans'
-        WHEN r.failure_devices > 0 THEN 'Needs Action - patch failures'
-        WHEN r.stalled_or_never > 0 THEN 'Needs Action - stalled devices'
-        WHEN r.reboot_devices > 0 THEN 'Needs Action - reboot blockers'
-        WHEN r.manual_devices > 0 THEN 'Needs Action - approvals'
-        WHEN r.warning_devices > 0 THEN 'Watch - warnings'
-        WHEN r.recent_install_devices = 0 THEN 'Watch - no recent installs'
+        WHEN r.scanned_30d = 0 THEN 'Action needed - devices have no recent scans'
+        WHEN r.failure_devices > 0 THEN 'Action needed - devices have patch failures'
+        WHEN r.stalled_or_never > 0 THEN 'Action needed - devices are stalled'
+        WHEN r.reboot_devices > 0 THEN 'Action needed - devices need reboot'
+        WHEN r.manual_devices > 0 THEN 'Action needed - devices need approval'
+        WHEN r.warning_devices > 0 THEN 'Watch - devices have warnings'
+        WHEN r.recent_install_devices = 0 THEN 'Watch - no devices installed recently'
         ELSE 'Good'
     END AS client_patch_status
-FROM rollup r
+FROM selected_clients sc
+CROSS JOIN rollup r
 CROSS JOIN latest_run lr
 """,
     },
     {
         "key":     "org_progress",
-        "name":    "Patching Enabled",
+        "name":    "Included Devices",
         "display": "scalar",
         "row": 0, "col": 8, "size_x": 8, "size_y": 3,
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS_FULL,
         "query": f"""
-SELECT COUNT(*) AS devices
-FROM ninja_core.device_troubleshooting_signal s
-JOIN ninja_core.v_active_devices d ON d.id = s.device_id
-JOIN ninja_core.organizations o ON o.id = s.organization_id
-WHERE s.patching_scope = 'Included'
+WITH {_ORG_SELECTED_CLIENTS_CTE},
+matching_devices AS (
+    SELECT s.device_id
+    FROM ninja_core.device_troubleshooting_signal s
+    JOIN ninja_core.v_active_devices d ON d.id = s.device_id
+    JOIN ninja_core.organizations o ON o.id = s.organization_id
+    WHERE s.patching_scope = 'Included'
 {_ORG_FILTERS_DEVICE}
+)
+SELECT
+    CASE WHEN sc.client_count = 1 THEN COUNT(md.device_id) ELSE NULL END AS devices
+FROM selected_clients sc
+LEFT JOIN matching_devices md ON TRUE
+GROUP BY sc.client_count
 """,
     },
     {
         "key":     "org_active_count",
-        "name":    "Scanned Successfully (30d)",
+        "name":    "Devices Scanned Successfully (30d)",
         "display": "scalar",
         "row": 3, "col": 0, "size_x": 12, "size_y": 2,
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS_FULL,
         "query": f"""
-SELECT COUNT(*) AS devices
-FROM ninja_core.device_troubleshooting_signal s
-JOIN ninja_core.v_active_devices d ON d.id = s.device_id
-JOIN ninja_core.organizations o ON o.id = s.organization_id
-WHERE s.patching_scope = 'Included'
-  AND s.last_scan_completed >= NOW() - INTERVAL '30 days'
+WITH {_ORG_SELECTED_CLIENTS_CTE},
+matching_devices AS (
+    SELECT s.device_id
+    FROM ninja_core.device_troubleshooting_signal s
+    JOIN ninja_core.v_active_devices d ON d.id = s.device_id
+    JOIN ninja_core.organizations o ON o.id = s.organization_id
+    WHERE s.patching_scope = 'Included'
+      AND s.last_scan_completed >= NOW() - INTERVAL '30 days'
 {_ORG_FILTERS_DEVICE}
+)
+SELECT
+    CASE WHEN sc.client_count = 1 THEN COUNT(md.device_id) ELSE NULL END AS devices
+FROM selected_clients sc
+LEFT JOIN matching_devices md ON TRUE
+GROUP BY sc.client_count
 """,
     },
     {
         "key":     "org_progress_count",
-        "name":    "Installed Recently (30d)",
+        "name":    "Devices Installed Recently (30d)",
         "display": "scalar",
         "row": 3, "col": 12, "size_x": 12, "size_y": 2,
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS_FULL,
         "query": f"""
-SELECT COUNT(*) AS devices
-FROM ninja_core.device_troubleshooting_signal s
-JOIN ninja_core.v_active_devices d ON d.id = s.device_id
-JOIN ninja_core.organizations o ON o.id = s.organization_id
-WHERE s.patching_scope = 'Included'
-  AND s.last_install_attempt >= NOW() - INTERVAL '30 days'
+WITH {_ORG_SELECTED_CLIENTS_CTE},
+matching_devices AS (
+    SELECT s.device_id
+    FROM ninja_core.device_troubleshooting_signal s
+    JOIN ninja_core.v_active_devices d ON d.id = s.device_id
+    JOIN ninja_core.organizations o ON o.id = s.organization_id
+    WHERE s.patching_scope = 'Included'
+      AND s.last_install_attempt >= NOW() - INTERVAL '30 days'
 {_ORG_FILTERS_DEVICE}
+)
+SELECT
+    CASE WHEN sc.client_count = 1 THEN COUNT(md.device_id) ELSE NULL END AS devices
+FROM selected_clients sc
+LEFT JOIN matching_devices md ON TRUE
+GROUP BY sc.client_count
 """,
     },
     {
         "key":     "org_data_freshness",
-        "name":    "Needs Action",
+        "name":    "Devices Needing Action",
         "display": "scalar",
         "row": 0, "col": 16, "size_x": 8, "size_y": 3,
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS_FULL,
         "query": f"""
-SELECT COUNT(*) AS devices
-FROM ninja_core.device_troubleshooting_signal s
-JOIN ninja_core.v_active_devices d ON d.id = s.device_id
-JOIN ninja_core.organizations o ON o.id = s.organization_id
-WHERE s.patching_scope = 'Included'
-  AND (
-      s.patch_status IN ('no_patch_data', 'stale_patch_data')
-      OR s.failed_installs > 0
-      OR s.patch_failure_events_30d > 0
-      OR COALESCE(s.needs_reboot, FALSE)
-      OR s.manual_patches > 0
-      OR s.warning_events_30d > 0
-  )
+WITH {_ORG_SELECTED_CLIENTS_CTE},
+matching_devices AS (
+    SELECT s.device_id
+    FROM ninja_core.device_troubleshooting_signal s
+    JOIN ninja_core.v_active_devices d ON d.id = s.device_id
+    JOIN ninja_core.organizations o ON o.id = s.organization_id
+    WHERE s.patching_scope = 'Included'
+      AND (
+          s.patch_status IN ('no_patch_data', 'stale_patch_data')
+          OR s.failed_installs > 0
+          OR s.patch_failure_events_30d > 0
+          OR COALESCE(s.needs_reboot, FALSE)
+          OR s.manual_patches > 0
+          OR s.warning_events_30d > 0
+      )
 {_ORG_FILTERS_DEVICE}
+)
+SELECT
+    CASE WHEN sc.client_count = 1 THEN COUNT(md.device_id) ELSE NULL END AS devices
+FROM selected_clients sc
+LEFT JOIN matching_devices md ON TRUE
+GROUP BY sc.client_count
 """,
     },
     {
@@ -5617,7 +5659,10 @@ def build_dashboards(
             "parameters": build_org_parameters(org_names),
             "cards":      ORG_OVERVIEW_CARDS,
             "section_headers": [
-                {"row": 0, "text": "### Client Patch Status"},
+                {
+                    "row": 0,
+                    "text": "### Client Patch Status\nSelect one client for the report. Use Command Center for all-client status.",
+                },
                 {"row": 6, "text": "### Devices"},
                 {"row": 11, "text": "### Patches"},
             ],

@@ -2,6 +2,16 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.34.7] — 2026-07-02
+
+### Changed
+- Client Patch Status now requires one selected client for the top KPI
+  band: the status card shows `Choose one client` when the page is
+  unfiltered or multi-client, and the top numeric cards stay blank
+  instead of showing misleading all-client totals.
+- Clarified Client Patch Status top-card titles so operators can tell
+  whether a card counts devices, patches, or client status.
+
 ## [0.34.6] — 2026-07-02
 
 ### Fixed
