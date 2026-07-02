@@ -5,6 +5,40 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-07-02 — v0.34.2 client/status patch dashboard buildout
+
+**Why:** The first patch dashboard slice still sounded too formal and
+too much like a health-scoring system. The desired behavior is simpler:
+show whether a client or device needs action, why, and where to click
+for the evidence.
+
+**Decision:** Use client/status language across patch operations:
+Client Patch Status, Triage, Patch Trends, Needs Action, Watch, and
+Good. Keep lowercase `organization` SQL aliases where Metabase
+click-through mappings depend on them, but show `Client` in visible
+filter and table labels.
+
+**What landed:**
+- `BLUEPRINT.md` updated to the final functional-area model.
+- Legacy dashboard titles are renamed in place with legacy card UID
+  matching so bootstrap does not duplicate existing cards.
+- Command Center client status rules were made explicit and stable.
+- Client Patch Status retains the key click-through paths from client,
+  device, patch state, KB, and device type columns.
+- Triage now includes scan-gap, reboot, approval, and stalled-device
+  subqueues in addition to message search and full failure text.
+- Device Drilldown now surfaces the current problem, suggested action,
+  recent install/failure timing, and full failure/warning messages.
+
+**Pending validation:**
+- Run Metabase bootstrap against the stack.
+- Measure landing-page load times against the <4s cold / <3s filtered
+  target.
+- Walk the Client Patch Status and Triage click-through paths with live
+  data.
+
+---
+
 ## 2026-07-01 — v0.34.1 patch dashboard functional blueprint
 
 **Why:** The patch dashboards had the data to answer operational

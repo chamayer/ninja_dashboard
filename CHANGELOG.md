@@ -2,6 +2,31 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.34.2] — 2026-07-02
+
+### Changed
+- Renamed the patch dashboard model from role/health language to
+  functional client/status language: Client Patch Status, Triage, Patch
+  Trends, status, Needs Action, Watch, and Good.
+- Metabase bootstrap now renames legacy dashboard identities in place
+  while matching legacy card UIDs, avoiding duplicate cards when
+  `Org Overview`, `Issues`, or `Trends` already exist.
+- Command Center now orders clients by explicit patch status rules and
+  shows the reason behind the status.
+- Client Patch Status keeps the quick questions up front: patching
+  enabled, successful scans, recent installs, and devices needing action.
+
+### Added
+- Triage subqueues for scan gaps, reboot blockers, approval backlog, and
+  stalled or never-patched devices.
+- Device Drilldown summary fields for current problem, suggested action,
+  last install attempt, last failure, and full failure/warning messages.
+
+### Fixed
+- Restored/preserved Client Patch Status click-through aliases on client,
+  device, patch state, KB, and device type columns, including the top
+  problem-device table.
+
 ## [0.34.1] — 2026-07-01
 
 ### Changed

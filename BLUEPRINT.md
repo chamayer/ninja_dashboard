@@ -7,14 +7,14 @@ operations reporting while preserving click-through filtering.
 
 Current patching dashboards contain most of the needed signals, but the
 story is fragmented. Org Overview and other cards often present counts
-without making it obvious whether patching is healthy, what needs work,
-or why devices/customers are blocked.
+without making it obvious whether patching is running, what needs work,
+or why devices/clients are blocked.
 
 # Scope
 
 - Reframe patching around functional areas, not formal roles:
-  - Command Center: cross-customer health and exceptions.
-  - Customer Health: one-customer health report.
+  - Command Center: cross-client patch status and exceptions.
+  - Client Patch Status: one-client patch report.
   - Triage: device/action queue and failure investigation.
   - Device Drilldown: full single-device evidence.
   - Trends / Reporting: time-series and exportable evidence.
@@ -22,7 +22,7 @@ or why devices/customers are blocked.
 - Preserve and expand useful click-through filter behavior.
 - Make page load speed a hard requirement.
 - Design for an internal AMR operator wearing multiple hats in a small
-  MSP; customer-facing output is reporting/export evidence, not the
+  MSP; client-facing output is reporting/export evidence, not the
   operational landing view.
 
 # Out of scope
@@ -57,7 +57,7 @@ or why devices/customers are blocked.
 # Design rules
 
 - Page load must be quick:
-  - Command Center and Customer Health should load under 4 seconds on a
+  - Command Center and Client Patch Status should load under 4 seconds on a
     broad/cold open and under 3 seconds p95 in normal filtered use.
   - Individual card queries target under 1 second; anything over 2
     seconds needs a fix or explicit justification.
@@ -67,17 +67,17 @@ or why devices/customers are blocked.
   - Keep broad tables capped and show total matching row count in a
     separate scalar when needed.
   - Avoid `COUNT(*) OVER()` on large limited tables.
-  - Add indexes with any new reporting view that filters by customer,
+  - Add indexes with any new reporting view that filters by client,
     device, policy, scope, issue, scan time, install time, or activity
     time.
 - Human consumer first:
-  - Show work/health language, not database terms.
+  - Show work/status language, not database terms.
   - Put decision columns before verbose evidence.
   - Keep full raw/debug detail out of landing sections.
   - Show full error text only where failure investigation needs it.
 - Click-throughs are part of the product:
-  - Customer row/cell opens Customer Health with organization filter.
-  - Bad customer/device category opens Triage with matching filters.
+  - Client row/cell opens Client Patch Status with client filter.
+  - Bad client/device category opens Triage with matching filters.
   - Device opens Device Drilldown.
   - KB opens Patch Detail.
   - Error category opens Triage/failure section filtered to that error.
@@ -88,9 +88,9 @@ or why devices/customers are blocked.
 
 - Preserve existing Metabase dashboard identities/IDs where practical;
   update visible/nav labels to functional names.
-- `Org Overview` becomes visible as Customer Health if feasible without
-  breaking compatibility; otherwise the nav label says Customer Health
-  while the stored dashboard name remains stable.
+- `Org Overview` is renamed in place to Client Patch Status with legacy
+  dashboard/card identity handling so existing dashboards are updated,
+  not duplicated.
 - Recent windows are dashboard parameters, defaulting to 30 days, not
   hardcoded constants.
 - Replacement proves equivalent through an old-to-new functional mapping,
@@ -98,33 +98,34 @@ or why devices/customers are blocked.
   their operational answers and click-through paths have accepted new
   homes.
 - Triage owns detailed Approval Backlog and Reboot Completion queues.
-  Customer Health may show customer-scoped summary counts/top blockers;
-  Command Center may show cross-customer summaries/ranking.
+  Client Patch Status may show client-scoped summary counts/top blockers;
+  Command Center may show cross-client summaries/ranking.
 
-# Customer health model
+# Client patch status model
 
-Use a rule-stack/tier model for v1, not a weighted black-box score.
-Tiers must be explainable directly in the UI with `health_reason`.
+Use a rule-stack status model for v1, not a weighted black-box score.
+Statuses must be explainable directly in the UI with `Reason`.
 
-- `Broken`
-  - stale dashboard data;
-  - no scan coverage on included devices;
-  - active failures above the Step 1 threshold.
-- `At Risk`
-  - stalled/never-patched included devices above threshold;
-  - reboot blockers above threshold;
-  - manual approval backlog above threshold.
+- `Data Stale`
+  - the dashboard data itself is too old or missing, so other patch
+    conclusions should not be trusted yet.
+- `Needs Action`
+  - no recent successful scan on included devices;
+  - active patch failures;
+  - stalled/never-patched included devices;
+  - reboot blockers;
+  - manual approval backlog.
 - `Watch`
-  - warnings above threshold;
-  - delayed backlog above threshold;
-  - low recent-install activity below threshold.
-- `Healthy`
-  - enabled/included devices are scanning and patching recently;
+  - warnings;
+  - delayed backlog;
+  - low recent-install activity;
+  - no included patching devices.
+- `Good`
+  - included devices are scanning and patching recently;
   - no material blockers.
 
-Step 1 must pin concrete thresholds for each placeholder above before
-Command Center is implemented. Within each tier, sort by severity inputs
-first, then affected device count, oldest blocker age, and customer name.
+Within each status, sort by status severity first, then affected device
+count, oldest blocker age, and client name.
 
 # Triage ordering
 
@@ -139,23 +140,23 @@ Triage queue priority order:
 7. Manual approvals.
 8. Warnings / watch items.
 
-Each row should expose priority, customer, device, problem, likely
+Each row should expose priority, client, device, problem, likely
 cause, next step, last scan, last install attempt, last contact, and a
 click path to Ninja and Device Drilldown.
 
 # Target dashboards
 
 1. Command Center
-   - Cross-customer health ranking.
-   - Management summary band: healthy/watch/at-risk/broken customers,
-     data-confidence problems, customers needing follow-up.
+   - Cross-client patch status ranking.
+   - Management summary band: good/watch/needs-action/data-stale
+     clients, data-confidence problems, clients needing follow-up.
    - Patch progress pulse.
    - Data confidence / ingest freshness.
-   - Top exceptions by customer and issue.
-   - Fast click-through into Customer Health or Triage.
+   - Top exceptions by client and issue.
+   - Fast click-through into Client Patch Status or Triage.
 
-2. Customer Health
-   - Current Org Overview reshaped as a one-customer report.
+2. Client Patch Status
+   - Current Org Overview reshaped and renamed as a one-client report.
    - Patching enabled/included devices.
    - Successful scan coverage and no-scan devices.
    - Recently installed devices.
@@ -174,7 +175,7 @@ click path to Ninja and Device Drilldown.
    - Approval backlog.
    - Search filters for device, KB, and error/message text.
    - Full error message available in failure investigation tables.
-   - Blocker ownership/type: data confidence, MSP action, customer/user
+   - Blocker ownership/type: data confidence, MSP action, client/user
      action, policy/expected, offline/unreachable.
 
 4. Device Drilldown
@@ -191,7 +192,7 @@ click path to Ninja and Device Drilldown.
    - Failed installs over time.
    - Operational failures and warnings over time.
    - Active/stalled/never-patched movement.
-   - Customer/exportable evidence.
+   - Client/exportable evidence.
 
 Supporting dashboards:
 - Patch Detail remains the KB/current-state drill-through page.
@@ -200,7 +201,7 @@ Supporting dashboards:
 
 # Functional coverage
 
-- Customer Health
+- Client Patch Status
 - Device Triage
 - Failure Investigation
 - Patch Progress
@@ -213,9 +214,9 @@ Supporting dashboards:
 
 # Acceptance checks
 
-- Command Center ranks customers by the documented tier rules and shows
-  the reason behind each tier.
-- Customer Health answers the same health questions for one customer as
+- Command Center ranks clients by the documented status rules and shows
+  the reason behind each status.
+- Client Patch Status answers the same patch status questions for one client as
   an export-friendly report.
 - Triage uses the documented priority order and exposes enough evidence
   for a junior tech to know what to check next.
@@ -223,7 +224,7 @@ Supporting dashboards:
   reboot, next-step, and Ninja-link evidence for the selected device.
 - Trends shows patch progress and failure movement over the selected
   window.
-- A real operator walkthrough can answer: which customers are unhealthy,
+- A real operator walkthrough can answer: which clients need action,
   which devices need work, what is blocking them, and where is the full
   evidence, without schema explanation.
 
@@ -235,15 +236,15 @@ Supporting dashboards:
    - dashboard broad vs filtered load behavior;
    - existing click-through paths to preserve;
    - current bootstrap trigger after Portainer deploy;
-   - concrete health-tier thresholds;
-   - concrete within-tier customer ordering.
+   - concrete status thresholds;
+   - concrete within-status client ordering.
 2. Audit current card SQL and identify reusable canonical result shapes:
-   customer health, device triage, scan confidence, failure events.
+   client patch status, device triage, scan confidence, failure events.
 3. Decide which shapes need materialized views for speed.
 4. Add migration/view refresh plumbing if needed.
-5. Rework Command Center into cross-customer health and exceptions.
-6. Rework Org Overview into Customer Health while preserving existing
-   customer click-through behavior.
+5. Rework Command Center into cross-client patch status and exceptions.
+6. Rework Org Overview into Client Patch Status while preserving existing
+   click-through behavior.
 7. Rework Issues/Device Patching Status into a sharper Triage workflow.
 8. Tighten Device Drilldown failure/warning detail and Ninja links.
 9. Adjust Trends only where reporting gaps remain.
@@ -258,16 +259,24 @@ Supporting dashboards:
 
 # Status
 
-first implementation slice complete locally:
-- visible navigation labels changed to Customer Health and Triage while
-  stored Metabase dashboard names remain stable;
-- Command Center customer ranking now uses health tier + reason;
-- Customer Health top band now answers enabled/scanned/installed/needs
-  attention;
-- Triage now has priority, blocker, warning-only rows, full messages,
-  and message-text search.
+Blueprint implemented locally:
+- visible and stored dashboard names now use Client Patch Status, Triage,
+  and Patch Trends, with legacy dashboard/card matching for existing
+  Metabase installs;
+- Command Center ranks clients by explicit status rules and shows the
+  reason behind each status;
+- Client Patch Status answers enabled, scanned, installed recently, needs
+  action, failures, reboot blockers, approval backlog, and stalled-device
+  questions;
+- Triage includes priority, blocker, full messages, message-text search,
+  scan gaps, reboot blockers, approval backlog, and stalled/never-patched
+  subqueues;
+- Device Drilldown surfaces current problem, suggested action, install
+  attempt/failure timing, and full warning/failure messages;
+- click-through aliases were preserved on client, device, patch state,
+  KB, and device type columns.
 
-Pending:
-- live Metabase bootstrap;
-- page-load timing;
-- click-through validation against the running stack.
+Pending live validation:
+- Metabase bootstrap against the running stack;
+- page-load timing against the documented target;
+- click-through validation against live dashboard cards and filters.

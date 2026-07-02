@@ -62,13 +62,24 @@ COLLECTION_NAME = "Ninja"
 # can reference them. Don't rename without updating drill targets.
 DASH_COMMAND     = "Ninja — Patch Command Center"
 DASH_OVERVIEW    = "Ninja — Overall Patching Status"
-DASH_ORG         = "Ninja — Org Overview"
+DASH_ORG         = "Ninja — Client Patch Status"
 DASH_DETAIL      = "Ninja — Patch Detail (Filterable)"
 DASH_DRILLDOWN   = "Ninja — Device Drilldown"
 DASH_PCOV        = "Ninja — Device Patching Status"
-DASH_ISSUES      = "Ninja — Issues"
-DASH_TRENDS      = "Ninja — Trends"
+DASH_ISSUES      = "Ninja — Triage"
+DASH_TRENDS      = "Ninja — Patch Trends"
 DASH_UTILITY     = "Ninja — Utilities"
+
+_DASHBOARD_LEGACY_NAMES: dict[str, list[str]] = {
+    # Order matters: most-recent legacy name first so it's matched
+    # ahead of older names. The bootstrap renames in place if a
+    # legacy name is found.
+    DASH_ORG:      ["Ninja — Org Overview"],
+    DASH_ISSUES:   ["Ninja — Issues"],
+    DASH_TRENDS:   ["Ninja — Trends"],
+    DASH_PCOV:     ["Ninja — Patching Status", "Ninja — Patch Coverage"],
+    DASH_OVERVIEW: ["Ninja — Overview"],
+}
 
 NINJA_DEVICE_URL = "https://amrose.rmmservice.com/#/deviceDashboard/{{Device ID}}/overview"
 
@@ -579,7 +590,7 @@ PARAM_CMD_SEV   = "p_cmd_sev"
 PARAM_PATCHING_SCOPE = "p_patching_scope"
 
 _CMD_TAGS = {
-    "org":         {"id": "tt_cmd_org",         "name": "org",         "display-name": "Organization", "type": "text"},
+    "org":         {"id": "tt_cmd_org",         "name": "org",         "display-name": "Client", "type": "text"},
     "device_type": {"id": "tt_cmd_device_type", "name": "device_type", "display-name": "Device Type",  "type": "text"},
     "patching_scope": {
         "id": "tt_cmd_patching_scope",
@@ -621,7 +632,7 @@ _CMD_FILTERS_PATCH_LIR    = _CMD_FILTERS_DEVICE + _CMD_FILTER_SEV_LIR
 
 def build_command_parameters(org_names: list[str]) -> list[dict]:
     return [
-        _param_multiselect(PARAM_CMD_ORG,   "Organization", "org", org_names),
+        _param_multiselect(PARAM_CMD_ORG,   "Client", "org", org_names),
         _param_multiselect(PARAM_CMD_CLASS, "Device Type",  "device_type", _NODE_CLASS_OPTIONS),
         _param_multiselect(PARAM_PATCHING_SCOPE, "Patching Scope", "patching_scope", _PATCHING_SCOPE_OPTIONS),
         _param_multiselect(PARAM_CMD_SEV,   "Severity",     "severity",    _SEVERITY_OPTIONS),
@@ -868,7 +879,7 @@ WHERE a.activity_type = 'PATCH_MANAGEMENT_FAILURE'
         "row": 7, "col": 16, "size_x": 8, "size_y": 3,
         "template_tags":  _CMD_TAGS,
         "param_mappings": _CMD_PARAM_MAPPINGS_FULL,
-        # Mirror of the per-org card on Org Overview. Tells the operator
+        # Mirror of the per-client card on Client Patch Status. Tells the operator
         # how stale the numbers below are — if the latest run failed and
         # the timestamp is hours old, the dashboard isn't fresh.
         "query": """
@@ -951,15 +962,15 @@ SELECT
     organization,
     CASE
         WHEN included_devices = 0 THEN 'Watch'
-        WHEN scanned_30d = 0 THEN 'Broken'
-        WHEN failure_devices > 0 THEN 'Broken'
-        WHEN stalled_devices + never_patched_devices > 0 THEN 'At Risk'
-        WHEN reboot_devices > 0 THEN 'At Risk'
-        WHEN manual_devices > 0 THEN 'At Risk'
+        WHEN scanned_30d = 0 THEN 'Needs Action'
+        WHEN failure_devices > 0 THEN 'Needs Action'
+        WHEN stalled_devices + never_patched_devices > 0 THEN 'Needs Action'
+        WHEN reboot_devices > 0 THEN 'Needs Action'
+        WHEN manual_devices > 0 THEN 'Needs Action'
         WHEN warning_devices > 0 THEN 'Watch'
         WHEN installed_30d = 0 THEN 'Watch'
-        ELSE 'Healthy'
-    END AS "Tier",
+        ELSE 'Good'
+    END AS "Status",
     CASE
         WHEN included_devices = 0 THEN 'No included patching devices'
         WHEN scanned_30d = 0 THEN 'No successful patch scans in 30d'
@@ -1172,14 +1183,14 @@ ORDER BY a.activity_time DESC
 LIMIT 100
 """,
     },
-    # ── Ingest Pipeline Health ─────────────────────────────────────
+    # ── Ingest Pipeline Status ─────────────────────────────────────
     # Per-module last-run status + age. Tells the operator whether the
     # numbers above are fresh or stale per domain — useful when a
     # single domain (e.g. activities) has been failing silently while
     # the rest succeed. Pulled from ninja_core.run_log directly.
     {
         "key":            "cmd_ingest_health",
-        "name":           "Ingest Pipeline Health",
+        "name":           "Ingest Pipeline Status",
         "display":        "table",
         "row": 61, "col": 0, "size_x": 24, "size_y": 8,
         "template_tags":  _CMD_TAGS,
@@ -1223,7 +1234,7 @@ PARAM_OVERALL_OS    = "p_overall_os"
 PARAM_OVERALL_SEV   = "p_overall_sev"
 
 _OVERALL_TAGS = {
-    "org":         {"id": "tt_overall_org",         "name": "org",         "display-name": "Organization",            "type": "text"},
+    "org":         {"id": "tt_overall_org",         "name": "org",         "display-name": "Client",                  "type": "text"},
     "device_type": {"id": "tt_overall_device_type", "name": "device_type", "display-name": "Device Type",             "type": "text"},
     "os_family":   {"id": "tt_overall_os_family",   "name": "os_family",   "display-name": "Operating System Family", "type": "text"},
     "patching_scope": {
@@ -1272,7 +1283,7 @@ _OVERALL_FILTERS_PATCH_LIR = _OVERALL_FILTERS_DEVICE + _OVERALL_FILTER_SEV_LIR
 
 def build_overall_parameters(org_names: list[str], os_families: list[str]) -> list[dict]:
     return [
-        _param_multiselect(PARAM_OVERALL_ORG,   "Organization",            "org", org_names),
+        _param_multiselect(PARAM_OVERALL_ORG,   "Client",                  "org", org_names),
         _param_multiselect(PARAM_OVERALL_CLASS, "Device Type",             "device_type", _NODE_CLASS_OPTIONS),
         _param_multiselect(PARAM_OVERALL_OS,    "Operating System Family", "os_family",   os_families),
         _param_multiselect(PARAM_PATCHING_SCOPE, "Patching Scope",         "patching_scope", _PATCHING_SCOPE_OPTIONS),
@@ -1353,7 +1364,7 @@ WHERE 1=1
 """,
     },
     {
-        # Data freshness indicator. If ingest is broken, every other
+        # Data freshness indicator. If ingest is stale, every other
         # number on the dashboard is stale — this card surfaces that
         # explicitly. Reads the most recent successful run from
         # run_log. Bold if older than the warning threshold.
@@ -1624,7 +1635,7 @@ ORDER BY "Patches" DESC
             "graph.dimensions": ["organization"],
             "graph.metrics":    ["Fully patched devices %"],
         },
-        # Click an org bar → open Org Overview filtered to that org.
+        # Click a client bar → open Client Patch Status filtered to that client.
         "click_behavior": {
             "target": DASH_ORG,
             "params": {"p_org": "organization"},
@@ -1748,7 +1759,7 @@ ORDER BY d.last_contact DESC
     },
     {
         "key":        "ingest_health",
-        "name":       "Ingest Health (last 24h)",
+        "name":       "Ingest Status (last 24h)",
         "display":    "table",
         "row": 44, "col": 0, "size_x": 24, "size_y": 8,
         "query": """
@@ -2134,12 +2145,12 @@ def build_detail_parameters(
 ) -> list[dict]:
     """Construct the dashboard's parameter widgets.
 
-    Organization and Device are populated from live data. Device Type
+    Client and Device are populated from live data. Device Type
     defaults to Windows Workstation so the MSP workflow "patch
     workstations across all clients first" is the default view.
     """
     return [
-        _param_multiselect(PARAM_ORG,     "Organization",            "org",             org_names),
+        _param_multiselect(PARAM_ORG,     "Client",                  "org",             org_names),
         _param_dropdown(   PARAM_DEVICE,  "Device",                  "device",          device_names),
         _param_multiselect(PARAM_STATUS,  "Current Patch State",     "status",          _STATUS_OPTIONS),
         _param_multiselect(PARAM_CLASS,   "Device Type",             "node_class",      _NODE_CLASS_OPTIONS,
@@ -2156,7 +2167,7 @@ def build_detail_parameters(
 # Each filtered card declares the same template tags + maps the dashboard
 # parameters onto them.
 _FILTER_TAGS = {
-    "org":        {"id": "tt_org",        "name": "org",        "display-name": "Organization", "type": "text"},
+    "org":        {"id": "tt_org",        "name": "org",        "display-name": "Client", "type": "text"},
     "status":     {"id": "tt_status",     "name": "status",     "display-name": "Current Patch State", "type": "text"},
     "node_class": {"id": "tt_node_class", "name": "node_class", "display-name": "Device Type",  "type": "text"},
     "severity":   {"id": "tt_severity",   "name": "severity",   "display-name": "Severity",     "type": "text"},
@@ -2529,7 +2540,7 @@ ORDER BY "Patches" DESC
 # the active Windows fleet.
 
 DEVICE_TAGS = {
-    "org": {"id": "tt_org", "name": "org", "display-name": "Organization", "type": "text"},
+    "org": {"id": "tt_org", "name": "org", "display-name": "Client", "type": "text"},
     "device": {"id": "tt_device", "name": "device", "display-name": "Device", "type": "text"},
     "patching_scope": {
         "id": "tt_device_patching_scope",
@@ -2540,7 +2551,7 @@ DEVICE_TAGS = {
 }
 
 DEVICE_TIMELINE_TAGS = {
-    "org": {"id": "tt_org", "name": "org", "display-name": "Organization", "type": "text"},
+    "org": {"id": "tt_org", "name": "org", "display-name": "Client", "type": "text"},
     "device": {"id": "tt_device", "name": "device", "display-name": "Device", "type": "text"},
     "patching_scope": {
         "id": "tt_device_timeline_patching_scope",
@@ -2579,7 +2590,7 @@ _DEVICE_FILTER = (
 def build_device_parameters(device_names: list[str]) -> list[dict]:
     """Device selector + timeline window."""
     return [
-        _param_text(      PARAM_ORG,      "Organization", "org"),
+        _param_text(      PARAM_ORG,      "Client", "org"),
         _param_dropdown(PARAM_DEVICE,      "Device", "device", device_names),
         _param_multiselect(PARAM_PATCHING_SCOPE, "Patching Scope", "patching_scope", _PATCHING_SCOPE_OPTIONS),
         _param_number(  PARAM_DEVICE_DAYS, "Timeline window (days)", "device_days", 180),
@@ -2598,9 +2609,11 @@ DEVICE_CARDS = [
             "table.columns": [
                 {"name": "Device",              "enabled": True},
                 {"name": "Open in Ninja",       "enabled": True},
-                {"name": "Organization",        "enabled": True},
+                {"name": "Client",              "enabled": True},
                 {"name": "Policy",              "enabled": True},
-                {"name": "Health",              "enabled": True},
+                {"name": "Current Problem",     "enabled": True},
+                {"name": "Suggested Action",    "enabled": True},
+                {"name": "Ninja Status",        "enabled": True},
                 {"name": "Patching Scope",      "enabled": True},
                 {"name": "Patching Notes",      "enabled": True},
                 {"name": "Device Type",         "enabled": True},
@@ -2612,9 +2625,13 @@ DEVICE_CARDS = [
                 {"name": "Reboot Reason",       "enabled": True},
                 {"name": "Earliest Scan in DB", "enabled": True},
                 {"name": "Last Scan",           "enabled": True},
+                {"name": "Last Install Attempt","enabled": True},
+                {"name": "Last Failure",        "enabled": True},
                 {"name": "Last Warning",        "enabled": True},
                 {"name": "Warnings (30d)",      "enabled": True},
                 {"name": "Failures (30d)",      "enabled": True},
+                {"name": "Last Failure Message","enabled": True},
+                {"name": "Last Warning Message","enabled": True},
                 {"name": "Ninja OS Pending",    "enabled": True},
                 {"name": "Ninja OS Failed",     "enabled": True},
                 {"name": "Alerts",              "enabled": True},
@@ -2642,9 +2659,11 @@ SELECT
     d.system_name          AS "Device",
     d.id                   AS "Device ID",
     'Open in Ninja'        AS "Open in Ninja",
-    o.name                 AS "Organization",
+    o.name                 AS "Client",
     COALESCE(role_policy.name, assigned_policy.name, '(none)') AS "Policy",
-    ldh.health_status      AS "Health",
+    ts.issue_type          AS "Current Problem",
+    ts.suggested_action    AS "Suggested Action",
+    ldh.health_status      AS "Ninja Status",
     d.patching_scope       AS "Patching Scope",
     d.patching_notes       AS "Patching Notes",
     {DEVICE_TYPE_D}        AS "Device Type",
@@ -2660,9 +2679,13 @@ SELECT
     ldh.pending_reboot_reason AS "Reboot Reason",
     ts.first_scan_started  AS "Earliest Scan in DB",
     ts.last_scan_completed AS "Last Scan",
+    ts.last_install_attempt AS "Last Install Attempt",
+    ts.last_patch_failure  AS "Last Failure",
     ts.last_warning_at     AS "Last Warning",
     ts.warning_events_30d  AS "Warnings (30d)",
     ts.patch_failure_events_30d AS "Failures (30d)",
+    ts.last_failure_message AS "Last Failure Message",
+    ts.last_warning_message AS "Last Warning Message",
     ldh.pending_os_patches_count AS "Ninja OS Pending",
     ldh.failed_os_patches_count AS "Ninja OS Failed",
     ldh.alert_count        AS "Alerts",
@@ -2924,7 +2947,7 @@ def build_pcov_parameters(
     org_names: list[str], os_families: list[str], policy_names: list[str],
 ) -> list[dict]:
     return [
-        _param_multiselect(PARAM_PCOV_ORG,    "Organization",            "pcov_org",        org_names),
+        _param_multiselect(PARAM_PCOV_ORG,    "Client",                  "pcov_org",        org_names),
         _param_multiselect(PARAM_PCOV_CLASS,  "Device Type",             "pcov_node_class", _NODE_CLASS_OPTIONS,
                            default="Windows Workstation"),
         _param_multiselect(PARAM_PCOV_OS,     "Operating System Family", "pcov_os",         os_families),
@@ -2936,7 +2959,7 @@ def build_pcov_parameters(
 
 
 _PCOV_TAGS = {
-    "pcov_org":         {"id": "tt_pcov_org",    "name": "pcov_org",        "display-name": "Organization", "type": "text"},
+    "pcov_org":         {"id": "tt_pcov_org",    "name": "pcov_org",        "display-name": "Client", "type": "text"},
     "pcov_node_class":  {"id": "tt_pcov_class",  "name": "pcov_node_class", "display-name": "Device Type",  "type": "text"},
     "pcov_os":          {"id": "tt_pcov_os",     "name": "pcov_os",         "display-name": "Operating System Family", "type": "text"},
     "pcov_policy":      {"id": "tt_pcov_policy", "name": "pcov_policy",     "display-name": "Policy", "type": "text"},
@@ -3101,7 +3124,7 @@ problem_devices AS (
         CASE
             WHEN c.patching_scope = 'Excluded' THEN 'Validate exclusion and notes'
             WHEN c.patch_status = 'no_patch_data' AND COALESCE(c.offline, FALSE) THEN 'Bring online; verify Ninja agent and patch policy'
-            WHEN c.patch_status = 'no_patch_data' THEN 'Verify policy assignment, agent health, and OS patch inventory'
+            WHEN c.patch_status = 'no_patch_data' THEN 'Verify policy assignment, agent status, and OS patch inventory'
             WHEN c.patch_status = 'stale_patch_data' AND COALESCE(c.offline, FALSE) THEN 'Bring online; confirm agent check-in'
             WHEN c.patch_status = 'stale_patch_data'
                 AND c.last_patch_started IS NOT NULL
@@ -3116,7 +3139,7 @@ problem_devices AS (
             WHEN c.patch_status = 'stale_patch_data' AND COALESCE(c.warning_events_30d, 0) > 0 THEN 'Review recent OS patch warnings (Drilldown)'
             WHEN c.patch_status = 'stale_patch_data' AND COALESCE(c.delayed_patches, 0) > 0 THEN 'Review delay policy/window'
             WHEN c.patch_status = 'stale_patch_data' AND COALESCE(c.approved_patches, 0) > 0 THEN 'Check why approved patches are not installing'
-            WHEN c.patch_status = 'stale_patch_data' THEN 'Check schedule, agent health, maintenance window, and policy'
+            WHEN c.patch_status = 'stale_patch_data' THEN 'Check schedule, agent status, maintenance window, and policy'
             WHEN COALESCE(c.failed_installs, 0) > 0 THEN 'Review failed install results'
             WHEN COALESCE(c.needs_reboot, FALSE) THEN 'Reboot or confirm reboot policy'
             WHEN COALESCE(c.warning_events_30d, 0) > 0 THEN 'Review recent OS patch warnings (Drilldown)'
@@ -3354,7 +3377,7 @@ SELECT
     p.assigned_policy AS "Policy",
     p.issue_type AS issue,
     p.suggested_action AS action,
-    p.health_status AS "Health",
+    p.health_status AS "Ninja Status",
     CASE WHEN p.last_seen_at IS NULL THEN NULL
          ELSE EXTRACT(DAY FROM (NOW() - p.last_seen_at))::int
     END AS "Days Since Patch",
@@ -3531,7 +3554,7 @@ def build_issue_parameters(
     org_names: list[str], os_families: list[str], policy_names: list[str],
 ) -> list[dict]:
     return [
-        _param_multiselect(PARAM_ISSUE_ORG, "Organization", "issue_org", org_names),
+        _param_multiselect(PARAM_ISSUE_ORG, "Client", "issue_org", org_names),
         _param_multiselect(PARAM_ISSUE_CLASS, "Device Type", "issue_device_type", _NODE_CLASS_OPTIONS),
         _param_multiselect(PARAM_ISSUE_OS, "OS Family", "issue_os", os_families),
         _param_multiselect(PARAM_ISSUE_POLICY, "Policy", "issue_policy", policy_names),
@@ -3550,7 +3573,7 @@ def build_issue_parameters(
 
 
 _ISSUE_TAGS = {
-    "issue_org": {"id": "tt_issue_org", "name": "issue_org", "display-name": "Organization", "type": "text"},
+    "issue_org": {"id": "tt_issue_org", "name": "issue_org", "display-name": "Client", "type": "text"},
     "issue_device_type": {"id": "tt_issue_class", "name": "issue_device_type", "display-name": "Device Type", "type": "text"},
     "issue_os": {"id": "tt_issue_os", "name": "issue_os", "display-name": "OS Family", "type": "text"},
     "issue_policy": {"id": "tt_issue_policy", "name": "issue_policy", "display-name": "Policy", "type": "text"},
@@ -3796,7 +3819,7 @@ SELECT
         ELSE 'Patch flow'
     END AS "Blocker",
     p.assigned_policy AS "Policy",
-    p.health_status AS "Health",
+    p.health_status AS "Ninja Status",
     CASE WHEN p.last_seen_at IS NULL THEN NULL
          ELSE EXTRACT(DAY FROM (NOW() - p.last_seen_at))::int
     END AS "Days Since Patch",
@@ -3848,7 +3871,7 @@ ORDER BY
     },
     {
         "key": "issues_by_org",
-        "name": "Issues by Organization",
+        "name": "Issues by Client",
         "display": "table",
         "row": 21, "col": 0, "size_x": 12, "size_y": 8,
         "template_tags": _ISSUE_TAGS,
@@ -3901,6 +3924,133 @@ GROUP BY p.issue_type
 ORDER BY devices DESC, issue
 """,
     },
+    {
+        "key": "issues_scan_gaps",
+        "name": "Scan Gaps",
+        "display": "table",
+        "row": 29, "col": 0, "size_x": 12, "size_y": 8,
+        "template_tags": _ISSUE_TAGS,
+        "param_mappings": _ISSUE_PARAM_MAPPINGS,
+        "column_click_behaviors": {
+            "device": {"target": DASH_DRILLDOWN, "params": {"p_device": "device"}},
+            "organization": {"target": "self", "params": {"p_issue_org": "organization"}},
+        },
+        "query": f"""
+{_problem_devices_cte("issue_days")}
+SELECT
+    p.system_name AS device,
+    o.name AS organization,
+    p.assigned_policy AS "Policy",
+    p.first_scan_started AS "Earliest Scan",
+    p.last_scan_completed AS "Last Successful Scan",
+    p.patch_status AS "Patch Activity",
+    p.suggested_action AS "Suggested Action",
+    p.last_failure_message AS "Last Failure Message",
+    p.last_warning_message AS "Last Warning Message"
+FROM problem_devices p
+JOIN ninja_core.organizations o ON o.id = p.organization_id
+WHERE p.patching_scope = 'Included'
+  AND p.last_scan_completed IS NULL
+{_ISSUE_FILTERS}
+ORDER BY o.name, p.system_name
+LIMIT 200
+""",
+    },
+    {
+        "key": "issues_reboot_queue",
+        "name": "Reboot Blockers",
+        "display": "table",
+        "row": 29, "col": 12, "size_x": 12, "size_y": 8,
+        "template_tags": _ISSUE_TAGS,
+        "param_mappings": _ISSUE_PARAM_MAPPINGS,
+        "column_click_behaviors": {
+            "device": {"target": DASH_DRILLDOWN, "params": {"p_device": "device"}},
+            "organization": {"target": "self", "params": {"p_issue_org": "organization"}},
+        },
+        "query": f"""
+{_problem_devices_cte("issue_days")}
+SELECT
+    p.system_name AS device,
+    o.name AS organization,
+    p.pending_reboot_reason AS "Reboot Reason",
+    p.last_contact AS "Last Contact",
+    p.last_install_attempt AS "Last Install Attempt",
+    p.suggested_action AS "Suggested Action"
+FROM problem_devices p
+JOIN ninja_core.organizations o ON o.id = p.organization_id
+WHERE COALESCE(p.needs_reboot, FALSE)
+{_ISSUE_FILTERS}
+ORDER BY p.last_install_attempt DESC NULLS LAST, o.name, p.system_name
+LIMIT 200
+""",
+    },
+    {
+        "key": "issues_approval_queue",
+        "name": "Approval Backlog",
+        "display": "table",
+        "row": 37, "col": 0, "size_x": 12, "size_y": 8,
+        "template_tags": _ISSUE_TAGS,
+        "param_mappings": _ISSUE_PARAM_MAPPINGS,
+        "column_click_behaviors": {
+            "device": {"target": DASH_DRILLDOWN, "params": {"p_device": "device"}},
+            "organization": {"target": "self", "params": {"p_issue_org": "organization"}},
+        },
+        "query": f"""
+{_problem_devices_cte("issue_days")}
+SELECT
+    p.system_name AS device,
+    o.name AS organization,
+    p.assigned_policy AS "Policy",
+    p.manual_patches AS "Manual",
+    p.approved_patches AS "Approved",
+    p.delayed_patches AS "Delayed",
+    p.waiting_patches AS "Waiting",
+    p.last_patch_state_seen AS "Last Patch State Seen",
+    p.suggested_action AS "Suggested Action"
+FROM problem_devices p
+JOIN ninja_core.organizations o ON o.id = p.organization_id
+WHERE (
+    p.manual_patches > 0
+    OR p.approved_patches > 0
+    OR p.delayed_patches > 0
+)
+{_ISSUE_FILTERS}
+ORDER BY p.manual_patches DESC, p.approved_patches DESC, p.delayed_patches DESC, o.name, p.system_name
+LIMIT 200
+""",
+    },
+    {
+        "key": "issues_stalled_queue",
+        "name": "Stalled or Never Patched",
+        "display": "table",
+        "row": 37, "col": 12, "size_x": 12, "size_y": 8,
+        "template_tags": _ISSUE_TAGS,
+        "param_mappings": _ISSUE_PARAM_MAPPINGS,
+        "column_click_behaviors": {
+            "device": {"target": DASH_DRILLDOWN, "params": {"p_device": "device"}},
+            "organization": {"target": "self", "params": {"p_issue_org": "organization"}},
+        },
+        "query": f"""
+{_problem_devices_cte("issue_days")}
+SELECT
+    p.system_name AS device,
+    o.name AS organization,
+    p.issue_type AS issue,
+    p.suggested_action AS "Suggested Action",
+    p.last_seen_at AS "Last Install",
+    p.last_install_attempt AS "Last Install Attempt",
+    p.last_scan_completed AS "Last Successful Scan",
+    p.last_contact AS "Last Contact",
+    p.last_failure_message AS "Last Failure Message",
+    p.last_warning_message AS "Last Warning Message"
+FROM problem_devices p
+JOIN ninja_core.organizations o ON o.id = p.organization_id
+WHERE p.patch_status IN ('no_patch_data', 'stale_patch_data')
+{_ISSUE_FILTERS}
+ORDER BY p.last_seen_at ASC NULLS FIRST, o.name, p.system_name
+LIMIT 200
+""",
+    },
     # ── Warnings by Category (fleet-wide, last 30 days) ────────────
     # Walks the activity feed directly (not via problem_devices) so
     # categorization can evolve without re-aggregating the rollup MV.
@@ -3908,7 +4058,7 @@ ORDER BY devices DESC, issue
         "key": "issues_warnings_by_category",
         "name": "Warnings by Category (30d)",
         "display": "table",
-        "row": 29, "col": 0, "size_x": 12, "size_y": 8,
+        "row": 45, "col": 0, "size_x": 12, "size_y": 8,
         "template_tags": _ISSUE_TAGS,
         "param_mappings": _ISSUE_PARAM_MAPPINGS,
         # Click a category row → sets warning_category dashboard param,
@@ -3959,7 +4109,7 @@ ORDER BY "Events" DESC
         "key": "issues_top_devices_warnings",
         "name": "Top Devices by Warnings (30d)",
         "display": "table",
-        "row": 38, "col": 0, "size_x": 12, "size_y": 8,
+        "row": 54, "col": 0, "size_x": 12, "size_y": 8,
         "template_tags": _ISSUE_TAGS,
         "param_mappings": _ISSUE_PARAM_MAPPINGS,
         "column_click_behaviors": {
@@ -3988,7 +4138,7 @@ LIMIT 50
         "key": "issues_top_devices_failures",
         "name": "Top Devices by Failures (30d)",
         "display": "table",
-        "row": 38, "col": 12, "size_x": 12, "size_y": 8,
+        "row": 54, "col": 12, "size_x": 12, "size_y": 8,
         "template_tags": _ISSUE_TAGS,
         "param_mappings": _ISSUE_PARAM_MAPPINGS,
         "column_click_behaviors": {
@@ -4020,7 +4170,7 @@ LIMIT 50
         "key": "issues_failures_by_error",
         "name": "Failures by Error Code (30d)",
         "display": "table",
-        "row": 29, "col": 12, "size_x": 12, "size_y": 8,
+        "row": 45, "col": 12, "size_x": 12, "size_y": 8,
         "template_tags": _ISSUE_TAGS,
         "param_mappings": _ISSUE_PARAM_MAPPINGS,
         # Click an error type row → sets failure_error_type dashboard
@@ -4070,7 +4220,7 @@ ORDER BY "Events" DESC
         "key": "issues_devices_by_warning_category",
         "name": "Devices Matching Warning Category (30d)",
         "display": "table",
-        "row": 46, "col": 0, "size_x": 24, "size_y": 10,
+        "row": 62, "col": 0, "size_x": 24, "size_y": 10,
         "template_tags": _ISSUE_TAGS,
         "param_mappings": _ISSUE_PARAM_MAPPINGS,
         "column_click_behaviors": {
@@ -4121,7 +4271,7 @@ LIMIT 200
         "key": "issues_devices_by_failure_error",
         "name": "Devices Matching Failure Error Type (30d)",
         "display": "table",
-        "row": 56, "col": 0, "size_x": 24, "size_y": 10,
+        "row": 72, "col": 0, "size_x": 24, "size_y": 10,
         "template_tags": _ISSUE_TAGS,
         "param_mappings": _ISSUE_PARAM_MAPPINGS,
         "column_click_behaviors": {
@@ -4168,10 +4318,10 @@ LIMIT 200
 ]
 
 
-# ── Org Overview dashboard ──────────────────────────────────────────
+# ── Client Patch Status dashboard ───────────────────────────────────
 
 _ORG_TAGS = {
-    "org":         {"id": "tt_org_overview_org",         "name": "org",         "display-name": "Organization", "type": "text"},
+    "org":         {"id": "tt_org_overview_org",         "name": "org",         "display-name": "Client", "type": "text"},
     "device_type": {"id": "tt_org_overview_device_type", "name": "device_type", "display-name": "Device Type",  "type": "text"},
     "os_family":   {"id": "tt_org_overview_os_family",   "name": "os_family",   "display-name": "OS Family",    "type": "text"},
     "patching_scope": {
@@ -4198,7 +4348,7 @@ _ORG_PARAM_MAPPINGS_FULL = {
     PARAM_SEV:   ["variable", ["template-tag", "severity"]],
 }
 
-# SQL predicate fragments for Org Overview filters. Each ends with a
+# SQL predicate fragments for Client Patch Status filters. Each ends with a
 # trailing newline so cards can append them directly after their own
 # WHERE/AND lines. Device-only cards use the DEVICE variant; patch-
 # context cards use PATCH_CS (cs.severity alias) or PATCH_LIR
@@ -4235,7 +4385,7 @@ _ORG_FILTERS_PATCH_LIR = _ORG_FILTERS_DEVICE + _ORG_FILTER_SEV_LIR
 
 def build_org_parameters(org_names: list[str]) -> list[dict]:
     return [
-        _param_multiselect(PARAM_ORG,   "Organization", "org", org_names),
+        _param_multiselect(PARAM_ORG,   "Client", "org", org_names),
         _param_multiselect(PARAM_CLASS, "Device Type",  "device_type", _NODE_CLASS_OPTIONS),
         _param_multiselect(PARAM_OS,    "OS Family",    "os_family",   _OS_FAMILY_OPTIONS),
         _param_multiselect(PARAM_PATCHING_SCOPE, "Patching Scope", "patching_scope", _PATCHING_SCOPE_OPTIONS),
@@ -4278,7 +4428,7 @@ WHERE 1=1
     },
     {
         "key":     "org_compliance",
-        "name":    "Health Tier",
+        "name":    "Client Patch Status",
         "display": "scalar",
         "row": 0, "col": 0, "size_x": 8, "size_y": 3,
         "template_tags":  _ORG_TAGS,
@@ -4328,17 +4478,17 @@ rollup AS (
 )
 SELECT
     CASE
-        WHEN lr.last_ok_run IS NULL OR lr.last_ok_run < NOW() - INTERVAL '3 hours' THEN 'Broken - stale data'
+        WHEN lr.last_ok_run IS NULL OR lr.last_ok_run < NOW() - INTERVAL '3 hours' THEN 'Data stale'
         WHEN r.included_devices = 0 THEN 'Watch - no included devices'
-        WHEN r.scanned_30d = 0 THEN 'Broken - no recent scans'
-        WHEN r.failure_devices > 0 THEN 'Broken - patch failures'
-        WHEN r.stalled_or_never > 0 THEN 'At Risk - stalled devices'
-        WHEN r.reboot_devices > 0 THEN 'At Risk - reboot blockers'
-        WHEN r.manual_devices > 0 THEN 'At Risk - approvals'
+        WHEN r.scanned_30d = 0 THEN 'Needs Action - no recent scans'
+        WHEN r.failure_devices > 0 THEN 'Needs Action - patch failures'
+        WHEN r.stalled_or_never > 0 THEN 'Needs Action - stalled devices'
+        WHEN r.reboot_devices > 0 THEN 'Needs Action - reboot blockers'
+        WHEN r.manual_devices > 0 THEN 'Needs Action - approvals'
         WHEN r.warning_devices > 0 THEN 'Watch - warnings'
         WHEN r.recent_install_devices = 0 THEN 'Watch - no recent installs'
-        ELSE 'Healthy'
-    END AS health_tier
+        ELSE 'Good'
+    END AS client_patch_status
 FROM rollup r
 CROSS JOIN latest_run lr
 """,
@@ -4395,7 +4545,7 @@ WHERE s.patching_scope = 'Included'
     },
     {
         "key":     "org_data_freshness",
-        "name":    "Needs Attention",
+        "name":    "Needs Action",
         "display": "scalar",
         "row": 0, "col": 16, "size_x": 8, "size_y": 3,
         "template_tags":  _ORG_TAGS,
@@ -4720,8 +4870,8 @@ ORDER BY
 LIMIT 100
 """,
     },
-    # ── Org warnings + failures rollup (30d) ───────────────────────
-    # Per-org operational pulse — how many warning + failure events
+    # ── Client warnings + failures rollup (30d) ────────────────────
+    # Per-client operational pulse — how many warning + failure events
     # fired across this client's devices in the last 30 days. Two
     # scalars + one table for the recent activity detail.
     {
@@ -4758,8 +4908,8 @@ WHERE a.activity_type = 'PATCH_MANAGEMENT_FAILURE'
 {_ORG_FILTERS_DEVICE}
 """,
     },
-    # ── Top Problem Devices in this Org ────────────────────────────
-    # Per-org triage table. Operator opens Org Overview filtered to a
+    # ── Top Problem Devices in this Client ─────────────────────────
+    # Per-client triage table. Operator opens Client Patch Status filtered to a
     # client → sees the worst devices for that client, ordered by
     # issue severity (no_patch_data > stale > failures > warnings).
     # Click device → Device Drilldown. Reuses the canonical
@@ -4773,10 +4923,12 @@ WHERE a.activity_type = 'PATCH_MANAGEMENT_FAILURE'
         "template_tags":  _ORG_TAGS,
         "param_mappings": _ORG_PARAM_MAPPINGS,
         "column_click_behaviors": {
-            "device": {"target": DASH_DRILLDOWN, "params": {"p_device": "device"}},
+            "organization": {"target": "self",         "params": {"p_org": "organization"}},
+            "device":       {"target": DASH_DRILLDOWN, "params": {"p_device": "device"}},
         },
         "query": f"""
 SELECT
+    o.name                     AS organization,
     d.system_name              AS device,
     s.issue_type               AS issue,
     s.suggested_action         AS "Suggested Action",
@@ -4861,7 +5013,7 @@ _TRENDS_TAGS = {
         "display-name": "Timeline window (days)",
         "type": "number", "default": "90", "required": True,
     },
-    "org":         {"id": "tt_trends_org",         "name": "org",         "display-name": "Organization", "type": "text"},
+    "org":         {"id": "tt_trends_org",         "name": "org",         "display-name": "Client", "type": "text"},
     "device_type": {"id": "tt_trends_device_type", "name": "device_type", "display-name": "Device Type",  "type": "text"},
     "patching_scope": {
         "id": "tt_trends_patching_scope",
@@ -4901,7 +5053,7 @@ _TRENDS_FILTERS_PATCH_CS   = _TRENDS_FILTERS_DEVICE + _TRENDS_FILTER_SEV_CS
 def build_trends_parameters(org_names: list[str]) -> list[dict]:
     return [
         _param_number(     PARAM_TRENDS_DAYS,  "Timeline window (days)", "days",        90),
-        _param_multiselect(PARAM_TRENDS_ORG,   "Organization",           "org", org_names),
+        _param_multiselect(PARAM_TRENDS_ORG,   "Client",                 "org", org_names),
         _param_multiselect(PARAM_TRENDS_CLASS, "Device Type",            "device_type", _NODE_CLASS_OPTIONS),
         _param_multiselect(PARAM_PATCHING_SCOPE, "Patching Scope",       "patching_scope", _PATCHING_SCOPE_OPTIONS),
         _param_multiselect(PARAM_TRENDS_SEV,   "Severity",               "severity",    _SEVERITY_OPTIONS),
@@ -5173,7 +5325,6 @@ _SCALAR_SUFFIX_RULES: dict[str, tuple[str, str]] = {
     # key            (column, suffix)
     "overall_compliance": ("percent_installed", "%"),
     "overall_progress":   ("percent_installed", "%"),
-    "org_compliance":     ("percent_installed", "%"),
     "org_progress":       ("percent_installed", "%"),
     "cmd_compliance":     ("percent_installed", "%"),
 }
@@ -5276,7 +5427,7 @@ _UTIL_TAGS = {
     "message":       {"id": "tt_util_message",       "name": "message",       "display-name": "Message contains", "type": "text"},
     "subject":       {"id": "tt_util_subject",       "name": "subject",       "display-name": "Subject contains", "type": "text"},
     "activity_type": {"id": "tt_util_activity_type", "name": "activity_type", "display-name": "Activity Type",    "type": "text"},
-    "org":           {"id": "tt_util_org",           "name": "org",           "display-name": "Organization",     "type": "text"},
+    "org":           {"id": "tt_util_org",           "name": "org",           "display-name": "Client",           "type": "text"},
     "device":        {"id": "tt_util_device",        "name": "device",        "display-name": "Device",           "type": "text"},
     "severity":      {"id": "tt_util_severity",      "name": "severity",      "display-name": "Severity",         "type": "text"},
     "days": {
@@ -5304,7 +5455,7 @@ def build_utility_parameters(
         _param_text(       PARAM_UTIL_MESSAGE,  "Message contains",       "message"),
         _param_text(       PARAM_UTIL_SUBJECT,  "Subject contains",       "subject"),
         _param_multiselect(PARAM_UTIL_TYPE,     "Activity Type",          "activity_type", list(_DRILLDOWN_ACTIVITY_CODES)),
-        _param_multiselect(PARAM_UTIL_ORG,      "Organization",           "org",           org_names),
+        _param_multiselect(PARAM_UTIL_ORG,      "Client",                 "org",           org_names),
         _param_dropdown(   PARAM_UTIL_DEVICE,   "Device",                 "device",        device_names),
         _param_multiselect(PARAM_UTIL_SEVERITY, "Severity",               "severity",      _SEVERITY_OPTIONS),
         _param_number(     PARAM_UTIL_DAYS,     "Timeline window (days)", "days",          30),
@@ -5323,7 +5474,7 @@ UTILITY_CARDS = [
             "table.columns": [
                 {"name": "Activity Time", "enabled": True},
                 {"name": "Device",        "enabled": True},
-                {"name": "Organization",  "enabled": True},
+                {"name": "Client",        "enabled": True},
                 {"name": "Activity Type", "enabled": True},
                 {"name": "Severity",      "enabled": True},
                 {"name": "Subject",       "enabled": True},
@@ -5349,7 +5500,7 @@ SELECT
     a.activity_time      AS "Activity Time",
     d.system_name        AS "Device",
     d.id                 AS "Device ID",
-    o.name               AS "Organization",
+    o.name               AS "Client",
     a.activity_type      AS "Activity Type",
     a.severity           AS "Severity",
     a.subject            AS "Subject",
@@ -5408,7 +5559,7 @@ def build_dashboards(
             "parameters": build_org_parameters(org_names),
             "cards":      ORG_OVERVIEW_CARDS,
             "section_headers": [
-                {"row": 0, "text": "### Customer Health"},
+                {"row": 0, "text": "### Client Patch Status"},
                 {"row": 6, "text": "### Devices"},
                 {"row": 11, "text": "### Patches"},
             ],
@@ -5523,12 +5674,25 @@ def _card_uid(dashboard_name: str, card_key: str) -> str:
     return f"ninja-dashboard:{dash_slug}:{card_key}"
 
 
+def _card_uid_candidates(dashboard_name: str, card_key: str) -> list[str]:
+    """Current card identity plus legacy dashboard-name identities.
+
+    Dashboard titles are user-facing, so they may be renamed for clearer
+    operations language. Card descriptions are the bootstrap's hidden
+    identity; checking legacy titles lets us rename dashboards without
+    duplicating every card.
+    """
+    names = [dashboard_name, *_DASHBOARD_LEGACY_NAMES.get(dashboard_name, [])]
+    return [_card_uid(name, card_key) for name in names]
+
+
 def _upsert_card(
     client: httpx.Client, spec: dict, db_id: int, collection_id: int,
     dashboard_name: str,
     existing_cards: list[dict],
 ) -> int:
     uid = _card_uid(dashboard_name, spec["key"])
+    uid_candidates = set(_card_uid_candidates(dashboard_name, spec["key"]))
     native: dict[str, Any] = {"query": spec["query"].strip()}
     if "template_tags" in spec:
         native["template-tags"] = spec["template_tags"]
@@ -5547,7 +5711,7 @@ def _upsert_card(
     existing = next(
         (
             card for card in existing_cards
-            if card.get("description") == uid
+            if card.get("description") in uid_candidates
         ),
         None,
     )
@@ -5571,15 +5735,8 @@ def _upsert_dashboard(
     r = client.get("/api/dashboard")
     r.raise_for_status()
     existing = None
-    legacy_names = {
-        # Order matters: most-recent legacy name first so it's matched
-        # ahead of older names. The bootstrap renames in place if a
-        # legacy name is found.
-        DASH_PCOV:     ["Ninja — Patching Status", "Ninja — Patch Coverage"],
-        DASH_OVERVIEW: ["Ninja — Overview"],
-    }
     for d in r.json():
-        names = [name, *legacy_names.get(name, [])]
+        names = [name, *_DASHBOARD_LEGACY_NAMES.get(name, [])]
         if d.get("name") in names and d.get("collection_id") == collection_id:
             existing = d
             break
@@ -5623,10 +5780,10 @@ NAV_ORDER = [
 NAV_DISPLAY_NAMES = {
     DASH_COMMAND:   "Command Center",
     DASH_OVERVIEW:  "Overall Status",
-    DASH_ORG:       "Customer Health",
+    DASH_ORG:       "Client Patch Status",
     DASH_ISSUES:    "Triage",
     DASH_PCOV:      "Device Status",
-    DASH_TRENDS:    "Trends",
+    DASH_TRENDS:    "Patch Trends",
     DASH_DETAIL:    "Patch Detail",
     DASH_DRILLDOWN: "Device Drilldown",
 }
