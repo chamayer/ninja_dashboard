@@ -4171,6 +4171,7 @@ WITH categorized AS (
     JOIN ninja_core.v_active_devices d ON d.id = a.device_id
     WHERE a.activity_type IN ('PATCH_MANAGEMENT_MESSAGE','SOFTWARE_PATCH_MANAGEMENT_MESSAGE')
       AND a.activity_time >= NOW() - INTERVAL '30 days'
+      [[AND a.message ILIKE '%' || {{{{message_text}}}} || '%']]
 )
 SELECT
     c.category AS "Category",
@@ -4279,6 +4280,7 @@ WITH categorized AS (
     JOIN ninja_core.v_active_devices d ON d.id = a.device_id
     WHERE a.activity_type = 'PATCH_MANAGEMENT_FAILURE'
       AND a.activity_time >= NOW() - INTERVAL '30 days'
+      [[AND a.message ILIKE '%' || {{{{message_text}}}} || '%']]
 )
 SELECT
     c.error_type AS "Error Type",
@@ -4333,6 +4335,7 @@ WITH categorized AS (
     JOIN ninja_core.v_active_devices d ON d.id = a.device_id
     WHERE a.activity_type IN ('PATCH_MANAGEMENT_MESSAGE','SOFTWARE_PATCH_MANAGEMENT_MESSAGE')
       AND a.activity_time >= NOW() - INTERVAL '30 days'
+      [[AND a.message ILIKE '%' || {{{{message_text}}}} || '%']]
 )
 SELECT
     c.system_name AS device,
@@ -4381,6 +4384,7 @@ WITH categorized AS (
     JOIN ninja_core.v_active_devices d ON d.id = a.device_id
     WHERE a.activity_type = 'PATCH_MANAGEMENT_FAILURE'
       AND a.activity_time >= NOW() - INTERVAL '30 days'
+      [[AND a.message ILIKE '%' || {{{{message_text}}}} || '%']]
 )
 SELECT
     c.system_name AS device,

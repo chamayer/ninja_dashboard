@@ -5,6 +5,23 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-07-02 — v0.34.6 Triage message search wiring
+
+**Why:** Live validation showed the main Triage queue honored
+`Message Contains`, but warning/error category detail cards carried the
+dashboard parameter without applying it in SQL. Searching for similar
+messages therefore looked available but was incomplete.
+
+**Fix:** Added `message_text` predicates to the warning category,
+failure error, and matching-device raw activity cards. Added migration
+066 with a trigram index on `ninja_activities.activities.message` plus
+an activity type/time/device index for the 30-day patch activity paths.
+
+**Validation:** Pending local compile/spec checks and live retime after
+deployment.
+
+---
+
 ## 2026-07-02 — v0.34.5 Client Patch Status card performance
 
 **Why:** Live timing after the Command Center fix showed Triage was fast,

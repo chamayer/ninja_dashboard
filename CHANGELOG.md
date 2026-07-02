@@ -2,6 +2,15 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.34.6] — 2026-07-02
+
+### Fixed
+- Triage warning/error category activity cards now honor the
+  `Message Contains` filter so operators can find devices with similar
+  patch messages across the fleet.
+- Added trigram and activity type/time indexes for faster patch activity
+  message searches.
+
 ## [0.34.5] — 2026-07-02
 
 ### Fixed
