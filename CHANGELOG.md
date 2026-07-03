@@ -2,6 +2,31 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.35.0] — 2026-07-03
+
+### Changed
+- Reworked the patch dashboard information architecture around the
+  approved operator flow: Command Center, Client Patch Review, Device
+  Work Queue, Device Detail, Patch Evidence, Patch Trends, and
+  Activity Search.
+- Renamed active dashboards in place using legacy dashboard names so
+  existing Metabase dashboard IDs are preserved where possible.
+- Removed `Overall Patching Status` and `Device Patching Status` from
+  the active dashboard build/navigation; their useful concepts are
+  merged into the remaining workflow pages.
+- Clarified card titles for fleet devices, client status, patch
+  failures, approval blockers, device work queues, and patch evidence.
+- Device Detail now requires a selected device instead of running broad
+  fleet detail queries on direct page open.
+- Removed the two slowest Trends cards from the visible layout until
+  they can be rebuilt on optimized reporting views.
+
+### Added
+- `DASHBOARD_PLACEMENT_MAP.md` records the card-by-card placement,
+  timing baseline, and keep/move/drop decisions used for this redesign.
+- Bootstrap cleanup archives retired duplicate dashboards after active
+  dashboards are resolved.
+
 ## [0.34.7] — 2026-07-02
 
 ### Changed

@@ -5,6 +5,34 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-07-03 — v0.35.0 Patch dashboard IA implementation
+
+**Why:** Operator review showed the dashboard set still reflected
+project history more than work flow. `Command Center` and `Overall`
+overlapped, `Device Patching Status` had no distinct job, duplicate
+`Utilities` dashboards existed, and several card titles did not tell a
+human whether they counted clients, devices, patches, or events.
+
+**Fix:** Added `DASHBOARD_PLACEMENT_MAP.md` with live no-filter timing
+baseline and card-by-card placement decisions. Updated
+`ingest/metabase_bootstrap.py` so the active operator flow is:
+Command Center, Client Patch Review, Device Work Queue, Device Detail,
+Patch Evidence, Patch Trends, and Activity Search. Dashboard legacy-name
+matching preserves existing active dashboard IDs during renames. Retired
+`Overall Patching Status`, `Device Patching Status`, and duplicate
+`Utilities` dashboards are archived after active dashboards are
+resolved. Card titles now identify fleet/client/device/patch intent more
+clearly. Device Detail requires a selected device, preventing broad
+fleet detail queries. The two slowest Trends cards were removed from the
+visible layout pending optimized reporting views.
+
+**Validation:** `python -m py_compile ingest/metabase_bootstrap.py`
+passes. Running the bootstrap CLI locally is blocked by missing local
+dependency `httpx`; live bootstrap/redeploy and curl retiming still need
+to run against the stack.
+
+---
+
 ## 2026-07-02 — v0.34.7 Client Patch Status one-client guard
 
 **Why:** Operator feedback: Client Patch Status top cards were

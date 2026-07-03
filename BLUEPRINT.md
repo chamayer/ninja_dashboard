@@ -1,292 +1,503 @@
 # Goal
 
-Redesign the patching dashboards around fast, human-first patch
-operations reporting while preserving click-through filtering.
+Redesign the patching dashboard navigation and card placement around the
+operator's workflow, so each visible dashboard has a clear job and clear
+scope.
 
 # Why
 
-Current patching dashboards contain most of the needed signals, but the
-story is fragmented. Org Overview and other cards often present counts
-without making it obvious whether patching is running, what needs work,
-or why devices/clients are blocked.
+The current dashboards have useful data, fast queries, and working
+click-throughs, but the navigation still carries project history:
+
+- dashboard titles mix old names, data concepts, and workflow concepts;
+- `Command Center` and `Overall Status` overlap heavily;
+- `Device Patching Status` overlaps with all-client, client, and triage
+  views;
+- `Utilities` is vague and duplicated in live Metabase;
+- some card titles do not make clear whether they refer to clients,
+  devices, patches, events, or the current filter scope.
+
+The goal is not another query rebuild. The goal is a reviewable
+information architecture pass before implementation.
 
 # Scope
 
-- Reframe patching around functional areas, not formal roles:
-  - Command Center: cross-client patch status and exceptions.
-  - Client Patch Status: one-client patch report.
-  - Triage: device/action queue and failure investigation.
-  - Device Drilldown: full single-device evidence.
-  - Trends / Reporting: time-series and exportable evidence.
-- Keep Metabase as the reporting UI with limited feedback/actions.
-- Preserve and expand useful click-through filter behavior.
-- Make page load speed a hard requirement.
-- Design for an internal AMR operator wearing multiple hats in a small
-  MSP; client-facing output is reporting/export evidence, not the
-  operational landing view.
+- Define the final operator-facing navigation.
+- Define the function of each dashboard.
+- Audit every current dashboard/card and decide whether it is kept,
+  moved, renamed, duplicated intentionally, demoted, or removed.
+- Keep useful metric concepts in multiple places when the operational
+  question is different.
+- Preserve working filters, click-through behavior, and dashboard IDs
+  where practical.
+- Keep page load targets from the previous blueprint.
+
+> **Q (reviewer):** How is dashboard ID preservation actually achieved
+> when the display name changes? Prior responses stated bootstrap is
+> idempotent "by name/stable hidden card UID." Renaming `Triage →
+> Device Work Queue` will create a new dashboard, not rename the
+> existing one, unless a hidden UID or explicit rename path is in play.
+> Verify the mechanism in `metabase_bootstrap.py` before Step 2 or the
+> renames will silently orphan the old IDs and break external
+> bookmarks.
+>
+> **Response:** Accepted. Verified in `ingest/metabase_bootstrap.py`:
+> `_upsert_dashboard()` preserves IDs only when the new dashboard name
+> maps to the old display name through `_DASHBOARD_LEGACY_NAMES`. Card
+> IDs are preserved separately through hidden card UIDs in the card
+> `description`, with `_card_uid_candidates()` checking current and
+> legacy dashboard-name slugs. Implementation must therefore update
+> `_DASHBOARD_LEGACY_NAMES` for every dashboard rename before running
+> bootstrap. This becomes a required Step 4 checklist item, not an
+> assumption.
+
+> **Q (reviewer):** The previous blueprint required a page-load
+> baseline in its Step 1. Where does the baseline capture live in this
+> plan? Suggest folding it into Step 2's audit output, since every
+> card is being looked at anyway — otherwise "keep page load targets"
+> has no reference point to validate against.
+>
+> **Response:** Accepted. Step 2 will produce a durable placement map
+> that includes live dashboard/card timing columns. The baseline will
+> live in `DASHBOARD_PLACEMENT_MAP.md` alongside each card's keep/move/
+> drop verdict, so performance is reviewed before implementation and
+> retested after implementation.
 
 # Out of scope
 
-- No custom web app yet.
-- No broad workflow system with ownership, assignment, or ticket state.
-- No change to ingest cadence unless dashboard evidence proves it is
-  needed.
-- No removal of existing supporting dashboards until replacements prove
-  equivalent.
+- No custom web app.
+- No role-based dashboard model.
+- No broad query rewrite unless the card audit exposes a real gap or
+  performance regression.
+- No removal of useful drill-through paths without a replacement.
 
 # Files to change
 
-- `ingest/metabase_bootstrap.py`
-  - Dashboard layout, filters, card SQL, click-through mappings.
-- Conditional: `sql/migrations/065_patch_operations_current.sql` or
-  similar
-  - Add canonical current reporting views/materialized views if the
-    baseline shows landing dashboards or repeated logic need them.
-- Conditional: `ingest/summary_views.py` or patch ingest refresh path
-  - Refresh new materialized views after patch/activity/core ingest if
-    new MVs are added.
-- `CHANGELOG.md`
-  - Record the dashboard redesign.
-- `SESSIONS.md`
-  - Record decisions and validation notes.
-- `TODO.md`
-  - Move superseded dashboard follow-ups or add deferred polish.
-- `VERSION`
-  - Bump version when implementation ships.
+- `BLUEPRINT.md`
+  - This review blueprint.
+- `DASHBOARD_PLACEMENT_MAP.md`
+  - Card-by-card placement and timing baseline for the dashboard
+    cleanup.
+- Later, after review approval:
+  - `ingest/metabase_bootstrap.py`
+    - Dashboard names, nav labels, section headers, card placement,
+      card titles, and click-through targets.
+  - `CHANGELOG.md`
+    - Record the navigation cleanup.
+  - `SESSIONS.md`
+    - Record review decisions, implementation notes, validation.
+  - `TODO.md`
+    - Move any deferred dashboard cleanup or rejected alternatives.
+  - `VERSION`
+    - Bump when implementation ships.
 
-# Design rules
+# Naming Principles
 
-- Page load must be quick:
-  - Command Center and Client Patch Status should load under 4 seconds on a
-    broad/cold open and under 3 seconds p95 in normal filtered use.
-  - Individual card queries target under 1 second; anything over 2
-    seconds needs a fix or explicit justification.
-  - Canonical views/materialized views are presumed in-scope for
-    landing views unless the baseline proves direct card SQL already
-    meets target.
-  - Keep broad tables capped and show total matching row count in a
-    separate scalar when needed.
-  - Avoid `COUNT(*) OVER()` on large limited tables.
-  - Add indexes with any new reporting view that filters by client,
-    device, policy, scope, issue, scan time, install time, or activity
-    time.
-- Human consumer first:
-  - Show work/status language, not database terms.
-  - Put decision columns before verbose evidence.
-  - Keep full raw/debug detail out of landing sections.
-  - Show full error text only where failure investigation needs it.
-- Click-throughs are part of the product:
-  - Client row/cell opens Client Patch Status with client filter.
-  - Bad client/device category opens Triage with matching filters.
-  - Device opens Device Drilldown.
-  - KB opens Patch Detail.
-  - Error category opens Triage/failure section filtered to that error.
-  - OS, policy, scope, and issue fields self-filter where useful.
-  - Use stable lowercase SQL aliases for click-source columns.
+- Dashboard names must describe the operator workflow, not the database
+  shape.
+- A card title must identify the object it counts:
+  - clients;
+  - devices;
+  - patches;
+  - activity events;
+  - time movement.
+- A metric concept may appear in more than one dashboard, but each card
+  instance must make scope and purpose obvious.
+- Avoid vague titles:
+  - `Needs Action`;
+  - `Status`;
+  - `Patching Enabled`;
+  - `Active Devices`;
+  - `Utilities`;
+  - `Overall`.
+- Prefer direct operator names:
+  - `Clients Needing Attention`;
+  - `Devices Needing Action`;
+  - `Included Devices`;
+  - `Patch Failures`;
+  - `Activity Search`.
+- Prefix scope only where ambiguity exists. The dashboard context
+  should carry the normal scope; add `Fleet`, `Client`, `Device`,
+  `Patch`, or `Activity` only when the title would otherwise be
+  unclear.
 
-# Locked decisions
+> **Q (reviewer):** The Card Placement Rules example uses `Fleet
+> Devices Needing Action` (Command Center) alongside `Devices Needing
+> Action` (Client Patch Review, Device Work Queue), implying scope
+> prefixes are used *only where ambiguity exists*. But Review Question 7
+> still asks whether to prefix consistently or only where ambiguous.
+> Pin the answer here — either always prefix, or prefix-on-ambiguity —
+> because every card title depends on it, and Step 4 will churn if it's
+> decided mid-implementation.
+>
+> **Response:** Accepted. Decision: prefix only where ambiguity exists.
+> The dashboard's context should carry the normal scope. Add `Fleet`,
+> `Client`, `Device`, `Patch`, or `Activity` only when a card title
+> would otherwise leave the operator unsure what object is being
+> counted. Avoid blanket prefixes because they make the dashboard noisy
+> without improving comprehension.
 
-- Preserve existing Metabase dashboard identities/IDs where practical;
-  update visible/nav labels to functional names.
-- `Org Overview` is renamed in place to Client Patch Status with legacy
-  dashboard/card identity handling so existing dashboards are updated,
-  not duplicated.
-- Recent windows are dashboard parameters, defaulting to 30 days, not
-  hardcoded constants.
-- Replacement proves equivalent through an old-to-new functional mapping,
-  not equal card count. Do not remove or hide old cards/dashboards until
-  their operational answers and click-through paths have accepted new
-  homes.
-- Triage owns detailed Approval Backlog and Reboot Completion queues.
-  Client Patch Status may show client-scoped summary counts/top blockers;
-  Command Center may show cross-client summaries/ranking.
+# Proposed Navigation
 
-# Client patch status model
+1. `Command Center`
+   - Function: all-client operational landing page.
+   - Primary object: clients.
+   - Operator question: "Where do we need attention across the customer
+     base?"
+   - Should contain:
+     - all-client summary;
+     - client ranking;
+     - top blockers;
+     - data freshness / ingest status;
+     - click-through to client review or device work queue.
 
-Use a rule-stack status model for v1, not a weighted black-box score.
-Statuses must be explainable directly in the UI with `Reason`.
+2. `Client Patch Review`
+   - Function: one-client patch review and action planning.
+   - Primary object: one client's devices.
+   - Operator question: "What is happening for this client, and what
+     needs to happen next?"
+   - Top band requires exactly one selected client.
+   - Should contain:
+     - client status;
+     - included devices;
+     - scan/install coverage;
+     - devices needing action;
+     - failures/warnings/reboot blockers/approval backlog;
+     - client-scoped evidence tables.
 
-- `Data Stale`
-  - the dashboard data itself is too old or missing, so other patch
-    conclusions should not be trusted yet.
-- `Needs Action`
-  - no recent successful scan on included devices;
-  - active patch failures;
-  - stalled/never-patched included devices;
-  - reboot blockers;
-  - manual approval backlog.
-- `Watch`
-  - warnings;
-  - delayed backlog;
-  - low recent-install activity;
-  - no included patching devices.
-- `Good`
-  - included devices are scanning and patching recently;
-  - no material blockers.
+3. `Device Work Queue`
+   - Current dashboard: `Triage`.
+   - Function: devices a tech should work.
+   - Primary object: devices/issues.
+   - Operator question: "Which devices should I fix next, and why?"
+   - Should contain:
+     - prioritized device queue;
+     - scan gaps;
+     - failed installs;
+     - reboot blockers;
+     - approval backlog;
+     - warning/failure grouping and message search.
 
-Within each status, sort by status severity first, then affected device
-count, oldest blocker age, and client name.
+4. `Device Detail`
+   - Current dashboard: `Device Drilldown`.
+   - Function: complete evidence for one device.
+   - Primary object: one device.
+   - Operator question: "What is the full story for this device?"
+   - Should contain:
+     - current problem and suggested next step;
+     - scope/policy/contact;
+     - current patch state;
+     - install history;
+     - warning/failure history;
+     - reboot evidence;
+     - Ninja link.
 
-# Triage ordering
+5. `Patch Evidence`
+   - Current dashboard: `Patch Detail (Filterable)`.
+   - Function: KB / patch / install outcome lookup.
+   - Primary object: patches and KBs.
+   - Operator question: "Which patches or KBs are involved, and where?"
+   - Should contain:
+     - patch state breakdown;
+     - KB counts;
+     - install outcomes;
+     - patch detail table;
+     - patch type breakdown.
 
-Triage queue priority order:
+6. `Patch Trends`
+   - Function: movement over time.
+   - Primary object: dates/time series.
+   - Operator question: "Is patching improving or getting worse?"
+   - Should contain:
+     - installs per day;
+     - failures per day;
+     - reboots per day;
+     - active devices over time;
+     - fully patched trend;
+     - warning/failure trends.
 
-1. Data confidence blockers.
-2. No successful scan on included devices.
-3. Active operational failures.
-4. Failed installs.
-5. Stalled / never-patched included devices.
-6. Reboot blockers.
-7. Manual approvals.
-8. Warnings / watch items.
+7. `Activity Search`
+   - Current dashboard: `Utilities`.
+   - Function: raw activity/message lookup.
+   - Primary object: activity events.
+   - Operator question: "Where else did this message/event happen?"
+   - Should contain:
+     - activity search table;
+     - message, subject, activity type, client, device, severity, and
+       days filters.
 
-Each row should expose priority, client, device, problem, likely
-cause, next step, last scan, last install attempt, last contact, and a
-click path to Ninja and Device Drilldown.
+# Merge / Demote Decisions To Review
 
-# Target dashboards
+- `Overall Patching Status`
+  - Proposed decision: remove from primary navigation.
+  - Reason: overlaps heavily with `Command Center`.
+  - Action: move any uniquely useful cards into `Command Center` or
+    `Patch Evidence`; drop redundant cards.
 
-1. Command Center
-   - Cross-client patch status ranking.
-   - Management summary band: good/watch/needs-action/data-stale
-     clients, data-confidence problems, clients needing follow-up.
-   - Patch progress pulse.
-   - Data confidence / ingest freshness.
-   - Top exceptions by client and issue.
-   - Fast click-through into Client Patch Status or Triage.
+- `Device Patching Status`
+  - Proposed decision: demote from primary navigation unless the audit
+    proves a unique operator workflow.
+  - Reason: overlaps with `Command Center`, `Client Patch Review`, and
+    `Device Work Queue`.
+  - Action: move useful status breakdowns into those dashboards; keep
+    only if it becomes a distinct device status explorer.
 
-2. Client Patch Status
-   - Current Org Overview reshaped and renamed as a one-client report.
-   - Patching enabled/included devices.
-   - Successful scan coverage and no-scan devices.
-   - Recently installed devices.
-   - Stalled / never-patched devices.
-   - Failures, warnings, reboot blockers, manual approvals.
-   - Top devices needing attention.
-   - Export-friendly evidence tables: installed recently, unresolved
-     blockers, exclusions, failures/warnings, reboot blockers.
+- Duplicate `Ninja - Utilities`
+  - Proposed decision: keep one as `Activity Search`, remove/hide the
+    duplicate.
 
-3. Triage
-   - Main device work queue.
-   - Scope / eligibility issues.
-   - Scan confidence issues.
-   - Failed installs and operational failures.
-   - Reboot completion blockers.
-   - Approval backlog.
-   - Search filters for device, KB, and error/message text.
-   - Full error message available in failure investigation tables.
-   - Blocker ownership/type: data confidence, MSP action, client/user
-     action, policy/expected, offline/unreachable.
+# Card Placement Rules
 
-4. Device Drilldown
-   - Full single-device context.
-   - Action summary at top: current problem, likely cause, suggested
-     next step, last scan, last install, last failure.
-   - Scope, policy, last contact, last scan, last install.
-   - Current patch state and install history.
-   - Warning/failure history with full or sufficiently long messages.
-   - Open in Ninja link.
+- A metric concept may appear in multiple dashboards only when the
+  question is different.
+- Each card instance must have a single clear job and scope.
+- Examples:
+  - `Command Center`: `Clients Needing Attention`
+    - portfolio question;
+    - click into client review.
+  - `Command Center`: `Fleet Devices Needing Action`
+    - work-volume question;
+    - click into device work queue.
+  - `Client Patch Review`: `Devices Needing Action`
+    - one-client question;
+    - click into client-scoped devices.
+  - `Device Work Queue`: `Devices Needing Action`
+    - actual fix list;
+    - click into device detail.
 
-5. Trends / Reporting
-   - Installs over time.
-   - Failed installs over time.
-   - Operational failures and warnings over time.
-   - Active/stalled/never-patched movement.
-   - Client/exportable evidence.
+# Current Dashboard Audit
 
-Supporting dashboards:
-- Patch Detail remains the KB/current-state drill-through page.
-- Utilities remains broad activity search, but important search paths
-  should be reachable from Triage.
+## Command Center
 
-# Functional coverage
+Proposed function: keep as all-client landing page.
 
-- Client Patch Status
-- Device Triage
-- Failure Investigation
-- Patch Progress
-- Scan / Inventory Confidence
-- Scope / Eligibility
-- Approval Backlog
-- Reboot Completion
-- Remediation Follow-Up
-- Reporting / Evidence
+Review actions:
+- Keep client ranking and top blockers.
+- Rename ambiguous count cards to make object and scope explicit.
+- Pull in only the useful unique `Overall Status` fleet cards.
+- Ensure every card click goes to `Client Patch Review`, `Device Work
+  Queue`, `Patch Evidence`, or `Device Detail`.
 
-# Acceptance checks
+## Overall Patching Status
 
-- Command Center ranks clients by the documented status rules and shows
-  the reason behind each status.
-- Client Patch Status answers the same patch status questions for one client as
-  an export-friendly report.
-- Triage uses the documented priority order and exposes enough evidence
-  for a junior tech to know what to check next.
-- Device Drilldown shows full scope, scan, install, warning/failure,
-  reboot, next-step, and Ninja-link evidence for the selected device.
-- Trends shows patch progress and failure movement over the selected
-  window.
-- A real operator walkthrough can answer: which clients need action,
-  which devices need work, what is blocking them, and where is the full
-  evidence, without schema explanation.
+Proposed function: merge/demote.
+
+Review actions:
+- Identify cards that are unique and useful:
+  - current patch state;
+  - clients with lowest fully patched devices;
+  - client fully patched devices;
+  - ingest status;
+  - devices needing reboot.
+- Move useful all-client cards to `Command Center`.
+- Move patch/KB evidence cards to `Patch Evidence`.
+- Remove from primary nav after replacement.
+
+## Client Patch Status
+
+Proposed new name: `Client Patch Review`.
+
+Review actions:
+- Keep one-client guard on top summary.
+- Rename titles to be direct and device/client scoped.
+- Keep lower evidence tables filterable.
+- Ensure it does not present all-client totals as a client report.
+
+## Triage
+
+Proposed new name: `Device Work Queue`.
+
+Review actions:
+- Keep prioritized queue and issue-specific work lists.
+- Rename cards from triage terminology to work/action terminology where
+  useful.
+- Keep message search and error grouping.
+- Ensure junior tech workflow is obvious:
+  - what device;
+  - why it matters;
+  - next step;
+  - where to click.
+
+## Device Patching Status
+
+Proposed function: demote or merge.
+
+Review actions:
+- Check whether `Patching Status by Device Type`, `Operating System`,
+  `Organization`, and `All Devices by Patching Status` provide unique
+  value.
+- If unique, move:
+  - all-client status breakdowns to `Command Center`;
+  - device lists to `Device Work Queue`;
+  - client-scoped breakdowns to `Client Patch Review`.
+- Remove from primary nav if no distinct workflow remains.
+
+## Patch Detail
+
+Proposed new name: `Patch Evidence`.
+
+Review actions:
+- Keep as patch/KB evidence page.
+- Rename titles to clarify patches vs devices.
+- Keep drill-through from KB, patch state, severity, install result.
+
+## Device Drilldown
+
+Proposed new name: `Device Detail`.
+
+Review actions:
+- Keep as one-device evidence page.
+- Ensure top cards show action summary before history tables.
+- Keep open-in-Ninja link.
+
+## Patch Trends
+
+Proposed function: keep.
+
+Review actions:
+- Keep as secondary reporting/trends page.
+- Rename cards so every chart says what is moving over time.
+- Avoid mixing current-state cards into trends.
+
+## Utilities
+
+Proposed new name: `Activity Search`.
+
+Review actions:
+- Keep one dashboard only.
+- Remove/hide duplicate live dashboard.
+- Keep raw event/message search out of primary work pages except where
+  filtered drill-through needs it.
+
+# Locked Review Decisions
+
+1. The one-client page is `Client Patch Review`.
+2. `Triage` becomes `Device Work Queue` in both dashboard title and nav
+   label.
+3. `Overall Patching Status` is removed from primary navigation after
+   useful cards are moved or intentionally dropped.
+4. `Patch Evidence` stays in primary navigation for now because KB and
+   patch lookup is a real support workflow, not just a drill-through.
+5. `Patch Trends` stays in primary navigation for now because trend
+   review is a real reporting workflow.
+6. Card scope prefixes are used only where ambiguity exists.
+7. One duplicate `Utilities` dashboard is kept and renamed to
+   `Activity Search`; the duplicate is hidden or removed.
+8. The implementation review will use `DASHBOARD_PLACEMENT_MAP.md` as
+   the durable card-placement artifact.
+9. Final acceptance requires a walkthrough by the user and reviewer.
+   A junior tech walkthrough is preferred if available, but is not a
+   blocker.
+
+# Placement Map Decision
+
+- `Device Patching Status` has a hard proposed verdict in
+  `DASHBOARD_PLACEMENT_MAP.md`: remove it from primary navigation and
+  merge useful content into `Command Center`, `Client Patch Review`, or
+  `Device Work Queue`.
+- That verdict must be accepted or revised during placement-map review
+  before implementation starts.
+
+> **Q (reviewer):** Questions 5 (Patch Evidence in primary nav?) and 7
+> (scope-prefix policy) materially shape the nav bar and every card
+> title. They must be resolved before Step 4, not carried through
+> implementation. Suggest resolving all seven review questions during
+> the Step 1 blueprint review pass and moving them into Naming
+> Principles / Proposed Navigation as decisions.
+>
+> **Response:** Accepted. The review questions are now converted into
+> locked decisions above. `Patch Evidence` and `Patch Trends` stay in
+> primary navigation for now, and the scope-prefix policy is
+> prefix-on-ambiguity only. The only unresolved decision is
+> `Device Patching Status`, and that decision is explicitly blocked
+> from crossing the placement-map review.
+
+# Acceptance Checks
+
+- A new operator can explain what each visible dashboard is for from
+  the nav labels alone.
+
+> **Q (reviewer):** How is this actually tested? Self-review by the
+> author, or a real walkthrough with someone unfamiliar with the
+> current design? The prior blueprint required an operator walkthrough
+> as a required acceptance check — suggest reusing that here so this
+> check isn't just an assertion.
+>
+> **Response:** Accepted. Acceptance requires a walkthrough by the user
+> and reviewer using the final visible dashboard names and top-level
+> cards. The walkthrough must answer: where do I start across all
+> clients, where do I review one client, where do I find devices to fix,
+> where do I inspect one device, and where do I search a repeated error.
+> A junior tech walkthrough is preferred if available.
+- No visible dashboard exists only because it existed before.
+- No top-level card leaves the operator guessing whether it counts
+  clients, devices, patches, or events.
+- No client page shows all-client status as if it were a client report.
+- Cross-client work starts in `Command Center`.
+- One-client review starts in `Client Patch Review`.
+- Device fixing starts in `Device Work Queue`.
+- One-device evidence starts in `Device Detail`.
+- Patch/KB lookup starts in `Patch Evidence`.
+- Raw message lookup starts in `Activity Search`.
+- Page-load targets from the previous blueprint still pass after the
+  nav/content cleanup.
+- Existing click-through filter propagation still works.
 
 # Steps
 
-1. Lock dashboard naming/identity strategy, deployment/bootstrap behavior,
-   old-to-new functional mapping, and speed baseline:
-   - current dashboard/card query timing;
-   - dashboard broad vs filtered load behavior;
-   - existing click-through paths to preserve;
-   - current bootstrap trigger after Portainer deploy;
-   - concrete status thresholds;
-   - concrete within-status client ordering.
-2. Audit current card SQL and identify reusable canonical result shapes:
-   client patch status, device triage, scan confidence, failure events.
-3. Decide which shapes need materialized views for speed.
-4. Add migration/view refresh plumbing if needed.
-5. Rework Command Center into cross-client patch status and exceptions.
-6. Rework Org Overview into Client Patch Status while preserving existing
-   click-through behavior.
-7. Rework Issues/Device Patching Status into a sharper Triage workflow.
-8. Tighten Device Drilldown failure/warning detail and Ninja links.
-9. Adjust Trends only where reporting gaps remain.
-10. Run compile checks and dashboard spec build checks.
-11. Bootstrap Metabase on the stack and validate:
-    - page load speed;
-    - dashboard filters;
-    - click-through parameter propagation;
-    - capped table counts;
-    - full error/message visibility where intended;
-    - human-consumer walkthrough.
+1. Review and approve/revise this blueprint.
+2. Produce `DASHBOARD_PLACEMENT_MAP.md` from live dashboards:
+   - source dashboard;
+   - source card;
+   - current card ID;
+   - baseline dashboard/card timing;
+   - keep;
+   - move;
+   - rename;
+   - duplicate/drop;
+   - demote from nav.
+   - target dashboard;
+   - target card title;
+   - click-through/filter notes.
+3. Review the placement map before implementation. This review cannot
+   pass while `Device Patching Status` still has an unresolved verdict.
+
+> **Q (reviewer):** Where does the placement map live? It's not in the
+> Files to change list, and without a durable artifact (a section of
+> this blueprint, a `PLACEMENT_MAP.md`, or a table appended here) the
+> Step 3 review happens in chat and won't survive. Suggest making it a
+> committed file so it can be diffed, reviewed, and referenced during
+> Step 4.
+>
+> **Response:** Accepted. The placement map lives in
+> `DASHBOARD_PLACEMENT_MAP.md` and is listed in Files to change. Step 3
+> review is against that committed artifact, not chat-only notes.
+
+> **Q (reviewer):** Step 2 must also return a verdict on
+> `Device Patching Status` (Review Question 4) — the deferred keep/
+> demote/remove decision cannot cross Step 3 unresolved, or Step 4
+> can't finalize the nav bar. Call that out explicitly as a Step 2
+> deliverable.
+>
+> **Response:** Accepted. Step 2 must produce a hard
+> `Device Patching Status` verdict. Step 3 cannot approve the placement
+> map until that verdict is keep, merge, or remove with the affected
+> cards mapped to their final homes.
+4. Implement dashboard/nav names and section headings.
+5. Move or remove duplicate/overlapping cards.
+6. Preserve dashboard IDs where practical.
+7. Remove/hide duplicate `Utilities`.
+8. Run local compile and dashboard spec build.
+9. Apply to live Metabase.
+10. Validate:
+    - dashboard load speed;
+    - filter carryover;
+    - click-throughs;
+    - no-client vs one-client behavior;
+    - card titles and scope clarity.
+11. Update `CHANGELOG.md`, `SESSIONS.md`, `TODO.md`, and `VERSION`.
+12. Commit and push after review-approved implementation.
 
 # Status
 
-Blueprint implemented locally:
-- visible and stored dashboard names now use Client Patch Status, Triage,
-  and Patch Trends, with legacy dashboard/card matching for existing
-  Metabase installs;
-- Command Center ranks clients by explicit status rules and shows the
-  reason behind each status;
-- Client Patch Status answers enabled, scanned, installed recently, needs
-  action, failures, reboot blockers, approval backlog, and stalled-device
-  questions;
-- Triage includes priority, blocker, full messages, message-text search,
-  scan gaps, reboot blockers, approval backlog, and stalled/never-patched
-  subqueues;
-- Device Drilldown surfaces current problem, suggested action, install
-  attempt/failure timing, and full warning/failure messages;
-- click-through aliases were preserved on client, device, patch state,
-  KB, and device type columns.
-
-Live validation completed:
-- Metabase bootstrap/deploy applied Command Center and Client Patch
-  Status naming/filter changes;
-- Command Center page shell/API and all card runtimes meet the
-  documented target;
-- live click-through mappings are present for Command Center, Client
-  Patch Status, and Triage key cards;
-- Triage message search works on the main queue and warning/error
-  category detail cards;
-- Client Patch Status and Triage full card sweeps meet the documented
-  per-card target after v0.34.6.
-
-Status: done — committed through 8c8c791, with live card SQL updated to
-the v0.34.6 definitions and validated against Metabase.
+in progress - implemented locally as v0.35.0; live bootstrap and timing validation pending

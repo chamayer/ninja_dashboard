@@ -24,6 +24,14 @@ Read Inbox at the start of every session.
 
 ## Backlog
 
+### Patch dashboard follow-ups
+
+- [ ] Rebuild the removed Patch Trends cards on optimized reporting
+      views before adding them back to primary navigation:
+      `Active Devices Seen per Day` was about 6.6s broad, and
+      `Fully patched % (patching devices) per Day` timed out above
+      15s during the v0.35.0 placement-map timing pass.
+
 ### Ingest domain split
 
 - [ ] Split the ingest runtime into domain packages with explicit

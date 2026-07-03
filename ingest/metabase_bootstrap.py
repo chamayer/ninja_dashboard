@@ -60,25 +60,37 @@ COLLECTION_NAME = "Ninja"
 
 # Dashboard names — defined early so card-spec click_behaviors below
 # can reference them. Don't rename without updating drill targets.
-DASH_COMMAND     = "Ninja — Patch Command Center"
+DASH_COMMAND     = "Ninja — Command Center"
 DASH_OVERVIEW    = "Ninja — Overall Patching Status"
-DASH_ORG         = "Ninja — Client Patch Status"
-DASH_DETAIL      = "Ninja — Patch Detail (Filterable)"
-DASH_DRILLDOWN   = "Ninja — Device Drilldown"
+DASH_ORG         = "Ninja — Client Patch Review"
+DASH_DETAIL      = "Ninja — Patch Evidence"
+DASH_DRILLDOWN   = "Ninja — Device Detail"
 DASH_PCOV        = "Ninja — Device Patching Status"
-DASH_ISSUES      = "Ninja — Triage"
+DASH_ISSUES      = "Ninja — Device Work Queue"
 DASH_TRENDS      = "Ninja — Patch Trends"
-DASH_UTILITY     = "Ninja — Utilities"
+DASH_UTILITY     = "Ninja — Activity Search"
 
 _DASHBOARD_LEGACY_NAMES: dict[str, list[str]] = {
     # Order matters: most-recent legacy name first so it's matched
     # ahead of older names. The bootstrap renames in place if a
     # legacy name is found.
-    DASH_ORG:      ["Ninja — Org Overview"],
-    DASH_ISSUES:   ["Ninja — Issues"],
+    DASH_COMMAND:  ["Ninja — Patch Command Center"],
+    DASH_ORG:      ["Ninja — Client Patch Status", "Ninja — Org Overview"],
+    DASH_DETAIL:   ["Ninja — Patch Detail (Filterable)"],
+    DASH_DRILLDOWN:["Ninja — Device Drilldown"],
+    DASH_ISSUES:   ["Ninja — Triage", "Ninja — Issues"],
     DASH_TRENDS:   ["Ninja — Trends"],
+    DASH_UTILITY:  ["Ninja — Utilities"],
     DASH_PCOV:     ["Ninja — Patching Status", "Ninja — Patch Coverage"],
     DASH_OVERVIEW: ["Ninja — Overview"],
+}
+
+_RETIRED_DASHBOARD_NAMES = {
+    DASH_OVERVIEW,
+    DASH_PCOV,
+    "Ninja — Overall Patching Status",
+    "Ninja — Device Patching Status",
+    "Ninja — Utilities",
 }
 
 NINJA_DEVICE_URL = "https://amrose.rmmservice.com/#/deviceDashboard/{{Device ID}}/overview"
@@ -721,7 +733,7 @@ COMMAND_CARDS: list[dict[str, Any]] = [
     # tables, not as a high-level patch-management KPI.
     {
         "key":            "cmd_total_devices",
-        "name":           "Total Devices",
+        "name":           "Fleet Approved Windows Devices",
         "display":        "scalar",
         "row": 0, "col": 0, "size_x": 4, "size_y": 3,
         "template_tags":  _CMD_TAGS,
@@ -739,7 +751,7 @@ WHERE d.is_current = TRUE
     },
     {
         "key":            "cmd_active_devices",
-        "name":           "Active Devices",
+        "name":           "Fleet Active Windows Devices",
         "display":        "scalar",
         "row": 0, "col": 4, "size_x": 4, "size_y": 3,
         "template_tags":  _CMD_TAGS,
@@ -755,16 +767,15 @@ WHERE 1=1
     },
     {
         "key":            "cmd_patching",
-        "name":           "Patching Devices",
+        "name":           "Fleet Included Devices",
         "display":        "scalar",
         "row": 0, "col": 8, "size_x": 4, "size_y": 3,
         "template_tags":  _CMD_TAGS,
         "param_mappings": _CMD_PARAM_MAPPINGS_FULL,
-        "click_behavior": {"target": DASH_PCOV, "params": {"p_pcov_status": "pcov_status"}},
+        "click_behavior": {"target": DASH_DETAIL, "preset": {}},
         "query": f"""
 SELECT
-    COUNT(*) AS devices,
-    'Patching Devices' AS pcov_status
+    COUNT(*) AS devices
 FROM ninja_core.v_active_devices d
 JOIN ninja_core.organizations o ON o.id = d.organization_id
 JOIN ninja_patches.device_patch_signal dps ON dps.device_id = d.id
@@ -780,11 +791,11 @@ WHERE 1=1
         "row": 0, "col": 12, "size_x": 4, "size_y": 3,
         "template_tags":  _CMD_TAGS,
         "param_mappings": _CMD_PARAM_MAPPINGS_FULL,
-        "click_behavior": {"target": DASH_PCOV, "params": {"p_pcov_status": "pcov_status"}},
+        "click_behavior": {"target": DASH_ISSUES, "params": {"p_issue_message_text": "issue_search"}},
         "query": f"""
 SELECT
     COUNT(*) AS devices,
-    'Stalled Devices' AS pcov_status
+    'Stalled' AS issue_search
 FROM ninja_core.v_active_devices d
 JOIN ninja_core.organizations o ON o.id = d.organization_id
 JOIN ninja_patches.device_patch_signal dps ON dps.device_id = d.id
@@ -800,11 +811,11 @@ WHERE 1=1
         "row": 0, "col": 16, "size_x": 4, "size_y": 3,
         "template_tags":  _CMD_TAGS,
         "param_mappings": _CMD_PARAM_MAPPINGS_FULL,
-        "click_behavior": {"target": DASH_PCOV, "params": {"p_pcov_status": "pcov_status"}},
+        "click_behavior": {"target": DASH_ISSUES, "params": {"p_issue_message_text": "issue_search"}},
         "query": f"""
 SELECT
     COUNT(*) AS devices,
-    'Never-Patched Devices' AS pcov_status
+    'Never patched' AS issue_search
 FROM ninja_core.v_active_devices d
 JOIN ninja_core.organizations o ON o.id = d.organization_id
 LEFT JOIN ninja_patches.device_patch_signal dps ON dps.device_id = d.id
@@ -815,7 +826,7 @@ WHERE 1=1
     },
     {
         "key":            "cmd_compliance",
-        "name":           "Actively patching %",
+        "name":           "Included Devices Actively Patching",
         "display":        "scalar",
         "row": 0, "col": 20, "size_x": 4, "size_y": 3,
         "template_tags":  _CMD_TAGS,
@@ -849,7 +860,7 @@ WHERE cs.status = 'APPROVED'
     },
     {
         "key":            "cmd_manual",
-        "name":           "Manual Approval",
+        "name":           "Patches Awaiting Manual Approval",
         "display":        "scalar",
         "row": 4, "col": 6, "size_x": 6, "size_y": 3,
         "template_tags":  _CMD_TAGS,
@@ -893,7 +904,7 @@ WHERE cs.status = 'DELAYED'
     },
     {
         "key":            "cmd_failed",
-        "name":           "Failed Patches",
+        "name":           "Patch Failures",
         "display":        "scalar",
         "row": 4, "col": 18, "size_x": 6, "size_y": 3,
         "template_tags":  _CMD_TAGS,
@@ -2659,7 +2670,7 @@ DEVICE_TIMELINE_PARAM_MAPPINGS = {
 _DEVICE_FILTER = (
     "[[AND EXISTS (SELECT 1 FROM ninja_core.organizations o "
     "WHERE o.id = d.organization_id AND o.name ILIKE '%' || {{org}} || '%')]]\n"
-    "[[AND d.system_name = {{device}}]]\n"
+    "AND d.system_name = {{device}}\n"
     "[[AND d.patching_scope IN ({{patching_scope}})]]"
 )
 
@@ -5497,6 +5508,64 @@ def _cap_table_card_heights(*card_lists: list[dict], max_height: int = 7) -> Non
                 card["size_y"] = min(int(card.get("size_y") or max_height), max_height)
 
 
+_CARD_TITLE_OVERRIDES = {
+    # Command Center
+    "cmd_total_devices": "Fleet Approved Windows Devices",
+    "cmd_active_devices": "Fleet Active Windows Devices",
+    "cmd_patching": "Fleet Included Devices",
+    "cmd_compliance": "Included Devices Actively Patching",
+    "cmd_manual": "Patches Awaiting Manual Approval",
+    "cmd_failed": "Patch Failures",
+    "cmd_failed_queue": "Failed Patch Devices",
+    "cmd_approval_queue": "Manual or Delayed Patch Devices",
+    "cmd_awaiting_reboot": "Devices Awaiting Reboot",
+    # Client Patch Review
+    "org_compliance": "Client Patch Status",
+    "org_failed": "Patch Failures",
+    "org_manual": "Patches Awaiting Manual Approval",
+    "org_failed_queue": "Failed Patch Devices",
+    "org_action_queue": "Manual or Delayed Patch Devices",
+    # Device Work Queue
+    "issues_total": "Devices Needing Action",
+    "issues_queue": "Device Work Queue",
+    "issues_by_org": "Devices Needing Action by Client",
+    "issues_by_type": "Devices Needing Action by Problem",
+    "issues_reboot_queue": "Devices Blocked by Reboot",
+    "issues_approval_queue": "Devices Blocked by Approval",
+    # Patch Evidence
+    "detail_status_donut": "Patch State",
+    "detail_severity_bar": "Patch Severity",
+    "detail_top_devices": "Devices with Matching Patches",
+    "detail_top_kbs": "KBs with Matching Patches",
+    "detail_installs_timeline": "Patch Install Results Over Time",
+    "detail_all_devices": "All Devices with Matching Patches",
+    "detail_all_kbs": "All Matching KBs",
+    "detail_table_total": "Matching Patch Rows",
+    "detail_table": "Patch Evidence Table (top 500)",
+    "detail_type_distribution": "Patch Types",
+}
+
+
+def _apply_card_title_overrides(*card_lists: list[dict]) -> None:
+    for cards in card_lists:
+        for card in cards:
+            title = _CARD_TITLE_OVERRIDES.get(card.get("key"))
+            if title:
+                card["name"] = title
+
+
+_VISIBLE_TRENDS_CARD_KEYS = {
+    "trends_installs_daily",
+    "trends_failures_daily",
+    "trends_reboots_daily",
+    "trends_patch_progress",
+    "trends_manual_age",
+    "trends_warnings_daily",
+    "trends_patch_failures_activity_daily",
+}
+TRENDS_CARDS = [card for card in TRENDS_CARDS if card.get("key") in _VISIBLE_TRENDS_CARD_KEYS]
+
+
 _apply_scalar_alerts(
     COMMAND_CARDS, OVERVIEW_CARDS, ORG_OVERVIEW_CARDS, PCOV_CARDS, ISSUE_CARDS,
 )
@@ -5506,6 +5575,10 @@ _apply_scalar_suffixes(
 _cap_table_card_heights(
     COMMAND_CARDS, OVERVIEW_CARDS, DETAIL_CARDS, DEVICE_CARDS, PCOV_CARDS,
     ISSUE_CARDS, ORG_OVERVIEW_CARDS, TRENDS_CARDS,
+)
+_apply_card_title_overrides(
+    COMMAND_CARDS, DETAIL_CARDS, DEVICE_CARDS, ISSUE_CARDS,
+    ORG_OVERVIEW_CARDS, TRENDS_CARDS, UTILITY_CARDS,
 )
 
 
@@ -5640,18 +5713,8 @@ def build_dashboards(
             "parameters": build_command_parameters(org_names),
             "cards":      COMMAND_CARDS,
             "section_headers": [
-                {"row": 0, "text": "### Devices"},
+                {"row": 0, "text": "### Fleet devices"},
                 {"row": 4, "text": "### Patches"},
-            ],
-        },
-        {
-            "name":       DASH_OVERVIEW,
-            "parameters": build_overall_parameters(org_names, os_families),
-            "cards":      OVERVIEW_CARDS,
-            "section_headers": [
-                {"row": 0, "text": "### Compliance"},
-                {"row": 6, "text": "### Devices"},
-                {"row": 11, "text": "### Patches"},
             ],
         },
         {
@@ -5661,7 +5724,7 @@ def build_dashboards(
             "section_headers": [
                 {
                     "row": 0,
-                    "text": "### Client Patch Status\nSelect one client for the report. Use Command Center for all-client status.",
+                    "text": "### Client Patch Review\nSelect one client. Use Command Center for all-client status.",
                 },
                 {"row": 6, "text": "### Devices"},
                 {"row": 11, "text": "### Patches"},
@@ -5673,19 +5736,14 @@ def build_dashboards(
             "cards":      ISSUE_CARDS,
         },
         {
-            "name":       "Ninja — Patch Detail (Filterable)",
+            "name":       DASH_DETAIL,
             "parameters": build_detail_parameters(org_names, os_families, device_names),
             "cards":      DETAIL_CARDS,
         },
         {
-            "name":       "Ninja — Device Drilldown",
+            "name":       DASH_DRILLDOWN,
             "parameters": build_device_parameters(device_names),
             "cards":      DEVICE_CARDS,
-        },
-        {
-            "name":       DASH_PCOV,
-            "parameters": build_pcov_parameters(org_names, os_families, policy_names),
-            "cards":      PCOV_CARDS,
         },
         {
             "name":       DASH_TRENDS,
@@ -5840,7 +5898,11 @@ def _upsert_dashboard(
     existing = None
     for d in r.json():
         names = [name, *_DASHBOARD_LEGACY_NAMES.get(name, [])]
-        if d.get("name") in names and d.get("collection_id") == collection_id:
+        if (
+            d.get("name") in names
+            and d.get("collection_id") == collection_id
+            and not d.get("archived", False)
+        ):
             existing = d
             break
 
@@ -5874,21 +5936,54 @@ def _upsert_dashboard(
     return dash
 
 
+def _archive_retired_dashboards(
+    client: httpx.Client, collection_id: int, active_dashboard_ids: set[int],
+) -> None:
+    """Hide old dashboards that were removed from the operator nav.
+
+    The active dashboards are resolved and renamed before this runs. Skipping
+    active IDs prevents us from archiving a dashboard that was just renamed via
+    a legacy-name match.
+    """
+    r = client.get("/api/dashboard")
+    r.raise_for_status()
+    for dash in r.json():
+        dash_id = int(dash.get("id"))
+        if dash_id in active_dashboard_ids:
+            continue
+        if dash.get("collection_id") != collection_id:
+            continue
+        if dash.get("archived"):
+            continue
+        if dash.get("name") not in _RETIRED_DASHBOARD_NAMES:
+            continue
+        try:
+            resp = client.put(f"/api/dashboard/{dash_id}", json={"archived": True})
+            resp.raise_for_status()
+            log.info("Archived retired dashboard: %s (id=%s)", dash.get("name"), dash_id)
+        except httpx.HTTPStatusError as e:
+            log.warning(
+                "Could not archive retired dashboard %s (id=%s): %s",
+                dash.get("name"),
+                dash_id,
+                e,
+            )
+
+
 NAV_HEIGHT = 2  # rows reserved at top of every dashboard for the nav bar
 SECTION_HEADER_HEIGHT = 1  # rows each section header markdown card occupies
 NAV_ORDER = [
-    DASH_COMMAND, DASH_OVERVIEW, DASH_ORG, DASH_ISSUES,
-    DASH_PCOV, DASH_DETAIL, DASH_DRILLDOWN, DASH_TRENDS,
+    DASH_COMMAND, DASH_ORG, DASH_ISSUES, DASH_DRILLDOWN,
+    DASH_DETAIL, DASH_TRENDS, DASH_UTILITY,
 ]
 NAV_DISPLAY_NAMES = {
     DASH_COMMAND:   "Command Center",
-    DASH_OVERVIEW:  "Overall Status",
-    DASH_ORG:       "Client Patch Status",
-    DASH_ISSUES:    "Triage",
-    DASH_PCOV:      "Device Status",
+    DASH_ORG:       "Client Patch Review",
+    DASH_ISSUES:    "Device Work Queue",
+    DASH_DRILLDOWN: "Device Detail",
+    DASH_DETAIL:    "Patch Evidence",
     DASH_TRENDS:    "Patch Trends",
-    DASH_DETAIL:    "Patch Detail",
-    DASH_DRILLDOWN: "Device Drilldown",
+    DASH_UTILITY:   "Activity Search",
 }
 
 
@@ -6171,7 +6266,11 @@ def run_bootstrap(
         log.info("── Applying click behaviors ──")
         _apply_click_behaviors(client, dashboards, card_ids_by_dash, dash_id_by_name)
 
-        # Pass 3 — make Patch Command Center the Metabase-wide custom
+        # Pass 3 — archive old dashboards that are no longer part of the
+        # operator navigation.
+        _archive_retired_dashboards(client, col_id, set(dash_id_by_name.values()))
+
+        # Pass 4 — make Command Center the Metabase-wide custom
         # homepage so operators land there instead of the generic
         # Metabase home. Two settings work together:
         # `custom-homepage` enables the feature; `custom-homepage-
