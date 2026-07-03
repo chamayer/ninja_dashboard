@@ -26,11 +26,6 @@ Read Inbox at the start of every session.
 
 ### Patch dashboard follow-ups
 
-- [ ] Rebuild the removed Client Patch Review fully-patched breakdowns
-      (`by Device Type`, `by Operating System`) on an optimized
-      device-level reporting view before adding them back to first-load
-      dashboards. They were about 2.0s each in the v0.35.1 broad card
-      sweep and are analytical, not first-response action cards.
 - [ ] Rebuild the removed Patch Trends cards on optimized reporting
       views before adding them back to primary navigation:
       `Active Devices Seen per Day` was about 6.6s broad, and

@@ -5,6 +5,35 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-07-03 — v0.35.3 Restore hidden cards and finish slow-card pass
+
+**Why:** v0.35.2 improved page/API loads and fixed
+`Patch Installs per Day`, but it hid two Client Patch Review analytical
+cards and left three slow broad cards: `Patching Devices per Day`,
+`Warnings by Category (30d)`, and `System Reboots per Day`.
+
+**Fix:** Restored the Client Patch Review fully-patched breakdown cards
+and rewrote their SQL to count active patching devices with no current
+missing patch state instead of rebuilding an installed/missing patch
+universe. Rebuilt `Patching Devices per Day` on
+`latest_install_outcome`. Added activity reporting materialized views for
+recent warning events and reboot events, then moved warning-category,
+warning trend, and reboot trend cards onto those views. Activity ingest
+now refreshes the new reporting views with the existing activity summary
+refresh.
+
+**Validation:** Candidate live SQL timing before implementation showed
+the patching-devices rewrite at about 0.46s and the compliance breakdown
+pattern at about 0.17s. Local `py_compile` passes for
+`ingest/metabase_bootstrap.py` and `ingest/activities/ingest.py`.
+Generated-card inspection confirmed the two Client Patch Review
+breakdown cards are present again, patching-devices uses
+`latest_install_outcome`, warning/reboot cards use the new activity
+rollups, and the compliance breakdowns use the fast missing-patch check.
+Live retiming pending after deploy/bootstrap applies the new migration.
+
+---
+
 ## 2026-07-03 — v0.35.2 Patch dashboard performance pass
 
 **Why:** Live timing after v0.35.1 showed dashboard page/API loads were

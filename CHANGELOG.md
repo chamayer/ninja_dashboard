@@ -2,6 +2,21 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.35.3] — 2026-07-03
+
+### Changed
+- Restored the Client Patch Review fully-patched breakdown cards and
+  rewrote them to use a fast device-level missing-patch check instead
+  of rebuilding the full installed/missing patch universe.
+- Rebuilt `Patching Devices per Day` on `latest_install_outcome` instead
+  of raw patch facts.
+- Moved warning-category, warning trend, and reboot trend dashboard
+  cards onto activity reporting materialized views.
+
+### Added
+- Added recent patch-warning and reboot activity reporting materialized
+  views, refreshed with the existing activity summary refresh.
+
 ## [0.35.2] — 2026-07-03
 
 ### Changed

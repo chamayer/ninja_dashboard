@@ -276,14 +276,18 @@ def _set_last_id(value: int) -> None:
 
 
 def _refresh_activity_summary_views() -> None:
+    views = (
+        "ninja_activities.device_activity_signal",
+        "ninja_activities.patch_warning_events_recent",
+        "ninja_activities.system_reboot_events_recent",
+    )
     try:
         with db.transaction() as cur:
-            cur.execute(
-                "REFRESH MATERIALIZED VIEW ninja_activities.device_activity_signal"
-            )
+            for view_name in views:
+                cur.execute(f"REFRESH MATERIALIZED VIEW {view_name}")
         log.info("Refreshed activity summary materialized views")
     except (psycopg.errors.UndefinedTable, psycopg.errors.WrongObjectType):
         log.info(
-            "ninja_activities.device_activity_signal is not materialized yet; "
+            "One or more activity summary views are not materialized yet; "
             "skipping refresh"
         )

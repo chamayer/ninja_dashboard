@@ -373,68 +373,34 @@ def _patching_device_compliance_group_query(
 ) -> str:
     """Fully patched device percentage grouped by a device dimension."""
     return f"""
-WITH classified AS (
+WITH active_patching_devices AS (
     SELECT
         d.id              AS device_id,
-        d.organization_id,
-        d.node_class,
-        d.os_name,
-        dps.ever_installed,
-        dps.last_seen_at,
-        CASE
-            WHEN NOT COALESCE(dps.ever_installed, FALSE) THEN 'no_patch_data'
-            WHEN dps.last_seen_at IS NULL THEN 'stale_patch_data'
-            WHEN dps.last_seen_at < NOW() - (INTERVAL '1 day' * {DEFAULT_STALE_PATCH_DAYS}) THEN 'stale_patch_data'
-            ELSE 'active_patching'
-        END AS patch_status
+        d.organization_id
     FROM ninja_core.v_active_devices d
-    LEFT JOIN ninja_patches.device_patch_signal dps ON dps.device_id = d.id
+    JOIN ninja_patches.device_patch_signal dps ON dps.device_id = d.id
     WHERE d.approval_status = 'APPROVED'
       AND d.node_class IN ('WINDOWS_WORKSTATION', 'WINDOWS_SERVER')
-),
-installed_patches AS (
-    SELECT DISTINCT device_id, patch_uid
-    FROM ninja_patches.latest_install_outcome
-    WHERE status = 'INSTALLED'
-{_PATCH_TYPE_EXCLUDE}),
-current_patch_state AS (
-    SELECT device_id, patch_uid, status
-    FROM ninja_patches.current_patch_state
-    WHERE 1=1
-{_PATCH_TYPE_EXCLUDE}),
-missing_patches AS (
-    SELECT device_id, patch_uid
-    FROM current_patch_state
-    WHERE status IN ({COMPLIANCE_MISSING_SQL})
-),
-universe AS (
-    SELECT device_id, patch_uid FROM installed_patches
-    UNION
-    SELECT device_id, patch_uid FROM missing_patches
-),
-device_rollup AS (
-    SELECT
-        u.device_id,
-        COUNT(*) FILTER (WHERE mp.device_id IS NOT NULL) AS missing_count
-    FROM universe u
-    LEFT JOIN missing_patches mp USING (device_id, patch_uid)
-    GROUP BY u.device_id
+      AND COALESCE(dps.ever_installed, FALSE)
+      AND dps.last_seen_at >= NOW() - (INTERVAL '1 day' * {DEFAULT_STALE_PATCH_DAYS})
 )
 SELECT
     {group_expr} AS "{group_label}",
     ROUND(
         COUNT(*) FILTER (
-            WHERE c.patch_status = 'active_patching'
-              AND dr.device_id IS NOT NULL
-              AND dr.missing_count = 0
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM ninja_patches.current_patch_state cs
+                WHERE cs.device_id = apd.device_id
+                  AND cs.status IN ({COMPLIANCE_MISSING_SQL})
+{_PATCH_TYPE_EXCLUDE.replace("patch_category", "cs.patch_category")}            )
         ) * 100.0
-        / NULLIF(COUNT(*) FILTER (WHERE c.patch_status = 'active_patching'), 0),
+        / NULLIF(COUNT(*), 0),
         1
     ) AS "Fully patched % (patching devices)"
-FROM classified c
-LEFT JOIN device_rollup dr ON dr.device_id = c.device_id
-JOIN ninja_core.v_active_devices d ON d.id = c.device_id
-JOIN ninja_core.organizations o ON o.id = c.organization_id
+FROM active_patching_devices apd
+JOIN ninja_core.v_active_devices d ON d.id = apd.device_id
+JOIN ninja_core.organizations o ON o.id = apd.organization_id
 WHERE d.approval_status = 'APPROVED'
 {filters}
 GROUP BY "{group_label}"
@@ -627,16 +593,15 @@ ORDER BY dr.day
 def _daily_patching_devices_query(filters: str) -> str:
     return f"""
 SELECT
-    DATE_TRUNC('day', pf.installed_at)::date AS "Day",
-    COUNT(DISTINCT pf.device_id)            AS "Patching Devices"
-FROM ninja_patches.patch_facts pf
-JOIN ninja_core.v_active_devices d ON d.id = pf.device_id
+    DATE_TRUNC('day', lio.installed_at)::date AS "Day",
+    COUNT(DISTINCT lio.device_id)             AS "Patching Devices"
+FROM ninja_patches.latest_install_outcome lio
+JOIN ninja_core.v_active_devices d ON d.id = lio.device_id
 JOIN ninja_core.organizations o ON o.id = d.organization_id
-WHERE pf.fact_type = 'install_outcome'
-  AND pf.installed_at IS NOT NULL
-  AND pf.installed_at > NOW() - (INTERVAL '1 day' * CAST({{{{days}}}} AS integer))
+WHERE lio.installed_at IS NOT NULL
+  AND lio.installed_at > NOW() - (INTERVAL '1 day' * CAST({{{{days}}}} AS integer))
   AND d.approval_status = 'APPROVED'
-{_PATCH_TYPE_EXCLUDE_RAW}{filters}
+{_PATCH_TYPE_EXCLUDE.replace("patch_category", "lio.patch_category")}{filters.replace("pf.", "lio.")}
 GROUP BY 1
 ORDER BY 1
 """
@@ -4162,10 +4127,9 @@ LIMIT 200
         },
         "query": f"""
 WITH recent_patch_messages AS (
-    SELECT device_id, activity_time, message
-    FROM ninja_activities.activities
-    WHERE activity_type IN ('PATCH_MANAGEMENT_MESSAGE','SOFTWARE_PATCH_MANAGEMENT_MESSAGE')
-      AND activity_time >= NOW() - INTERVAL '30 days'
+    SELECT device_id, activity_time, message, warning_category
+    FROM ninja_activities.patch_warning_events_recent
+    WHERE activity_time >= NOW() - INTERVAL '30 days'
       [[AND message ILIKE '%' || {{{{message_text}}}} || '%']]
 ),
 categorized AS (
@@ -4173,18 +4137,7 @@ categorized AS (
         d.id AS device_id,
         d.organization_id,
         rpm.activity_time,
-        CASE
-            WHEN rpm.message ILIKE '%outstanding approved patches%' THEN 'Outstanding approved patches'
-            WHEN rpm.message ILIKE '%was skipped because%' THEN 'Scheduled job skipped'
-            WHEN rpm.message ILIKE '%metered connection%' THEN 'Metered connection'
-            WHEN rpm.message ILIKE '%post reboot scan%' THEN 'Post-reboot scan required'
-            WHEN rpm.message ILIKE '%download error%' OR rpm.message ILIKE '%download failed%' THEN 'OS patch download error'
-            WHEN rpm.message ILIKE '%requires a reboot%' OR rpm.message ILIKE '%needs to be rebooted%' THEN 'Reboot needed'
-            WHEN rpm.message ILIKE '%Windows Update Agent%out of date%' THEN 'WUA out of date'
-            WHEN rpm.message ILIKE '%reboot%scheduled%' THEN 'Reboot scheduling'
-            WHEN rpm.message ILIKE '%download is complete%' THEN 'Download complete'
-            ELSE 'Other'
-        END AS category
+        rpm.warning_category AS category
     FROM recent_patch_messages rpm
     JOIN ninja_core.v_active_devices d ON d.id = rpm.device_id
 )
@@ -5250,14 +5203,13 @@ ORDER BY 1
         "param_mappings": _TRENDS_PARAM_MAPPINGS_FULL,
         "query": f"""
 WITH recent_reboots AS (
-    SELECT device_id, activity_time
-    FROM ninja_activities.activities
-    WHERE activity_type = 'SYSTEM_REBOOTED'
-      AND activity_time > NOW() - (INTERVAL '1 day' * {{{{days}}}})
+    SELECT device_id, activity_day, reboot_events
+    FROM ninja_activities.system_reboot_events_recent
+    WHERE activity_day > CURRENT_DATE - CAST({{{{days}}}} AS integer)
 )
 SELECT
-    DATE_TRUNC('day', rr.activity_time)::date AS "Day",
-    COUNT(*)                                 AS "Reboots"
+    rr.activity_day AS "Day",
+    SUM(rr.reboot_events) AS "Reboots"
 FROM recent_reboots rr
 JOIN ninja_core.v_active_devices d ON d.id = rr.device_id
 JOIN ninja_core.organizations o ON o.id = d.organization_id
@@ -5381,13 +5333,12 @@ ORDER BY 1
         "param_mappings": _TRENDS_PARAM_MAPPINGS_FULL,
         "query": f"""
 SELECT
-    DATE_TRUNC('day', a.activity_time)::date AS "Day",
-    COUNT(*)                                 AS "Warnings"
-FROM ninja_activities.activities a
-JOIN ninja_core.v_active_devices d ON d.id = a.device_id
+    pwe.activity_day AS "Day",
+    COUNT(*) AS "Warnings"
+FROM ninja_activities.patch_warning_events_recent pwe
+JOIN ninja_core.v_active_devices d ON d.id = pwe.device_id
 JOIN ninja_core.organizations o ON o.id = d.organization_id
-WHERE a.activity_type IN ('PATCH_MANAGEMENT_MESSAGE', 'SOFTWARE_PATCH_MANAGEMENT_MESSAGE')
-  AND a.activity_time > NOW() - (INTERVAL '1 day' * {{{{days}}}})
+WHERE pwe.activity_day > CURRENT_DATE - CAST({{{{days}}}} AS integer)
 {_TRENDS_FILTERS_DEVICE}
 GROUP BY 1
 ORDER BY 1
@@ -5574,14 +5525,6 @@ _VISIBLE_TRENDS_CARD_KEYS = {
     "trends_patch_failures_activity_daily",
 }
 TRENDS_CARDS = [card for card in TRENDS_CARDS if card.get("key") in _VISIBLE_TRENDS_CARD_KEYS]
-
-_VISIBLE_ORG_CARD_KEYS = {
-    card["key"]
-    for card in ORG_OVERVIEW_CARDS
-    if card.get("key") not in {"org_device_type", "org_os_family"}
-}
-ORG_OVERVIEW_CARDS = [card for card in ORG_OVERVIEW_CARDS if card.get("key") in _VISIBLE_ORG_CARD_KEYS]
-
 
 _apply_scalar_alerts(
     COMMAND_CARDS, OVERVIEW_CARDS, ORG_OVERVIEW_CARDS, PCOV_CARDS, ISSUE_CARDS,
