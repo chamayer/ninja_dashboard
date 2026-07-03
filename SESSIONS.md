@@ -5,6 +5,25 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-07-03 — v0.35.4 Postgres shared-memory fix
+
+**Why:** Live agent-compliance follow-up refresh logged
+`psycopg.errors.DiskFull: could not resize shared memory segment ... No
+space left on device` while refreshing
+`ninja_inventory.inventory_summary_current`. This is PostgreSQL dynamic
+shared-memory exhaustion inside the Docker container, not ordinary disk
+capacity exhaustion.
+
+**Fix:** Added `shm_size: "1gb"` to the `postgres` service in
+`docker-compose.yml` so materialized-view refreshes have enough shared
+memory during deploy/runtime.
+
+**Validation:** `git diff --check` passes. Local
+`docker compose config --quiet` could not run because Docker is not
+installed/available in this workstation shell.
+
+---
+
 ## 2026-07-03 — v0.35.3 Restore hidden cards and finish slow-card pass
 
 **Why:** v0.35.2 improved page/API loads and fixed

@@ -36,6 +36,7 @@ services:
       dockerfile: postgres.Dockerfile
     container_name: ninja-postgres
     restart: unless-stopped
+    shm_size: "1gb"
     # Wrap the official entrypoint: source the bind-mounted env file,
     # export everything in it (`set -a`), then exec the real entrypoint.
     # `.` fails loud if /etc/secrets.env is missing, so we don't start

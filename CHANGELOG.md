@@ -2,6 +2,13 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.35.4] — 2026-07-03
+
+### Fixed
+- Increased the Postgres container shared-memory allocation to prevent
+  materialized-view refreshes from failing with dynamic shared-memory
+  `No space left on device` errors.
+
 ## [0.35.3] — 2026-07-03
 
 ### Changed
