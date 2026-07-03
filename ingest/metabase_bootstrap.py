@@ -5578,7 +5578,7 @@ _cap_table_card_heights(
 )
 _apply_card_title_overrides(
     COMMAND_CARDS, DETAIL_CARDS, DEVICE_CARDS, ISSUE_CARDS,
-    ORG_OVERVIEW_CARDS, TRENDS_CARDS, UTILITY_CARDS,
+    ORG_OVERVIEW_CARDS, TRENDS_CARDS,
 )
 
 

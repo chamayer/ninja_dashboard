@@ -2,6 +2,12 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.35.1] — 2026-07-03
+
+### Fixed
+- Fixed Metabase bootstrap import failure from applying card-title
+  overrides to `UTILITY_CARDS` before the utility card list was defined.
+
 ## [0.35.0] — 2026-07-03
 
 ### Changed

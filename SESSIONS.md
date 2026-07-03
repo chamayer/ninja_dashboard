@@ -5,6 +5,23 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-07-03 — v0.35.1 Metabase bootstrap import fix
+
+**Why:** Live `/bootstrap-metabase` on v0.35.0 failed during import:
+`NameError: name 'UTILITY_CARDS' is not defined`. `/healthz` still
+returned 200 because it is only an HTTP liveness endpoint; the bootstrap
+runs asynchronously in a background thread and reports failures only in
+logs.
+
+**Fix:** Removed the premature `UTILITY_CARDS` reference from the
+top-level card-title override call. Utility cards had no override entry,
+so this does not change intended dashboard behavior.
+
+**Validation:** Local `python -m py_compile ingest/metabase_bootstrap.py`
+passes. Live bootstrap validation pending after redeploy.
+
+---
+
 ## 2026-07-03 — v0.35.0 Patch dashboard IA implementation
 
 **Why:** Operator review showed the dashboard set still reflected
