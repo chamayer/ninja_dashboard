@@ -5,6 +5,33 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-07-03 — v0.35.2 Patch dashboard performance pass
+
+**Why:** Live timing after v0.35.1 showed dashboard page/API loads were
+acceptable, but several broad cards still made first-load feel slow:
+`Patch Installs per Day`, `Warnings by Category (30d)`, `System Reboots
+per Day`, and the two Client Patch Review fully-patched breakdowns.
+
+**Fix:** Rebuilt `Patch Installs per Day` on
+`ninja_patches.latest_install_outcome`, which live dataset testing had
+already shown to run in about 430 ms for the broad query. Reworked
+reboot and warning-category SQL so recent activity is selected before
+joining device/client context. Added targeted partial indexes for recent
+install, patch-warning, and reboot dashboard queries. Removed the two
+slow Client Patch Review analytical breakdown charts from the active
+layout; they are useful analysis but not needed for the first-pass
+client action flow.
+
+**Validation:** Local `python -m py_compile ingest/metabase_bootstrap.py`
+passes. Generated-card inspection, using local dependency stubs because
+the workstation environment lacks `httpx`/`psycopg`, confirmed Client
+Patch Review no longer includes the two slow breakdown cards, Patch
+Trends still has seven visible cards, and the modified cards contain
+the expected latest-install/recent-activity SQL. Live retiming pending
+after redeploy/bootstrap applies the migration and card updates.
+
+---
+
 ## 2026-07-03 — v0.35.1 Metabase bootstrap import fix
 
 **Why:** Live `/bootstrap-metabase` on v0.35.0 failed during import:

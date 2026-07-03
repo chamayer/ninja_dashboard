@@ -2,6 +2,23 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.35.2] — 2026-07-03
+
+### Changed
+- Rebuilt `Patch Installs per Day` on `latest_install_outcome` instead
+  of raw patch facts so the broad trend card uses the existing patch
+  reporting view.
+- Reworked broad reboot and warning-category cards to filter recent
+  activity before joining device/client context.
+- Removed the two slow Client Patch Review analytical breakdowns
+  (`fully patched by device type` and `fully patched by OS`) from the
+  active layout until they can be rebuilt on a dedicated reporting
+  rollup.
+
+### Added
+- Added targeted indexes for recent install, patch-warning, and reboot
+  dashboard activity queries.
+
 ## [0.35.1] — 2026-07-03
 
 ### Fixed

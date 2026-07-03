@@ -4161,28 +4161,32 @@ LIMIT 200
             "Category": {"target": "self", "params": {PARAM_ISSUE_WARNING_CAT: "Category"}},
         },
         "query": f"""
-WITH categorized AS (
+WITH recent_patch_messages AS (
+    SELECT device_id, activity_time, message
+    FROM ninja_activities.activities
+    WHERE activity_type IN ('PATCH_MANAGEMENT_MESSAGE','SOFTWARE_PATCH_MANAGEMENT_MESSAGE')
+      AND activity_time >= NOW() - INTERVAL '30 days'
+      [[AND message ILIKE '%' || {{{{message_text}}}} || '%']]
+),
+categorized AS (
     SELECT
         d.id AS device_id,
         d.organization_id,
-        a.activity_time,
+        rpm.activity_time,
         CASE
-            WHEN a.message ILIKE '%outstanding approved patches%' THEN 'Outstanding approved patches'
-            WHEN a.message ILIKE '%was skipped because%' THEN 'Scheduled job skipped'
-            WHEN a.message ILIKE '%metered connection%' THEN 'Metered connection'
-            WHEN a.message ILIKE '%post reboot scan%' THEN 'Post-reboot scan required'
-            WHEN a.message ILIKE '%download error%' OR a.message ILIKE '%download failed%' THEN 'OS patch download error'
-            WHEN a.message ILIKE '%requires a reboot%' OR a.message ILIKE '%needs to be rebooted%' THEN 'Reboot needed'
-            WHEN a.message ILIKE '%Windows Update Agent%out of date%' THEN 'WUA out of date'
-            WHEN a.message ILIKE '%reboot%scheduled%' THEN 'Reboot scheduling'
-            WHEN a.message ILIKE '%download is complete%' THEN 'Download complete'
+            WHEN rpm.message ILIKE '%outstanding approved patches%' THEN 'Outstanding approved patches'
+            WHEN rpm.message ILIKE '%was skipped because%' THEN 'Scheduled job skipped'
+            WHEN rpm.message ILIKE '%metered connection%' THEN 'Metered connection'
+            WHEN rpm.message ILIKE '%post reboot scan%' THEN 'Post-reboot scan required'
+            WHEN rpm.message ILIKE '%download error%' OR rpm.message ILIKE '%download failed%' THEN 'OS patch download error'
+            WHEN rpm.message ILIKE '%requires a reboot%' OR rpm.message ILIKE '%needs to be rebooted%' THEN 'Reboot needed'
+            WHEN rpm.message ILIKE '%Windows Update Agent%out of date%' THEN 'WUA out of date'
+            WHEN rpm.message ILIKE '%reboot%scheduled%' THEN 'Reboot scheduling'
+            WHEN rpm.message ILIKE '%download is complete%' THEN 'Download complete'
             ELSE 'Other'
         END AS category
-    FROM ninja_activities.activities a
-    JOIN ninja_core.v_active_devices d ON d.id = a.device_id
-    WHERE a.activity_type IN ('PATCH_MANAGEMENT_MESSAGE','SOFTWARE_PATCH_MANAGEMENT_MESSAGE')
-      AND a.activity_time >= NOW() - INTERVAL '30 days'
-      [[AND a.message ILIKE '%' || {{{{message_text}}}} || '%']]
+    FROM recent_patch_messages rpm
+    JOIN ninja_core.v_active_devices d ON d.id = rpm.device_id
 )
 SELECT
     c.category AS "Category",
@@ -5152,12 +5156,14 @@ _TRENDS_FILTER_PATCHING_SCOPE = (
     "  [[AND d.patching_scope IN ({{patching_scope}})]]\n"
 )
 _TRENDS_FILTER_SEV_PF      = "  [[AND pf.severity IN ({{severity}})]]\n"
+_TRENDS_FILTER_SEV_LIO     = "  [[AND lio.severity IN ({{severity}})]]\n"
 _TRENDS_FILTER_SEV_CS      = "  [[AND cs.severity IN ({{severity}})]]\n"
 
 _TRENDS_FILTERS_DEVICE     = (
     _TRENDS_FILTER_ORG + _TRENDS_FILTER_DEVICE_TYPE + _TRENDS_FILTER_PATCHING_SCOPE
 )
 _TRENDS_FILTERS_PATCH_PF   = _TRENDS_FILTERS_DEVICE + _TRENDS_FILTER_SEV_PF
+_TRENDS_FILTERS_PATCH_LIO  = _TRENDS_FILTERS_DEVICE + _TRENDS_FILTER_SEV_LIO
 _TRENDS_FILTERS_PATCH_CS   = _TRENDS_FILTERS_DEVICE + _TRENDS_FILTER_SEV_CS
 
 
@@ -5186,16 +5192,15 @@ TRENDS_CARDS = [
         "param_mappings": _TRENDS_PARAM_MAPPINGS_FULL,
         "query": f"""
 SELECT
-    DATE_TRUNC('day', pf.installed_at)::date AS "Day",
+    DATE_TRUNC('day', lio.installed_at)::date AS "Day",
     COUNT(*)                                 AS "Installs"
-FROM ninja_patches.patch_facts pf
-JOIN ninja_core.v_active_devices d ON d.id = pf.device_id
+FROM ninja_patches.latest_install_outcome lio
+JOIN ninja_core.v_active_devices d ON d.id = lio.device_id
 JOIN ninja_core.organizations o ON o.id = d.organization_id
-WHERE pf.fact_type = 'install_outcome'
-  AND pf.status    = 'INSTALLED'
-  AND pf.installed_at IS NOT NULL
-  AND pf.installed_at > NOW() - (INTERVAL '1 day' * {{{{days}}}})
-{_PATCH_TYPE_EXCLUDE_RAW}{_TRENDS_FILTERS_PATCH_PF}
+WHERE lio.status = 'INSTALLED'
+  AND lio.installed_at IS NOT NULL
+  AND lio.installed_at > NOW() - (INTERVAL '1 day' * {{{{days}}}})
+{_PATCH_TYPE_EXCLUDE.replace("patch_category", "lio.patch_category")}{_TRENDS_FILTERS_PATCH_LIO}
 GROUP BY 1
 ORDER BY 1
 """,
@@ -5244,14 +5249,19 @@ ORDER BY 1
         "template_tags":  _TRENDS_TAGS,
         "param_mappings": _TRENDS_PARAM_MAPPINGS_FULL,
         "query": f"""
+WITH recent_reboots AS (
+    SELECT device_id, activity_time
+    FROM ninja_activities.activities
+    WHERE activity_type = 'SYSTEM_REBOOTED'
+      AND activity_time > NOW() - (INTERVAL '1 day' * {{{{days}}}})
+)
 SELECT
-    DATE_TRUNC('day', a.activity_time)::date AS "Day",
+    DATE_TRUNC('day', rr.activity_time)::date AS "Day",
     COUNT(*)                                 AS "Reboots"
-FROM ninja_activities.activities a
-JOIN ninja_core.v_active_devices d ON d.id = a.device_id
+FROM recent_reboots rr
+JOIN ninja_core.v_active_devices d ON d.id = rr.device_id
 JOIN ninja_core.organizations o ON o.id = d.organization_id
-WHERE a.activity_type = 'SYSTEM_REBOOTED'
-  AND a.activity_time > NOW() - (INTERVAL '1 day' * {{{{days}}}})
+WHERE 1=1
 {_TRENDS_FILTERS_DEVICE}
 GROUP BY 1
 ORDER BY 1
@@ -5564,6 +5574,13 @@ _VISIBLE_TRENDS_CARD_KEYS = {
     "trends_patch_failures_activity_daily",
 }
 TRENDS_CARDS = [card for card in TRENDS_CARDS if card.get("key") in _VISIBLE_TRENDS_CARD_KEYS]
+
+_VISIBLE_ORG_CARD_KEYS = {
+    card["key"]
+    for card in ORG_OVERVIEW_CARDS
+    if card.get("key") not in {"org_device_type", "org_os_family"}
+}
+ORG_OVERVIEW_CARDS = [card for card in ORG_OVERVIEW_CARDS if card.get("key") in _VISIBLE_ORG_CARD_KEYS]
 
 
 _apply_scalar_alerts(
