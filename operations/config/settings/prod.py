@@ -6,8 +6,37 @@ import os
 import sys
 
 from .base import *  # noqa: F401,F403
+from .base import BASE_DIR  # noqa: F401  (kept for future overrides)
 
 DEBUG = False
+
+# ---------------------------------------------------------------------------
+# Postgres
+# ---------------------------------------------------------------------------
+# All keys sourced from /amr-ch-01_data/ninja-dashboard/.env (bind-mounted).
+# Missing values fail loud below alongside SECRET_KEY / ALLOWED_HOSTS.
+
+DATABASES = {
+    "default": {
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": os.environ.get("OPERATIONS_DB_NAME", "ninja"),
+        "USER": os.environ.get("OPERATIONS_DB_USER", "operations_app"),
+        "PASSWORD": os.environ.get("OPERATIONS_DB_PASSWORD", ""),
+        "HOST": os.environ.get("POSTGRES_HOST", "postgres"),
+        "PORT": os.environ.get("POSTGRES_PORT", "5432"),
+        # BLUEPRINT §6.3 — every request runs inside one transaction so the
+        # SET LOCAL operations.tenant_id issued by TenantMiddleware persists
+        # for the whole request.
+        "ATOMIC_REQUESTS": True,
+        "OPTIONS": {
+            # Django tables + operations schema first on search_path.
+            # ninja_* schemas readable when granted (managed=False models).
+            "options": "-c search_path=operations,public",
+            "connect_timeout": 5,
+        },
+    },
+}
+
 
 # Refuse to start without an explicit secret key in prod.
 if os.environ.get("OPERATIONS_SECRET_KEY") in (None, "", "insecure-dev-key-change-me"):

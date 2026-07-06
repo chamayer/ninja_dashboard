@@ -1,3 +1,13 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+# No package install — the Django project runs from its working
+# directory (manage.py + config/ + apps/). pip install picks up
+# runtime dependencies from [project.dependencies] and stops.
+packages = []
+
 [project]
 name = "operations"
 version = "0.1.0"

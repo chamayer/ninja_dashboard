@@ -121,6 +121,41 @@ services:
       postgres:
         condition: service_healthy
 
+  # ───────────────────────────────────────────────────────────────────
+  # operations — Django + DRF service, write-side operator console.
+  # Companion to Metabase. Built from operations.Dockerfile.
+  # See operations/BLUEPRINT.md.
+  # ───────────────────────────────────────────────────────────────────
+  operations:
+    build:
+      context: .
+      dockerfile: operations.Dockerfile
+    container_name: ninja-operations
+    restart: unless-stopped
+    environment:
+      # Static — never overridden. Pin DB host/port to docker network.
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+    volumes:
+      # Same env-file bind-mount pattern as ingest. python-dotenv in
+      # config/settings/base.py reads /app/.env at import time.
+      - /amr-ch-01_data/ninja-dashboard/.env:/app/.env:ro
+      # Brand overrides (optional): mount an on-disk theme directory
+      # per §4.16 rebrand path. Default AMRose assets ship in-image;
+      # this mount only matters when an appliance install overrides.
+      # Comment out on any install that ships the default brand.
+      # - /amr-ch-01_data/ninja-dashboard/operations/theme:/app/theme:ro
+    ports:
+      # 3002 — UI + API, published to LAN.
+      - "3002:3002"
+      # 8091 — health / internal ops, published to host loopback only.
+      # Reachable from other containers on the docker network at
+      # `operations:8091` and from am-ch-01 host at 127.0.0.1:8091.
+      - "127.0.0.1:8091:8091"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
 # ── Named volumes ────────────────────────────────────────────────────
 # Auto-managed (NOT external: true). Survives normal stack ops
 # (Portainer "stop", "redeploy", `docker compose down`). Only
