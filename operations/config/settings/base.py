@@ -48,7 +48,8 @@ INSTALLED_APPS = [
     "rest_framework",
     "drf_spectacular",
     "django_htmx",
-    # First-party (apps are added by later commits as they land)
+    # First-party
+    "apps.core.apps.OperationsCoreConfig",
 ]
 
 MIDDLEWARE = [
@@ -58,10 +59,11 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "apps.core.middleware.TenantMiddleware",
+    "apps.core.middleware.ClientScopeMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "django_htmx.middleware.HtmxMiddleware",
-    # TenantMiddleware + ClientScopeMiddleware added when RLS/scoping lands.
 ]
 
 ROOT_URLCONF = "config.urls"
@@ -105,7 +107,7 @@ DATABASES = {
 # ---------------------------------------------------------------------------
 # Auth
 # ---------------------------------------------------------------------------
-# AUTH_USER_MODEL is set to the custom user model once apps/core lands.
+AUTH_USER_MODEL = "operations.User"
 
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},

@@ -5,6 +5,21 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-07-06 — Operations M0 resumed as module-scoped WIP
+
+**Why:** Operations M0 work resumed from Claude handoff
+`a2a3de93-e7af-4d46-a2dd-b2c156f12c9a`. The repo now uses module-level
+Operations docs for detailed build state.
+
+**Pointer:** Detailed status, validation, and pending work live in
+`operations/BUILD_BLUEPRINT.md`, `operations/SESSIONS.md`, and
+`operations/TODO.md`. Root `BLUEPRINT.md` is now the checkpoint/router.
+
+**Pending:** Review uncommitted Operations M0.3-M0.5 WIP and approve the next
+slice before M0.6 implementation.
+
+---
+
 ## 2026-07-03 — v0.35.4 Postgres shared-memory fix
 
 **Why:** Live agent-compliance follow-up refresh logged

@@ -11,11 +11,32 @@
 # =============================================================================
 set -e
 
-echo "[operations] applying migrations..."
+runtime_db_user="${OPERATIONS_DB_USER:-operations_app}"
+runtime_db_password="${OPERATIONS_DB_PASSWORD:-}"
+migrate_db_user="${OPERATIONS_MIGRATE_DB_USER:-operations_migrate}"
+migrate_db_password="${OPERATIONS_MIGRATE_DB_PASSWORD:-}"
+
+if [ -z "$runtime_db_password" ]; then
+    echo "[operations] OPERATIONS_DB_PASSWORD is required for runtime role ${runtime_db_user}" >&2
+    exit 1
+fi
+
+if [ -z "$migrate_db_password" ]; then
+    echo "[operations] OPERATIONS_MIGRATE_DB_PASSWORD is required for migration role ${migrate_db_user}" >&2
+    exit 1
+fi
+
+echo "[operations] applying migrations as ${migrate_db_user}..."
+export OPERATIONS_DB_USER="$migrate_db_user"
+export OPERATIONS_DB_PASSWORD="$migrate_db_password"
 python manage.py migrate --noinput
 
 echo "[operations] collecting static files..."
 python manage.py collectstatic --noinput --clear
+
+echo "[operations] switching to runtime DB role ${runtime_db_user}..."
+export OPERATIONS_DB_USER="$runtime_db_user"
+export OPERATIONS_DB_PASSWORD="$runtime_db_password"
 
 echo "[operations] starting gunicorn on 3002 (LAN) + 8091 (internal)..."
 exec gunicorn config.wsgi:application \

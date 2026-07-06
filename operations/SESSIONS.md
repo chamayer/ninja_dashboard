@@ -1,0 +1,271 @@
+# Operations Sessions
+
+Detailed Operations module development journal. Root `../SESSIONS.md` keeps
+only project-level pointers.
+
+---
+
+## 2026-07-06 — M0 deployability checkpoint
+
+**Why:** We realized M0 cannot be considered healthy just because schema
+migrations validate locally. The blueprint requires a Portainer-deployed
+Operations container, and the M0.8 RLS/role migration cannot safely run under
+the runtime `operations_app` role.
+
+**Work completed locally:**
+
+- Updated `operations/entrypoint.sh` to run migrations with
+  `OPERATIONS_MIGRATE_DB_USER` / `OPERATIONS_MIGRATE_DB_PASSWORD`, then switch
+  back to `OPERATIONS_DB_USER` / `OPERATIONS_DB_PASSWORD` before launching
+  Gunicorn.
+- Updated `operations/config/settings/prod.py` to require both runtime and
+  migration DB passwords in production.
+- Updated `docker-compose.yml` comments to document the Portainer `.env`
+  contract for both role pairs.
+
+**Required `.env` keys for deploy:**
+
+- `OPERATIONS_DB_USER=operations_app`
+- `OPERATIONS_DB_PASSWORD=...`
+- `OPERATIONS_MIGRATE_DB_USER=operations_migrate`
+- `OPERATIONS_MIGRATE_DB_PASSWORD=...`
+- Existing required keys still apply: `OPERATIONS_SECRET_KEY` and
+  `OPERATIONS_ALLOWED_HOSTS`.
+
+**Validation:** Local Docker is unavailable on this workstation, so container
+build/start was not exercised here. Python/Django validation remains required
+after this change.
+
+**Pending:** Build/start through Docker or Portainer on a Docker-capable host,
+then hit `/healthz` on `127.0.0.1:8091`.
+
+---
+
+## 2026-07-06 — M0.10 seed groups, permissions, and taxonomy
+
+**Why:** Continue the approved Operations M0 build after middleware. M0.10
+adds idempotent seed data for local auth groups/permissions and the initial
+source/collector/finding taxonomy.
+
+**Work completed locally:**
+
+- Added migration `0007_seed_m0_reference_data`.
+- Seeds default tenant `id=1`, `slug=amrose`.
+- Creates/updates the 15 custom Operations permissions from §5.4 on the
+  `operations.User` content type.
+- Creates global Django groups:
+  - `admin` with all custom Operations permissions.
+  - `operator` with `view_*`, decision, merge, finding, client policy, and
+    query permissions.
+  - `viewer` with `view_*` and `run_queries`.
+- Seeds `sources`: `Ninja`.
+- Seeds `collectors`: `internal-ingest`, `ninja-hosted-script`.
+- Seeds one tenant-scoped `collector_instances` row for `internal-ingest`.
+- Seeds the 10 baseline `finding_types` with runbook paths.
+- Seeds an `admin` superuser with an unusable password for break-glass setup
+  until a real password is set intentionally.
+
+**Validation:**
+
+- `python operations\manage.py check` passed.
+- `python operations\manage.py makemigrations --check --dry-run` passed.
+- `python -m ruff check operations` passed.
+- `python operations\manage.py migrate --noinput` applied migration `0007`
+  to the local SQLite skeleton.
+- Local seed sanity check confirmed: 1 tenant, groups
+  `admin`/`operator`/`viewer`, `Ninja` source, 2 collectors, 1 collector
+  instance, 10 finding types, and admin user present.
+
+**Pending:** M0.11 bootstrap clients from `ninja_core.organizations`.
+Requires approval before implementation.
+
+---
+
+## 2026-07-06 — M0.9 tenant/client-scope middleware
+
+**Why:** Continue the approved Operations M0 build after RLS roles/policies.
+M0.9 adds runtime tenant scoping, client-scope resolution, management-command
+tenant context helpers, query helpers, and scope decorators.
+
+**Work completed locally:**
+
+- Added `apps.core.db.tenant` with:
+  - `set_local_tenant(tenant_id)`
+  - `current_tenant_id()`
+  - `tenant_context(tenant_id)`
+  - `client_scoped_query(request, sql, params)`
+  - `all_clients_query(sql, params)`
+  - development query-time tenant GUC assertion wrapper.
+- Added `TenantMiddleware`.
+  - Resolves tenant from authenticated user when present, otherwise tenant 1.
+  - Opens the outer transaction itself on Postgres before issuing
+    `SET LOCAL operations.tenant_id = %s`, because Django `ATOMIC_REQUESTS`
+    wraps views but not normal middleware.
+  - Skips the wrapper on `/healthz`.
+- Added `ClientScopeMiddleware`.
+  - Resolves `/orgs/all/...` to all-client mode.
+  - Resolves `/orgs/{slug}/...` to `request.current_client`.
+- Added `require_client_scope` and `require_admin` decorators.
+- Wired middleware into `config/settings/base.py` after authentication.
+
+**Validation:**
+
+- `python operations\manage.py check` passed.
+- `python operations\manage.py makemigrations --check --dry-run` passed.
+- `python -m ruff check operations` passed.
+- `python operations\manage.py migrate --plan` reports no planned operations.
+
+**Pending:** M0.10 admin seed groups, permissions, taxonomy, and finding
+types. Requires approval before implementation.
+
+---
+
+## 2026-07-06 — M0.8 RLS roles, policies, and grants
+
+**Why:** Continue the approved Operations M0 build after M0.7 workflow/audit
+tables. M0.8 adds the Postgres role, RLS, and privilege layer required by
+§6.3 and the M0 DB grants section.
+
+**Work completed locally:**
+
+- Added migration `0006_rls_roles_policies_grants`.
+- Postgres-only migration path ensures roles exist:
+  `operations_app`, `operations_migrate`, `operations_readonly`,
+  `operations_health`, `metabase_ro`, and `ninja_ingest`.
+- Enables and forces RLS on tenant-scoped tables with a fail-closed
+  `tenant_isolation` policy using
+  `current_setting('operations.tenant_id', TRUE)::bigint`.
+- Enables and forces RLS on `software_catalog` with a layered
+  `tenant_or_global` policy.
+- Applies broad app/read-only grants and restricted `ninja_ingest` grants for
+  `entity_observations`, `dead_letter_observations`, `run_log`, and
+  `refresh_software_installations_current(bigint)`.
+- SQLite/local migration path no-ops the Postgres SQL.
+
+**Validation:**
+
+- `python operations\manage.py check` passed.
+- `python operations\manage.py makemigrations --check --dry-run` passed.
+- `python -m ruff check operations` passed.
+- `python operations\manage.py migrate --noinput` applied migration `0006`
+  to the local SQLite skeleton.
+
+**Pending:** M0.9 tenant/client-scope middleware and tenant context helpers.
+Requires approval before implementation.
+
+---
+
+## 2026-07-06 — M0.7 workflow and audit tables
+
+**Why:** Continue the approved Operations M0 build after M0.6 observation
+tables. M0.7 adds the operator workflow, catalog, findings, notification,
+secret, audit, and run tracking tables.
+
+**Work completed locally:**
+
+- Added `SoftwareCatalog` as the layered global/tenant taxonomy table with
+  partial uniqueness for global and tenant rows.
+- Added `SoftwareDecision`.
+- Added `MergeCandidate` with `member_snapshots` and historical
+  `member_observation_ids`.
+- Added `Finding` with subject polymorphism fields and finding details JSON.
+- Added `SuppressionRule`, `NotificationRoute`, `Secret`, `AuditLog`, and
+  `RunLog`.
+- Added admin registrations for all M0.7 tables.
+- Added migration
+  `0005_notificationroute_auditlog_finding_mergecandidate_and_more`.
+
+**Validation:**
+
+- `python operations\manage.py check` passed.
+- `python operations\manage.py makemigrations --check --dry-run` passed.
+- `python -m ruff check operations` passed.
+- `python operations\manage.py migrate --noinput` applied migration `0005`
+  to the local SQLite skeleton.
+
+**Pending:** M0.8 RLS roles, policies, and grants. Requires approval before
+implementation.
+
+---
+
+## 2026-07-06 — M0.6 observations and current-state table
+
+**Why:** Continue the approved Operations M0 build slice after the module-doc
+checkpoint. M0.6 adds the ingest observation landing tables and the
+software-install current-state table/function required by §4.5 and §4.7.
+
+**Work completed locally:**
+
+- Added `EntityObservation` with promoted nullable `client_id` and
+  `device_id`, collector/source binding references, raw/canonical JSON, batch
+  idempotency fields, and the unique key
+  `(tenant_id, collector_instance_id, batch_id, observation_hash)`.
+- Added `DeadLetterObservation` for unresolved/rejected ingest envelopes.
+- Added admin inspection surfaces for both tables.
+- Added migration `0004_deadletterobservation_entityobservation`.
+- Added Postgres-only migration SQL for
+  `operations.software_installations_current` with composite primary key
+  `(tenant_id, client_id, device_id, canonical_name)`.
+- Added Postgres-only
+  `operations.refresh_software_installations_current(bigint)` as a
+  `SECURITY DEFINER` function. SQLite/local migration planning no-ops this
+  SQL path.
+
+**Validation:**
+
+- `python operations\manage.py check` passed.
+- `python operations\manage.py makemigrations --check --dry-run` passed.
+- `python -m ruff check operations` passed.
+- `python operations\manage.py migrate --plan` passed.
+
+**Pending:** M0.7 workflow/audit tables. Requires approval before
+implementation.
+
+---
+
+## 2026-07-06 — M0.3-M0.5 local build WIP
+
+**Why:** Resume Claude handoff `a2a3de93-e7af-4d46-a2dd-b2c156f12c9a` for
+the Operations M0 build.
+
+**Work completed locally:**
+
+- M0.3 custom auth/tenant foundation:
+  - `Tenant`
+  - custom `operations.User`
+  - tenant-scoped `UserGroup` / `UserPermission`
+  - `AUTH_USER_MODEL`
+  - admin wiring
+  - migration `0001_initial`
+- M0.4 canonical entity/link foundation:
+  - `Source`
+  - `Client`, `ClientLink`, `ClientPolicy`
+  - `Device`, `DeviceLink`
+  - `ClientUser`, `ClientUserLink`
+  - admin wiring
+  - migration `0002_source_client_clientpolicy_clientuser_device_and_more`
+- M0.5 source/collector taxonomy and binding foundation:
+  - `Collector`
+  - `FindingType`
+  - `SourceInstance`
+  - `CollectorInstance`
+  - `SourceBinding`
+  - admin wiring
+  - migration `0003_collector_findingtype_collectorinstance_and_more`
+- Independent M0 stubs:
+  - `/healthz`
+  - 10 runbook placeholder files.
+
+**Validation:**
+
+- `python operations\manage.py check` passed.
+- `python operations\manage.py makemigrations --check --dry-run` passed.
+- `python -m ruff check operations` passed.
+- `python operations\manage.py migrate --plan` passed.
+
+**Process correction:** This build WIP was created before the module-doc
+delegation rule was added to `DEVELOPMENT.md`. Future Operations slices must
+checkpoint here and in `operations/BUILD_BLUEPRINT.md` before edits.
+
+**Pending:** M0.6 observations/dead-letter/current-state schema and refresh
+function. Requires approval before implementation.

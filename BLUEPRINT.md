@@ -1,35 +1,34 @@
 # Goal
 
-Prevent Postgres materialized-view refreshes from failing because the
-container has too little shared memory.
+Continue the Operations M0 build from the Claude handoff while keeping the
+root repo docs as a resumable checkpoint.
 
 # Why
 
-Live log showed `psycopg.errors.DiskFull: could not resize shared memory
-segment ... No space left on device` while refreshing
-`ninja_inventory.inventory_summary_current`.
+Operations is a module-sized build inside `ninja-dashboard`; the detailed
+architecture already lives in `operations/BLUEPRINT.md`, and the active
+implementation plan should not overwrite unrelated root project context.
 
 # Scope
 
-- Add Docker shared-memory sizing to the Postgres service.
-- Record the deployment requirement in version notes.
-- Do not change dashboard SQL, inventory SQL, or scheduler behavior in
-  this patch.
+- In: Operations M0 Django app/schema foundation.
+- In: root pointer docs required by `DEVELOPMENT.md`.
+- Out: agent compliance, patch dashboards, existing ingest domains.
+- Detail: `operations/BUILD_BLUEPRINT.md`.
 
 # Files to change
 
-- `docker-compose.yml` — set `postgres.shm_size`.
-- `VERSION` — bump patch version.
-- `CHANGELOG.md` — record the Docker/Postgres fix.
-- `SESSIONS.md` — record cause, fix, and validation.
+- `operations/BUILD_BLUEPRINT.md` — detailed active implementation plan.
+- `operations/SESSIONS.md` — detailed Operations session journal.
+- `operations/TODO.md` — Operations-specific backlog.
+- `operations/...` — code files named in the module blueprint.
 
 # Steps
 
-1. Add `shm_size: "1gb"` to the Postgres service.
-2. Bump version to `0.35.4`.
-3. Update changelog/session notes.
-4. Validate whitespace locally; compose validation requires Docker.
-5. Ask before commit/push.
+1. Keep this file as the root checkpoint.
+2. Follow `operations/BUILD_BLUEPRINT.md` for detailed M0 slices.
+3. Checkpoint for approval before each new M0 slice.
+4. Mirror only repo-level status into root `SESSIONS.md` / `TODO.md`.
 
 # Open questions
 
@@ -37,4 +36,6 @@ segment ... No space left on device` while refreshing
 
 # Status
 
-implemented locally; commit/push approval needed.
+In progress. Operations M0.3-M0.10 plus the M0 deployability checkpoint exist
+locally. Next build checkpoint is M0.11 bootstrap clients from
+`ninja_core.organizations`.

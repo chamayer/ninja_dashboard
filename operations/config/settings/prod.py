@@ -5,8 +5,7 @@ from __future__ import annotations
 import os
 import sys
 
-from .base import *  # noqa: F401,F403
-from .base import BASE_DIR  # noqa: F401  (kept for future overrides)
+from .base import *
 
 DEBUG = False
 
@@ -15,6 +14,11 @@ DEBUG = False
 # ---------------------------------------------------------------------------
 # All keys sourced from /amr-ch-01_data/ninja-dashboard/.env (bind-mounted).
 # Missing values fail loud below alongside SECRET_KEY / ALLOWED_HOSTS.
+#
+# Runtime workers use operations_app. The entrypoint temporarily exports
+# OPERATIONS_DB_USER/PASSWORD from the migration variables below before
+# running `manage.py migrate`, then switches back to runtime credentials
+# before launching Gunicorn.
 
 DATABASES = {
     "default": {
@@ -37,6 +41,9 @@ DATABASES = {
     },
 }
 
+OPERATIONS_MIGRATE_DB_USER = os.environ.get("OPERATIONS_MIGRATE_DB_USER", "operations_migrate")
+OPERATIONS_MIGRATE_DB_PASSWORD = os.environ.get("OPERATIONS_MIGRATE_DB_PASSWORD", "")
+
 
 # Refuse to start without an explicit secret key in prod.
 if os.environ.get("OPERATIONS_SECRET_KEY") in (None, "", "insecure-dev-key-change-me"):
@@ -53,6 +60,18 @@ if not _allowed:
     )
     sys.exit(1)
 ALLOWED_HOSTS = [h.strip() for h in _allowed.split(",") if h.strip()]
+
+if not os.environ.get("OPERATIONS_DB_PASSWORD"):
+    sys.stderr.write(
+        "OPERATIONS_DB_PASSWORD must be set for the runtime operations_app role. Refusing to start.\n"
+    )
+    sys.exit(1)
+
+if not OPERATIONS_MIGRATE_DB_PASSWORD:
+    sys.stderr.write(
+        "OPERATIONS_MIGRATE_DB_PASSWORD must be set for migrations. Refusing to start.\n"
+    )
+    sys.exit(1)
 
 # Secure cookies + HSTS assume the LAN reverse proxy handles TLS; if the
 # deploy shape ever changes to direct-Gunicorn HTTP, revisit these.

@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import os
 
-from .base import *  # noqa: F401,F403
-from .base import INSTALLED_APPS, MIDDLEWARE
+from .base import *
 
 DEBUG = True
 
@@ -13,7 +12,7 @@ DEBUG = True
 ALLOWED_HOSTS = ["*"]
 
 # Loosen DRF for interactive use.
-REST_FRAMEWORK = {  # noqa: F811
+REST_FRAMEWORK = {
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
     "DEFAULT_AUTHENTICATION_CLASSES": [
         "rest_framework.authentication.SessionAuthentication",

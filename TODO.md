@@ -7,6 +7,10 @@ Read Inbox at the start of every session.
 
 ## Inbox
 
+- [ ] Operations M0 build is now tracked in module docs:
+      `operations/BUILD_BLUEPRINT.md`, `operations/SESSIONS.md`, and
+      `operations/TODO.md`. Review current M0.3-M0.10 WIP before commit;
+      approve M0.11 before more schema work.
 - [ ] After v0.32.0 redeploys, run `/run/agent-compliance` and
       execute the new validation queries (HANDY_COMMANDS.md
       "id-link sanity") to confirm no
