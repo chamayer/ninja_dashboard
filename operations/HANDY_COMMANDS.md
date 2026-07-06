@@ -14,10 +14,13 @@ creates the other five roles idempotently.
 
 ```bash
 # Read the migrate password out of the bind-mounted .env, feed to psql.
+# psql's :'migrate_pw' expansion adds the surrounding single quotes; do
+# NOT wrap ${MIG_PW} in quotes here or the password ends up literally
+# containing quote characters.
 MIG_PW=$(grep '^OPERATIONS_MIGRATE_DB_PASSWORD=' /amr-ch-01_data/ninja-dashboard/.env | cut -d= -f2-)
 
 docker exec -i ninja-postgres psql -U ninja -d ninja \
-    -v migrate_pw="'${MIG_PW}'" \
+    -v migrate_pw="${MIG_PW}" \
     < /path/to/repo/operations/sql/bootstrap-roles.sql
 ```
 
