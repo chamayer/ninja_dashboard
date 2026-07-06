@@ -11,6 +11,20 @@ from .models import Client
 
 ORG_PATH_PARTS = 2
 
+# Paths that MUST NOT be wrapped in a tenant SET LOCAL. Static asset
+# serving, favicon, healthz probe, and API metadata don't need a DB
+# transaction. Admin IS tenant-scoped in the sense that the admin user
+# lives in tenant 1 and RLS must permit that lookup, so /admin stays IN
+# the tenant scope.
+TENANT_SCOPE_EXEMPT_PREFIXES = (
+    "/healthz",
+    "/static/",
+    "/favicon.ico",
+    "/api/schema/",
+    "/api/docs/",
+    "/api/redoc/",
+)
+
 
 class TenantMiddleware:
     def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]) -> None:
@@ -22,12 +36,16 @@ class TenantMiddleware:
         request.tenant_id = tenant_id  # type: ignore[attr-defined]
         self._install_assertion_wrapper()
 
-        if connection.vendor != "postgresql" or request.path_info == "/healthz":
+        if connection.vendor != "postgresql" or self._is_exempt(request.path_info):
             return self.get_response(request)
 
         with transaction.atomic():
             set_local_tenant(tenant_id)
             return self.get_response(request)
+
+    @staticmethod
+    def _is_exempt(path_info: str) -> bool:
+        return any(path_info.startswith(prefix) for prefix in TENANT_SCOPE_EXEMPT_PREFIXES)
 
     def _resolve_tenant_id(self, request: HttpRequest) -> int:
         user = getattr(request, "user", None)

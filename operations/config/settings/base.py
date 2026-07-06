@@ -133,7 +133,11 @@ USE_TZ = True
 
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
-STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
+# Compressed (gzip/brotli) but NOT manifest-strict. Manifest storage 500s
+# hard if any {% static %} tag references a file that isn't in the
+# manifest (common with third-party admin apps + Django admin). Revisit
+# when we ship a real static-asset pipeline.
+STATICFILES_STORAGE = "whitenoise.storage.CompressedStaticFilesStorage"
 
 # ---------------------------------------------------------------------------
 # DRF
