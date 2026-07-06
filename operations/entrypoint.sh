@@ -5,11 +5,19 @@
 # 2) Collect static assets for whitenoise.
 # 3) Launch gunicorn on 3002 (LAN) and 8091 (internal ops / health).
 #
-# python-dotenv in config/settings/base.py loads /app/.env at import time,
-# so no OS-level env-file sourcing is needed. .env is bind-mounted into
-# the container from /amr-ch-01_data/ninja-dashboard/.env by compose.
+# /app/.env is bind-mounted from /amr-ch-01_data/ninja-dashboard/.env by
+# compose. Source it here so pre-Django shell checks (DB passwords) see
+# the values — python-dotenv only loads at Django import time, which is
+# too late for this script. Same pattern as postgres/metabase services.
 # =============================================================================
 set -e
+
+# Load bind-mounted .env into shell env before any pre-Django checks.
+if [ -f /app/.env ]; then
+    set -a
+    . /app/.env
+    set +a
+fi
 
 runtime_db_user="${OPERATIONS_DB_USER:-operations_app}"
 runtime_db_password="${OPERATIONS_DB_PASSWORD:-}"
