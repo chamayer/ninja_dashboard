@@ -12,11 +12,21 @@
 # =============================================================================
 set -e
 
-# Load bind-mounted .env into shell env before any pre-Django checks.
+# Extract only OPERATIONS_* keys from the bind-mounted .env so pre-Django
+# shell checks (DB passwords) see them. Blanket-sourcing the whole file
+# breaks under dash (/bin/sh on python:slim images) when other keys in
+# .env contain unquoted spaces — dash treats the tail of the value as
+# further commands. python-dotenv handles the full file at Django import
+# time; this loop only exists for the pre-import shell checks.
 if [ -f /app/.env ]; then
-    set -a
-    . /app/.env
-    set +a
+    for k in OPERATIONS_SECRET_KEY OPERATIONS_ALLOWED_HOSTS \
+             OPERATIONS_DB_NAME OPERATIONS_DB_USER OPERATIONS_DB_PASSWORD \
+             OPERATIONS_MIGRATE_DB_USER OPERATIONS_MIGRATE_DB_PASSWORD; do
+        v=$(grep "^${k}=" /app/.env | head -1 | cut -d= -f2-)
+        if [ -n "$v" ]; then
+            export "${k}=${v}"
+        fi
+    done
 fi
 
 runtime_db_user="${OPERATIONS_DB_USER:-operations_app}"

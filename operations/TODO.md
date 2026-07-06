@@ -32,6 +32,12 @@ module-specific; root `../TODO.md` keeps cross-repo items and pointers.
       ingest/metabase/postgres containers so they can still read it after
       the mode change. Deferred until Operations container is deployed and
       verified, so we change one variable at a time.
+- [ ] Audit `/amr-ch-01_data/ninja-dashboard/.env` for values with unquoted
+      spaces and add quotes. Discovered when `INGEST_PATCHING_ENABLED_POLICIES`
+      broke dash sourcing in the Operations entrypoint (worked around by
+      only extracting OPERATIONS_* keys). Bash-based services (postgres,
+      metabase) tolerated it; dash didn't. Nice-to-have, not blocking any
+      current service.
 
 ---
 
