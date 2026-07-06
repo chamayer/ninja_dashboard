@@ -36,3 +36,11 @@ NinjaRMM-API-v2*.json
 *~
 .DS_Store
 Thumbs.db
+
+# ── Operations (Django) ──────────────────────────────────────────────
+operations/skeleton.sqlite3
+operations/staticfiles/
+operations/.python-version
+operations/htmlcov/
+operations/.coverage
+operations/coverage.xml
