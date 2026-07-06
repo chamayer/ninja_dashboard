@@ -21,7 +21,8 @@ set -e
 if [ -f /app/.env ]; then
     for k in OPERATIONS_SECRET_KEY OPERATIONS_ALLOWED_HOSTS \
              OPERATIONS_DB_NAME OPERATIONS_DB_USER OPERATIONS_DB_PASSWORD \
-             OPERATIONS_MIGRATE_DB_USER OPERATIONS_MIGRATE_DB_PASSWORD; do
+             OPERATIONS_MIGRATE_DB_USER OPERATIONS_MIGRATE_DB_PASSWORD \
+             OPERATIONS_INITIAL_ADMIN_PASSWORD; do
         v=$(grep "^${k}=" /app/.env | head -1 | cut -d= -f2-)
         if [ -n "$v" ]; then
             export "${k}=${v}"
@@ -48,6 +49,9 @@ echo "[operations] applying migrations as ${migrate_db_user}..."
 export OPERATIONS_DB_USER="$migrate_db_user"
 export OPERATIONS_DB_PASSWORD="$migrate_db_password"
 python manage.py migrate --noinput
+
+echo "[operations] setting initial admin password from env (if provided)..."
+python manage.py set_initial_admin_password
 
 echo "[operations] collecting static files..."
 python manage.py collectstatic --noinput --clear
