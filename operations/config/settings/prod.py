@@ -87,3 +87,40 @@ X_FRAME_OPTIONS = "SAMEORIGIN"
 # Strict tenant assertion off in prod (would panic on any missing GUC —
 # want it in dev only per BLUEPRINT §6.3).
 OPERATIONS_STRICT_TENANT = False
+
+# ---------------------------------------------------------------------------
+# Logging
+# ---------------------------------------------------------------------------
+# Django's default routes django.request ERROR to mail_admins only. Without
+# an admin email configured, 500 tracebacks disappear silently and only the
+# status line reaches stdout via gunicorn. Route django.request ERROR to
+# stderr so tracebacks land in `docker logs`.
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "verbose": {
+            "format": "{asctime} {levelname} {name} {message}",
+            "style": "{",
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "verbose",
+        },
+    },
+    "loggers": {
+        "django": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False,
+        },
+        "django.request": {
+            "handlers": ["console"],
+            "level": "ERROR",
+            "propagate": False,
+        },
+    },
+}
