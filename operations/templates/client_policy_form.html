@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+
+{% block title %}
+    {% if mode == "edit" %}Edit policy — {{ policy.category }}{% else %}New policy{% endif %}
+{% endblock %}
+
+{% block content %}
+<div class="card">
+    <p class="muted">
+        <a href="{% url 'org_index' org_slug=client.slug %}">{{ client.display_name }}</a>
+        &nbsp;›&nbsp; {% if mode == "edit" %}Edit policy{% else %}New policy{% endif %}
+    </p>
+    <h1>
+        {% if mode == "edit" %}
+            Edit policy — <code>{{ policy.category }}</code>
+        {% else %}
+            New policy — {{ client.display_name }}
+        {% endif %}
+    </h1>
+</div>
+
+<div class="card">
+    {% for message in messages %}
+        <p style="padding: 0.5rem; background: #ffe; border: 1px solid #cca; border-radius: 4px;">{{ message }}</p>
+    {% endfor %}
+
+    <form method="post" style="max-width: 640px;">
+        {% csrf_token %}
+        {% for field in form %}
+        <div style="margin-bottom: 1rem;">
+            <label for="{{ field.id_for_label }}" style="display: block; font-weight: 600; margin-bottom: 0.25rem;">
+                {{ field.label }}
+            </label>
+            {{ field }}
+            {% if field.help_text %}
+                <p class="muted" style="font-size: 0.8rem; margin: 0.25rem 0 0;">{{ field.help_text }}</p>
+            {% endif %}
+            {% for error in field.errors %}
+                <p style="color: #c00; font-size: 0.85rem; margin: 0.25rem 0 0;">{{ error }}</p>
+            {% endfor %}
+        </div>
+        {% endfor %}
+
+        <div style="display: flex; gap: 0.75rem; align-items: center;">
+            <button type="submit" style="padding: 0.5rem 1rem; background: var(--accent); color: white; border: none; border-radius: 4px;">
+                {% if mode == "edit" %}Save changes{% else %}Create policy{% endif %}
+            </button>
+            <a href="{% url 'org_index' org_slug=client.slug %}" class="muted">Cancel</a>
+        </div>
+    </form>
+
+    {% if mode == "edit" %}
+    <form action="{% url 'client_policy_delete' org_slug=client.slug policy_id=policy.id %}" method="post" style="margin-top: 2rem;" onsubmit="return confirm('Delete this policy?');">
+        {% csrf_token %}
+        <button type="submit" style="padding: 0.5rem 1rem; background: transparent; color: #c00; border: 1px solid #c00; border-radius: 4px;">
+            Delete policy
+        </button>
+    </form>
+    {% endif %}
+</div>
+{% endblock %}

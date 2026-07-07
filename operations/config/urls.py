@@ -11,6 +11,9 @@ from drf_spectacular.views import (
 )
 
 from apps.core.views import (
+    client_policy_delete,
+    client_policy_edit,
+    client_policy_new,
     client_switch,
     device_detail,
     findings_queue,
@@ -25,6 +28,9 @@ urlpatterns = [
     path("healthz", healthz, name="healthz"),
     path("orgs/<slug:org_slug>/", org_index, name="org_index"),
     path("orgs/<slug:org_slug>/devices/<uuid:device_id>/", device_detail, name="device_detail"),
+    path("orgs/<slug:org_slug>/policies/new/", client_policy_new, name="client_policy_new"),
+    path("orgs/<slug:org_slug>/policies/<uuid:policy_id>/edit/", client_policy_edit, name="client_policy_edit"),
+    path("orgs/<slug:org_slug>/policies/<uuid:policy_id>/delete/", client_policy_delete, name="client_policy_delete"),
     path("findings/", findings_queue, name="findings_queue"),
     path("merge-candidates/", merge_candidates_queue, name="merge_candidates_queue"),
     path("switch/", client_switch, name="client_switch"),

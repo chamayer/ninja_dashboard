@@ -26,6 +26,47 @@
 
 {% if current_client %}
 <div class="card">
+    <div style="display: flex; justify-content: space-between; align-items: center;">
+        <h2 style="margin: 0;">Policies</h2>
+        <a href="{% url 'client_policy_new' org_slug=current_client.slug %}" style="padding: 0.4rem 0.8rem; background: var(--accent); color: white; text-decoration: none; border-radius: 4px; font-size: 0.9rem;">+ New policy</a>
+    </div>
+    {% if policies %}
+    <table style="width: 100%; border-collapse: collapse; margin-top: 1rem;">
+        <thead>
+            <tr style="text-align: left; border-bottom: 1px solid var(--border);">
+                <th style="padding: 0.5rem;">Category</th>
+                <th style="padding: 0.5rem;">Approved products</th>
+                <th style="padding: 0.5rem; text-align: right;">Agent SLA</th>
+                <th style="padding: 0.5rem;"></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for p in policies %}
+            <tr style="border-bottom: 1px solid var(--border);">
+                <td style="padding: 0.5rem;"><code>{{ p.category }}</code></td>
+                <td style="padding: 0.5rem;">
+                    {% if p.approved_products %}
+                        {{ p.approved_products|join:", " }}
+                    {% else %}
+                        <span class="muted">— none —</span>
+                    {% endif %}
+                </td>
+                <td style="padding: 0.5rem; text-align: right;">
+                    {% if p.agent_sla_days %}{{ p.agent_sla_days }} days{% else %}<span class="muted">—</span>{% endif %}
+                </td>
+                <td style="padding: 0.5rem; text-align: right;">
+                    <a href="{% url 'client_policy_edit' org_slug=current_client.slug policy_id=p.id %}">Edit</a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="muted" style="margin-top: 1rem;">No policies defined. Add one to declare authorized products for RMM, AV/EDR, remote access, etc.</p>
+    {% endif %}
+</div>
+
+<div class="card">
     <h2 style="margin-top: 0;">External identities</h2>
     {% if client_links %}
     <table style="width: 100%; border-collapse: collapse;">

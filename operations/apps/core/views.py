@@ -6,9 +6,13 @@ from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_GET
 
+from django.contrib import messages
 from django.db.models import Count, Q
+from django.urls import reverse
+from django.views.decorators.http import require_POST
 
-from .models import Client, Device, Finding, FindingType, MergeCandidate
+from .forms import ClientPolicyForm
+from .models import Client, ClientPolicy, Device, Finding, FindingType, MergeCandidate
 
 
 @require_GET
@@ -39,6 +43,9 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
         ctx["device_count"] = devices.count()
         ctx["client_links"] = list(
             client.links.select_related("source").order_by("source__name")
+        )
+        ctx["policies"] = list(
+            ClientPolicy.objects.filter(tenant_id=1, client=client).order_by("category")
         )
     else:
         # All-clients view: per-client device counts + fleet totals.
@@ -125,6 +132,67 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             "active_type": type_filter,
         },
     )
+
+
+def _get_client_by_slug(slug: str) -> Client:
+    return get_object_or_404(
+        Client, tenant_id=1, slug=slug, deleted_at__isnull=True
+    )
+
+
+@login_required
+def client_policy_new(request: HttpRequest, org_slug: str) -> HttpResponse:
+    client = _get_client_by_slug(org_slug)
+    if request.method == "POST":
+        form = ClientPolicyForm(request.POST)
+        if form.is_valid():
+            policy = form.save(commit=False)
+            policy.tenant_id = 1
+            policy.client = client
+            try:
+                policy.save()
+            except Exception as exc:  # noqa: BLE001 - user-facing message
+                form.add_error("category", f"Could not save: {exc}")
+            else:
+                messages.success(request, f"Policy '{policy.category}' created.")
+                return redirect("org_index", org_slug=org_slug)
+    else:
+        form = ClientPolicyForm()
+    return render(
+        request,
+        "client_policy_form.html",
+        {"form": form, "client": client, "mode": "new"},
+    )
+
+
+@login_required
+def client_policy_edit(request: HttpRequest, org_slug: str, policy_id: str) -> HttpResponse:
+    client = _get_client_by_slug(org_slug)
+    policy = get_object_or_404(ClientPolicy, tenant_id=1, client=client, id=policy_id)
+    if request.method == "POST":
+        form = ClientPolicyForm(request.POST, instance=policy)
+        if form.is_valid():
+            form.save()
+            messages.success(request, f"Policy '{policy.category}' updated.")
+            return redirect("org_index", org_slug=org_slug)
+    else:
+        form = ClientPolicyForm(instance=policy)
+    return render(
+        request,
+        "client_policy_form.html",
+        {"form": form, "client": client, "policy": policy, "mode": "edit"},
+    )
+
+
+@login_required
+@require_POST
+def client_policy_delete(request: HttpRequest, org_slug: str, policy_id: str) -> HttpResponse:
+    client = _get_client_by_slug(org_slug)
+    policy = get_object_or_404(ClientPolicy, tenant_id=1, client=client, id=policy_id)
+    category = policy.category
+    policy.delete()
+    messages.success(request, f"Policy '{category}' deleted.")
+    return redirect("org_index", org_slug=org_slug)
 
 
 @login_required
