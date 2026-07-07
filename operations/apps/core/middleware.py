@@ -27,12 +27,24 @@ TENANT_SCOPE_EXEMPT_PREFIXES = (
 
 
 class TenantMiddleware:
+    """Opens a per-request transaction and pins the tenant GUC.
+
+    M0 is single-tenant per BLUEPRINT §2 non-goals — tenant is always
+    DEFAULT_TENANT_ID (1). When multi-tenant lands in a later milestone,
+    tenant should be resolved from session data or subdomain, NOT from
+    ``request.user.tenant_id`` — accessing ``request.user`` here triggers
+    Django's session-based user lookup BEFORE the tenant GUC has been
+    set, which under RLS + operations_app returns empty and caches the
+    result as AnonymousUser, permanently anonymising the request even
+    though the user did log in successfully.
+    """
+
     def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]) -> None:
         self.get_response = get_response
         self._assertion_installed = False
 
     def __call__(self, request: HttpRequest) -> HttpResponse:
-        tenant_id = self._resolve_tenant_id(request)
+        tenant_id = DEFAULT_TENANT_ID
         request.tenant_id = tenant_id  # type: ignore[attr-defined]
         self._install_assertion_wrapper()
 
@@ -46,12 +58,6 @@ class TenantMiddleware:
     @staticmethod
     def _is_exempt(path_info: str) -> bool:
         return any(path_info.startswith(prefix) for prefix in TENANT_SCOPE_EXEMPT_PREFIXES)
-
-    def _resolve_tenant_id(self, request: HttpRequest) -> int:
-        user = getattr(request, "user", None)
-        if getattr(user, "is_authenticated", False) and getattr(user, "tenant_id", None):
-            return int(user.tenant_id)
-        return DEFAULT_TENANT_ID
 
     def _install_assertion_wrapper(self) -> None:
         if self._assertion_installed:
