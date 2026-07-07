@@ -53,6 +53,9 @@ python manage.py migrate --noinput
 echo "[operations] setting initial admin password from env (if provided)..."
 python manage.py set_initial_admin_password
 
+echo "[operations] bootstrapping clients from ninja_core.organizations..."
+python manage.py bootstrap_clients_from_ninja
+
 echo "[operations] collecting static files..."
 python manage.py collectstatic --noinput --clear
 
