@@ -1,74 +1,66 @@
 # Goal
 
-Build Operations M0 through the Django app/schema foundation.
+Complete M0 remaining slices: CI + pre-commit, bootstrap clients from
+`ninja_core.organizations`, brand/template/client-selector scaffold.
 
 # Why
 
-Resume the Claude handoff for `operations` and continue the approved M0
-implementation plan from `operations/BLUEPRINT.md`.
+M0.3–M0.10 + deploy plumbing are shipped, verified running on am-ch-01
+against the ninja-dashboard stack (commits `5d0456a`..`3ad38d0`). Three
+build slices remain to close M0: M0.15 (CI safety net), M0.11 (real
+client data), M0.12 (brand/template/selector).
 
 # Scope
 
-- In: Django Operations app, models, migrations, admin wiring, health route,
-  runbook stubs, seed/reference schema foundations.
-- Out: public UI pages, ingest endpoint implementation, production deploy,
-  commit/push.
-- Current checkpoint: M0.3-M0.5 code is uncommitted WIP and validated locally.
+Order: M0.15 → M0.11 → M0.12.
 
-# Files to change
+- **M0.15 — CI + pre-commit** (this slice, active).
+  - `.github/workflows/ci.yml` — ruff + Django check + makemigrations
+    --check --dry-run on push / PR.
+  - `.pre-commit-config.yaml` — ruff, ruff-format, EOF/whitespace,
+    check-added-large-files, check-yaml.
+  - No production code changes.
+- **M0.11 — Bootstrap clients** (next).
+  - Managed=False model against `ninja_core.organizations`.
+  - Management command `bootstrap_clients_from_ninja` — idempotent
+    upsert of Client + ClientLink(source=Ninja).
+  - Runs as `operations_migrate` (bypasses RLS).
+- **M0.12 — Brand + templates + client selector** (after M0.11).
+  - `operations.context_processors.brand`.
+  - `templates/base.html` scaffold.
+  - Header client selector reading `Client.objects` in tenant 1.
+  - `/orgs/all/` and `/orgs/<slug>/` URL rewrites via existing
+    `ClientScopeMiddleware`.
 
-- `operations/apps/core/` — Django app models, admin, migrations, views.
-- `operations/config/settings/*.py` — app registration and lint cleanup.
-- `operations/config/urls.py` — health endpoint route.
-- `operations/docs/runbooks/*.md` — baseline finding type placeholders.
-- `operations/BUILD_BLUEPRINT.md` — active implementation status.
-- `operations/SESSIONS.md` — detailed session log.
-- `operations/TODO.md` — Operations backlog.
+Out of scope for now: real UI views, ingest endpoint, HTTPS
+(explicitly parked in backlog).
+
+# Files to change (M0.15 only, this slice)
+
+- `.github/workflows/ci.yml` — new, workflow definition.
+- `.pre-commit-config.yaml` — new, hook config.
+- `operations/BUILD_BLUEPRINT.md` — this file (already updated).
+- `operations/SESSIONS.md` — add session entry when M0.15 lands.
+- `operations/TODO.md` — move M0.15 from Backlog to Completed on commit.
 
 # Steps
 
-1. M0.3 auth/tenant foundation.
-   - Status: done locally.
-   - Includes `Tenant`, custom `User`, tenant-scoped auth through models,
-     `AUTH_USER_MODEL`, admin wiring, migration `0001`.
-2. M0.4 canonical entities.
-   - Status: done locally.
-   - Includes clients, policies, devices, client users, link tables, `Source`,
-     admin wiring, migration `0002`.
-3. M0.5 source/collector taxonomy and bindings.
-   - Status: done locally.
-   - Includes `Collector`, `FindingType`, source/collector instances,
-     source bindings, admin wiring, migration `0003`.
-4. Independent M0 stubs.
-   - Status: done locally.
-   - Includes `/healthz` and 10 runbook placeholder files.
-5. M0.6 observations/current-state.
-   - Status: done locally.
-   - Add `entity_observations`, `dead_letter_observations`,
-     `software_installations_current`, and refresh function strategy.
-6. M0.7+ workflow, RLS, seeds, bootstrap clients, middleware, CI.
-   - Status: M0.7 done locally; M0.8+ pending.
-   - M0.7 includes workflow/audit tables and admin wiring.
-7. M0.8 RLS roles, policies, and grants.
-   - Status: done locally.
-8. M0.9 tenant/client-scope middleware and tenant context helpers.
-   - Status: done locally.
-9. M0.10 admin seed groups, permissions, taxonomy, and finding types.
-   - Status: done locally.
-10. M0.11 bootstrap clients from `ninja_core.organizations`.
-   - Status: pending approval.
-11. M0 deployability checkpoint.
-   - Status: done locally.
-   - Ensures the container runs migrations with `operations_migrate`, then
-     starts Gunicorn with `operations_app`.
+1. Write `.pre-commit-config.yaml` at repo root — ruff check, ruff
+   format, standard hygiene hooks.
+2. Write `.github/workflows/ci.yml` — Ubuntu, Python 3.12, install
+   dev deps, `ruff check`, `python operations/manage.py check`,
+   `python operations/manage.py makemigrations --check --dry-run`.
+3. Commit + push (branch: master, per user's no-branches workflow).
+4. Verify: check GitHub Actions tab for green build on push.
+5. Update SESSIONS.md + TODO.md.
 
 # Open questions
 
-- Whether RLS roles/grants are one SQL migration or separated from model
-  migrations for easier local SQLite checks.
+- Whether to also run pytest in CI. Punt: no tests yet in the tree.
+  Add pytest step later when tests land.
+- Whether to gate merges on CI passing. Punt: user is solo on master;
+  green is aspirational not enforced.
 
 # Status
 
-In progress. Do not start M0.11 bootstrap clients without an explicit approval
-checkpoint. Before commit/deploy, validate the container on a Docker-capable
-host because this workstation lacks Docker.
+M0.15 planning. Awaiting approval to write CI files.
