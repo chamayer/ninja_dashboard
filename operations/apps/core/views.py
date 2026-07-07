@@ -47,7 +47,7 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
         devices = list(
             Device.objects.filter(
                 tenant_id=1, client=client, deleted_at__isnull=True
-            ).only("device_kind")
+            ).only("device_type")
         )
         ctx["device_count"] = len(devices)
         ctx["type_summary"] = _type_summary(devices)
