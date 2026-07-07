@@ -22,6 +22,16 @@ module-specific; root `../TODO.md` keeps cross-repo items and pointers.
 - [ ] M0.12 brand context/base template/client selector.
 - [ ] M0.15 CI and pre-commit configuration.
 
+### Stack-wide (post-M0)
+
+- [ ] TLS reverse proxy in front of the whole stack (postgres/metabase/
+      ingest/operations). Options: Caddy (auto-cert, easiest for LAN),
+      Traefik (LE via DNS-01), nginx (manual). Currently everything is
+      direct-Gunicorn/-Jetty HTTP. Once landed, set `OPERATIONS_HTTPS=1`
+      in `.env` and re-enable secure cookies + HSTS. Blueprint §2
+      explicitly deferred this; parked here as a conscious "later, not
+      never."
+
 ### Process
 
 - [ ] Split current uncommitted WIP into approved logical commits:
