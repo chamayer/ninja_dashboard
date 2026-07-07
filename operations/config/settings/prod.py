@@ -73,16 +73,37 @@ if not OPERATIONS_MIGRATE_DB_PASSWORD:
     )
     sys.exit(1)
 
-# Secure cookies + HSTS assume the LAN reverse proxy handles TLS; if the
-# deploy shape ever changes to direct-Gunicorn HTTP, revisit these.
-SESSION_COOKIE_SECURE = True
-CSRF_COOKIE_SECURE = True
-SECURE_HSTS_SECONDS = 60 * 60 * 24 * 30
-SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+# TLS-dependent settings toggled by OPERATIONS_HTTPS env var. Default is
+# off (direct-Gunicorn HTTP on port 3002). Flip to "1" once a TLS
+# reverse proxy is in front.
+#
+# SESSION_COOKIE_SECURE=True + HTTP breaks logins: the browser refuses
+# to send the session cookie back, so every POST looks anonymous.
+# Same story for CSRF_COOKIE_SECURE — the CSRF token never returns and
+# every form submit 403s.
+_https_mode = os.environ.get("OPERATIONS_HTTPS", "0") == "1"
+
+SESSION_COOKIE_SECURE = _https_mode
+CSRF_COOKIE_SECURE = _https_mode
+SECURE_HSTS_SECONDS = 60 * 60 * 24 * 30 if _https_mode else 0
+SECURE_HSTS_INCLUDE_SUBDOMAINS = _https_mode
 SECURE_HSTS_PRELOAD = False
 SECURE_REFERRER_POLICY = "same-origin"
 SECURE_CONTENT_TYPE_NOSNIFF = True
 X_FRAME_OPTIONS = "SAMEORIGIN"
+
+# Django's CSRF check requires the Origin/Referer host+port to appear in
+# CSRF_TRUSTED_ORIGINS for cross-origin form submits (which admin login
+# on a non-standard port qualifies as). Auto-derive from ALLOWED_HOSTS
+# with the current scheme so LAN hostnames + IPs both work.
+_scheme = "https" if _https_mode else "http"
+_default_port = "443" if _https_mode else "3002"
+CSRF_TRUSTED_ORIGINS = [
+    f"{_scheme}://{host}" if ":" in host or host in ("localhost", "127.0.0.1")
+    else f"{_scheme}://{host}:{_default_port}"
+    for host in ALLOWED_HOSTS
+    if host not in ("*",)
+]
 
 # Strict tenant assertion off in prod (would panic on any missing GUC —
 # want it in dev only per BLUEPRINT §6.3).
