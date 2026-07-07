@@ -4,7 +4,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
 from django.db import transaction
-from django.db.models import Count, Q
+from django.db.models import Count, Prefetch, Q
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_GET, require_POST
@@ -12,6 +12,7 @@ from django.views.decorators.http import require_GET, require_POST
 from .forms import ClientPolicyForm
 from .models import (
     Client,
+    ClientLink,
     ClientPolicy,
     Device,
     Finding,
@@ -80,9 +81,15 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
             .order_by("category")
         )
     else:
-        # All-clients view: per-client device counts + fleet totals.
+        # All-clients fleet view.
         clients_with_counts = list(
             Client.objects.filter(tenant_id=1, deleted_at__isnull=True)
+            .prefetch_related(
+                Prefetch(
+                    "links",
+                    queryset=ClientLink.objects.select_related("source").order_by("source__name"),
+                )
+            )
             .annotate(
                 device_count=Count(
                     "devices",
@@ -91,9 +98,26 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
             )
             .order_by("-device_count", "display_name")
         )
+        fleet_type_counts = {
+            row["device_type"]: row["count"]
+            for row in Device.objects.filter(tenant_id=1, deleted_at__isnull=True)
+            .values("device_type")
+            .annotate(count=Count("id"))
+        }
+        source_coverage = list(
+            ClientLink.objects.filter(tenant_id=1)
+            .values("source__name")
+            .annotate(client_count=Count("client_id", distinct=True))
+            .order_by("source__name")
+        )
         ctx["clients_with_counts"] = clients_with_counts
         ctx["all_device_count"] = sum(c.device_count for c in clients_with_counts)
         ctx["all_client_count"] = len(clients_with_counts)
+        ctx["fleet_type_summary"] = _type_summary_from_counts(fleet_type_counts)
+        ctx["source_coverage"] = source_coverage
+        ctx["open_finding_count"] = Finding.objects.filter(
+            tenant_id=1, status__in=_FINDING_ACTIVE_STATUSES
+        ).count()
     return render(request, "org_index.html", ctx)
 
 

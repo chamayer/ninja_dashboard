@@ -5,15 +5,6 @@
 {% endblock %}
 
 {% block content %}
-{% if current_client %}
-{# ─── PER-CLIENT SUMMARY ─────────────────────────────────────────── #}
-<div class="card">
-    <h1 style="margin: 0 0 0.25rem;">{{ current_client.display_name }}</h1>
-    <p class="muted" style="margin: 0;">
-        Slug: <code>{{ current_client.slug }}</code> · timezone {{ current_client.timezone }}
-    </p>
-</div>
-
 <style>
     .summary-grid {
         display: grid;
@@ -52,13 +43,22 @@
     }
 </style>
 
+{% if current_client %}
+{# Per-client summary #}
+<div class="card">
+    <h1 style="margin: 0 0 0.25rem;">{{ current_client.display_name }}</h1>
+    <p class="muted" style="margin: 0;">
+        Slug: <code>{{ current_client.slug }}</code> &middot; timezone {{ current_client.timezone }}
+    </p>
+</div>
+
 <div class="summary-grid">
     <a class="summary-tile" href="{% url 'org_devices' org_slug=current_client.slug %}">
         <div class="tile-label">Devices</div>
         <div class="tile-count">{{ device_count }}</div>
         <div class="tile-detail">
             {% if type_summary %}
-                {% for type_value, label, count in type_summary %}{{ count }} {{ label|lower }}{% if not forloop.last %} · {% endif %}{% endfor %}
+                {% for type_value, label, count in type_summary %}{{ count }} {{ label|lower }}{% if not forloop.last %} &middot; {% endif %}{% endfor %}
             {% else %}
                 No devices yet
             {% endif %}
@@ -70,7 +70,7 @@
         <div class="tile-count">{{ policy_count }}</div>
         <div class="tile-detail">
             {% if policy_categories %}
-                {{ policy_categories|join:" · " }}
+                {{ policy_categories|join:" &middot; " }}
             {% else %}
                 None defined
             {% endif %}
@@ -82,7 +82,7 @@
         <div class="tile-count">{{ client_links|length }}</div>
         <div class="tile-detail">
             {% if client_links %}
-                {% for link in client_links %}{{ link.source.name }}{% if not forloop.last %} · {% endif %}{% endfor %}
+                {% for link in client_links %}{{ link.source.name }}{% if not forloop.last %} &middot; {% endif %}{% endfor %}
             {% else %}
                 Not linked to any source
             {% endif %}
@@ -117,29 +117,66 @@
     </table>
 </div>
 {% endif %}
+
 {% else %}
-{# ─── ALL-CLIENTS FLEET VIEW ─────────────────────────────────────── #}
+{# Fleet overview #}
+<div class="summary-grid">
+    <div class="summary-tile" style="cursor: default;">
+        <div class="tile-label">Clients</div>
+        <div class="tile-count">{{ all_client_count }}</div>
+        <div class="tile-detail">Managed clients</div>
+    </div>
+
+    <div class="summary-tile" style="cursor: default;">
+        <div class="tile-label">Devices</div>
+        <div class="tile-count">{{ all_device_count }}</div>
+        <div class="tile-detail">
+            {% if fleet_type_summary %}
+                {% for type_value, label, count in fleet_type_summary %}{{ count }} {{ label|lower }}{% if not forloop.last %} &middot; {% endif %}{% endfor %}
+            {% else %}
+                No devices yet
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="summary-tile" style="cursor: default;">
+        <div class="tile-label">Sources</div>
+        <div class="tile-count">{{ source_coverage|length }}</div>
+        <div class="tile-detail">
+            {% if source_coverage %}
+                {% for row in source_coverage %}{{ row.source__name }} ({{ row.client_count }}){% if not forloop.last %} &middot; {% endif %}{% endfor %}
+            {% else %}
+                No sources linked
+            {% endif %}
+        </div>
+    </div>
+
+    <a class="summary-tile" href="{% url 'findings_queue' %}">
+        <div class="tile-label">Findings</div>
+        <div class="tile-count">{{ open_finding_count }}</div>
+        <div class="tile-detail">Open across all clients</div>
+    </a>
+</div>
+
 <div class="card">
-    <h2 style="margin-top: 0;">Fleet</h2>
-    <p class="muted">
-        {{ all_client_count }} client{{ all_client_count|pluralize }} ·
-        {{ all_device_count }} device{{ all_device_count|pluralize }} total.
-    </p>
+    <h2 style="margin-top: 0;">Clients</h2>
     {% if clients_with_counts %}
     <table style="width: 100%; border-collapse: collapse;">
         <thead>
             <tr style="text-align: left; border-bottom: 1px solid var(--border);">
                 <th style="padding: 0.5rem;">Client</th>
-                <th style="padding: 0.5rem;">Slug</th>
                 <th style="padding: 0.5rem; text-align: right;">Devices</th>
+                <th style="padding: 0.5rem;">Sources</th>
             </tr>
         </thead>
         <tbody>
             {% for c in clients_with_counts %}
             <tr style="border-bottom: 1px solid var(--border);">
                 <td style="padding: 0.5rem;"><a href="{% url 'org_index' org_slug=c.slug %}">{{ c.display_name }}</a></td>
-                <td style="padding: 0.5rem;"><code>{{ c.slug }}</code></td>
                 <td style="padding: 0.5rem; text-align: right;">{{ c.device_count }}</td>
+                <td style="padding: 0.5rem; color: var(--muted); font-size: 0.9rem;">
+                    {% for link in c.links.all %}{{ link.source.name }}{% if not forloop.last %} &middot; {% endif %}{% empty %}—{% endfor %}
+                </td>
             </tr>
             {% endfor %}
         </tbody>
