@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+
+{% block title %}Home{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h1>{{ brand.name }}</h1>
+    <p>Write-side companion to Metabase. Choose a client from the header, or view <a href="{% url 'org_index' org_slug='all' %}">all clients</a>.</p>
+    <p class="muted">{{ clients|length }} client{{ clients|length|pluralize }} available.</p>
+</div>
+{% endblock %}

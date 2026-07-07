@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+
+{% block title %}
+    {% if current_client %}{{ current_client.display_name }}{% else %}All clients{% endif %}
+{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h1>
+        {% if current_client %}
+            {{ current_client.display_name }}
+        {% else %}
+            All clients ({{ clients|length }})
+        {% endif %}
+    </h1>
+    <p class="muted">
+        {% if current_client %}
+            Client scope: <code>{{ current_client.slug }}</code> · timezone {{ current_client.timezone }}
+        {% else %}
+            Cross-client view.
+        {% endif %}
+    </p>
+    <p>Real views land in later milestones (findings, decisions, merge review, policy edit).</p>
+</div>
+
+{% if not current_client %}
+<div class="card">
+    <h2 style="margin-top: 0;">Clients</h2>
+    <ul>
+        {% for c in clients %}
+            <li><a href="{% url 'org_index' org_slug=c.slug %}">{{ c.display_name }}</a> <span class="muted">({{ c.slug }})</span></li>
+        {% empty %}
+            <li class="muted">No clients yet. Run the bootstrap or wait for the container to start.</li>
+        {% endfor %}
+    </ul>
+</div>
+{% endif %}
+{% endblock %}

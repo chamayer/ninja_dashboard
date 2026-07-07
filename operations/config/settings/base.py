@@ -78,7 +78,7 @@ TEMPLATES = [
                 "django.template.context_processors.request",
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
-                # brand context processor added when the brand layer lands.
+                "apps.core.context_processors.brand",
             ],
         },
     },
@@ -108,6 +108,11 @@ DATABASES = {
 # Auth
 # ---------------------------------------------------------------------------
 AUTH_USER_MODEL = "operations.User"
+
+# login_required redirects here. Admin login gets us into the app until
+# we ship dedicated login views.
+LOGIN_URL = "/admin/login/"
+LOGIN_REDIRECT_URL = "/"
 
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
