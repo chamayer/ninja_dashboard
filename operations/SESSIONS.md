@@ -5,6 +5,29 @@ only project-level pointers.
 
 ---
 
+## 2026-07-07 — Product direction reframed to operational data app
+
+**Why:** We were drifting toward describing Operations as mainly an issue
+resolution console. The intended product is broader: it should become the
+primary app for viewing and working with the operational data model.
+
+**Decision:**
+
+- Operations is the operational data browser and control plane.
+- Operators should use it to view current canonical clients, devices, users,
+  software, sources, observations, evidence, status, history, findings, and
+  decisions.
+- Metabase remains useful for exploratory BI, broad historical analytics, and
+  arbitrary charting.
+- Operations pages should be model-aware and workflow-aware. If a page helps
+  someone understand or operate the managed environment, it belongs here. If it
+  is only a generic chart over arbitrary data, it likely belongs in Metabase.
+
+**Pending:** Next approved UI slice should start from this framing, likely a
+top-level Operations dashboard/data-browser front door.
+
+---
+
 ## 2026-07-07 — Client landing identity coverage WIP
 
 **Why:** The client landing page only showed canonical client identity and
@@ -30,8 +53,8 @@ operator-facing identity-resolution surface.
 - `python -m ruff check operations\apps\core\views.py` passed.
 - Template load smoke for `org_index.html` passed.
 
-**Pending:** Commit, push, Portainer redeploy, and a light browser check. Pause
-after this UI change before starting another UI slice.
+**Deployed:** Committed as `a8bf257`, pushed to both remotes, Portainer
+auto-update deployed it. Container healthy. Browser validation pending.
 
 ---
 

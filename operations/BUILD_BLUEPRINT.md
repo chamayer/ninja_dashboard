@@ -1,59 +1,55 @@
 # Goal
 
-Add a compact identity coverage section to the per-client landing page.
+Reframe Operations' next build direction as an operational data browser and
+control plane, not only an issue-resolution console.
 
 # Why
 
-The client landing page currently shows canonical client identity and
-`client_links`, but Operations is meant to be the operator-facing source of
-truth for client/source identity resolution. The landing page should expose
-enough identity coverage to show whether a client is known across sources and
-where resolution gaps may exist.
+Recent UI slices improved issue/workflow surfaces, but the product intent is
+broader: Operations should become the primary place to view and work with the
+canonical operational data model. Findings and decisions remain important, but
+the app should also let operators browse current clients, devices, users,
+software, sources, observations, evidence, status, and history without going
+to SQL or Metabase for routine inspection.
 
 # Scope
 
 In:
 
-- Keep the current landing page structure.
-- Add summary counts for:
-  - client external identities;
-  - device source links by source;
-  - source binding enabled/disabled counts;
-  - client users and client-user source links;
-  - active `unlinked_external_identity` findings resolvable through this
-    client's source bindings.
+- Document the product framing:
+  - Operations = operational data browser + control plane.
+  - Metabase = exploratory BI and broad historical analytics.
+- Define the next dashboard/page direction around data viewing, status, and
+  drilldown, not only issue queues.
+- Preserve the rule that Operations pages should be model-aware and
+  operator-useful, not generic chart clones.
 
 Out:
 
-- Broader dashboard/home redesign.
-- Detail pages for source bindings, user identities, or unlinked identities.
-- New schema migrations.
-- New ingest/classification behavior.
+- Implementing the top-level dashboard in this slice.
+- New schema, ingest, or UI pages.
 
 # Files to change
 
-- `operations/apps/core/views.py` — add identity coverage aggregates.
-- `operations/templates/org_index.html` — render compact identity coverage
-  section.
-- `operations/BUILD_BLUEPRINT.md` — this checkpoint.
-- `operations/TODO.md` — completion/backlog state.
-- `operations/SESSIONS.md` — implementation and validation result.
+- `operations/BUILD_BLUEPRINT.md` — active product-direction checkpoint.
+- `operations/TODO.md` — backlog the next dashboard/data-browser slices.
+- `operations/SESSIONS.md` — record the direction decision.
 
 # Steps
 
-1. Add aggregate queries in `org_index` for client identity coverage.
-2. Render the identity coverage card/table below the summary tiles.
-3. Validate locally with Django checks and template load.
-4. Pause after this UI change before starting another UI slice.
+1. Update this build checkpoint with the broader product direction.
+2. Update TODO with the next data-browser/dashboard slices.
+3. Record the decision in `operations/SESSIONS.md`.
+4. Ask before implementing the next UI slice.
 
 # Open questions
 
-- Whether Operations should get a true top-level operations summary page as a
-  future replacement path for high-value Metabase workflows.
-- Whether this summary later deserves detail links for source bindings,
-  client users, and unlinked external identities.
+- Which data domain should get the first dedicated browse/detail experience
+  after clients/devices: users, software, sources/collectors, or observations.
+- How much historical trend/status belongs in Operations before it becomes BI
+  and should stay in Metabase.
 
 # Status
 
-Approved. Implementing compact identity coverage on the client landing page.
-Pause after this UI change before starting another UI slice.
+Planning checkpoint. Next implementation should be an Operations dashboard or
+data-browser slice, approved separately.

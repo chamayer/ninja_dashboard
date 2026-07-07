@@ -39,18 +39,28 @@ module-specific; root `../TODO.md` keeps cross-repo items and pointers.
 
 ### Stack-wide (post-M0)
 
-- [ ] Ship compact client landing identity coverage section. Local
-      implementation done; commit/push/redeploy/light browser validation
-      pending.
+- [ ] Product direction: Operations is the operational data browser and
+      control plane, not only an issue-resolution console. Build pages that
+      help operators view current canonical data, source evidence, status,
+      history, and workflow actions. Keep Metabase for exploratory BI and
+      broad historical analytics.
+- [ ] Design top-level Operations dashboard as a data-viewing front door:
+      fleet/client/device/user/software/source counts, source coverage,
+      collector freshness, recent observations/changes, active findings,
+      pending decisions, and links into browse/detail pages. Avoid reducing it
+      to only "things broken."
+- [ ] Plan next domain browse/detail pages after clients/devices: candidates
+      are users, software, sources/collectors, observations/evidence, and
+      recent changes.
+- [ ] Browser-validate client landing identity coverage section. Committed
+      as `a8bf257`, deployed via Portainer auto-update. Light browser
+      check pending.
 - [x] Client landing identity coverage audit: decide which identities belong
       on the client summary page. Current page shows canonical client plus
       `client_links`; future candidates include source binding health, device
       source coverage, client-user identities, and unlinked external identity
       findings. 2026-07-07: approved as matching Operations' intent; compact
       summary section implemented locally.
-- [ ] Design a top-level Operations summary page if Operations continues to
-      replace high-value Metabase workflows. Keep it workflow/action oriented
-      instead of recreating generic BI dashboards.
 - [ ] TLS reverse proxy in front of the whole stack (postgres/metabase/
       ingest/operations). Options: Caddy (auto-cert, easiest for LAN),
       Traefik (LE via DNS-01), nginx (manual). Currently everything is
