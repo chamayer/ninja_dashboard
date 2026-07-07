@@ -25,9 +25,10 @@ RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir .
 
 # ── App source ───────────────────────────────────────────────────────
-COPY operations/config/ ./config/
-COPY operations/apps/   ./apps/
-COPY operations/manage.py ./
+COPY operations/config/    ./config/
+COPY operations/apps/      ./apps/
+COPY operations/templates/ ./templates/
+COPY operations/manage.py  ./
 COPY operations/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
