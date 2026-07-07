@@ -7,9 +7,10 @@ module-specific; root `../TODO.md` keeps cross-repo items and pointers.
 
 ## Inbox
 
-- [ ] After device-list pagination/search ships, live-check
+- [x] After device-list pagination/search ships, live-check
       `/orgs/uta/devices/` through Operations and compare response size/time
-      against the previous large render.
+      against the previous large render. 2026-07-07: live response was 47,649
+      bytes versus the previous 504,547-byte render.
 - [x] Validate Operations container build/start on a Docker-capable host:
       migrations should run as `operations_migrate`, Gunicorn should run with
       `operations_app`, and `/healthz` should pass on `127.0.0.1:8091`.
@@ -23,8 +24,8 @@ module-specific; root `../TODO.md` keeps cross-repo items and pointers.
 
 ### M0 build
 
-- [ ] Ship server-side pagination/search for per-client device lists. Local
-      implementation done; commit/push/redeploy/live validation pending.
+- [x] Ship server-side pagination/search for per-client device lists.
+      Completed in `200c24f`, deployed through `cfa1767`, and live validated.
 - [x] Live-validate the committed Operations container through Portainer:
       confirm commit `746770e`, startup migrations/bootstrap, `/healthz`,
       populated clients/devices, and same-password redeploy session
@@ -38,11 +39,15 @@ module-specific; root `../TODO.md` keeps cross-repo items and pointers.
 
 ### Stack-wide (post-M0)
 
-- [ ] Client landing identity coverage audit: decide which identities belong
+- [ ] Ship compact client landing identity coverage section. Local
+      implementation done; commit/push/redeploy/light browser validation
+      pending.
+- [x] Client landing identity coverage audit: decide which identities belong
       on the client summary page. Current page shows canonical client plus
       `client_links`; future candidates include source binding health, device
       source coverage, client-user identities, and unlinked external identity
-      findings.
+      findings. 2026-07-07: approved as matching Operations' intent; compact
+      summary section implemented locally.
 - [ ] Design a top-level Operations summary page if Operations continues to
       replace high-value Metabase workflows. Keep it workflow/action oriented
       instead of recreating generic BI dashboards.

@@ -1,62 +1,59 @@
 # Goal
 
-Make the per-client device list fast and stable for large clients by moving
-search/filter/pagination server-side.
+Add a compact identity coverage section to the per-client landing page.
 
 # Why
 
-Live validation showed `/orgs/uta/devices/` rendered a 504 KB response and a
-Gunicorn worker timed out shortly afterward. The current view loads every
-device for the client and filters in browser JavaScript, which does not scale
-for large clients.
+The client landing page currently shows canonical client identity and
+`client_links`, but Operations is meant to be the operator-facing source of
+truth for client/source identity resolution. The landing page should expose
+enough identity coverage to show whether a client is known across sources and
+where resolution gaps may exist.
 
 # Scope
 
 In:
 
-- Server-side search by hostname or serial.
-- Server-side type filter using existing `Device.DeviceType` values.
-- Pagination, defaulting to 100 devices per page.
-- Preserve current device-list layout and links.
-- Record user questions about client identity coverage and a higher-level
-  Operations summary page as backlog items.
+- Keep the current landing page structure.
+- Add summary counts for:
+  - client external identities;
+  - device source links by source;
+  - source binding enabled/disabled counts;
+  - client users and client-user source links;
+  - active `unlinked_external_identity` findings resolvable through this
+    client's source bindings.
 
 Out:
 
 - Broader dashboard/home redesign.
-- New client identity panels beyond TODO/backlog capture.
+- Detail pages for source bindings, user identities, or unlinked identities.
 - New schema migrations.
 - New ingest/classification behavior.
 
 # Files to change
 
-- `operations/apps/core/views.py` — paginate/filter device query.
-- `operations/templates/org_devices.html` — GET search/filter form and
-  pagination controls.
+- `operations/apps/core/views.py` — add identity coverage aggregates.
+- `operations/templates/org_index.html` — render compact identity coverage
+  section.
 - `operations/BUILD_BLUEPRINT.md` — this checkpoint.
-- `operations/TODO.md` — backlog user questions and completion state.
+- `operations/TODO.md` — completion/backlog state.
 - `operations/SESSIONS.md` — implementation and validation result.
 
 # Steps
 
-1. Replace full list materialization in `org_devices` with filtered queryset,
-   count, and `Paginator`.
-2. Replace browser-only filtering in `org_devices.html` with GET controls.
-3. Add pagination controls that preserve search/type query params.
-4. Validate locally with Django checks and migration dry-run.
-5. After commit/push/redeploy, validate live response size/time for
-   `/orgs/uta/devices/`.
-6. Pause after this UI change before starting another UI slice.
+1. Add aggregate queries in `org_index` for client identity coverage.
+2. Render the identity coverage card/table below the summary tiles.
+3. Validate locally with Django checks and template load.
+4. Pause after this UI change before starting another UI slice.
 
 # Open questions
 
-- Whether to later add richer client identity coverage to the client landing
-  page: client links, device-link source coverage, source bindings, and
-  client-user identity coverage.
 - Whether Operations should get a true top-level operations summary page as a
   future replacement path for high-value Metabase workflows.
+- Whether this summary later deserves detail links for source bindings,
+  client users, and unlinked external identities.
 
 # Status
 
-Approved. Implementing server-side device-list search/filter/pagination. Pause
-after this UI change before starting another UI slice.
+Approved. Implementing compact identity coverage on the client landing page.
+Pause after this UI change before starting another UI slice.

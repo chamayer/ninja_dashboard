@@ -5,6 +5,36 @@ only project-level pointers.
 
 ---
 
+## 2026-07-07 — Client landing identity coverage WIP
+
+**Why:** The client landing page only showed canonical client identity and
+`client_links`. That was too thin for Operations' purpose as the
+operator-facing identity-resolution surface.
+
+**Work completed locally:**
+
+- Added identity coverage aggregates to `org_index` for:
+  - device source links by source;
+  - source binding enabled/disabled counts;
+  - canonical client users and external user links;
+  - active `unlinked_external_identity` findings tied to this client's
+    source bindings.
+- Added a compact "Identity coverage" section to the per-client landing page.
+- Kept the change summary-level; no new detail pages or schema changes.
+
+**Validation:**
+
+- `python operations\manage.py check --settings=config.settings.dev` passed.
+- `python operations\manage.py makemigrations --check --dry-run --settings=config.settings.dev`
+  passed.
+- `python -m ruff check operations\apps\core\views.py` passed.
+- Template load smoke for `org_index.html` passed.
+
+**Pending:** Commit, push, Portainer redeploy, and a light browser check. Pause
+after this UI change before starting another UI slice.
+
+---
+
 ## 2026-07-07 — Device list pagination/search WIP
 
 **Why:** Live Operations logs showed `/orgs/uta/devices/` returned a large
@@ -31,9 +61,12 @@ loaded every device for a client and filtered rows in browser JavaScript.
 - `python operations\manage.py shell --settings=config.settings.dev -c "from django.template.loader import get_template; get_template('org_devices.html'); print('template_ok')"`
   passed.
 
-**Pending:** Commit, push, Portainer redeploy, and live-check
-`/orgs/uta/devices/` response size/time. Pause after this UI change before
-starting another UI slice.
+**Live validation:** Portainer deployed `cfa1767`; `/orgs/uta/devices/`
+returned 47,649 bytes versus the previous 504,547-byte render. Operations
+remained healthy. A later Gunicorn timeout showed `no URI read`, so it was
+recorded as non-blocking idle connection noise, not a page render failure.
+
+**Pending:** None for this slice.
 
 ---
 

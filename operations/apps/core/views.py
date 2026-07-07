@@ -10,9 +10,26 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_GET, require_POST
 
 from .forms import ClientPolicyForm
-from .models import Client, ClientPolicy, Device, Finding, FindingType, MergeCandidate
+from .models import (
+    Client,
+    ClientPolicy,
+    ClientUser,
+    ClientUserLink,
+    Device,
+    DeviceLink,
+    Finding,
+    FindingType,
+    MergeCandidate,
+    SourceBinding,
+)
 
 DEVICE_PAGE_SIZE = 100
+
+_FINDING_ACTIVE_STATUSES = (
+    Finding.Status.OPEN,
+    Finding.Status.ACKNOWLEDGED,
+    Finding.Status.INVESTIGATING,
+)
 
 
 @require_GET
@@ -57,6 +74,89 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
         ctx["type_summary"] = _type_summary(devices)
         ctx["client_links"] = list(
             client.links.select_related("source").order_by("source__name")
+        )
+        device_source_counts = list(
+            DeviceLink.objects.filter(
+                tenant_id=1,
+                device__client=client,
+                device__deleted_at__isnull=True,
+            )
+            .values("source__name")
+            .annotate(count=Count("id"))
+            .order_by("source__name")
+        )
+        user_source_counts = list(
+            ClientUserLink.objects.filter(
+                tenant_id=1,
+                client_user__client=client,
+                client_user__deleted_at__isnull=True,
+            )
+            .values("source__name")
+            .annotate(count=Count("id"))
+            .order_by("source__name")
+        )
+        user_count_by_source = {
+            row["source__name"]: row["count"] for row in user_source_counts
+        }
+        source_names = sorted(
+            {
+                row["source__name"]
+                for row in [*device_source_counts, *user_source_counts]
+            }
+        )
+        ctx["identity_source_rows"] = [
+            {
+                "source_name": source_name,
+                "device_links": next(
+                    (
+                        row["count"]
+                        for row in device_source_counts
+                        if row["source__name"] == source_name
+                    ),
+                    0,
+                ),
+                "user_links": user_count_by_source.get(source_name, 0),
+            }
+            for source_name in source_names
+        ]
+        ctx["identity_device_source_counts"] = device_source_counts
+        source_binding_ids = list(
+            SourceBinding.objects.filter(
+                tenant_id=1,
+                source_instance__client=client,
+            ).values_list("id", flat=True)
+        )
+        ctx["identity_source_binding_count"] = len(source_binding_ids)
+        ctx["identity_source_binding_enabled_count"] = SourceBinding.objects.filter(
+            tenant_id=1,
+            source_instance__client=client,
+            enabled=True,
+        ).count()
+        ctx["identity_source_binding_disabled_count"] = (
+            ctx["identity_source_binding_count"]
+            - ctx["identity_source_binding_enabled_count"]
+        )
+        ctx["identity_client_user_count"] = ClientUser.objects.filter(
+            tenant_id=1,
+            client=client,
+            deleted_at__isnull=True,
+        ).count()
+        ctx["identity_client_user_link_count"] = ClientUserLink.objects.filter(
+            tenant_id=1,
+            client_user__client=client,
+            client_user__deleted_at__isnull=True,
+        ).count()
+        ctx["identity_user_source_counts"] = user_source_counts
+        ctx["identity_unlinked_finding_count"] = (
+            Finding.objects.filter(
+                tenant_id=1,
+                subject_type=Finding.SubjectType.SOURCE_BINDING,
+                subject_id__in=source_binding_ids,
+                status__in=_FINDING_ACTIVE_STATUSES,
+                finding_type__name="unlinked_external_identity",
+            ).count()
+            if source_binding_ids
+            else 0
         )
         ctx["policy_count"] = ClientPolicy.objects.filter(
             tenant_id=1, client=client
@@ -181,13 +281,6 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
 def client_switch(request: HttpRequest) -> HttpResponse:
     slug = request.GET.get("slug", "all")
     return redirect("org_index", org_slug=slug)
-
-
-_FINDING_ACTIVE_STATUSES = (
-    Finding.Status.OPEN,
-    Finding.Status.ACKNOWLEDGED,
-    Finding.Status.INVESTIGATING,
-)
 
 
 @login_required

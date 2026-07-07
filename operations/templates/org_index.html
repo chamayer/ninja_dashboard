@@ -92,6 +92,74 @@
     </a>
 </div>
 
+<div class="card">
+    <h2 style="margin-top: 0;">Identity coverage</h2>
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin-bottom: 1rem;">
+        <div>
+            <div class="tile-label">Client identities</div>
+            <div class="tile-count">{{ client_links|length }}</div>
+            <div class="tile-detail">Canonical client linked to external sources</div>
+        </div>
+        <div>
+            <div class="tile-label">Device source links</div>
+            <div class="tile-count">
+                {% if identity_device_source_counts %}
+                    {% for row in identity_device_source_counts %}{{ row.count }}{% if not forloop.last %} / {% endif %}{% endfor %}
+                {% else %}
+                    0
+                {% endif %}
+            </div>
+            <div class="tile-detail">
+                {% if identity_device_source_counts %}
+                    {% for row in identity_device_source_counts %}{{ row.source__name }}{% if not forloop.last %} · {% endif %}{% endfor %}
+                {% else %}
+                    No device source links
+                {% endif %}
+            </div>
+        </div>
+        <div>
+            <div class="tile-label">Source bindings</div>
+            <div class="tile-count">{{ identity_source_binding_enabled_count }} / {{ identity_source_binding_count }}</div>
+            <div class="tile-detail">
+                {{ identity_source_binding_enabled_count }} enabled · {{ identity_source_binding_disabled_count }} disabled
+            </div>
+        </div>
+        <div>
+            <div class="tile-label">Client users</div>
+            <div class="tile-count">{{ identity_client_user_count }}</div>
+            <div class="tile-detail">{{ identity_client_user_link_count }} external user link{{ identity_client_user_link_count|pluralize }}</div>
+        </div>
+        <div>
+            <div class="tile-label">Unlinked identities</div>
+            <div class="tile-count">{{ identity_unlinked_finding_count }}</div>
+            <div class="tile-detail">Active source-level findings</div>
+        </div>
+    </div>
+
+    <table style="width: 100%; border-collapse: collapse;">
+        <thead>
+            <tr style="text-align: left; border-bottom: 1px solid var(--border);">
+                <th style="padding: 0.5rem;">Source</th>
+                <th style="padding: 0.5rem; text-align: right;">Device links</th>
+                <th style="padding: 0.5rem; text-align: right;">User links</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in identity_source_rows %}
+            <tr style="border-bottom: 1px solid var(--border);">
+                <td style="padding: 0.5rem;">{{ row.source_name }}</td>
+                <td style="padding: 0.5rem; text-align: right;">{{ row.device_links }}</td>
+                <td style="padding: 0.5rem; text-align: right;">{{ row.user_links }}</td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="3" class="muted" style="padding: 0.5rem;">No source identity coverage yet.</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
 {% if client_links %}
 <div class="card">
     <h2 style="margin-top: 0;">External identities</h2>
