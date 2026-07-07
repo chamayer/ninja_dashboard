@@ -7,9 +7,12 @@ module-specific; root `../TODO.md` keeps cross-repo items and pointers.
 
 ## Inbox
 
-- [ ] Validate Operations container build/start on a Docker-capable host:
+- [x] Validate Operations container build/start on a Docker-capable host:
       migrations should run as `operations_migrate`, Gunicorn should run with
       `operations_app`, and `/healthz` should pass on `127.0.0.1:8091`.
+      2026-07-07: confirmed via SSH as `amrose` with plain Docker commands;
+      containers healthy, loopback health passed, migrations applied, and
+      bootstrap counts populated.
 
 ---
 
@@ -17,10 +20,14 @@ module-specific; root `../TODO.md` keeps cross-repo items and pointers.
 
 ### M0 build
 
-- [ ] Live-validate the committed Operations container through Portainer:
+- [x] Live-validate the committed Operations container through Portainer:
       confirm commit `746770e`, startup migrations/bootstrap, `/healthz`,
       populated clients/devices, and same-password redeploy session
-      preservation.
+      preservation. 2026-07-07: validated startup health, migrations,
+      bootstrap, and data counts. Browser session preservation still needs
+      user-facing confirmation after a future redeploy.
+- [ ] Browser-confirm Operations admin session survives a same-password
+      Portainer redeploy.
 - [ ] Decide whether to restore CI/pre-commit after resolving current Ruff
       lint debt, or keep it deferred until tests/lint policy settle.
 

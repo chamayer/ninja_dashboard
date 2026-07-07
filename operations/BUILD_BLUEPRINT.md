@@ -79,5 +79,10 @@ Out:
 
 # Status
 
-Docs reconciled to committed state. Awaiting live Portainer validation before
-starting another implementation slice.
+Live container validation completed for startup health, migrations, bootstrap,
+and data counts. Operations responds on LAN port `3002` via Gunicorn, host
+loopback `/healthz` returns `{"status": "ok"}`, all Operations migrations are
+applied, and bootstrap populated 75 clients plus 5658 devices. Browser
+confirmation of same-password redeploy session preservation is still pending
+after a future Portainer redeploy. Next implementation slice requires a fresh
+approval checkpoint.

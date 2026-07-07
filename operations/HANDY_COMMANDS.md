@@ -6,6 +6,50 @@ for stack-wide commands (postgres, metabase, ingest).
 
 ---
 
+## Remote validation from workstation
+
+The Docker host is not DNS-resolvable by name. Use the local SSH alias
+`am-ch-01`, which maps to `amrose@10.61.50.28` in
+`C:\Users\chamayer\.ssh\config`.
+
+`amrose` is in the `docker` group, so use plain `docker ...` commands. Do not
+prefix Docker validation commands with `sudo`; `sudo docker ...` will prompt
+for a password even though plain Docker works.
+
+```powershell
+C:\Windows\System32\OpenSSH\ssh.exe am-ch-01 "hostname && id"
+C:\Windows\System32\OpenSSH\ssh.exe am-ch-01 "docker ps"
+C:\Windows\System32\OpenSSH\ssh.exe am-ch-01 "docker logs --tail=120 ninja-operations"
+C:\Windows\System32\OpenSSH\ssh.exe am-ch-01 "curl -fsS http://127.0.0.1:8091/healthz"
+```
+
+Expected basics:
+
+- `id` includes `docker`.
+- `ninja-operations` is `healthy`.
+- `/healthz` returns `{"status": "ok"}` from the host loopback binding.
+- Startup logs show migrations, initial admin password sync, client bootstrap,
+  device bootstrap, static collection, then Gunicorn startup.
+
+Data validation:
+
+```powershell
+C:\Windows\System32\OpenSSH\ssh.exe am-ch-01 "docker exec ninja-operations python manage.py showmigrations"
+C:\Windows\System32\OpenSSH\ssh.exe am-ch-01 "docker logs ninja-operations 2>&1 | head -40"
+```
+
+The Operations runtime role is RLS-protected. A plain Django shell count without
+tenant context can return zero rows even when bootstrap succeeded. Either wrap
+ORM checks in `tenant_context(1)` or query counts through Postgres:
+
+```powershell
+C:\Windows\System32\OpenSSH\ssh.exe am-ch-01 'docker exec ninja-postgres psql -U ninja -d ninja -c "SELECT ''clients'' AS table_name, COUNT(*) FROM operations.clients UNION ALL SELECT ''client_links'', COUNT(*) FROM operations.client_links UNION ALL SELECT ''devices'', COUNT(*) FROM operations.devices UNION ALL SELECT ''device_links'', COUNT(*) FROM operations.device_links ORDER BY table_name;"'
+```
+
+If SSH prints a `known_hosts` update warning but the remote command succeeds,
+record the warning separately. It is a local SSH-client issue, not an
+Operations deployment failure.
+
 ## One-time Postgres role bootstrap
 
 Only needed on a fresh Postgres (or after DR). Creates the `operations_migrate`

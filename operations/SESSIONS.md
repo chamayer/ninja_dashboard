@@ -5,6 +5,59 @@ only project-level pointers.
 
 ---
 
+## 2026-07-07 — Live Operations validation
+
+**Why:** Continue the active checkpoint after pushing `55cda73`.
+
+**Validation completed:**
+
+- Pushed docs checkpoint `55cda73` to both `origin/master` and
+  `a-m-rose/master`.
+- Configured SSH key login from the workstation to `amrose@10.61.50.28` via
+  local alias `am-ch-01`.
+- Confirmed SSH login lands on host `am-ch-01` as `amrose`, with `docker`
+  group membership available.
+- Confirmed Operations is reachable from the workstation at
+  `http://10.61.50.28:3002/`.
+- Confirmed Gunicorn serves the app and unauthenticated `/` and
+  `/orgs/all/` requests redirect to `/admin/login/`.
+- Confirmed `ninja-operations`, `ninja-ingest`, `ninja-metabase`, and
+  `ninja-postgres` containers are running healthy.
+- Confirmed host-loopback health:
+  `curl -fsS http://127.0.0.1:8091/healthz` returned `{"status": "ok"}`.
+- Confirmed all Operations migrations through `0009_rename_device_kind_to_device_type`
+  are applied.
+- Confirmed startup logs show:
+  - migrations ran as `operations_migrate`;
+  - initial admin password sync skipped because already current;
+  - client bootstrap saw `created=0 updated=0 unchanged=75 total=75`;
+  - device bootstrap saw `created=0 updated=2 unchanged=5656 orphaned=0 total=5658`;
+  - static files collected and Gunicorn started.
+- Confirmed Postgres counts:
+  - `operations.clients`: 75
+  - `operations.client_links`: 75
+  - `operations.devices`: 5658
+  - `operations.device_links`: 5658
+
+**Notes:**
+
+- Plain `docker ...` works over SSH because `amrose` is in the `docker`
+  group; do not use `sudo docker ...`.
+- Django ORM counts from the runtime app role can return zero without tenant
+  context because RLS is active. Use `tenant_context(1)` or Postgres-side
+  count queries for validation.
+- SSH commands currently print a local `known_hosts` update warning even when
+  the remote command succeeds:
+  `hostfile_replace_entries: mkstemp: Permission denied`.
+- Logs contain one Gunicorn worker timeout at `2026-07-07 16:49:44` after a
+  large `/orgs/uta/devices/` page response; service recovered and health
+  checks continued passing.
+
+**Pending:** User-facing same-password redeploy session preservation still
+needs browser confirmation after a future Portainer redeploy.
+
+---
+
 ## 2026-07-07 — Checkpoint docs reconciled to committed Operations state
 
 **Why:** The active build blueprint and TODO still described M0.11/M0.12/M0.15
@@ -54,8 +107,8 @@ password produced a new stored hash and invalidated existing admin sessions.
 - `python -m ruff check operations` still fails on pre-existing unrelated lint
   in `forms.py`, `views.py`, and `bootstrap_devices_from_ninja.py`.
 
-**Pending:** Redeploy and confirm an existing browser session survives a
-Portainer redeploy. Commit `746770e` has been pushed to both remotes.
+**Pending:** Browser-confirm same-password redeploy session preservation after
+a future Portainer redeploy. Commit `746770e` has been pushed to both remotes.
 
 ---
 
