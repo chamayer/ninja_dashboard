@@ -82,7 +82,10 @@
             </form>
         </div>
         <div class="user-info">
-            {{ user.username }} · <a href="{% url 'admin:index' %}">admin</a> · <a href="{% url 'admin:logout' %}">logout</a>
+            <a href="{% url 'findings_queue' %}">findings</a> ·
+            {{ user.username }} ·
+            <a href="{% url 'admin:index' %}">admin</a> ·
+            <a href="{% url 'admin:logout' %}">logout</a>
         </div>
         {% else %}
         <div class="user-info"><a href="{% url 'admin:login' %}">log in</a></div>

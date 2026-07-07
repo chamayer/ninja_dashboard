@@ -6,7 +6,7 @@ from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_GET
 
-from .models import Client, Device
+from .models import Client, Device, Finding, FindingType
 
 
 @require_GET
@@ -66,3 +66,49 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
 def client_switch(request: HttpRequest) -> HttpResponse:
     slug = request.GET.get("slug", "all")
     return redirect("org_index", org_slug=slug)
+
+
+_FINDING_ACTIVE_STATUSES = (
+    Finding.Status.OPEN,
+    Finding.Status.ACKNOWLEDGED,
+    Finding.Status.INVESTIGATING,
+)
+
+
+@login_required
+def findings_queue(request: HttpRequest) -> HttpResponse:
+    """Findings queue landing page. Empty until M2 classification lands."""
+    status_filter = request.GET.get("status", "active")
+    severity_filter = request.GET.get("severity", "")
+    type_filter = request.GET.get("type", "")
+
+    qs = Finding.objects.filter(tenant_id=1).select_related("finding_type", "owner")
+
+    if status_filter == "active":
+        qs = qs.filter(status__in=_FINDING_ACTIVE_STATUSES)
+    elif status_filter and status_filter != "all":
+        qs = qs.filter(status=status_filter)
+
+    if severity_filter:
+        qs = qs.filter(severity=severity_filter)
+
+    if type_filter:
+        qs = qs.filter(finding_type__name=type_filter)
+
+    qs = qs.order_by("-severity", "-last_seen_at")[:200]
+
+    finding_types = FindingType.objects.order_by("name")
+
+    return render(
+        request,
+        "findings_queue.html",
+        {
+            "findings": qs,
+            "finding_types": finding_types,
+            "status_choices": Finding.Status.choices,
+            "severity_choices": Finding.Severity.choices,
+            "active_status": status_filter,
+            "active_severity": severity_filter,
+            "active_type": type_filter,
+        },
+    )
