@@ -10,7 +10,7 @@
     </p>
     <h1>{{ device.canonical_hostname }}</h1>
     <p class="muted">
-        <strong>Kind:</strong> {{ device.get_device_kind_display }}
+        <strong>Type:</strong> {{ device.get_device_kind_display }}
         &nbsp;·&nbsp;
         <strong>Serial:</strong> <code>{{ device.canonical_serial|default:"—" }}</code>
         {% if device.canonical_vm_uuid %}

@@ -26,26 +26,41 @@ def home(request: HttpRequest) -> HttpResponse:
     return render(request, "home.html")
 
 
+def _type_summary(devices: list) -> list[tuple[str, str, int]]:
+    """(kind_value, kind_label, count) for kinds present in the list."""
+    counts: dict[str, int] = {}
+    for d in devices:
+        counts[d.device_kind] = counts.get(d.device_kind, 0) + 1
+    return [
+        (kind, label, counts.get(kind, 0))
+        for kind, label in Device.DeviceKind.choices
+        if counts.get(kind, 0) > 0
+    ]
+
+
 @login_required
 def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
+    """Summary hub for a client or the fleet."""
     ctx: dict = {}
     if getattr(request, "current_client", None):
         client = request.current_client
-        devices = (
+        devices = list(
             Device.objects.filter(
-                tenant_id=1,
-                client=client,
-                deleted_at__isnull=True,
-            )
-            .order_by("canonical_hostname")
+                tenant_id=1, client=client, deleted_at__isnull=True
+            ).only("device_kind")
         )
-        ctx["devices"] = devices
-        ctx["device_count"] = devices.count()
+        ctx["device_count"] = len(devices)
+        ctx["type_summary"] = _type_summary(devices)
         ctx["client_links"] = list(
             client.links.select_related("source").order_by("source__name")
         )
-        ctx["policies"] = list(
-            ClientPolicy.objects.filter(tenant_id=1, client=client).order_by("category")
+        ctx["policy_count"] = ClientPolicy.objects.filter(
+            tenant_id=1, client=client
+        ).count()
+        ctx["policy_categories"] = list(
+            ClientPolicy.objects.filter(tenant_id=1, client=client)
+            .values_list("category", flat=True)
+            .order_by("category")
         )
     else:
         # All-clients view: per-client device counts + fleet totals.
@@ -63,6 +78,40 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
         ctx["all_device_count"] = sum(c.device_count for c in clients_with_counts)
         ctx["all_client_count"] = len(clients_with_counts)
     return render(request, "org_index.html", ctx)
+
+
+@login_required
+def org_devices(request: HttpRequest, org_slug: str) -> HttpResponse:
+    """Device list for a specific client with search + kind-filter chips."""
+    client = _get_client_by_slug(org_slug)
+    devices = list(
+        Device.objects.filter(
+            tenant_id=1, client=client, deleted_at__isnull=True
+        ).order_by("canonical_hostname")
+    )
+    return render(
+        request,
+        "org_devices.html",
+        {
+            "client": client,
+            "devices": devices,
+            "device_count": len(devices),
+            "type_summary": _type_summary(devices),
+        },
+    )
+
+
+@login_required
+def org_policies(request: HttpRequest, org_slug: str) -> HttpResponse:
+    client = _get_client_by_slug(org_slug)
+    policies = list(
+        ClientPolicy.objects.filter(tenant_id=1, client=client).order_by("category")
+    )
+    return render(
+        request,
+        "org_policies.html",
+        {"client": client, "policies": policies},
+    )
 
 
 @login_required

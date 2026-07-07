@@ -212,6 +212,7 @@ class Device(UUIDTenantScopedModel):
         max_length=32,
         choices=DeviceKind.choices,
         default=DeviceKind.UNKNOWN,
+        verbose_name="Type",
     )
     deleted_at = models.DateTimeField(null=True, blank=True)
 

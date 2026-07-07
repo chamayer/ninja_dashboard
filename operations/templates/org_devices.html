@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+
+{% block title %}Devices — {{ client.display_name }}{% endblock %}
+
+{% block content %}
+<div class="card">
+    <p class="muted">
+        <a href="{% url 'org_index' org_slug=client.slug %}">{{ client.display_name }}</a>
+        &nbsp;›&nbsp; Devices
+    </p>
+    <h1 style="margin: 0;">Devices <span class="muted" style="font-weight: 400;">({{ device_count }})</span></h1>
+</div>
+
+<div class="card">
+    {% if devices %}
+    <style>
+        .type-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 0.75rem;
+            font-weight: 500;
+            line-height: 1.4;
+            white-space: nowrap;
+        }
+        .type-badge[data-kind="physical"]         { background: #e0edff; color: #1e3a8a; }
+        .type-badge[data-kind="vm-with-agent"]    { background: #e6f9ea; color: #14532d; }
+        .type-badge[data-kind="vm-agentless"]     { background: #fef3c7; color: #92400e; }
+        .type-badge[data-kind="hypervisor-host"]  { background: #f3e8ff; color: #581c87; }
+        .type-badge[data-kind="network-device"]   { background: #fce7f3; color: #831843; }
+        .type-badge[data-kind="unknown"]          { background: #f3f4f6; color: #374151; }
+        .filter-chip {
+            padding: 0.35rem 0.75rem;
+            font-size: 0.8rem;
+            border-radius: 999px;
+            border: 1px solid var(--border);
+            background: white;
+            cursor: pointer;
+            user-select: none;
+        }
+        .filter-chip[data-active="true"] {
+            background: var(--header-bg);
+            color: white;
+            border-color: var(--header-bg);
+        }
+        .device-row:nth-child(odd) { background: #fafbfc; }
+        .device-row td { padding: 0.4rem 0.5rem; }
+    </style>
+
+    <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-bottom: 1rem;">
+        <input type="search" id="device-search" placeholder="Search hostname or serial…"
+               style="flex: 1; min-width: 220px; padding: 0.45rem 0.75rem; border: 1px solid var(--border); border-radius: 4px;">
+        <div id="type-filters" style="display: flex; gap: 0.35rem; flex-wrap: wrap;">
+            <button type="button" class="filter-chip" data-kind="all" data-active="true">All · {{ device_count }}</button>
+            {% for kind, label, count in type_summary %}
+                <button type="button" class="filter-chip" data-kind="{{ kind }}">{{ label }} · {{ count }}</button>
+            {% endfor %}
+        </div>
+    </div>
+
+    <table id="devices-table" style="width: 100%; border-collapse: collapse; font-size: 0.9rem;">
+        <thead>
+            <tr style="text-align: left; border-bottom: 2px solid var(--border);">
+                <th style="padding: 0.5rem;">Hostname</th>
+                <th style="padding: 0.5rem;">Type</th>
+                <th style="padding: 0.5rem;">Serial</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for d in devices %}
+            <tr class="device-row" data-kind="{{ d.device_kind }}" data-search="{{ d.canonical_hostname|lower }} {{ d.canonical_serial|lower }}">
+                <td><a href="{% url 'device_detail' org_slug=client.slug device_id=d.id %}">{{ d.canonical_hostname }}</a></td>
+                <td><span class="type-badge" data-kind="{{ d.device_kind }}">{{ d.get_device_kind_display }}</span></td>
+                <td><code style="font-size: 0.85rem;">{{ d.canonical_serial|default:"—" }}</code></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <p id="empty-msg" class="muted" style="margin-top: 1rem; display: none;">No devices match your filter.</p>
+
+    <script>
+    (function () {
+        var searchInput = document.getElementById('device-search');
+        var chipContainer = document.getElementById('type-filters');
+        var rows = document.querySelectorAll('#devices-table .device-row');
+        var emptyMsg = document.getElementById('empty-msg');
+        var activeKind = 'all';
+
+        function apply() {
+            var q = searchInput.value.trim().toLowerCase();
+            var visible = 0;
+            rows.forEach(function (row) {
+                var kind = row.getAttribute('data-kind');
+                var haystack = row.getAttribute('data-search') || '';
+                var matchKind = activeKind === 'all' || activeKind === kind;
+                var matchQ = !q || haystack.indexOf(q) !== -1;
+                var show = matchKind && matchQ;
+                row.style.display = show ? '' : 'none';
+                if (show) visible++;
+            });
+            emptyMsg.style.display = visible === 0 ? '' : 'none';
+        }
+
+        searchInput.addEventListener('input', apply);
+        chipContainer.addEventListener('click', function (evt) {
+            var chip = evt.target.closest('.filter-chip');
+            if (!chip) return;
+            activeKind = chip.getAttribute('data-kind');
+            chipContainer.querySelectorAll('.filter-chip').forEach(function (c) {
+                c.setAttribute('data-active', c === chip ? 'true' : 'false');
+            });
+            apply();
+        });
+    })();
+    </script>
+    {% else %}
+    <p class="muted">No devices for this client yet.</p>
+    {% endif %}
+</div>
+{% endblock %}

@@ -20,14 +20,18 @@ from apps.core.views import (
     healthz,
     home,
     merge_candidates_queue,
+    org_devices,
     org_index,
+    org_policies,
 )
 
 urlpatterns = [
     path("", home, name="home"),
     path("healthz", healthz, name="healthz"),
     path("orgs/<slug:org_slug>/", org_index, name="org_index"),
+    path("orgs/<slug:org_slug>/devices/", org_devices, name="org_devices"),
     path("orgs/<slug:org_slug>/devices/<uuid:device_id>/", device_detail, name="device_detail"),
+    path("orgs/<slug:org_slug>/policies/", org_policies, name="org_policies"),
     path("orgs/<slug:org_slug>/policies/new/", client_policy_new, name="client_policy_new"),
     path("orgs/<slug:org_slug>/policies/<uuid:policy_id>/edit/", client_policy_edit, name="client_policy_edit"),
     path("orgs/<slug:org_slug>/policies/<uuid:policy_id>/delete/", client_policy_delete, name="client_policy_delete"),

@@ -5,70 +5,96 @@
 {% endblock %}
 
 {% block content %}
+{% if current_client %}
+{# ─── PER-CLIENT SUMMARY ─────────────────────────────────────────── #}
 <div class="card">
-    <h1>
-        {% if current_client %}
-            {{ current_client.display_name }}
-        {% else %}
-            All clients ({{ clients|length }})
-        {% endif %}
-    </h1>
-    <p class="muted">
-        {% if current_client %}
-            Slug: <code>{{ current_client.slug }}</code> ·
-            timezone {{ current_client.timezone }} ·
-            {{ device_count }} device{{ device_count|pluralize }}
-        {% else %}
-            Cross-client view · {{ all_device_count }} device{{ all_device_count|pluralize }} total.
-        {% endif %}
+    <h1 style="margin: 0 0 0.25rem;">{{ current_client.display_name }}</h1>
+    <p class="muted" style="margin: 0;">
+        Slug: <code>{{ current_client.slug }}</code> · timezone {{ current_client.timezone }}
     </p>
 </div>
 
-{% if current_client %}
-<div class="card">
-    <div style="display: flex; justify-content: space-between; align-items: center;">
-        <h2 style="margin: 0;">Policies</h2>
-        <a href="{% url 'client_policy_new' org_slug=current_client.slug %}" style="padding: 0.4rem 0.8rem; background: var(--accent); color: white; text-decoration: none; border-radius: 4px; font-size: 0.9rem;">+ New policy</a>
+<style>
+    .summary-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 1rem;
+        margin-bottom: 1rem;
+    }
+    .summary-tile {
+        display: block;
+        padding: 1.25rem;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        text-decoration: none;
+        color: inherit;
+        transition: box-shadow 0.15s;
+    }
+    .summary-tile:hover {
+        box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+        border-color: var(--accent);
+    }
+    .summary-tile .tile-label {
+        font-size: 0.85rem;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }
+    .summary-tile .tile-count {
+        font-size: 2rem;
+        font-weight: 600;
+        margin: 0.25rem 0;
+    }
+    .summary-tile .tile-detail {
+        font-size: 0.85rem;
+        color: var(--muted);
+    }
+</style>
+
+<div class="summary-grid">
+    <a class="summary-tile" href="{% url 'org_devices' org_slug=current_client.slug %}">
+        <div class="tile-label">Devices</div>
+        <div class="tile-count">{{ device_count }}</div>
+        <div class="tile-detail">
+            {% if type_summary %}
+                {% for kind, label, count in type_summary %}{{ count }} {{ label|lower }}{% if not forloop.last %} · {% endif %}{% endfor %}
+            {% else %}
+                No devices yet
+            {% endif %}
+        </div>
+    </a>
+
+    <a class="summary-tile" href="{% url 'org_policies' org_slug=current_client.slug %}">
+        <div class="tile-label">Policies</div>
+        <div class="tile-count">{{ policy_count }}</div>
+        <div class="tile-detail">
+            {% if policy_categories %}
+                {{ policy_categories|join:" · " }}
+            {% else %}
+                None defined
+            {% endif %}
+        </div>
+    </a>
+
+    <div class="summary-tile" style="cursor: default;">
+        <div class="tile-label">External identities</div>
+        <div class="tile-count">{{ client_links|length }}</div>
+        <div class="tile-detail">
+            {% for link in client_links %}{{ link.source.name }}{% if not forloop.last %} · {% endif %}{% endfor %}
+        </div>
     </div>
-    {% if policies %}
-    <table style="width: 100%; border-collapse: collapse; margin-top: 1rem;">
-        <thead>
-            <tr style="text-align: left; border-bottom: 1px solid var(--border);">
-                <th style="padding: 0.5rem;">Category</th>
-                <th style="padding: 0.5rem;">Approved products</th>
-                <th style="padding: 0.5rem; text-align: right;">Agent SLA</th>
-                <th style="padding: 0.5rem;"></th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for p in policies %}
-            <tr style="border-bottom: 1px solid var(--border);">
-                <td style="padding: 0.5rem;"><code>{{ p.category }}</code></td>
-                <td style="padding: 0.5rem;">
-                    {% if p.approved_products %}
-                        {{ p.approved_products|join:", " }}
-                    {% else %}
-                        <span class="muted">— none —</span>
-                    {% endif %}
-                </td>
-                <td style="padding: 0.5rem; text-align: right;">
-                    {% if p.agent_sla_days %}{{ p.agent_sla_days }} days{% else %}<span class="muted">—</span>{% endif %}
-                </td>
-                <td style="padding: 0.5rem; text-align: right;">
-                    <a href="{% url 'client_policy_edit' org_slug=current_client.slug policy_id=p.id %}">Edit</a>
-                </td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-    {% else %}
-    <p class="muted" style="margin-top: 1rem;">No policies defined. Add one to declare authorized products for RMM, AV/EDR, remote access, etc.</p>
-    {% endif %}
+
+    <a class="summary-tile" href="{% url 'findings_queue' %}">
+        <div class="tile-label">Findings</div>
+        <div class="tile-count">—</div>
+        <div class="tile-detail">Global queue (per-client scope in a later milestone)</div>
+    </a>
 </div>
 
+{% if client_links %}
 <div class="card">
     <h2 style="margin-top: 0;">External identities</h2>
-    {% if client_links %}
     <table style="width: 100%; border-collapse: collapse;">
         <thead>
             <tr style="text-align: left; border-bottom: 1px solid var(--border);">
@@ -87,37 +113,10 @@
             {% endfor %}
         </tbody>
     </table>
-    {% else %}
-    <p class="muted">No external identities linked yet.</p>
-    {% endif %}
 </div>
-
-<div class="card">
-    <h2 style="margin-top: 0;">Devices ({{ device_count }})</h2>
-    {% if devices %}
-    <table style="width: 100%; border-collapse: collapse;">
-        <thead>
-            <tr style="text-align: left; border-bottom: 1px solid var(--border);">
-                <th style="padding: 0.5rem;">Hostname</th>
-                <th style="padding: 0.5rem;">Kind</th>
-                <th style="padding: 0.5rem;">Serial</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for d in devices %}
-            <tr style="border-bottom: 1px solid var(--border);">
-                <td style="padding: 0.5rem;"><a href="{% url 'device_detail' org_slug=current_client.slug device_id=d.id %}">{{ d.canonical_hostname }}</a></td>
-                <td style="padding: 0.5rem;">{{ d.get_device_kind_display }}</td>
-                <td style="padding: 0.5rem;"><code>{{ d.canonical_serial|default:"—" }}</code></td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-    {% else %}
-    <p class="muted">No devices for this client yet.</p>
-    {% endif %}
-</div>
+{% endif %}
 {% else %}
+{# ─── ALL-CLIENTS FLEET VIEW ─────────────────────────────────────── #}
 <div class="card">
     <h2 style="margin-top: 0;">Fleet</h2>
     <p class="muted">
