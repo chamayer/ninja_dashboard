@@ -58,7 +58,7 @@
         <div class="tile-count">{{ device_count }}</div>
         <div class="tile-detail">
             {% if type_summary %}
-                {% for kind, label, count in type_summary %}{{ count }} {{ label|lower }}{% if not forloop.last %} · {% endif %}{% endfor %}
+                {% for type_value, label, count in type_summary %}{{ count }} {{ label|lower }}{% if not forloop.last %} · {% endif %}{% endfor %}
             {% else %}
                 No devices yet
             {% endif %}

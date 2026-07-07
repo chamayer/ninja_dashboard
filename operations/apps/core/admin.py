@@ -143,8 +143,8 @@ class DeviceLinkInline(admin.TabularInline):
 
 @admin.register(Device)
 class DeviceAdmin(admin.ModelAdmin):
-    list_display = ("canonical_hostname", "client", "device_kind", "tenant", "deleted_at", "version")
-    list_filter = ("tenant", "device_kind", "deleted_at")
+    list_display = ("canonical_hostname", "client", "device_type", "tenant", "deleted_at", "version")
+    list_filter = ("tenant", "device_type", "deleted_at")
     search_fields = ("canonical_hostname", "canonical_serial", "canonical_vm_uuid")
     inlines = (DeviceLinkInline,)
 

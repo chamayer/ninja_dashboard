@@ -23,12 +23,12 @@
             line-height: 1.4;
             white-space: nowrap;
         }
-        .type-badge[data-kind="physical"]         { background: #e0edff; color: #1e3a8a; }
-        .type-badge[data-kind="vm-with-agent"]    { background: #e6f9ea; color: #14532d; }
-        .type-badge[data-kind="vm-agentless"]     { background: #fef3c7; color: #92400e; }
-        .type-badge[data-kind="hypervisor-host"]  { background: #f3e8ff; color: #581c87; }
-        .type-badge[data-kind="network-device"]   { background: #fce7f3; color: #831843; }
-        .type-badge[data-kind="unknown"]          { background: #f3f4f6; color: #374151; }
+        .type-badge[data-type="physical"]         { background: #e0edff; color: #1e3a8a; }
+        .type-badge[data-type="vm-with-agent"]    { background: #e6f9ea; color: #14532d; }
+        .type-badge[data-type="vm-agentless"]     { background: #fef3c7; color: #92400e; }
+        .type-badge[data-type="hypervisor-host"]  { background: #f3e8ff; color: #581c87; }
+        .type-badge[data-type="network-device"]   { background: #fce7f3; color: #831843; }
+        .type-badge[data-type="unknown"]          { background: #f3f4f6; color: #374151; }
         .filter-chip {
             padding: 0.35rem 0.75rem;
             font-size: 0.8rem;
@@ -51,9 +51,9 @@
         <input type="search" id="device-search" placeholder="Search hostname or serial…"
                style="flex: 1; min-width: 220px; padding: 0.45rem 0.75rem; border: 1px solid var(--border); border-radius: 4px;">
         <div id="type-filters" style="display: flex; gap: 0.35rem; flex-wrap: wrap;">
-            <button type="button" class="filter-chip" data-kind="all" data-active="true">All · {{ device_count }}</button>
-            {% for kind, label, count in type_summary %}
-                <button type="button" class="filter-chip" data-kind="{{ kind }}">{{ label }} · {{ count }}</button>
+            <button type="button" class="filter-chip" data-type="all" data-active="true">All · {{ device_count }}</button>
+            {% for type_value, label, count in type_summary %}
+                <button type="button" class="filter-chip" data-type="{{ type_value }}">{{ label }} · {{ count }}</button>
             {% endfor %}
         </div>
     </div>
@@ -68,9 +68,9 @@
         </thead>
         <tbody>
             {% for d in devices %}
-            <tr class="device-row" data-kind="{{ d.device_kind }}" data-search="{{ d.canonical_hostname|lower }} {{ d.canonical_serial|lower }}">
+            <tr class="device-row" data-type="{{ d.device_type }}" data-search="{{ d.canonical_hostname|lower }} {{ d.canonical_serial|lower }}">
                 <td><a href="{% url 'device_detail' org_slug=client.slug device_id=d.id %}">{{ d.canonical_hostname }}</a></td>
-                <td><span class="type-badge" data-kind="{{ d.device_kind }}">{{ d.get_device_kind_display }}</span></td>
+                <td><span class="type-badge" data-type="{{ d.device_type }}">{{ d.get_device_type_display }}</span></td>
                 <td><code style="font-size: 0.85rem;">{{ d.canonical_serial|default:"—" }}</code></td>
             </tr>
             {% endfor %}
@@ -84,17 +84,17 @@
         var chipContainer = document.getElementById('type-filters');
         var rows = document.querySelectorAll('#devices-table .device-row');
         var emptyMsg = document.getElementById('empty-msg');
-        var activeKind = 'all';
+        var activeType = 'all';
 
         function apply() {
             var q = searchInput.value.trim().toLowerCase();
             var visible = 0;
             rows.forEach(function (row) {
-                var kind = row.getAttribute('data-kind');
+                var type = row.getAttribute('data-type');
                 var haystack = row.getAttribute('data-search') || '';
-                var matchKind = activeKind === 'all' || activeKind === kind;
+                var matchType = activeType === 'all' || activeType === type;
                 var matchQ = !q || haystack.indexOf(q) !== -1;
-                var show = matchKind && matchQ;
+                var show = matchType && matchQ;
                 row.style.display = show ? '' : 'none';
                 if (show) visible++;
             });
@@ -105,7 +105,7 @@
         chipContainer.addEventListener('click', function (evt) {
             var chip = evt.target.closest('.filter-chip');
             if (!chip) return;
-            activeKind = chip.getAttribute('data-kind');
+            activeType = chip.getAttribute('data-type');
             chipContainer.querySelectorAll('.filter-chip').forEach(function (c) {
                 c.setAttribute('data-active', c === chip ? 'true' : 'false');
             });

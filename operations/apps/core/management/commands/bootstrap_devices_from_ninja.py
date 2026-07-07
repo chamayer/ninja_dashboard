@@ -26,17 +26,17 @@ NINJA_SOURCE_NAME = "Ninja"
 
 
 def _classify(node_class: str, is_vm: bool) -> str:
-    """Map Ninja node_class to Operations DeviceKind."""
+    """Map Ninja node_class to Operations DeviceType."""
     nc = (node_class or "").upper()
     if "VMHOST" in nc or nc.endswith("_HOST"):
-        return Device.DeviceKind.HYPERVISOR_HOST
+        return Device.DeviceType.HYPERVISOR_HOST
     if "NMS" in nc:
-        return Device.DeviceKind.NETWORK_DEVICE
+        return Device.DeviceType.NETWORK_DEVICE
     if is_vm or nc.endswith("_GUEST"):
         # Ninja only reports VMs where its agent is installed, so treat
         # as agented VM. Agentless VMs come from vCenter/HyperV modules.
-        return Device.DeviceKind.VM_WITH_AGENT
-    return Device.DeviceKind.PHYSICAL
+        return Device.DeviceType.VM_WITH_AGENT
+    return Device.DeviceType.PHYSICAL
 
 
 def _canonical_hostname(display_name: str | None, system_name: str | None, dns_name: str | None) -> str:
@@ -136,8 +136,8 @@ class Command(BaseCommand):
                     if device.canonical_vm_uuid != vm_uuid:
                         device.canonical_vm_uuid = vm_uuid
                         dirty_device = True
-                    if device.device_kind != kind:
-                        device.device_kind = kind
+                    if device.device_type != kind:
+                        device.device_type = kind
                         dirty_device = True
                     if device.client_id != client_id:
                         device.client_id = client_id
@@ -148,7 +148,7 @@ class Command(BaseCommand):
                                 "canonical_hostname",
                                 "canonical_serial",
                                 "canonical_vm_uuid",
-                                "device_kind",
+                                "device_type",
                                 "client_id",
                             ]
                         )
@@ -167,7 +167,7 @@ class Command(BaseCommand):
                     canonical_hostname=hostname,
                     canonical_serial=serial_number or "",
                     canonical_vm_uuid=vm_uuid,
-                    device_kind=kind,
+                    device_type=kind,
                 )
                 DeviceLink.objects.create(
                     tenant_id=TENANT_ID,

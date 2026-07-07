@@ -30,10 +30,10 @@ def _type_summary(devices: list) -> list[tuple[str, str, int]]:
     """(kind_value, kind_label, count) for kinds present in the list."""
     counts: dict[str, int] = {}
     for d in devices:
-        counts[d.device_kind] = counts.get(d.device_kind, 0) + 1
+        counts[d.device_type] = counts.get(d.device_type, 0) + 1
     return [
         (kind, label, counts.get(kind, 0))
-        for kind, label in Device.DeviceKind.choices
+        for kind, label in Device.DeviceType.choices
         if counts.get(kind, 0) > 0
     ]
 

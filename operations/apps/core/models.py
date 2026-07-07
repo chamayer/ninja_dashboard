@@ -196,7 +196,7 @@ class ClientPolicy(UUIDTenantScopedModel):
 
 
 class Device(UUIDTenantScopedModel):
-    class DeviceKind(models.TextChoices):
+    class DeviceType(models.TextChoices):
         PHYSICAL = "physical", "Physical"
         VM_WITH_AGENT = "vm-with-agent", "VM with agent"
         VM_AGENTLESS = "vm-agentless", "VM agentless"
@@ -208,10 +208,10 @@ class Device(UUIDTenantScopedModel):
     canonical_hostname = models.CharField(max_length=255)
     canonical_serial = models.CharField(max_length=255, blank=True)
     canonical_vm_uuid = models.CharField(max_length=64, blank=True)
-    device_kind = models.CharField(
+    device_type = models.CharField(
         max_length=32,
-        choices=DeviceKind.choices,
-        default=DeviceKind.UNKNOWN,
+        choices=DeviceType.choices,
+        default=DeviceType.UNKNOWN,
         verbose_name="Type",
     )
     deleted_at = models.DateTimeField(null=True, blank=True)
