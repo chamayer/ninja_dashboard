@@ -78,97 +78,32 @@
     </a>
 
     <div class="summary-tile" style="cursor: default;">
-        <div class="tile-label">External identities</div>
+        <div class="tile-label">Sources</div>
         <div class="tile-count">{{ client_links|length }}</div>
         <div class="tile-detail">
-            {% for link in client_links %}{{ link.source.name }}{% if not forloop.last %} · {% endif %}{% endfor %}
+            {% if client_links %}
+                {% for link in client_links %}{{ link.source.name }}{% if not forloop.last %} · {% endif %}{% endfor %}
+            {% else %}
+                Not linked to any source
+            {% endif %}
         </div>
     </div>
 
     <a class="summary-tile" href="{% url 'findings_queue' %}">
         <div class="tile-label">Findings</div>
         <div class="tile-count">—</div>
-        <div class="tile-detail">Global queue (per-client scope in a later milestone)</div>
+        <div class="tile-detail">Per-client scope coming later</div>
     </a>
-</div>
-
-<div class="card">
-    <h2 style="margin-top: 0;">Identity coverage</h2>
-    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin-bottom: 1rem;">
-        <div>
-            <div class="tile-label">Client identities</div>
-            <div class="tile-count">{{ client_links|length }}</div>
-            <div class="tile-detail">Canonical client linked to external sources</div>
-        </div>
-        <div>
-            <div class="tile-label">Device source links</div>
-            <div class="tile-count">
-                {% if identity_device_source_counts %}
-                    {% for row in identity_device_source_counts %}{{ row.count }}{% if not forloop.last %} / {% endif %}{% endfor %}
-                {% else %}
-                    0
-                {% endif %}
-            </div>
-            <div class="tile-detail">
-                {% if identity_device_source_counts %}
-                    {% for row in identity_device_source_counts %}{{ row.source__name }}{% if not forloop.last %} · {% endif %}{% endfor %}
-                {% else %}
-                    No device source links
-                {% endif %}
-            </div>
-        </div>
-        <div>
-            <div class="tile-label">Source bindings</div>
-            <div class="tile-count">{{ identity_source_binding_enabled_count }} / {{ identity_source_binding_count }}</div>
-            <div class="tile-detail">
-                {{ identity_source_binding_enabled_count }} enabled · {{ identity_source_binding_disabled_count }} disabled
-            </div>
-        </div>
-        <div>
-            <div class="tile-label">Client users</div>
-            <div class="tile-count">{{ identity_client_user_count }}</div>
-            <div class="tile-detail">{{ identity_client_user_link_count }} external user link{{ identity_client_user_link_count|pluralize }}</div>
-        </div>
-        <div>
-            <div class="tile-label">Unlinked identities</div>
-            <div class="tile-count">{{ identity_unlinked_finding_count }}</div>
-            <div class="tile-detail">Active source-level findings</div>
-        </div>
-    </div>
-
-    <table style="width: 100%; border-collapse: collapse;">
-        <thead>
-            <tr style="text-align: left; border-bottom: 1px solid var(--border);">
-                <th style="padding: 0.5rem;">Source</th>
-                <th style="padding: 0.5rem; text-align: right;">Device links</th>
-                <th style="padding: 0.5rem; text-align: right;">User links</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for row in identity_source_rows %}
-            <tr style="border-bottom: 1px solid var(--border);">
-                <td style="padding: 0.5rem;">{{ row.source_name }}</td>
-                <td style="padding: 0.5rem; text-align: right;">{{ row.device_links }}</td>
-                <td style="padding: 0.5rem; text-align: right;">{{ row.user_links }}</td>
-            </tr>
-            {% empty %}
-            <tr>
-                <td colspan="3" class="muted" style="padding: 0.5rem;">No source identity coverage yet.</td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
 </div>
 
 {% if client_links %}
 <div class="card">
-    <h2 style="margin-top: 0;">External identities</h2>
+    <h2 style="margin-top: 0;">Known in</h2>
     <table style="width: 100%; border-collapse: collapse;">
         <thead>
             <tr style="text-align: left; border-bottom: 1px solid var(--border);">
                 <th style="padding: 0.5rem;">Source</th>
-                <th style="padding: 0.5rem;">External name</th>
-                <th style="padding: 0.5rem;">External ID</th>
+                <th style="padding: 0.5rem;">Name in that system</th>
             </tr>
         </thead>
         <tbody>
@@ -176,7 +111,6 @@
             <tr style="border-bottom: 1px solid var(--border);">
                 <td style="padding: 0.5rem;">{{ link.source.name }}</td>
                 <td style="padding: 0.5rem;">{{ link.external_name }}</td>
-                <td style="padding: 0.5rem;"><code>{{ link.external_id }}</code></td>
             </tr>
             {% endfor %}
         </tbody>
