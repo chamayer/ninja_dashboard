@@ -5,6 +5,29 @@ only project-level pointers.
 
 ---
 
+## 2026-07-07 — Fleet overview dashboard
+
+**Why:** The all-clients view was a plain flat table. With Operations
+reframed as a data browser, the front door should show fleet state at a
+glance.
+
+**Work completed:**
+
+- Added 4 summary tiles to the all-clients view: Clients, Devices (with
+  type breakdown), Sources (distinct sources with per-source client count),
+  Findings (global open count).
+- Added Sources column to the client table showing which systems each
+  client is linked to.
+- Moved shared tile CSS out of the per-client branch so both views share it.
+- Removed slug column from client table (slug belongs on the detail page,
+  not the fleet list).
+
+**Validation:** Django check, ruff, template load smoke test all passed.
+
+**Deployed:** `8b452f7`, pushed to both remotes. Browser check pending.
+
+---
+
 ## 2026-07-07 — Product direction reframed to operational data app
 
 **Why:** We were drifting toward describing Operations as mainly an issue

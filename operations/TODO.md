@@ -44,11 +44,8 @@ module-specific; root `../TODO.md` keeps cross-repo items and pointers.
       help operators view current canonical data, source evidence, status,
       history, and workflow actions. Keep Metabase for exploratory BI and
       broad historical analytics.
-- [ ] Design top-level Operations dashboard as a data-viewing front door:
-      fleet/client/device/user/software/source counts, source coverage,
-      collector freshness, recent observations/changes, active findings,
-      pending decisions, and links into browse/detail pages. Avoid reducing it
-      to only "things broken."
+- [ ] Browser-validate fleet overview dashboard. Committed as `8b452f7`,
+      deployed via Portainer auto-update. Light browser check pending.
 - [ ] Plan next domain browse/detail pages after clients/devices: candidates
       are users, software, sources/collectors, observations/evidence, and
       recent changes.
