@@ -8,6 +8,14 @@ for stack-wide commands (postgres, metabase, ingest).
 
 ## Remote validation from workstation
 
+Preferred helper:
+
+```powershell
+C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Users\chamayer\Documents\Development\Scripts\Invoke-DevTool.ps1 am-ch-01 ssh "docker ps"
+C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Users\chamayer\Documents\Development\Scripts\Invoke-DevTool.ps1 am-ch-01 ssh "docker logs --tail=120 ninja-operations"
+C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Users\chamayer\Documents\Development\Scripts\Invoke-DevTool.ps1 portainer GET /api/stacks
+```
+
 The Docker host is not DNS-resolvable by name. Use the local SSH alias
 `am-ch-01`, which maps to `amrose@10.61.50.28` in
 `C:\Users\chamayer\.ssh\config`.
