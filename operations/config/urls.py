@@ -10,12 +10,13 @@ from drf_spectacular.views import (
     SpectacularSwaggerView,
 )
 
-from apps.core.views import client_switch, healthz, home, org_index
+from apps.core.views import client_switch, device_detail, healthz, home, org_index
 
 urlpatterns = [
     path("", home, name="home"),
     path("healthz", healthz, name="healthz"),
     path("orgs/<slug:org_slug>/", org_index, name="org_index"),
+    path("orgs/<slug:org_slug>/devices/<uuid:device_id>/", device_detail, name="device_detail"),
     path("switch/", client_switch, name="client_switch"),
     path("admin/", admin.site.urls),
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),

@@ -15,15 +15,68 @@
     </h1>
     <p class="muted">
         {% if current_client %}
-            Client scope: <code>{{ current_client.slug }}</code> · timezone {{ current_client.timezone }}
+            Slug: <code>{{ current_client.slug }}</code> ·
+            timezone {{ current_client.timezone }} ·
+            {{ device_count }} device{{ device_count|pluralize }}
         {% else %}
-            Cross-client view.
+            Cross-client view · {{ all_device_count }} device{{ all_device_count|pluralize }} total.
         {% endif %}
     </p>
-    <p>Real views land in later milestones (findings, decisions, merge review, policy edit).</p>
 </div>
 
-{% if not current_client %}
+{% if current_client %}
+<div class="card">
+    <h2 style="margin-top: 0;">External identities</h2>
+    {% if client_links %}
+    <table style="width: 100%; border-collapse: collapse;">
+        <thead>
+            <tr style="text-align: left; border-bottom: 1px solid var(--border);">
+                <th style="padding: 0.5rem;">Source</th>
+                <th style="padding: 0.5rem;">External name</th>
+                <th style="padding: 0.5rem;">External ID</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for link in client_links %}
+            <tr style="border-bottom: 1px solid var(--border);">
+                <td style="padding: 0.5rem;">{{ link.source.name }}</td>
+                <td style="padding: 0.5rem;">{{ link.external_name }}</td>
+                <td style="padding: 0.5rem;"><code>{{ link.external_id }}</code></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="muted">No external identities linked yet.</p>
+    {% endif %}
+</div>
+
+<div class="card">
+    <h2 style="margin-top: 0;">Devices ({{ device_count }})</h2>
+    {% if devices %}
+    <table style="width: 100%; border-collapse: collapse;">
+        <thead>
+            <tr style="text-align: left; border-bottom: 1px solid var(--border);">
+                <th style="padding: 0.5rem;">Hostname</th>
+                <th style="padding: 0.5rem;">Kind</th>
+                <th style="padding: 0.5rem;">Serial</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for d in devices %}
+            <tr style="border-bottom: 1px solid var(--border);">
+                <td style="padding: 0.5rem;"><a href="{% url 'device_detail' org_slug=current_client.slug device_id=d.id %}">{{ d.canonical_hostname }}</a></td>
+                <td style="padding: 0.5rem;">{{ d.get_device_kind_display }}</td>
+                <td style="padding: 0.5rem;"><code>{{ d.canonical_serial|default:"—" }}</code></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="muted">No devices for this client yet.</p>
+    {% endif %}
+</div>
+{% else %}
 <div class="card">
     <h2 style="margin-top: 0;">Clients</h2>
     <ul>
