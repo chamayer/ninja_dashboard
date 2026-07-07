@@ -5,6 +5,38 @@ only project-level pointers.
 
 ---
 
+## 2026-07-07 — Device list pagination/search WIP
+
+**Why:** Live Operations logs showed `/orgs/uta/devices/` returned a large
+device-list page and a Gunicorn worker timed out shortly afterward. The view
+loaded every device for a client and filtered rows in browser JavaScript.
+
+**Work completed locally:**
+
+- Changed `org_devices` to filter/search/paginate in Django instead of
+  materializing all client devices.
+- Added server-side search by hostname/serial.
+- Added server-side device type filtering.
+- Added pagination at 100 devices per page.
+- Updated the device-list template to use GET controls and pagination links.
+- Added backlog notes for broader client identity coverage and a future
+  top-level Operations summary page.
+
+**Validation:**
+
+- `python operations\manage.py check --settings=config.settings.dev` passed.
+- `python operations\manage.py makemigrations --check --dry-run --settings=config.settings.dev`
+  passed.
+- `python -m ruff check operations\apps\core\views.py` passed.
+- `python operations\manage.py shell --settings=config.settings.dev -c "from django.template.loader import get_template; get_template('org_devices.html'); print('template_ok')"`
+  passed.
+
+**Pending:** Commit, push, Portainer redeploy, and live-check
+`/orgs/uta/devices/` response size/time. Pause after this UI change before
+starting another UI slice.
+
+---
+
 ## 2026-07-07 — Live Operations validation
 
 **Why:** Continue the active checkpoint after pushing `55cda73`.

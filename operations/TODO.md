@@ -7,6 +7,9 @@ module-specific; root `../TODO.md` keeps cross-repo items and pointers.
 
 ## Inbox
 
+- [ ] After device-list pagination/search ships, live-check
+      `/orgs/uta/devices/` through Operations and compare response size/time
+      against the previous large render.
 - [x] Validate Operations container build/start on a Docker-capable host:
       migrations should run as `operations_migrate`, Gunicorn should run with
       `operations_app`, and `/healthz` should pass on `127.0.0.1:8091`.
@@ -20,6 +23,8 @@ module-specific; root `../TODO.md` keeps cross-repo items and pointers.
 
 ### M0 build
 
+- [ ] Ship server-side pagination/search for per-client device lists. Local
+      implementation done; commit/push/redeploy/live validation pending.
 - [x] Live-validate the committed Operations container through Portainer:
       confirm commit `746770e`, startup migrations/bootstrap, `/healthz`,
       populated clients/devices, and same-password redeploy session
@@ -33,6 +38,14 @@ module-specific; root `../TODO.md` keeps cross-repo items and pointers.
 
 ### Stack-wide (post-M0)
 
+- [ ] Client landing identity coverage audit: decide which identities belong
+      on the client summary page. Current page shows canonical client plus
+      `client_links`; future candidates include source binding health, device
+      source coverage, client-user identities, and unlinked external identity
+      findings.
+- [ ] Design a top-level Operations summary page if Operations continues to
+      replace high-value Metabase workflows. Keep it workflow/action oriented
+      instead of recreating generic BI dashboards.
 - [ ] TLS reverse proxy in front of the whole stack (postgres/metabase/
       ingest/operations). Options: Caddy (auto-cert, easiest for LAN),
       Traefik (LE via DNS-01), nginx (manual). Currently everything is

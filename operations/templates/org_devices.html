@@ -9,10 +9,12 @@
         &nbsp;›&nbsp; Devices
     </p>
     <h1 style="margin: 0;">Devices <span class="muted" style="font-weight: 400;">({{ device_count }})</span></h1>
+    {% if search_query or active_type %}
+        <p class="muted" style="margin-bottom: 0;">Showing {{ filtered_count }} matching device{{ filtered_count|pluralize }}.</p>
+    {% endif %}
 </div>
 
 <div class="card">
-    {% if devices %}
     <style>
         .type-badge {
             display: inline-block;
@@ -43,21 +45,64 @@
             color: white;
             border-color: var(--header-bg);
         }
+        .filter-chip:hover {
+            border-color: var(--accent);
+        }
         .device-row:nth-child(odd) { background: #fafbfc; }
         .device-row td { padding: 0.4rem 0.5rem; }
+        .pager {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            margin-top: 1rem;
+            flex-wrap: wrap;
+        }
+        .pager-links {
+            display: flex;
+            gap: 0.4rem;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .pager-link {
+            display: inline-block;
+            padding: 0.35rem 0.65rem;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            text-decoration: none;
+            color: inherit;
+            background: white;
+            font-size: 0.85rem;
+        }
+        .pager-link:hover {
+            border-color: var(--accent);
+        }
     </style>
 
-    <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-bottom: 1rem;">
-        <input type="search" id="device-search" placeholder="Search hostname or serial…"
+    <form method="get" style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-bottom: 1rem;">
+        {% if active_type %}<input type="hidden" name="type" value="{{ active_type }}">{% endif %}
+        <input type="search" name="q" value="{{ search_query }}" placeholder="Search hostname or serial..."
                style="flex: 1; min-width: 220px; padding: 0.45rem 0.75rem; border: 1px solid var(--border); border-radius: 4px;">
-        <div id="type-filters" style="display: flex; gap: 0.35rem; flex-wrap: wrap;">
-            <button type="button" class="filter-chip" data-type="all" data-active="true">All · {{ device_count }}</button>
+        <button type="submit" class="filter-chip" data-active="true">Search</button>
+        {% if search_query or active_type %}
+            <a href="{% url 'org_devices' org_slug=client.slug %}" class="filter-chip" style="text-decoration: none;">Clear</a>
+        {% endif %}
+    </form>
+
+    {% if device_count %}
+        <div style="display: flex; gap: 0.35rem; flex-wrap: wrap; margin-bottom: 1rem;">
+            <a href="{% url 'org_devices' org_slug=client.slug %}{% if type_query %}?{{ type_query }}{% endif %}"
+               class="filter-chip" data-active="{% if not active_type %}true{% else %}false{% endif %}"
+               style="text-decoration: none;">All · {{ device_count }}</a>
             {% for type_value, label, count in type_summary %}
-                <button type="button" class="filter-chip" data-type="{{ type_value }}">{{ label }} · {{ count }}</button>
+                <a href="{% url 'org_devices' org_slug=client.slug %}?{% if type_query %}{{ type_query }}&amp;{% endif %}type={{ type_value }}"
+                   class="filter-chip" data-active="{% if active_type == type_value %}true{% else %}false{% endif %}"
+                   style="text-decoration: none;">{{ label }} · {{ count }}</a>
             {% endfor %}
         </div>
-    </div>
+    {% endif %}
 
+    {% if devices %}
     <table id="devices-table" style="width: 100%; border-collapse: collapse; font-size: 0.9rem;">
         <thead>
             <tr style="text-align: left; border-bottom: 2px solid var(--border);">
@@ -68,7 +113,7 @@
         </thead>
         <tbody>
             {% for d in devices %}
-            <tr class="device-row" data-type="{{ d.device_type }}" data-search="{{ d.canonical_hostname|lower }} {{ d.canonical_serial|lower }}">
+            <tr class="device-row">
                 <td><a href="{% url 'device_detail' org_slug=client.slug device_id=d.id %}">{{ d.canonical_hostname }}</a></td>
                 <td><span class="type-badge" data-type="{{ d.device_type }}">{{ d.get_device_type_display }}</span></td>
                 <td><code style="font-size: 0.85rem;">{{ d.canonical_serial|default:"—" }}</code></td>
@@ -76,45 +121,31 @@
             {% endfor %}
         </tbody>
     </table>
-    <p id="empty-msg" class="muted" style="margin-top: 1rem; display: none;">No devices match your filter.</p>
 
-    <script>
-    (function () {
-        var searchInput = document.getElementById('device-search');
-        var chipContainer = document.getElementById('type-filters');
-        var rows = document.querySelectorAll('#devices-table .device-row');
-        var emptyMsg = document.getElementById('empty-msg');
-        var activeType = 'all';
-
-        function apply() {
-            var q = searchInput.value.trim().toLowerCase();
-            var visible = 0;
-            rows.forEach(function (row) {
-                var type = row.getAttribute('data-type');
-                var haystack = row.getAttribute('data-search') || '';
-                var matchType = activeType === 'all' || activeType === type;
-                var matchQ = !q || haystack.indexOf(q) !== -1;
-                var show = matchType && matchQ;
-                row.style.display = show ? '' : 'none';
-                if (show) visible++;
-            });
-            emptyMsg.style.display = visible === 0 ? '' : 'none';
-        }
-
-        searchInput.addEventListener('input', apply);
-        chipContainer.addEventListener('click', function (evt) {
-            var chip = evt.target.closest('.filter-chip');
-            if (!chip) return;
-            activeType = chip.getAttribute('data-type');
-            chipContainer.querySelectorAll('.filter-chip').forEach(function (c) {
-                c.setAttribute('data-active', c === chip ? 'true' : 'false');
-            });
-            apply();
-        });
-    })();
-    </script>
+    {% if page_obj.has_other_pages %}
+    <div class="pager">
+        <p class="muted" style="margin: 0;">
+            Page {{ page_obj.number }} of {{ paginator.num_pages }} ·
+            {{ page_size }} per page
+        </p>
+        <div class="pager-links">
+            {% if page_obj.has_previous %}
+                <a class="pager-link" href="?{% if page_query %}{{ page_query }}&amp;{% endif %}page=1">First</a>
+                <a class="pager-link" href="?{% if page_query %}{{ page_query }}&amp;{% endif %}page={{ page_obj.previous_page_number }}">Previous</a>
+            {% endif %}
+            {% if page_obj.has_next %}
+                <a class="pager-link" href="?{% if page_query %}{{ page_query }}&amp;{% endif %}page={{ page_obj.next_page_number }}">Next</a>
+                <a class="pager-link" href="?{% if page_query %}{{ page_query }}&amp;{% endif %}page={{ paginator.num_pages }}">Last</a>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
     {% else %}
-    <p class="muted">No devices for this client yet.</p>
+        {% if search_query or active_type %}
+            <p class="muted">No devices match your filters.</p>
+        {% else %}
+            <p class="muted">No devices for this client yet.</p>
+        {% endif %}
     {% endif %}
 </div>
 {% endblock %}

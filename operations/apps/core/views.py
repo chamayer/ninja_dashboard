@@ -1,18 +1,18 @@
 from __future__ import annotations
 
+from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.core.paginator import Paginator
 from django.db import transaction
+from django.db.models import Count, Q
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
-from django.views.decorators.http import require_GET
-
-from django.contrib import messages
-from django.db.models import Count, Q
-from django.urls import reverse
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_GET, require_POST
 
 from .forms import ClientPolicyForm
 from .models import Client, ClientPolicy, Device, Finding, FindingType, MergeCandidate
+
+DEVICE_PAGE_SIZE = 100
 
 
 @require_GET
@@ -26,16 +26,20 @@ def home(request: HttpRequest) -> HttpResponse:
     return render(request, "home.html")
 
 
+def _type_summary_from_counts(counts: dict[str, int]) -> list[tuple[str, str, int]]:
+    """(type_value, type_label, count) for device types present in a count map."""
+    return [
+        (device_type, label, counts.get(device_type, 0))
+        for device_type, label in Device.DeviceType.choices
+        if counts.get(device_type, 0) > 0
+    ]
+
+
 def _type_summary(devices: list) -> list[tuple[str, str, int]]:
-    """(kind_value, kind_label, count) for kinds present in the list."""
     counts: dict[str, int] = {}
     for d in devices:
         counts[d.device_type] = counts.get(d.device_type, 0) + 1
-    return [
-        (kind, label, counts.get(kind, 0))
-        for kind, label in Device.DeviceType.choices
-        if counts.get(kind, 0) > 0
-    ]
+    return _type_summary_from_counts(counts)
 
 
 @login_required
@@ -82,21 +86,63 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
 
 @login_required
 def org_devices(request: HttpRequest, org_slug: str) -> HttpResponse:
-    """Device list for a specific client with search + kind-filter chips."""
+    """Device list for a specific client with server-side search/filter."""
     client = _get_client_by_slug(org_slug)
-    devices = list(
-        Device.objects.filter(
-            tenant_id=1, client=client, deleted_at__isnull=True
-        ).order_by("canonical_hostname")
+    base_qs = Device.objects.filter(
+        tenant_id=1, client=client, deleted_at__isnull=True
     )
+    type_counts = {
+        row["device_type"]: row["count"]
+        for row in base_qs.values("device_type").annotate(count=Count("id"))
+    }
+    total_count = sum(type_counts.values())
+
+    search_query = request.GET.get("q", "").strip()
+    active_type = request.GET.get("type", "").strip()
+    valid_types = {value for value, _label in Device.DeviceType.choices}
+
+    devices_qs = base_qs
+    if search_query:
+        devices_qs = devices_qs.filter(
+            Q(canonical_hostname__icontains=search_query)
+            | Q(canonical_serial__icontains=search_query)
+        )
+    if active_type in valid_types:
+        devices_qs = devices_qs.filter(device_type=active_type)
+    else:
+        active_type = ""
+
+    devices_qs = devices_qs.order_by("canonical_hostname").only(
+        "id",
+        "canonical_hostname",
+        "canonical_serial",
+        "device_type",
+    )
+    paginator = Paginator(devices_qs, DEVICE_PAGE_SIZE)
+    page_obj = paginator.get_page(request.GET.get("page"))
+
+    page_query = request.GET.copy()
+    page_query.pop("page", None)
+    type_query = request.GET.copy()
+    type_query.pop("page", None)
+    type_query.pop("type", None)
+
     return render(
         request,
         "org_devices.html",
         {
             "client": client,
-            "devices": devices,
-            "device_count": len(devices),
-            "type_summary": _type_summary(devices),
+            "devices": page_obj.object_list,
+            "page_obj": page_obj,
+            "paginator": paginator,
+            "device_count": total_count,
+            "filtered_count": paginator.count,
+            "type_summary": _type_summary_from_counts(type_counts),
+            "active_type": active_type,
+            "search_query": search_query,
+            "page_query": page_query.urlencode(),
+            "type_query": type_query.urlencode(),
+            "page_size": DEVICE_PAGE_SIZE,
         },
     )
 
@@ -200,7 +246,7 @@ def client_policy_new(request: HttpRequest, org_slug: str) -> HttpResponse:
             policy.client = client
             try:
                 policy.save()
-            except Exception as exc:  # noqa: BLE001 - user-facing message
+            except Exception as exc:
                 form.add_error("category", f"Could not save: {exc}")
             else:
                 messages.success(request, f"Policy '{policy.category}' created.")
