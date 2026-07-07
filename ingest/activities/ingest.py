@@ -45,6 +45,7 @@ from ingest.config import settings
 from ingest.ninja_client import NinjaClient
 from ingest.runlog import run_log
 from ingest.util import ninja_epoch_to_dt
+from ingest.inventory.queue import SOFTWARE_ACTIVITY_TYPES, enqueue_activity
 
 log = logging.getLogger(__name__)
 
@@ -116,6 +117,9 @@ def run(client: NinjaClient) -> int:
 
         if max_id > last_id:
             _set_last_id(max_id)
+
+        if settings.SOFTWARE_QUEUE_ENABLED and all_rows:
+            _enqueue_software_activities(all_rows)
 
         _refresh_activity_summary_views()
         stats["rows_inserted"] = inserted
@@ -273,6 +277,20 @@ def _set_last_id(value: int) -> None:
             "SET value = EXCLUDED.value, updated_at = NOW()",
             (_STATE_KEY, str(value)),
         )
+
+
+def _enqueue_software_activities(rows: list[dict]) -> None:
+    enqueued = 0
+    for row in rows:
+        if row.get("activity_type") not in SOFTWARE_ACTIVITY_TYPES:
+            continue
+        ninja_device_id = row.get("device_id")
+        if ninja_device_id is None:
+            continue
+        if enqueue_activity(int(ninja_device_id), reason="ninja.ingest.activity"):
+            enqueued += 1
+    if enqueued:
+        log.info("activities: enqueued %d device(s) to software activity queue", enqueued)
 
 
 def _refresh_activity_summary_views() -> None:

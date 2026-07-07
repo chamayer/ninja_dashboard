@@ -39,6 +39,8 @@ from ingest.activities import ingest as activities_ingest
 from ingest.agent_compliance import ingest as agent_compliance_ingest
 from ingest.agent_compliance import review_digest
 from ingest.inventory.refresh import refresh_current as refresh_inventory_current
+from ingest.inventory import software as software_ingest
+from ingest.inventory import queue as software_queue
 from ingest.runlog import run_log
 from ingest.agent_compliance.config_loader import (
     add_device_ignore,
@@ -145,6 +147,57 @@ def run_agent_compliance_evaluate_once() -> None:
     finally:
         _AGENT_COMPLIANCE_LOCK.release()
     log.info("Agent compliance evaluate complete")
+
+
+def enqueue_all_orgs_once() -> None:
+    """Populate Q1 with one entry per Ninja org. Dedup prevents duplicates
+    when the previous sweep hasn't fully drained yet."""
+    if not settings.SOFTWARE_QUEUE_ENABLED:
+        return
+    with db.transaction() as cur:
+        cur.execute("SELECT id FROM ninja_core.organizations ORDER BY id")
+        org_ids = [row[0] for row in cur.fetchall()]
+    if not org_ids:
+        log.warning("enqueue_all_orgs: no orgs in ninja_core.organizations — skipping")
+        return
+    enqueued = sum(
+        software_queue.enqueue_scheduled(org_id, reason="ninja.ingest.scheduled_sweep")
+        for org_id in org_ids
+    )
+    log.info("Scheduled sweep enqueue: %d / %d orgs added to Q1", enqueued, len(org_ids))
+
+
+def run_software_queue_once() -> None:
+    """Drain Q3 (activity) then Q1 (scheduled) up to the configured batch size."""
+    if not settings.SOFTWARE_QUEUE_ENABLED:
+        return
+    with NinjaClient(
+        base_url=settings.NINJA_BASE_URL,
+        token_url=settings.NINJA_TOKEN_URL,
+        client_id=settings.NINJA_CLIENT_ID,
+        client_secret=settings.NINJA_CLIENT_SECRET.get_secret_value(),
+        scope=settings.NINJA_SCOPE,
+    ) as client:
+        activity, scheduled = software_queue.drain_background(
+            client, settings.SOFTWARE_QUEUE_WORKER_BATCH
+        )
+    log.info(
+        "Software queue drain complete: activity=%d scheduled=%d",
+        activity, scheduled,
+    )
+
+
+def run_software_scoped(df: str) -> None:
+    log.info("Software inventory scoped run starting (df=%r)", df)
+    with NinjaClient(
+        base_url=settings.NINJA_BASE_URL,
+        token_url=settings.NINJA_TOKEN_URL,
+        client_id=settings.NINJA_CLIENT_ID,
+        client_secret=settings.NINJA_CLIENT_SECRET.get_secret_value(),
+        scope=settings.NINJA_SCOPE,
+    ) as client:
+        _safe("software.scoped", software_ingest.run, client, df)
+    log.info("Software inventory scoped run complete (df=%r)", df)
 
 
 def schedule_agent_compliance_evaluate(reason: str) -> bool:
@@ -316,6 +369,14 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 self._respond(200, b"ready\n")
             else:
                 self._respond(503, b"starting\n")
+        elif self.path == "/run/software/scoped" or self.path.startswith("/run/software/scoped?"):
+            self._handle_software_scoped()
+        elif self.path == "/run/software/enqueue" or self.path.startswith("/run/software/enqueue?"):
+            self._handle_software_enqueue()
+        elif self.path.startswith("/run/software/demand/"):
+            self._handle_software_demand_status()
+        elif self.path == "/run/software/queue":
+            self._handle_software_queue_status()
         elif self.path.startswith("/agent-compliance/action/") or self.path.startswith("/a/"):
             self._handle_agent_compliance_action()
         else:
@@ -352,6 +413,10 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 return
             threading.Thread(target=run_review_digest_once, daemon=True).start()
             self._respond(202, b"review digest scheduled\n")
+        elif self.path == "/run/software/enqueue" or self.path.startswith("/run/software/enqueue?"):
+            self._handle_software_enqueue()
+        elif self.path == "/run/software/scoped" or self.path.startswith("/run/software/scoped?"):
+            self._handle_software_scoped()
         elif self.path == "/bootstrap-metabase":
             threading.Thread(target=bootstrap_metabase, daemon=True).start()
             self._respond(202, b"metabase bootstrap scheduled\n")
@@ -1126,6 +1191,296 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
         self.send_error(404)
 
+    def _handle_software_scoped(self) -> None:
+        if not _READY.is_set():
+            self._respond(503, b"still starting - try again shortly\n")
+            return
+        parsed = urlparse(self.path)
+        params = parse_qs(parsed.query)
+        confirm = params.get("confirm", ["0"])[0]
+        df = (params.get("df", [""])[0]).strip()
+
+        if confirm != "1":
+            body = f"""
+                <!doctype html>
+                <html>
+                <head>
+                  <meta charset="utf-8">
+                  <title>Software inventory — scoped refresh</title>
+                  <style>
+                    body {{ font-family: sans-serif; margin: 24px; color: #1f2933; max-width: 720px; }}
+                    label {{ display: block; font-weight: 700; margin: 16px 0 6px; }}
+                    input {{ font-size: 16px; padding: 8px 10px; width: 100%; box-sizing: border-box; }}
+                    button {{ margin-top: 18px; padding: 9px 14px; font-weight: 700; }}
+                    .hint {{ color: #52606d; font-size: 14px; margin: 4px 0 0; }}
+                    pre {{ background: #f3f4f6; padding: 10px; border-radius: 4px; font-size: 13px; }}
+                    a {{ color: #0b69a3; }}
+                  </style>
+                </head>
+                <body>
+                  <h2>Software inventory — scoped refresh</h2>
+                  <p class="hint">
+                    Pulls <code>/queries/software?df=…</code> for the specified scope and
+                    writes observations into Operations. Leaves all other devices unchanged.
+                  </p>
+                  <form method="get" action="/run/software/scoped">
+                    <input type="hidden" name="confirm" value="1">
+                    <label for="df">Device filter (df)</label>
+                    <input id="df" name="df" value="{escape(df)}"
+                           placeholder="org=123  or  id=456  or  org=123 AND id=456"
+                           required>
+                    <p class="hint">
+                      Syntax: <code>org=&lt;OrgID&gt;</code> &middot;
+                      <code>id=&lt;DeviceID&gt;</code> &middot;
+                      <code>org=123 AND id=456</code><br>
+                      Full syntax: org / loc / role / id / class / status / online / offline / group / created
+                    </p>
+                    <button type="submit">Run scoped refresh</button>
+                  </form>
+                  <p style="margin-top: 24px;"><a href="/run/software/enqueue">Queue a demand run instead</a> &middot; <a href="/run/software/queue">Queue status</a></p>
+                </body>
+                </html>
+            """.encode("utf-8")
+            self._respond_html(200, body)
+            return
+
+        if not df:
+            self._respond(400, b"missing df\n")
+            return
+
+        threading.Thread(
+            target=run_software_scoped, args=(df,), daemon=True
+        ).start()
+        self._respond(
+            202,
+            f"software scoped run scheduled (df={df!r})\n".encode("utf-8"),
+        )
+
+    def _handle_software_enqueue(self) -> None:
+        """Q2 demand queue form and submission."""
+        if not _READY.is_set():
+            self._respond(503, b"still starting - try again shortly\n")
+            return
+        parsed = urlparse(self.path)
+        params = parse_qs(parsed.query)
+        df = (params.get("df", [""])[0]).strip()
+        confirm = params.get("confirm", ["0"])[0]
+
+        if self.command == "GET" and confirm != "1":
+            body = f"""
+                <!doctype html>
+                <html>
+                <head>
+                  <meta charset="utf-8">
+                  <title>Software inventory — demand run</title>
+                  <style>
+                    body {{ font-family: sans-serif; margin: 24px; color: #1f2933; max-width: 720px; }}
+                    label {{ display: block; font-weight: 700; margin: 16px 0 6px; }}
+                    input {{ font-size: 16px; padding: 8px 10px; width: 100%; box-sizing: border-box; }}
+                    button {{ margin-top: 18px; padding: 9px 14px; font-weight: 700; }}
+                    .hint {{ color: #52606d; font-size: 14px; margin: 4px 0 0; }}
+                    a {{ color: #0b69a3; }}
+                  </style>
+                </head>
+                <body>
+                  <h2>Software inventory — demand run</h2>
+                  <p class="hint">
+                    Queues an immediate scoped pull and shows live status.
+                    Use <code>org=&lt;OrgID&gt;</code> for an entire org or
+                    <code>id=&lt;DeviceID&gt;</code> for a single device.
+                  </p>
+                  <form method="get" action="/run/software/enqueue">
+                    <input type="hidden" name="confirm" value="1">
+                    <label for="df">Scope (df)</label>
+                    <input id="df" name="df" value="{escape(df)}"
+                           placeholder="org=123  or  id=456"
+                           required>
+                    <p class="hint">
+                      Syntax: <code>org=&lt;OrgID&gt;</code> &middot;
+                      <code>id=&lt;DeviceID&gt;</code> &middot;
+                      <code>org=123 AND id=456</code>
+                    </p>
+                    <button type="submit">Run now</button>
+                  </form>
+                  <p style="margin-top: 24px;">
+                    <a href="/run/software/queue">Queue status</a> &middot;
+                    <a href="/run/software/scoped">Direct scoped run (bypasses queue)</a>
+                  </p>
+                </body>
+                </html>
+            """.encode("utf-8")
+            self._respond_html(200, body)
+            return
+
+        if not df:
+            self._respond(400, b"missing df\n")
+            return
+
+        entry_id = software_queue.enqueue_demand(df, reason="on_demand")
+        if not entry_id:
+            self._respond(500, b"failed to enqueue demand entry\n")
+            return
+
+        def _run() -> None:
+            with NinjaClient(
+                base_url=settings.NINJA_BASE_URL,
+                token_url=settings.NINJA_TOKEN_URL,
+                client_id=settings.NINJA_CLIENT_ID,
+                client_secret=settings.NINJA_CLIENT_SECRET.get_secret_value(),
+                scope=settings.NINJA_SCOPE,
+            ) as client:
+                software_queue.process_demand_entry(entry_id, client)
+
+        threading.Thread(target=_run, daemon=True).start()
+
+        # Redirect to status page.
+        location = f"/run/software/demand/{entry_id}"
+        self.send_response(303)
+        self.send_header("Location", location)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def _handle_software_demand_status(self) -> None:
+        """Status page for a Q2 demand run. Auto-refreshes until done/failed."""
+        if not _READY.is_set():
+            self._respond(503, b"still starting - try again shortly\n")
+            return
+        parts = self.path.rstrip("/").rsplit("/", 1)
+        try:
+            entry_id = int(parts[-1])
+        except (ValueError, IndexError):
+            self._respond(400, b"invalid demand entry id\n")
+            return
+
+        entry = software_queue.get_demand_status(entry_id)
+        if entry is None:
+            self._respond(404, b"demand entry not found\n")
+            return
+
+        status = entry["status"]
+        terminal = status in ("done", "failed")
+        refresh_meta = "" if terminal else '<meta http-equiv="refresh" content="5">'
+
+        status_labels = {
+            "pending": "Queued — waiting for worker",
+            "processing": "Running…",
+            "done": "Completed",
+            "failed": "Failed",
+        }
+        status_label = status_labels.get(status, status)
+
+        def _fmt(v: object) -> str:
+            return str(v) if v is not None else "—"
+
+        error_html = (
+            f'<div class="error">{escape(entry["error"])}</div>'
+            if entry.get("error") else ""
+        )
+
+        body = f"""
+            <!doctype html>
+            <html>
+            <head>
+              <meta charset="utf-8">
+              <title>Demand run #{entry_id}</title>
+              {refresh_meta}
+              <style>
+                body {{ font-family: sans-serif; margin: 24px; color: #1f2933; max-width: 720px; }}
+                h2 {{ margin-bottom: 4px; }}
+                .status {{ font-size: 18px; font-weight: 700; margin: 12px 0 20px; }}
+                .pending   {{ color: #52606d; }}
+                .processing {{ color: #0b69a3; }}
+                .done {{ color: #27ab83; }}
+                .failed {{ color: #ba2525; }}
+                table {{ border-collapse: collapse; width: 100%; }}
+                th, td {{ text-align: left; padding: 8px 12px; border-bottom: 1px solid #d9e2ec; }}
+                th {{ background: #f3f4f6; font-weight: 600; width: 160px; }}
+                .error {{ background: #fff5f5; border: 1px solid #fc8181; border-radius: 4px;
+                          padding: 12px; margin-top: 16px; font-family: monospace; font-size: 13px;
+                          white-space: pre-wrap; word-break: break-all; }}
+                a {{ color: #0b69a3; }}
+                .links {{ margin-top: 24px; }}
+              </style>
+            </head>
+            <body>
+              <h2>Demand run #{entry_id}</h2>
+              <p class="status {status}">{escape(status_label)}</p>
+              <table>
+                <tr><th>Scope (df)</th><td><code>{escape(entry["df"])}</code></td></tr>
+                <tr><th>Reason</th><td>{escape(entry["reason"] or "—")}</td></tr>
+                <tr><th>Queued</th><td>{_fmt(entry["queued_at"])}</td></tr>
+                <tr><th>Started</th><td>{_fmt(entry["started_at"])}</td></tr>
+                <tr><th>Completed</th><td>{_fmt(entry["completed_at"])}</td></tr>
+                <tr><th>Rows processed</th><td>{_fmt(entry["rows_seen"])}</td></tr>
+                <tr><th>Attempts</th><td>{entry["attempts"]} / {entry["max_attempts"]}</td></tr>
+              </table>
+              {error_html}
+              <p class="links">
+                <a href="/run/software/enqueue">New demand run</a> &middot;
+                <a href="/run/software/queue">Queue status</a>
+              </p>
+            </body>
+            </html>
+        """.encode("utf-8")
+        self._respond_html(200, body)
+
+    def _handle_software_queue_status(self) -> None:
+        """Overview of all three software queues."""
+        if not _READY.is_set():
+            self._respond(503, b"still starting - try again shortly\n")
+            return
+        counts = software_queue.queue_counts()
+        statuses = ["pending", "processing", "done", "failed"]
+
+        def _row(name: str) -> str:
+            c = counts.get(name, {})
+            cells = "".join(f"<td>{c.get(s, 0)}</td>" for s in statuses)
+            return f"<tr><th>{name}</th>{cells}</tr>"
+
+        body = f"""
+            <!doctype html>
+            <html>
+            <head>
+              <meta charset="utf-8">
+              <title>Software queue status</title>
+              <meta http-equiv="refresh" content="30">
+              <style>
+                body {{ font-family: sans-serif; margin: 24px; color: #1f2933; max-width: 720px; }}
+                table {{ border-collapse: collapse; width: 100%; margin-top: 16px; }}
+                th, td {{ text-align: left; padding: 8px 12px; border-bottom: 1px solid #d9e2ec; }}
+                thead th {{ background: #f3f4f6; font-weight: 600; }}
+                .hint {{ color: #52606d; font-size: 14px; }}
+                a {{ color: #0b69a3; }}
+              </style>
+            </head>
+            <body>
+              <h2>Software queue status</h2>
+              <p class="hint">Auto-refreshes every 30 s. Queue enabled: <strong>{"yes" if settings.SOFTWARE_QUEUE_ENABLED else "no"}</strong></p>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Queue</th>
+                    <th>Pending</th>
+                    <th>Processing</th>
+                    <th>Done</th>
+                    <th>Failed</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {_row("scheduled")}
+                  {_row("demand")}
+                  {_row("activity")}
+                </tbody>
+              </table>
+              <p style="margin-top: 24px;">
+                <a href="/run/software/enqueue">New demand run</a> &middot;
+                <a href="/run/software/scoped">Direct scoped run</a>
+              </p>
+            </body>
+            </html>
+        """.encode("utf-8")
+        self._respond_html(200, body)
+
     def _respond(self, code: int, body: bytes) -> None:
         self.send_response(code)
         self.send_header("Content-Type", "text/plain")
@@ -1156,7 +1511,9 @@ def _start_http_server() -> _ThreadingServer:
     log.info(
         "HTTP server listening on %s:%d "
         "(/healthz liveness, /readyz readiness, /run, /run/patches, "
-        "/run/agent-compliance, /run/agent-compliance-evaluate, /bootstrap-metabase)",
+        "/run/agent-compliance, /run/agent-compliance-evaluate, "
+        "/run/software/enqueue, /run/software/scoped, /run/software/queue, "
+        "/run/software/demand/<id>, /bootstrap-metabase)",
         *addr,
     )
     return httpd
@@ -1211,11 +1568,35 @@ def main() -> None:
                 id="agent_compliance_review_digest",
                 max_instances=1,
             )
+    if settings.SOFTWARE_QUEUE_ENABLED:
+        scheduler.add_job(
+            enqueue_all_orgs_once,
+            "interval",
+            hours=settings.SOFTWARE_INGEST_SCHEDULE_HOURS,
+            id="software_enqueue_orgs_cycle",
+            max_instances=1,
+        )
+        scheduler.add_job(
+            run_software_queue_once,
+            "interval",
+            minutes=settings.SOFTWARE_QUEUE_POLL_MINUTES,
+            id="software_queue_drain_cycle",
+            max_instances=1,
+        )
     scheduler.start()
     log.info(
         "Patch scheduler started (every %dh)",
         settings.patch_ingest_schedule_hours,
     )
+    if settings.SOFTWARE_QUEUE_ENABLED:
+        log.info(
+            "Software queue enabled: org enqueue every %dh, worker every %dm (batch=%d)",
+            settings.SOFTWARE_INGEST_SCHEDULE_HOURS,
+            settings.SOFTWARE_QUEUE_POLL_MINUTES,
+            settings.SOFTWARE_QUEUE_WORKER_BATCH,
+        )
+    else:
+        log.info("Software queue disabled (SOFTWARE_QUEUE_ENABLED=false)")
     if settings.AGENT_COMPLIANCE_ENABLED:
         log.info(
             "Agent compliance scheduler started (every %dh)",

@@ -37,6 +37,10 @@ class Settings(BaseSettings):
     PATCH_INGEST_SCHEDULE_HOURS: int | None = Field(default=None, ge=1, le=24)
     AGENT_COMPLIANCE_ENABLED: bool = False
     AGENT_COMPLIANCE_SCHEDULE_HOURS: int = Field(default=4, ge=1, le=24)
+    SOFTWARE_INGEST_SCHEDULE_HOURS: int = Field(default=24, ge=1, le=168)
+    SOFTWARE_QUEUE_ENABLED: bool = False
+    SOFTWARE_QUEUE_POLL_MINUTES: int = Field(default=5, ge=1, le=60)
+    SOFTWARE_QUEUE_WORKER_BATCH: int = Field(default=3, ge=1, le=20)
     AGENT_COMPLIANCE_EVALUATE_SCHEDULE_MINUTES: int = Field(default=30, ge=5, le=1440)
     INGEST_LOG_LEVEL: str = "INFO"
     INGEST_HTTP_PORT: int = 8090
