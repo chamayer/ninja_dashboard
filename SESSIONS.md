@@ -5,6 +5,26 @@ were made, what's pending. Useful for resuming interrupted work.
 
 ---
 
+## 2026-07-07 — v0.35.5 Operations redeploy-session fix
+
+**Why:** After an Operations redeploy, the admin user had to log in again even
+when `OPERATIONS_INITIAL_ADMIN_PASSWORD` had not changed.
+
+**Fix:** Made the Operations startup password sync idempotent. It now checks
+the existing admin password first and only calls `set_password()` when the env
+password actually changed, avoiding Django session-auth-hash invalidation on
+ordinary redeploys.
+
+**Validation:** `python operations\manage.py check --settings=config.settings.dev`
+passed, `python operations\manage.py makemigrations --check --dry-run
+--settings=config.settings.dev` passed, and a targeted two-run command test
+confirmed the stored password hash stays unchanged on the second run.
+
+**Pending:** Push after commit approval, then let Portainer redeploy and
+confirm an existing Operations admin browser session survives a redeploy.
+
+---
+
 ## 2026-07-06 — Operations M0 resumed as module-scoped WIP
 
 **Why:** Operations M0 work resumed from Claude handoff

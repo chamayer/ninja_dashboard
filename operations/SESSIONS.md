@@ -5,6 +5,34 @@ only project-level pointers.
 
 ---
 
+## 2026-07-07 — Admin session preservation across redeploys
+
+**Why:** The Operations container startup command re-applied the initial admin
+password on every redeploy. Django salts each password hash, so even the same
+password produced a new stored hash and invalidated existing admin sessions.
+
+**Work completed locally:**
+
+- Updated `set_initial_admin_password` to check the current admin password
+  before calling `set_password()`.
+- Kept flag repair behavior for `is_active`, `is_staff`, and `is_superuser`.
+- Added command output that reports whether the password or flags changed.
+
+**Validation:**
+
+- `python operations\manage.py check --settings=config.settings.dev` passed.
+- `python operations\manage.py makemigrations --check --dry-run --settings=config.settings.dev`
+  passed.
+- A targeted two-run command test confirmed the second run skips and the
+  stored password hash remains unchanged.
+- `python -m ruff check operations` still fails on pre-existing unrelated lint
+  in `forms.py`, `views.py`, and `bootstrap_devices_from_ninja.py`.
+
+**Pending:** Push, redeploy, and confirm an existing browser session survives a
+Portainer redeploy.
+
+---
+
 ## 2026-07-06 — M0 deployability checkpoint
 
 **Why:** We realized M0 cannot be considered healthy just because schema

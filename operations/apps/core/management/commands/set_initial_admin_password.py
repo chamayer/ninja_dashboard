@@ -44,13 +44,35 @@ class Command(BaseCommand):
             )
             return
 
-        user.set_password(password)
-        user.is_active = True
-        user.is_staff = True
-        user.is_superuser = True
-        user.save(update_fields=["password", "is_active", "is_staff", "is_superuser"])
+        # Idempotent: only re-hash the password if it actually changed.
+        # Calling set_password every startup changes the stored hash (fresh
+        # salt), which changes the user's session auth hash — Django then
+        # invalidates every existing session, forcing a fresh login on
+        # every container restart. Skip the write if the env password
+        # already matches what's stored.
+        password_changed = not user.check_password(password)
+        flags_changed = not (user.is_active and user.is_staff and user.is_superuser)
+
+        if not password_changed and not flags_changed:
+            self.stdout.write(
+                "[set_initial_admin_password] admin already up to date; skipping."
+            )
+            return
+
+        update_fields = []
+        if password_changed:
+            user.set_password(password)
+            update_fields.append("password")
+        if flags_changed:
+            user.is_active = True
+            user.is_staff = True
+            user.is_superuser = True
+            update_fields.extend(["is_active", "is_staff", "is_superuser"])
+
+        user.save(update_fields=update_fields)
         self.stdout.write(
             self.style.SUCCESS(
-                "[set_initial_admin_password] admin password updated from env."
+                "[set_initial_admin_password] admin updated "
+                f"(password_changed={password_changed}, flags_changed={flags_changed})."
             )
         )

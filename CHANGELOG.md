@@ -2,6 +2,13 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.35.5] — 2026-07-07
+
+### Fixed
+- Preserved Operations admin sessions across container redeploys by making
+  the startup admin-password sync skip password re-hashing when the
+  configured password already matches the stored admin password.
+
 ## [0.35.4] — 2026-07-03
 
 ### Fixed
