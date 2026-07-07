@@ -37,6 +37,9 @@ NinjaRMM-API-v2*.json
 .DS_Store
 Thumbs.db
 
+# ── Local scripts (contain credentials, not for repo) ────────────────
+inventory-scripts/
+
 # ── Operations (Django) ──────────────────────────────────────────────
 operations/skeleton.sqlite3
 operations/staticfiles/
