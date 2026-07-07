@@ -6,7 +6,9 @@ from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_GET
 
-from .models import Client, Device, Finding, FindingType
+from django.db.models import Count, Q
+
+from .models import Client, Device, Finding, FindingType, MergeCandidate
 
 
 @require_GET
@@ -39,9 +41,20 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
             client.links.select_related("source").order_by("source__name")
         )
     else:
-        ctx["all_device_count"] = Device.objects.filter(
-            tenant_id=1, deleted_at__isnull=True
-        ).count()
+        # All-clients view: per-client device counts + fleet totals.
+        clients_with_counts = list(
+            Client.objects.filter(tenant_id=1, deleted_at__isnull=True)
+            .annotate(
+                device_count=Count(
+                    "devices",
+                    filter=Q(devices__deleted_at__isnull=True),
+                )
+            )
+            .order_by("-device_count", "display_name")
+        )
+        ctx["clients_with_counts"] = clients_with_counts
+        ctx["all_device_count"] = sum(c.device_count for c in clients_with_counts)
+        ctx["all_client_count"] = len(clients_with_counts)
     return render(request, "org_index.html", ctx)
 
 
@@ -110,5 +123,39 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             "active_status": status_filter,
             "active_severity": severity_filter,
             "active_type": type_filter,
+        },
+    )
+
+
+@login_required
+def merge_candidates_queue(request: HttpRequest) -> HttpResponse:
+    """Cross-source merge candidate review queue. Empty until multi-source ingest lands."""
+    status_filter = request.GET.get("status", MergeCandidate.Status.OPEN)
+    entity_filter = request.GET.get("entity", "")
+
+    qs = MergeCandidate.objects.filter(tenant_id=1).select_related("client")
+
+    if status_filter and status_filter != "all":
+        qs = qs.filter(status=status_filter)
+    if entity_filter:
+        qs = qs.filter(entity_type=entity_filter)
+
+    qs = qs.order_by("-confidence", "canonical_key")[:200]
+
+    entity_types = (
+        MergeCandidate.objects.filter(tenant_id=1)
+        .values_list("entity_type", flat=True)
+        .distinct()
+    )
+
+    return render(
+        request,
+        "merge_candidates_queue.html",
+        {
+            "candidates": qs,
+            "status_choices": MergeCandidate.Status.choices,
+            "entity_types": sorted(set(entity_types)),
+            "active_status": status_filter,
+            "active_entity": entity_filter,
         },
     )

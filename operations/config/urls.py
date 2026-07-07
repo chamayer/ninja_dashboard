@@ -16,6 +16,7 @@ from apps.core.views import (
     findings_queue,
     healthz,
     home,
+    merge_candidates_queue,
     org_index,
 )
 
@@ -25,6 +26,7 @@ urlpatterns = [
     path("orgs/<slug:org_slug>/", org_index, name="org_index"),
     path("orgs/<slug:org_slug>/devices/<uuid:device_id>/", device_detail, name="device_detail"),
     path("findings/", findings_queue, name="findings_queue"),
+    path("merge-candidates/", merge_candidates_queue, name="merge_candidates_queue"),
     path("switch/", client_switch, name="client_switch"),
     path("admin/", admin.site.urls),
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),

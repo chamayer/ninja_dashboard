@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+
+{% block title %}Merge candidates{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h1>Merge candidates</h1>
+    <p class="muted">
+        Cross-source matches proposed by the merge detector. Approve / reject / split
+        (workflow lands with M2+ once multi-source ingest exists).
+    </p>
+</div>
+
+<div class="card">
+    <form action="" method="get" style="display: flex; gap: 1rem; flex-wrap: wrap; align-items: end;">
+        <div>
+            <label for="filter-status" style="display: block; font-size: 0.8rem; color: var(--muted);">Status</label>
+            <select id="filter-status" name="status">
+                <option value="all"{% if active_status == "all" %} selected{% endif %}>All</option>
+                {% for value, label in status_choices %}
+                    <option value="{{ value }}"{% if active_status == value %} selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <label for="filter-entity" style="display: block; font-size: 0.8rem; color: var(--muted);">Entity type</label>
+            <select id="filter-entity" name="entity">
+                <option value="">Any</option>
+                {% for et in entity_types %}
+                    <option value="{{ et }}"{% if active_entity == et %} selected{% endif %}>{{ et }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <button type="submit" style="padding: 0.5rem 1rem;">Apply</button>
+        </div>
+    </form>
+</div>
+
+<div class="card">
+    {% if candidates %}
+    <table style="width: 100%; border-collapse: collapse;">
+        <thead>
+            <tr style="text-align: left; border-bottom: 1px solid var(--border);">
+                <th style="padding: 0.5rem;">Entity</th>
+                <th style="padding: 0.5rem;">Canonical key</th>
+                <th style="padding: 0.5rem;">Client</th>
+                <th style="padding: 0.5rem;">Members</th>
+                <th style="padding: 0.5rem;">Confidence</th>
+                <th style="padding: 0.5rem;">Status</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for c in candidates %}
+            <tr style="border-bottom: 1px solid var(--border);">
+                <td style="padding: 0.5rem;"><code>{{ c.entity_type }}</code></td>
+                <td style="padding: 0.5rem;">{{ c.canonical_key }}</td>
+                <td style="padding: 0.5rem;">{{ c.client.display_name|default:"—" }}</td>
+                <td style="padding: 0.5rem;">{{ c.member_snapshots|length }}</td>
+                <td style="padding: 0.5rem;">{{ c.confidence|default:"—" }}</td>
+                <td style="padding: 0.5rem;">{{ c.get_status_display }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="muted">
+        No merge candidates. Multi-source detection lands once SentinelOne / LogMeIn /
+        ScreenConnect ingest starts writing observations.
+    </p>
+    {% endif %}
+</div>
+{% endblock %}

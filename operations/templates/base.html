@@ -83,6 +83,7 @@
         </div>
         <div class="user-info">
             <a href="{% url 'findings_queue' %}">findings</a> ·
+            <a href="{% url 'merge_candidates_queue' %}">merges</a> ·
             {{ user.username }} ·
             <a href="{% url 'admin:index' %}">admin</a> ·
             <a href="{% url 'admin:logout' %}">logout</a>
