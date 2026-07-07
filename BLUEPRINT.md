@@ -36,6 +36,8 @@ implementation plan should not overwrite unrelated root project context.
 
 # Status
 
-In progress. Operations M0.3-M0.10 plus the M0 deployability checkpoint exist
-locally. Next build checkpoint is M0.11 bootstrap clients from
-`ninja_core.organizations`.
+In progress. Operations M0 foundation, M0.11/M0.12 bootstrap/UI scaffold,
+M1.1 device bootstrap, initial M1 queues/pages, and the v0.35.5 redeploy
+session fix are committed and pushed through `746770e`. Resume from
+`operations/BUILD_BLUEPRINT.md`: live Portainer validation is the active
+checkpoint before the next implementation slice.

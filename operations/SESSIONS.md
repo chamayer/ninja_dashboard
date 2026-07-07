@@ -5,6 +5,32 @@ only project-level pointers.
 
 ---
 
+## 2026-07-07 — Checkpoint docs reconciled to committed Operations state
+
+**Why:** The active build blueprint and TODO still described M0.11/M0.12/M0.15
+as pending, but the commit history showed M0.11/M0.12, device bootstrap, and
+several M1 UI/data pages were already committed and pushed.
+
+**Work completed locally:**
+
+- Updated `operations/BUILD_BLUEPRINT.md` to make live Portainer validation
+  the active checkpoint.
+- Moved obsolete M0.11/M0.12/current-WIP items out of `operations/TODO.md`.
+- Recorded completed Operations slices through `746770e`.
+
+**Current checkpoint:**
+
+- Validate commit `746770e` in the Portainer-managed `ninja-dashboard` stack.
+- Confirm migrations/bootstrap, `/healthz`, populated clients/devices, and
+  same-password redeploy session preservation.
+- Choose the next M1 implementation slice only after that validation is known.
+
+**Validation:** Documentation-only change; no code checks required.
+
+**Pending:** Live Portainer validation.
+
+---
+
 ## 2026-07-07 — Admin session preservation across redeploys
 
 **Why:** The Operations container startup command re-applied the initial admin
@@ -28,8 +54,8 @@ password produced a new stored hash and invalidated existing admin sessions.
 - `python -m ruff check operations` still fails on pre-existing unrelated lint
   in `forms.py`, `views.py`, and `bootstrap_devices_from_ninja.py`.
 
-**Pending:** Push, redeploy, and confirm an existing browser session survives a
-Portainer redeploy.
+**Pending:** Redeploy and confirm an existing browser session survives a
+Portainer redeploy. Commit `746770e` has been pushed to both remotes.
 
 ---
 

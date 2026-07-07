@@ -7,7 +7,6 @@ module-specific; root `../TODO.md` keeps cross-repo items and pointers.
 
 ## Inbox
 
-- [ ] Review current M0.3-M0.10 WIP diff before committing.
 - [ ] Validate Operations container build/start on a Docker-capable host:
       migrations should run as `operations_migrate`, Gunicorn should run with
       `operations_app`, and `/healthz` should pass on `127.0.0.1:8091`.
@@ -18,9 +17,12 @@ module-specific; root `../TODO.md` keeps cross-repo items and pointers.
 
 ### M0 build
 
-- [ ] M0.11 bootstrap clients from `ninja_core.organizations`.
-- [ ] M0.12 brand context/base template/client selector.
-- [ ] M0.15 CI and pre-commit configuration.
+- [ ] Live-validate the committed Operations container through Portainer:
+      confirm commit `746770e`, startup migrations/bootstrap, `/healthz`,
+      populated clients/devices, and same-password redeploy session
+      preservation.
+- [ ] Decide whether to restore CI/pre-commit after resolving current Ruff
+      lint debt, or keep it deferred until tests/lint policy settle.
 
 ### Stack-wide (post-M0)
 
@@ -34,9 +36,6 @@ module-specific; root `../TODO.md` keeps cross-repo items and pointers.
 
 ### Process
 
-- [ ] Split current uncommitted WIP into approved logical commits:
-      auth/tenant foundation, canonical entities, source/collector bindings,
-      and independent health/runbook stubs.
 - [ ] Tighten `/amr-ch-01_data/ninja-dashboard/.env` permissions to `0640`
       root:docker (currently 0644 world-readable). Coordinate with existing
       ingest/metabase/postgres containers so they can still read it after
@@ -61,3 +60,16 @@ module-specific; root `../TODO.md` keeps cross-repo items and pointers.
 - [x] 2026-07-06: Added M0.10 seed groups, permissions, taxonomy, and finding types.
 - [x] 2026-07-06: Added M0 deployability role split for container startup.
 - [x] 2026-07-06: Added module-level Operations build/session/TODO docs.
+- [x] 2026-07-06: Added M0.11 bootstrap clients from
+      `ninja_core.organizations` (`f13fc9b`).
+- [x] 2026-07-06: Added M0.12 brand context, base template, and client
+      selector (`aab87da`).
+- [x] 2026-07-06: Added and then removed CI/pre-commit while lint policy was
+      still unsettled (`1828e90`, `1e3a665`).
+- [x] 2026-07-06: Added M1.1 bootstrap devices from `ninja_core.devices`
+      (`afee1bf`).
+- [x] 2026-07-06: Added device list/detail pages, findings queue, fleet view,
+      merge candidates queue, policy editor, and summary sub-pages
+      (`c32dae5`..`25584a0`).
+- [x] 2026-07-07: Preserved Operations admin sessions across same-password
+      redeploys (`746770e`).
