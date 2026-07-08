@@ -15,7 +15,7 @@ def create_identity_candidates(apps, schema_editor):
         return
     schema_editor.execute(
         """
-        CREATE TABLE operations.identity_candidates (
+        CREATE TABLE IF NOT EXISTS operations.identity_candidates (
             id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             tenant_id      BIGINT NOT NULL,
             observation_id UUID REFERENCES operations.entity_observations(observation_id)
@@ -32,13 +32,12 @@ def create_identity_candidates(apps, schema_editor):
         """
     )
     schema_editor.execute(
-        "CREATE INDEX ON operations.identity_candidates (tenant_id, status);"
+        "CREATE INDEX IF NOT EXISTS idx_identity_candidates_tenant_status"
+        " ON operations.identity_candidates (tenant_id, status);"
     )
-    # One pending candidate per observation — prevents duplicate rows when
-    # the resolver re-processes the same unresolved observation.
     schema_editor.execute(
         """
-        CREATE UNIQUE INDEX uq_identity_candidates_observation
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_identity_candidates_observation
             ON operations.identity_candidates (observation_id)
             WHERE observation_id IS NOT NULL;
         """
