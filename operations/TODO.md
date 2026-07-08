@@ -38,9 +38,9 @@ Batch A3 — new platform tables (Phase 4):
 - [x] Phase 4: Django migration 0014 — CoverageRequirement, AdminFinding, QueueRegistry, IdentityCandidate, NotificationRule, NotificationState, NotificationEvent + RLS
 
 Batch B — data sync + connectors (Phases 5–7, ship together):
-- [ ] Phase 5: ingest/core/devices.py — _sync_operations_device_links after _mark_missing_devices
-- [ ] Phase 6: new package ingest/identity/ — fast_path.py + resolver.py
-- [ ] Phase 7: Django migration 0015 (S1/SC SourceBindings) + dual-write to entity_observations in sentinelone.py + screenconnect.py
+- [x] Phase 5: ingest/core/devices.py — _sync_operations_device_links after _mark_missing_devices
+- [x] Phase 6: new package ingest/identity/ — fast_path.py + resolver.py
+- [x] Phase 7: Django migration 0015 (S1/SC SourceBindings) + dual-write to entity_observations in ingest.py
 
 Batch C — evaluator + compliance rebuild (Phases 8–10, ship together):
 - [ ] Phase 8: ingest/evaluator.py — platform evaluator + schedule in main.py

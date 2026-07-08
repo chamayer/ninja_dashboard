@@ -5,6 +5,28 @@ only project-level pointers.
 
 ---
 
+## 2026-07-08 — Batch B (Phases 5–7)
+
+**Why:** Data sync: keep operations.device_links in sync with Ninja pull,
+seed S1/SC/LMI source bindings, dual-write AC observations into
+operations.entity_observations, ship identity fast_path and polling resolver.
+
+**Work completed:**
+
+- Phase 5: _sync_operations_device_links() added to ingest/core/devices.py —
+  three UPDATE statements inside the existing Ninja device transaction to keep
+  operations.device_links.last_seen_at/missing_since in sync.
+- Phase 6: ingest/identity/__init__.py + fast_path.py + resolver.py — inline
+  device resolution (source link → serial → hostname) and polling v1 resolver
+  for entity_observations with NULL device_id.
+- Phase 7: migration 0015 seeds SentinelOne/ScreenConnect/LogMeIn source
+  bindings with fixed UUIDs. ingest.py dual-writes AC observations into
+  operations.entity_observations for S1/SC/LMI platforms.
+
+**Deployed:** v0.39.0
+
+---
+
 ## 2026-07-08 — Platform foundation Batch A3 (Phase 4)
 
 **Why:** Create all new platform tables needed by the evaluator, identity

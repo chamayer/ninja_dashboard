@@ -97,6 +97,7 @@ def run(client: NinjaClient, snapshot_at: datetime) -> tuple[int, int]:
                 "existing devices as missing"
             )
 
+        current_ids = [row["id"] for row in device_rows]
         with db.transaction() as cur:
             dev_count = db.upsert(
                 cur, "ninja_core.devices", device_rows, conflict_keys=["id"],
@@ -107,11 +108,8 @@ def run(client: NinjaClient, snapshot_at: datetime) -> tuple[int, int]:
                 snapshot_rows,
                 conflict_keys=["snapshot_at", "device_id"],
             )
-            missing_count = _mark_missing_devices(
-                cur,
-                [row["id"] for row in device_rows],
-                snapshot_at,
-            )
+            missing_count = _mark_missing_devices(cur, current_ids, snapshot_at)
+            _sync_operations_device_links(cur, current_ids, snapshot_at)
 
         _refresh_active_devices_view()
         stats["rows_upserted"] = dev_count
@@ -141,6 +139,46 @@ def _mark_missing_devices(cur: object, current_ids: list[int], snapshot_at: date
         {"snapshot_at": snapshot_at, "current_ids": current_ids},
     )
     return cur.rowcount
+
+
+def _sync_operations_device_links(cur: object, current_ids: list[int], snapshot_at: datetime) -> None:
+    """Keep operations.device_links.last_seen_at and missing_since in sync with the Ninja pull."""
+    cur.execute("SET LOCAL operations.tenant_id = 1")
+    ids_text = [str(i) for i in current_ids]
+    params = {"snapshot_at": snapshot_at, "ids": ids_text}
+    cur.execute(
+        """
+        UPDATE operations.device_links dl
+        SET last_seen_at = %(snapshot_at)s
+        FROM operations.sources s
+        WHERE dl.source_id = s.id AND s.name = 'Ninja'
+          AND dl.external_id = ANY(%(ids)s)
+          AND dl.missing_since IS NULL
+        """,
+        params,
+    )
+    cur.execute(
+        """
+        UPDATE operations.device_links dl
+        SET missing_since = %(snapshot_at)s
+        FROM operations.sources s
+        WHERE dl.source_id = s.id AND s.name = 'Ninja'
+          AND NOT (dl.external_id = ANY(%(ids)s))
+          AND dl.missing_since IS NULL
+        """,
+        params,
+    )
+    cur.execute(
+        """
+        UPDATE operations.device_links dl
+        SET missing_since = NULL
+        FROM operations.sources s
+        WHERE dl.source_id = s.id AND s.name = 'Ninja'
+          AND dl.external_id = ANY(%(ids)s)
+          AND dl.missing_since IS NOT NULL
+        """,
+        params,
+    )
 
 
 def _refresh_active_devices_view() -> None:

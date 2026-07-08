@@ -2,6 +2,25 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.39.0] — 2026-07-08
+
+### Added
+- `ingest/core/devices.py`: syncs `operations.device_links.last_seen_at` and
+  `missing_since` on every Ninja full-pull (Phase 5). Runs inside the same
+  transaction as the ninja_core upserts.
+- `ingest/identity/fast_path.py`: inline device identity resolver — exact
+  source link → unique serial → unique hostname (Phase 6).
+- `ingest/identity/resolver.py`: polling v1 resolver for `entity_observations`
+  with NULL device_id — scans, resolves by hostname, logs multi-match misses
+  (Phase 6).
+- `operations/apps/core/migrations/0015`: seeds SentinelOne, ScreenConnect,
+  LogMeIn as Sources + SourceInstances + SourceBindings with fixed UUIDs
+  (Phase 7).
+- `ingest/agent_compliance/ingest.py`: dual-writes S1/SC/LMI observations into
+  `operations.entity_observations` after the existing platform_observations
+  write. Uses `fast_path.resolve_device_fast` for inline device resolution
+  (Phase 7).
+
 ## [0.38.0] — 2026-07-08
 
 ### Added
