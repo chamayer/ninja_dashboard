@@ -43,9 +43,9 @@ Batch B — data sync + connectors (Phases 5–7, ship together):
 - [x] Phase 7: Django migration 0015 (S1/SC SourceBindings) + dual-write to entity_observations in ingest.py
 
 Batch C — evaluator + compliance rebuild (Phases 8–10, ship together):
-- [ ] Phase 8: ingest/evaluator.py — platform evaluator + schedule in main.py
-- [ ] Phase 9: ingest/agent_compliance/ingest.py — replace internal evaluate() with platform evaluator
-- [ ] Phase 10: Django migration 0016 — agent_presence_current materialized view
+- [x] Phase 8: ingest/evaluator.py — platform evaluator + schedule in main.py
+- [x] Phase 9: ingest/agent_compliance/ingest.py — calls platform_evaluate() after AC run
+- [x] Phase 10: Django migration 0016 — agent_presence_current materialized view
 
 Batch D — web pages (Phase 11):
 - [ ] Phase 11: findings review page (/findings/) + admin health page (/admin/findings/health/)

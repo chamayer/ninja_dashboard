@@ -67,6 +67,7 @@ from ingest.core import (
 )
 from ingest.policy_scope import sync_patching_enabled_policies
 from ingest.ninja_client import NinjaClient
+from ingest.evaluator import evaluate as platform_evaluate
 from ingest.patches import ingest as patches_ingest
 from ingest.summary_views import refresh_device_troubleshooting_signal
 
@@ -206,6 +207,15 @@ def schedule_agent_compliance_evaluate(reason: str) -> bool:
     log.info("Scheduling agent compliance evaluate: %s", reason)
     threading.Thread(target=run_agent_compliance_evaluate_once, daemon=True).start()
     return True
+
+
+def run_platform_evaluate_once() -> None:
+    """Run the platform evaluator for tenant 1."""
+    try:
+        affected = platform_evaluate(tenant_id=1)
+        log.info("Platform evaluate complete: findings_affected=%d", affected)
+    except Exception:
+        log.exception("Platform evaluate failed")
 
 
 def run_review_digest_once() -> None:
@@ -1568,6 +1578,13 @@ def main() -> None:
                 id="agent_compliance_review_digest",
                 max_instances=1,
             )
+    scheduler.add_job(
+        run_platform_evaluate_once,
+        "interval",
+        hours=4,
+        id="platform_evaluate_cycle",
+        max_instances=1,
+    )
     if settings.SOFTWARE_QUEUE_ENABLED:
         scheduler.add_job(
             enqueue_all_orgs_once,

@@ -5,6 +5,26 @@ only project-level pointers.
 
 ---
 
+## 2026-07-08 — Batch C (Phases 8–10)
+
+**Why:** Platform evaluator, compliance engine rebuild, agent_presence_current
+materialized view.
+
+**Work completed:**
+
+- Phase 8: ingest/evaluator.py — platform evaluator with coverage gap analysis,
+  device lifecycle findings (missing_from_source, long_offline), and
+  auto-resolve. Wired into main.py APScheduler (every 4h).
+- Phase 9: ingest/agent_compliance/ingest.py — calls platform_evaluate() after
+  each full AC run. Also refreshes agent_presence_current.
+- Phase 10: migration 0016 — creates operations.agent_presence_current
+  materialized view aggregating agent.* entity_observations per device per
+  platform. CONCURRENT refresh function. Grants to all reader roles.
+
+**Deployed:** v0.40.0
+
+---
+
 ## 2026-07-08 — Batch B (Phases 5–7)
 
 **Why:** Data sync: keep operations.device_links in sync with Ninja pull,

@@ -2,6 +2,21 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.40.0] — 2026-07-08
+
+### Added
+- `ingest/evaluator.py`: platform evaluator — reads `coverage_requirements`
+  and `entity_observations` to UPSERT entity findings; also opens
+  `device_missing_from_source` and `device_long_offline` lifecycle findings;
+  auto-resolves findings where condition clears. Scheduled every 4 h in
+  main.py. (Phase 8)
+- `ingest/agent_compliance/ingest.py`: calls `platform_evaluate(tenant_id=1)`
+  after each full AC run and refreshes `agent_presence_current`. (Phase 9)
+- `operations/apps/core/migrations/0016`: creates
+  `operations.agent_presence_current` materialized view (agent.* entity
+  observations aggregated per device/platform) with CONCURRENT refresh
+  function. Grants SELECT to all reader roles. (Phase 10)
+
 ## [0.39.0] — 2026-07-08
 
 ### Added

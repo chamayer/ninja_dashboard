@@ -27,6 +27,7 @@ from ingest.agent_compliance.config_loader import (
     upsert_id_links_from_observations,
 )
 from ingest.agent_compliance.normalize import is_macos_name, normalize_loose_hostname
+from ingest.evaluator import evaluate as platform_evaluate
 from ingest.identity.fast_path import resolve_device_fast
 from ingest.runlog import run_log
 
@@ -123,7 +124,16 @@ def run() -> tuple[int, int]:
         renames_detected = _detect_device_renames(run_id, source_run_ids)
         if renames_detected:
             log.info("Agent compliance detected %d device renames", renames_detected)
+        try:
+            with db.transaction() as cur:
+                cur.execute("SELECT operations.refresh_agent_presence_current()")
+        except Exception:
+            log.exception("agent_presence_current refresh failed — continuing")
         alerts_sent = alerts.process_alerts(run_id, observed_at)
+        try:
+            platform_evaluate(tenant_id=1)
+        except Exception:
+            log.exception("platform evaluator failed during AC run — continuing")
 
         stats["rows_inserted"] = len(all_observations) + len(matrix_rows) + len(finding_rows)
         stats["rows_upserted"] = len(matrix_rows)
