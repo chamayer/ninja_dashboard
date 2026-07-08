@@ -188,7 +188,11 @@ def recover_stale_entries() -> int:
             UPDATE {_DEMAND_TABLE}
             SET status = 'failed',
                 completed_at = NOW(),
-                error = 'lease expired — resubmit'
+                error = CASE
+                    WHEN error IS NOT NULL AND error <> ''
+                    THEN error || ' | lease expired — resubmit'
+                    ELSE 'lease expired — resubmit'
+                END
             WHERE status = 'processing'
               AND started_at < NOW() - INTERVAL '{_LEASE_MINUTES} minutes'
             """,
