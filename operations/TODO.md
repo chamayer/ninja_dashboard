@@ -98,6 +98,24 @@ Architecture options when we get here:
       entity_type (e.g. `security.threat`, `patch.failure`) so the evaluator
       picks them up naturally — cleaner but requires new entity types.
 
+### Operator UX — next up
+
+- [ ] **Home page high-level cards:** fleet device count, active findings by
+      severity, coverage gap summary (platforms missing), recent software
+      decisions. Currently home.html is a stub.
+- [ ] **Client page — agent presence / entity type cards:** show per-platform
+      coverage counts (Ninja/S1/SC/LMI) from agent_presence_current with
+      clickthrough to filtered device list. No representation of new entity
+      types on the client landing page today.
+- [ ] **Software review workflow:** decision summary tab on client page
+      (approved/rejected/pending counts), bulk-decide by publisher.
+- [ ] **Reusable scope selector:** extract org/device picker used in demand
+      form into a Django template partial + view helper so findings filters,
+      coverage requirement editor, and other views can include it without
+      duplication.
+- [ ] **Device detail page:** add agent presence section (which platforms
+      observed this device, last seen per platform) and active findings list.
+
 ### Stack-wide (post-M0)
 
 - [ ] Product direction: Operations is the operational data browser and

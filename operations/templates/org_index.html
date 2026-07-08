@@ -52,6 +52,21 @@
     </p>
 </div>
 
+<style>
+  .cov-bar-wrap { height: 6px; background: #e8edf2; border-radius: 3px; margin-top: 0.4rem; overflow: hidden; }
+  .cov-bar-fill { height: 100%; border-radius: 3px; transition: width 0.3s; }
+  .cov-critical { background: #c0392b; }
+  .cov-high     { background: #e67e22; }
+  .cov-medium   { background: #f1c40f; }
+  .cov-low      { background: #27ae60; }
+  .cov-ok       { background: #27ae60; }
+  .cov-row { display: flex; justify-content: space-between; align-items: center; font-size: 0.82rem; }
+  .cov-gap { font-weight: 600; }
+  .cov-gap.gap-crit { color: #c0392b; }
+  .cov-gap.gap-high { color: #e67e22; }
+  .cov-gap.gap-ok   { color: #27ae60; }
+</style>
+
 <div class="summary-grid">
     <a class="summary-tile" href="{% url 'org_devices' org_slug=current_client.slug %}">
         <div class="tile-label">Devices</div>
@@ -65,36 +80,61 @@
         </div>
     </a>
 
+    <a class="summary-tile" href="{% url 'findings_queue' %}?client={{ current_client.slug }}">
+        <div class="tile-label">Active Findings</div>
+        <div class="tile-count">{{ active_finding_count }}</div>
+        <div class="tile-detail">Open · acknowledged · investigating</div>
+    </a>
+
+    <a class="summary-tile" href="{% url 'org_software' org_slug=current_client.slug %}">
+        <div class="tile-label">Software</div>
+        <div class="tile-count">—</div>
+        <div class="tile-detail">View installed software</div>
+    </a>
+
     <a class="summary-tile" href="{% url 'org_policies' org_slug=current_client.slug %}">
         <div class="tile-label">Policies</div>
         <div class="tile-count">{{ policy_count }}</div>
         <div class="tile-detail">
-            {% if policy_categories %}
-                {{ policy_categories|join:" &middot; " }}
-            {% else %}
-                None defined
-            {% endif %}
+            {% if policy_categories %}{{ policy_categories|join:" · " }}{% else %}None defined{% endif %}
         </div>
-    </a>
-
-    <div class="summary-tile" style="cursor: default;">
-        <div class="tile-label">Sources</div>
-        <div class="tile-count">{{ client_links|length }}</div>
-        <div class="tile-detail">
-            {% if client_links %}
-                {% for link in client_links %}{{ link.source.name }}{% if not forloop.last %} &middot; {% endif %}{% endfor %}
-            {% else %}
-                Not linked to any source
-            {% endif %}
-        </div>
-    </div>
-
-    <a class="summary-tile" href="{% url 'findings_queue' %}">
-        <div class="tile-label">Findings</div>
-        <div class="tile-count">—</div>
-        <div class="tile-detail">Per-client scope coming later</div>
     </a>
 </div>
+
+{% if platform_coverage %}
+<div class="card">
+    <h2 style="margin-top: 0;">Agent Coverage</h2>
+    <div class="summary-grid">
+    {% for cov in platform_coverage %}
+    {% with pct=cov.present|default:0 %}
+    <a class="summary-tile" href="{% url 'findings_queue' %}?client={{ current_client.slug }}&type=missing_required_platform"
+       style="text-decoration:none;">
+        <div class="tile-label">{{ cov.platform }}</div>
+        <div style="display:flex; align-items:baseline; gap:0.4rem; margin: 0.25rem 0;">
+            <span style="font-size:1.6rem; font-weight:600;">{{ cov.present }}</span>
+            <span class="muted" style="font-size:0.9rem;">/ {{ cov.total }}</span>
+        </div>
+        <div class="cov-row">
+            <span class="muted" style="font-size:0.78rem;">{{ cov.entity_type }}</span>
+            <span class="cov-gap {% if cov.gap == 0 %}gap-ok{% elif cov.severity == 'critical' %}gap-crit{% else %}gap-high{% endif %}">
+                {% if cov.gap == 0 %}✓ all present{% else %}{{ cov.gap }} missing{% endif %}
+            </span>
+        </div>
+        {% if cov.total > 0 %}
+        <div class="cov-bar-wrap">
+            <div class="cov-bar-fill {% if cov.gap == 0 %}cov-ok{% elif cov.severity == 'critical' %}cov-critical{% elif cov.severity == 'high' %}cov-high{% else %}cov-medium{% endif %}"
+                 style="width: {% widthratio cov.present cov.total 100 %}%"></div>
+        </div>
+        {% endif %}
+        {% if cov.last_seen %}
+        <div class="muted" style="font-size:0.75rem; margin-top:0.3rem;">Last: {{ cov.last_seen|date:"Y-m-d H:i" }}</div>
+        {% endif %}
+    </a>
+    {% endwith %}
+    {% endfor %}
+    </div>
+</div>
+{% endif %}
 
 {% if client_links %}
 <div class="card">

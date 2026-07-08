@@ -82,6 +82,55 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
             .values_list("category", flat=True)
             .order_by("category")
         )
+
+        # Agent presence: per-platform coverage vs total devices
+        with transaction.atomic():
+            with connection.cursor() as cur:
+                cur.execute("SET LOCAL operations.tenant_id = 1")
+                cur.execute(
+                    """
+                    SELECT platform, entity_type,
+                           COUNT(DISTINCT device_id) AS present_count,
+                           MAX(last_observed_at)     AS last_seen
+                    FROM operations.agent_presence_current
+                    WHERE tenant_id = %s AND client_id = %s
+                      AND last_observed_at > NOW() - INTERVAL '7 days'
+                    GROUP BY platform, entity_type
+                    ORDER BY entity_type, platform
+                    """,
+                    [1, str(client.id)],
+                )
+                presence_rows = cur.fetchall()
+
+                cur.execute(
+                    """
+                    SELECT DISTINCT platform, entity_type, severity
+                    FROM operations.coverage_requirements
+                    WHERE tenant_id = %s AND enabled = TRUE
+                      AND (client_id = %s OR client_id IS NULL)
+                    ORDER BY platform
+                    """,
+                    [1, str(client.id)],
+                )
+                req_rows = cur.fetchall()
+
+        presence_map = {row[0]: {"count": row[2], "last_seen": row[3]} for row in presence_rows}
+        total = len(devices)
+        ctx["platform_coverage"] = [
+            {
+                "platform":    platform,
+                "entity_type": etype,
+                "severity":    severity,
+                "present":     presence_map.get(platform, {}).get("count", 0),
+                "total":       total,
+                "last_seen":   presence_map.get(platform, {}).get("last_seen"),
+                "gap":         total - presence_map.get(platform, {}).get("count", 0),
+            }
+            for platform, etype, severity in req_rows
+        ]
+        ctx["active_finding_count"] = Finding.objects.filter(
+            tenant_id=1, client=client, status__in=_FINDING_ACTIVE_STATUSES
+        ).count()
     else:
         # All-clients fleet view.
         clients_with_counts = list(
