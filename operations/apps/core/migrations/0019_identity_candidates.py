@@ -31,6 +31,24 @@ def create_identity_candidates(apps, schema_editor):
         );
         """
     )
+    # Table may have existed before this migration without observation_id —
+    # add any missing columns idempotently.
+    schema_editor.execute(
+        """
+        ALTER TABLE operations.identity_candidates
+            ADD COLUMN IF NOT EXISTS observation_id UUID
+                REFERENCES operations.entity_observations(observation_id) ON DELETE CASCADE,
+            ADD COLUMN IF NOT EXISTS device_id_a UUID
+                REFERENCES operations.devices(id) ON DELETE CASCADE,
+            ADD COLUMN IF NOT EXISTS device_id_b UUID
+                REFERENCES operations.devices(id) ON DELETE CASCADE,
+            ADD COLUMN IF NOT EXISTS confidence TEXT NOT NULL DEFAULT 'low',
+            ADD COLUMN IF NOT EXISTS signals JSONB NOT NULL DEFAULT '{}',
+            ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'pending',
+            ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMPTZ,
+            ADD COLUMN IF NOT EXISTS resolved_by TEXT;
+        """
+    )
     schema_editor.execute(
         "CREATE INDEX IF NOT EXISTS idx_identity_candidates_tenant_status"
         " ON operations.identity_candidates (tenant_id, status);"
