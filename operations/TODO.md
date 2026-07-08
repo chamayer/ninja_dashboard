@@ -22,6 +22,35 @@ module-specific; root `../TODO.md` keeps cross-repo items and pointers.
 
 ## Backlog
 
+### Platform implementation (BLUEPRINT.md — Batches A–E)
+
+Batch A — schema foundation (Phases 1–4, ship together):
+- [ ] Phase 1: Django migration 0011 — software_installations_current three-state staleness
+- [ ] Phase 2: Django migration 0012 — DeviceLink.missing_since + Device/Client lifecycle columns
+- [ ] Phase 3: Django migration 0013 — FindingType extensions + Finding extensions + new finding types
+- [ ] Phase 4: Django migration 0014 — CoverageRequirement, AdminFinding, QueueRegistry, IdentityCandidate, NotificationRule, NotificationState, NotificationEvent + RLS
+
+Batch B — data sync + connectors (Phases 5–7, ship together):
+- [ ] Phase 5: ingest/core/devices.py — _sync_operations_device_links after _mark_missing_devices
+- [ ] Phase 6: new package ingest/identity/ — fast_path.py + resolver.py
+- [ ] Phase 7: Django migration 0015 (S1/SC SourceBindings) + dual-write to entity_observations in sentinelone.py + screenconnect.py
+
+Batch C — evaluator + compliance rebuild (Phases 8–10, ship together):
+- [ ] Phase 8: ingest/evaluator.py — platform evaluator + schedule in main.py
+- [ ] Phase 9: ingest/agent_compliance/ingest.py — replace internal evaluate() with platform evaluator
+- [ ] Phase 10: Django migration 0016 — agent_presence_current materialized view
+
+Batch D — web pages (Phase 11):
+- [ ] Phase 11: findings review page (/findings/) + admin health page (/admin/findings/health/)
+
+Batch E — naming cleanup (Phases 12–14, coordinate with am-ch-01 .env update):
+- [ ] Phase 12: docker-compose.yml — rename ninja-ingest → operations-ingest
+- [ ] Phase 13: Django migration 0017 — DB role rename ninja_ingest → operations_ingest
+- [ ] Phase 14: Django migration 0018 — schema rename ninja_agent_compliance → agent_compliance
+
+Operator action (no code push needed):
+- [ ] Add SOFTWARE_ADDED,SOFTWARE_REMOVED,SOFTWARE_UPDATED to INGEST_ACTIVITY_TYPES_INCLUDE in server .env on am-ch-01
+
 ### M0 build
 
 - [x] Ship server-side pagination/search for per-client device lists.
