@@ -59,8 +59,58 @@
             margin-bottom: 1rem;
         }
         h1 { margin-top: 0; font-size: 1.5rem; }
+        h2 { font-size: 1.15rem; color: #1a1a2e; margin-top: 0; }
         p.muted { color: var(--muted); font-size: 0.9rem; }
+        .muted { color: var(--muted); }
+        a { color: var(--accent); }
+        a:hover { opacity: 0.8; }
+        table { border-collapse: collapse; width: 100%; }
+        table thead th { background: #f8f9fb; font-size: 0.82rem; font-weight: 600;
+            color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+        table tbody tr:hover { background: #f4f7fb; }
+        table[data-sortable] thead th { cursor: pointer; user-select: none; }
+        table[data-sortable] thead th:hover { color: var(--accent); }
+        table[data-sortable] thead th[data-sort="asc"]::after  { content: ' ↑'; }
+        table[data-sortable] thead th[data-sort="desc"]::after { content: ' ↓'; }
+        .badge { display: inline-block; font-size: 0.72rem; font-weight: 700;
+            padding: 2px 7px; border-radius: 20px; text-transform: uppercase; letter-spacing: 0.04em; }
+        .badge-critical { background: #fee2e2; color: #991b1b; }
+        .badge-high     { background: #ffedd5; color: #9a3412; }
+        .badge-medium   { background: #fef3c7; color: #92400e; }
+        .badge-low      { background: #d1fae5; color: #065f46; }
+        .badge-info     { background: #e0f2fe; color: #075985; }
+        .badge-open     { background: #fee2e2; color: #991b1b; }
+        .badge-acknowledged { background: #fef3c7; color: #92400e; }
+        .badge-resolved { background: #d1fae5; color: #065f46; }
+        .badge-suppressed { background: #f3f4f6; color: #6b7280; }
     </style>
+    <script>
+    (function() {
+      function sortTable(th) {
+        var table = th.closest('table');
+        var tbody = table.querySelector('tbody');
+        if (!tbody) return;
+        var col = Array.from(th.parentNode.children).indexOf(th);
+        var asc = th.getAttribute('data-sort') !== 'asc';
+        th.parentNode.querySelectorAll('th').forEach(function(t) { t.removeAttribute('data-sort'); });
+        th.setAttribute('data-sort', asc ? 'asc' : 'desc');
+        var rows = Array.from(tbody.querySelectorAll('tr'));
+        rows.sort(function(a, b) {
+          var av = (a.children[col] ? a.children[col].textContent.trim() : '');
+          var bv = (b.children[col] ? b.children[col].textContent.trim() : '');
+          var an = parseFloat(av.replace(/[^0-9.\-]/g, '')), bn = parseFloat(bv.replace(/[^0-9.\-]/g, ''));
+          var r = (!isNaN(an) && !isNaN(bn)) ? (an - bn) : av.localeCompare(bv, undefined, {numeric: true});
+          return asc ? r : -r;
+        });
+        rows.forEach(function(r) { tbody.appendChild(r); });
+      }
+      document.addEventListener('DOMContentLoaded', function() {
+        document.querySelectorAll('table[data-sortable] thead th').forEach(function(th) {
+          th.addEventListener('click', function() { sortTable(this); });
+        });
+      });
+    })();
+    </script>
 </head>
 <body>
     <header>

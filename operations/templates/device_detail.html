@@ -4,51 +4,145 @@
 
 {% block content %}
 <div class="card">
-    <p class="muted">
+    <p class="muted" style="margin:0 0 0.5rem;">
         <a href="{% url 'org_index' org_slug=device.client.slug %}">{{ device.client.display_name }}</a>
-        &nbsp;›&nbsp; Device
+        &nbsp;›&nbsp; <a href="{% url 'org_devices' org_slug=device.client.slug %}">Devices</a>
+        &nbsp;›&nbsp; {{ device.canonical_hostname }}
     </p>
-    <h1>{{ device.canonical_hostname }}</h1>
-    <p class="muted">
-        <strong>Type:</strong> {{ device.get_device_type_display }}
-        &nbsp;·&nbsp;
-        <strong>Serial:</strong> <code>{{ device.canonical_serial|default:"—" }}</code>
-        {% if device.canonical_vm_uuid %}
-        &nbsp;·&nbsp;
-        <strong>VM UUID:</strong> <code>{{ device.canonical_vm_uuid }}</code>
-        {% endif %}
+    <h1 style="margin: 0 0 0.25rem;">{{ device.canonical_hostname }}</h1>
+    <p class="muted" style="margin: 0;">
+        {{ device.get_device_type_display }}
+        {% if device.canonical_serial %}&nbsp;·&nbsp; <code>{{ device.canonical_serial }}</code>{% endif %}
+        {% if device.canonical_vm_uuid %}&nbsp;·&nbsp; VM <code>{{ device.canonical_vm_uuid }}</code>{% endif %}
     </p>
 </div>
 
+{% if active_findings %}
 <div class="card">
-    <h2 style="margin-top: 0;">External identities</h2>
-    {% if links %}
-    <table style="width: 100%; border-collapse: collapse;">
+    <h2>Active Findings</h2>
+    <table data-sortable>
         <thead>
-            <tr style="text-align: left; border-bottom: 1px solid var(--border);">
-                <th style="padding: 0.5rem;">Source</th>
-                <th style="padding: 0.5rem;">External name</th>
-                <th style="padding: 0.5rem;">External ID</th>
-                <th style="padding: 0.5rem;">Last seen</th>
+            <tr>
+                <th style="padding: 0.45rem 0.6rem;">Severity</th>
+                <th style="padding: 0.45rem 0.6rem;">Finding</th>
+                <th style="padding: 0.45rem 0.6rem;">Status</th>
+                <th style="padding: 0.45rem 0.6rem;">First seen</th>
+                <th style="padding: 0.45rem 0.6rem;">Last seen</th>
             </tr>
         </thead>
         <tbody>
-            {% for link in links %}
-            <tr style="border-bottom: 1px solid var(--border);">
-                <td style="padding: 0.5rem;">{{ link.source.name }}</td>
-                <td style="padding: 0.5rem;">{{ link.external_name }}</td>
-                <td style="padding: 0.5rem;"><code>{{ link.external_id }}</code></td>
-                <td style="padding: 0.5rem;" class="muted">{{ link.last_seen_at|default:"—" }}</td>
+            {% for f in active_findings %}
+            <tr>
+                <td style="padding: 0.4rem 0.6rem;">
+                    <span class="badge badge-{{ f.severity }}">{{ f.severity }}</span>
+                </td>
+                <td style="padding: 0.4rem 0.6rem;">{{ f.finding_type.name }}</td>
+                <td style="padding: 0.4rem 0.6rem;">
+                    <span class="badge badge-{{ f.status }}">{{ f.get_status_display }}</span>
+                </td>
+                <td style="padding: 0.4rem 0.6rem; white-space:nowrap;" class="muted">{{ f.first_seen_at|date:"Y-m-d" }}</td>
+                <td style="padding: 0.4rem 0.6rem; white-space:nowrap;" class="muted">{{ f.last_seen_at|date:"Y-m-d" }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+<div class="card">
+    <h2>Agent Presence</h2>
+    {% if agent_presence %}
+    <table data-sortable>
+        <thead>
+            <tr>
+                <th style="padding: 0.45rem 0.6rem;">Platform</th>
+                <th style="padding: 0.45rem 0.6rem;">Agent type</th>
+                <th style="padding: 0.45rem 0.6rem;">Last observed</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for platform, entity_type, last_seen in agent_presence %}
+            <tr>
+                <td style="padding: 0.4rem 0.6rem; font-weight: 600;">{{ platform }}</td>
+                <td style="padding: 0.4rem 0.6rem;" class="muted">{{ entity_type }}</td>
+                <td style="padding: 0.4rem 0.6rem; white-space:nowrap;" class="muted">{{ last_seen|date:"Y-m-d H:i" }}</td>
             </tr>
             {% endfor %}
         </tbody>
     </table>
     {% else %}
-    <p class="muted">No external identities linked yet.</p>
+    <p class="muted">No agent observations recorded yet.</p>
     {% endif %}
 </div>
 
 <div class="card">
-    <p class="muted">Observations from source ingest views land here in a later milestone (M2).</p>
+    <h2>Source Identities</h2>
+    {% if links %}
+    <table data-sortable>
+        <thead>
+            <tr>
+                <th style="padding: 0.45rem 0.6rem;">Source</th>
+                <th style="padding: 0.45rem 0.6rem;">Name in that system</th>
+                <th style="padding: 0.45rem 0.6rem;">External ID</th>
+                <th style="padding: 0.45rem 0.6rem;">Last seen</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for link in links %}
+            <tr>
+                <td style="padding: 0.4rem 0.6rem;">{{ link.source.name }}</td>
+                <td style="padding: 0.4rem 0.6rem;">{{ link.external_name }}</td>
+                <td style="padding: 0.4rem 0.6rem;"><code style="font-size:0.82rem;">{{ link.external_id }}</code></td>
+                <td style="padding: 0.4rem 0.6rem; white-space:nowrap;" class="muted">{{ link.last_seen_at|default:"—" }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="muted">No source identities linked yet.</p>
+    {% endif %}
 </div>
+
+{% if software_rows %}
+<div class="card">
+    <h2>Installed Software <span class="muted" style="font-weight: 400; font-size: 0.9rem;">({{ software_rows|length }}{% if software_rows|length == 300 %}+{% endif %})</span></h2>
+    <div style="margin-bottom: 0.5rem;">
+        <input type="search" id="sw-filter" placeholder="Filter software…"
+               oninput="swFilter(this.value)"
+               style="padding: 0.4rem 0.7rem; border: 1px solid var(--border); border-radius: 4px; font-size: 0.85rem; min-width: 240px;">
+    </div>
+    <table data-sortable>
+        <thead>
+            <tr>
+                <th style="padding: 0.45rem 0.6rem;">Name</th>
+                <th style="padding: 0.45rem 0.6rem;">Publisher</th>
+                <th style="padding: 0.45rem 0.6rem;">Version</th>
+                <th style="padding: 0.45rem 0.6rem;">Installed</th>
+                <th style="padding: 0.45rem 0.6rem;">Last seen</th>
+                <th style="padding: 0.45rem 0.6rem;">Location</th>
+            </tr>
+        </thead>
+        <tbody id="sw-tbody">
+            {% for name, publisher, version, install_date, last_seen, location in software_rows %}
+            <tr>
+                <td style="padding: 0.4rem 0.6rem; font-size: 0.88rem;">{{ name }}</td>
+                <td style="padding: 0.4rem 0.6rem; font-size: 0.83rem;" class="muted">{{ publisher|default:"—" }}</td>
+                <td style="padding: 0.4rem 0.6rem; font-size: 0.83rem;" class="muted">{{ version|default:"—" }}</td>
+                <td style="padding: 0.4rem 0.6rem; font-size: 0.8rem; white-space:nowrap;" class="muted">{{ install_date|date:"Y-m-d"|default:"—" }}</td>
+                <td style="padding: 0.4rem 0.6rem; font-size: 0.8rem; white-space:nowrap;" class="muted">{{ last_seen|date:"Y-m-d"|default:"—" }}</td>
+                <td style="padding: 0.4rem 0.6rem; font-size: 0.78rem;" class="muted">{{ location|default:"—" }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+<script>
+function swFilter(q) {
+  q = q.toLowerCase();
+  document.querySelectorAll('#sw-tbody tr').forEach(function(r) {
+    r.style.display = (!q || r.textContent.toLowerCase().indexOf(q) !== -1) ? '' : 'none';
+  });
+}
+</script>
+{% endif %}
 {% endblock %}

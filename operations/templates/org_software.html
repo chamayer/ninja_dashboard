@@ -16,24 +16,6 @@
 
 <div class="card">
 <style>
-  .sw-filters { display: flex; gap: 1rem; align-items: flex-start; flex-wrap: wrap; margin-bottom: 1rem; }
-  .sw-filter-group { display: flex; flex-direction: column; gap: 4px; }
-  .sw-filter-group label { font-size: 0.78rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
-  .sw-filter-group input[type=search],
-  .sw-filter-group input[type=text] {
-    padding: 0.4rem 0.65rem; border: 1px solid var(--border); border-radius: 4px;
-    font-size: 0.88rem; min-width: 200px;
-  }
-  .pub-panel {
-    border: 1px solid var(--border); border-radius: 4px; background: white;
-    max-height: 160px; overflow-y: auto; min-width: 220px;
-  }
-  .pub-panel label { display: flex; align-items: center; gap: 0.4rem;
-    padding: 0.28rem 0.6rem; font-size: 0.85rem; font-weight: 400;
-    cursor: pointer; text-transform: none; letter-spacing: 0; color: inherit; }
-  .pub-panel label:hover { background: #f0f4f8; }
-  .pub-count { margin-left: auto; color: var(--muted); font-size: 0.78rem; }
-  .sw-row:nth-child(odd) { background: #fafbfc; }
   .sw-row td { padding: 0.4rem 0.6rem; vertical-align: top; font-size: 0.88rem; }
   .sw-row.hidden-row { display: none; }
   .version-list { color: #52606d; font-size: 0.8rem; }
@@ -53,64 +35,90 @@
   .sw-actions button { font-size: 0.75rem; padding: 2px 7px; border-radius: 3px;
     border: 1px solid var(--border); background: white; cursor: pointer; }
   .sw-actions button:hover { background: #f0f4f8; }
-  .filter-actions { display: flex; gap: 0.5rem; align-items: center; margin-top: 0.5rem; }
-  .btn-apply { padding: 0.4rem 0.9rem; border: 1px solid var(--border); border-radius: 4px;
-    background: var(--header-bg); color: white; cursor: pointer; font-size: 0.88rem; }
-  .btn-clear { padding: 0.4rem 0.75rem; border: none; background: none;
-    color: var(--muted); cursor: pointer; font-size: 0.85rem; text-decoration: underline; }
-  #live-filter { padding: 0.4rem 0.65rem; border: 1px solid var(--border); border-radius: 4px;
-    font-size: 0.88rem; min-width: 240px; }
+
+  /* Filter bar */
+  .filter-bar { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-bottom: 0.6rem; }
+  .filter-bar input[type=search] { padding: 0.42rem 0.7rem; border: 1px solid var(--border); border-radius: 4px; font-size: 0.88rem; min-width: 220px; }
+  .btn-apply { padding: 0.42rem 1rem; background: var(--accent); color: white; border: none; border-radius: 4px; font-size: 0.88rem; cursor: pointer; font-weight: 600; }
+  .btn-apply:hover { opacity: 0.88; }
+  .btn-clear { padding: 0.42rem 0.6rem; background: none; border: none; color: var(--muted); font-size: 0.85rem; cursor: pointer; text-decoration: underline; }
+
+  /* Publisher dropdown */
+  .pub-dropdown { position: relative; display: inline-block; }
+  .pub-dropdown-btn { padding: 0.42rem 0.9rem; border: 1px solid var(--border); border-radius: 4px;
+    background: white; font-size: 0.88rem; cursor: pointer; white-space: nowrap; display: flex; align-items: center; gap: 0.35rem; }
+  .pub-dropdown-btn::after { content: '▾'; font-size: 0.72rem; color: var(--muted); }
+  .pub-dropdown-btn.active { border-color: var(--accent); background: #f0f5ff; color: #1d4ed8; }
+  .pub-panel-wrap { display: none; position: absolute; top: calc(100% + 4px); left: 0; z-index: 200;
+    background: white; border: 1px solid var(--border); border-radius: 6px;
+    box-shadow: 0 6px 18px rgba(0,0,0,.1); min-width: 270px; max-width: 340px; }
+  .pub-panel-wrap.open { display: block; }
+  .pub-panel-search { width: 100%; box-sizing: border-box; padding: 0.4rem 0.65rem;
+    border: none; border-bottom: 1px solid var(--border); font-size: 0.85rem; outline: none; }
+  .pub-list { max-height: 220px; overflow-y: auto; }
+  .pub-item { display: flex; align-items: center; gap: 0.4rem; padding: 0.3rem 0.65rem; cursor: pointer; }
+  .pub-item:hover { background: #f4f7fb; }
+  .pub-item span { font-size: 0.85rem; }
+
+  /* Active filter chips */
+  .active-chips { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-bottom: 0.6rem; }
+  .chip { display: inline-flex; align-items: center; gap: 0.3rem;
+    padding: 0.18rem 0.45rem 0.18rem 0.65rem;
+    background: #e8f0fe; border: 1px solid #c5d5f8; border-radius: 20px;
+    font-size: 0.82rem; color: #1a3a6e; }
+  .chip-remove { display: inline-flex; align-items: center; justify-content: center;
+    width: 16px; height: 16px; border-radius: 50%; background: #c5d5f8;
+    color: #1a3a6e; font-size: 0.78rem; cursor: pointer; border: none; padding: 0; line-height: 1; }
+  .chip-remove:hover { background: #aac0f0; }
+
   #match-count { font-size: 0.82rem; color: var(--muted); }
 </style>
 
 <form method="get" id="sw-form">
-  <div class="sw-filters">
+  <div class="filter-bar">
+    <input type="search" name="q" value="{{ search_query }}" placeholder="Search by name…">
 
-    <div class="sw-filter-group">
-      <label for="q">Search name (server-side)</label>
-      <input type="search" name="q" id="q" value="{{ search_query }}" placeholder="e.g. office, chrome…">
-    </div>
-
-    <div class="sw-filter-group">
-      <label>Publisher</label>
-      <input type="search" id="pub-search" placeholder="Filter publishers…"
-             oninput="filterPubList(this.value)"
-             style="padding: 0.4rem 0.65rem; border: 1px solid var(--border); border-radius: 4px 4px 0 0; font-size: 0.85rem; min-width: 220px;">
-      <div class="pub-panel" id="pub-panel">
-        {% for pub in publishers %}
-        <label>
-          <input type="checkbox" name="publisher" value="{{ pub }}"
-                 {% if pub in active_publishers %}checked{% endif %}>
-          {{ pub }}
-        </label>
-        {% empty %}
-        <p style="padding: 0.5rem; color: var(--muted); font-size: 0.85rem; margin: 0;">No publishers</p>
-        {% endfor %}
+    <div class="pub-dropdown" id="pub-dd">
+      <button type="button" class="pub-dropdown-btn {% if active_publishers %}active{% endif %}"
+              id="pub-btn" onclick="togglePubPanel()">
+        Publisher{% if active_publishers %} ({{ active_publishers|length }}){% endif %}
+      </button>
+      <div class="pub-panel-wrap" id="pub-panel">
+        <input type="search" class="pub-panel-search" placeholder="Filter publishers…" oninput="filterPubs(this.value)">
+        <div class="pub-list" id="pub-list">
+          {% for pub in publishers %}
+          <label class="pub-item">
+            <input type="checkbox" name="publisher" value="{{ pub }}"
+                   {% if pub in active_publishers %}checked{% endif %}
+                   onchange="onPubChange()">
+            <span>{{ pub }}</span>
+          </label>
+          {% empty %}
+          <p style="padding: 0.5rem; color: var(--muted); margin: 0; font-size: 0.85rem;">No publishers</p>
+          {% endfor %}
+        </div>
       </div>
     </div>
 
-    <div class="sw-filter-group" style="justify-content: flex-end;">
-      <label>&nbsp;</label>
-      <div class="filter-actions">
-        <button type="submit" class="btn-apply">Apply</button>
-        {% if search_query or active_publishers %}
-        <a href="{% url 'org_software' org_slug=client.slug %}" class="btn-clear">Clear</a>
-        {% endif %}
-      </div>
-    </div>
-
+    <button type="submit" class="btn-apply">Apply</button>
+    {% if search_query or active_publishers %}
+    <button type="button" class="btn-clear" onclick="clearFilters()">Clear all</button>
+    {% endif %}
   </div>
+
+  <div class="active-chips" id="active-chips"></div>
 </form>
 
 {% if rows %}
-<div style="display:flex; align-items:center; gap:1rem; margin-bottom:0.5rem;">
-  <input type="search" id="live-filter" placeholder="Quick filter visible rows…" oninput="liveFilter(this.value)">
+<div style="display:flex; align-items:center; gap:1rem; margin-bottom:0.5rem; flex-wrap:wrap;">
+  <input type="search" id="live-filter" placeholder="Quick filter visible rows…" oninput="liveFilter(this.value)"
+         style="padding:0.4rem 0.65rem; border:1px solid var(--border); border-radius:4px; font-size:0.88rem; min-width:240px;">
   <span id="match-count"></span>
 </div>
 
-<table style="width: 100%; border-collapse: collapse;">
+<table data-sortable>
     <thead>
-        <tr style="text-align: left; border-bottom: 2px solid var(--border); font-size: 0.82rem; color: var(--muted);">
+        <tr style="text-align: left; border-bottom: 2px solid var(--border);">
             <th style="padding: 0.5rem 0.6rem;">Name</th>
             <th style="padding: 0.5rem 0.6rem;">Publisher</th>
             <th style="padding: 0.5rem 0.6rem; text-align: right;">Devices</th>
@@ -185,28 +193,79 @@
 </div>
 
 <script>
-function filterPubList(q) {
+// Publisher dropdown toggle
+function togglePubPanel() {
+  document.getElementById('pub-panel').classList.toggle('open');
+}
+document.addEventListener('click', function(e) {
+  var dd = document.getElementById('pub-dd');
+  if (dd && !dd.contains(e.target)) document.getElementById('pub-panel').classList.remove('open');
+});
+
+// Filter publisher list inside panel
+function filterPubs(q) {
   q = q.toLowerCase();
-  document.querySelectorAll('#pub-panel label').forEach(function(lbl) {
-    var txt = lbl.textContent.toLowerCase();
-    lbl.style.display = (!q || txt.indexOf(q) !== -1) ? '' : 'none';
+  document.querySelectorAll('#pub-list .pub-item').forEach(function(lbl) {
+    lbl.style.display = (!q || lbl.textContent.toLowerCase().indexOf(q) !== -1) ? '' : 'none';
   });
 }
 
+// Update chips + button label when checkboxes change
+function onPubChange() { renderChips(); }
+
+function renderChips() {
+  var checked = Array.from(document.querySelectorAll('input[name=publisher]:checked'));
+  var container = document.getElementById('active-chips');
+  container.innerHTML = '';
+  checked.forEach(function(cb) {
+    var chip = document.createElement('span');
+    chip.className = 'chip';
+    var label = document.createElement('span');
+    label.textContent = cb.value;
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'chip-remove';
+    btn.textContent = '×';
+    btn.dataset.pub = cb.value;
+    btn.addEventListener('click', function() {
+      var cbx = document.querySelector('input[name=publisher][value="' + this.dataset.pub.replace(/"/g, '\\"') + '"]');
+      if (cbx) cbx.checked = false;
+      renderChips();
+      document.getElementById('sw-form').submit();
+    });
+    chip.appendChild(label);
+    chip.appendChild(btn);
+    container.appendChild(chip);
+  });
+  // Update button label
+  var btn = document.getElementById('pub-btn');
+  if (btn) {
+    btn.innerHTML = (checked.length ? 'Publisher (' + checked.length + ')' : 'Publisher') + '<span style="font-size:.7rem;color:var(--muted);margin-left:.3rem;">&#9660;</span>';
+    btn.classList.toggle('active', checked.length > 0);
+  }
+}
+
+function clearFilters() {
+  document.querySelectorAll('input[name=publisher]').forEach(function(cb) { cb.checked = false; });
+  document.querySelector('input[name=q]').value = '';
+  document.getElementById('sw-form').submit();
+}
+
+// Live row filter (client-side, for current page)
 function liveFilter(q) {
   q = q.toLowerCase();
   var rows = document.querySelectorAll('#sw-tbody tr.sw-row');
   var visible = 0;
   rows.forEach(function(row) {
-    var name = row.getAttribute('data-name') || '';
-    var pub  = row.getAttribute('data-pub') || '';
-    var match = !q || name.indexOf(q) !== -1 || pub.indexOf(q) !== -1;
+    var match = !q || row.textContent.toLowerCase().indexOf(q) !== -1;
     row.classList.toggle('hidden-row', !match);
     if (match) visible++;
   });
-  var total = rows.length;
   var el = document.getElementById('match-count');
-  if (el) el.textContent = q ? (visible + ' of ' + total + ' visible') : '';
+  if (el) el.textContent = q ? (visible + ' of ' + rows.length + ' shown') : '';
 }
+
+// Init chips on page load
+document.addEventListener('DOMContentLoaded', renderChips);
 </script>
 {% endblock %}

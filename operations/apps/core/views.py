@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import timedelta
+
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
@@ -7,6 +9,7 @@ from django.db import connection, transaction
 from django.db.models import Count, Prefetch, Q
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils import timezone
 from django.views.decorators.http import require_GET, require_POST
 
 from .forms import ClientPolicyForm
@@ -39,7 +42,77 @@ def healthz(request: HttpRequest) -> JsonResponse:
 
 @login_required
 def home(request: HttpRequest) -> HttpResponse:
-    return render(request, "home.html")
+    total_devices = Device.objects.filter(tenant_id=1, deleted_at__isnull=True).count()
+    total_clients = Client.objects.filter(tenant_id=1, deleted_at__isnull=True).count()
+
+    severity_counts = {
+        row["severity"]: row["n"]
+        for row in Finding.objects.filter(tenant_id=1, status__in=_FINDING_ACTIVE_STATUSES)
+        .values("severity")
+        .annotate(n=Count("id"))
+    }
+    total_active_findings = sum(severity_counts.values())
+
+    yesterday = timezone.now() - timedelta(hours=24)
+    recent_findings = list(
+        Finding.objects.filter(
+            tenant_id=1,
+            status__in=_FINDING_ACTIVE_STATUSES,
+            first_seen_at__gte=yesterday,
+        )
+        .select_related("finding_type", "client")
+        .order_by("-first_seen_at")[:10]
+    )
+
+    device_counts = {
+        row["client_id"]: row["n"]
+        for row in Device.objects.filter(tenant_id=1, deleted_at__isnull=True)
+        .values("client_id")
+        .annotate(n=Count("id"))
+    }
+
+    clients = list(
+        Client.objects.filter(tenant_id=1, deleted_at__isnull=True)
+        .annotate(
+            critical_findings=Count(
+                "findings",
+                filter=Q(findings__status__in=_FINDING_ACTIVE_STATUSES, findings__severity="critical"),
+            ),
+            high_findings=Count(
+                "findings",
+                filter=Q(findings__status__in=_FINDING_ACTIVE_STATUSES, findings__severity="high"),
+            ),
+            total_findings=Count(
+                "findings",
+                filter=Q(findings__status__in=_FINDING_ACTIVE_STATUSES),
+            ),
+        )
+        .order_by("-critical_findings", "-high_findings", "display_name")
+    )
+
+    client_health = [
+        {
+            "client": c,
+            "devices": device_counts.get(c.id, 0),
+            "critical": c.critical_findings,
+            "high": c.high_findings,
+            "total": c.total_findings,
+        }
+        for c in clients
+    ]
+
+    return render(
+        request,
+        "home.html",
+        {
+            "total_devices": total_devices,
+            "total_clients": total_clients,
+            "total_active_findings": total_active_findings,
+            "severity_counts": severity_counts,
+            "recent_findings": recent_findings,
+            "client_health": client_health,
+        },
+    )
 
 
 def _type_summary_from_counts(counts: dict[str, int]) -> list[tuple[str, str, int]]:
@@ -257,11 +330,59 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
         client__slug=org_slug,
         deleted_at__isnull=True,
     )
-    links = device.links.select_related("source").order_by("source__name")
+    links = list(device.links.select_related("source").order_by("source__name"))
+
+    active_findings = list(
+        Finding.objects.filter(
+            tenant_id=1,
+            subject_type=Finding.SubjectType.DEVICE,
+            subject_id=device.id,
+            status__in=_FINDING_ACTIVE_STATUSES,
+        )
+        .select_related("finding_type")
+        .order_by("severity", "-last_seen_at")[:50]
+    )
+
+    agent_presence = []
+    software_rows = []
+    with transaction.atomic():
+        with connection.cursor() as cur:
+            cur.execute("SET LOCAL operations.tenant_id = 1")
+            cur.execute(
+                """
+                SELECT platform, entity_type, MAX(last_observed_at) AS last_seen
+                FROM operations.agent_presence_current
+                WHERE tenant_id = %s AND device_id = %s
+                GROUP BY platform, entity_type
+                ORDER BY platform
+                """,
+                [1, str(device.id)],
+            )
+            agent_presence = cur.fetchall()
+
+            cur.execute(
+                """
+                SELECT canonical_name, publisher, version,
+                       install_date, last_observed_at, install_location
+                FROM operations.software_installations_current
+                WHERE tenant_id = %s AND device_id = %s AND deleted_at IS NULL
+                ORDER BY canonical_name
+                LIMIT 300
+                """,
+                [1, str(device.id)],
+            )
+            software_rows = cur.fetchall()
+
     return render(
         request,
         "device_detail.html",
-        {"device": device, "links": links},
+        {
+            "device": device,
+            "links": links,
+            "active_findings": active_findings,
+            "agent_presence": agent_presence,
+            "software_rows": software_rows,
+        },
     )
 
 

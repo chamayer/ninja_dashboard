@@ -139,7 +139,7 @@
 {% if client_links %}
 <div class="card">
     <h2 style="margin-top: 0;">Known in</h2>
-    <table style="width: 100%; border-collapse: collapse;">
+    <table data-sortable style="width: 100%; border-collapse: collapse;">
         <thead>
             <tr style="text-align: left; border-bottom: 1px solid var(--border);">
                 <th style="padding: 0.5rem;">Source</th>
@@ -201,7 +201,7 @@
 <div class="card">
     <h2 style="margin-top: 0;">Clients</h2>
     {% if clients_with_counts %}
-    <table style="width: 100%; border-collapse: collapse;">
+    <table data-sortable style="width: 100%; border-collapse: collapse;">
         <thead>
             <tr style="text-align: left; border-bottom: 1px solid var(--border);">
                 <th style="padding: 0.5rem;">Client</th>

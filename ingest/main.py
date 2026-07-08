@@ -68,6 +68,7 @@ from ingest.core import (
 from ingest.policy_scope import sync_patching_enabled_policies
 from ingest.ninja_client import NinjaClient
 from ingest.evaluator import evaluate as platform_evaluate
+from ingest import scope_selector as _scope_selector
 from ingest.patches import ingest as patches_ingest
 from ingest.summary_views import refresh_device_troubleshooting_signal
 
@@ -1211,46 +1212,37 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         df = (params.get("df", [""])[0]).strip()
 
         if confirm != "1":
-            body = f"""
-                <!doctype html>
-                <html>
-                <head>
-                  <meta charset="utf-8">
-                  <title>Software inventory — scoped refresh</title>
-                  <style>
-                    body {{ font-family: sans-serif; margin: 24px; color: #1f2933; max-width: 720px; }}
-                    label {{ display: block; font-weight: 700; margin: 16px 0 6px; }}
-                    input {{ font-size: 16px; padding: 8px 10px; width: 100%; box-sizing: border-box; }}
-                    button {{ margin-top: 18px; padding: 9px 14px; font-weight: 700; }}
-                    .hint {{ color: #52606d; font-size: 14px; margin: 4px 0 0; }}
-                    pre {{ background: #f3f4f6; padding: 10px; border-radius: 4px; font-size: 13px; }}
-                    a {{ color: #0b69a3; }}
-                  </style>
-                </head>
-                <body>
-                  <h2>Software inventory — scoped refresh</h2>
-                  <p class="hint">
-                    Pulls <code>/queries/software?df=…</code> for the specified scope and
-                    writes observations into Operations. Leaves all other devices unchanged.
-                  </p>
-                  <form method="get" action="/run/software/scoped">
-                    <input type="hidden" name="confirm" value="1">
-                    <label for="df">Device filter (df)</label>
-                    <input id="df" name="df" value="{escape(df)}"
-                           placeholder="org=123  or  id=456  or  org=123 AND id=456"
-                           required>
-                    <p class="hint">
-                      Syntax: <code>org=&lt;OrgID&gt;</code> &middot;
-                      <code>id=&lt;DeviceID&gt;</code> &middot;
-                      <code>org=123 AND id=456</code><br>
-                      Full syntax: org / loc / role / id / class / status / online / offline / group / created
-                    </p>
-                    <button type="submit">Run scoped refresh</button>
-                  </form>
-                  <p style="margin-top: 24px;"><a href="/run/software/enqueue">Queue a demand run instead</a> &middot; <a href="/run/software/queue">Queue status</a></p>
-                </body>
-                </html>
-            """.encode("utf-8")
+            orgs, devices = _scope_selector.load_scope_choices()
+            links_html = (
+                '<p style="margin-top:16px;font-size:13px;color:#52606d;">'
+                '<a href="/run/software/enqueue" style="color:#0b69a3;">Queue a demand run instead</a>'
+                ' &middot; <a href="/run/software/queue" style="color:#0b69a3;">Queue status</a>'
+                '</p>'
+            )
+            selector_html = _scope_selector.render_scope_selector(
+                orgs, devices,
+                action="/run/software/scoped",
+                submit_label="Run scoped refresh",
+                redirect_url="/run/software/queue",
+                links_html=links_html,
+            )
+            body = f"""<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Software inventory — scoped refresh</title>
+  <style>
+    body {{ font-family: sans-serif; margin: 24px; color: #1f2933; max-width: 780px; }}
+    h2 {{ margin-bottom: 4px; }}
+    p.hint {{ color: #52606d; font-size: 14px; margin: 0 0 16px; }}
+  </style>
+</head>
+<body>
+  <h2>Software inventory — scoped refresh</h2>
+  <p class="hint">Pulls software observations for the selected scope and writes them into Operations. All other devices are unchanged.</p>
+  {selector_html}
+</body>
+</html>""".encode("utf-8")
             self._respond_html(200, body)
             return
 
@@ -1277,126 +1269,37 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         confirm = params.get("confirm", ["0"])[0]
 
         if self.command == "GET" and confirm != "1":
-            # Load orgs and devices for the selectors.
-            orgs: list[tuple[int, str]] = []
-            devices: list[tuple[int, str, str]] = []
-            try:
-                with db.pool.connection() as conn, conn.cursor() as cur:
-                    cur.execute(
-                        "SELECT id, name FROM ninja_core.organizations ORDER BY name"
-                    )
-                    orgs = cur.fetchall()
-                    cur.execute(
-                        """
-                        SELECT id, COALESCE(display_name, system_name, 'Device ' || id::text),
-                               organization_id
-                        FROM ninja_core.devices
-                        WHERE is_current = TRUE
-                        ORDER BY display_name, system_name
-                        LIMIT 5000
-                        """
-                    )
-                    devices = cur.fetchall()
-            except Exception:
-                pass
-
-            org_options = "".join(
-                f'<option value="org={oid}" data-df="org={oid}">{escape(name)} (org={oid})</option>'
-                for oid, name in orgs
+            orgs, devs = _scope_selector.load_scope_choices()
+            links_html = (
+                '<p style="margin-top:16px;font-size:13px;color:#52606d;">'
+                '<a href="/run/software/queue" style="color:#0b69a3;">Queue status</a>'
+                ' &middot; <a href="/run/software/scoped" style="color:#0b69a3;">Direct scoped run (bypasses queue)</a>'
+                '</p>'
             )
-            # Build org_id → name map for device option labels
-            org_map = {oid: name for oid, name in orgs}
-            device_options = "".join(
-                f'<option value="id={did}" data-df="id={did}">{escape(dname)} — {escape(org_map.get(org_id, str(org_id)))} (id={did})</option>'
-                for did, dname, org_id in devices
+            selector_html = _scope_selector.render_scope_selector(
+                orgs, devs,
+                action="/run/software/enqueue",
+                submit_label="Queue now",
+                redirect_url="/run/software/queue",
+                links_html=links_html,
             )
-
-            body = f"""
-                <!doctype html>
-                <html>
-                <head>
-                  <meta charset="utf-8">
-                  <title>Software inventory — demand run</title>
-                  <style>
-                    body {{ font-family: sans-serif; margin: 24px; color: #1f2933; max-width: 760px; }}
-                    label {{ display: block; font-weight: 700; margin: 16px 0 4px; }}
-                    .search-wrap {{ position: relative; margin-bottom: 4px; }}
-                    .search-wrap input[type=search] {{
-                      font-size: 14px; padding: 7px 10px; width: 100%; box-sizing: border-box;
-                      border: 1px solid #bcccdc; border-radius: 4px;
-                    }}
-                    select {{
-                      font-size: 14px; padding: 4px 6px; width: 100%; box-sizing: border-box;
-                      border: 1px solid #bcccdc; border-radius: 4px; height: 160px;
-                    }}
-                    .df-box {{ font-size: 16px; padding: 8px 10px; width: 100%; box-sizing: border-box;
-                               border: 1px solid #bcccdc; border-radius: 4px; margin-top: 4px; }}
-                    button {{ margin-top: 18px; padding: 9px 18px; font-weight: 700;
-                              background: #0b69a3; color: white; border: none; border-radius: 4px; cursor: pointer; }}
-                    button:hover {{ background: #0a5c8f; }}
-                    .hint {{ color: #52606d; font-size: 13px; margin: 3px 0 0; }}
-                    a {{ color: #0b69a3; }}
-                    .cols {{ display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }}
-                    @media (max-width: 600px) {{ .cols {{ grid-template-columns: 1fr; }} }}
-                  </style>
-                </head>
-                <body>
-                  <h2>Software inventory — demand run</h2>
-                  <p class="hint">Select a client or device below, or type a scope directly.</p>
-
-                  <div class="cols">
-                    <div>
-                      <label>Client (entire org)</label>
-                      <div class="search-wrap">
-                        <input type="search" id="org-search" placeholder="Search clients…" oninput="filterSelect('org-list', this.value)">
-                      </div>
-                      <select id="org-list" size="8" onchange="setDf(this)">
-                        {org_options}
-                      </select>
-                    </div>
-                    <div>
-                      <label>Device (single)</label>
-                      <div class="search-wrap">
-                        <input type="search" id="dev-search" placeholder="Search devices…" oninput="filterSelect('dev-list', this.value)">
-                      </div>
-                      <select id="dev-list" size="8" onchange="setDf(this)">
-                        {device_options}
-                      </select>
-                    </div>
-                  </div>
-
-                  <form method="get" action="/run/software/enqueue">
-                    <input type="hidden" name="confirm" value="1">
-                    <label for="df">Scope (df)</label>
-                    <input id="df" name="df" class="df-box" value="{escape(df)}"
-                           placeholder="org=123  or  id=456  or  org=123 AND id=456"
-                           required>
-                    <p class="hint">Selections above fill this field. Edit freely.</p>
-                    <button type="submit">Queue now</button>
-                  </form>
-
-                  <p style="margin-top:24px;">
-                    <a href="/run/software/queue">Queue status</a> &middot;
-                    <a href="/run/software/scoped">Direct scoped run (bypasses queue)</a>
-                  </p>
-
-                  <script>
-                    function setDf(sel) {{
-                      var opt = sel.options[sel.selectedIndex];
-                      if (opt) document.getElementById('df').value = opt.getAttribute('data-df') || opt.value;
-                    }}
-                    function filterSelect(listId, query) {{
-                      var q = query.toLowerCase();
-                      var sel = document.getElementById(listId);
-                      for (var i = 0; i < sel.options.length; i++) {{
-                        var txt = sel.options[i].text.toLowerCase();
-                        sel.options[i].style.display = (!q || txt.indexOf(q) !== -1) ? '' : 'none';
-                      }}
-                    }}
-                  </script>
-                </body>
-                </html>
-            """.encode("utf-8")
+            body = f"""<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Software inventory — demand run</title>
+  <style>
+    body {{ font-family: sans-serif; margin: 24px; color: #1f2933; max-width: 780px; }}
+    h2 {{ margin-bottom: 4px; }}
+    p.hint {{ color: #52606d; font-size: 14px; margin: 0 0 16px; }}
+  </style>
+</head>
+<body>
+  <h2>Software inventory — demand run</h2>
+  <p class="hint">Select one or more clients or devices. Multiple selections are queued separately.</p>
+  {selector_html}
+</body>
+</html>""".encode("utf-8")
             self._respond_html(200, body)
             return
 
