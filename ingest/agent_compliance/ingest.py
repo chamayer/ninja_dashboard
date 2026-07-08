@@ -1111,7 +1111,7 @@ def _write_entity_observations(
     obs_rows: list[dict[str, Any]] = []
     try:
         with db.transaction() as cur:
-            cur.execute("SET LOCAL operations.tenant_id = %s", (_TENANT_ID,))
+            cur.execute(f"SET LOCAL operations.tenant_id = {_TENANT_ID}")
             for row in rows:
                 entity_key = str(row.get("platform_device_id") or "")
                 if not entity_key:

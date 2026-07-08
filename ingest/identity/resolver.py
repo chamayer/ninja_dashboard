@@ -29,7 +29,7 @@ def drain_resolution(batch_size: int = 20) -> int:
     """
     resolved_count = 0
     with db.transaction() as cur:
-        cur.execute("SET LOCAL operations.tenant_id = %s", (TENANT_ID,))
+        cur.execute(f"SET LOCAL operations.tenant_id = {TENANT_ID}")
 
         cur.execute(
             """

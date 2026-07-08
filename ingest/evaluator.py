@@ -35,7 +35,7 @@ def evaluate(tenant_id: int, device_id: uuid.UUID | None = None) -> int:
 
     with db.pool.connection() as conn:
         with conn.cursor() as cur:
-            cur.execute("SET LOCAL operations.tenant_id = %s", (tenant_id,))
+            cur.execute(f"SET LOCAL operations.tenant_id = {tenant_id}")
             affected += _evaluate_coverage(cur, tenant_id, device_id, now)
             affected += _evaluate_device_lifecycle(cur, tenant_id, device_id, now)
             affected += _auto_resolve(cur, tenant_id, device_id, now)
