@@ -47,6 +47,7 @@ Batch E — naming cleanup (Phases 12–14, coordinate with am-ch-01 .env update
 - [ ] Phase 12: docker-compose.yml — rename ninja-ingest → operations-ingest
 - [ ] Phase 13: Django migration 0017 — DB role rename ninja_ingest → operations_ingest
 - [ ] Phase 14: Django migration 0018 — schema rename ninja_agent_compliance → agent_compliance
+- [ ] Repo rename: ninja-dashboard → operations-platform (GitHub rename → local folder mv → Portainer stack git URL update → .claude memory path update). Low risk; GitHub redirects old URLs. Do last.
 
 Operator action (no code push needed):
 - [ ] Add SOFTWARE_ADDED,SOFTWARE_REMOVED,SOFTWARE_UPDATED to INGEST_ACTIVITY_TYPES_INCLUDE in server .env on am-ch-01
