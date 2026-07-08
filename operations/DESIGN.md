@@ -1,34 +1,120 @@
-# Entity Lifecycle Design
+# Operations Platform Design
 
-Architectural decisions for how entities are created, tracked, and retired
-across Operations. Applies to canonical entities (devices, clients, users)
-and observation-derived current-state tables (software_installations_current,
-and any future *_current tables).
+Authoritative design reference for the Operations platform. Every
+architectural decision made in design sessions lives here. Code should
+reflect this document; when they diverge, update one or the other
+explicitly — never let them drift silently.
 
 ---
 
-## 1. Canonical entities vs. observation-derived tables
+## 1. Guiding principles
 
-Two fundamentally different classes of data:
+1. **Source-agnostic platform.** Operations does not belong to Ninja.
+   Ninja is one source. The platform must work identically if Ninja is
+   replaced by another RMM at any client or tenant.
 
-| Class | Examples | Auto-delete allowed? |
+2. **One observation pipeline.** All sources write to
+   `operations.entity_observations`. No parallel observation tables.
+
+3. **Modules provide data and configuration. The platform evaluates.**
+   A module's job is to collect observations and define coverage
+   requirements. It does not generate findings, route notifications, or
+   manage acknowledgements — those are platform functions.
+
+4. **Identity resolution is a first-class citizen.** Cross-source device
+   matching is not a feature of any one module. It lives in `operations`
+   and serves all modules equally.
+
+5. **Queue governance by contract.** Every queue inherits health
+   monitoring, operational controls, and failure handling by conforming
+   to the standard table contract and registering in the queue registry.
+   No snowflake queues.
+
+6. **Findings are facts. Rules are responses.** A finding states what is
+   wrong and how certain we are. A notification rule decides what to do
+   about it. These concerns are strictly separated.
+
+---
+
+## 2. Service and schema naming
+
+### Ingest service
+
+The ingest container is the **Operations Ingest Engine** — one service,
+multiple source connectors.
+
+| Layer | Current | Target |
 |---|---|---|
-| **Canonical entity** | `devices`, `clients`, `users` | **Never** |
-| **Observation-derived current state** | `software_installations_current` | Yes, via three-state model |
+| Docker service | `ninja-ingest` | `operations-ingest` |
+| DB role | `ninja_ingest` | `operations_ingest` |
+| Python package | `ingest/` | unchanged (internal) |
 
-Canonical entities represent real-world things that existed. Deleting them
-destroys audit history and breaks FK relationships. Staleness on a canonical
-entity is a **finding to investigate**, not a trigger for deletion.
+The Docker service rename is trivial (one line in compose). The DB role
+rename is a planned migration — recreate role, reassign all grants across
+six migrations.
 
-Observation-derived `*_current` tables are ephemeral materialized views of
-the latest observed state. They are refreshed from `entity_observations` and
-can be soft-deleted when an observation disappears.
+### Schema conventions
+
+| Schema | Role | Source-specific? |
+|---|---|---|
+| `<source>_core` | Raw staging — mirrors source's native data model | Yes |
+| `operations` | Canonical entities, observations, findings, notifications | No |
+| `agent_compliance` | Compliance configuration and evaluation (renamed from `ninja_agent_compliance`) | No |
+
+Raw staging schemas (`ninja_core`, `ninja_activities`) are intentionally
+source-branded — they reflect that source's native data model. A future
+RMM gets its own `<source>_core` schema. Forcing multiple sources into
+one staging schema loses fidelity.
+
+`agent_compliance` is a platform feature (multi-source coverage
+evaluation), not a Ninja feature. Rename is a planned migration.
 
 ---
 
-## 2. Universal lifecycle columns
+## 3. Data architecture
 
-Every canonical entity table carries these eight columns:
+### 3.1 Entity types
+
+All observations are classified by `entity_type`. The `platform` field
+differentiates sources within a type.
+
+| entity_type | Covers | Platform examples |
+|---|---|---|
+| `software` | Software installations | Ninja |
+| `agent.rmm` | RMM agent presence and check-in | Ninja, ConnectWise |
+| `agent.edr` | EDR agent presence | SentinelOne, CrowdStrike |
+| `agent.remote_access` | Remote access tool | ScreenConnect, LogMeIn |
+| `user` | User accounts (planned) | AD, Azure AD |
+| `vulnerability` | CVEs (planned) | SentinelOne, Tenable |
+
+### 3.2 Observation pipeline
+
+Every source connector writes to `operations.entity_observations`.
+`device_id` is resolved at write time where possible (see §4 Identity
+Resolution). Unresolved observations have `device_id = NULL` and are
+queued for async resolution.
+
+`ninja_agent_compliance.platform_observations` is the legacy
+multi-source observation table. It will be retired once:
+1. S1 and ScreenConnect connectors write `agent.*` observations to
+   `operations.entity_observations`
+2. The compliance evaluator is rebuilt on `operations.*`
+3. The compliance engine is validated on the new source
+
+### 3.3 Canonical entities vs. observation-derived tables
+
+| Class | Examples | Auto-delete? |
+|---|---|---|
+| Canonical entity | `devices`, `clients`, `users` | Never |
+| Observation-derived current state | `software_installations_current`, `agent_presence_current` | Yes, three-state model |
+
+Canonical entities represent real-world things that existed. Staleness
+on a canonical entity triggers a finding — it never triggers deletion.
+Deletion is operator-only.
+
+### 3.4 Universal lifecycle columns
+
+Every canonical entity table carries:
 
 ```sql
 created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -41,227 +127,233 @@ deleted_at     TIMESTAMPTZ
 deleted_reason TEXT
 ```
 
-Rules:
-- `created_reason` / `updated_reason`: always set on write. Use the vocabulary below.
-- `stale_since` / `stale_reason`: set by automated reconciliation when a
-  canonical entity can no longer be confirmed current. Triggers a finding;
-  does NOT delete the row.
-- `deleted_at` / `deleted_reason`: set **only by explicit operator action**.
-  No automated process ever sets `deleted_at` on a canonical entity.
+`deleted_at` is set only by explicit operator action. No automated
+process ever sets it on a canonical entity.
 
----
-
-## 3. Reason vocabulary
-
-Standard values for `*_reason` columns. Use these literals so queries and
-runbooks can filter consistently:
+### 3.5 Reason vocabulary
 
 | Token | When to use |
 |---|---|
-| `ninja.ingest.full_run` | Upserted during a scheduled full-fleet pull |
-| `ninja.ingest.scoped_run` | Upserted during a scoped (df-filtered) pull |
-| `ninja.ingest.activity` | Created/updated in response to a Ninja activity event |
+| `ninja.ingest.full_run` | Upserted during scheduled full-fleet pull |
+| `ninja.ingest.scoped_run` | Upserted during scoped (df-filtered) pull |
+| `ninja.ingest.activity` | Created/updated from a Ninja activity event |
 | `ninja.ingest.new_device` | First time this device_id appeared from Ninja |
 | `ninja.ingest.device_disappeared` | Device no longer returned by source API |
-| `ninja.ingest.device_offline` | Device present in API but not checking in |
-| `ninja.ingest.observation_missing` | Software row absent from latest full refresh |
+| `ninja.ingest.observation_missing` | Entity absent from latest full refresh |
 | `operator.dismissed` | Operator explicitly dismissed a finding |
 | `operator.deleted` | Operator explicitly deleted a canonical entity |
-| `operator.merged` | Two records merged by operator action |
-| `system.migration` | Set during a schema migration / seed run |
-| `system.reconciliation` | Set during a post-ingest reconciliation pass |
+| `system.migration` | Set during schema migration / seed run |
+| `system.reconciliation` | Set during post-ingest reconciliation pass |
 
----
-
-## 4. Three-state model for observation-derived `*_current` tables
-
-Applies to `software_installations_current` and any future `*_current` table.
+### 3.6 Three-state staleness model for `*_current` tables
 
 ```
-NULL stale_since          → current (observed in most recent run)
-stale_since = <ts>        → stale   (was current; not seen in latest run)
-deleted_at  = <ts>        → tombstone (stale window expired or operator action)
+stale_since = NULL      → current (observed in most recent run)
+stale_since = <ts>      → stale   (absent from latest run)
+deleted_at  = <ts>      → tombstone (stale window expired or operator)
 ```
 
-Staleness window: 48 hours (configurable). Do NOT tombstone rows from
-devices that are offline — offline means "device not checking in", not
-"software uninstalled". A row on an offline device should remain current
-until the device comes back and is re-observed.
+Do NOT tombstone rows for devices that are offline. Offline means the
+device is not checking in — not that the software was uninstalled.
 
-Required columns on every `*_current` table:
+### 3.7 Offline vs. missing (devices)
 
-```sql
-stale_since   TIMESTAMPTZ
-stale_reason  TEXT
-deleted_at    TIMESTAMPTZ
-deleted_reason TEXT
-```
-
-`refresh_software_installations_current()` must implement:
-1. INSERT new observations (already done).
-2. UPDATE stale_since = now() where row not in current batch AND device is online.
-3. DELETE (tombstone) rows where stale_since < now() - interval '48 hours'.
-4. Skip step 2 for rows belonging to offline devices (`devices.is_online = false`).
-
----
-
-## 5. Offline vs. missing distinction (devices)
-
-Two different states that look similar but have different operational meaning:
-
-| State | Definition | Where tracked |
+| State | Definition | Tracked in |
 |---|---|---|
-| **Offline** | Device visible in Ninja API; `is_online = false` | `devices.is_online` (already exists) |
-| **Missing** | Device no longer returned by Ninja API at all | `device_links.missing_since` (to be added) |
+| Offline | Device in API; `is_online = false` | `devices.is_online` |
+| Missing | Device no longer returned by API | `device_links.missing_since` |
 
-Additions required to `device_links`:
-
+`device_links` additions needed:
 ```sql
-last_seen_at   TIMESTAMPTZ   -- updated every time this device appears in a Ninja pull
-missing_since  TIMESTAMPTZ   -- set when device absent from full pull; cleared on re-appearance
+last_seen_at   TIMESTAMPTZ   -- updated every time device appears in a pull
+missing_since  TIMESTAMPTZ   -- set when absent from full pull; cleared on reappearance
 ```
 
-Post-upsert reconciliation in `devices.py` (to be added):
-
-After each full-fleet device pull, run a pass that sets
-`missing_since = now()` on any `device_links` row whose `external_id` was
-NOT present in the current pull (i.e., device has vanished from the API).
-
-When `missing_since` is set:
-- Create a finding of type `device_missing_from_source`.
-- Do NOT set `devices.deleted_at` — that is operator-only.
-
-When the device reappears:
-- Clear `missing_since = NULL`.
-- Resolve/close the `device_missing_from_source` finding automatically.
+When `missing_since` is set: create `device_missing_from_source` finding.
+When device reappears: clear `missing_since`, auto-resolve finding.
 
 ---
 
-## 6. Finding types to be seeded
+## 4. Identity resolution
 
-New finding types needed to support the lifecycle model:
+Identity resolution is a **first-class platform function** in
+`operations`. It is not owned by any module. Every source connector
+benefits from it automatically.
 
-| type_key | severity | title |
+A device seen in Ninja, SentinelOne, and ScreenConnect is one
+`operations.devices` row with three `device_links` rows.
+
+### 4.1 Fast-path resolution (inline at ingest)
+
+Runs synchronously at write time. Resolves the simple cases immediately
+so `entity_observations.device_id` is set on first write.
+
+| Signal | Confidence | Action |
 |---|---|---|
-| `device_missing_from_source` | warning | Device missing from source |
-| `device_long_offline` | info | Device offline for extended period |
-| `device_stale_data` | info | Device data not refreshed recently |
+| Same source, `external_id` already in `device_links` | Certain | Resolve immediately |
+| Serial number exact match across any source | High | Resolve immediately, log cross-source match |
+| Exact hostname, unique match across `device_links` | Medium-high | Resolve immediately, flag as auto-resolved |
 
-`device_missing_from_source` is the primary signal for "admin deleted this
-from Ninja" — differentiated from `device_long_offline` which fires when
-the device is still in Ninja but `is_online = false` for N days.
+Rule: **if you can resolve with certainty at ingest, do it. If you are
+guessing, defer.**
 
----
+### 4.2 Async resolver (slow path)
 
-## 7. Software queue architecture (event-driven refresh)
+Processes observations where `device_id = NULL`. Runs as a processing
+queue (see §5). Tries normalized hostname matching and fuzzy signals.
+Uncertain matches create an `identity_candidate` for operator review.
 
-Full fleet pulls via `/queries/software` cover ~472k rows fleet-wide. Three
-separate queues handle different execution priorities. The direct full-fleet
-pull (`run_software_once`) is removed — coverage is maintained entirely
-through the queue system.
+### 4.3 Resolution triggers (four writers to resolution queue)
 
-### Three queues
+| Trigger | When |
+|---|---|
+| Ingest fast-path miss | Immediately when inline resolution fails |
+| New `device_links` row | Any source adds a new device — re-evaluate existing NULL observations |
+| Operator confirms `identity_candidate` | Cascade: resolve all observations that can now be matched |
+| Periodic sweep | Every N hours — safety net for anything missed |
 
-| Queue | Table | Source | Execution | df granularity |
-|---|---|---|---|---|
-| 1 – Scheduled sweep | `ninja_core.software_scheduled_queue` | `enqueue_all_orgs()` on timer | Background worker, polled | `org=<ninja_org_id>` |
-| 2 – On-demand | `ninja_core.software_demand_queue` | Operator via HTTP form | **Immediate thread on enqueue** | `org=X` or `id=X` |
-| 3 – Activity | `ninja_core.software_activity_queue` | Activity processor on SOFTWARE_* | Same background worker as Q1 | `id=<ninja_device_id>` |
-
-Queues 1 and 3 share one background worker. The worker drains Q3 (activity)
-entries before Q1 (scheduled) entries within each tick. Queue 2 never waits
-for the worker — it fires a thread the moment the operator submits.
-
-### Queue schemas (ninja_core)
-
-All three tables share the same column shape:
+### 4.4 Schema additions
 
 ```sql
-CREATE TABLE ninja_core.software_<name>_queue (
-    id           BIGSERIAL    PRIMARY KEY,
-    df           TEXT         NOT NULL,
-    reason       TEXT         NOT NULL DEFAULT '',
-    queued_at    TIMESTAMPTZ  NOT NULL DEFAULT now(),
-    status       TEXT         NOT NULL DEFAULT 'pending',
-    attempts     SMALLINT     NOT NULL DEFAULT 0,
-    max_attempts SMALLINT     NOT NULL DEFAULT 3,
-    worker_id    TEXT,                          -- reserved for future parallelism
-    started_at   TIMESTAMPTZ,
-    completed_at TIMESTAMPTZ,
-    rows_seen    INTEGER,
-    error        TEXT
+-- operations schema
+CREATE TABLE operations.identity_candidates (
+    id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id      BIGINT NOT NULL,
+    device_id_a    UUID NOT NULL REFERENCES operations.devices(id),
+    device_id_b    UUID NOT NULL REFERENCES operations.devices(id),
+    confidence     TEXT NOT NULL,   -- 'high' | 'medium' | 'low'
+    signals        JSONB NOT NULL,  -- what evidence triggered this
+    status         TEXT NOT NULL DEFAULT 'pending',  -- pending | confirmed | rejected
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    resolved_at    TIMESTAMPTZ,
+    resolved_by    TEXT
 );
-
--- Deduplication: one pending entry per df value per queue
-CREATE UNIQUE INDEX ON ninja_core.software_<name>_queue (df)
-    WHERE status = 'pending';
 ```
-
-### Failure handling
-
-**Stuck entries (lease expiry):** On each worker tick, before claiming new
-work, reset any `processing` entry where `started_at < now() - interval '30 minutes'`
-back to `pending`. Handles container restarts mid-run.
-
-**Repeated failures (retry cap):** On failure, increment `attempts`. If
-`attempts < max_attempts`, reset to `pending`. If `attempts >= max_attempts`,
-leave as `failed` permanently. Operator can re-enqueue manually.
-
-**Full API outage:** All entries exhaust their retries and land in `failed`.
-The next scheduled `enqueue_all_orgs()` tick repopulates Q1. Q3 entries
-from missed activities are lost — acceptable because the scheduled sweep
-restores coverage within `SOFTWARE_INGEST_SCHEDULE_HOURS`.
-
-### On-demand status page
-
-Queue 2 is for operators who are actively waiting for results. The HTTP flow:
-
-1. `GET /run/software/enqueue` → form (df input, org or device)
-2. `POST /run/software/enqueue` → writes demand entry, fires thread, redirects
-   to `/run/software/demand/<id>`
-3. `GET /run/software/demand/<id>` → status page, auto-refreshes every 5s
-   until `status` is `done` or `failed`
-4. Status page shows: `df`, `status`, `started_at`, `completed_at`,
-   `rows_seen`, `error`
-
-### Queue writers
-
-| Writer | Where | Enqueues to |
-|---|---|---|
-| `enqueue_all_orgs()` | `main.py`, scheduler | Q1 — one row per `ninja_core.organizations.id` |
-| HTTP form submit | `main.py`, `_handle_software_enqueue()` | Q2 — fires thread immediately |
-| Activity processor | `activities/ingest.py`, SOFTWARE_* handler | Q3 — df=id=<ninja_device_id> |
-| New device detection | `devices.py`, first-seen path | Q3 — df=id=<ninja_device_id> |
-
-### Config knobs
-
-```
-SOFTWARE_QUEUE_ENABLED=false          # gates both worker and enqueue_all_orgs
-SOFTWARE_INGEST_SCHEDULE_HOURS=24     # how often enqueue_all_orgs fires
-SOFTWARE_QUEUE_POLL_MINUTES=5         # how often the Q1/Q3 worker ticks
-SOFTWARE_QUEUE_WORKER_BATCH=3         # entries per worker tick
-```
-
-`SOFTWARE_QUEUE_ENABLED=false` (default): writers still insert rows so the
-queue accumulates; worker is a no-op. Lets the tables be populated before
-the worker is turned on.
-
-### Prerequisite
-
-`INGEST_ACTIVITY_TYPES_INCLUDE` in the server `.env` must include
-`SOFTWARE_ADDED,SOFTWARE_REMOVED,SOFTWARE_UPDATED`. Currently absent — the
-activity processor never sees these. Must be added before Q3 writers fire.
 
 ---
 
-## 8. Admin findings
+## 5. Queue system
 
-Admin findings are platform-level signals about the Operations system itself
-— not about any managed device or client. They are source-agnostic: a queue
-failure from the Ninja ingest and a future failure from another source both
-land in the same place.
+### 5.1 Two queue types
 
-### Separation from entity findings
+| Type | Purpose | External dependency |
+|---|---|---|
+| **Refresh** | Drive API calls to source systems | Yes — rate-limited by source |
+| **Processing** | Work on data already in `operations.*` | No — DB only |
+
+Refresh queues need a source client and carry API failure risk.
+Processing queues are faster, more reliable, and independent of source
+availability.
+
+### 5.2 Queue governance
+
+**Every queue** must conform to all four governance contracts. No
+exceptions.
+
+#### Standard table contract
+
+```sql
+id           BIGSERIAL    PRIMARY KEY
+df           TEXT         NOT NULL,   -- scope or payload
+reason       TEXT         NOT NULL DEFAULT '',
+queued_at    TIMESTAMPTZ  NOT NULL DEFAULT now(),
+status       TEXT         NOT NULL DEFAULT 'pending',
+attempts     SMALLINT     NOT NULL DEFAULT 0,
+max_attempts SMALLINT     NOT NULL DEFAULT 3,
+worker_id    TEXT,                    -- reserved for parallelism
+started_at   TIMESTAMPTZ,
+completed_at TIMESTAMPTZ,
+rows_seen    INTEGER,
+error        TEXT
+```
+
+Unique partial index: `(df) WHERE status = 'pending'` — one pending
+entry per scope value per queue.
+
+#### Queue registry
+
+Every queue registers one row in `operations.queue_registry`:
+
+```sql
+queue_key          TEXT  -- 'software.scheduled', 'identity.resolution'
+queue_type         TEXT  -- 'refresh' | 'processing'
+table_name         TEXT  -- 'ninja_core.software_scheduled_queue'
+owner              TEXT  -- 'ninja.ingest' | 'operations.resolver'
+enabled            BOOL  -- operator toggle (not env var)
+max_pending_age_m  INT   -- health threshold: pending entry age
+max_failure_count  INT   -- health threshold: failed entry count
+max_depth          INT   -- health threshold: pending depth ceiling
+description        TEXT
+```
+
+Health monitoring, the status UI, and operational controls all read
+from the registry. New queue = create table + insert registry row.
+
+One master env var `QUEUE_SUBSYSTEM_ENABLED` gates all queues.
+Per-queue enable/disable via `queue_registry.enabled`.
+
+#### Standard worker contract
+
+Every worker implements these five steps in order:
+
+1. `recover_stale()` — reset processing entries past lease window back to pending
+2. `claim_batch(n)` — atomically claim N pending entries (FOR UPDATE SKIP LOCKED)
+3. `process(entry)` — do the work
+4. `complete(entry_id)` — mark done, record result
+5. `fail(entry_id)` — increment attempts; retry if below max, else fail permanently
+
+Refresh queues add: acquire source client before step 3.
+
+Lease window: 30 minutes. Demand queue stale entries → fail (no worker
+to re-pick them up); background queue stale entries → reset to pending.
+
+#### Health contract
+
+The health evaluator runs periodically and checks each registered queue:
+- Oldest pending entry age vs. `max_pending_age_m`
+- Failed entry count vs. `max_failure_count`
+- Pending depth vs. `max_depth`
+
+Breach → `operations.admin_findings` row opens automatically.
+Recovery → finding auto-resolves.
+No per-queue monitoring code required.
+
+### 5.3 Queue catalogue
+
+**Refresh queues**
+
+| Queue | Trigger(s) | Scope | Status |
+|---|---|---|---|
+| `software_scheduled_queue` | Schedule (every N hours) | Per org | Built |
+| `software_demand_queue` | Operator via HTTP form | Org or device | Built |
+| `software_activity_queue` | SOFTWARE_* activity event | Per device | Built |
+| `agent_presence_scheduled_queue` | Schedule | Per org, per source | Planned |
+| `agent_presence_demand_queue` | Operator | Org or device | Planned |
+| `agent_presence_activity_queue` | Agent install/uninstall event | Per device | Planned |
+| `device_verify_queue` | `missing_since` set on device_links | Per device | Planned |
+
+**Processing queues**
+
+| Queue | Trigger(s) | Scope | Status |
+|---|---|---|---|
+| `identity_resolution_queue` | Fast-path miss / new device_links / operator confirm / sweep | Per observation | Designed |
+| `compliance_evaluation_queue` | Observation state change / rule change | Per device | Planned |
+| `finding_lifecycle_queue` | Entity state change (stale, missing, recovered) | Per entity | Planned |
+| `notification_dispatch_queue` | Finding opens / escalates | Per finding | Planned |
+
+**Plug & play checklist for a new queue:**
+1. Create table matching standard contract
+2. Insert into `operations.queue_registry`
+3. Implement worker following five-step contract
+4. Register worker with scheduler
+
+Health monitoring, operational toggles, admin findings — all inherited.
+
+---
+
+## 6. Findings system
+
+### 6.1 Two finding classes
 
 | | Entity findings | Admin findings |
 |---|---|---|
@@ -269,64 +361,281 @@ land in the same place.
 | Audience | MSP operators | System admins |
 | Closes when | Entity state recovers | System state recovers |
 | Lives in | `operations.findings` | `operations.admin_findings` |
-| Surfaces in | Device / client pages | System health page (Operations web app) |
+| Surfaces in | Device / client pages | System health page |
+| Auto-resolves | Yes, when condition clears | Yes, when condition clears |
 
-Admin findings are **not** in `ninja_core` — they belong to Operations
-because they are independent of which source caused them.
+**The Health system IS admin findings.** No separate subsystem.
+The admin findings page in Operations IS the Health dashboard.
 
-### Table (operations schema, Django-managed)
+### 6.2 Finding types registry
+
+Every finding type registers in `operations.finding_types`:
 
 ```sql
-CREATE TABLE operations.admin_findings (
-    id           UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id    BIGINT       NOT NULL REFERENCES operations.tenants(id),
-    type_key     TEXT         NOT NULL,   -- e.g. 'software_queue_drain_stalled'
-    severity     TEXT         NOT NULL,   -- 'info' | 'warning' | 'critical'
-    title        TEXT         NOT NULL,
-    detail       JSONB        NOT NULL DEFAULT '{}',
-    source       TEXT         NOT NULL,   -- e.g. 'ninja.ingest'
-    opened_at    TIMESTAMPTZ  NOT NULL DEFAULT now(),
-    resolved_at  TIMESTAMPTZ,
-    resolve_reason TEXT
+type_key               TEXT  -- 'missing_required_platform', 'software_queue_stalled'
+finding_class          TEXT  -- 'entity' | 'admin'
+source_module          TEXT  -- 'agent_compliance' | 'queue_health' | 'identity_resolver'
+default_severity       TEXT  -- 'critical' | 'high' | 'medium' | 'low' | 'info'
+auto_resolvable        BOOL
+description            TEXT
+```
+
+New finding type = one row here. The notification engine, review page,
+and correlation rules discover it automatically.
+
+### 6.3 Coverage requirements
+
+Coverage requirements are **declarative policy** — what should exist for
+a given entity/org/device scope. They are the input to the platform
+evaluator. Modules define them; the platform evaluates against them.
+
+```sql
+-- operations schema
+CREATE TABLE operations.coverage_requirements (
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id           BIGINT NOT NULL,
+    client_id           UUID,                  -- NULL = applies to all clients
+    entity_type         TEXT NOT NULL,         -- 'agent.edr', 'agent.rmm', ...
+    platform            TEXT,                  -- NULL = any platform of this type
+    device_scope        TEXT NOT NULL,         -- 'all' | 'servers' | 'workstations'
+    severity            TEXT NOT NULL,         -- finding severity when gap detected
+    gap_after_hours     INT  NOT NULL,         -- hours before gap is flagged
+    confidence_probable INT  NOT NULL,         -- hours → confidence becomes probable
+    confidence_confirmed INT NOT NULL,         -- hours → confidence becomes confirmed
+    enabled             BOOL NOT NULL DEFAULT true,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 ```
 
-### Finding types for queue health
+This replaces `ninja_agent_compliance` alert_rules as the source of
+compliance policy. Agent compliance becomes a configuration domain only.
 
-| type_key | severity | Condition |
-|---|---|---|
-| `software_queue_drain_stalled` | warning | Q1/Q3 depth not decreasing over 3 consecutive ticks |
-| `software_queue_high_failures` | warning | Failed entries exceed threshold (default: 10) |
-| `ninja_api_degraded` | critical | Consecutive Ninja API errors across multiple queue runs |
+### 6.4 Platform evaluator
 
-These open and auto-resolve based on system state. The ingest container
-writes to `operations.admin_findings` using the `ninja_ingest` role, which
-will need INSERT + UPDATE grants on this table.
+The platform evaluator is a **generic, domain-agnostic** gap analysis
+engine. It does not know about Ninja, SentinelOne, or ScreenConnect
+specifically.
+
+Logic: for each device in scope, for each coverage requirement that
+applies, does a current observation of the required entity_type exist?
+If not, open or update a finding.
+
+**Triggered by (both — hybrid model, same pattern as queues):**
+- Event-driven: new observation arrives → evaluate that device immediately
+- Scheduled sweep: periodic backstop covering any gaps missed by events
+
+### 6.5 Confidence, severity, and urgency
+
+These are three distinct dimensions, each with a single definition point:
+
+**Confidence** — how certain we are the gap is real. Computed by the
+evaluator from thresholds defined on the coverage requirement.
+Evolves over time.
+
+```
+probable   → gap_after_hours threshold crossed, device online
+confirmed  → confidence_confirmed threshold crossed
+```
+
+**Severity** — how bad this finding is. Defined on the coverage
+requirement at creation time. **Immutable after the finding opens.**
+Industry standard: severity is a static impact measure, not a
+time-varying signal.
+
+The `finding_types` registry holds default severity. The coverage
+requirement overrides it for specific scopes (e.g., missing EDR on
+servers = critical, not just high).
+
+**Urgency** — time pressure for re-escalation. Defined on notification
+rules. Drives re-notification on acknowledged findings if unresolved
+past the urgency window. Independent of severity.
+
+Notification rules filter on all three independently.
+
+### 6.6 Finding deduplication
+
+Two independent dedup mechanisms:
+
+**Finding dedup** — prevents duplicate open findings for the same
+condition. Each finding carries a `condition_key` (deterministic hash of
+`tenant_id + client_id + device_id + finding_type`). Unique constraint
+on `(condition_key)` where `status = 'open'`.
+
+**Notification dedup** — prevents duplicate alerts for the same finding.
+Fingerprint + cooldown window in `operations.notification_state`. The
+`condition_key` is the dedup fingerprint.
+
+These are orthogonal. Dedup is stateless signal clustering. Ack is
+response lifecycle. Ack does not affect dedup logic.
+
+### 6.7 Finding lifecycle
+
+```
+open → acknowledged → resolved
+         ↑                ↑
+   human claims it   condition clears
+                     (auto or operator)
+```
+
+- **open**: condition detected, no response yet
+- **acknowledged**: operator has claimed it; escalation notifications
+  suppressed; re-escalation fires anyway after urgency timeout
+- **resolved**: condition cleared (auto when evaluator sees it gone, or
+  operator closes explicitly)
+
+`last_detected_at` is refreshed on every evaluation cycle while the
+condition persists. This drives staleness detection on acknowledged
+findings.
+
+### 6.8 Suppression
+
+Explicit operator rule: suppress this finding type for this
+device/client for N days. Time-bounded. After expiry, finding reopens
+normally if condition still exists.
+
+Lives in `operations.finding_suppressions` — platform-level, applies
+across all finding types, not per module.
 
 ---
 
-## 9. Current gaps (work to be scheduled)
+## 7. Notification system
+
+### 7.1 Architecture
+
+```
+operations.findings / operations.admin_findings
+              ↓
+operations.notification_rules    platform-owned, reference finding_type
+              ↓
+operations.notification_routes   delivery channels
+              ↓
+operations.notification_state    dedup + cooldown per fingerprint
+operations.notification_events   full delivery audit trail
+```
+
+Modules do not own notification rules. Notification rules are a platform
+concern defined per finding_type, not per module.
+
+### 7.2 Notification rules
+
+```sql
+operations.notification_rules
+  rule_id          UUID PRIMARY KEY
+  tenant_id        BIGINT NOT NULL
+  finding_type     TEXT NOT NULL     -- references finding_types.type_key
+  finding_class    TEXT NOT NULL     -- 'entity' | 'admin'
+  min_severity     TEXT              -- 'critical' | 'high' | 'medium' | ...
+  min_confidence   TEXT              -- 'confirmed' | 'probable'
+  client_id        UUID              -- NULL = all clients
+  match_criteria   JSONB             -- domain-specific extra dimensions
+  route_id         UUID NOT NULL REFERENCES notification_routes
+  urgency_hours    INT               -- re-escalate acked finding after N hours
+  cooldown_hours   INT NOT NULL DEFAULT 24
+  enabled          BOOL NOT NULL DEFAULT true
+```
+
+`match_criteria` JSONB handles domain-specific dimensions without
+polluting the base schema. Agent compliance adds `device_scope`,
+`affected_platform` there.
+
+### 7.3 Routes, state, events
+
+Moved from `ninja_agent_compliance` to `operations`:
+
+```
+operations.notification_routes   channels: webhook, email, Zendesk
+operations.notification_state    dedup/cooldown per fingerprint
+operations.notification_events   delivery audit trail (all domains)
+```
+
+`target_ref` on routes points to an env var name — credentials stay
+outside the DB.
+
+### 7.4 Channels
+
+- **Webhook** — HTTP POST, configurable URL via env var
+- **Email** — SMTP, configurable host/port/TLS/auth
+- **Zendesk** — API v2, requester/subject/comment
+
+### 7.5 Findings review page
+
+The **findings review page** in the Operations web app shows all
+unresolved findings, filterable by:
+- Client / org
+- Finding type
+- Finding class (entity / admin)
+- Severity
+- Confidence
+- Status (open / acknowledged)
+
+This is the operational triage surface. The existing AC `review_digest`
+Metabase dashboard serves a separate analytical/reporting purpose and
+remains in place — different use case, different audience.
+
+---
+
+## 8. Agent compliance migration path
+
+Current state: `ninja_agent_compliance` is a multi-source compliance
+engine bundling data collection, identity resolution, evaluation, finding
+generation, and alert routing in one module.
+
+Future state: stripped to configuration only.
+
+| Responsibility | Current home | Future home |
+|---|---|---|
+| S1 / SC data collection | `ninja_agent_compliance` ingest | Source connectors → `entity_observations` |
+| Identity resolution | `ninja_agent_compliance` norm_name / merge_candidates | `operations` identity resolver |
+| Coverage requirements | `ninja_agent_compliance` alert_rules | `operations.coverage_requirements` |
+| Compliance evaluation | `ninja_agent_compliance` evaluate() | Platform evaluator |
+| Finding generation | `ninja_agent_compliance` evaluate() | Platform evaluator → `operations.findings` |
+| Alert routing | `ninja_agent_compliance` alerts.py | `operations` notification engine |
+| Review digest (analytical) | Metabase dashboard | Stays in Metabase |
+| Notification rules | `ninja_agent_compliance.alert_rules` | `operations.notification_rules` |
+| Routes / state / events | `ninja_agent_compliance.*` | `operations.*` |
+| Suppressions | `ninja_agent_compliance.alert_suppressions` | `operations.finding_suppressions` |
+| Schema rename | `ninja_agent_compliance` | `agent_compliance` |
+
+After migration, `agent_compliance` holds only:
+- `coverage_requirements` (or these move to `operations`)
+- Any AC-specific configuration that has no generic equivalent
+
+---
+
+## 9. Planned gap backlog
 
 In priority order:
 
 | # | Gap | Where |
 |---|---|---|
-| 1 | `INGEST_ACTIVITY_TYPES_INCLUDE` missing SOFTWARE_* types | Server `.env` on am-ch-01 |
+| 1 | `INGEST_ACTIVITY_TYPES_INCLUDE` add SOFTWARE_* | Server `.env` on am-ch-01 |
 | 2 | `stale_since/reason`, `deleted_at/reason` on `software_installations_current` | SQL migration |
 | 3 | Update `refresh_software_installations_current()` to three-state logic | DB function |
 | 4 | `device_links.last_seen_at`, `device_links.missing_since` | SQL migration |
 | 5 | Universal lifecycle columns on `devices` + `clients` | Django migration |
 | 6 | Entity finding types: `device_missing_from_source`, `device_long_offline`, `device_stale_data` | Seed migration |
-| 7 | Post-upsert reconciliation in `devices.py` | ingest code |
-| 8 | Remove `run_software_once()` from `main.py` + scheduler + catch-up | ingest code |
-| 9 | `operations.admin_findings` table + Django model | Django migration |
-| 10 | `ninja_core.software_scheduled_queue` + `demand_queue` + `activity_queue` tables | SQL migration |
-| 11 | Queue writers: activity processor + new device detection + `enqueue_all_orgs()` | ingest code |
-| 12 | Q1/Q3 background worker + on-demand status page + config knobs | ingest code |
-| 13 | System health page in Operations web app | Django views + templates |
+| 7 | Post-upsert reconciliation in `devices.py` | Ingest code |
+| 8 | `operations.finding_types` registry table | Django migration |
+| 9 | `operations.coverage_requirements` table | Django migration |
+| 10 | `operations.admin_findings` table + Django model | Django migration |
+| 11 | `operations.queue_registry` table + Django model | Django migration |
+| 12 | `operations.identity_candidates` table | Django migration |
+| 13 | `operations.notification_routes/rules/state/events` (move from AC) | Django migration |
+| 14 | `operations.finding_suppressions` table | Django migration |
+| 15 | Platform evaluator (generic gap analysis engine) | Ingest code |
+| 16 | Identity resolver (async worker + fast-path helper) | Ingest code |
+| 17 | S1 connector → `entity_observations` (agent.edr) | Ingest code |
+| 18 | ScreenConnect connector → `entity_observations` (agent.remote_access) | Ingest code |
+| 19 | `agent_presence_current` materialized view | SQL migration |
+| 20 | Compliance engine rebuilt on `operations.*` | Ingest code |
+| 21 | Findings review page in Operations web app | Django views + templates |
+| 22 | System health page (admin findings) in Operations web app | Django views + templates |
+| 23 | Docker service rename `ninja-ingest` → `operations-ingest` | docker-compose.yml |
+| 24 | DB role rename `ninja_ingest` → `operations_ingest` | Migration across 6 files |
+| 25 | Schema rename `ninja_agent_compliance` → `agent_compliance` | SQL migration |
 
 Items 1–3: blocking for correct software staleness.
 Items 4–7: blocking for correct device lifecycle.
-Item 8: should be done before deploying any queue code.
-Items 9–12: the queue feature, shippable independently of 4–7.
-Item 13: system health UI, follows after admin findings table exists.
+Items 8–16: platform foundation — evaluator, identity resolver, findings tables.
+Items 17–22: AC migration (depends on 8–16).
+Items 23–25: naming cleanup (can be done independently at any time).
