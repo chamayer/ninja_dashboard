@@ -1439,13 +1439,60 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         if not _READY.is_set():
             self._respond(503, b"still starting - try again shortly\n")
             return
-        counts = software_queue.queue_counts()
+        details = software_queue.queue_details()
         statuses = ["pending", "processing", "done", "failed"]
 
-        def _row(name: str) -> str:
-            c = counts.get(name, {})
+        def _fmt_dt(dt) -> str:
+            return dt.strftime("%H:%M:%S") if dt else "—"
+
+        def _count_row(name: str) -> str:
+            c = details.get(name, {}).get("counts", {})
             cells = "".join(f"<td>{c.get(s, 0)}</td>" for s in statuses)
             return f"<tr><th>{name}</th>{cells}</tr>"
+
+        def _detail_section(name: str) -> str:
+            d = details.get(name, {})
+            active = d.get("active", [])
+            recent = d.get("recent", [])
+            if not active and not recent:
+                return ""
+            rows_html = ""
+            import datetime as _dt
+            _now = _dt.datetime.now(_dt.timezone.utc)
+            for r in active:
+                elapsed = ""
+                if r["started_at"]:
+                    st = r["started_at"]
+                    if st.tzinfo is None:
+                        st = st.replace(tzinfo=_dt.timezone.utc)
+                    elapsed = f" ({int((_now - st).total_seconds())}s)"
+                rows_html += (
+                    f"<tr style='background:#fff8e1'>"
+                    f"<td>processing</td><td>{r['df']}</td>"
+                    f"<td>{_fmt_dt(r['started_at'])}{elapsed}</td>"
+                    f"<td>—</td><td>—</td><td></td></tr>"
+                )
+            for r in recent:
+                err = f"<span style='color:#c0392b'>{r['error'][:80]}</span>" if r.get("error") else ""
+                rows_html += (
+                    f"<tr>"
+                    f"<td>{r['status']}</td><td>{r['df']}</td>"
+                    f"<td>{_fmt_dt(r['started_at'])}</td>"
+                    f"<td>{_fmt_dt(r['completed_at'])}</td>"
+                    f"<td>{r['rows_seen'] if r['rows_seen'] is not None else '—'}</td>"
+                    f"<td>{err}</td></tr>"
+                )
+            return f"""
+              <h3 style="margin-top:24px;margin-bottom:4px">{name}</h3>
+              <table>
+                <thead><tr>
+                  <th>Status</th><th>Scope</th><th>Started</th>
+                  <th>Completed</th><th>Rows</th><th>Error</th>
+                </tr></thead>
+                <tbody>{rows_html}</tbody>
+              </table>"""
+
+        detail_html = "".join(_detail_section(n) for n in ("scheduled", "demand", "activity"))
 
         body = f"""
             <!doctype html>
@@ -1453,11 +1500,11 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             <head>
               <meta charset="utf-8">
               <title>Software queue status</title>
-              <meta http-equiv="refresh" content="30">
+              <meta http-equiv="refresh" content="15">
               <style>
-                body {{ font-family: sans-serif; margin: 24px; color: #1f2933; max-width: 720px; }}
-                table {{ border-collapse: collapse; width: 100%; margin-top: 16px; }}
-                th, td {{ text-align: left; padding: 8px 12px; border-bottom: 1px solid #d9e2ec; }}
+                body {{ font-family: sans-serif; margin: 24px; color: #1f2933; max-width: 900px; }}
+                table {{ border-collapse: collapse; width: 100%; margin-top: 8px; }}
+                th, td {{ text-align: left; padding: 6px 10px; border-bottom: 1px solid #d9e2ec; font-size: 13px; }}
                 thead th {{ background: #f3f4f6; font-weight: 600; }}
                 .hint {{ color: #52606d; font-size: 14px; }}
                 a {{ color: #0b69a3; }}
@@ -1465,23 +1512,18 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             </head>
             <body>
               <h2>Software queue status</h2>
-              <p class="hint">Auto-refreshes every 30 s. Queue enabled: <strong>{"yes" if settings.SOFTWARE_QUEUE_ENABLED else "no"}</strong></p>
+              <p class="hint">Auto-refreshes every 15 s. Queue enabled: <strong>{"yes" if settings.SOFTWARE_QUEUE_ENABLED else "no"}</strong></p>
               <table>
                 <thead>
-                  <tr>
-                    <th>Queue</th>
-                    <th>Pending</th>
-                    <th>Processing</th>
-                    <th>Done</th>
-                    <th>Failed</th>
-                  </tr>
+                  <tr><th>Queue</th><th>Pending</th><th>Processing</th><th>Done</th><th>Failed</th></tr>
                 </thead>
                 <tbody>
-                  {_row("scheduled")}
-                  {_row("demand")}
-                  {_row("activity")}
+                  {_count_row("scheduled")}
+                  {_count_row("demand")}
+                  {_count_row("activity")}
                 </tbody>
               </table>
+              {detail_html}
               <p style="margin-top: 24px;">
                 <a href="/run/software/enqueue">New demand run</a> &middot;
                 <a href="/run/software/scoped">Direct scoped run</a>

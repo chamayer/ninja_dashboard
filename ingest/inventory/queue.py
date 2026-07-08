@@ -102,6 +102,46 @@ def get_demand_status(entry_id: int) -> dict | None:
     return dict(zip(cols, row))
 
 
+def queue_details() -> dict[str, dict]:
+    """Return counts + active + recent rows for all three queues."""
+    tables = {
+        "scheduled": "ninja_core.software_scheduled_queue",
+        "demand":    "ninja_core.software_demand_queue",
+        "activity":  "ninja_core.software_activity_queue",
+    }
+    result: dict[str, dict] = {}
+    with db.pool.connection() as conn, conn.cursor() as cur:
+        for name, table in tables.items():
+            cur.execute(f"SELECT status, COUNT(*) FROM {table} GROUP BY status")
+            counts = {row[0]: int(row[1]) for row in cur.fetchall()}
+
+            cur.execute(
+                f"""
+                SELECT id, df, status, attempts, started_at, completed_at, rows_seen, error
+                FROM {table}
+                WHERE status = 'processing'
+                ORDER BY started_at
+                LIMIT 20
+                """
+            )
+            cols = ["id", "df", "status", "attempts", "started_at", "completed_at", "rows_seen", "error"]
+            active = [dict(zip(cols, row)) for row in cur.fetchall()]
+
+            cur.execute(
+                f"""
+                SELECT id, df, status, attempts, started_at, completed_at, rows_seen, error
+                FROM {table}
+                WHERE status IN ('done', 'failed')
+                ORDER BY completed_at DESC
+                LIMIT 20
+                """
+            )
+            recent = [dict(zip(cols, row)) for row in cur.fetchall()]
+
+            result[name] = {"counts": counts, "active": active, "recent": recent}
+    return result
+
+
 def queue_counts() -> dict[str, dict[str, int]]:
     """Return {queue_name: {status: count}} for all three queues."""
     tables = {
