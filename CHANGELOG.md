@@ -2,6 +2,19 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.36.0] — 2026-07-08
+
+### Added
+- `operations.software_installations_current`: three-state staleness columns
+  (`stale_since`, `stale_reason`, `deleted_at`, `deleted_reason`). Rows are
+  no longer hard-deleted when absent from a software pull — they are marked
+  stale instead. Reappearance clears `stale_since`. (migration 0011)
+- `operations.device_links`: `missing_since` column tracks when a Ninja device
+  last disappeared from the full pull. (migration 0012)
+- `operations.devices` / `operations.clients`: full lifecycle columns —
+  `created_at`, `created_reason`, `updated_at`, `updated_reason`,
+  `stale_since`, `stale_reason`, `deleted_reason`. (migration 0012)
+
 ## [0.35.5] — 2026-07-07
 
 ### Fixed

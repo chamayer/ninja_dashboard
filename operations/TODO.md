@@ -28,8 +28,8 @@ Operator action (do before Batch A1 — no code push):
 - [ ] Add SOFTWARE_ADDED,SOFTWARE_REMOVED,SOFTWARE_UPDATED to INGEST_ACTIVITY_TYPES_INCLUDE in server .env on am-ch-01
 
 Batch A1 — lifecycle/staleness foundations (Phases 1–2, ship together):
-- [ ] Phase 1: Django migration 0011 — software_installations_current three-state staleness (fixes active data-loss in refresh function)
-- [ ] Phase 2: Django migration 0012 — DeviceLink.missing_since + Device/Client lifecycle columns
+- [x] Phase 1: Django migration 0011 — software_installations_current three-state staleness (fixes active data-loss in refresh function)
+- [x] Phase 2: Django migration 0012 — DeviceLink.missing_since + Device/Client lifecycle columns
 
 Batch A2 — finding extensions (Phase 3):
 - [ ] Phase 3: Django migration 0013 — FindingType extensions + Finding extensions + new finding types

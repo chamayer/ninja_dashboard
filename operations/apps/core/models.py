@@ -144,7 +144,14 @@ class Client(UUIDTenantScopedModel):
     slug = models.SlugField(max_length=120)
     display_name = models.CharField(max_length=240)
     timezone = models.CharField(max_length=64, default="UTC")
+    created_at = models.DateTimeField(auto_now_add=True)
+    created_reason = models.CharField(max_length=120, blank=True, default="")
+    updated_at = models.DateTimeField(auto_now=True)
+    updated_reason = models.CharField(max_length=120, blank=True, default="")
+    stale_since = models.DateTimeField(null=True, blank=True)
+    stale_reason = models.CharField(max_length=120, blank=True, default="")
     deleted_at = models.DateTimeField(null=True, blank=True)
+    deleted_reason = models.CharField(max_length=120, blank=True, default="")
 
     class Meta:
         db_table = "clients"
@@ -214,7 +221,14 @@ class Device(UUIDTenantScopedModel):
         default=DeviceType.UNKNOWN,
         verbose_name="Type",
     )
+    created_at = models.DateTimeField(auto_now_add=True)
+    created_reason = models.CharField(max_length=120, blank=True, default="")
+    updated_at = models.DateTimeField(auto_now=True)
+    updated_reason = models.CharField(max_length=120, blank=True, default="")
+    stale_since = models.DateTimeField(null=True, blank=True)
+    stale_reason = models.CharField(max_length=120, blank=True, default="")
     deleted_at = models.DateTimeField(null=True, blank=True)
+    deleted_reason = models.CharField(max_length=120, blank=True, default="")
 
     class Meta:
         db_table = "devices"
@@ -231,6 +245,7 @@ class DeviceLink(UUIDTenantScopedModel):
     external_name = models.CharField(max_length=240, blank=True)
     first_seen_at = models.DateTimeField(null=True, blank=True)
     last_seen_at = models.DateTimeField(null=True, blank=True)
+    missing_since = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         db_table = "device_links"

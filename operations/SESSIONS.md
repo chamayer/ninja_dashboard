@@ -5,6 +5,26 @@ only project-level pointers.
 
 ---
 
+## 2026-07-08 — Platform foundation Batch A1 (Phases 1–2)
+
+**Why:** Three-state staleness model for software_installations_current (fixes
+active data-loss risk — refresh function was hard-deleting missing rows).
+Universal lifecycle columns on devices, device_links, and clients per DESIGN.md §3.4.
+
+**Work completed:**
+
+- Migration 0011: rewrote `operations.refresh_software_installations_current()`
+  to use stale/unmark pattern instead of DELETE. Added stale_since, stale_reason,
+  deleted_at, deleted_reason columns to software_installations_current.
+- Migration 0012: added missing_since to device_links; added created_at,
+  created_reason, updated_at, updated_reason, stale_since, stale_reason,
+  deleted_reason to both devices and clients.
+- Updated models.py to reflect all new fields.
+
+**Deployed:** v0.36.0
+
+---
+
 ## 2026-07-07 — Fleet overview dashboard
 
 **Why:** The all-clients view was a plain flat table. With Operations
