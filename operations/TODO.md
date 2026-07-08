@@ -74,6 +74,30 @@ Operator action (no code push needed):
 - [ ] Decide whether to restore CI/pre-commit after resolving current Ruff
       lint debt, or keep it deferred until tests/lint policy settle.
 
+### Activity → findings bridge (post-M0)
+
+`ninja_activities.activities` is a rich finding signal that Operations
+currently ignores entirely. The platform evaluator only reads
+`entity_observations`; nothing reads activities. Key event types to wire up,
+in priority order:
+
+- [ ] **Security (immediate findings):**
+      `SENTINEL_ONE_THREAT_DETECTED`, `SENTINEL_ONE_AGENT_DISABLED`,
+      `SENTINEL_ONE_AGENT_INSTALLATION_FAILED`, `NODE_CLONING_DETECTED`,
+      `ATTACHMENT_FILE_SUSPICIOUS`
+- [ ] **Patch compliance:**
+      `PATCH_MANAGEMENT_FAILURE`, `SOFTWARE_PATCH_MANAGEMENT_INSTALL_FAILED`,
+      `PATCH_MANAGEMENT_PATCH_REJECTED`
+- [ ] **Encryption compliance:** `BITLOCKER_DISABLED`
+- [ ] **Device lifecycle:** `NODE_CREATED`, `NODE_DELETED` (faster than waiting
+      for the device ingest cycle)
+
+Architecture options when we get here:
+  (a) Scheduled job scans recent activities and upserts findings directly.
+  (b) Activity ingest writes to `entity_observations` with appropriate
+      entity_type (e.g. `security.threat`, `patch.failure`) so the evaluator
+      picks them up naturally — cleaner but requires new entity types.
+
 ### Stack-wide (post-M0)
 
 - [ ] Product direction: Operations is the operational data browser and

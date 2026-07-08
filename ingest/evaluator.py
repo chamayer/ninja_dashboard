@@ -21,7 +21,6 @@ from ingest import db
 
 log = logging.getLogger(__name__)
 
-_DEVICE_LONG_OFFLINE_DAYS = 7
 _DEVICE_MISSING_MIN_AGE_HOURS = 1
 
 
@@ -74,21 +73,20 @@ def _evaluate_coverage(
         cur.execute(
             """
             SELECT d.id, d.client_id, d.canonical_hostname,
-                   MAX(o.observed_at) AS last_observed_at,
+                   apc.last_observed_at,
                    d.created_at
             FROM operations.devices d
-            LEFT JOIN operations.entity_observations o
-                ON o.tenant_id = d.tenant_id
-               AND o.device_id = d.id
-               AND o.entity_type = %s
-               AND (%s = '' OR o.platform = %s)
+            LEFT JOIN operations.agent_presence_current apc
+                ON apc.tenant_id = d.tenant_id
+               AND apc.device_id = d.id
+               AND apc.entity_type = %s
+               AND apc.platform = %s
             WHERE d.tenant_id = %s
               AND d.deleted_at IS NULL
               AND (%s IS NULL OR d.client_id = %s)
               AND (%s IS NULL OR d.id = %s)
-            GROUP BY d.id, d.client_id, d.canonical_hostname, d.created_at
             """,
-            (entity_type, platform, platform, tenant_id, client_id, client_id, device_id, device_id),
+            (entity_type, platform, tenant_id, client_id, client_id, device_id, device_id),
         )
         devices = cur.fetchall()
 
@@ -125,7 +123,7 @@ def _evaluate_device_lifecycle(
     device_id: uuid.UUID | None,
     now: datetime,
 ) -> int:
-    """Open device_missing_from_source and device_long_offline findings."""
+    """Open device_missing_from_source findings."""
     count = 0
 
     # device_missing_from_source
@@ -154,38 +152,6 @@ def _evaluate_device_lifecycle(
                 {"hostname": hostname},
             )
 
-    # device_long_offline
-    offline_type_id = _get_finding_type_id(cur, "device_long_offline")
-    if offline_type_id:
-        offline_threshold = now - timedelta(days=_DEVICE_LONG_OFFLINE_DAYS)
-        cur.execute(
-            """
-            SELECT DISTINCT ON (d.id) d.id, d.client_id, d.canonical_hostname
-            FROM operations.devices d
-            JOIN ninja_core.device_snapshots ds ON ds.device_id = (
-                SELECT dl2.external_id::bigint
-                FROM operations.device_links dl2
-                JOIN operations.sources s2 ON s2.id = dl2.source_id AND s2.name = 'Ninja'
-                WHERE dl2.device_id = d.id AND dl2.tenant_id = d.tenant_id
-                LIMIT 1
-            )
-            WHERE d.tenant_id = %s
-              AND d.deleted_at IS NULL
-              AND ds.offline = TRUE
-              AND ds.snapshot_at <= %s
-              AND (%s IS NULL OR d.id = %s)
-            ORDER BY d.id, ds.snapshot_at DESC
-            """,
-            (tenant_id, offline_threshold, device_id, device_id),
-        )
-        for dev_id, dev_client_id, hostname in cur.fetchall():
-            ckey = _condition_key(tenant_id, dev_client_id, dev_id, "device_long_offline", "")
-            count += _upsert_finding(
-                cur, tenant_id, offline_type_id, dev_client_id, dev_id,
-                ckey, "medium", "confirmed", now,
-                {"hostname": hostname},
-            )
-
     return count
 
 
@@ -211,12 +177,12 @@ def _auto_resolve(
               AND f.status IN ('open', 'acknowledged')
               AND (%s IS NULL OR f.subject_id = %s)
               AND EXISTS (
-                  SELECT 1 FROM operations.entity_observations o
-                  WHERE o.tenant_id = f.tenant_id
-                    AND o.device_id = f.subject_id
-                    AND o.entity_type = (f.finding_details->>'entity_type')
-                    AND (f.finding_details->>'platform' = '' OR o.platform = f.finding_details->>'platform')
-                    AND o.observed_at > now() - INTERVAL '48 hours'
+                  SELECT 1 FROM operations.agent_presence_current apc
+                  WHERE apc.tenant_id = f.tenant_id
+                    AND apc.device_id = f.subject_id
+                    AND apc.entity_type = (f.finding_details->>'entity_type')
+                    AND apc.platform = (f.finding_details->>'platform')
+                    AND apc.last_observed_at > now() - INTERVAL '48 hours'
               )
             """,
             (now, tenant_id, ft_id, device_id, device_id),

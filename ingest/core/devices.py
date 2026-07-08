@@ -2,9 +2,10 @@
 
 Source: GET /v2/devices-detailed (paginate_after).
 
-Two writes per device per run:
+Writes per device per run:
   - ninja_core.devices            (upsert on id; slowly-changing dim)
   - ninja_core.device_snapshots   (insert per snapshot_at; volatile state)
+  - operations.entity_observations (agent.rmm observation; idempotent via batch_id hash)
 
 `first_seen_at` on devices is deliberately NOT in the row dict — the
 column DEFAULT now() handles the initial insert, and on conflict
@@ -14,7 +15,9 @@ bumps it.
 
 from __future__ import annotations
 
+import hashlib
 import logging
+import uuid
 from datetime import datetime
 
 import psycopg
@@ -26,6 +29,10 @@ from ingest.runlog import run_log
 from ingest.util import ninja_epoch_to_dt
 
 log = logging.getLogger(__name__)
+
+_TENANT_ID = 1
+NINJA_SOURCE_BINDING_ID      = uuid.UUID("00000000-0000-4000-8000-000000000011")
+INTERNAL_COLLECTOR_INSTANCE_ID = uuid.UUID("00000000-0000-4000-8000-000000000001")
 
 
 def run(client: NinjaClient, snapshot_at: datetime) -> tuple[int, int]:
@@ -112,12 +119,14 @@ def run(client: NinjaClient, snapshot_at: datetime) -> tuple[int, int]:
             _sync_operations_device_links(cur, current_ids, snapshot_at)
 
         _refresh_active_devices_view()
+        obs_count = _write_ninja_observations(device_rows, snapshot_at)
+        _refresh_agent_presence_current()
         stats["rows_upserted"] = dev_count
         stats["rows_inserted"] = snap_count
         stats["devices_marked_missing"] = missing_count
         log.info(
-            "Upserted %d devices, inserted %d snapshots, marked %d missing",
-            dev_count, snap_count, missing_count,
+            "Upserted %d devices, inserted %d snapshots, marked %d missing, wrote %d agent.rmm observations",
+            dev_count, snap_count, missing_count, obs_count,
         )
         return dev_count, snap_count
 
@@ -179,6 +188,89 @@ def _sync_operations_device_links(cur: object, current_ids: list[int], snapshot_
         """,
         params,
     )
+
+
+def _write_ninja_observations(device_rows: list[dict], snapshot_at: datetime) -> int:
+    """Write one agent.rmm entity_observation per device seen in this sync.
+
+    Uses a per-run batch_id + per-device hash so re-runs of the same
+    snapshot_at are idempotent (ON CONFLICT DO NOTHING).
+    """
+    if not device_rows:
+        return 0
+
+    ninja_ids = [str(r["id"]) for r in device_rows]
+    batch_id = uuid.uuid4()
+
+    try:
+        with db.transaction() as cur:
+            cur.execute(f"SET LOCAL operations.tenant_id = {_TENANT_ID}")
+            cur.execute(
+                """
+                SELECT dl.external_id, dl.device_id, d.client_id
+                FROM operations.device_links dl
+                JOIN operations.devices d
+                     ON d.id = dl.device_id AND d.tenant_id = dl.tenant_id
+                JOIN operations.sources s
+                     ON s.id = dl.source_id AND s.name = 'Ninja'
+                WHERE dl.tenant_id = %s
+                  AND dl.external_id = ANY(%s)
+                """,
+                (_TENANT_ID, ninja_ids),
+            )
+            link_map = {row[0]: (row[1], row[2]) for row in cur.fetchall()}
+
+            obs_rows = []
+            for r in device_rows:
+                entry = link_map.get(str(r["id"]))
+                if not entry:
+                    continue
+                ops_device_id, client_id = entry
+                entity_key = str(r["id"])
+                obs_hash = hashlib.sha256(
+                    f"{entity_key}:{snapshot_at.isoformat()}".encode()
+                ).digest()
+                obs_rows.append({
+                    "observation_id":          uuid.uuid4(),
+                    "tenant_id":               _TENANT_ID,
+                    "client_id":               client_id,
+                    "device_id":               ops_device_id,
+                    "collector_instance_id":   INTERNAL_COLLECTOR_INSTANCE_ID,
+                    "source_binding_id":       NINJA_SOURCE_BINDING_ID,
+                    "entity_type":             "agent.rmm",
+                    "entity_key":              entity_key,
+                    "platform":                "Ninja",
+                    "subplatform":             "",
+                    "observed_at":             snapshot_at,
+                    "raw_data":                Json({}),
+                    "canonical_data":          Json({}),
+                    "batch_id":                batch_id,
+                    "observation_hash":        obs_hash,
+                    "collector_version":       "",
+                    "schema_version":          1,
+                })
+
+            if obs_rows:
+                db.insert_ignore(
+                    cur,
+                    "operations.entity_observations",
+                    obs_rows,
+                    conflict_keys=["tenant_id", "collector_instance_id", "batch_id", "observation_hash"],
+                )
+            return len(obs_rows)
+    except Exception:
+        log.exception("Ninja entity_observations write failed — continuing")
+        return 0
+
+
+def _refresh_agent_presence_current() -> None:
+    """Refresh agent_presence_current after Ninja device observations land."""
+    try:
+        with db.transaction() as cur:
+            cur.execute("SELECT operations.refresh_agent_presence_current()")
+        log.info("Refreshed materialized view operations.agent_presence_current")
+    except Exception:
+        log.exception("Failed to refresh agent_presence_current — continuing")
 
 
 def _refresh_active_devices_view() -> None:
