@@ -1658,7 +1658,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 elapsed = f" ({int((_now - st).total_seconds())}s)"
             rows_html += (
                 f"<tr style='background:#fff8e1'>"
-                f"<td>{escape(r['df'])}</td><td>processing</td>"
+                f"<td><a href='/run/sources/demand/{r['id']}'>{escape(r['df'])}</a></td><td>processing</td>"
                 f"<td>{_fmt_dt(r.get('started_at'))}{elapsed}</td>"
                 f"<td>—</td>"
                 f"<td>{r['rows_seen'] if r.get('rows_seen') is not None else '—'}</td>"
