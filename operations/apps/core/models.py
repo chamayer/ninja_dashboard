@@ -715,7 +715,7 @@ class NotificationRule(TenantScopedModel):
         related_name="notification_rules",
     )
     match_criteria = models.JSONField(default=dict)
-    route = models.ForeignKey(NotificationRoute, on_delete=models.PROTECT, related_name="rules")
+    route = models.ForeignKey("NotificationRoute", on_delete=models.PROTECT, related_name="rules")
     urgency_hours = models.PositiveIntegerField(null=True, blank=True)
     cooldown_hours = models.PositiveIntegerField(default=24)
     enabled = models.BooleanField(default=True)
