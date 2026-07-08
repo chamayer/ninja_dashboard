@@ -310,7 +310,13 @@ class IdentityCandidate(TenantScopedModel):
         ]
 ```
 
-**NotificationRule** (NEW — rule engine; existing NotificationRoute is the delivery channel, unchanged)
+**NotificationRoute — legacy field decision**
+
+The existing `NotificationRoute` model (`notification_routes`) already carries `client`, `finding_type`, `severity_min`, and `mode` fields. These were added before `NotificationRule` existed and effectively implemented a partial rule engine on the delivery channel.
+
+Decision: **keep them as compatibility fields for now, mark deprecated in a code comment.** New logic must use `NotificationRule` (below) for rule evaluation and `NotificationRoute` only for the delivery target (channel + target). The AC alert dispatcher (`ingest/agent_compliance/alerts.py`) currently reads these fields — it must not be changed to read `NotificationRule` until Phase 9 is validated. When Phase 9 lands, remove the compatibility fields from `NotificationRoute` in a follow-up migration.
+
+**NotificationRule** (NEW — rule engine; `NotificationRoute` is delivery channel only)
 ```python
 class NotificationRule(TenantScopedModel):
     id             = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -482,15 +488,22 @@ WHERE tenant_id = %s AND canonical_hostname = %s AND deleted_at IS NULL
 ```
 Only return if exactly 1 row AND no existing device_link for this source+external_id.
 
-Returns None on miss. Caller enqueues to identity_resolution_queue (future: add to QueueRegistry in Phase 4 seed).
+Returns None on miss. Log the miss; the resolver (below) will pick it up via polling sweep.
 
-**`ingest/identity/resolver.py`**
+**`ingest/identity/resolver.py`** — polling v1
+
+> **v1 is a polling resolver, not a queue consumer.** `drain_resolution()` scans
+> `entity_observations WHERE device_id IS NULL` directly. There is no queue table
+> driving it. `identity.resolution` is registered in QueueRegistry for operational
+> visibility and health monitoring, but the worker reads from the observation table,
+> not from a queue. A true queue-governed consumer (where fast_path misses enqueue a
+> row and the worker consumes it) is a future upgrade once v1 volume is understood.
 
 ```python
 def drain_resolution(batch_size: int = 20) -> int
 ```
 
-Fetches `entity_observations WHERE device_id IS NULL LIMIT batch_size` (with GUC set).
+Fetches `entity_observations WHERE device_id IS NULL ORDER BY observed_at ASC LIMIT batch_size` (with GUC set).
 For each: tries normalized hostname match (lowercase, strip domain suffix).
 - Unique match: `UPDATE entity_observations SET device_id = %s`.
 - Multiple candidates: INSERT into identity_candidates (status='pending').
@@ -740,16 +753,22 @@ Only then: `ALTER SCHEMA ninja_agent_compliance RENAME TO agent_compliance;` in 
 
 ## Deployment batches
 
-| Batch | Phases | Can ship together |
-|---|---|---|
-| A | 1, 2, 3, 4 | Yes — pure schema/model additions, no logic dependencies between them |
-| B | 5, 6, 7 | Yes — devices.py sync + identity fast_path + S1/SC dual-write (migration 0015 in same batch) |
-| C | 8, 9, 10 | Yes — evaluator + compliance rebuild + agent_presence_current |
-| D | 11 | Findings review pages (can go with C or separately) |
-| E | 12, 13, 14 | Naming cleanup — last |
+Batch A has been split into three smaller deploys to give cleaner rollback/debug boundaries.
 
-Batch A unblocks all subsequent batches.
+| Batch | Phases | Notes |
+|---|---|---|
+| A1 | 1, 2 | Lifecycle/staleness foundations — safest first deploy; fixes active data-loss risk in refresh function |
+| A2 | 3 | Finding extensions + new finding types — isolated model changes |
+| A3 | 4 | New platform tables + RLS — largest single migration; isolated from A1/A2 |
+| B  | 5, 6, 7 | devices.py sync + identity fast_path + S1/SC dual-write (migration 0015 in same batch) |
+| C  | 8, 9, 10 | Evaluator + compliance rebuild + agent_presence_current |
+| D  | 11 | Findings review pages |
+| E  | 12, 13, 14 | Naming cleanup — last |
+
+A1 → A2 → A3 must be deployed in order. A3 unblocks all subsequent batches.
 Each batch is a single `git push` + Portainer redeploy + verify step.
+
+**Do before A1 (operator action, no code push):** add `SOFTWARE_ADDED,SOFTWARE_REMOVED,SOFTWARE_UPDATED` to `INGEST_ACTIVITY_TYPES_INCLUDE` in server `.env` on am-ch-01. Small change, immediate value.
 
 ---
 
