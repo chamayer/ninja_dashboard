@@ -11,11 +11,14 @@ from drf_spectacular.views import (
 )
 
 from apps.core.views import (
+    admin_finding_acknowledge,
     client_policy_delete,
     client_policy_edit,
     client_policy_new,
     client_switch,
     device_detail,
+    finding_acknowledge,
+    findings_admin_health,
     findings_queue,
     healthz,
     home,
@@ -36,6 +39,9 @@ urlpatterns = [
     path("orgs/<slug:org_slug>/policies/<uuid:policy_id>/edit/", client_policy_edit, name="client_policy_edit"),
     path("orgs/<slug:org_slug>/policies/<uuid:policy_id>/delete/", client_policy_delete, name="client_policy_delete"),
     path("findings/", findings_queue, name="findings_queue"),
+    path("findings/<uuid:finding_id>/ack/", finding_acknowledge, name="finding_acknowledge"),
+    path("admin/findings/health/", findings_admin_health, name="findings_admin_health"),
+    path("admin/findings/<uuid:finding_id>/ack/", admin_finding_acknowledge, name="admin_finding_acknowledge"),
     path("merge-candidates/", merge_candidates_queue, name="merge_candidates_queue"),
     path("switch/", client_switch, name="client_switch"),
     path("admin/", admin.site.urls),

@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+
+{% block title %}Admin Health{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h1>Admin / Platform Health</h1>
+    <p class="muted">Platform-level findings: queue health, identity resolution backlogs, and other operational issues.</p>
+</div>
+
+<div class="card">
+    <form action="" method="get" style="display: flex; gap: 1rem; flex-wrap: wrap; align-items: end;">
+        <div>
+            <label style="display: block; font-size: 0.8rem; color: var(--muted);">Status</label>
+            <select name="status">
+                <option value="active"{% if active_status == "active" %} selected{% endif %}>Active</option>
+                <option value="all"{% if active_status == "all" %} selected{% endif %}>All</option>
+                <option value="open"{% if active_status == "open" %} selected{% endif %}>Open</option>
+                <option value="acknowledged"{% if active_status == "acknowledged" %} selected{% endif %}>Acknowledged</option>
+                <option value="resolved"{% if active_status == "resolved" %} selected{% endif %}>Resolved</option>
+            </select>
+        </div>
+        <div>
+            <label style="display: block; font-size: 0.8rem; color: var(--muted);">Severity</label>
+            <select name="severity">
+                <option value="">Any</option>
+                {% for value, label in severity_choices %}
+                    <option value="{{ value }}"{% if active_severity == value %} selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <label style="display: block; font-size: 0.8rem; color: var(--muted);">Type</label>
+            <select name="type">
+                <option value="">Any</option>
+                {% for ft in finding_types %}
+                    <option value="{{ ft.name }}"{% if active_type == ft.name %} selected{% endif %}>{{ ft.name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <button type="submit" style="padding: 0.5rem 1rem;">Apply</button>
+            <a href="?" style="margin-left: 0.5rem; font-size: 0.85rem;">Reset</a>
+        </div>
+    </form>
+</div>
+
+<div class="card">
+    {% if findings %}
+    <table style="width: 100%; border-collapse: collapse;">
+        <thead>
+            <tr style="text-align: left; border-bottom: 1px solid var(--border);">
+                <th style="padding: 0.5rem;">Severity</th>
+                <th style="padding: 0.5rem;">Type</th>
+                <th style="padding: 0.5rem;">Condition key</th>
+                <th style="padding: 0.5rem;">Status</th>
+                <th style="padding: 0.5rem;">First detected</th>
+                <th style="padding: 0.5rem;">Last detected</th>
+                <th style="padding: 0.5rem;"></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for f in findings %}
+            <tr style="border-bottom: 1px solid var(--border);">
+                <td style="padding: 0.5rem;"><strong>{{ f.get_severity_display }}</strong></td>
+                <td style="padding: 0.5rem;">{{ f.finding_type.name }}</td>
+                <td style="padding: 0.5rem;"><code class="muted" style="font-size: 0.8rem;">{{ f.condition_key|truncatechars:40 }}</code></td>
+                <td style="padding: 0.5rem;">{{ f.status }}</td>
+                <td style="padding: 0.5rem;" class="muted">{{ f.first_detected_at }}</td>
+                <td style="padding: 0.5rem;" class="muted">{{ f.last_detected_at }}</td>
+                <td style="padding: 0.5rem;">
+                    {% if f.status == "open" %}
+                    <form method="post" action="{% url 'admin_finding_acknowledge' f.id %}" style="display: inline;">
+                        {% csrf_token %}
+                        <button type="submit" style="padding: 0.25rem 0.6rem; font-size: 0.8rem;">Ack</button>
+                    </form>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="muted">No admin findings match the current filters.</p>
+    {% endif %}
+</div>
+
+<div style="margin-top: 1rem;">
+    <a href="{% url 'findings_queue' %}" style="font-size: 0.85rem;">&larr; Entity findings</a>
+</div>
+{% endblock %}

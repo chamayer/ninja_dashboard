@@ -2,6 +2,17 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.41.0] — 2026-07-08
+
+### Added
+- `/findings/`: enhanced entity findings review page — confidence, client,
+  and type filters; paginated (50/page); hostname from finding_details;
+  one-click Acknowledge action. (Phase 11)
+- `/admin/findings/health/`: new admin-findings health page — platform-level
+  findings (queue health, identity backlogs). Acknowledge action. (Phase 11)
+- `POST /findings/<id>/ack/` and `POST /admin/findings/<id>/ack/`: acknowledge
+  endpoints for entity and admin findings respectively. (Phase 11)
+
 ## [0.40.0] — 2026-07-08
 
 ### Added

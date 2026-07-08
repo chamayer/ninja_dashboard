@@ -11,6 +11,7 @@ from django.views.decorators.http import require_GET, require_POST
 
 from .forms import ClientPolicyForm
 from .models import (
+    AdminFinding,
     Client,
     ClientLink,
     ClientPolicy,
@@ -222,12 +223,14 @@ def client_switch(request: HttpRequest) -> HttpResponse:
 
 @login_required
 def findings_queue(request: HttpRequest) -> HttpResponse:
-    """Findings queue landing page. Empty until M2 classification lands."""
+    """Entity findings review page."""
     status_filter = request.GET.get("status", "active")
     severity_filter = request.GET.get("severity", "")
     type_filter = request.GET.get("type", "")
+    confidence_filter = request.GET.get("confidence", "")
+    client_filter = request.GET.get("client", "")
 
-    qs = Finding.objects.filter(tenant_id=1).select_related("finding_type", "owner")
+    qs = Finding.objects.filter(tenant_id=1).select_related("finding_type", "client", "owner")
 
     if status_filter == "active":
         qs = qs.filter(status__in=_FINDING_ACTIVE_STATUSES)
@@ -236,27 +239,99 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
 
     if severity_filter:
         qs = qs.filter(severity=severity_filter)
-
     if type_filter:
         qs = qs.filter(finding_type__name=type_filter)
+    if confidence_filter:
+        qs = qs.filter(confidence=confidence_filter)
+    if client_filter:
+        qs = qs.filter(client__slug=client_filter)
 
-    qs = qs.order_by("-severity", "-last_seen_at")[:200]
+    _SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
+    findings = sorted(qs[:500], key=lambda f: (_SEVERITY_ORDER.get(f.severity, 9), -(f.last_detected_at or f.last_seen_at).timestamp()))
+
+    paginator = Paginator(findings, 50)
+    page = paginator.get_page(request.GET.get("page"))
 
     finding_types = FindingType.objects.order_by("name")
+    clients = Client.objects.filter(tenant_id=1, deleted_at__isnull=True).order_by("display_name")
 
     return render(
         request,
         "findings_queue.html",
         {
+            "page_obj": page,
+            "findings": page.object_list,
+            "finding_types": finding_types,
+            "clients": clients,
+            "status_choices": Finding.Status.choices,
+            "severity_choices": Finding.Severity.choices,
+            "confidence_choices": Finding.Confidence.choices,
+            "active_status": status_filter,
+            "active_severity": severity_filter,
+            "active_type": type_filter,
+            "active_confidence": confidence_filter,
+            "active_client": client_filter,
+        },
+    )
+
+
+@login_required
+@require_POST
+def finding_acknowledge(request: HttpRequest, finding_id: str) -> HttpResponse:
+    """Acknowledge an entity finding."""
+    finding = get_object_or_404(Finding, id=finding_id, tenant_id=1)
+    if finding.status == Finding.Status.OPEN:
+        finding.status = Finding.Status.ACKNOWLEDGED
+        finding.save(update_fields=["status"])
+    return redirect("findings_queue")
+
+
+@login_required
+def findings_admin_health(request: HttpRequest) -> HttpResponse:
+    """Admin/platform-health findings page."""
+    status_filter = request.GET.get("status", "active")
+    severity_filter = request.GET.get("severity", "")
+    type_filter = request.GET.get("type", "")
+
+    qs = AdminFinding.objects.filter(tenant_id=1).select_related("finding_type")
+
+    if status_filter == "active":
+        qs = qs.filter(status__in=["open", "acknowledged"])
+    elif status_filter and status_filter != "all":
+        qs = qs.filter(status=status_filter)
+
+    if severity_filter:
+        qs = qs.filter(severity=severity_filter)
+    if type_filter:
+        qs = qs.filter(finding_type__name=type_filter)
+
+    qs = qs.order_by("-last_detected_at")[:200]
+
+    finding_types = FindingType.objects.filter(finding_class="admin").order_by("name")
+
+    return render(
+        request,
+        "findings_admin_health.html",
+        {
             "findings": qs,
             "finding_types": finding_types,
-            "status_choices": Finding.Status.choices,
             "severity_choices": Finding.Severity.choices,
             "active_status": status_filter,
             "active_severity": severity_filter,
             "active_type": type_filter,
         },
     )
+
+
+@login_required
+@require_POST
+def admin_finding_acknowledge(request: HttpRequest, finding_id: str) -> HttpResponse:
+    """Acknowledge an admin finding."""
+    finding = get_object_or_404(AdminFinding, id=finding_id, tenant_id=1)
+    if finding.status == "open":
+        finding.status = "acknowledged"
+        finding.save(update_fields=["status"])
+    return redirect("findings_admin_health")
 
 
 def _get_client_by_slug(slug: str) -> Client:

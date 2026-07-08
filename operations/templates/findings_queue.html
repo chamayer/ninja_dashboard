@@ -4,15 +4,15 @@
 
 {% block content %}
 <div class="card">
-    <h1>Findings queue</h1>
-    <p class="muted">Rules-based flags on canonical entities. Populated by classification (M2+).</p>
+    <h1>Findings</h1>
+    <p class="muted">Entity findings — gaps and lifecycle events on canonical devices and clients.</p>
 </div>
 
 <div class="card">
     <form action="" method="get" style="display: flex; gap: 1rem; flex-wrap: wrap; align-items: end;">
         <div>
-            <label for="filter-status" style="display: block; font-size: 0.8rem; color: var(--muted);">Status</label>
-            <select id="filter-status" name="status">
+            <label style="display: block; font-size: 0.8rem; color: var(--muted);">Status</label>
+            <select name="status">
                 <option value="active"{% if active_status == "active" %} selected{% endif %}>Active</option>
                 <option value="all"{% if active_status == "all" %} selected{% endif %}>All</option>
                 {% for value, label in status_choices %}
@@ -21,8 +21,8 @@
             </select>
         </div>
         <div>
-            <label for="filter-severity" style="display: block; font-size: 0.8rem; color: var(--muted);">Severity</label>
-            <select id="filter-severity" name="severity">
+            <label style="display: block; font-size: 0.8rem; color: var(--muted);">Severity</label>
+            <select name="severity">
                 <option value="">Any</option>
                 {% for value, label in severity_choices %}
                     <option value="{{ value }}"{% if active_severity == value %} selected{% endif %}>{{ label }}</option>
@@ -30,8 +30,17 @@
             </select>
         </div>
         <div>
-            <label for="filter-type" style="display: block; font-size: 0.8rem; color: var(--muted);">Type</label>
-            <select id="filter-type" name="type">
+            <label style="display: block; font-size: 0.8rem; color: var(--muted);">Confidence</label>
+            <select name="confidence">
+                <option value="">Any</option>
+                {% for value, label in confidence_choices %}
+                    <option value="{{ value }}"{% if active_confidence == value %} selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <label style="display: block; font-size: 0.8rem; color: var(--muted);">Type</label>
+            <select name="type">
                 <option value="">Any</option>
                 {% for ft in finding_types %}
                     <option value="{{ ft.name }}"{% if active_type == ft.name %} selected{% endif %}>{{ ft.name }}</option>
@@ -39,7 +48,17 @@
             </select>
         </div>
         <div>
+            <label style="display: block; font-size: 0.8rem; color: var(--muted);">Client</label>
+            <select name="client">
+                <option value="">Any</option>
+                {% for c in clients %}
+                    <option value="{{ c.slug }}"{% if active_client == c.slug %} selected{% endif %}>{{ c.display_name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
             <button type="submit" style="padding: 0.5rem 1rem;">Apply</button>
+            <a href="?" style="margin-left: 0.5rem; font-size: 0.85rem;">Reset</a>
         </div>
     </form>
 </div>
@@ -50,35 +69,57 @@
         <thead>
             <tr style="text-align: left; border-bottom: 1px solid var(--border);">
                 <th style="padding: 0.5rem;">Severity</th>
+                <th style="padding: 0.5rem;">Confidence</th>
                 <th style="padding: 0.5rem;">Type</th>
+                <th style="padding: 0.5rem;">Client</th>
                 <th style="padding: 0.5rem;">Subject</th>
                 <th style="padding: 0.5rem;">Status</th>
-                <th style="padding: 0.5rem;">Owner</th>
-                <th style="padding: 0.5rem;">Last seen</th>
+                <th style="padding: 0.5rem;">Last detected</th>
+                <th style="padding: 0.5rem;"></th>
             </tr>
         </thead>
         <tbody>
             {% for f in findings %}
             <tr style="border-bottom: 1px solid var(--border);">
                 <td style="padding: 0.5rem;"><strong>{{ f.get_severity_display }}</strong></td>
+                <td style="padding: 0.5rem;" class="muted">{{ f.confidence|default:"—" }}</td>
                 <td style="padding: 0.5rem;">{{ f.finding_type.name }}</td>
+                <td style="padding: 0.5rem;">{{ f.client.display_name|default:"—" }}</td>
                 <td style="padding: 0.5rem;">
-                    <code>{{ f.get_subject_type_display }}</code>
-                    <span class="muted">{{ f.subject_id }}</span>
+                    <span class="muted">{{ f.get_subject_type_display }}</span>
+                    {% if f.finding_details.hostname %}<br><code>{{ f.finding_details.hostname }}</code>{% endif %}
                 </td>
                 <td style="padding: 0.5rem;">{{ f.get_status_display }}</td>
-                <td style="padding: 0.5rem;">{{ f.owner|default:"—" }}</td>
-                <td style="padding: 0.5rem;" class="muted">{{ f.last_seen_at }}</td>
+                <td style="padding: 0.5rem;" class="muted">{{ f.last_detected_at|default:f.last_seen_at }}</td>
+                <td style="padding: 0.5rem;">
+                    {% if f.status == "open" %}
+                    <form method="post" action="{% url 'finding_acknowledge' f.id %}" style="display: inline;">
+                        {% csrf_token %}
+                        <button type="submit" style="padding: 0.25rem 0.6rem; font-size: 0.8rem;">Ack</button>
+                    </form>
+                    {% endif %}
+                </td>
             </tr>
             {% endfor %}
         </tbody>
     </table>
-    <p class="muted" style="margin-top: 1rem;">Showing up to 200 findings.</p>
-    {% else %}
-    <p class="muted">
-        No findings match the current filters. Findings appear once the classification
-        pipeline (M2) begins stamping rule results — until then this queue is empty by design.
-    </p>
+    {% if page_obj.has_other_pages %}
+    <div style="margin-top: 1rem; display: flex; gap: 0.5rem; align-items: center;">
+        {% if page_obj.has_previous %}
+            <a href="?page={{ page_obj.previous_page_number }}&status={{ active_status }}&severity={{ active_severity }}&confidence={{ active_confidence }}&type={{ active_type }}&client={{ active_client }}">&laquo; Prev</a>
+        {% endif %}
+        <span class="muted">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+        {% if page_obj.has_next %}
+            <a href="?page={{ page_obj.next_page_number }}&status={{ active_status }}&severity={{ active_severity }}&confidence={{ active_confidence }}&type={{ active_type }}&client={{ active_client }}">Next &raquo;</a>
+        {% endif %}
+    </div>
     {% endif %}
+    {% else %}
+    <p class="muted">No findings match the current filters.</p>
+    {% endif %}
+</div>
+
+<div style="margin-top: 1rem;">
+    <a href="{% url 'findings_admin_health' %}" style="font-size: 0.85rem;">Admin / platform health findings &rarr;</a>
 </div>
 {% endblock %}

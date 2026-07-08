@@ -5,6 +5,25 @@ only project-level pointers.
 
 ---
 
+## 2026-07-08 — Batch D (Phase 11)
+
+**Why:** Findings review and admin health pages — first UI surface for the
+platform evaluator output.
+
+**Work completed:**
+
+- Enhanced /findings/ view: added confidence, client, type filters; pagination
+  (50/page); shows hostname from finding_details; one-click Ack button.
+- New /admin/findings/health/ view: shows AdminFinding records (platform-level
+  issues), severity/status/type filters, Ack button.
+- New POST /findings/<id>/ack/ and /admin/findings/<id>/ack/ acknowledge endpoints.
+- Updated urls.py with 4 new routes.
+- Updated findings_queue.html template and added findings_admin_health.html.
+
+**Deployed:** v0.41.0
+
+---
+
 ## 2026-07-08 — Batch C (Phases 8–10)
 
 **Why:** Platform evaluator, compliance engine rebuild, agent_presence_current

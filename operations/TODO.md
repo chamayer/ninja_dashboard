@@ -48,7 +48,7 @@ Batch C — evaluator + compliance rebuild (Phases 8–10, ship together):
 - [x] Phase 10: Django migration 0016 — agent_presence_current materialized view
 
 Batch D — web pages (Phase 11):
-- [ ] Phase 11: findings review page (/findings/) + admin health page (/admin/findings/health/)
+- [x] Phase 11: findings review page (/findings/) + admin health page (/admin/findings/health/)
 
 Batch E — naming cleanup (Phases 12–14, coordinate with am-ch-01 .env update):
 - [ ] Phase 12: docker-compose.yml — rename ninja-ingest → operations-ingest
