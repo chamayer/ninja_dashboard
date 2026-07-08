@@ -15,81 +15,198 @@
 </div>
 
 <div class="card">
-    <style>
-        .sw-row:nth-child(odd) { background: #fafbfc; }
-        .sw-row td { padding: 0.4rem 0.6rem; vertical-align: top; }
-        .version-list { color: #52606d; font-size: 0.82rem; }
-        .pager { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-top: 1rem; flex-wrap: wrap; }
-        .pager-links { display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap; }
-        .pager-link { display: inline-block; padding: 0.35rem 0.65rem; border: 1px solid var(--border); border-radius: 4px; text-decoration: none; color: inherit; background: white; font-size: 0.85rem; }
-        .pager-link:hover { border-color: var(--accent); }
-    </style>
+<style>
+  .sw-filters { display: flex; gap: 1rem; align-items: flex-start; flex-wrap: wrap; margin-bottom: 1rem; }
+  .sw-filter-group { display: flex; flex-direction: column; gap: 4px; }
+  .sw-filter-group label { font-size: 0.78rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  .sw-filter-group input[type=search],
+  .sw-filter-group input[type=text] {
+    padding: 0.4rem 0.65rem; border: 1px solid var(--border); border-radius: 4px;
+    font-size: 0.88rem; min-width: 200px;
+  }
+  .pub-panel {
+    border: 1px solid var(--border); border-radius: 4px; background: white;
+    max-height: 160px; overflow-y: auto; min-width: 220px;
+  }
+  .pub-panel label { display: flex; align-items: center; gap: 0.4rem;
+    padding: 0.28rem 0.6rem; font-size: 0.85rem; font-weight: 400;
+    cursor: pointer; text-transform: none; letter-spacing: 0; color: inherit; }
+  .pub-panel label:hover { background: #f0f4f8; }
+  .pub-count { margin-left: auto; color: var(--muted); font-size: 0.78rem; }
+  .sw-row:nth-child(odd) { background: #fafbfc; }
+  .sw-row td { padding: 0.4rem 0.6rem; vertical-align: top; font-size: 0.88rem; }
+  .sw-row.hidden-row { display: none; }
+  .version-list { color: #52606d; font-size: 0.8rem; }
+  .loc-list { color: #52606d; font-size: 0.78rem; max-width: 240px; white-space: pre-line; }
+  .pager { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-top: 1rem; flex-wrap: wrap; }
+  .pager-links { display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap; }
+  .pager-link { display: inline-block; padding: 0.3rem 0.6rem; border: 1px solid var(--border);
+    border-radius: 4px; text-decoration: none; color: inherit; background: white; font-size: 0.82rem; }
+  .pager-link:hover { border-color: var(--accent); }
+  .decision-badge { display: inline-block; font-size: 0.72rem; padding: 1px 6px;
+    border-radius: 3px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+  .decision-approve { background: #d4edda; color: #155724; }
+  .decision-reject { background: #f8d7da; color: #721c24; }
+  .decision-investigate { background: #fff3cd; color: #856404; }
+  .decision-approve_publisher { background: #cce5ff; color: #004085; }
+  .sw-actions form { display: inline; }
+  .sw-actions button { font-size: 0.75rem; padding: 2px 7px; border-radius: 3px;
+    border: 1px solid var(--border); background: white; cursor: pointer; }
+  .sw-actions button:hover { background: #f0f4f8; }
+  .filter-actions { display: flex; gap: 0.5rem; align-items: center; margin-top: 0.5rem; }
+  .btn-apply { padding: 0.4rem 0.9rem; border: 1px solid var(--border); border-radius: 4px;
+    background: var(--header-bg); color: white; cursor: pointer; font-size: 0.88rem; }
+  .btn-clear { padding: 0.4rem 0.75rem; border: none; background: none;
+    color: var(--muted); cursor: pointer; font-size: 0.85rem; text-decoration: underline; }
+  #live-filter { padding: 0.4rem 0.65rem; border: 1px solid var(--border); border-radius: 4px;
+    font-size: 0.88rem; min-width: 240px; }
+  #match-count { font-size: 0.82rem; color: var(--muted); }
+</style>
 
-    <form method="get" style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-bottom: 1rem;">
-        <input type="search" name="q" value="{{ search_query }}" placeholder="Search by name..."
-               style="flex: 1; min-width: 220px; padding: 0.45rem 0.75rem; border: 1px solid var(--border); border-radius: 4px;">
-        {% if publishers %}
-        <select name="publisher" style="padding: 0.45rem 0.75rem; border: 1px solid var(--border); border-radius: 4px; background: white;">
-            <option value="">All publishers</option>
-            {% for pub in publishers %}
-            <option value="{{ pub }}" {% if pub == active_publisher %}selected{% endif %}>{{ pub }}</option>
-            {% endfor %}
-        </select>
-        {% endif %}
-        <button type="submit" style="padding: 0.45rem 0.9rem; border: 1px solid var(--border); border-radius: 4px; background: var(--header-bg); color: white; cursor: pointer;">Filter</button>
-        {% if search_query or active_publisher %}
-        <a href="{% url 'org_software' org_slug=client.slug %}" style="padding: 0.45rem 0.75rem; text-decoration: none; color: var(--muted);">Clear</a>
-        {% endif %}
-    </form>
+<form method="get" id="sw-form">
+  <div class="sw-filters">
 
-    {% if rows %}
-    <table style="width: 100%; border-collapse: collapse; font-size: 0.9rem;">
-        <thead>
-            <tr style="text-align: left; border-bottom: 2px solid var(--border);">
-                <th style="padding: 0.5rem 0.6rem;">Name</th>
-                <th style="padding: 0.5rem 0.6rem;">Publisher</th>
-                <th style="padding: 0.5rem 0.6rem; text-align: right;">Devices</th>
-                <th style="padding: 0.5rem 0.6rem;">Version(s)</th>
-                <th style="padding: 0.5rem 0.6rem;">Last seen</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for name, publisher, versions, device_count, last_seen in rows %}
-            <tr class="sw-row">
-                <td>{{ name }}</td>
-                <td class="muted">{{ publisher|default:"—" }}</td>
-                <td style="text-align: right;">{{ device_count }}</td>
-                <td class="version-list">{{ versions|default:"—" }}</td>
-                <td class="muted" style="white-space: nowrap; font-size: 0.82rem;">{{ last_seen|date:"Y-m-d"|default:"—" }}</td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-
-    {% if num_pages > 1 %}
-    <div class="pager">
-        <p class="muted" style="margin: 0;">Page {{ page }} of {{ num_pages }} · {{ page_size }} per page</p>
-        <div class="pager-links">
-            {% if has_previous %}
-                <a class="pager-link" href="?{% if page_query %}{{ page_query }}&{% endif %}page=1">First</a>
-                <a class="pager-link" href="?{% if page_query %}{{ page_query }}&{% endif %}page={{ previous_page }}">Previous</a>
-            {% endif %}
-            {% if has_next %}
-                <a class="pager-link" href="?{% if page_query %}{{ page_query }}&{% endif %}page={{ next_page }}">Next</a>
-                <a class="pager-link" href="?{% if page_query %}{{ page_query }}&{% endif %}page={{ num_pages }}">Last</a>
-            {% endif %}
-        </div>
+    <div class="sw-filter-group">
+      <label for="q">Search name (server-side)</label>
+      <input type="search" name="q" id="q" value="{{ search_query }}" placeholder="e.g. office, chrome…">
     </div>
-    {% endif %}
 
-    {% else %}
-    <p class="muted">
-        {% if search_query or active_publisher %}
-            No software matches your filters.
-        {% else %}
-            No software data yet — enable <code>SOFTWARE_QUEUE_ENABLED=true</code> in <code>.env</code> and redeploy ingest to start collecting.
+    <div class="sw-filter-group">
+      <label>Publisher</label>
+      <input type="search" id="pub-search" placeholder="Filter publishers…"
+             oninput="filterPubList(this.value)"
+             style="padding: 0.4rem 0.65rem; border: 1px solid var(--border); border-radius: 4px 4px 0 0; font-size: 0.85rem; min-width: 220px;">
+      <div class="pub-panel" id="pub-panel">
+        {% for pub in publishers %}
+        <label>
+          <input type="checkbox" name="publisher" value="{{ pub }}"
+                 {% if pub in active_publishers %}checked{% endif %}>
+          {{ pub }}
+        </label>
+        {% empty %}
+        <p style="padding: 0.5rem; color: var(--muted); font-size: 0.85rem; margin: 0;">No publishers</p>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="sw-filter-group" style="justify-content: flex-end;">
+      <label>&nbsp;</label>
+      <div class="filter-actions">
+        <button type="submit" class="btn-apply">Apply</button>
+        {% if search_query or active_publishers %}
+        <a href="{% url 'org_software' org_slug=client.slug %}" class="btn-clear">Clear</a>
         {% endif %}
-    </p>
-    {% endif %}
+      </div>
+    </div>
+
+  </div>
+</form>
+
+{% if rows %}
+<div style="display:flex; align-items:center; gap:1rem; margin-bottom:0.5rem;">
+  <input type="search" id="live-filter" placeholder="Quick filter visible rows…" oninput="liveFilter(this.value)">
+  <span id="match-count"></span>
 </div>
+
+<table style="width: 100%; border-collapse: collapse;">
+    <thead>
+        <tr style="text-align: left; border-bottom: 2px solid var(--border); font-size: 0.82rem; color: var(--muted);">
+            <th style="padding: 0.5rem 0.6rem;">Name</th>
+            <th style="padding: 0.5rem 0.6rem;">Publisher</th>
+            <th style="padding: 0.5rem 0.6rem; text-align: right;">Devices</th>
+            <th style="padding: 0.5rem 0.6rem;">Version(s)</th>
+            <th style="padding: 0.5rem 0.6rem;">First installed</th>
+            <th style="padding: 0.5rem 0.6rem;">Last seen</th>
+            <th style="padding: 0.5rem 0.6rem;">Location</th>
+            <th style="padding: 0.5rem 0.6rem;">Decision</th>
+        </tr>
+    </thead>
+    <tbody id="sw-tbody">
+        {% for name, publisher, versions, device_count, first_installed, last_seen, locations, decision in rows %}
+        <tr class="sw-row" data-name="{{ name|lower }}" data-pub="{{ publisher|lower|default:'' }}">
+            <td>{{ name }}</td>
+            <td class="muted">{{ publisher|default:"—" }}</td>
+            <td style="text-align: right;">
+                <a href="{% url 'org_software_devices' org_slug=client.slug %}?name={{ name|urlencode }}&publisher={{ publisher|default:''|urlencode }}">{{ device_count }}</a>
+            </td>
+            <td class="version-list">{{ versions|default:"—" }}</td>
+            <td class="muted" style="white-space: nowrap; font-size: 0.8rem;">{{ first_installed|date:"Y-m-d"|default:"—" }}</td>
+            <td class="muted" style="white-space: nowrap; font-size: 0.8rem;">{{ last_seen|date:"Y-m-d"|default:"—" }}</td>
+            <td class="loc-list">{{ locations|default:"—" }}</td>
+            <td class="sw-actions">
+                {% if decision %}
+                <span class="decision-badge decision-{{ decision }}">{{ decision|title }}</span>
+                {% endif %}
+                <details style="display:inline-block; position:relative;">
+                  <summary style="cursor:pointer; font-size:0.78rem; color:var(--muted); list-style:none;">⋯</summary>
+                  <div style="position:absolute; right:0; z-index:10; background:white; border:1px solid var(--border); border-radius:4px; padding:0.4rem; white-space:nowrap; box-shadow:0 2px 8px rgba(0,0,0,.1);">
+                    {% for choice_val, choice_label in decision_choices %}
+                    <form method="post" action="{% url 'org_software_decide' org_slug=client.slug %}">
+                      {% csrf_token %}
+                      <input type="hidden" name="canonical_name" value="{{ name }}">
+                      <input type="hidden" name="decision" value="{{ choice_val }}">
+                      <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                      <button type="submit" style="display:block; width:100%; text-align:left; padding:0.25rem 0.5rem; border:none; background:none; cursor:pointer; font-size:0.83rem;">{{ choice_label }}</button>
+                    </form>
+                    {% endfor %}
+                  </div>
+                </details>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+{% if num_pages > 1 %}
+<div class="pager">
+    <p class="muted" style="margin: 0;">Page {{ page }} of {{ num_pages }} · {{ page_size }} per page</p>
+    <div class="pager-links">
+        {% if has_previous %}
+            <a class="pager-link" href="?{% if page_query %}{{ page_query }}&{% endif %}page=1">First</a>
+            <a class="pager-link" href="?{% if page_query %}{{ page_query }}&{% endif %}page={{ previous_page }}">Prev</a>
+        {% endif %}
+        {% if has_next %}
+            <a class="pager-link" href="?{% if page_query %}{{ page_query }}&{% endif %}page={{ next_page }}">Next</a>
+            <a class="pager-link" href="?{% if page_query %}{{ page_query }}&{% endif %}page={{ num_pages }}">Last</a>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+
+{% else %}
+<p class="muted">
+    {% if search_query or active_publishers %}
+        No software matches your filters.
+    {% else %}
+        No software data yet — enable <code>SOFTWARE_QUEUE_ENABLED=true</code> in <code>.env</code> and redeploy ingest to start collecting.
+    {% endif %}
+</p>
+{% endif %}
+</div>
+
+<script>
+function filterPubList(q) {
+  q = q.toLowerCase();
+  document.querySelectorAll('#pub-panel label').forEach(function(lbl) {
+    var txt = lbl.textContent.toLowerCase();
+    lbl.style.display = (!q || txt.indexOf(q) !== -1) ? '' : 'none';
+  });
+}
+
+function liveFilter(q) {
+  q = q.toLowerCase();
+  var rows = document.querySelectorAll('#sw-tbody tr.sw-row');
+  var visible = 0;
+  rows.forEach(function(row) {
+    var name = row.getAttribute('data-name') || '';
+    var pub  = row.getAttribute('data-pub') || '';
+    var match = !q || name.indexOf(q) !== -1 || pub.indexOf(q) !== -1;
+    row.classList.toggle('hidden-row', !match);
+    if (match) visible++;
+  });
+  var total = rows.length;
+  var el = document.getElementById('match-count');
+  if (el) el.textContent = q ? (visible + ' of ' + total + ' visible') : '';
+}
+</script>
 {% endblock %}

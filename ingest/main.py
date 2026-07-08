@@ -1277,6 +1277,40 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         confirm = params.get("confirm", ["0"])[0]
 
         if self.command == "GET" and confirm != "1":
+            # Load orgs and devices for the selectors.
+            orgs: list[tuple[int, str]] = []
+            devices: list[tuple[int, str, str]] = []
+            try:
+                with db.pool.connection() as conn, conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT id, name FROM ninja_core.organizations ORDER BY name"
+                    )
+                    orgs = cur.fetchall()
+                    cur.execute(
+                        """
+                        SELECT id, COALESCE(display_name, system_name, 'Device ' || id::text),
+                               organization_id
+                        FROM ninja_core.devices
+                        WHERE is_current = TRUE
+                        ORDER BY display_name, system_name
+                        LIMIT 5000
+                        """
+                    )
+                    devices = cur.fetchall()
+            except Exception:
+                pass
+
+            org_options = "".join(
+                f'<option value="org={oid}" data-df="org={oid}">{escape(name)} (org={oid})</option>'
+                for oid, name in orgs
+            )
+            # Build org_id → name map for device option labels
+            org_map = {oid: name for oid, name in orgs}
+            device_options = "".join(
+                f'<option value="id={did}" data-df="id={did}">{escape(dname)} — {escape(org_map.get(org_id, str(org_id)))} (id={did})</option>'
+                for did, dname, org_id in devices
+            )
+
             body = f"""
                 <!doctype html>
                 <html>
@@ -1284,38 +1318,82 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                   <meta charset="utf-8">
                   <title>Software inventory — demand run</title>
                   <style>
-                    body {{ font-family: sans-serif; margin: 24px; color: #1f2933; max-width: 720px; }}
-                    label {{ display: block; font-weight: 700; margin: 16px 0 6px; }}
-                    input {{ font-size: 16px; padding: 8px 10px; width: 100%; box-sizing: border-box; }}
-                    button {{ margin-top: 18px; padding: 9px 14px; font-weight: 700; }}
-                    .hint {{ color: #52606d; font-size: 14px; margin: 4px 0 0; }}
+                    body {{ font-family: sans-serif; margin: 24px; color: #1f2933; max-width: 760px; }}
+                    label {{ display: block; font-weight: 700; margin: 16px 0 4px; }}
+                    .search-wrap {{ position: relative; margin-bottom: 4px; }}
+                    .search-wrap input[type=search] {{
+                      font-size: 14px; padding: 7px 10px; width: 100%; box-sizing: border-box;
+                      border: 1px solid #bcccdc; border-radius: 4px;
+                    }}
+                    select {{
+                      font-size: 14px; padding: 4px 6px; width: 100%; box-sizing: border-box;
+                      border: 1px solid #bcccdc; border-radius: 4px; height: 160px;
+                    }}
+                    .df-box {{ font-size: 16px; padding: 8px 10px; width: 100%; box-sizing: border-box;
+                               border: 1px solid #bcccdc; border-radius: 4px; margin-top: 4px; }}
+                    button {{ margin-top: 18px; padding: 9px 18px; font-weight: 700;
+                              background: #0b69a3; color: white; border: none; border-radius: 4px; cursor: pointer; }}
+                    button:hover {{ background: #0a5c8f; }}
+                    .hint {{ color: #52606d; font-size: 13px; margin: 3px 0 0; }}
                     a {{ color: #0b69a3; }}
+                    .cols {{ display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }}
+                    @media (max-width: 600px) {{ .cols {{ grid-template-columns: 1fr; }} }}
                   </style>
                 </head>
                 <body>
                   <h2>Software inventory — demand run</h2>
-                  <p class="hint">
-                    Queues an immediate scoped pull and shows live status.
-                    Use <code>org=&lt;OrgID&gt;</code> for an entire org or
-                    <code>id=&lt;DeviceID&gt;</code> for a single device.
-                  </p>
+                  <p class="hint">Select a client or device below, or type a scope directly.</p>
+
+                  <div class="cols">
+                    <div>
+                      <label>Client (entire org)</label>
+                      <div class="search-wrap">
+                        <input type="search" id="org-search" placeholder="Search clients…" oninput="filterSelect('org-list', this.value)">
+                      </div>
+                      <select id="org-list" size="8" onchange="setDf(this)">
+                        {org_options}
+                      </select>
+                    </div>
+                    <div>
+                      <label>Device (single)</label>
+                      <div class="search-wrap">
+                        <input type="search" id="dev-search" placeholder="Search devices…" oninput="filterSelect('dev-list', this.value)">
+                      </div>
+                      <select id="dev-list" size="8" onchange="setDf(this)">
+                        {device_options}
+                      </select>
+                    </div>
+                  </div>
+
                   <form method="get" action="/run/software/enqueue">
                     <input type="hidden" name="confirm" value="1">
                     <label for="df">Scope (df)</label>
-                    <input id="df" name="df" value="{escape(df)}"
-                           placeholder="org=123  or  id=456"
+                    <input id="df" name="df" class="df-box" value="{escape(df)}"
+                           placeholder="org=123  or  id=456  or  org=123 AND id=456"
                            required>
-                    <p class="hint">
-                      Syntax: <code>org=&lt;OrgID&gt;</code> &middot;
-                      <code>id=&lt;DeviceID&gt;</code> &middot;
-                      <code>org=123 AND id=456</code>
-                    </p>
-                    <button type="submit">Run now</button>
+                    <p class="hint">Selections above fill this field. Edit freely.</p>
+                    <button type="submit">Queue now</button>
                   </form>
-                  <p style="margin-top: 24px;">
+
+                  <p style="margin-top:24px;">
                     <a href="/run/software/queue">Queue status</a> &middot;
                     <a href="/run/software/scoped">Direct scoped run (bypasses queue)</a>
                   </p>
+
+                  <script>
+                    function setDf(sel) {{
+                      var opt = sel.options[sel.selectedIndex];
+                      if (opt) document.getElementById('df').value = opt.getAttribute('data-df') || opt.value;
+                    }}
+                    function filterSelect(listId, query) {{
+                      var q = query.toLowerCase();
+                      var sel = document.getElementById(listId);
+                      for (var i = 0; i < sel.options.length; i++) {{
+                        var txt = sel.options[i].text.toLowerCase();
+                        sel.options[i].style.display = (!q || txt.indexOf(q) !== -1) ? '' : 'none';
+                      }}
+                    }}
+                  </script>
                 </body>
                 </html>
             """.encode("utf-8")
@@ -1466,28 +1544,43 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                     if st.tzinfo is None:
                         st = st.replace(tzinfo=_dt.timezone.utc)
                     elapsed = f" ({int((_now - st).total_seconds())}s)"
+                attempts_str = f"{r['attempts']}/{r['max_attempts']}" if r.get('max_attempts') else str(r.get('attempts', ''))
+                scope_cell = (
+                    f"<a href='/run/software/demand/{r['id']}'>{r['df']}</a>"
+                    if name == "demand" else r['df']
+                )
                 rows_html += (
                     f"<tr style='background:#fff8e1'>"
-                    f"<td>processing</td><td>{r['df']}</td>"
+                    f"<td>processing</td><td>{scope_cell}</td>"
                     f"<td>{_fmt_dt(r['started_at'])}{elapsed}</td>"
-                    f"<td>—</td><td>—</td><td></td></tr>"
+                    f"<td>—</td><td>—</td><td>{attempts_str}</td><td></td></tr>"
                 )
             for r in recent:
-                err = f"<span style='color:#c0392b'>{r['error'][:80]}</span>" if r.get("error") else ""
+                err_full = r.get("error") or ""
+                err_cell = (
+                    f"<span style='color:#c0392b' title='{err_full}'>{err_full[:80]}{'…' if len(err_full) > 80 else ''}</span>"
+                    if err_full else ""
+                )
+                attempts_str = f"{r['attempts']}/{r['max_attempts']}" if r.get('max_attempts') else str(r.get('attempts', ''))
+                scope_cell = (
+                    f"<a href='/run/software/demand/{r['id']}'>{r['df']}</a>"
+                    if name == "demand" else r['df']
+                )
                 rows_html += (
                     f"<tr>"
-                    f"<td>{r['status']}</td><td>{r['df']}</td>"
+                    f"<td>{r['status']}</td><td>{scope_cell}</td>"
                     f"<td>{_fmt_dt(r['started_at'])}</td>"
                     f"<td>{_fmt_dt(r['completed_at'])}</td>"
                     f"<td>{r['rows_seen'] if r['rows_seen'] is not None else '—'}</td>"
-                    f"<td>{err}</td></tr>"
+                    f"<td>{attempts_str}</td>"
+                    f"<td>{err_cell}</td></tr>"
                 )
             return f"""
               <h3 style="margin-top:24px;margin-bottom:4px">{name}</h3>
               <table>
                 <thead><tr>
                   <th>Status</th><th>Scope</th><th>Started</th>
-                  <th>Completed</th><th>Rows</th><th>Error</th>
+                  <th>Completed</th><th>Rows</th><th>Attempts</th><th>Error</th>
                 </tr></thead>
                 <tbody>{rows_html}</tbody>
               </table>"""

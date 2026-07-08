@@ -19,6 +19,7 @@ from .models import (
     Finding,
     FindingType,
     MergeCandidate,
+    SoftwareDecision,
 )
 
 DEVICE_PAGE_SIZE = 100
@@ -436,7 +437,7 @@ _SW_PAGE_SIZE = 100
 def org_software(request: HttpRequest, org_slug: str) -> HttpResponse:
     client = _get_client_by_slug(org_slug)
     search = request.GET.get("q", "").strip()
-    publisher_filter = request.GET.get("publisher", "").strip()
+    active_publishers = request.GET.getlist("publisher")
     page = max(1, int(request.GET.get("page", 1) or 1))
 
     base_params: list = [1, str(client.id)]
@@ -447,9 +448,10 @@ def org_software(request: HttpRequest, org_slug: str) -> HttpResponse:
     if search:
         extra_where += " AND canonical_name ILIKE %s"
         extra_params.append(f"%{search}%")
-    if publisher_filter:
-        extra_where += " AND publisher = %s"
-        extra_params.append(publisher_filter)
+    if active_publishers:
+        placeholders = ",".join(["%s"] * len(active_publishers))
+        extra_where += f" AND publisher IN ({placeholders})"
+        extra_params.extend(active_publishers)
 
     full_where = base_where + extra_where
     all_params = base_params + extra_params
@@ -487,9 +489,13 @@ def org_software(request: HttpRequest, org_slug: str) -> HttpResponse:
                 SELECT
                     canonical_name,
                     publisher,
-                    string_agg(DISTINCT version, ', ' ORDER BY version) FILTER (WHERE version IS NOT NULL AND version <> '') AS versions,
+                    string_agg(DISTINCT version, ', ' ORDER BY version)
+                        FILTER (WHERE version IS NOT NULL AND version <> '') AS versions,
                     count(DISTINCT device_id) AS device_count,
-                    max(last_observed_at) AS last_seen
+                    min(install_date)          AS first_installed,
+                    max(last_observed_at)      AS last_seen,
+                    string_agg(DISTINCT install_location, E'\\n')
+                        FILTER (WHERE install_location IS NOT NULL AND install_location <> '') AS locations
                 FROM operations.software_installations_current
                 WHERE {full_where}
                 GROUP BY canonical_name, publisher
@@ -500,13 +506,18 @@ def org_software(request: HttpRequest, org_slug: str) -> HttpResponse:
             )
             rows = cur.fetchall()
 
+    # Attach decision to each row so templates don't need dict-key lookup
+    decisions_map = {
+        d.canonical_name: d.decision
+        for d in SoftwareDecision.objects.filter(tenant_id=1, client=client)
+    }
+    rows = [row + (decisions_map.get(row[0], ""),) for row in rows]
+
     num_pages = max(1, (total + _SW_PAGE_SIZE - 1) // _SW_PAGE_SIZE)
 
-    page_query_parts = []
+    page_query_parts = [f"publisher={p}" for p in active_publishers]
     if search:
         page_query_parts.append(f"q={search}")
-    if publisher_filter:
-        page_query_parts.append(f"publisher={publisher_filter}")
     page_query = "&".join(page_query_parts)
 
     return render(
@@ -517,8 +528,9 @@ def org_software(request: HttpRequest, org_slug: str) -> HttpResponse:
             "rows": rows,
             "total": total,
             "publishers": publishers,
+            "active_publishers": active_publishers,
             "search_query": search,
-            "active_publisher": publisher_filter,
+            "decision_choices": SoftwareDecision.Decision.choices,
             "page": page,
             "num_pages": num_pages,
             "page_size": _SW_PAGE_SIZE,
@@ -529,3 +541,74 @@ def org_software(request: HttpRequest, org_slug: str) -> HttpResponse:
             "next_page": page + 1,
         },
     )
+
+
+@login_required
+def org_software_devices(request: HttpRequest, org_slug: str) -> HttpResponse:
+    """Devices that have a specific software installed."""
+    client = _get_client_by_slug(org_slug)
+    sw_name = request.GET.get("name", "").strip()
+    sw_publisher = request.GET.get("publisher", "").strip()
+    if not sw_name:
+        return redirect("org_software", org_slug=org_slug)
+
+    with transaction.atomic():
+        with connection.cursor() as cur:
+            cur.execute("SET LOCAL operations.tenant_id = 1")
+            params: list = [1, str(client.id), sw_name]
+            pub_clause = ""
+            if sw_publisher:
+                pub_clause = " AND s.publisher = %s"
+                params.append(sw_publisher)
+            cur.execute(
+                f"""
+                SELECT d.id, d.canonical_hostname, d.canonical_serial, d.device_type,
+                       s.version, s.install_date, s.install_location, s.last_observed_at
+                FROM operations.software_installations_current s
+                JOIN operations.devices d
+                     ON d.id = s.device_id AND d.tenant_id = s.tenant_id
+                WHERE s.tenant_id = %s
+                  AND s.client_id = %s
+                  AND s.canonical_name = %s
+                  AND s.deleted_at IS NULL{pub_clause}
+                ORDER BY d.canonical_hostname
+                """,
+                params,
+            )
+            device_rows = cur.fetchall()
+
+    return render(
+        request,
+        "org_software_devices.html",
+        {
+            "client": client,
+            "sw_name": sw_name,
+            "sw_publisher": sw_publisher,
+            "device_rows": device_rows,
+        },
+    )
+
+
+@login_required
+@require_POST
+def org_software_decide(request: HttpRequest, org_slug: str) -> HttpResponse:
+    """Record approve/reject/investigate decision for a software entry."""
+    from django.utils import timezone
+    client = _get_client_by_slug(org_slug)
+    sw_name = request.POST.get("canonical_name", "").strip()
+    decision = request.POST.get("decision", "").strip()
+    if not sw_name or decision not in SoftwareDecision.Decision.values:
+        return redirect("org_software", org_slug=org_slug)
+
+    SoftwareDecision.objects.update_or_create(
+        tenant_id=1,
+        client=client,
+        canonical_name=sw_name,
+        defaults={
+            "decision": decision,
+            "decided_by": request.user,
+            "decided_at": timezone.now(),
+        },
+    )
+    return redirect(request.POST.get("next") or request.META.get("HTTP_REFERER") or
+                    f"/orgs/{org_slug}/software/")

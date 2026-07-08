@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+
+{% block title %}{{ sw_name }} — Devices — {{ client.display_name }}{% endblock %}
+
+{% block content %}
+<div class="card">
+    <p class="muted">
+        <a href="{% url 'org_index' org_slug=client.slug %}">{{ client.display_name }}</a>
+        &nbsp;›&nbsp; <a href="{% url 'org_software' org_slug=client.slug %}">Software</a>
+        &nbsp;›&nbsp; {{ sw_name }}
+    </p>
+    <h1 style="margin: 0;">
+        {{ sw_name }}
+        <span class="muted" style="font-weight: 400; font-size: 1.1rem;">
+            {% if sw_publisher %}· {{ sw_publisher }}{% endif %}
+        </span>
+    </h1>
+    <p class="muted" style="margin-top: 0.25rem;">{{ device_rows|length }} device{{ device_rows|length|pluralize }}</p>
+</div>
+
+<div class="card">
+{% if device_rows %}
+<table style="width: 100%; border-collapse: collapse; font-size: 0.88rem;">
+    <thead>
+        <tr style="text-align: left; border-bottom: 2px solid var(--border); font-size: 0.8rem; color: var(--muted);">
+            <th style="padding: 0.5rem 0.6rem;">Device</th>
+            <th style="padding: 0.5rem 0.6rem;">Type</th>
+            <th style="padding: 0.5rem 0.6rem;">Version</th>
+            <th style="padding: 0.5rem 0.6rem;">Installed</th>
+            <th style="padding: 0.5rem 0.6rem;">Last seen</th>
+            <th style="padding: 0.5rem 0.6rem;">Location</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for dev_id, hostname, serial, dev_type, version, install_date, install_location, last_seen in device_rows %}
+        <tr style="border-bottom: 1px solid var(--border);">
+            <td style="padding: 0.4rem 0.6rem;">
+                <a href="{% url 'device_detail' org_slug=client.slug device_id=dev_id %}">{{ hostname|default:serial|default:"—" }}</a>
+                {% if serial %}<span class="muted" style="font-size:0.78rem;"> · {{ serial }}</span>{% endif %}
+            </td>
+            <td style="padding: 0.4rem 0.6rem;" class="muted">{{ dev_type|default:"—" }}</td>
+            <td style="padding: 0.4rem 0.6rem;" class="muted">{{ version|default:"—" }}</td>
+            <td style="padding: 0.4rem 0.6rem; white-space: nowrap;" class="muted">{{ install_date|date:"Y-m-d"|default:"—" }}</td>
+            <td style="padding: 0.4rem 0.6rem; white-space: nowrap;" class="muted">{{ last_seen|date:"Y-m-d"|default:"—" }}</td>
+            <td style="padding: 0.4rem 0.6rem; font-size: 0.78rem;" class="muted">{{ install_location|default:"—" }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p class="muted">No devices found with this software.</p>
+{% endif %}
+</div>
+{% endblock %}

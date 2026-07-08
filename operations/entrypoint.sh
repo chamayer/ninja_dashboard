@@ -72,6 +72,7 @@ exec gunicorn config.wsgi:application \
     --bind 0.0.0.0:8091 \
     --workers "${OPERATIONS_WORKERS:-3}" \
     --timeout "${OPERATIONS_TIMEOUT:-60}" \
+    --keep-alive 2 \
     --access-logfile - \
     --error-logfile - \
     --forwarded-allow-ips="*"

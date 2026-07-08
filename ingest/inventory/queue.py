@@ -117,19 +117,19 @@ def queue_details() -> dict[str, dict]:
 
             cur.execute(
                 f"""
-                SELECT id, df, status, attempts, started_at, completed_at, rows_seen, error
+                SELECT id, df, status, attempts, max_attempts, started_at, completed_at, rows_seen, error
                 FROM {table}
                 WHERE status = 'processing'
                 ORDER BY started_at
                 LIMIT 20
                 """
             )
-            cols = ["id", "df", "status", "attempts", "started_at", "completed_at", "rows_seen", "error"]
+            cols = ["id", "df", "status", "attempts", "max_attempts", "started_at", "completed_at", "rows_seen", "error"]
             active = [dict(zip(cols, row)) for row in cur.fetchall()]
 
             cur.execute(
                 f"""
-                SELECT id, df, status, attempts, started_at, completed_at, rows_seen, error
+                SELECT id, df, status, attempts, max_attempts, started_at, completed_at, rows_seen, error
                 FROM {table}
                 WHERE status IN ('done', 'failed')
                 ORDER BY completed_at DESC
