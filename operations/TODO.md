@@ -32,7 +32,7 @@ Batch A1 — lifecycle/staleness foundations (Phases 1–2, ship together):
 - [x] Phase 2: Django migration 0012 — DeviceLink.missing_since + Device/Client lifecycle columns
 
 Batch A2 — finding extensions (Phase 3):
-- [ ] Phase 3: Django migration 0013 — FindingType extensions + Finding extensions + new finding types
+- [x] Phase 3: Django migration 0013 — FindingType extensions + Finding extensions + new finding types
 
 Batch A3 — new platform tables (Phase 4):
 - [ ] Phase 4: Django migration 0014 — CoverageRequirement, AdminFinding, QueueRegistry, IdentityCandidate, NotificationRule, NotificationState, NotificationEvent + RLS

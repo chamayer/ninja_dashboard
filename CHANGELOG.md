@@ -2,6 +2,18 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.37.0] — 2026-07-08
+
+### Added
+- `operations.finding_types`: `finding_class` (entity/admin), `source_module`,
+  `auto_resolvable` fields. All 10 existing types back-filled with entity class.
+  6 new finding types seeded: `device_missing_from_source`, `device_long_offline`,
+  `device_stale_data`, `missing_required_platform`, `software_queue_stalled`,
+  `identity_resolution_pending`. (migration 0013)
+- `operations.findings`: `condition_key` (dedup hash, unique per active finding
+  per tenant), `confidence` (possible/probable/confirmed), `last_detected_at`,
+  `client` FK. (migration 0013)
+
 ## [0.36.0] — 2026-07-08
 
 ### Added

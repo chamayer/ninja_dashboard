@@ -5,6 +5,24 @@ only project-level pointers.
 
 ---
 
+## 2026-07-08 — Platform foundation Batch A2 (Phase 3)
+
+**Why:** Extend FindingType and Finding models with platform evaluator fields —
+finding_class/source_module/auto_resolvable on types; condition_key/confidence/
+last_detected_at/client FK on findings. Seed 6 new finding types.
+
+**Work completed:**
+
+- Migration 0013: AddField finding_class, source_module, auto_resolvable on
+  FindingType. AddField condition_key (with unique partial constraint on active
+  findings), confidence, last_detected_at, client FK on Finding.
+  RunPython back-fills all 10 existing types with entity class + source_module.
+  Inserts 6 new finding types (4 entity, 2 admin).
+
+**Deployed:** v0.37.0
+
+---
+
 ## 2026-07-08 — Platform foundation Batch A1 (Phases 1–2)
 
 **Why:** Three-state staleness model for software_installations_current (fixes

@@ -126,9 +126,16 @@ class FindingType(models.Model):
         HIGH = "high", "High"
         CRITICAL = "critical", "Critical"
 
+    class FindingClass(models.TextChoices):
+        ENTITY = "entity", "Entity"
+        ADMIN = "admin", "Admin"
+
     id = models.SmallAutoField(primary_key=True)
     name = models.CharField(max_length=120, unique=True)
     default_severity = models.CharField(max_length=16, choices=Severity.choices, default=Severity.MEDIUM)
+    finding_class = models.CharField(max_length=16, choices=FindingClass.choices, default=FindingClass.ENTITY)
+    source_module = models.CharField(max_length=80, blank=True, default="")
+    auto_resolvable = models.BooleanField(default=True)
     runbook_path = models.CharField(max_length=255, blank=True)
     description = models.TextField(blank=True)
 
@@ -536,11 +543,19 @@ class Finding(UUIDTenantScopedModel):
         RESOLVED = "resolved", "Resolved"
         WONTFIX = "wontfix", "Won't fix"
 
+    class Confidence(models.TextChoices):
+        POSSIBLE = "possible", "Possible"
+        PROBABLE = "probable", "Probable"
+        CONFIRMED = "confirmed", "Confirmed"
+
     finding_type = models.ForeignKey(FindingType, on_delete=models.PROTECT, related_name="findings")
+    client = models.ForeignKey("Client", on_delete=models.PROTECT, null=True, blank=True, related_name="findings")
     subject_type = models.CharField(max_length=32, choices=SubjectType.choices)
     subject_id = models.UUIDField()
     finding_details = models.JSONField(default=dict, blank=True)
+    condition_key = models.CharField(max_length=255, blank=True, default="", db_index=True)
     severity = models.CharField(max_length=16, choices=Severity.choices, default=Severity.MEDIUM)
+    confidence = models.CharField(max_length=16, choices=Confidence.choices, blank=True, default="")
     status = models.CharField(max_length=24, choices=Status.choices, default=Status.OPEN)
     owner = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -552,6 +567,7 @@ class Finding(UUIDTenantScopedModel):
     sla_due_at = models.DateTimeField(null=True, blank=True)
     first_seen_at = models.DateTimeField()
     last_seen_at = models.DateTimeField()
+    last_detected_at = models.DateTimeField(null=True, blank=True)
     last_reviewed_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
@@ -559,6 +575,13 @@ class Finding(UUIDTenantScopedModel):
         indexes = (
             models.Index(fields=("tenant", "status", "severity"), name="idx_findings_status_severity"),
             models.Index(fields=("tenant", "subject_type", "subject_id"), name="idx_findings_subject"),
+        )
+        constraints = (
+            models.UniqueConstraint(
+                fields=("tenant", "condition_key"),
+                condition=Q(condition_key__gt="") & Q(status__in=["open", "acknowledged"]),
+                name="uq_findings_active_condition_key",
+            ),
         )
 
     def __str__(self) -> str:
