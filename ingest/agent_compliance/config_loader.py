@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -34,6 +35,10 @@ class SourceConfig:
     secret_key: str | None
     company_id: str | None
     psk: str | None
+    # Populated from operations.source_bindings at load time.
+    # None when no binding has been seeded for this source yet.
+    source_binding_id: uuid.UUID | None = None
+    entity_type: str | None = None
 
 
 @dataclass(frozen=True)
@@ -67,9 +72,22 @@ def load_sources() -> list[SourceConfig]:
                 ps.base_url, ps.token_url, ps.api_token_secret_ref,
                 ps.client_id_secret_ref, ps.client_secret_ref,
                 ps.ext_guid_secret_ref, ps.secret_key_secret_ref,
-                ps.company_id_secret_ref, ps.psk_secret_ref
+                ps.company_id_secret_ref, ps.psk_secret_ref,
+                osb.id AS source_binding_id,
+                CASE os.kind
+                    WHEN 'rmm'           THEN 'agent.rmm'
+                    WHEN 'edr'           THEN 'agent.edr'
+                    WHEN 'remote_access' THEN 'agent.remote_access'
+                    ELSE NULL
+                END AS entity_type
             FROM ninja_agent_compliance.platform_sources ps
             LEFT JOIN ninja_agent_compliance.clients c ON c.client_id = ps.client_id
+            LEFT JOIN operations.sources os ON os.name = ps.platform
+            LEFT JOIN operations.source_instances osi
+                ON osi.source_id = os.id
+               AND osi.tenant_id = 1
+               AND osi.client_id IS NULL
+            LEFT JOIN operations.source_bindings osb ON osb.source_instance_id = osi.id
             WHERE ps.enabled
             ORDER BY ps.platform, ps.source_name
             """
@@ -94,6 +112,8 @@ def load_sources() -> list[SourceConfig]:
             secret_key=_secret(row[14]),
             company_id=_secret(row[15]),
             psk=_secret(row[16]),
+            source_binding_id=row[17],
+            entity_type=row[18],
         )
         for row in rows
     ]

@@ -38,11 +38,13 @@ from ingest.logging_utils import install_log_safety
 from ingest.activities import ingest as activities_ingest
 from ingest.agent_compliance import ingest as agent_compliance_ingest
 from ingest.agent_compliance import review_digest
+from ingest.source_observations import run_source_observations
 from ingest.inventory.refresh import refresh_current as refresh_inventory_current
 from ingest.inventory import software as software_ingest
 from ingest.inventory import queue as software_queue
 from ingest.runlog import run_log
 from ingest.agent_compliance.config_loader import (
+    load_sources,
     add_device_ignore,
     add_device_merge_decision,
     add_human_decision,
@@ -127,6 +129,27 @@ def run_identity_resolver_once() -> None:
         log.info("Identity resolver complete: resolved=%d", resolved)
     except Exception:
         log.exception("Identity resolver failed")
+
+
+def run_agent_observations_once() -> None:
+    """Fetch S1/SC/LMI and write to entity_observations, then resolve device IDs.
+
+    Runs independently of the AC compliance pipeline — AC can be disabled
+    or failing and observations still land in operations.entity_observations.
+    """
+    if not settings.AGENT_COMPLIANCE_ENABLED:
+        log.info("Agent compliance disabled; skipping agent observations run")
+        return
+    try:
+        sources = load_sources()
+        observed_at = datetime.now(timezone.utc)
+        counts = run_source_observations(sources, observed_at)
+        total = sum(counts.values())
+        log.info("Agent observations complete: %s total=%d", counts, total)
+        if total:
+            run_identity_resolver_once()
+    except Exception:
+        log.exception("Agent observations run failed")
 
 
 def run_agent_compliance_once() -> None:
@@ -1606,6 +1629,13 @@ def main() -> None:
     )
     if settings.AGENT_COMPLIANCE_ENABLED:
         scheduler.add_job(
+            run_agent_observations_once,
+            "interval",
+            hours=settings.AGENT_COMPLIANCE_SCHEDULE_HOURS,
+            id="agent_observations_cycle",
+            max_instances=1,
+        )
+        scheduler.add_job(
             run_agent_compliance_once,
             "interval",
             hours=settings.AGENT_COMPLIANCE_SCHEDULE_HOURS,
@@ -1673,6 +1703,10 @@ def main() -> None:
         log.info("Software queue disabled (SOFTWARE_QUEUE_ENABLED=false)")
     if settings.AGENT_COMPLIANCE_ENABLED:
         log.info(
+            "Agent observations scheduler started (every %dh)",
+            settings.AGENT_COMPLIANCE_SCHEDULE_HOURS,
+        )
+        log.info(
             "Agent compliance scheduler started (every %dh)",
             settings.AGENT_COMPLIANCE_SCHEDULE_HOURS,
         )
@@ -1694,6 +1728,10 @@ def main() -> None:
         threading.Thread(target=run_patching_once, daemon=True).start()
     else:
         log.info("No patch catch-up needed (fresh install or recent run)")
+
+    if settings.AGENT_COMPLIANCE_ENABLED:
+        threading.Thread(target=run_agent_observations_once, daemon=True).start()
+        log.info("Agent observations: firing immediately on startup")
 
     if (
         settings.AGENT_COMPLIANCE_ENABLED

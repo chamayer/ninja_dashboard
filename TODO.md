@@ -207,6 +207,23 @@ Read Inbox at the start of every session.
 - [ ] Export dashboard JSON to repo (`metabase/dashboards/`) for
       version control.
 
+### Metabase / platform_observations retirement
+
+- [ ] **Retire `ninja_agent_compliance.platform_observations` from Metabase.**
+      Six cards in the AC Metabase bootstrap read this table directly
+      (`platform_observations` in `metabase_bootstrap.py` lines 1398,
+      1406, 1648, 1777, 3122, 3445). Until they are repointed, the table
+      must stay. Plan:
+      1. Remap each card to query `operations.entity_observations` +
+         `operations.devices` + `operations.clients` (column mapping:
+         `hostname` → `canonical_data->>'hostname'`,
+         `platform_group_name` → AC-side join via `source_run_id`).
+      2. Drop `platform_observations` write in `_insert_observations`
+         (ingest.py:448) once Metabase cards no longer need it.
+      3. Migration to DROP the table.
+      Do NOT drop the table until all three steps are done and verified
+      on the live stack.
+
 ### Permanently parked (do not revisit)
 
 - **Activity `user_id` in dashboards** — Ninja's `userId` on activity

@@ -14,6 +14,8 @@ from __future__ import annotations
 import logging
 import uuid
 
+from psycopg.types.json import Json
+
 from ingest import db
 from ingest.agent_compliance.normalize import normalize_hostname
 
@@ -122,7 +124,7 @@ def _resolve_by_hostname(cur, norm: str) -> uuid.UUID | None:
 
 
 def _maybe_create_candidate(cur, obs_id: uuid.UUID, entity_key: str, norm: str) -> None:
-    """If multiple devices match the hostname, log for now (candidate creation needs two device UUIDs)."""
+    """If multiple devices match the hostname, record an identity_candidate for review."""
     cur.execute(
         """
         SELECT id FROM operations.devices
@@ -132,8 +134,24 @@ def _maybe_create_candidate(cur, obs_id: uuid.UUID, entity_key: str, norm: str) 
         (TENANT_ID, norm),
     )
     rows = cur.fetchall()
-    if len(rows) >= 2:
-        log.debug(
-            "resolver: multiple devices for hostname=%s entity_key=%s obs_id=%s — skipping candidate creation",
-            norm, entity_key, obs_id,
+    if len(rows) < 2:
+        return
+    device_id_a = rows[0][0]
+    device_id_b = rows[1][0]
+    cur.execute(
+        """
+        INSERT INTO operations.identity_candidates
+            (tenant_id, observation_id, device_id_a, device_id_b, confidence, signals, status)
+        VALUES (%s, %s, %s, %s, 'low', %s, 'pending')
+        ON CONFLICT (observation_id) DO NOTHING
+        """,
+        (
+            TENANT_ID, obs_id, device_id_a, device_id_b,
+            Json({"hostname": norm, "candidate_count": len(rows)}),
+        ),
+    )
+    if cur.rowcount:
+        log.info(
+            "resolver: identity_candidate created obs=%s hostname=%s device_count=%d",
+            obs_id, norm, len(rows),
         )

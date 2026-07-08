@@ -12,7 +12,7 @@ from psycopg.types.json import Json
 
 from ingest import db
 from ingest.agent_compliance import alerts
-from ingest.agent_compliance.clients import logmein, ninja, screenconnect, sentinelone
+from ingest.agent_compliance.clients import ninja, sentinelone, logmein, screenconnect
 from ingest.agent_compliance.config_loader import (
     SourceConfig,
     get_requirement,
@@ -28,22 +28,11 @@ from ingest.agent_compliance.config_loader import (
 )
 from ingest.agent_compliance.normalize import is_macos_name, normalize_loose_hostname
 from ingest.evaluator import evaluate as platform_evaluate
-from ingest.identity.fast_path import resolve_device_fast
 from ingest.runlog import run_log
 
 log = logging.getLogger(__name__)
 
 _TENANT_ID = 1
-_INTERNAL_COLLECTOR_INSTANCE_ID = uuid.UUID("00000000-0000-4000-8000-000000000001")
-_S1_SOURCE_BINDING_ID  = uuid.UUID("00000000-0000-4000-8000-000000000012")
-_SC_SOURCE_BINDING_ID  = uuid.UUID("00000000-0000-4000-8000-000000000013")
-_LMI_SOURCE_BINDING_ID = uuid.UUID("00000000-0000-4000-8000-000000000014")
-
-_ENTITY_OBS_SOURCE_BINDING: dict[str, uuid.UUID] = {
-    "SentinelOne":   _S1_SOURCE_BINDING_ID,
-    "ScreenConnect": _SC_SOURCE_BINDING_ID,
-    "LogMeIn":       _LMI_SOURCE_BINDING_ID,
-}
 
 _FETCHERS = {
     "Ninja": ninja.fetch,
@@ -87,12 +76,9 @@ def run() -> tuple[int, int]:
         clients = load_clients()
         aliases = load_aliases()
         id_links = load_id_links()
-        batch_id = uuid.uuid4()
         for source_run_id, source, rows in fetched_sources:
             resolved = _resolve_observations(rows, source, clients, aliases, id_links=id_links)
             _insert_observations(source_run_id, resolved)
-            if source.platform in _ENTITY_OBS_SOURCE_BINDING:
-                _write_entity_observations(source.platform, resolved, batch_id, observed_at)
             _finish_source_run(source_run_id, "ok", len(resolved), None)
             all_observations.extend(resolved)
         # Maintain the id-link table from this run's resolutions: any
@@ -1085,92 +1071,6 @@ def _write_findings(rows: list[dict[str, Any]]) -> None:
             rows,
         )
 
-
-def _write_entity_observations(
-    platform: str,
-    rows: list[dict[str, Any]],
-    batch_id: uuid.UUID,
-    observed_at: datetime,
-) -> None:
-    """Dual-write AC observations into operations.entity_observations.
-
-    Keeps the existing ninja_agent_compliance write intact. Only S1 / SC / LMI
-    rows are written here; Ninja device observations come from core/devices.py.
-    """
-    source_binding_id = _ENTITY_OBS_SOURCE_BINDING.get(platform)
-    if not source_binding_id or not rows:
-        return
-
-    if platform == "SentinelOne":
-        entity_type = "agent.edr"
-    elif platform in ("ScreenConnect", "LogMeIn"):
-        entity_type = "agent.remote_access"
-    else:
-        return
-
-    obs_rows: list[dict[str, Any]] = []
-    try:
-        with db.transaction() as cur:
-            cur.execute(f"SET LOCAL operations.tenant_id = {_TENANT_ID}")
-            for row in rows:
-                entity_key = str(row.get("platform_device_id") or "")
-                if not entity_key:
-                    continue
-                hostname = row.get("hostname") or ""
-                raw = row.get("raw_data") or {}
-                if not isinstance(raw, dict):
-                    raw = {}
-                serial = (
-                    raw.get("serialNumber") or raw.get("biosSerialNumber")
-                    or raw.get("serial_number") or None
-                )
-                canonical_data: dict[str, Any] = {
-                    "hostname": hostname,
-                    "platform": platform,
-                    "last_seen_at": row.get("last_seen_at").isoformat() if row.get("last_seen_at") else None,
-                    "is_online": row.get("is_online"),
-                    "serial_number": serial,
-                }
-                obs_hash = hashlib.sha256(
-                    f"{entity_key}:{observed_at.isoformat()}".encode()
-                ).digest()
-                device_id = resolve_device_fast(
-                    cur, _TENANT_ID, platform, entity_key,
-                    serial=serial or None,
-                    hostname=hostname or None,
-                )
-                obs_rows.append({
-                    "observation_id":        uuid.uuid4(),
-                    "tenant_id":             _TENANT_ID,
-                    "client_id":             None,
-                    "device_id":             device_id,
-                    "collector_instance_id": _INTERNAL_COLLECTOR_INSTANCE_ID,
-                    "source_binding_id":     source_binding_id,
-                    "entity_type":           entity_type,
-                    "entity_key":            entity_key,
-                    "platform":              platform,
-                    "subplatform":           "",
-                    "observed_at":           observed_at,
-                    "raw_data":              Json({}),
-                    "canonical_data":        Json(canonical_data),
-                    "batch_id":              batch_id,
-                    "observation_hash":      obs_hash,
-                    "collector_version":     "",
-                    "schema_version":        1,
-                })
-            if obs_rows:
-                db.insert_ignore(
-                    cur,
-                    "operations.entity_observations",
-                    obs_rows,
-                    conflict_keys=["tenant_id", "collector_instance_id", "batch_id", "observation_hash"],
-                )
-                log.info(
-                    "entity_observations dual-write: platform=%s inserted=%d",
-                    platform, len(obs_rows),
-                )
-    except Exception:
-        log.exception("entity_observations dual-write failed for platform=%s — continuing", platform)
 
 
 def _hash(value: str) -> str:
