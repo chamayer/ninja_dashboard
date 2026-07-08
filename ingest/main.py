@@ -417,7 +417,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._handle_software_demand_status()
         elif self.path == "/run/software/queue":
             self._handle_software_queue_status()
-        elif self.path == "/run/sources" or self.path == "/run/sources/enqueue":
+        elif self.path in ("/run/sources", "/run/sources/enqueue") or self.path.startswith("/run/sources/enqueue?"):
             self._handle_sources_enqueue()
         elif self.path == "/run/sources/queue":
             self._handle_sources_queue()
