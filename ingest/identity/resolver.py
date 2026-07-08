@@ -22,10 +22,11 @@ log = logging.getLogger(__name__)
 TENANT_ID = 1
 
 
-def drain_resolution(batch_size: int = 20) -> int:
+def drain_resolution(batch_size: int = 200) -> int:
     """Resolve up to batch_size unresolved entity_observations.
 
     Returns the count of observations that were resolved (device_id set).
+    Refreshes agent_presence_current if any observations were resolved.
     """
     resolved_count = 0
     with db.transaction() as cur:
@@ -36,7 +37,8 @@ def drain_resolution(batch_size: int = 20) -> int:
             SELECT observation_id, entity_key, platform, canonical_data
             FROM operations.entity_observations
             WHERE tenant_id = %s AND device_id IS NULL
-            ORDER BY observed_at ASC
+              AND entity_type LIKE 'agent.%%'
+            ORDER BY observed_at DESC
             LIMIT %s
             """,
             (TENANT_ID, batch_size),
@@ -44,7 +46,23 @@ def drain_resolution(batch_size: int = 20) -> int:
         rows = cur.fetchall()
 
         for obs_id, entity_key, platform, canonical_data in rows:
-            hostname_raw = (canonical_data or {}).get("hostname") or (canonical_data or {}).get("guest_name")
+            cd = canonical_data or {}
+
+            # Try serial number first (high confidence, unique hardware ID)
+            serial = cd.get("serial_number")
+            if serial:
+                device_id = _resolve_by_serial(cur, serial)
+                if device_id is not None:
+                    cur.execute(
+                        "UPDATE operations.entity_observations SET device_id = %s WHERE observation_id = %s",
+                        (device_id, obs_id),
+                    )
+                    resolved_count += 1
+                    log.debug("resolver: serial match %s → device %s", entity_key, device_id)
+                    continue
+
+            # Fall back to normalised hostname
+            hostname_raw = cd.get("hostname") or cd.get("guest_name")
             if not hostname_raw:
                 continue
             norm = normalize_hostname(hostname_raw)
@@ -54,20 +72,39 @@ def drain_resolution(batch_size: int = 20) -> int:
             device_id = _resolve_by_hostname(cur, norm)
             if device_id is not None:
                 cur.execute(
-                    """
-                    UPDATE operations.entity_observations
-                    SET device_id = %s
-                    WHERE observation_id = %s
-                    """,
+                    "UPDATE operations.entity_observations SET device_id = %s WHERE observation_id = %s",
                     (device_id, obs_id),
                 )
                 resolved_count += 1
-                log.debug("resolver: resolved %s → device %s", entity_key, device_id)
+                log.debug("resolver: hostname match %s → device %s", entity_key, device_id)
             else:
                 _maybe_create_candidate(cur, obs_id, entity_key, norm)
 
-    log.info("resolver: resolved %d observations (batch_size=%d)", resolved_count, batch_size)
+    log.info("resolver: resolved %d / %d observations", resolved_count, len(rows) if rows else 0)
+
+    if resolved_count:
+        try:
+            with db.transaction() as cur:
+                cur.execute("SELECT operations.refresh_agent_presence_current()")
+            log.info("resolver: refreshed agent_presence_current after %d resolutions", resolved_count)
+        except Exception:
+            log.exception("resolver: agent_presence_current refresh failed — continuing")
+
     return resolved_count
+
+
+def _resolve_by_serial(cur, serial: str) -> uuid.UUID | None:
+    cur.execute(
+        """
+        SELECT id FROM operations.devices
+        WHERE tenant_id = %s AND canonical_serial = %s AND deleted_at IS NULL
+        """,
+        (TENANT_ID, serial),
+    )
+    rows = cur.fetchall()
+    if len(rows) == 1:
+        return rows[0][0]
+    return None
 
 
 def _resolve_by_hostname(cur, norm: str) -> uuid.UUID | None:

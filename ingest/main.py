@@ -68,6 +68,7 @@ from ingest.core import (
 from ingest.policy_scope import sync_patching_enabled_policies
 from ingest.ninja_client import NinjaClient
 from ingest.evaluator import evaluate as platform_evaluate
+from ingest.identity.resolver import drain_resolution as _drain_resolution
 from ingest import scope_selector as _scope_selector
 from ingest.patches import ingest as patches_ingest
 from ingest.summary_views import refresh_device_troubleshooting_signal
@@ -119,6 +120,15 @@ def _refresh_inventory_current(reason: str) -> None:
         log.exception("Inventory current refresh failed after %s", reason)
 
 
+def run_identity_resolver_once() -> None:
+    """Drain unresolved entity_observations and refresh agent_presence_current."""
+    try:
+        resolved = _drain_resolution(batch_size=500)
+        log.info("Identity resolver complete: resolved=%d", resolved)
+    except Exception:
+        log.exception("Identity resolver failed")
+
+
 def run_agent_compliance_once() -> None:
     if not settings.AGENT_COMPLIANCE_ENABLED:
         log.info("Agent compliance disabled; skipping run")
@@ -132,6 +142,8 @@ def run_agent_compliance_once() -> None:
         _refresh_inventory_current("agent compliance run")
     finally:
         _AGENT_COMPLIANCE_LOCK.release()
+    # Run resolver immediately after AC so new S1/SC/LMI observations get device_ids
+    threading.Thread(target=run_identity_resolver_once, daemon=True).start()
     log.info("Agent compliance run complete")
 
 
@@ -1616,6 +1628,13 @@ def main() -> None:
                 id="agent_compliance_review_digest",
                 max_instances=1,
             )
+    scheduler.add_job(
+        run_identity_resolver_once,
+        "interval",
+        minutes=30,
+        id="identity_resolver_cycle",
+        max_instances=1,
+    )
     scheduler.add_job(
         run_platform_evaluate_once,
         "interval",

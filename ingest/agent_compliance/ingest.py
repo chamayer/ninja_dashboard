@@ -1117,17 +1117,27 @@ def _write_entity_observations(
                 if not entity_key:
                     continue
                 hostname = row.get("hostname") or ""
+                raw = row.get("raw_data") or {}
+                if not isinstance(raw, dict):
+                    raw = {}
+                serial = (
+                    raw.get("serialNumber") or raw.get("biosSerialNumber")
+                    or raw.get("serial_number") or None
+                )
                 canonical_data: dict[str, Any] = {
                     "hostname": hostname,
                     "platform": platform,
                     "last_seen_at": row.get("last_seen_at").isoformat() if row.get("last_seen_at") else None,
                     "is_online": row.get("is_online"),
+                    "serial_number": serial,
                 }
                 obs_hash = hashlib.sha256(
                     f"{entity_key}:{observed_at.isoformat()}".encode()
                 ).digest()
                 device_id = resolve_device_fast(
-                    cur, _TENANT_ID, platform, entity_key, hostname=hostname or None,
+                    cur, _TENANT_ID, platform, entity_key,
+                    serial=serial or None,
+                    hostname=hostname or None,
                 )
                 obs_rows.append({
                     "observation_id":        uuid.uuid4(),
