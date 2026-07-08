@@ -1130,6 +1130,7 @@ def _write_entity_observations(
                     cur, _TENANT_ID, platform, entity_key, hostname=hostname or None,
                 )
                 obs_rows.append({
+                    "observation_id":        uuid.uuid4(),
                     "tenant_id":             _TENANT_ID,
                     "client_id":             None,
                     "device_id":             device_id,
