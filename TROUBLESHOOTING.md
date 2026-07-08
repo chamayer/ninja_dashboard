@@ -87,7 +87,7 @@ So we cover the last ~8 days only. Anything older requires the
 backfill script (`ingest.activities.backfill`).
 
 **(C) env**
-- `docker exec ninja-ingest env | grep INGEST_ACTIVITY` returned
+- `docker exec operations-ingest env | grep INGEST_ACTIVITY` returned
   nothing — vars aren't in process env. Probably loaded from
   `/app/.env` via dotenv. Not blocking — (A) already proves the
   filter is wide.

@@ -51,7 +51,7 @@ Batch D — web pages (Phase 11):
 - [x] Phase 11: findings review page (/findings/) + admin health page (/admin/findings/health/)
 
 Batch E — naming cleanup (Phases 12–14, coordinate with am-ch-01 .env update):
-- [ ] Phase 12: docker-compose.yml — rename ninja-ingest → operations-ingest
+- [x] Phase 12: docker-compose.yml — rename ninja-ingest → operations-ingest
 - [ ] Phase 13: Django migration 0017 — DB role rename ninja_ingest → operations_ingest
 - [ ] Phase 14: Django migration 0018 — schema rename ninja_agent_compliance → agent_compliance
 - [ ] Repo rename: ninja-dashboard → operations-platform (GitHub rename → local folder mv → Portainer stack git URL update → .claude memory path update). Low risk; GitHub redirects old URLs. Do last.

@@ -1,7 +1,7 @@
 """Probe /v2/activities — figure out the right filter + pagination params.
 
 Run from inside the container:
-    docker exec -it ninja-ingest python -m ingest.probe_activities
+    docker exec -it operations-ingest python -m ingest.probe_activities
 
 Each test is wrapped in try/except — a single 400 / 500 won't abort
 the rest. Output marks what worked (✓), what didn't (✗), what was

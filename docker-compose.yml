@@ -103,7 +103,7 @@ services:
     build:
       context: .
       dockerfile: ingest.Dockerfile
-    container_name: ninja-ingest
+    container_name: operations-ingest
     restart: unless-stopped
     environment:
       # Static — never overridden. Pin DB host/port to docker network.

@@ -6,7 +6,7 @@ INGEST_CUSTOM_FIELDS_INCLUDE allowlist across device, organization, and
 location scopes.
 
 Usage:
-    docker exec -it ninja-ingest python -m ingest.probe_fields
+    docker exec -it operations-ingest python -m ingest.probe_fields
 
 Options:
     --records N    scan up to N records (default 1000)

@@ -2,6 +2,14 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.42.0] — 2026-07-08
+
+### Changed
+- Renamed ingest container from `ninja-ingest` to `operations-ingest`
+  (`docker-compose.yml` container_name). Updated all `docker exec` examples
+  in `ingest/` module docstrings, `HANDY_COMMANDS.md`, and `TROUBLESHOOTING.md`
+  to match. (Phase 12)
+
 ## [0.41.0] — 2026-07-08
 
 ### Added

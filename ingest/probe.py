@@ -2,23 +2,23 @@
 
 Usage from inside the ingest container:
 
-    docker exec -it ninja-ingest python -m ingest.probe <path> [options]
+    docker exec -it operations-ingest python -m ingest.probe <path> [options]
 
 Examples:
 
     # Single GET, top-level shape + first record
-    docker exec ninja-ingest python -m ingest.probe /organizations
+    docker exec operations-ingest python -m ingest.probe /organizations
 
     # Cursor pagination walk — confirms whether cursor.name advances
-    docker exec ninja-ingest python -m ingest.probe \
+    docker exec operations-ingest python -m ingest.probe \
         /queries/os-patch-installs --pages 3 --page-size 2
 
     # Inspect a custom-fields response in full
-    docker exec ninja-ingest python -m ingest.probe \
+    docker exec operations-ingest python -m ingest.probe \
         /queries/custom-fields --pages 1 --page-size 1 --full
 
     # Pass extra query params (repeatable)
-    docker exec ninja-ingest python -m ingest.probe \
+    docker exec operations-ingest python -m ingest.probe \
         /devices-detailed --param 'df=class in (WINDOWS_WORKSTATION)' --pages 1
 """
 

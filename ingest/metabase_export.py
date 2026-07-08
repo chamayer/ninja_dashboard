@@ -7,7 +7,7 @@ live only in Metabase's Postgres state. This tool snapshots them so
 the snapshots can be committed to git or backed up.
 
 Operator runs (inside the ingest container):
-    docker exec ninja-ingest python -m ingest.metabase_export \\
+    docker exec operations-ingest python -m ingest.metabase_export \\
         --user admin@example.com --password-file /run/secrets/mb
 
 Defaults:

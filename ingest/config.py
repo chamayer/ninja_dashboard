@@ -71,7 +71,7 @@ class Settings(BaseSettings):
     # runs the dashboard bootstrap script on startup in a background
     # thread. Failures are logged but don't crash ingest. Empty values
     # disable the auto-run (script can still be triggered manually via
-    # `docker exec ninja-ingest python -m ingest.metabase_bootstrap`).
+    # `docker exec operations-ingest python -m ingest.metabase_bootstrap`).
     MB_BOOTSTRAP_URL: str = "http://metabase:3000"
     MB_BOOTSTRAP_USER: str = ""
     MB_BOOTSTRAP_PASS: SecretStr = SecretStr("")

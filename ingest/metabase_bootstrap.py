@@ -15,16 +15,16 @@ Then from the host. Three ways to provide the password, in priority
 order:
 
   # Interactive prompt (recommended — nothing in shell history)
-  docker exec -it ninja-ingest python -m ingest.metabase_bootstrap \\
+  docker exec -it operations-ingest python -m ingest.metabase_bootstrap \\
       --user you@example.com
 
   # From an environment variable
   METABASE_PASSWORD='...' docker exec -i \\
-      -e METABASE_PASSWORD ninja-ingest \\
+      -e METABASE_PASSWORD operations-ingest \\
       python -m ingest.metabase_bootstrap --user you@example.com
 
   # From a file on the host (mounted into the container)
-  docker exec -i ninja-ingest python -m ingest.metabase_bootstrap \\
+  docker exec -i operations-ingest python -m ingest.metabase_bootstrap \\
       --user you@example.com \\
       --password-file /app/.env  # if you put MB_ADMIN_PASS=... there
 

@@ -5,6 +5,24 @@ only project-level pointers.
 
 ---
 
+## 2026-07-08 — Batch E Phase 12 (container rename)
+
+**Why:** Naming cleanup — align Docker container name with the
+`operations-*` convention established for the rest of the stack.
+
+**Work completed:**
+
+- `docker-compose.yml`: `container_name: ninja-ingest` → `operations-ingest`.
+- `HANDY_COMMANDS.md`: all `docker exec ninja-ingest` examples updated.
+- `ingest/` module docstrings (7 files): all `docker exec ninja-ingest`
+  examples updated to `operations-ingest`.
+- `TROUBLESHOOTING.md`: updated one `docker exec ninja-ingest` example.
+
+**Status:** Phase 12 complete. Phases 13–14 require operator coordination
+(see TODO.md Backlog — Phase 13 needs `.env` change on am-ch-01 first).
+
+---
+
 ## 2026-07-08 — Batch D (Phase 11)
 
 **Why:** Findings review and admin health pages — first UI surface for the

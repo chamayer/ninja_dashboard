@@ -21,7 +21,7 @@ cd /amr-ch-01_data/ninja-dashboard && docker compose build ingest && docker comp
 Check running container port binding:
 
 ```bash
-docker ps --format 'table {{.Names}}\t{{.Ports}}' | grep ninja-ingest
+docker ps --format 'table {{.Names}}\t{{.Ports}}' | grep operations-ingest
 ```
 
 ## Ingest
@@ -126,7 +126,7 @@ docker exec ninja-postgres psql -U ninja -d ninja -c "SELECT version,applied_at 
 Watch Agent Compliance logs:
 
 ```bash
-docker logs --tail 150 ninja-ingest | awk '/agent compliance|Agent compliance|Dashboard ready|ERROR|Traceback/ {print}'
+docker logs --tail 150 operations-ingest | awk '/agent compliance|Agent compliance|Dashboard ready|ERROR|Traceback/ {print}'
 ```
 
 ### id-link sanity (v0.32.0+)
@@ -163,14 +163,14 @@ docker exec ninja-postgres psql -U ninja -d ninja -c "SELECT version,applied_at 
 Check the current custom-field allowlist seen by the running container:
 
 ```bash
-docker exec -it ninja-ingest printenv INGEST_CUSTOM_FIELDS_INCLUDE
-docker exec -it ninja-ingest python -c "from ingest.config import settings; print(settings.INGEST_CUSTOM_FIELDS_INCLUDE)"
+docker exec -it operations-ingest printenv INGEST_CUSTOM_FIELDS_INCLUDE
+docker exec -it operations-ingest python -c "from ingest.config import settings; print(settings.INGEST_CUSTOM_FIELDS_INCLUDE)"
 ```
 
 Backfill historical activities (all codes in the current allowlist):
 
 ```bash
-docker exec ninja-ingest python -m ingest.activities.backfill --days 90
+docker exec operations-ingest python -m ingest.activities.backfill --days 90
 ```
 
 Backfill ONE or a FEW specific activity statusCode(s) only — useful
@@ -180,7 +180,7 @@ ingest config loads `/app/.env` with `override=False`, so process env
 takes precedence. Comma-separated for multiple codes:
 
 ```bash
-docker exec -e INGEST_ACTIVITY_TYPES_INCLUDE=SOFTWARE_PATCH_MANAGEMENT_MESSAGE ninja-ingest python -m ingest.activities.backfill --days 90
+docker exec -e INGEST_ACTIVITY_TYPES_INCLUDE=SOFTWARE_PATCH_MANAGEMENT_MESSAGE operations-ingest python -m ingest.activities.backfill --days 90
 ```
 
 Delete activity rows whose `activity_type` is no longer in the
@@ -196,7 +196,7 @@ docker exec -i ninja-postgres psql -U ninja -d ninja -c "DELETE FROM ninja_activ
 Tail ingest logs:
 
 ```bash
-docker logs --tail=200 -f ninja-ingest
+docker logs --tail=200 -f operations-ingest
 ```
 
 Tail Metabase logs:
@@ -351,13 +351,13 @@ ORDER BY entity_type, entity_id, field_name, last_observed_at DESC;
 Probe custom-field values:
 
 ```bash
-docker exec -it ninja-ingest python -m ingest.probe /queries/scoped-custom-fields --pages 1 --page-size 20 --param "scopes=NODE,ORGANIZATION" --param "fields=patchingDisabled,serverPatchingDisabled,workstationPatchingDisabled,patchingNotes" --full
+docker exec -it operations-ingest python -m ingest.probe /queries/scoped-custom-fields --pages 1 --page-size 20 --param "scopes=NODE,ORGANIZATION" --param "fields=patchingDisabled,serverPatchingDisabled,workstationPatchingDisabled,patchingNotes" --full
 ```
 
 Scan field names and sample values:
 
 ```bash
-docker exec -it ninja-ingest python -m ingest.probe_fields --records 200 --page-size 100 --preview 40
+docker exec -it operations-ingest python -m ingest.probe_fields --records 200 --page-size 100 --preview 40
 ```
 
 ## Notes

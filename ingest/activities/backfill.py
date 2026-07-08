@@ -6,7 +6,7 @@ The regular hourly ingest only moves forward from the cursor. After
 first deploy there's no history; this script fills it in.
 
 Operator runs (inside the ingest container):
-    docker exec ninja-ingest python -m ingest.activities.backfill --days 90
+    docker exec operations-ingest python -m ingest.activities.backfill --days 90
 
 Stops at any of:
 - An empty page (no more older activities)
