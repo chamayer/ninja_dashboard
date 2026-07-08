@@ -35,7 +35,7 @@ Batch A2 — finding extensions (Phase 3):
 - [x] Phase 3: Django migration 0013 — FindingType extensions + Finding extensions + new finding types
 
 Batch A3 — new platform tables (Phase 4):
-- [ ] Phase 4: Django migration 0014 — CoverageRequirement, AdminFinding, QueueRegistry, IdentityCandidate, NotificationRule, NotificationState, NotificationEvent + RLS
+- [x] Phase 4: Django migration 0014 — CoverageRequirement, AdminFinding, QueueRegistry, IdentityCandidate, NotificationRule, NotificationState, NotificationEvent + RLS
 
 Batch B — data sync + connectors (Phases 5–7, ship together):
 - [ ] Phase 5: ingest/core/devices.py — _sync_operations_device_links after _mark_missing_devices

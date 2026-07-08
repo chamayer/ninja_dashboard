@@ -588,6 +588,195 @@ class Finding(UUIDTenantScopedModel):
         return f"{self.finding_type_id}:{self.subject_type}:{self.subject_id}"
 
 
+class CoverageRequirement(TenantScopedModel):
+    """Declarative policy: what platform/entity_type should exist per org/device scope."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    client = models.ForeignKey(
+        "Client", on_delete=models.PROTECT, null=True, blank=True,
+        related_name="coverage_requirements",
+    )
+    entity_type = models.CharField(max_length=80)
+    platform = models.CharField(max_length=80, blank=True, default="")
+    device_scope = models.CharField(max_length=40, default="all")
+    severity = models.CharField(max_length=16, choices=Finding.Severity.choices, default="high")
+    gap_after_hours = models.PositiveIntegerField(default=24)
+    confidence_probable = models.PositiveIntegerField(default=48)
+    confidence_confirmed = models.PositiveIntegerField(default=168)
+    enabled = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "coverage_requirements"
+        ordering = ("entity_type", "platform")
+
+    def __str__(self) -> str:
+        return f"{self.entity_type}:{self.platform or '*'}:{self.device_scope}"
+
+
+class AdminFinding(TenantScopedModel):
+    """Platform health findings — about the Operations platform itself, not devices."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    finding_type = models.ForeignKey(
+        FindingType, on_delete=models.PROTECT, related_name="admin_findings"
+    )
+    condition_key = models.CharField(max_length=255)
+    severity = models.CharField(max_length=16, choices=Finding.Severity.choices, default="medium")
+    status = models.CharField(max_length=24, choices=Finding.Status.choices, default="open")
+    subject_ref = models.JSONField(default=dict)
+    details = models.JSONField(default=dict)
+    first_detected_at = models.DateTimeField()
+    last_detected_at = models.DateTimeField()
+    resolved_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "admin_findings"
+        constraints = (
+            models.UniqueConstraint(
+                fields=("tenant", "condition_key"),
+                condition=Q(status__in=["open", "acknowledged"]),
+                name="uq_admin_findings_active_condition_key",
+            ),
+        )
+        indexes = (
+            models.Index(fields=("tenant", "status", "severity"), name="idx_admin_findings_status"),
+        )
+
+    def __str__(self) -> str:
+        return f"{self.finding_type_id}:{self.condition_key[:40]}"
+
+
+class QueueRegistry(models.Model):
+    """Registry of all known queues. No tenant isolation — global operator view."""
+
+    queue_key = models.CharField(max_length=120, primary_key=True)
+    queue_type = models.CharField(max_length=16)
+    table_name = models.CharField(max_length=120)
+    owner = models.CharField(max_length=80)
+    enabled = models.BooleanField(default=True)
+    max_pending_age_m = models.PositiveIntegerField(default=60)
+    max_failure_count = models.PositiveIntegerField(default=5)
+    max_depth = models.PositiveIntegerField(default=1000)
+    description = models.TextField(blank=True)
+
+    class Meta:
+        app_label = "operations"
+        db_table = "queue_registry"
+        ordering = ("queue_key",)
+
+    def __str__(self) -> str:
+        return self.queue_key
+
+
+class IdentityCandidate(TenantScopedModel):
+    """Uncertain cross-source device matches awaiting operator review."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    device_a = models.ForeignKey(
+        "Device", on_delete=models.PROTECT, related_name="identity_candidates_a"
+    )
+    device_b = models.ForeignKey(
+        "Device", on_delete=models.PROTECT, related_name="identity_candidates_b"
+    )
+    confidence = models.CharField(max_length=16)
+    signals = models.JSONField(default=dict)
+    status = models.CharField(max_length=16, default="pending")
+    created_at = models.DateTimeField(auto_now_add=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    resolved_by = models.CharField(max_length=120, blank=True)
+
+    class Meta:
+        db_table = "identity_candidates"
+        constraints = (
+            models.UniqueConstraint(
+                fields=("tenant", "device_a", "device_b"),
+                condition=Q(status="pending"),
+                name="uq_identity_candidates_pending_pair",
+            ),
+        )
+
+    def __str__(self) -> str:
+        return f"{self.device_a_id}↔{self.device_b_id}:{self.confidence}"
+
+
+class NotificationRule(TenantScopedModel):
+    """Rule engine: maps finding types to delivery routes with filters."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    finding_type = models.ForeignKey(
+        FindingType, on_delete=models.PROTECT, related_name="notification_rules"
+    )
+    finding_class = models.CharField(max_length=16, default="entity")
+    min_severity = models.CharField(max_length=16, blank=True, default="")
+    min_confidence = models.CharField(max_length=16, blank=True, default="")
+    client = models.ForeignKey(
+        "Client", on_delete=models.PROTECT, null=True, blank=True,
+        related_name="notification_rules",
+    )
+    match_criteria = models.JSONField(default=dict)
+    route = models.ForeignKey(NotificationRoute, on_delete=models.PROTECT, related_name="rules")
+    urgency_hours = models.PositiveIntegerField(null=True, blank=True)
+    cooldown_hours = models.PositiveIntegerField(default=24)
+    enabled = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = "notification_rules"
+
+    def __str__(self) -> str:
+        return f"{self.finding_type_id}→{self.route_id}"
+
+
+class NotificationState(TenantScopedModel):
+    """Dedup + cooldown tracking per fingerprint + rule pair."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    fingerprint = models.CharField(max_length=255)
+    rule = models.ForeignKey(
+        NotificationRule, on_delete=models.PROTECT, related_name="state_entries"
+    )
+    last_sent_at = models.DateTimeField()
+    next_allowed_at = models.DateTimeField()
+    send_count = models.PositiveIntegerField(default=1)
+
+    class Meta:
+        db_table = "notification_state"
+        constraints = (
+            models.UniqueConstraint(
+                fields=("tenant", "fingerprint", "rule"),
+                name="uq_notification_state_fingerprint_rule",
+            ),
+        )
+
+    def __str__(self) -> str:
+        return f"{self.fingerprint[:40]}:{self.rule_id}"
+
+
+class NotificationEvent(TenantScopedModel):
+    """Delivery audit trail for all notification attempts."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    rule = models.ForeignKey(
+        NotificationRule, on_delete=models.PROTECT, null=True, blank=True,
+        related_name="events",
+    )
+    fingerprint = models.CharField(max_length=255)
+    channel = models.CharField(max_length=16)
+    status = models.CharField(max_length=16)
+    payload_ref = models.JSONField(default=dict)
+    error = models.TextField(blank=True)
+    sent_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "notification_events"
+        indexes = (
+            models.Index(fields=("tenant", "sent_at"), name="idx_notif_events_sent_at"),
+        )
+
+    def __str__(self) -> str:
+        return f"{self.channel}:{self.status}:{self.fingerprint[:32]}"
+
+
 class SuppressionRule(TenantScopedModel):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     finding_type = models.ForeignKey(FindingType, on_delete=models.PROTECT, related_name="suppression_rules")

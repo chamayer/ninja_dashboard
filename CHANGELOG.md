@@ -2,6 +2,27 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.38.0] — 2026-07-08
+
+### Added
+- `operations.coverage_requirements`: per-tenant/client gap thresholds
+  (entity_type, platform, device_scope, severity, gap/confidence windows).
+  RLS enabled. (migration 0014)
+- `operations.admin_findings`: platform-health findings (condition_key unique
+  partial constraint on active). RLS enabled. (migration 0014)
+- `operations.queue_registry`: queue governance catalogue (no tenant scope,
+  no RLS). Seeded with 4 queues: software.scheduled, software.demand,
+  software.activity, identity.resolution. (migration 0014)
+- `operations.identity_candidates`: pending device-pair merge suggestions
+  (unique partial constraint on pending pairs). RLS enabled. (migration 0014)
+- `operations.notification_rules`: rule engine layer over NotificationRoute
+  (finding_class, min_severity, match_criteria, cooldown_hours). RLS enabled.
+  (migration 0014)
+- `operations.notification_state`: cooldown tracking per rule+fingerprint.
+  RLS enabled. (migration 0014)
+- `operations.notification_events`: delivery audit log. RLS enabled.
+  (migration 0014)
+
 ## [0.37.0] — 2026-07-08
 
 ### Added

@@ -5,6 +5,26 @@ only project-level pointers.
 
 ---
 
+## 2026-07-08 — Platform foundation Batch A3 (Phase 4)
+
+**Why:** Create all new platform tables needed by the evaluator, identity
+resolver, queue governance, and notification engine.
+
+**Work completed:**
+
+- Migration 0014: CreateModel for 7 new tables — CoverageRequirement,
+  AdminFinding, QueueRegistry, IdentityCandidate, NotificationRule,
+  NotificationState, NotificationEvent. Unique/index constraints added.
+  RunPython enables RLS + grants on 6 tenant-scoped tables (not queue_registry).
+  RunPython seeds 4 queues into queue_registry.
+- models.py: 7 new model classes added (CoverageRequirement, AdminFinding,
+  QueueRegistry, IdentityCandidate, NotificationRule, NotificationState,
+  NotificationEvent).
+
+**Deployed:** v0.38.0
+
+---
+
 ## 2026-07-08 — Platform foundation Batch A2 (Phase 3)
 
 **Why:** Extend FindingType and Finding models with platform evaluator fields —
