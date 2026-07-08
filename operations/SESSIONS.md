@@ -5,6 +5,23 @@ only project-level pointers.
 
 ---
 
+## 2026-07-08 — Software inventory page (0.43.0)
+
+**Work completed:**
+
+- `views.py`: `org_software` view — raw SQL against `software_installations_current`
+  with SET LOCAL RLS setup inside `transaction.atomic()`. Aggregates by
+  (canonical_name, publisher), returns device_count, versions, last_seen.
+  Name search + publisher filter + manual pagination (100/page).
+- `config/urls.py`: `/orgs/<slug>/software/` → `org_software`.
+- `templates/org_software.html`: table with search/publisher filter form,
+  pagination, and empty-state message pointing to `SOFTWARE_QUEUE_ENABLED`.
+
+**Status:** Deployed. Will show empty until `SOFTWARE_QUEUE_ENABLED=true` is
+set in server `.env` and ingest redeployed + first sweep completes.
+
+---
+
 ## 2026-07-08 — Batch E Phase 12 (container rename)
 
 **Why:** Naming cleanup — align Docker container name with the

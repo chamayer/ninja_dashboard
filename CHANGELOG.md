@@ -2,6 +2,14 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.43.0] — 2026-07-08
+
+### Added
+- `/orgs/<slug>/software/`: per-client software inventory browse page.
+  Aggregates `software_installations_current` by product (name + publisher),
+  shows device count, versions, last seen. Name search + publisher filter +
+  pagination (100/page). Empty-state message when queue is disabled.
+
 ## [0.42.0] — 2026-07-08
 
 ### Changed

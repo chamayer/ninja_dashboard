@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+
+{% block title %}Software — {{ client.display_name }}{% endblock %}
+
+{% block content %}
+<div class="card">
+    <p class="muted">
+        <a href="{% url 'org_index' org_slug=client.slug %}">{{ client.display_name }}</a>
+        &nbsp;›&nbsp; Software
+    </p>
+    <h1 style="margin: 0;">
+        Software
+        <span class="muted" style="font-weight: 400;">({{ total }})</span>
+    </h1>
+</div>
+
+<div class="card">
+    <style>
+        .sw-row:nth-child(odd) { background: #fafbfc; }
+        .sw-row td { padding: 0.4rem 0.6rem; vertical-align: top; }
+        .version-list { color: #52606d; font-size: 0.82rem; }
+        .pager { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-top: 1rem; flex-wrap: wrap; }
+        .pager-links { display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap; }
+        .pager-link { display: inline-block; padding: 0.35rem 0.65rem; border: 1px solid var(--border); border-radius: 4px; text-decoration: none; color: inherit; background: white; font-size: 0.85rem; }
+        .pager-link:hover { border-color: var(--accent); }
+    </style>
+
+    <form method="get" style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-bottom: 1rem;">
+        <input type="search" name="q" value="{{ search_query }}" placeholder="Search by name..."
+               style="flex: 1; min-width: 220px; padding: 0.45rem 0.75rem; border: 1px solid var(--border); border-radius: 4px;">
+        {% if publishers %}
+        <select name="publisher" style="padding: 0.45rem 0.75rem; border: 1px solid var(--border); border-radius: 4px; background: white;">
+            <option value="">All publishers</option>
+            {% for pub in publishers %}
+            <option value="{{ pub }}" {% if pub == active_publisher %}selected{% endif %}>{{ pub }}</option>
+            {% endfor %}
+        </select>
+        {% endif %}
+        <button type="submit" style="padding: 0.45rem 0.9rem; border: 1px solid var(--border); border-radius: 4px; background: var(--header-bg); color: white; cursor: pointer;">Filter</button>
+        {% if search_query or active_publisher %}
+        <a href="{% url 'org_software' org_slug=client.slug %}" style="padding: 0.45rem 0.75rem; text-decoration: none; color: var(--muted);">Clear</a>
+        {% endif %}
+    </form>
+
+    {% if rows %}
+    <table style="width: 100%; border-collapse: collapse; font-size: 0.9rem;">
+        <thead>
+            <tr style="text-align: left; border-bottom: 2px solid var(--border);">
+                <th style="padding: 0.5rem 0.6rem;">Name</th>
+                <th style="padding: 0.5rem 0.6rem;">Publisher</th>
+                <th style="padding: 0.5rem 0.6rem; text-align: right;">Devices</th>
+                <th style="padding: 0.5rem 0.6rem;">Version(s)</th>
+                <th style="padding: 0.5rem 0.6rem;">Last seen</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for name, publisher, versions, device_count, last_seen in rows %}
+            <tr class="sw-row">
+                <td>{{ name }}</td>
+                <td class="muted">{{ publisher|default:"—" }}</td>
+                <td style="text-align: right;">{{ device_count }}</td>
+                <td class="version-list">{{ versions|default:"—" }}</td>
+                <td class="muted" style="white-space: nowrap; font-size: 0.82rem;">{{ last_seen|date:"Y-m-d"|default:"—" }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    {% if num_pages > 1 %}
+    <div class="pager">
+        <p class="muted" style="margin: 0;">Page {{ page }} of {{ num_pages }} · {{ page_size }} per page</p>
+        <div class="pager-links">
+            {% if has_previous %}
+                <a class="pager-link" href="?{% if page_query %}{{ page_query }}&{% endif %}page=1">First</a>
+                <a class="pager-link" href="?{% if page_query %}{{ page_query }}&{% endif %}page={{ previous_page }}">Previous</a>
+            {% endif %}
+            {% if has_next %}
+                <a class="pager-link" href="?{% if page_query %}{{ page_query }}&{% endif %}page={{ next_page }}">Next</a>
+                <a class="pager-link" href="?{% if page_query %}{{ page_query }}&{% endif %}page={{ num_pages }}">Last</a>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+
+    {% else %}
+    <p class="muted">
+        {% if search_query or active_publisher %}
+            No software matches your filters.
+        {% else %}
+            No software data yet — enable <code>SOFTWARE_QUEUE_ENABLED=true</code> in <code>.env</code> and redeploy ingest to start collecting.
+        {% endif %}
+    </p>
+    {% endif %}
+</div>
+{% endblock %}

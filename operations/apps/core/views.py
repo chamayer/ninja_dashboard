@@ -3,7 +3,7 @@ from __future__ import annotations
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
-from django.db import transaction
+from django.db import connection, transaction
 from django.db.models import Count, Prefetch, Q
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -425,5 +425,107 @@ def merge_candidates_queue(request: HttpRequest) -> HttpResponse:
             "entity_types": sorted(set(entity_types)),
             "active_status": status_filter,
             "active_entity": entity_filter,
+        },
+    )
+
+
+_SW_PAGE_SIZE = 100
+
+
+@login_required
+def org_software(request: HttpRequest, org_slug: str) -> HttpResponse:
+    client = _get_client_by_slug(org_slug)
+    search = request.GET.get("q", "").strip()
+    publisher_filter = request.GET.get("publisher", "").strip()
+    page = max(1, int(request.GET.get("page", 1) or 1))
+
+    base_params: list = [1, str(client.id)]
+    base_where = "tenant_id = %s AND client_id = %s AND deleted_at IS NULL"
+    extra_where = ""
+    extra_params: list = []
+
+    if search:
+        extra_where += " AND canonical_name ILIKE %s"
+        extra_params.append(f"%{search}%")
+    if publisher_filter:
+        extra_where += " AND publisher = %s"
+        extra_params.append(publisher_filter)
+
+    full_where = base_where + extra_where
+    all_params = base_params + extra_params
+
+    with transaction.atomic():
+        with connection.cursor() as cur:
+            cur.execute("SET LOCAL operations.tenant_id = 1")
+
+            cur.execute(
+                f"""
+                SELECT publisher
+                FROM operations.software_installations_current
+                WHERE {base_where}
+                  AND publisher IS NOT NULL AND publisher <> ''
+                GROUP BY publisher
+                ORDER BY publisher
+                """,
+                base_params,
+            )
+            publishers = [row[0] for row in cur.fetchall()]
+
+            cur.execute(
+                f"""
+                SELECT count(DISTINCT (canonical_name, COALESCE(publisher, '')))
+                FROM operations.software_installations_current
+                WHERE {full_where}
+                """,
+                all_params,
+            )
+            total = cur.fetchone()[0]
+
+            offset = (page - 1) * _SW_PAGE_SIZE
+            cur.execute(
+                f"""
+                SELECT
+                    canonical_name,
+                    publisher,
+                    string_agg(DISTINCT version, ', ' ORDER BY version) FILTER (WHERE version IS NOT NULL AND version <> '') AS versions,
+                    count(DISTINCT device_id) AS device_count,
+                    max(last_observed_at) AS last_seen
+                FROM operations.software_installations_current
+                WHERE {full_where}
+                GROUP BY canonical_name, publisher
+                ORDER BY canonical_name
+                LIMIT %s OFFSET %s
+                """,
+                all_params + [_SW_PAGE_SIZE, offset],
+            )
+            rows = cur.fetchall()
+
+    num_pages = max(1, (total + _SW_PAGE_SIZE - 1) // _SW_PAGE_SIZE)
+
+    page_query_parts = []
+    if search:
+        page_query_parts.append(f"q={search}")
+    if publisher_filter:
+        page_query_parts.append(f"publisher={publisher_filter}")
+    page_query = "&".join(page_query_parts)
+
+    return render(
+        request,
+        "org_software.html",
+        {
+            "client": client,
+            "rows": rows,
+            "total": total,
+            "publishers": publishers,
+            "search_query": search,
+            "active_publisher": publisher_filter,
+            "page": page,
+            "num_pages": num_pages,
+            "page_size": _SW_PAGE_SIZE,
+            "page_query": page_query,
+            "has_previous": page > 1,
+            "has_next": page < num_pages,
+            "previous_page": page - 1,
+            "next_page": page + 1,
         },
     )
