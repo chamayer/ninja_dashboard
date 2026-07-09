@@ -184,7 +184,7 @@
         <div class="tile-count">{{ source_coverage|length }}</div>
         <div class="tile-detail">
             {% if source_coverage %}
-                {% for row in source_coverage %}{{ row.source__name }} ({{ row.client_count }}){% if not forloop.last %} &middot; {% endif %}{% endfor %}
+                {% for row in source_coverage %}{{ row.name }} ({{ row.client_count }}){% if not forloop.last %} &middot; {% endif %}{% endfor %}
             {% else %}
                 No sources linked
             {% endif %}

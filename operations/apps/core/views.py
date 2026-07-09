@@ -336,12 +336,22 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
             .values("device_type")
             .annotate(count=Count("id"))
         }
-        source_coverage = list(
-            ClientLink.objects.filter(tenant_id=1)
-            .values("source__name")
-            .annotate(client_count=Count("client_id", distinct=True))
-            .order_by("source__name")
-        )
+        # Clients actually observed per platform — client_links row counts are
+        # meaningless here (per-client SC instances have one link total).
+        with transaction.atomic(), connection.cursor() as cur:
+            cur.execute("SET LOCAL operations.tenant_id = 1")
+            cur.execute(
+                """
+                SELECT platform, COUNT(DISTINCT client_id)
+                FROM operations.agent_presence_current
+                WHERE client_id IS NOT NULL
+                GROUP BY platform
+                ORDER BY platform
+                """
+            )
+            source_coverage = [
+                {"name": r[0], "client_count": int(r[1])} for r in cur.fetchall()
+            ]
         ctx["clients_with_counts"] = clients_with_counts
         ctx["all_device_count"] = sum(c.device_count for c in clients_with_counts)
         ctx["all_client_count"] = len(clients_with_counts)
@@ -1044,6 +1054,14 @@ def sources_status(request: HttpRequest) -> HttpResponse:
             """)
             last_obs = {r[0]: r[1] for r in cur.fetchall()}
 
+            # Observed reach per platform
+            cur.execute("""
+                SELECT platform, COUNT(DISTINCT client_id), COUNT(DISTINCT device_id)
+                FROM operations.agent_presence_current
+                GROUP BY platform
+            """)
+            reach = {r[0]: (int(r[1]), int(r[2])) for r in cur.fetchall()}
+
             # Recent run history
             cur.execute("""
                 SELECT id, df, status, queued_at, started_at, completed_at,
@@ -1073,6 +1091,8 @@ def sources_status(request: HttpRequest) -> HttpResponse:
             "last_rows":     run[3] if run and run[1] == "done" else None,
             "last_error":    last_error,
             "last_observed": last_obs.get(source),
+            "client_count":  reach.get(source, (0, 0))[0],
+            "device_count":  reach.get(source, (0, 0))[1],
             "is_stale":      is_stale,
         })
 

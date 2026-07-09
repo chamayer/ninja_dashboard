@@ -65,6 +65,7 @@
     {% if s.last_rows is not None %}
     <div class="source-stat">Records: <strong>{{ s.last_rows }}</strong></div>
     {% endif %}
+    <div class="source-stat">Clients: <strong>{{ s.client_count }}</strong> &middot; Devices: <strong>{{ s.device_count }}</strong></div>
     {% if s.last_observed %}
     <div class="source-stat">Last observation: <strong>{{ s.last_observed|date:"Y-m-d H:i" }}</strong></div>
     {% endif %}
@@ -114,7 +115,7 @@
                     {{ run.rows_seen|default:"—" }}
                 </td>
                 <td style="padding:0.45rem 0.75rem; color:#c0392b; font-size:0.78rem; max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
-                    {{ run.error|truncatechars:60|default:"" }}
+                    {% if run.error %}{{ run.error|truncatechars:60 }}{% endif %}
                 </td>
             </tr>
             {% endfor %}
