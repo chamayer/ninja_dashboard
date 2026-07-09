@@ -163,8 +163,8 @@ def process_entry(entry_id: int) -> None:
     error: str | None = None
     try:
         if df == "Ninja":
-            from ingest.main import run_patching_once
-            run_patching_once()
+            from ingest.main import run_ninja_observations_once
+            run_ninja_observations_once()
         elif df in ("SentinelOne", "ScreenConnect", "LogMeIn"):
             sources = [s for s in load_sources() if s.platform == df]
             observed_at = datetime.now(timezone.utc)

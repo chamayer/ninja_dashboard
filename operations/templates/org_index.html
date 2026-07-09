@@ -105,32 +105,32 @@
 <div class="card">
     <h2 style="margin-top: 0;">Agent Coverage</h2>
     <div class="summary-grid">
-    {% for cov in platform_coverage %}
-    {% with pct=cov.present|default:0 %}
-    <a class="summary-tile" href="{% url 'findings_queue' %}?client={{ current_client.slug }}&type=missing_required_platform"
-       style="text-decoration:none;">
-        <div class="tile-label">{{ cov.platform }}</div>
-        <div style="display:flex; align-items:baseline; gap:0.4rem; margin: 0.25rem 0;">
-            <span style="font-size:1.6rem; font-weight:600;">{{ cov.present }}</span>
-            <span class="muted" style="font-size:0.9rem;">/ {{ cov.total }}</span>
+    {% for platform, cov in platform_coverage.items %}
+    <div class="summary-tile" style="cursor:default;">
+        <div class="tile-label" style="font-size:0.9rem; font-weight:600; color:var(--fg); text-transform:none; letter-spacing:0;">
+            {{ platform }}
+            <span class="muted" style="font-size:0.75rem; font-weight:400; margin-left:0.4rem;">{{ cov.severity }}</span>
         </div>
-        <div class="cov-row">
-            <span class="muted" style="font-size:0.78rem;">{{ cov.entity_type }}</span>
-            <span class="cov-gap {% if cov.gap == 0 %}gap-ok{% elif cov.severity == 'critical' %}gap-crit{% else %}gap-high{% endif %}">
-                {% if cov.gap == 0 %}✓ all present{% else %}{{ cov.gap }} missing{% endif %}
-            </span>
+        {% for scope, counts in cov.scopes.items %}
+        <div style="margin-top:0.6rem;">
+            <div class="cov-row">
+                <span class="muted" style="font-size:0.8rem; text-transform:capitalize;">{{ scope }}</span>
+                <span style="font-size:0.9rem; font-weight:600;">
+                    {{ counts.present }}<span class="muted" style="font-weight:400;"> / {{ counts.total }}</span>
+                </span>
+                <span class="cov-gap {% if counts.gap == 0 %}gap-ok{% elif cov.severity == 'critical' %}gap-crit{% else %}gap-high{% endif %}" style="font-size:0.8rem;">
+                    {% if counts.gap == 0 %}✓{% else %}-{{ counts.gap }}{% endif %}
+                </span>
+            </div>
+            {% if counts.total > 0 %}
+            <div class="cov-bar-wrap">
+                <div class="cov-bar-fill {% if counts.gap == 0 %}cov-ok{% elif cov.severity == 'critical' %}cov-critical{% elif cov.severity == 'high' %}cov-high{% else %}cov-medium{% endif %}"
+                     style="width: {% widthratio counts.present counts.total 100 %}%"></div>
+            </div>
+            {% endif %}
         </div>
-        {% if cov.total > 0 %}
-        <div class="cov-bar-wrap">
-            <div class="cov-bar-fill {% if cov.gap == 0 %}cov-ok{% elif cov.severity == 'critical' %}cov-critical{% elif cov.severity == 'high' %}cov-high{% else %}cov-medium{% endif %}"
-                 style="width: {% widthratio cov.present cov.total 100 %}%"></div>
-        </div>
-        {% endif %}
-        {% if cov.last_seen %}
-        <div class="muted" style="font-size:0.75rem; margin-top:0.3rem;">Last: {{ cov.last_seen|date:"Y-m-d H:i" }}</div>
-        {% endif %}
-    </a>
-    {% endwith %}
+        {% endfor %}
+    </div>
     {% endfor %}
     </div>
 </div>

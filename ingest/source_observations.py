@@ -72,13 +72,22 @@ def run_source_observations(
     return counts
 
 
-def _upsert_client_links(cur, source: SourceConfig, obs_rows: list[dict]) -> None:
+def _upsert_client_links(
+    cur,
+    source: SourceConfig,
+    obs_rows: list[dict],
+    client_group_map: dict,
+) -> None:
     """Ensure a client_links row exists for every client seen in this batch.
 
     Per-client sources (is_shared=False, e.g. ScreenConnect-UTA): external_id
     is the source_key — one stable row per source instance.
     Shared sources (is_shared=True, e.g. SentinelOne, LogMeIn): external_id
     is the client UUID so each client gets its own row under the same source.
+
+    external_name is the client's name as seen in the source system
+    (S1 site name, LMI group name, SC client name), taken from the
+    platform_group_name field of the original fetcher rows.
     """
     if not source.ops_source_id:
         return
@@ -91,6 +100,7 @@ def _upsert_client_links(cur, source: SourceConfig, obs_rows: list[dict]) -> Non
         external_id = (
             source.source_key if not source.is_shared else str(client_uuid)
         )
+        external_name = client_group_map.get(client_uuid) or source.source_name
         cur.execute(
             """
             INSERT INTO operations.client_links
@@ -99,7 +109,7 @@ def _upsert_client_links(cur, source: SourceConfig, obs_rows: list[dict]) -> Non
             ON CONFLICT (tenant_id, source_id, external_id)
             DO UPDATE SET external_name = EXCLUDED.external_name
             """,
-            (_TENANT_ID, client_uuid, source.ops_source_id, external_id, source.source_name),
+            (_TENANT_ID, client_uuid, source.ops_source_id, external_id, external_name),
         )
 
 
@@ -113,6 +123,7 @@ def _write_observations(
         return 0
 
     obs_rows: list[dict[str, Any]] = []
+    client_group_map: dict = {}  # client_uuid → platform_group_name from source
     with db.transaction() as cur:
         cur.execute(f"SET LOCAL operations.tenant_id = {_TENANT_ID}")
         for row in rows:
@@ -157,6 +168,11 @@ def _write_observations(
                 dev_row = cur.fetchone()
                 device_client_id = dev_row[0] if dev_row else None
 
+            if device_client_id:
+                group_name = (row.get("platform_group_name") or "").strip()
+                if group_name:
+                    client_group_map[device_client_id] = group_name
+
             obs_rows.append({
                 "observation_id":        uuid.uuid4(),
                 "tenant_id":             _TENANT_ID,
@@ -186,5 +202,5 @@ def _write_observations(
                     "tenant_id", "collector_instance_id", "batch_id", "observation_hash"
                 ],
             )
-            _upsert_client_links(cur, source, obs_rows)
+            _upsert_client_links(cur, source, obs_rows, client_group_map)
     return len(obs_rows)

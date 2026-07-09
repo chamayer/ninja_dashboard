@@ -132,6 +132,30 @@ def run_identity_resolver_once() -> None:
         log.exception("Identity resolver failed")
 
 
+def run_ninja_observations_once() -> None:
+    """Sync Ninja orgs + devices into Operations without the full patch cycle.
+
+    Runs org/location/device sync only — populates operations.devices,
+    device_links, and entity_observations (agent.rmm), then refreshes
+    agent_presence_current. Skips device-health, patches, activities,
+    and custom fields, so it completes in seconds instead of minutes.
+    Used by the source run queue demand trigger.
+    """
+    log.info("Ninja observations run starting")
+    snapshot_at = datetime.now(timezone.utc)
+    with NinjaClient(
+        base_url=settings.NINJA_BASE_URL,
+        token_url=settings.NINJA_TOKEN_URL,
+        client_id=settings.NINJA_CLIENT_ID,
+        client_secret=settings.NINJA_CLIENT_SECRET.get_secret_value(),
+        scope=settings.NINJA_SCOPE,
+    ) as client:
+        _safe("organizations", organizations.run, client)
+        _safe("locations",     locations.run, client)
+        _safe("devices",       devices.run, client, snapshot_at)
+    log.info("Ninja observations run complete")
+
+
 def run_agent_observations_once() -> None:
     """Fetch S1/SC/LMI and write to entity_observations, then resolve device IDs."""
     try:
