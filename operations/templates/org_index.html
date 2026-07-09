@@ -215,7 +215,7 @@
                 <td style="padding: 0.5rem;"><a href="{% url 'org_index' org_slug=c.slug %}">{{ c.display_name }}</a></td>
                 <td style="padding: 0.5rem; text-align: right;">{{ c.device_count }}</td>
                 <td style="padding: 0.5rem; color: var(--muted); font-size: 0.9rem;">
-                    {% for link in c.links.all %}{{ link.source.name }}{% if not forloop.last %} &middot; {% endif %}{% empty %}—{% endfor %}
+                    {% for name in c.source_names %}{{ name }}{% if not forloop.last %} &middot; {% endif %}{% empty %}—{% endfor %}
                 </td>
             </tr>
             {% endfor %}

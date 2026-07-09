@@ -327,6 +327,9 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
             )
             .order_by("-device_count", "display_name")
         )
+        for c in clients_with_counts:
+            # Shared sources carry one link per platform group — dedupe for display.
+            c.source_names = list(dict.fromkeys(l.source.name for l in c.links.all()))
         fleet_type_counts = {
             row["device_type"]: row["count"]
             for row in Device.objects.filter(tenant_id=1, deleted_at__isnull=True)
