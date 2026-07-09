@@ -137,7 +137,7 @@ def process_entry(entry_id: int) -> None:
     """Claim and execute one demand entry. Run in a dedicated thread."""
     # Late imports to avoid circular deps at module load time.
     from ingest.source_observations import run_source_observations
-    from ingest.agent_compliance.config_loader import load_sources
+    from ingest.sources import load_sources
     from ingest.identity.resolver import drain_resolution
 
     with db.pool.connection() as conn, conn.cursor() as cur:

@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from ingest import db
-from ingest.agent_compliance.normalize import (
+from ingest.normalize import (
     canonical_platform,
     normalize_hostname,
     normalize_org_name,

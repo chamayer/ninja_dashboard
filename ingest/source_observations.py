@@ -6,8 +6,16 @@ no platform-specific branching. Registering a new source means seeding its
 operations.source_bindings row; no code changes required here.
 
 Fetchers are the only thing keyed by platform (they are code, not config).
-When a source moves its fetcher out of agent_compliance/clients/, update the
-_FETCHERS dict below. Everything else is config-driven.
+Everything else is config-driven via ingest.sources.
+
+Client resolution order per observation:
+  1. Client-scoped source instance (SourceConfig.client_id) — e.g. per-client
+     ScreenConnect instances.
+  2. client_links lookup on (source, platform_group_id) — e.g. S1 site id,
+     LMI group id.
+  3. Resolved device's client (fallback, requires identity match).
+Groups that resolve no client are recorded in
+operations.unmatched_source_groups for operator review.
 """
 
 from __future__ import annotations
@@ -21,9 +29,10 @@ from typing import Any
 from psycopg.types.json import Json
 
 from ingest import db
-from ingest.agent_compliance.clients import logmein, screenconnect, sentinelone
-from ingest.agent_compliance.config_loader import SourceConfig
+from ingest.connectors import logmein, screenconnect, sentinelone
 from ingest.identity.fast_path import resolve_device_fast
+from ingest.normalize import is_placeholder_org_name
+from ingest.sources import SourceConfig
 
 log = logging.getLogger(__name__)
 
@@ -72,35 +81,44 @@ def run_source_observations(
     return counts
 
 
+def _load_client_links(cur, source: SourceConfig) -> dict[str, uuid.UUID]:
+    """Return {external_id: client_id} for this source's client_links."""
+    if not source.ops_source_id:
+        return {}
+    cur.execute(
+        """
+        SELECT external_id, client_id
+        FROM operations.client_links
+        WHERE tenant_id = %s AND source_id = %s
+        """,
+        (_TENANT_ID, source.ops_source_id),
+    )
+    return {row[0]: row[1] for row in cur.fetchall()}
+
+
 def _upsert_client_links(
     cur,
     source: SourceConfig,
-    obs_rows: list[dict],
-    client_group_map: dict,
+    resolved_groups: dict[str, tuple[uuid.UUID, str]],
 ) -> None:
-    """Ensure a client_links row exists for every client seen in this batch.
+    """Ensure a client_links row exists per resolved source group.
 
     Per-client sources (is_shared=False, e.g. ScreenConnect-UTA): external_id
     is the source_key — one stable row per source instance.
     Shared sources (is_shared=True, e.g. SentinelOne, LogMeIn): external_id
-    is the client UUID so each client gets its own row under the same source.
+    is the platform group id (S1 site id, LMI group id) so the mapping
+    survives group renames.
 
-    external_name is the client's name as seen in the source system
-    (S1 site name, LMI group name, SC client name), taken from the
-    platform_group_name field of the original fetcher rows.
+    The link is the source of truth once created: on conflict only
+    external_name refreshes; client_id is never reassigned by ingest.
     """
     if not source.ops_source_id:
         return
-    seen_clients = {
-        row["client_id"] for row in obs_rows if row.get("client_id") is not None
-    }
-    if not seen_clients:
-        return
-    for client_uuid in seen_clients:
-        external_id = (
-            source.source_key if not source.is_shared else str(client_uuid)
-        )
-        external_name = client_group_map.get(client_uuid) or source.source_name
+    for group_id, (client_uuid, group_name) in resolved_groups.items():
+        external_id = source.source_key if not source.is_shared else group_id
+        if not external_id:
+            continue
+        external_name = group_name or source.source_name
         cur.execute(
             """
             INSERT INTO operations.client_links
@@ -110,6 +128,33 @@ def _upsert_client_links(
             DO UPDATE SET external_name = EXCLUDED.external_name
             """,
             (_TENANT_ID, client_uuid, source.ops_source_id, external_id, external_name),
+        )
+
+
+def _record_unmatched_groups(
+    cur,
+    source: SourceConfig,
+    unmatched: dict[str, tuple[str, int]],
+) -> None:
+    """Upsert operator-review rows for source groups that resolved no client."""
+    if not source.ops_source_id:
+        return
+    for group_id, (group_name, device_count) in unmatched.items():
+        if is_placeholder_org_name(group_name):
+            continue
+        cur.execute(
+            """
+            INSERT INTO operations.unmatched_source_groups
+                (tenant_id, source_id, external_id, external_name, device_count)
+            VALUES (%s, %s, %s, %s, %s)
+            ON CONFLICT (tenant_id, source_id, external_id)
+            DO UPDATE SET
+                external_name = COALESCE(NULLIF(EXCLUDED.external_name, ''),
+                                         operations.unmatched_source_groups.external_name),
+                device_count  = EXCLUDED.device_count,
+                last_seen_at  = now()
+            """,
+            (_TENANT_ID, source.ops_source_id, group_id, group_name or "", device_count),
         )
 
 
@@ -123,9 +168,11 @@ def _write_observations(
         return 0
 
     obs_rows: list[dict[str, Any]] = []
-    client_group_map: dict = {}  # client_uuid → platform_group_name from source
+    resolved_groups: dict[str, tuple[uuid.UUID, str]] = {}  # group_id → (client, name)
+    unmatched_groups: dict[str, tuple[str, int]] = {}       # group_id → (name, count)
     with db.transaction() as cur:
         cur.execute(f"SET LOCAL operations.tenant_id = {_TENANT_ID}")
+        link_map = _load_client_links(cur, source)
         for row in rows:
             entity_key = str(row.get("platform_device_id") or "")
             if not entity_key:
@@ -158,25 +205,36 @@ def _write_observations(
                 serial=serial,
                 hostname=hostname or None,
             )
-            device_client_id = None
-            if device_id:
+
+            group_id = str(row.get("platform_group_id") or "").strip()
+            group_name = (row.get("platform_group_name") or "").strip()
+
+            # 1. Client-scoped instance wins.
+            client_id = source.client_id
+            # 2. client_links mapping on the source group.
+            if client_id is None and group_id:
+                client_id = link_map.get(group_id)
+            # 3. Fall back to the resolved device's client.
+            if client_id is None and device_id:
                 cur.execute(
                     "SELECT client_id FROM operations.devices"
                     " WHERE id = %s AND deleted_at IS NULL",
                     (device_id,),
                 )
                 dev_row = cur.fetchone()
-                device_client_id = dev_row[0] if dev_row else None
+                client_id = dev_row[0] if dev_row else None
 
-            if device_client_id:
-                group_name = (row.get("platform_group_name") or "").strip()
-                if group_name:
-                    client_group_map[device_client_id] = group_name
+            if group_id or not source.is_shared:
+                if client_id:
+                    resolved_groups[group_id] = (client_id, group_name)
+                elif group_id:
+                    name, count = unmatched_groups.get(group_id, (group_name, 0))
+                    unmatched_groups[group_id] = (name or group_name, count + 1)
 
             obs_rows.append({
                 "observation_id":        uuid.uuid4(),
                 "tenant_id":             _TENANT_ID,
-                "client_id":             device_client_id,
+                "client_id":             client_id,
                 "device_id":             device_id,
                 "collector_instance_id": _INTERNAL_COLLECTOR_INSTANCE_ID,
                 "source_binding_id":     source.source_binding_id,
@@ -202,5 +260,9 @@ def _write_observations(
                     "tenant_id", "collector_instance_id", "batch_id", "observation_hash"
                 ],
             )
-            _upsert_client_links(cur, source, obs_rows, client_group_map)
+            # A group is unmatched only if NO row in the batch resolved it.
+            for gid in resolved_groups:
+                unmatched_groups.pop(gid, None)
+            _upsert_client_links(cur, source, resolved_groups)
+            _record_unmatched_groups(cur, source, unmatched_groups)
     return len(obs_rows)

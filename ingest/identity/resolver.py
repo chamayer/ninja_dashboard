@@ -17,7 +17,7 @@ import uuid
 from psycopg.types.json import Json
 
 from ingest import db
-from ingest.agent_compliance.normalize import normalize_hostname
+from ingest.normalize import normalize_hostname
 
 log = logging.getLogger(__name__)
 

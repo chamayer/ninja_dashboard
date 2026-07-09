@@ -12,7 +12,8 @@ from psycopg.types.json import Json
 
 from ingest import db
 from ingest.agent_compliance import alerts
-from ingest.agent_compliance.clients import ninja, sentinelone, logmein, screenconnect
+from ingest.connectors import logmein, screenconnect, sentinelone
+from ingest.connectors import ninja_presence as ninja
 from ingest.agent_compliance.config_loader import (
     SourceConfig,
     get_requirement,
@@ -26,7 +27,7 @@ from ingest.agent_compliance.config_loader import (
     sync_clients_from_observations,
     upsert_id_links_from_observations,
 )
-from ingest.agent_compliance.normalize import is_macos_name, normalize_loose_hostname
+from ingest.normalize import is_macos_name, normalize_loose_hostname
 from ingest.evaluator import evaluate as platform_evaluate
 from ingest.runlog import run_log
 

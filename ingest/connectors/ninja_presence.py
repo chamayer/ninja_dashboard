@@ -8,8 +8,8 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Json
 
 from ingest import db
-from ingest.agent_compliance.config_loader import SourceConfig
-from ingest.agent_compliance.normalize import infer_device_type, normalize_hostname
+from ingest.normalize import infer_device_type, normalize_hostname
+from ingest.sources import SourceConfig
 
 
 def _contains_no_av(value: object) -> bool:

@@ -8,8 +8,8 @@ from typing import Any
 import httpx
 from psycopg.types.json import Json
 
-from ingest.agent_compliance.config_loader import SourceConfig
-from ingest.agent_compliance.normalize import infer_device_type, normalize_hostname, parse_dt
+from ingest.normalize import infer_device_type, normalize_hostname, parse_dt
+from ingest.sources import SourceConfig
 
 
 def fetch(source: SourceConfig, observed_at: datetime) -> list[dict]:
