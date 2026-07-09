@@ -160,9 +160,9 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
         # ninja_core.devices is the canonical source; no AC dependency.
         _SCOPE_SQL = """
             CASE
-                WHEN nd.node_class LIKE '%SERVER%'     THEN 'server'
-                WHEN nd.node_class LIKE '%WORKSTATION%' THEN 'workstation'
-                WHEN nd.os_name ILIKE '%server%'       THEN 'server'
+                WHEN nd.node_class LIKE '%%SERVER%%'     THEN 'server'
+                WHEN nd.node_class LIKE '%%WORKSTATION%%' THEN 'workstation'
+                WHEN nd.os_name ILIKE '%%server%%'       THEN 'server'
                 ELSE 'workstation'
             END
         """
