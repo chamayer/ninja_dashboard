@@ -85,7 +85,8 @@ differentiates sources within a type.
 | `agent.edr` | EDR agent presence | SentinelOne, CrowdStrike |
 | `agent.remote_access` | Remote access tool | ScreenConnect, LogMeIn |
 | `user` | User accounts (planned) | AD, Azure AD |
-| `vulnerability` | CVEs (planned) | SentinelOne, Tenable |
+| `vulnerability` | CVEs (planned — backlog, NVD enrichment) | SentinelOne, Tenable, NVD |
+| `patch` | OS patch state and install outcomes (planned) | Ninja |
 
 ### 3.2 Observation pipeline
 
@@ -196,6 +197,13 @@ so `entity_observations.device_id` is set on first write.
 
 Rule: **if you can resolve with certainty at ingest, do it. If you are
 guessing, defer.**
+
+**Serial quality.** Serial numbers are only a valid matching signal when
+they are real. Placeholder values (`System Serial Number`,
+`Default string`, `To Be Filled By O.E.M.`, `0`, `None`, empty) and any
+serial shared by more than one device fleet-wide are classified
+low-quality and excluded from matching. Quality classification is
+computed at ingest and surfaced on the identity review page.
 
 ### 4.2 Async resolver (slow path)
 
@@ -424,6 +432,30 @@ If not, open or update a finding.
 - Event-driven: new observation arrives → evaluate that device immediately
 - Scheduled sweep: periodic backstop covering any gaps missed by events
 
+**Evaluation universe is observation-driven, not Ninja-driven.** A
+device known only to SentinelOne or ScreenConnect is still a canonical
+device — the async resolver promotes stable unmatched observation
+clusters into `operations.devices` (+ `device_links`) so the evaluator
+sees them. "Has ScreenConnect but no RMM agent" must produce a finding;
+an evaluator that only iterates Ninja-sourced devices cannot detect it.
+
+**Device scope applies.** Requirements carry `device_scope`
+(all/servers/workstations); the evaluator filters on
+`devices.device_type`, which every connector populates (Ninja
+node_class, else OS-name inference).
+
+**Exemptions apply.** A device flagged exempt for an entity_type (e.g.
+Ninja "NO AV" → `agent.edr`) is skipped for requirements of that type.
+Exemption flags are carried on the device (set from source data at
+ingest), not hard-coded per platform.
+
+**Source-failure guard.** When a source's latest collection run failed
+or is overdue, the evaluator (a) opens a `source_failure` **admin**
+finding for that source and (b) skips gap evaluation for that platform
+until a successful run lands. A broken S1 pull must never open
+fleet-wide false "missing EDR" findings. This replaces the legacy
+per-device "unknown" state with the entity/admin split of §6.1.
+
 ### 6.5 Confidence, severity, and urgency
 
 These are three distinct dimensions, each with a single definition point:
@@ -433,9 +465,18 @@ evaluator from thresholds defined on the coverage requirement.
 Evolves over time.
 
 ```
-probable   → gap_after_hours threshold crossed, device online
-confirmed  → confidence_confirmed threshold crossed
+possible   → gap_after_hours threshold crossed
+probable   → confidence_probable threshold crossed
+confirmed  → confidence_confirmed threshold crossed AND corroborated
 ```
+
+**Corroboration:** a gap is only `confirmed` when the device is
+demonstrably alive — observed online by at least one other platform
+within the staleness window (or an operator confirmed it manually). A
+device that is dark everywhere is probably retired; its gaps stay
+`probable`. This is the legacy `confirmed_gap` rule and is the primary
+false-positive control — notification rules typically filter on
+`min_confidence = confirmed`.
 
 **Severity** — how bad this finding is. Defined on the coverage
 requirement at creation time. **Immutable after the finding opens.**
@@ -580,7 +621,21 @@ Current state: `ninja_agent_compliance` is a multi-source compliance
 engine bundling data collection, identity resolution, evaluation, finding
 generation, and alert routing in one module.
 
-Future state: stripped to configuration only.
+Future state: **deleted entirely.** No stripped-down remnant, no
+configuration residue. The end state is:
+
+- `rg "agent_compliance|ninja_agent_compliance"` returns zero hits in
+  `ingest/` and `operations/` (excluding migration history);
+- the `ninja_agent_compliance` schema is dropped;
+- `ingest/agent_compliance/` is removed from the tree;
+- no new code may import `ingest.agent_compliance.*` or query
+  `ninja_agent_compliance.*` — such a dependency blocks cutover.
+
+Source configuration (URLs, credential env-var refs, shared/per-client
+scoping) lives in `operations.sources` / `source_instances` /
+`source_bindings`. Connector fetchers live in `ingest/connectors/`.
+Hostname/org normalization lives in a platform-neutral module.
+Client-to-source-group mapping lives in `operations.client_links`.
 
 | Responsibility | Current home | Future home |
 |---|---|---|
@@ -596,46 +651,139 @@ Future state: stripped to configuration only.
 | Suppressions | `ninja_agent_compliance.alert_suppressions` | `operations.finding_suppressions` |
 | Schema rename | `ninja_agent_compliance` | `agent_compliance` |
 
-After migration, `agent_compliance` holds only:
-- `coverage_requirements` (or these move to `operations`)
-- Any AC-specific configuration that has no generic equivalent
+The `agent_compliance` schema rename (backlog item 25) is superseded:
+there is nothing left to rename once the module is deleted.
 
 ---
 
-## 9. Planned gap backlog
+## 9. Parity tracks (2026-07-09)
 
-In priority order:
+The original 25-item gap backlog is complete through the platform
+foundation (items 1–19, 21–23 shipped in v0.36–0.43). Remaining work is
+organized as parity tracks in `BLUEPRINT.md` — the goal is full
+functional parity with the legacy AC engine, the standalone compliance
+scripts, and the Metabase operational dashboards, followed by deletion
+of `ninja_agent_compliance` (§8).
 
-| # | Gap | Where |
+| Track | Content |
+|---|---|
+| 0 | Legacy severance — connectors, source config, client resolution move off `ninja_agent_compliance` |
+| 1 | Evaluator parity — observation-driven universe, device_scope, exemptions, stale/source-failure/cross-client findings, corroborated confidence |
+| 2 | Notification dispatcher — rules→routes→state→events, suppressions with ignore/restore, webhook/email/Zendesk, review digest |
+| 3 | Software findings — classification pipeline for the seeded software finding types, catalog decision workflow (3b CVE/NVD enrichment: backlog) |
+| 4 | Identity fidelity — normalization/prefix/macOS matching, serial quality, candidate confirm/reject with cascade, conflict views |
+| 5 | Patching platform layer — patch findings + work queue over `ninja_patches` staging (§10) |
+| 6 | Cutover — side-by-side validation, Metabase disposition (§12), delete legacy |
+| U | UI framework — nav, page grammar, canonical entity pages (§11); surfaces land per-track as engines produce data |
+
+Backlog (not committed): 3b CVE/NVD enrichment (`vulnerability` entity
+type), VirusTotal/reputation lookups, user-risk scoring (needs a
+last-user data source), DB role rename `ninja_ingest` →
+`operations_ingest`.
+
+---
+
+## 10. Patching platform layer
+
+`ninja_patches` is a legitimate source-branded staging schema (§2) and
+stays. What is missing is the platform layer on top: findings and
+operator workflow. The Metabase patch dashboards prove the operational
+intent — triage, not charts.
+
+**Patch finding types (entity class):**
+
+| type_key | Condition | Default severity |
 |---|---|---|
-| 1 | `INGEST_ACTIVITY_TYPES_INCLUDE` add SOFTWARE_* | Server `.env` on am-ch-01 |
-| 2 | `stale_since/reason`, `deleted_at/reason` on `software_installations_current` | SQL migration |
-| 3 | Update `refresh_software_installations_current()` to three-state logic | DB function |
-| 4 | `device_links.last_seen_at`, `device_links.missing_since` | SQL migration |
-| 5 | Universal lifecycle columns on `devices` + `clients` | Django migration |
-| 6 | Entity finding types: `device_missing_from_source`, `device_long_offline`, `device_stale_data` | Seed migration |
-| 7 | Post-upsert reconciliation in `devices.py` | Ingest code |
-| 8 | `operations.finding_types` registry table | Django migration |
-| 9 | `operations.coverage_requirements` table | Django migration |
-| 10 | `operations.admin_findings` table + Django model | Django migration |
-| 11 | `operations.queue_registry` table + Django model | Django migration |
-| 12 | `operations.identity_candidates` table | Django migration |
-| 13 | `operations.notification_routes/rules/state/events` (move from AC) | Django migration |
-| 14 | `operations.finding_suppressions` table | Django migration |
-| 15 | Platform evaluator (generic gap analysis engine) | Ingest code |
-| 16 | Identity resolver (async worker + fast-path helper) | Ingest code |
-| 17 | S1 connector → `entity_observations` (agent.edr) | Ingest code |
-| 18 | ScreenConnect connector → `entity_observations` (agent.remote_access) | Ingest code |
-| 19 | `agent_presence_current` materialized view | SQL migration |
-| 20 | Compliance engine rebuilt on `operations.*` | Ingest code |
-| 21 | Findings review page in Operations web app | Django views + templates |
-| 22 | System health page (admin findings) in Operations web app | Django views + templates |
-| 23 | Docker service rename `ninja-ingest` → `operations-ingest` | docker-compose.yml |
-| 24 | DB role rename `ninja_ingest` → `operations_ingest` | Migration across 6 files |
-| 25 | Schema rename `ninja_agent_compliance` → `agent_compliance` | SQL migration |
+| `device_never_patched` | Device in patching scope, no patch scan/install history | high |
+| `patching_stalled` | No patch activity for N days (default 35) on an otherwise-active device | high |
+| `reboot_pending` | Installed patches awaiting reboot beyond N days | medium |
+| `patch_failing_repeatedly` | Same KB failed ≥3 consecutive attempts on a device | high |
+| `patch_approval_backlog` | Manual-approval queue for a client exceeds threshold/age | medium (subject: client) |
 
-Items 1–3: blocking for correct software staleness.
-Items 4–7: blocking for correct device lifecycle.
-Items 8–16: platform foundation — evaluator, identity resolver, findings tables.
-Items 17–22: AC migration (depends on 8–16).
-Items 23–25: naming cleanup (can be done independently at any time).
+The evaluator reads `ninja_patches.current_patch_state`,
+`latest_install_outcome`, and `device_patch_signal` (already
+materialized) — no new collection needed. Findings flow through the
+standard pipeline: review page, notification rules, suppressions.
+
+**Operator surfaces:** patch work queue (triage list mirroring the
+"Device Work Queue" dashboard intent), client patch review, patch tab
+on the canonical device page. Trend/evidence analytics stay in
+Metabase.
+
+A `patch` entity_type in `entity_observations` is **not** required for
+this layer; it becomes relevant only if a second patching source ever
+appears.
+
+---
+
+## 11. Operator UI
+
+Operations is the operational data browser and control plane (product
+direction, 2026-07-07). Metabase keeps exploratory BI and historical
+analytics. The dividing line: **if a page carries a decision or an
+action, it belongs in Operations.**
+
+### 11.1 Information architecture
+
+```
+Dashboard · Compliance · Software · Patching · Findings · Admin
+                    └── client context: ClientName › Devices | Software | Patches | Findings
+```
+
+Admin groups: Sources, Queues, Health (admin findings), Identity
+review, Configuration (requirements, notification rules/routes,
+suppressions).
+
+### 11.2 Page grammar
+
+Every list page follows one shape: summary tiles → filter bar →
+paginated table → row links to a canonical detail page → actions live
+on the detail page. Shared template components (tiles, filter bar,
+table, pagination, severity/status/confidence badges, freshness
+header) are defined once and reused — no per-page CSS or bespoke table
+markup.
+
+Every domain page shows **data freshness** (last successful ingest run
+for the backing source, from `run_log`) in the header.
+
+### 11.3 Canonical entity pages
+
+One page per entity; everything else links to it:
+
+- **Device** — identity (links per source, serial quality), agent
+  presence per platform, software, patches, open findings, history.
+- **Client** — coverage summary, devices, software rollup, patch
+  posture, findings, source links.
+- **Finding** — full detail, evidence, ack/suppress/resolve actions,
+  notification history.
+- **Source** — binding status, last runs, per-client link table.
+
+### 11.4 Standing workflows
+
+| Workflow | Surfaces | Actions |
+|---|---|---|
+| **Triage** | Findings queue (entity), Health (admin) | acknowledge, suppress (time-bound, with restore), resolve |
+| **Review** | Identity candidates, software decisions, unmatched source groups | confirm/reject, approve/approve-publisher/reject/investigate |
+| **Configure** | Coverage requirements, notification rules + routes, suppressions, sources | CRUD with audit |
+
+**Engine-first rule:** no surface ships before its backing engine
+produces real data. A page rendering an empty table is a defect, not a
+milestone.
+
+---
+
+## 12. Metabase disposition at cutover
+
+The AC Metabase dashboards query `ninja_agent_compliance.v_*` views and
+break when the schema drops. Disposition is explicit, per dashboard:
+
+| Class | Disposition |
+|---|---|
+| Workflow/triage cards (Today, Devices, Alerts, Customers, Setup, Debug) | Superseded by Operations pages — delete |
+| Health cards (source health, sync lag) | Superseded by Health page — delete |
+| Trend/analytics cards worth keeping | Rebuild on `operations.*` views |
+| Patching dashboards | Unaffected (read `ninja_patches`, which stays); triage-intent cards gradually superseded by Track 5 surfaces |
+| Inventory dashboards (`ninja_inventory`) | Identity/serial cards superseded by Track 4 surfaces; rest reviewed at cutover |
+
+No dashboard is dropped implicitly. Track 6 includes the inventory of
+which cards get rebuilt vs. deleted, approved before the schema drop.
