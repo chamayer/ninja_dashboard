@@ -39,6 +39,7 @@ class SourceConfig:
     # None when no binding has been seeded for this source yet.
     source_binding_id: uuid.UUID | None = None
     entity_type: str | None = None
+    ops_source_id: int | None = None  # operations.sources.id — for client_links upsert
 
 
 @dataclass(frozen=True)
@@ -79,7 +80,8 @@ def load_sources() -> list[SourceConfig]:
                     WHEN 'edr'           THEN 'agent.edr'
                     WHEN 'remote_access' THEN 'agent.remote_access'
                     ELSE NULL
-                END AS entity_type
+                END AS entity_type,
+                os.id AS ops_source_id
             FROM ninja_agent_compliance.platform_sources ps
             LEFT JOIN ninja_agent_compliance.clients c ON c.client_id = ps.client_id
             LEFT JOIN operations.sources os ON os.name = ps.platform
@@ -114,6 +116,7 @@ def load_sources() -> list[SourceConfig]:
             psk=_secret(row[16]),
             source_binding_id=row[17],
             entity_type=row[18],
+            ops_source_id=row[19],
         )
         for row in rows
     ]

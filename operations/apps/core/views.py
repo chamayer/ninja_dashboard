@@ -156,51 +156,89 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
             .order_by("category")
         )
 
-        # Agent presence: per-platform coverage vs total devices
+        # Device counts by type for scope-aware coverage totals.
+        type_counts: dict[str, int] = {}
+        for d in devices:
+            type_counts[d.device_type] = type_counts.get(d.device_type, 0) + 1
+        total_all = len(devices)
+
+        def _scope_total(scope: str) -> int:
+            if scope == "all":
+                return total_all
+            return type_counts.get(scope, 0)
+
+        # Agent presence: per-platform per-device_type counts.
         with transaction.atomic():
             with connection.cursor() as cur:
                 cur.execute("SET LOCAL operations.tenant_id = 1")
                 cur.execute(
                     """
-                    SELECT platform, entity_type,
+                    SELECT platform, entity_type, device_type,
                            COUNT(DISTINCT device_id) AS present_count,
                            MAX(last_observed_at)     AS last_seen
                     FROM operations.agent_presence_current
                     WHERE tenant_id = %s AND client_id = %s
                       AND last_observed_at > NOW() - INTERVAL '7 days'
-                    GROUP BY platform, entity_type
-                    ORDER BY entity_type, platform
+                    GROUP BY platform, entity_type, device_type
+                    ORDER BY entity_type, platform, device_type
                     """,
                     [1, str(client.id)],
                 )
                 presence_rows = cur.fetchall()
 
+                # Deduplicate requirements: client-specific beats global for the
+                # same (platform, entity_type, device_scope).
                 cur.execute(
                     """
-                    SELECT DISTINCT platform, entity_type, severity
+                    SELECT DISTINCT ON (platform, entity_type, device_scope)
+                        platform, entity_type, device_scope, severity
                     FROM operations.coverage_requirements
                     WHERE tenant_id = %s AND enabled = TRUE
                       AND (client_id = %s OR client_id IS NULL)
-                    ORDER BY platform
+                    ORDER BY platform, entity_type, device_scope,
+                        (client_id IS NULL)
                     """,
                     [1, str(client.id)],
                 )
                 req_rows = cur.fetchall()
 
-        presence_map = {row[0]: {"count": row[2], "last_seen": row[3]} for row in presence_rows}
-        total = len(devices)
-        ctx["platform_coverage"] = [
-            {
-                "platform":    platform,
+        # presence_by_ptype: (platform, device_type) → {count, last_seen}
+        presence_by_ptype: dict = {}
+        for platform, etype, dtype, count, last_seen in presence_rows:
+            presence_by_ptype[(platform, dtype)] = {"count": count, "last_seen": last_seen}
+
+        def _scope_present(platform: str, scope: str):
+            if scope == "all":
+                count = sum(
+                    v["count"] for (p, _), v in presence_by_ptype.items() if p == platform
+                )
+                last = max(
+                    (v["last_seen"] for (p, _), v in presence_by_ptype.items()
+                     if p == platform and v["last_seen"]),
+                    default=None,
+                )
+                return count, last
+            v = presence_by_ptype.get((platform, scope), {})
+            return v.get("count", 0), v.get("last_seen")
+
+        _scope_labels = {"server": "servers", "workstation": "workstations"}
+        platform_coverage = []
+        for platform, etype, scope, severity in req_rows:
+            present, last_seen = _scope_present(platform, scope)
+            total = _scope_total(scope)
+            scope_label = _scope_labels.get(scope, "")
+            display = f"{platform} ({scope_label})" if scope_label else platform
+            platform_coverage.append({
+                "platform":    display,
                 "entity_type": etype,
                 "severity":    severity,
-                "present":     presence_map.get(platform, {}).get("count", 0),
+                "device_scope": scope,
+                "present":     present,
                 "total":       total,
-                "last_seen":   presence_map.get(platform, {}).get("last_seen"),
-                "gap":         total - presence_map.get(platform, {}).get("count", 0),
-            }
-            for platform, etype, severity in req_rows
-        ]
+                "last_seen":   last_seen,
+                "gap":         max(0, total - present),
+            })
+        ctx["platform_coverage"] = platform_coverage
         ctx["active_finding_count"] = Finding.objects.filter(
             tenant_id=1, client=client, status__in=_FINDING_ACTIVE_STATUSES
         ).count()

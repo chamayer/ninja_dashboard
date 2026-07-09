@@ -72,6 +72,37 @@ def run_source_observations(
     return counts
 
 
+def _upsert_client_links(cur, source: SourceConfig, obs_rows: list[dict]) -> None:
+    """Ensure a client_links row exists for every client seen in this batch.
+
+    Per-client sources (is_shared=False, e.g. ScreenConnect-UTA): external_id
+    is the source_key — one stable row per source instance.
+    Shared sources (is_shared=True, e.g. SentinelOne, LogMeIn): external_id
+    is the client UUID so each client gets its own row under the same source.
+    """
+    if not source.ops_source_id:
+        return
+    seen_clients = {
+        row["client_id"] for row in obs_rows if row.get("client_id") is not None
+    }
+    if not seen_clients:
+        return
+    for client_uuid in seen_clients:
+        external_id = (
+            source.source_key if not source.is_shared else str(client_uuid)
+        )
+        cur.execute(
+            """
+            INSERT INTO operations.client_links
+                (id, version, tenant_id, client_id, source_id, external_id, external_name)
+            VALUES (gen_random_uuid(), 0, %s, %s, %s, %s, %s)
+            ON CONFLICT (tenant_id, source_id, external_id)
+            DO UPDATE SET external_name = EXCLUDED.external_name
+            """,
+            (_TENANT_ID, client_uuid, source.ops_source_id, external_id, source.source_name),
+        )
+
+
 def _write_observations(
     source: SourceConfig,
     rows: list[dict[str, Any]],
@@ -155,4 +186,5 @@ def _write_observations(
                     "tenant_id", "collector_instance_id", "batch_id", "observation_hash"
                 ],
             )
+            _upsert_client_links(cur, source, obs_rows)
     return len(obs_rows)
