@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+
+{% block title %}Sources{% endblock %}
+
+{% block content %}
+<style>
+    .source-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem; margin-bottom: 1.5rem; }
+    .source-card { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 1.25rem; }
+    .source-card.stale { border-color: #fca5a5; }
+    .source-card.ok    { border-color: #86efac; }
+    .source-card.active { border-color: #93c5fd; }
+    .source-name { font-weight: 700; font-size: 1rem; margin-bottom: 0.5rem; }
+    .source-stat { font-size: 0.82rem; color: var(--muted); margin-top: 0.2rem; }
+    .source-stat strong { color: #111; font-weight: 600; }
+    .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 0.35rem; }
+    .dot-ok   { background: #27ae60; }
+    .dot-stale { background: #e74c3c; }
+    .dot-run  { background: #3b82f6; animation: pulse 1.2s infinite; }
+    .dot-pending { background: #f59e0b; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+    .error-text { font-size: 0.78rem; color: #c0392b; margin-top: 0.35rem;
+                  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+</style>
+
+<div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:1rem;">
+    <div>
+        <h1 style="margin:0;">Sources</h1>
+        <p class="muted" style="margin:0.25rem 0 0;">Ingest status per source platform</p>
+    </div>
+    {% if stale_count %}
+    <span class="badge badge-high">{{ stale_count }} stale source{{ stale_count|pluralize }}</span>
+    {% else %}
+    <span class="badge badge-low">All current</span>
+    {% endif %}
+</div>
+
+<div class="source-grid">
+{% for s in sources %}
+<div class="source-card {% if s.is_processing or s.has_pending %}active{% elif not s.is_stale %}ok{% else %}stale{% endif %}">
+    <div class="source-name">
+        {% if s.is_processing %}
+        <span class="status-dot dot-run"></span>
+        {% elif s.has_pending %}
+        <span class="status-dot dot-pending"></span>
+        {% elif not s.is_stale %}
+        <span class="status-dot dot-ok"></span>
+        {% else %}
+        <span class="status-dot dot-stale"></span>
+        {% endif %}
+        {{ s.name }}
+    </div>
+    {% if s.is_processing %}
+    <div class="source-stat" style="color:#2563eb;">Running now…</div>
+    {% elif s.has_pending %}
+    <div class="source-stat" style="color:#d97706;">Queued — pending start</div>
+    {% endif %}
+    <div class="source-stat">
+        Last run:
+        {% if s.last_success %}
+        <strong>{{ s.last_success|date:"Y-m-d H:i" }}</strong>
+        {% else %}
+        <span style="color:#9ca3af;">never</span>
+        {% endif %}
+    </div>
+    {% if s.last_rows is not None %}
+    <div class="source-stat">Records: <strong>{{ s.last_rows }}</strong></div>
+    {% endif %}
+    {% if s.last_observed %}
+    <div class="source-stat">Last observation: <strong>{{ s.last_observed|date:"Y-m-d H:i" }}</strong></div>
+    {% endif %}
+    {% if s.last_error %}
+    <div class="error-text" title="{{ s.last_error }}">⚠ {{ s.last_error|truncatechars:80 }}</div>
+    {% endif %}
+</div>
+{% endfor %}
+</div>
+
+{% if recent_runs %}
+<div class="card">
+    <h2 style="margin-top:0;">Recent Runs</h2>
+    <table data-sortable style="width:100%; border-collapse:collapse;">
+        <thead>
+            <tr style="text-align:left; border-bottom:1px solid var(--border);">
+                <th style="padding:0.5rem 0.75rem;">Source</th>
+                <th style="padding:0.5rem 0.75rem;">Status</th>
+                <th style="padding:0.5rem 0.75rem;">Started</th>
+                <th style="padding:0.5rem 0.75rem;">Completed</th>
+                <th style="padding:0.5rem 0.75rem; text-align:right;">Rows</th>
+                <th style="padding:0.5rem 0.75rem;">Error</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for run in recent_runs %}
+            <tr style="border-bottom:1px solid var(--border);">
+                <td style="padding:0.45rem 0.75rem; font-weight:500;">{{ run.source }}</td>
+                <td style="padding:0.45rem 0.75rem;">
+                    {% if run.status == "done" %}
+                    <span class="badge badge-low">done</span>
+                    {% elif run.status == "failed" %}
+                    <span class="badge badge-critical">failed</span>
+                    {% elif run.status == "processing" %}
+                    <span class="badge badge-info">running</span>
+                    {% else %}
+                    <span class="badge">{{ run.status }}</span>
+                    {% endif %}
+                </td>
+                <td style="padding:0.45rem 0.75rem; color:var(--muted); font-size:0.82rem;">
+                    {{ run.started_at|date:"Y-m-d H:i"|default:"—" }}
+                </td>
+                <td style="padding:0.45rem 0.75rem; color:var(--muted); font-size:0.82rem;">
+                    {{ run.completed_at|date:"Y-m-d H:i"|default:"—" }}
+                </td>
+                <td style="padding:0.45rem 0.75rem; text-align:right; color:var(--muted); font-size:0.82rem;">
+                    {{ run.rows_seen|default:"—" }}
+                </td>
+                <td style="padding:0.45rem 0.75rem; color:#c0392b; font-size:0.78rem; max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+                    {{ run.error|truncatechars:60|default:"" }}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+{% endblock %}

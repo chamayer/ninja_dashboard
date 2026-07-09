@@ -33,6 +33,8 @@ _FINDING_ACTIVE_STATUSES = (
     Finding.Status.INVESTIGATING,
 )
 
+_SOURCES = ("Ninja", "SentinelOne", "ScreenConnect", "LogMeIn")
+
 
 @require_GET
 @transaction.non_atomic_requests
@@ -101,6 +103,23 @@ def home(request: HttpRequest) -> HttpResponse:
         for c in clients
     ]
 
+    # Source health: warn if any source has no successful run in 8 hours.
+    stale_sources: list[str] = []
+    eight_hours_ago = timezone.now() - timedelta(hours=8)
+    with connection.cursor() as cur:
+        cur.execute("""
+            SELECT DISTINCT ON (df)
+                df, status, completed_at
+            FROM operations.source_run_queue
+            WHERE status = 'done'
+            ORDER BY df, completed_at DESC
+        """)
+        last_success = {r[0]: r[2] for r in cur.fetchall()}
+    for src in _SOURCES:
+        ts = last_success.get(src)
+        if ts is None or ts < eight_hours_ago:
+            stale_sources.append(src)
+
     return render(
         request,
         "home.html",
@@ -111,6 +130,7 @@ def home(request: HttpRequest) -> HttpResponse:
             "severity_counts": severity_counts,
             "recent_findings": recent_findings,
             "client_health": client_health,
+            "stale_sources": stale_sources,
         },
     )
 
@@ -867,3 +887,186 @@ def org_software_decide(request: HttpRequest, org_slug: str) -> HttpResponse:
     )
     return redirect(request.POST.get("next") or request.META.get("HTTP_REFERER") or
                     f"/orgs/{org_slug}/software/")
+
+
+# ── Fleet-wide coverage page ─────────────────────────────────────────────────
+
+_COVERAGE_SCOPE_SQL = """
+    CASE
+        WHEN nd.node_class LIKE '%%SERVER%%'      THEN 'server'
+        WHEN nd.node_class LIKE '%%WORKSTATION%%' THEN 'workstation'
+        WHEN nd.os_name    ILIKE '%%server%%'     THEN 'server'
+        ELSE 'workstation'
+    END
+"""
+
+_SEV_ORDER = "CASE r.severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END"
+
+
+@login_required
+def fleet_coverage(request: HttpRequest) -> HttpResponse:
+    """Fleet-wide agent coverage gap view. Single query via materialized view."""
+    show_gaps_only = request.GET.get("gaps", "1") != "0"
+
+    with transaction.atomic():
+        with connection.cursor() as cur:
+            cur.execute("SET LOCAL operations.tenant_id = 1")
+            cur.execute(f"""
+                WITH
+                device_scopes AS (
+                    SELECT od.id AS device_id, od.client_id,
+                           {_COVERAGE_SCOPE_SQL} AS scope
+                    FROM operations.devices od
+                    JOIN operations.device_links dl
+                         ON dl.device_id = od.id AND dl.missing_since IS NULL
+                    JOIN operations.sources s
+                         ON s.id = dl.source_id AND s.name = 'Ninja'
+                    JOIN ninja_core.devices nd
+                         ON nd.id = dl.external_id::bigint AND nd.is_current
+                    WHERE od.tenant_id = 1 AND od.deleted_at IS NULL
+                ),
+                scope_totals AS (
+                    SELECT client_id, scope, COUNT(DISTINCT device_id)::int AS total
+                    FROM device_scopes GROUP BY client_id, scope
+                    UNION ALL
+                    SELECT client_id, 'all', COUNT(DISTINCT device_id)::int
+                    FROM device_scopes GROUP BY client_id
+                ),
+                presence AS (
+                    SELECT ap.client_id, ap.platform, ds.scope,
+                           COUNT(DISTINCT ap.device_id)::int AS present
+                    FROM operations.agent_presence_current ap
+                    JOIN device_scopes ds ON ds.device_id = ap.device_id
+                    WHERE ap.tenant_id = 1
+                      AND ap.last_observed_at > NOW() - INTERVAL '7 days'
+                    GROUP BY ap.client_id, ap.platform, ds.scope
+                    UNION ALL
+                    SELECT ap.client_id, ap.platform, 'all',
+                           COUNT(DISTINCT ap.device_id)::int
+                    FROM operations.agent_presence_current ap
+                    JOIN device_scopes ds ON ds.device_id = ap.device_id
+                    WHERE ap.tenant_id = 1
+                      AND ap.last_observed_at > NOW() - INTERVAL '7 days'
+                    GROUP BY ap.client_id, ap.platform
+                ),
+                reqs AS (
+                    SELECT DISTINCT ON (platform, entity_type, device_scope)
+                        platform, entity_type, device_scope, severity
+                    FROM operations.coverage_requirements
+                    WHERE tenant_id = 1 AND enabled = TRUE
+                    ORDER BY platform, entity_type, device_scope,
+                             (client_id IS NULL)
+                )
+                SELECT
+                    c.display_name, c.slug,
+                    r.platform, r.device_scope, r.severity,
+                    COALESCE(st.total,   0) AS total,
+                    COALESCE(p.present,  0) AS present,
+                    GREATEST(0, COALESCE(st.total, 0) - COALESCE(p.present, 0)) AS gap
+                FROM operations.clients c
+                CROSS JOIN reqs r
+                LEFT JOIN scope_totals st ON st.client_id = c.id AND st.scope = r.device_scope
+                LEFT JOIN presence p
+                    ON p.client_id = c.id AND p.platform = r.platform
+                   AND p.scope = r.device_scope
+                WHERE c.tenant_id = 1 AND c.deleted_at IS NULL
+                  AND COALESCE(st.total, 0) > 0
+                ORDER BY gap DESC, {_SEV_ORDER}, c.display_name, r.platform
+            """)
+            rows = cur.fetchall()
+
+    coverage_rows = [
+        {
+            "client_name": r[0], "client_slug": r[1],
+            "platform": r[2], "scope": r[3], "severity": r[4],
+            "total": r[5], "present": r[6], "gap": r[7],
+        }
+        for r in rows
+    ]
+    displayed = [r for r in coverage_rows if r["gap"] > 0] if show_gaps_only else coverage_rows
+    critical_gaps = sum(1 for r in coverage_rows if r["gap"] > 0 and r["severity"] == "critical")
+    total_gaps = sum(1 for r in coverage_rows if r["gap"] > 0)
+
+    return render(request, "coverage.html", {
+        "coverage_rows": displayed,
+        "show_gaps_only": show_gaps_only,
+        "critical_gaps": critical_gaps,
+        "total_gaps": total_gaps,
+    })
+
+
+# ── Source ingest status page ─────────────────────────────────────────────────
+
+
+@login_required
+def sources_status(request: HttpRequest) -> HttpResponse:
+    """Source ingest run status and last observation timestamps."""
+    with transaction.atomic():
+        with connection.cursor() as cur:
+            cur.execute("SET LOCAL operations.tenant_id = 1")
+
+            # Last completed run per source
+            cur.execute("""
+                SELECT DISTINCT ON (df)
+                    df, status, completed_at, rows_seen, error, started_at, queued_at
+                FROM operations.source_run_queue
+                WHERE status IN ('done', 'failed')
+                ORDER BY df, completed_at DESC
+            """)
+            last_run = {r[0]: r for r in cur.fetchall()}
+
+            # Currently pending or processing
+            cur.execute("""
+                SELECT df, status, queued_at, started_at
+                FROM operations.source_run_queue
+                WHERE status IN ('pending', 'processing')
+            """)
+            active = {r[0]: r for r in cur.fetchall()}
+
+            # Last observation per platform from entity_observations
+            cur.execute("""
+                SELECT platform, MAX(observed_at) AS last_observed
+                FROM operations.entity_observations
+                WHERE entity_type LIKE 'agent.%%'
+                GROUP BY platform
+            """)
+            last_obs = {r[0]: r[1] for r in cur.fetchall()}
+
+            # Recent run history
+            cur.execute("""
+                SELECT id, df, status, queued_at, started_at, completed_at,
+                       rows_seen, error
+                FROM operations.source_run_queue
+                ORDER BY queued_at DESC LIMIT 30
+            """)
+            recent_cols = ["id", "source", "status", "queued_at", "started_at",
+                           "completed_at", "rows_seen", "error"]
+            recent_runs = [dict(zip(recent_cols, r)) for r in cur.fetchall()]
+
+    now = timezone.now()
+    sources = []
+    for source in _SOURCES:
+        run = last_run.get(source)
+        act = active.get(source)
+        last_success = run[2] if run and run[1] == "done" else None
+        last_fail = run[2] if run and run[1] == "failed" else None
+        last_error = run[4] if run and run[1] == "failed" else None
+        is_stale = last_success is None or (now - last_success).total_seconds() > 8 * 3600
+        sources.append({
+            "name":          source,
+            "is_processing": bool(act and act[1] == "processing"),
+            "has_pending":   bool(act and act[1] == "pending"),
+            "last_success":  last_success,
+            "last_failure":  last_fail,
+            "last_rows":     run[3] if run and run[1] == "done" else None,
+            "last_error":    last_error,
+            "last_observed": last_obs.get(source),
+            "is_stale":      is_stale,
+        })
+
+    stale_count = sum(1 for s in sources if s["is_stale"] and not s["is_processing"])
+    return render(request, "sources.html", {
+        "sources": sources,
+        "recent_runs": recent_runs,
+        "stale_count": stale_count,
+    })

@@ -83,6 +83,25 @@
         .badge-acknowledged { background: #fef3c7; color: #92400e; }
         .badge-resolved { background: #d1fae5; color: #065f46; }
         .badge-suppressed { background: #f3f4f6; color: #6b7280; }
+
+        .primary-nav { background: #16213e; border-top: 1px solid #2a2a4e; }
+        .primary-nav-inner {
+            max-width: 1200px; margin: 0 auto; padding: 0 1.5rem;
+            display: flex; gap: 0; overflow-x: auto;
+        }
+        .nav-link {
+            padding: 0.5rem 0.9rem; font-size: 0.82rem; color: #9ca3af;
+            text-decoration: none; white-space: nowrap; display: flex;
+            align-items: center; gap: 0.3rem;
+            border-bottom: 2px solid transparent;
+        }
+        .nav-link:hover { color: #e5e7eb; background: rgba(255,255,255,0.04); }
+        .nav-badge {
+            background: #dc2626; color: #fff; font-size: 0.65rem; font-weight: 700;
+            padding: 1px 5px; border-radius: 10px; line-height: 1.4;
+        }
+        .nav-badge-muted { background: #4b5563; }
+        .nav-sep { border-left: 1px solid #2a2a4e; margin: 0.4rem 0.25rem; }
     </style>
     <script>
     (function() {
@@ -142,6 +161,30 @@
         <div class="user-info"><a href="{% url 'admin:login' %}">log in</a></div>
         {% endif %}
     </header>
+
+    {% if user.is_authenticated %}
+    <nav class="primary-nav">
+        <div class="primary-nav-inner">
+            <a class="nav-link" href="{% url 'home' %}">Home</a>
+            <a class="nav-link" href="{% url 'org_index' org_slug='all' %}">Clients</a>
+            {% if current_client %}
+            <a class="nav-link" href="{% url 'org_devices' org_slug=current_client.slug %}">Devices</a>
+            <a class="nav-link" href="{% url 'org_software' org_slug=current_client.slug %}">Software</a>
+            {% endif %}
+            <div class="nav-sep"></div>
+            <a class="nav-link" href="{% url 'findings_queue' %}">
+                Findings{% if nav_findings_count %} <span class="nav-badge">{{ nav_findings_count }}</span>{% endif %}
+            </a>
+            <a class="nav-link" href="{% url 'fleet_coverage' %}">Coverage</a>
+            <a class="nav-link" href="{% url 'sources_status' %}">Sources</a>
+            <a class="nav-link" href="{% url 'findings_admin_health' %}">Health</a>
+            {% if nav_pending_merges %}
+            <div class="nav-sep"></div>
+            <a class="nav-link" href="{% url 'merge_candidates_queue' %}">Merges <span class="nav-badge nav-badge-muted">{{ nav_pending_merges }}</span></a>
+            {% endif %}
+        </div>
+    </nav>
+    {% endif %}
 
     <main>
         {% block content %}{% endblock %}

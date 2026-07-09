@@ -45,6 +45,14 @@
   .recent-time { color: var(--muted); font-size: 0.78rem; white-space: nowrap; }
 </style>
 
+{% if stale_sources %}
+<div style="background:#fffbeb; border:1px solid #fcd34d; border-radius:6px; padding:0.85rem 1.25rem; margin-bottom:0.75rem; display:flex; align-items:center; gap:0.75rem;">
+  <span style="width:10px; height:10px; border-radius:50%; background:#d97706; display:inline-block; flex-shrink:0;"></span>
+  <span style="font-weight:600; color:#92400e;">Stale ingest: {{ stale_sources|join:", " }}</span>
+  <a href="{% url 'sources_status' %}" style="margin-left:auto; font-size:0.85rem; color:#92400e;">Check sources →</a>
+</div>
+{% endif %}
+
 {% if client_health %}
 {% with has_critical=severity_counts.critical %}
 {% if has_critical %}

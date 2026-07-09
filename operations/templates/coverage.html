@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+
+{% block title %}Coverage{% endblock %}
+
+{% block content %}
+<style>
+    .cov-bar-wrap { height: 6px; background: #e8edf2; border-radius: 3px; overflow: hidden; width: 80px; }
+    .cov-bar-fill { height: 100%; border-radius: 3px; }
+    .cov-bar-ok   { background: #27ae60; }
+    .cov-bar-crit { background: #c0392b; }
+    .cov-bar-high { background: #e67e22; }
+    .cov-bar-med  { background: #f1c40f; }
+    .gap-crit { color: #c0392b; font-weight: 600; }
+    .gap-high { color: #e67e22; font-weight: 600; }
+    .gap-ok   { color: #27ae60; }
+    .filter-bar { display: flex; gap: 0.5rem; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; }
+    .filter-btn { padding: 0.35rem 0.9rem; border-radius: 4px; border: 1px solid var(--border);
+                  font-size: 0.82rem; cursor: pointer; background: var(--surface); text-decoration: none;
+                  color: inherit; }
+    .filter-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+</style>
+
+<div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:1rem;">
+    <div>
+        <h1 style="margin:0;">Agent Coverage</h1>
+        <p class="muted" style="margin:0.25rem 0 0;">Fleet-wide coverage gaps across all clients</p>
+    </div>
+    {% if critical_gaps %}
+    <span class="badge badge-critical">{{ critical_gaps }} critical gap{{ critical_gaps|pluralize }}</span>
+    {% elif total_gaps %}
+    <span class="badge badge-high">{{ total_gaps }} gap{{ total_gaps|pluralize }}</span>
+    {% else %}
+    <span class="badge badge-low">All covered</span>
+    {% endif %}
+</div>
+
+<div class="filter-bar">
+    <span style="font-size:0.82rem; color:var(--muted);">Show:</span>
+    <a class="filter-btn {% if show_gaps_only %}active{% endif %}" href="?gaps=1">Gaps only</a>
+    <a class="filter-btn {% if not show_gaps_only %}active{% endif %}" href="?gaps=0">All</a>
+</div>
+
+{% if coverage_rows %}
+<div class="card" style="padding:0;">
+    <table data-sortable style="width:100%; border-collapse:collapse;">
+        <thead>
+            <tr style="text-align:left; border-bottom:1px solid var(--border);">
+                <th style="padding:0.6rem 1rem;">Client</th>
+                <th style="padding:0.6rem 0.75rem;">Platform</th>
+                <th style="padding:0.6rem 0.75rem;">Scope</th>
+                <th style="padding:0.6rem 0.75rem;">Severity</th>
+                <th style="padding:0.6rem 0.75rem; text-align:right;">Present / Total</th>
+                <th style="padding:0.6rem 1rem; text-align:right;">Gap</th>
+                <th style="padding:0.6rem 1rem;">Coverage</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in coverage_rows %}
+            <tr style="border-bottom:1px solid var(--border);">
+                <td style="padding:0.5rem 1rem;">
+                    <a href="{% url 'org_index' org_slug=row.client_slug %}">{{ row.client_name }}</a>
+                </td>
+                <td style="padding:0.5rem 0.75rem;">{{ row.platform }}</td>
+                <td style="padding:0.5rem 0.75rem; color:var(--muted); font-size:0.85rem; text-transform:capitalize;">
+                    {{ row.scope }}
+                </td>
+                <td style="padding:0.5rem 0.75rem;">
+                    <span class="badge badge-{{ row.severity }}">{{ row.severity }}</span>
+                </td>
+                <td style="padding:0.5rem 0.75rem; text-align:right; font-variant-numeric:tabular-nums;">
+                    {{ row.present }} / {{ row.total }}
+                </td>
+                <td style="padding:0.5rem 1rem; text-align:right;">
+                    {% if row.gap == 0 %}
+                    <span class="gap-ok">✓</span>
+                    {% elif row.severity == "critical" %}
+                    <span class="gap-crit">-{{ row.gap }}</span>
+                    {% else %}
+                    <span class="gap-high">-{{ row.gap }}</span>
+                    {% endif %}
+                </td>
+                <td style="padding:0.5rem 1rem;">
+                    {% if row.total > 0 %}
+                    <div class="cov-bar-wrap">
+                        <div class="cov-bar-fill {% if row.gap == 0 %}cov-bar-ok{% elif row.severity == 'critical' %}cov-bar-crit{% elif row.severity == 'high' %}cov-bar-high{% else %}cov-bar-med{% endif %}"
+                             style="width:{% widthratio row.present row.total 100 %}%"></div>
+                    </div>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="card">
+    <p class="muted">
+        {% if show_gaps_only %}No coverage gaps detected.{% else %}No coverage data yet — run a Ninja sync from <a href="{% url 'sources_status' %}">Sources</a>.{% endif %}
+    </p>
+</div>
+{% endif %}
+{% endblock %}

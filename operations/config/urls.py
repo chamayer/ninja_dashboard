@@ -20,6 +20,7 @@ from apps.core.views import (
     finding_acknowledge,
     findings_admin_health,
     findings_queue,
+    fleet_coverage,
     healthz,
     home,
     merge_candidates_queue,
@@ -29,6 +30,7 @@ from apps.core.views import (
     org_software,
     org_software_decide,
     org_software_devices,
+    sources_status,
 )
 
 urlpatterns = [
@@ -48,6 +50,8 @@ urlpatterns = [
     path("findings/<uuid:finding_id>/ack/", finding_acknowledge, name="finding_acknowledge"),
     path("admin/findings/health/", findings_admin_health, name="findings_admin_health"),
     path("admin/findings/<uuid:finding_id>/ack/", admin_finding_acknowledge, name="admin_finding_acknowledge"),
+    path("coverage/", fleet_coverage, name="fleet_coverage"),
+    path("sources/", sources_status, name="sources_status"),
     path("merge-candidates/", merge_candidates_queue, name="merge_candidates_queue"),
     path("switch/", client_switch, name="client_switch"),
     path("admin/", admin.site.urls),
