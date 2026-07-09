@@ -74,3 +74,19 @@ GRANT CREATE ON DATABASE ninja TO operations_migrate;
 -- CREATE SCHEMA IF NOT EXISTS is a no-op with correct ownership.
 -- ---------------------------------------------------------------------------
 CREATE SCHEMA IF NOT EXISTS operations AUTHORIZATION operations_migrate;
+
+-- ---------------------------------------------------------------------------
+-- Grant operations_app read access to ninja_core (populated by ingest).
+-- Safe to run before ninja_core exists — the GRANT on the schema is a no-op
+-- if the schema doesn't exist yet; re-run after first ingest to pick up tables.
+-- ALTER DEFAULT PRIVILEGES covers tables added in future migrations.
+-- ---------------------------------------------------------------------------
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.schemata WHERE schema_name = 'ninja_core') THEN
+        EXECUTE 'GRANT USAGE ON SCHEMA ninja_core TO operations_app';
+        EXECUTE 'GRANT SELECT ON ALL TABLES IN SCHEMA ninja_core TO operations_app';
+    END IF;
+END $$;
+ALTER DEFAULT PRIVILEGES FOR ROLE ninja IN SCHEMA ninja_core
+    GRANT SELECT ON TABLES TO operations_app;

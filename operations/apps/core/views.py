@@ -889,109 +889,118 @@ def org_software_decide(request: HttpRequest, org_slug: str) -> HttpResponse:
                     f"/orgs/{org_slug}/software/")
 
 
-# ── Fleet-wide coverage page ─────────────────────────────────────────────────
+# ── Compliance / fleet coverage page ─────────────────────────────────────────
 
-_COVERAGE_SCOPE_SQL = """
-    CASE
-        WHEN nd.node_class LIKE '%%SERVER%%'      THEN 'server'
-        WHEN nd.node_class LIKE '%%WORKSTATION%%' THEN 'workstation'
-        WHEN nd.os_name    ILIKE '%%server%%'     THEN 'server'
-        ELSE 'workstation'
-    END
-"""
-
-_SEV_ORDER = "CASE r.severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END"
+_SEV_RANK = "CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END"
 
 
 @login_required
 def fleet_coverage(request: HttpRequest) -> HttpResponse:
-    """Fleet-wide agent coverage gap view. Single query via materialized view."""
-    show_gaps_only = request.GET.get("gaps", "1") != "0"
+    """Compliance page: active missing-agent findings per client × platform."""
+    client_filter = request.GET.get("client", "")
+    platform_filter = request.GET.get("platform", "")
+    conf_filter = request.GET.get("confidence", "")
 
     with transaction.atomic():
         with connection.cursor() as cur:
             cur.execute("SET LOCAL operations.tenant_id = 1")
-            cur.execute(f"""
-                WITH
-                device_scopes AS (
-                    SELECT od.id AS device_id, od.client_id,
-                           {_COVERAGE_SCOPE_SQL} AS scope
-                    FROM operations.devices od
-                    JOIN operations.device_links dl
-                         ON dl.device_id = od.id AND dl.missing_since IS NULL
-                    JOIN operations.sources s
-                         ON s.id = dl.source_id AND s.name = 'Ninja'
-                    JOIN ninja_core.devices nd
-                         ON nd.id = dl.external_id::bigint AND nd.is_current
-                    WHERE od.tenant_id = 1 AND od.deleted_at IS NULL
-                ),
-                scope_totals AS (
-                    SELECT client_id, scope, COUNT(DISTINCT device_id)::int AS total
-                    FROM device_scopes GROUP BY client_id, scope
-                    UNION ALL
-                    SELECT client_id, 'all', COUNT(DISTINCT device_id)::int
-                    FROM device_scopes GROUP BY client_id
-                ),
-                presence AS (
-                    SELECT ap.client_id, ap.platform, ds.scope,
-                           COUNT(DISTINCT ap.device_id)::int AS present
-                    FROM operations.agent_presence_current ap
-                    JOIN device_scopes ds ON ds.device_id = ap.device_id
-                    WHERE ap.tenant_id = 1
-                      AND ap.last_observed_at > NOW() - INTERVAL '7 days'
-                    GROUP BY ap.client_id, ap.platform, ds.scope
-                    UNION ALL
-                    SELECT ap.client_id, ap.platform, 'all',
-                           COUNT(DISTINCT ap.device_id)::int
-                    FROM operations.agent_presence_current ap
-                    JOIN device_scopes ds ON ds.device_id = ap.device_id
-                    WHERE ap.tenant_id = 1
-                      AND ap.last_observed_at > NOW() - INTERVAL '7 days'
-                    GROUP BY ap.client_id, ap.platform
-                ),
-                reqs AS (
-                    SELECT DISTINCT ON (platform, entity_type, device_scope)
-                        platform, entity_type, device_scope, severity
-                    FROM operations.coverage_requirements
-                    WHERE tenant_id = 1 AND enabled = TRUE
-                    ORDER BY platform, entity_type, device_scope,
-                             (client_id IS NULL)
-                )
+
+            # Active missing-required-platform findings grouped by client + platform
+            cur.execute("""
                 SELECT
-                    c.display_name, c.slug,
-                    r.platform, r.device_scope, r.severity,
-                    COALESCE(st.total,   0) AS total,
-                    COALESCE(p.present,  0) AS present,
-                    GREATEST(0, COALESCE(st.total, 0) - COALESCE(p.present, 0)) AS gap
-                FROM operations.clients c
-                CROSS JOIN reqs r
-                LEFT JOIN scope_totals st ON st.client_id = c.id AND st.scope = r.device_scope
-                LEFT JOIN presence p
-                    ON p.client_id = c.id AND p.platform = r.platform
-                   AND p.scope = r.device_scope
-                WHERE c.tenant_id = 1 AND c.deleted_at IS NULL
-                  AND COALESCE(st.total, 0) > 0
-                ORDER BY gap DESC, {_SEV_ORDER}, c.display_name, r.platform
-            """)
+                    c.display_name,
+                    c.slug,
+                    f.finding_details->>'platform'    AS platform,
+                    f.severity,
+                    COUNT(*)::int                     AS total,
+                    COUNT(*) FILTER (WHERE f.confidence = 'confirmed')::int  AS confirmed,
+                    COUNT(*) FILTER (WHERE f.confidence = 'probable')::int   AS probable,
+                    MIN(f.first_seen_at)              AS oldest_at
+                FROM operations.findings f
+                JOIN operations.clients c ON c.id = f.client_id
+                JOIN operations.finding_types ft ON ft.id = f.finding_type_id
+                WHERE f.tenant_id = 1
+                  AND ft.name = 'missing_required_platform'
+                  AND f.status IN ('open', 'acknowledged', 'investigating')
+                  AND (%(client)s = '' OR c.slug = %(client)s)
+                  AND (%(platform)s = '' OR f.finding_details->>'platform' = %(platform)s)
+                  AND (%(confidence)s = '' OR f.confidence = %(confidence)s)
+                GROUP BY c.display_name, c.slug, f.finding_details->>'platform', f.severity
+                ORDER BY
+                    CASE f.severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
+                    COUNT(*) DESC,
+                    c.display_name,
+                    f.finding_details->>'platform'
+            """, {"client": client_filter, "platform": platform_filter, "confidence": conf_filter})
             rows = cur.fetchall()
 
-    coverage_rows = [
+            # Devices missing from Ninja per client (secondary signal)
+            cur.execute("""
+                SELECT c.display_name, c.slug, COUNT(*)::int
+                FROM operations.findings f
+                JOIN operations.clients c ON c.id = f.client_id
+                JOIN operations.finding_types ft ON ft.id = f.finding_type_id
+                WHERE f.tenant_id = 1
+                  AND ft.name = 'device_missing_from_source'
+                  AND f.status IN ('open', 'acknowledged', 'investigating')
+                GROUP BY c.display_name, c.slug
+                ORDER BY COUNT(*) DESC, c.display_name
+            """)
+            missing_rows = cur.fetchall()
+
+            # Available platforms for filter dropdown
+            cur.execute("""
+                SELECT DISTINCT f.finding_details->>'platform'
+                FROM operations.findings f
+                JOIN operations.finding_types ft ON ft.id = f.finding_type_id
+                WHERE f.tenant_id = 1 AND ft.name = 'missing_required_platform'
+                  AND f.status IN ('open', 'acknowledged', 'investigating')
+                  AND (f.finding_details->>'platform') IS NOT NULL
+                ORDER BY 1
+            """)
+            platforms = [r[0] for r in cur.fetchall()]
+
+            # Client list for filter dropdown
+            cur.execute("""
+                SELECT DISTINCT c.display_name, c.slug
+                FROM operations.findings f
+                JOIN operations.clients c ON c.id = f.client_id
+                JOIN operations.finding_types ft ON ft.id = f.finding_type_id
+                WHERE f.tenant_id = 1 AND ft.name = 'missing_required_platform'
+                  AND f.status IN ('open', 'acknowledged', 'investigating')
+                ORDER BY c.display_name
+            """)
+            filter_clients = [{"name": r[0], "slug": r[1]} for r in cur.fetchall()]
+
+    gap_rows = [
         {
             "client_name": r[0], "client_slug": r[1],
-            "platform": r[2], "scope": r[3], "severity": r[4],
-            "total": r[5], "present": r[6], "gap": r[7],
+            "platform": r[2], "severity": r[3],
+            "total": r[4], "confirmed": r[5], "probable": r[6],
+            "oldest_at": r[7],
         }
         for r in rows
     ]
-    displayed = [r for r in coverage_rows if r["gap"] > 0] if show_gaps_only else coverage_rows
-    critical_gaps = sum(1 for r in coverage_rows if r["gap"] > 0 and r["severity"] == "critical")
-    total_gaps = sum(1 for r in coverage_rows if r["gap"] > 0)
+    missing_devices = [
+        {"client_name": r[0], "client_slug": r[1], "count": r[2]}
+        for r in missing_rows
+    ]
+
+    clients_affected = len({r["client_slug"] for r in gap_rows})
+    total_gaps = sum(r["total"] for r in gap_rows)
+    critical_count = sum(r["total"] for r in gap_rows if r["severity"] == "critical")
 
     return render(request, "coverage.html", {
-        "coverage_rows": displayed,
-        "show_gaps_only": show_gaps_only,
-        "critical_gaps": critical_gaps,
+        "gap_rows": gap_rows,
+        "missing_devices": missing_devices,
+        "clients_affected": clients_affected,
         "total_gaps": total_gaps,
+        "critical_count": critical_count,
+        "platforms": platforms,
+        "filter_clients": filter_clients,
+        "client_filter": client_filter,
+        "platform_filter": platform_filter,
+        "conf_filter": conf_filter,
     })
 
 

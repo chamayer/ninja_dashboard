@@ -1,102 +1,191 @@
 {% extends "base.html" %}
 
-{% block title %}Coverage{% endblock %}
+{% block title %}Compliance{% endblock %}
 
 {% block content %}
 <style>
-    .cov-bar-wrap { height: 6px; background: #e8edf2; border-radius: 3px; overflow: hidden; width: 80px; }
-    .cov-bar-fill { height: 100%; border-radius: 3px; }
-    .cov-bar-ok   { background: #27ae60; }
-    .cov-bar-crit { background: #c0392b; }
-    .cov-bar-high { background: #e67e22; }
-    .cov-bar-med  { background: #f1c40f; }
-    .gap-crit { color: #c0392b; font-weight: 600; }
-    .gap-high { color: #e67e22; font-weight: 600; }
-    .gap-ok   { color: #27ae60; }
+    .cov-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 1rem; margin-bottom: 1.25rem; }
+    .cov-tile { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1.1rem 1.5rem; }
+    .cov-tile.alert { border-color: #fca5a5; background: #fff5f5; }
+    .cov-tile .tl { font-size: 0.75rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.3rem; }
+    .cov-tile .tv { font-size: 2rem; font-weight: 700; line-height: 1; color: #1a1a2e; }
+    .cov-tile.alert .tv { color: #dc2626; }
+    .cov-tile .ts { font-size: 0.78rem; color: var(--muted); margin-top: 0.2rem; }
+
     .filter-bar { display: flex; gap: 0.5rem; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; }
-    .filter-btn { padding: 0.35rem 0.9rem; border-radius: 4px; border: 1px solid var(--border);
-                  font-size: 0.82rem; cursor: pointer; background: var(--surface); text-decoration: none;
-                  color: inherit; }
-    .filter-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .filter-bar select { padding: 0.3rem 0.6rem; border: 1px solid var(--border); border-radius: 4px;
+                         font-size: 0.82rem; background: var(--surface); }
+    .filter-bar button { padding: 0.3rem 0.8rem; border-radius: 4px; border: 1px solid var(--border);
+                         font-size: 0.82rem; cursor: pointer; background: var(--surface); }
+    .filter-bar a.clear { font-size: 0.78rem; color: var(--muted); text-decoration: none; }
+    .filter-bar a.clear:hover { color: var(--accent); }
+
+    .conf-bar { display: flex; gap: 0.3rem; font-size: 0.78rem; }
+    .conf-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; }
+    .conf-confirmed { background: #dc2626; }
+    .conf-probable  { background: #f59e0b; }
 </style>
 
 <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:1rem;">
     <div>
-        <h1 style="margin:0;">Agent Coverage</h1>
-        <p class="muted" style="margin:0.25rem 0 0;">Fleet-wide coverage gaps across all clients</p>
+        <h1 style="margin:0;">Compliance</h1>
+        <p class="muted" style="margin:0.25rem 0 0;">Devices missing required agents — active findings</p>
     </div>
-    {% if critical_gaps %}
-    <span class="badge badge-critical">{{ critical_gaps }} critical gap{{ critical_gaps|pluralize }}</span>
+    {% if critical_count %}
+    <span class="badge badge-critical">{{ critical_count }} critical gap{{ critical_count|pluralize }}</span>
     {% elif total_gaps %}
     <span class="badge badge-high">{{ total_gaps }} gap{{ total_gaps|pluralize }}</span>
     {% else %}
-    <span class="badge badge-low">All covered</span>
+    <span class="badge badge-low">All compliant</span>
     {% endif %}
 </div>
 
-<div class="filter-bar">
-    <span style="font-size:0.82rem; color:var(--muted);">Show:</span>
-    <a class="filter-btn {% if show_gaps_only %}active{% endif %}" href="?gaps=1">Gaps only</a>
-    <a class="filter-btn {% if not show_gaps_only %}active{% endif %}" href="?gaps=0">All</a>
+<div class="cov-tiles">
+    <div class="cov-tile {% if critical_count %}alert{% endif %}">
+        <div class="tl">Critical gaps</div>
+        <div class="tv">{{ critical_count|default:"0" }}</div>
+        <div class="ts">Missing required agents</div>
+    </div>
+    <div class="cov-tile">
+        <div class="tl">Total gaps</div>
+        <div class="tv">{{ total_gaps|default:"0" }}</div>
+        <div class="ts">Across all platforms</div>
+    </div>
+    <div class="cov-tile">
+        <div class="tl">Clients affected</div>
+        <div class="tv">{{ clients_affected|default:"0" }}</div>
+        <div class="ts">With open findings</div>
+    </div>
+    {% if missing_devices %}
+    <div class="cov-tile">
+        <div class="tl">Missing from Ninja</div>
+        <div class="tv">{{ missing_devices|length }}</div>
+        <div class="ts">Client{{ missing_devices|length|pluralize }} with vanished devices</div>
+    </div>
+    {% endif %}
 </div>
 
-{% if coverage_rows %}
+{% if gap_rows or platform_filter or client_filter or conf_filter %}
 <div class="card" style="padding:0;">
+    <div style="padding:1rem 1rem 0.75rem; border-bottom:1px solid var(--border);">
+        <form method="get" class="filter-bar">
+            <select name="client">
+                <option value="">All clients</option>
+                {% for fc in filter_clients %}
+                <option value="{{ fc.slug }}"{% if fc.slug == client_filter %} selected{% endif %}>{{ fc.name }}</option>
+                {% endfor %}
+            </select>
+            <select name="platform">
+                <option value="">All platforms</option>
+                {% for p in platforms %}
+                <option value="{{ p }}"{% if p == platform_filter %} selected{% endif %}>{{ p }}</option>
+                {% endfor %}
+            </select>
+            <select name="confidence">
+                <option value="">Any confidence</option>
+                <option value="confirmed"{% if conf_filter == "confirmed" %} selected{% endif %}>Confirmed</option>
+                <option value="probable"{% if conf_filter == "probable" %} selected{% endif %}>Probable</option>
+                <option value="possible"{% if conf_filter == "possible" %} selected{% endif %}>Possible</option>
+            </select>
+            <button type="submit">Filter</button>
+            {% if client_filter or platform_filter or conf_filter %}
+            <a class="clear" href="{% url 'fleet_coverage' %}">✕ Clear</a>
+            {% endif %}
+        </form>
+    </div>
+
+    {% if gap_rows %}
     <table data-sortable style="width:100%; border-collapse:collapse;">
         <thead>
             <tr style="text-align:left; border-bottom:1px solid var(--border);">
-                <th style="padding:0.6rem 1rem;">Client</th>
-                <th style="padding:0.6rem 0.75rem;">Platform</th>
-                <th style="padding:0.6rem 0.75rem;">Scope</th>
-                <th style="padding:0.6rem 0.75rem;">Severity</th>
-                <th style="padding:0.6rem 0.75rem; text-align:right;">Present / Total</th>
-                <th style="padding:0.6rem 1rem; text-align:right;">Gap</th>
-                <th style="padding:0.6rem 1rem;">Coverage</th>
+                <th style="padding:0.55rem 1rem;">Client</th>
+                <th style="padding:0.55rem 0.75rem;">Platform</th>
+                <th style="padding:0.55rem 0.75rem;">Severity</th>
+                <th style="padding:0.55rem 0.75rem; text-align:right;">Devices</th>
+                <th style="padding:0.55rem 0.75rem;">Confidence</th>
+                <th style="padding:0.55rem 0.75rem; color:var(--muted);">Oldest</th>
+                <th style="padding:0.55rem 1rem;"></th>
             </tr>
         </thead>
         <tbody>
-            {% for row in coverage_rows %}
+            {% for row in gap_rows %}
             <tr style="border-bottom:1px solid var(--border);">
-                <td style="padding:0.5rem 1rem;">
+                <td style="padding:0.5rem 1rem; font-weight:500;">
                     <a href="{% url 'org_index' org_slug=row.client_slug %}">{{ row.client_name }}</a>
                 </td>
                 <td style="padding:0.5rem 0.75rem;">{{ row.platform }}</td>
-                <td style="padding:0.5rem 0.75rem; color:var(--muted); font-size:0.85rem; text-transform:capitalize;">
-                    {{ row.scope }}
-                </td>
                 <td style="padding:0.5rem 0.75rem;">
                     <span class="badge badge-{{ row.severity }}">{{ row.severity }}</span>
                 </td>
-                <td style="padding:0.5rem 0.75rem; text-align:right; font-variant-numeric:tabular-nums;">
-                    {{ row.present }} / {{ row.total }}
+                <td style="padding:0.5rem 0.75rem; text-align:right; font-weight:600; font-size:1rem;">
+                    {{ row.total }}
                 </td>
-                <td style="padding:0.5rem 1rem; text-align:right;">
-                    {% if row.gap == 0 %}
-                    <span class="gap-ok">✓</span>
-                    {% elif row.severity == "critical" %}
-                    <span class="gap-crit">-{{ row.gap }}</span>
-                    {% else %}
-                    <span class="gap-high">-{{ row.gap }}</span>
-                    {% endif %}
+                <td style="padding:0.5rem 0.75rem;">
+                    <div class="conf-bar">
+                        {% if row.confirmed %}
+                        <span class="conf-dot conf-confirmed"></span>
+                        <span>{{ row.confirmed }} confirmed</span>
+                        {% endif %}
+                        {% if row.probable %}
+                        <span class="conf-dot conf-probable" style="margin-left:0.4rem;"></span>
+                        <span>{{ row.probable }} probable</span>
+                        {% endif %}
+                    </div>
+                </td>
+                <td style="padding:0.5rem 0.75rem; color:var(--muted); font-size:0.8rem;">
+                    {{ row.oldest_at|date:"Y-m-d" }}
                 </td>
                 <td style="padding:0.5rem 1rem;">
-                    {% if row.total > 0 %}
-                    <div class="cov-bar-wrap">
-                        <div class="cov-bar-fill {% if row.gap == 0 %}cov-bar-ok{% elif row.severity == 'critical' %}cov-bar-crit{% elif row.severity == 'high' %}cov-bar-high{% else %}cov-bar-med{% endif %}"
-                             style="width:{% widthratio row.present row.total 100 %}%"></div>
-                    </div>
-                    {% endif %}
+                    <a href="{% url 'findings_queue' %}?client={{ row.client_slug }}&type=missing_required_platform"
+                       style="font-size:0.78rem; white-space:nowrap;">View →</a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="muted" style="padding:1.25rem 1rem;">No compliance gaps match the selected filters.</p>
+    {% endif %}
+</div>
+{% else %}
+<div class="card">
+    <p class="muted">
+        No active compliance gaps detected.
+        {% if not gap_rows %}Run an agent compliance ingest from <a href="{% url 'sources_status' %}">Sources</a> to populate findings.{% endif %}
+    </p>
+</div>
+{% endif %}
+
+{% if missing_devices %}
+<div class="card">
+    <h2 style="margin-top:0;">Devices Missing from Ninja</h2>
+    <p class="muted" style="font-size:0.85rem; margin-top:-0.5rem;">
+        Devices that were previously tracked in Ninja but have disappeared — may indicate decommission or agent removal.
+    </p>
+    <table data-sortable style="width:100%; border-collapse:collapse;">
+        <thead>
+            <tr style="text-align:left; border-bottom:1px solid var(--border);">
+                <th style="padding:0.5rem 0.75rem;">Client</th>
+                <th style="padding:0.5rem 0.75rem; text-align:right;">Devices</th>
+                <th style="padding:0.5rem 0.75rem;"></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for r in missing_devices %}
+            <tr style="border-bottom:1px solid var(--border);">
+                <td style="padding:0.45rem 0.75rem;">
+                    <a href="{% url 'org_index' org_slug=r.client_slug %}">{{ r.client_name }}</a>
+                </td>
+                <td style="padding:0.45rem 0.75rem; text-align:right; font-weight:600;">{{ r.count }}</td>
+                <td style="padding:0.45rem 0.75rem;">
+                    <a href="{% url 'findings_queue' %}?client={{ r.client_slug }}&type=device_missing_from_source"
+                       style="font-size:0.78rem;">View →</a>
                 </td>
             </tr>
             {% endfor %}
         </tbody>
     </table>
 </div>
-{% else %}
-<div class="card">
-    <p class="muted">
-        {% if show_gaps_only %}No coverage gaps detected.{% else %}No coverage data yet — run a Ninja sync from <a href="{% url 'sources_status' %}">Sources</a>.{% endif %}
-    </p>
-</div>
 {% endif %}
+
 {% endblock %}

@@ -87,21 +87,33 @@
         .primary-nav { background: #16213e; border-top: 1px solid #2a2a4e; }
         .primary-nav-inner {
             max-width: 1200px; margin: 0 auto; padding: 0 1.5rem;
-            display: flex; gap: 0; overflow-x: auto;
+            display: flex; align-items: stretch; gap: 0; overflow-x: auto;
         }
         .nav-link {
-            padding: 0.5rem 0.9rem; font-size: 0.82rem; color: #9ca3af;
+            padding: 0.55rem 0.9rem; font-size: 0.82rem; color: #9ca3af;
             text-decoration: none; white-space: nowrap; display: flex;
             align-items: center; gap: 0.3rem;
             border-bottom: 2px solid transparent;
+            transition: color 0.1s;
         }
-        .nav-link:hover { color: #e5e7eb; background: rgba(255,255,255,0.04); }
+        .nav-link:hover { color: #e5e7eb; border-bottom-color: #4d80c4; }
+        .nav-link.active { color: #f1f5f9; border-bottom-color: var(--accent); }
+        .nav-link.nav-admin { color: #6b7280; font-size: 0.78rem; }
+        .nav-link.nav-admin:hover { color: #9ca3af; }
+        .nav-link.nav-sub { color: #7dd3fc; font-size: 0.8rem; }
+        .nav-link.nav-sub:hover { color: #bae6fd; }
+        .nav-link.nav-sub.active { color: #fff; border-bottom-color: #7dd3fc; }
+        .nav-client-crumb {
+            display: flex; align-items: center; padding: 0 0.5rem;
+            font-size: 0.75rem; color: #4b5563; white-space: nowrap;
+        }
         .nav-badge {
             background: #dc2626; color: #fff; font-size: 0.65rem; font-weight: 700;
             padding: 1px 5px; border-radius: 10px; line-height: 1.4;
         }
         .nav-badge-muted { background: #4b5563; }
-        .nav-sep { border-left: 1px solid #2a2a4e; margin: 0.4rem 0.25rem; }
+        .nav-sep { border-left: 1px solid #2a2a4e; margin: 0.3rem 0.35rem; align-self: stretch; }
+        .nav-fill { flex: 1; }
     </style>
     <script>
     (function() {
@@ -151,10 +163,7 @@
             </form>
         </div>
         <div class="user-info">
-            <a href="{% url 'findings_queue' %}">findings</a> ·
-            <a href="{% url 'merge_candidates_queue' %}">merges</a> ·
             {{ user.username }} ·
-            <a href="{% url 'admin:index' %}">admin</a> ·
             <a href="{% url 'admin:logout' %}">logout</a>
         </div>
         {% else %}
@@ -165,23 +174,41 @@
     {% if user.is_authenticated %}
     <nav class="primary-nav">
         <div class="primary-nav-inner">
-            <a class="nav-link" href="{% url 'home' %}">Home</a>
-            <a class="nav-link" href="{% url 'org_index' org_slug='all' %}">Clients</a>
+            {# ── Operational domains ─────────────────────────────── #}
+            <a class="nav-link {% if request.resolver_match.url_name == 'home' %}active{% endif %}"
+               href="{% url 'home' %}">Dashboard</a>
+
+            <a class="nav-link {% if request.resolver_match and 'org' in request.resolver_match.url_name %}active{% endif %}"
+               href="{% url 'org_index' org_slug='all' %}">Inventory</a>
+
+            <a class="nav-link {% if request.resolver_match and 'finding' in request.resolver_match.url_name %}active{% endif %}"
+               href="{% url 'findings_queue' %}">Security{% if nav_findings_count %} <span class="nav-badge">{{ nav_findings_count }}</span>{% endif %}</a>
+
+            <a class="nav-link {% if request.resolver_match.url_name == 'fleet_coverage' %}active{% endif %}"
+               href="{% url 'fleet_coverage' %}">Compliance</a>
+
+            {# ── Client context sub-nav ───────────────────────────── #}
             {% if current_client %}
-            <a class="nav-link" href="{% url 'org_devices' org_slug=current_client.slug %}">Devices</a>
-            <a class="nav-link" href="{% url 'org_software' org_slug=current_client.slug %}">Software</a>
-            {% endif %}
             <div class="nav-sep"></div>
-            <a class="nav-link" href="{% url 'findings_queue' %}">
-                Findings{% if nav_findings_count %} <span class="nav-badge">{{ nav_findings_count }}</span>{% endif %}
-            </a>
-            <a class="nav-link" href="{% url 'fleet_coverage' %}">Coverage</a>
-            <a class="nav-link" href="{% url 'sources_status' %}">Sources</a>
-            <a class="nav-link" href="{% url 'findings_admin_health' %}">Health</a>
-            {% if nav_pending_merges %}
-            <div class="nav-sep"></div>
-            <a class="nav-link" href="{% url 'merge_candidates_queue' %}">Merges <span class="nav-badge nav-badge-muted">{{ nav_pending_merges }}</span></a>
+            <span class="nav-client-crumb">{{ current_client.display_name }} ›</span>
+            <a class="nav-link nav-sub {% if request.resolver_match and 'device' in request.resolver_match.url_name %}active{% endif %}"
+               href="{% url 'org_devices' org_slug=current_client.slug %}">Devices</a>
+            <a class="nav-link nav-sub {% if request.resolver_match and 'software' in request.resolver_match.url_name %}active{% endif %}"
+               href="{% url 'org_software' org_slug=current_client.slug %}">Software</a>
+            <a class="nav-link nav-sub {% if request.resolver_match and 'polic' in request.resolver_match.url_name %}active{% endif %}"
+               href="{% url 'org_policies' org_slug=current_client.slug %}">Policies</a>
             {% endif %}
+
+            {# ── Admin (right-aligned) ────────────────────────────── #}
+            <div class="nav-fill"></div>
+            <div class="nav-sep"></div>
+            <a class="nav-link nav-admin {% if request.resolver_match.url_name == 'sources_status' %}active{% endif %}"
+               href="{% url 'sources_status' %}">Sources</a>
+            <a class="nav-link nav-admin {% if request.resolver_match.url_name == 'findings_admin_health' %}active{% endif %}"
+               href="{% url 'findings_admin_health' %}">Health</a>
+            <a class="nav-link nav-admin {% if request.resolver_match.url_name == 'merge_candidates_queue' %}active{% endif %}"
+               href="{% url 'merge_candidates_queue' %}">Merges{% if nav_pending_merges %} <span class="nav-badge nav-badge-muted">{{ nav_pending_merges }}</span>{% endif %}</a>
+            <a class="nav-link nav-admin" href="{% url 'admin:index' %}">⚙</a>
         </div>
     </nav>
     {% endif %}
