@@ -19,6 +19,173 @@ VirusTotal/MalwareTips reputation, user-risk scoring, DB role rename.
 
 ---
 
+## Track E — Entity model correction (PRIORITY — before P2)
+
+Added 2026-07-10 after live data showed inflated inventory and broken
+coverage. Three user-set principles govern this track:
+
+1. **Ninja is an aggregation agent, not one source.** Its records are
+   distinct observation streams distinguished by `node_class`: an RMM
+   agent install, a hypervisor's guest inventory claim, a network
+   device seen by NMS. A `vm.guest` record proves the VM exists — NOT
+   that an agent is on it.
+2. **Same-name records are LINKED entities, not duplicates.** One
+   canonical device = (client, normalized hostname); every source
+   record (including multiple from the same source, e.g. agent record
+   + Hyper-V guest record) is its own `device_links` row with its
+   observations intact. Nothing merged away, nothing deleted.
+3. **Everything visible.** Anything that shows up in any source is
+   inventory. Gaps are questions surfaced as findings (why no agent /
+   offline / needs cleanup) — never hidden rows.
+4. **No unnecessary forced waits.** Promotion on first observation,
+   evaluation triggered by ingest completion, identity resolution
+   inline with the write path. Scheduled sweeps are backstops, never
+   the primary path. No maturation windows or artificial spans.
+
+### E.1 node_class → entity_type mapping (data audit first)
+
+Run `SELECT node_class, COUNT(*) FROM ninja_core.devices GROUP BY 1`
+and pin the mapping. Expected:
+
+| node_class pattern | entity_type | semantics |
+|---|---|---|
+| WINDOWS_*, MAC*, LINUX_* (agented) | `agent.rmm` | Ninja agent installed |
+| *_VMM_GUEST / *_VM_GUEST | `vm.guest` | hypervisor says VM exists |
+| *_VMM_HOST / *_HOST | `vm.host` | hypervisor host |
+| NMS_* | `network.device` | seen by network monitoring |
+| anything unmapped | `unknown` + admin finding | never silently dropped |
+
+### E.2 Ninja observation writer
+
+Extend the Ninja ingest (`ingest/core/devices.py`
+`_sync_operations_device_links`) to emit `entity_observations` for
+EVERY ninja_core.devices row, classified per E.1 — today it only
+writes `agent.rmm` for already-linked devices. `canonical_data`
+carries hostname, serial, vm uuid, node_class, last_contact (platform
+truth), is_online. Dual-write alongside bootstrap until E.4.
+
+### E.3 Uniform identity layer (resolver/fast_path)
+
+- Match precedence: serial (quality-checked) > vm_uuid > strict
+  normalized hostname, always within client scope first.
+- **Explainable identity:** migration adds `device_links.match_method`
+  (serial / vm_uuid / hostname_strict / hostname_loose / manual /
+  promoted / bootstrap) + `match_confidence`. Every link auditable and
+  operator-reversible.
+- **Lifecycle state machine:** `devices.lifecycle_status`
+  (active / offline_aging / pending_cleanup / retired), transitions
+  driven by platform last-contact + operator decisions. Retired stays
+  fully queryable with history — visible, just out of coverage
+  denominators. "Everything visible" without "everything noisy".
+- Same-client, same-hostname existing device → attach as an
+  ADDITIONAL device_link (multi-links per source are legal; unique key
+  is (tenant, source, external_id)). Canonical fields: the freshest
+  record by platform last-contact wins, `agent.rmm` records preferred
+  over `vm.guest` for device_type/os fields. Conflicting serials among
+  linked records → finding, not a blocker.
+- Cross-client same-hostname → identity_candidate (review), as today.
+- **Promotion = always and immediate** for any unmatched cluster from
+  ANY stream (everything visible). Promoted entity carries its
+  entity_type context so the evaluator can ask the right question:
+  `vm.guest`-only → missing agent.rmm; `agent.remote_access`-only →
+  probably retired hardware, cleanup finding.
+
+### E.4 Retire the Ninja bootstrap privilege
+
+`bootstrap_devices_from_ninja` (entrypoint.sh) stops creating devices;
+Ninja device creation flows through E.2 + E.3 like every other source.
+Keep a link-integrity sync only if the observation path proves
+insufficient. Remove entrypoint call last, after one clean cycle.
+
+### E.5 Clean rebuild (user-approved 2026-07-10 — replaces repair SQL)
+
+Derived data is nuked and re-ingested; operator-authored data is kept.
+
+- **Truncate:** devices, device_links, entity_observations,
+  findings, admin_findings, identity_candidates, notification_state,
+  notification_events; refresh `agent_presence_current` (empty).
+- **Keep:** clients, client_links, coverage_requirements,
+  notification rules/routes, suppression_rules, software decisions,
+  audit logs, users/sessions.
+- **Sequence:** correct writers deploy FIRST (E1–E2), then truncate,
+  then full re-ingest from ninja_core + source APIs, then verify from
+  zero. Accepted trade-off: observation history/first-seen resets
+  (old lineage was recorded against a broken identity model).
+
+### E.6 Coverage semantics per entity type
+
+- Coverage requirements evaluate against entity types, not "sources":
+  RMM coverage = `agent.rmm` present; a `vm.guest` observation never
+  satisfies it.
+- `device_long_offline` / staleness switch to platform last-contact
+  (`canonical_data->>'last_seen_at'`), not our fetch time.
+- Device page lists every link with its entity_type + per-record
+  last-contact; client cards count by entity_type (matview already
+  keyed on it).
+
+### E.7 device_type refactor — form factor only
+
+`Device.DeviceType` currently encodes agent presence (`vm-with-agent` /
+`vm-agentless`) — an observation-derived, time-varying fact baked into a
+canonical attribute, and bootstrap's `_classify` guesses it ("treat as
+agented VM"). Repair: device_type becomes pure form factor
+(physical / vm / hypervisor-host / network-device / unknown); agent
+presence comes ONLY from `agent_presence_current`. Migration remaps
+existing values; grep-audit every `device_type` consumer (evaluator,
+views, templates).
+
+### E.8 No hidden exclusions
+
+`_evaluate_coverage` excludes `_NON_AGENT_DEVICE_TYPES` from evaluation
+entirely — devices silently outside the universe. Repair: drop the
+blanket exclusion; applicability is expressed per requirement
+(entity_type + device_scope), and inapplicable simply means no finding —
+the device itself is always visible and countable. Same principle for
+the resolver's `pending_hostnames` skip: entities awaiting identity
+review must still be visible (as candidates), not absent.
+
+### Contradictions audit (2026-07-10, code-verified)
+
+| # | Violation | Where | Repair |
+|---|---|---|---|
+| 1 | Privileged device creation, no observations | `bootstrap_devices_from_ninja` + entrypoint | E.4 |
+| 2 | Only already-linked Ninja rows produce observations; unlinked rows invisible | `ingest/core/devices.py:310-313` (`if not entry: continue`) | E.2 |
+| 3 | Every Ninja row labeled `agent.rmm` — guest/NMS records become false agent presence | `ingest/core/devices.py:346` | E.1+E.2 |
+| 4 | device_type encodes agent presence + guessed | `models.py:213-219`, bootstrap `_classify` | E.7 |
+| 5 | Coverage universe silently excludes device types | `evaluator.py:324` `_NON_AGENT_DEVICE_TYPES` | E.8 |
+| 6 | `last_seen_at`/`last_observed_at` = our fetch time, not platform truth; `device_long_offline` fires on wrong clock | device_links writes, matview, `evaluator.py:471-478` | E.6 |
+| 7 | Hostname ambiguity → bail instead of link | `resolver.py` COUNT>=2 skip | E.3 |
+| 8 | Identity-pending entities hidden from promotion | `resolver.py` pending_hostnames skip | E.8 |
+
+Accepted exception: `bootstrap_clients_from_ninja` — canonical clients
+seed from Ninja orgs (a business-authority decision, not observation
+flattening); other sources map via client_links. Revisit only if a
+non-Ninja client authority emerges.
+
+### Future direction (backlog, design must not preclude)
+
+- **Entities beyond devices:** users (AD/M365/Google), software titles,
+  network segments — same pattern: streams → correlation → canonical
+  entity → coverage questions. Identity layer written so device logic
+  is a strategy, not the skeleton.
+- **Relationships as edges:** vm.guest names its host → guest-runs-on-host;
+  device→assigned-user; device→network. Inventory becomes a map.
+
+**Verify:** ops alive device count = distinct observed hosts (explainable
+vs Ninja console: extras are exactly the source-only hosts, each carrying
+a finding); UTA servers ≈ 151 Ninja-agented + visible guest/other hosts;
+zero devices with 0 links; every unmapped node_class has an admin finding.
+
+### Batches
+
+| Batch | Content | Gate |
+|---|---|---|
+| E1 | E.1 audit + E.2 writer (dual-write) | observation counts per entity_type match ninja_core node_class counts |
+| E2 | E.3 resolver + E.5 repair | inventory counts reconcile; no same-client strict-hostname twins as separate devices |
+| E3 | E.4 bootstrap retire + E.6 semantics | one clean cycle; coverage cards match manual console checks |
+
+---
+
 ## Track 0 — Legacy severance
 
 ### 0.1 Move connectors and normalize to neutral homes

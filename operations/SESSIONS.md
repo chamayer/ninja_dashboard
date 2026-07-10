@@ -5,6 +5,58 @@ only project-level pointers.
 
 ---
 
+## 2026-07-09 — Batch P1: evaluator parity live + device promotion + client-page card audit
+
+**Why:** Track 1 (evaluator parity) per BLUEPRINT P1; then user found the
+client-page coverage numbers wrong (S1 servers showed 15/122 while
+SentinelOne really had 98 servers at UTA) and asked for a full card
+accuracy + clickthrough review.
+
+**Work completed (commits `ad31d5b`, `47f3be7`, `6346321`, `d72d0be`,
+`a6c3827`, `c8ca279`):**
+
+- Migration 0023 (device_role/exemptions/finding types) — fixed
+  psycopg3 placeholder crash by passing `params=None` to
+  `schema_editor.execute` for raw SQL containing literal `%`.
+- **Device promotion span killed** (`ingest/identity/resolver.py`):
+  unresolved observation clusters now promote to canonical devices on
+  first observation — every source row comes from an authoritative
+  platform inventory, so an unmatched hostname is a real device (legacy
+  parity). Safeguards kept: serial match, hostname match, ambiguity
+  skip → identity_candidates.
+- New operator endpoint `POST /run/resolver` on operations-ingest
+  (127.0.0.1:8090) for on-demand resolution/promotion. Resolver also
+  runs immediately after every source fetch; the 30-min job is a
+  backstop.
+- Forced promotion created **3,213 devices** fleet-wide (multi-source
+  clusters merged into single devices with per-platform device_links).
+- Client-page card audit: Software tile now shows real distinct-title
+  count; coverage universe made form-factor based (excludes
+  network-device/hypervisor-host/vm-agentless) on both sides of the
+  ratio; coverage scope rows are now clickthrough links to
+  `/orgs/<slug>/devices/?missing=<platform>&role=<role>`; org_devices
+  gained `role` and `missing` filters + Role column.
+- Evaluator hardening (three prod-verified fixes): admin_findings
+  insert supplies `version=1` (physical NOT NULL without default);
+  findings upsert uses partial-unique-index inference
+  (`ON CONFLICT (tenant_id, condition_key) WHERE condition_key > ''
+  AND status IN ('open','acknowledged')`); nullable uuid params cast
+  `%s::uuid` to avoid psycopg3 IndeterminateDatatype.
+
+**Verified in prod:** UTA S1 servers went 15/122 → **102/209**;
+unknown-role S1 devices eliminated; LMI servers 1 → 50. First full
+evaluator run: findings_affected=1601, no skipped platforms. Open
+findings: cross_client_conflict 718 (over-firing on generic hostnames —
+needs tuning), device_long_offline 630, device_missing_from_source 240,
+device_role_conflict 13.
+
+**Follow-ups:** cross_client_conflict tuning; missing_required_platform
+findings will appear as promoted devices age past gap thresholds;
+one-off gunicorn worker timeout during matview refresh (if recurring,
+make refresh CONCURRENTLY); Batch P2 = Track 2 notification dispatcher.
+
+---
+
 ## 2026-07-08 — Software inventory page (0.43.0)
 
 **Work completed:**

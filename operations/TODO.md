@@ -22,6 +22,30 @@ module-specific; root `../TODO.md` keeps cross-repo items and pointers.
 
 ## Backlog
 
+### Parity blueprint (BLUEPRINT.md — Batches P1–P7)
+
+- [x] P1 — Track 1 evaluator parity: coverage matrix, lifecycle findings,
+      device promotion (span killed — promote on first observation),
+      `/run/resolver` endpoint, client-page card accuracy + clickthrough.
+      2026-07-09: live; UTA S1 servers 15/122 → 102/209; first full run
+      findings_affected=1601.
+- [ ] P2 — Track 2 notification dispatcher (`ingest/notifications.py`) +
+      migration 0020 (rules created disabled) + review digest. Verify:
+      webhook test delivery + cooldown.
+- [ ] P3–P7 — software findings (3a), patching parity, UI parity (Track U),
+      legacy cutover + deletion of `ninja_agent_compliance`. See BLUEPRINT
+      batch table.
+- [ ] Tune `cross_client_conflict` — 718 open findings, likely over-firing
+      on generic hostnames shared across clients (e.g. `fileserver`).
+      Needs policy decision: scope conflict detection to non-generic
+      hostnames or require serial disagreement.
+- [ ] Watch for `missing_required_platform` findings appearing as promoted
+      devices age past gap thresholds (none on first run — created_at too
+      young).
+- [ ] gunicorn worker timeout (ninja-operations, one-off during matview
+      refresh): if recurring, switch `refresh_agent_presence_current()`
+      to REFRESH MATERIALIZED VIEW CONCURRENTLY (needs unique index).
+
 ### Platform implementation (BLUEPRINT.md — Batches A–E)
 
 Operator action (do before Batch A1 — no code push):
