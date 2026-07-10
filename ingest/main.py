@@ -1908,30 +1908,9 @@ def main() -> None:
         minutes=15,
         id="source_run_queue_stale_recovery",
     )
-    if settings.AGENT_COMPLIANCE_ENABLED:
-        scheduler.add_job(
-            run_agent_compliance_once,
-            "interval",
-            hours=settings.AGENT_COMPLIANCE_SCHEDULE_HOURS,
-            id="agent_compliance_cycle",
-            max_instances=1,
-        )
-        scheduler.add_job(
-            run_agent_compliance_evaluate_once,
-            "interval",
-            minutes=settings.AGENT_COMPLIANCE_EVALUATE_SCHEDULE_MINUTES,
-            id="agent_compliance_evaluate_cycle",
-            max_instances=1,
-        )
-        if settings.AGENT_COMPLIANCE_REVIEW_DIGEST_ENABLED:
-            scheduler.add_job(
-                run_review_digest_once,
-                "cron",
-                hour=settings.AGENT_COMPLIANCE_REVIEW_DIGEST_HOUR,
-                minute=0,
-                id="agent_compliance_review_digest",
-                max_instances=1,
-            )
+    # Legacy AC remains available by manual endpoint during cutover, but no
+    # longer auto-runs. Operations validation uses source_observations,
+    # identity resolver, and platform evaluator.
     scheduler.add_job(
         run_identity_resolver_once,
         "interval",
@@ -1979,21 +1958,7 @@ def main() -> None:
         "Agent observations scheduler started (every %dh)",
         settings.AGENT_COMPLIANCE_SCHEDULE_HOURS,
     )
-    if settings.AGENT_COMPLIANCE_ENABLED:
-
-        log.info(
-            "Agent compliance scheduler started (every %dh)",
-            settings.AGENT_COMPLIANCE_SCHEDULE_HOURS,
-        )
-        log.info(
-            "Agent compliance evaluate scheduler started (every %dm)",
-            settings.AGENT_COMPLIANCE_EVALUATE_SCHEDULE_MINUTES,
-        )
-        if settings.AGENT_COMPLIANCE_REVIEW_DIGEST_ENABLED:
-            log.info(
-                "Review digest scheduler started (daily at %02d:00 UTC)",
-                settings.AGENT_COMPLIANCE_REVIEW_DIGEST_HOUR,
-            )
+    log.info("Legacy agent compliance auto-scheduler disabled")
 
     if should_catch_up("patches", settings.patch_ingest_schedule_hours):
         log.info(
@@ -2007,15 +1972,7 @@ def main() -> None:
     threading.Thread(target=run_agent_observations_once, daemon=True).start()
     log.info("Agent observations: firing immediately on startup")
 
-    if (
-        settings.AGENT_COMPLIANCE_ENABLED
-        and should_catch_up("agent_compliance", settings.AGENT_COMPLIANCE_SCHEDULE_HOURS)
-    ):
-        log.info(
-            "Catch-up: last successful agent compliance run > %dh ago",
-            settings.AGENT_COMPLIANCE_SCHEDULE_HOURS,
-        )
-        threading.Thread(target=run_agent_compliance_once, daemon=True).start()
+    log.info("Legacy agent compliance catch-up disabled")
 
     # Kick off Metabase bootstrap in the background — won't block
     # startup if Metabase isn't ready or creds aren't set.

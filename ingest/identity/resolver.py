@@ -252,7 +252,7 @@ def _maybe_create_candidate(
         INSERT INTO operations.identity_candidates
             (tenant_id, observation_id, device_id_a, device_id_b, confidence, signals, status)
         VALUES (%s, %s, %s, %s, 'low', %s, 'pending')
-        ON CONFLICT (observation_id) DO NOTHING
+        ON CONFLICT (observation_id) WHERE observation_id IS NOT NULL DO NOTHING
         """,
         (
             TENANT_ID, obs_id, device_id_a, device_id_b,
