@@ -164,10 +164,10 @@ def _upsert_admin_finding(
     cur.execute(
         """
         INSERT INTO operations.admin_findings (
-            id, tenant_id, finding_type_id, condition_key, severity, status,
-            subject_ref, details, first_detected_at, last_detected_at
+            id, version, tenant_id, finding_type_id, condition_key, severity,
+            status, subject_ref, details, first_detected_at, last_detected_at
         ) VALUES (
-            gen_random_uuid(), %s, %s, %s, %s, 'open', %s::jsonb, %s::jsonb, %s, %s
+            gen_random_uuid(), 1, %s, %s, %s, %s, 'open', %s::jsonb, %s::jsonb, %s, %s
         )
         ON CONFLICT (tenant_id, condition_key)
             WHERE status IN ('open', 'acknowledged')
