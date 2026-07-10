@@ -251,12 +251,14 @@ def _maybe_create_candidate(
         """
         INSERT INTO operations.identity_candidates
             (id, version, tenant_id, observation_id, device_id_a, device_id_b,
-             confidence, signals, status, created_at, resolved_by)
-        VALUES (gen_random_uuid(), 1, %s, %s, %s, %s, 'low', %s, 'pending', NOW(), '')
+             device_a_id, device_b_id, confidence, signals, status, created_at,
+             resolved_by)
+        VALUES (gen_random_uuid(), 1, %s, %s, %s, %s, %s, %s, 'low', %s,
+                'pending', NOW(), '')
         ON CONFLICT (observation_id) WHERE observation_id IS NOT NULL DO NOTHING
         """,
         (
-            TENANT_ID, obs_id, device_id_a, device_id_b,
+            TENANT_ID, obs_id, device_id_a, device_id_b, device_id_a, device_id_b,
             Json({"hostname": norm, "candidate_count": len(rows)}),
         ),
     )
