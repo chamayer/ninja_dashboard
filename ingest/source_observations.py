@@ -219,13 +219,14 @@ def _write_observations(
             canonical_data: dict[str, Any] = {
                 "hostname":      hostname,
                 "platform":      source.platform,
+                "entity_type":   source.entity_type,
                 "last_seen_at":  (
                     row["last_seen_at"].isoformat() if row.get("last_seen_at") else None
                 ),
                 "is_online":     row.get("is_online"),
                 "serial_number": serial,
                 # None when the source gives no explicit signal — never guessed.
-                "device_type":   row.get("device_type"),
+                "device_role":   row.get("device_type"),
                 "os_name":       os_name,
                 "os_family":     os_family(os_name),
                 "domain":        row.get("domain_name"),
@@ -236,12 +237,6 @@ def _write_observations(
                 f"{entity_key}:{observed_at.isoformat()}".encode()
             ).digest()
 
-            device_id = resolve_device_fast(
-                cur, _TENANT_ID, source.platform, entity_key,
-                serial=serial,
-                hostname=normalize_hostname(hostname) or None,
-            )
-
             group_id = str(row.get("platform_group_id") or "").strip()
             group_name = (row.get("platform_group_name") or "").strip()
 
@@ -250,6 +245,13 @@ def _write_observations(
             # 2. client_links mapping on the source group.
             if client_id is None and group_id:
                 client_id = link_map.get(group_id)
+
+            device_id = resolve_device_fast(
+                cur, _TENANT_ID, source.platform, entity_key,
+                serial=serial,
+                hostname=normalize_hostname(hostname) or None,
+                client_id=client_id,
+            )
             # 3. Fall back to the resolved device's client.
             if client_id is None and device_id:
                 cur.execute(

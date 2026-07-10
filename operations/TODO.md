@@ -24,6 +24,12 @@ module-specific; root `../TODO.md` keeps cross-repo items and pointers.
 
 ### Parity blueprint (BLUEPRINT.md — Batches P1–P7)
 
+- [ ] Track E — entity model correction before P2. E1/E2 code prepared:
+      Ninja observations preserve `entity_type`; device identity is
+      client-scoped; `device_type` is form factor only; `device_links`
+      record match method/confidence. Next: commit/deploy, run migration
+      0024, then perform the approved clean rebuild/re-ingest and verify
+      source counts from zero.
 - [x] P1 — Track 1 evaluator parity: coverage matrix, lifecycle findings,
       device promotion (span killed — promote on first observation),
       `/run/resolver` endpoint, client-page card accuracy + clickthrough.

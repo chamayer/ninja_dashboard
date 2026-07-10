@@ -27,6 +27,7 @@ from ingest.normalize import normalize_hostname, os_family
 log = logging.getLogger(__name__)
 
 TENANT_ID = 1
+_MIN_IDENTITY_CANDIDATES = 2
 
 
 def drain_resolution(batch_size: int = 200) -> int:
@@ -41,10 +42,10 @@ def drain_resolution(batch_size: int = 200) -> int:
 
         cur.execute(
             """
-            SELECT observation_id, entity_key, platform, canonical_data
+            SELECT observation_id, entity_type, entity_key, platform, client_id,
+                   observed_at, canonical_data
             FROM operations.entity_observations
             WHERE tenant_id = %s AND device_id IS NULL
-              AND entity_type LIKE 'agent.%%'
             ORDER BY observed_at DESC
             LIMIT %s
             """,
@@ -52,20 +53,34 @@ def drain_resolution(batch_size: int = 200) -> int:
         )
         rows = cur.fetchall()
 
-        for obs_id, entity_key, platform, canonical_data in rows:
+        source_ids = _load_source_ids(cur)
+
+        for obs_id, _entity_type, entity_key, platform, client_id, observed_at, canonical_data in rows:
             cd = canonical_data or {}
 
             # Try serial number first (high confidence, unique hardware ID)
             serial = cd.get("serial_number")
             if serial:
-                device_id = _resolve_by_serial(cur, serial)
+                device_id = _resolve_by_serial(cur, serial, client_id)
                 if device_id is not None:
-                    cur.execute(
-                        "UPDATE operations.entity_observations SET device_id = %s WHERE observation_id = %s",
-                        (device_id, obs_id),
+                    _attach_observation(
+                        cur, source_ids, obs_id, device_id, platform, entity_key,
+                        cd, observed_at, "serial", 0.980,
                     )
                     resolved_count += 1
                     log.debug("resolver: serial match %s → device %s", entity_key, device_id)
+                    continue
+
+            vm_uuid = cd.get("vm_uuid")
+            if vm_uuid:
+                device_id = _resolve_by_vm_uuid(cur, vm_uuid, client_id)
+                if device_id is not None:
+                    _attach_observation(
+                        cur, source_ids, obs_id, device_id, platform, entity_key,
+                        cd, observed_at, "vm_uuid", 0.950,
+                    )
+                    resolved_count += 1
+                    log.debug("resolver: vm_uuid match %s → device %s", entity_key, device_id)
                     continue
 
             # Fall back to normalised hostname
@@ -76,16 +91,16 @@ def drain_resolution(batch_size: int = 200) -> int:
             if not norm:
                 continue
 
-            device_id = _resolve_by_hostname(cur, norm)
+            device_id = _resolve_by_hostname(cur, norm, client_id)
             if device_id is not None:
-                cur.execute(
-                    "UPDATE operations.entity_observations SET device_id = %s WHERE observation_id = %s",
-                    (device_id, obs_id),
+                _attach_observation(
+                    cur, source_ids, obs_id, device_id, platform, entity_key,
+                    cd, observed_at, "hostname_strict", 0.900,
                 )
                 resolved_count += 1
                 log.debug("resolver: hostname match %s → device %s", entity_key, device_id)
             else:
-                _maybe_create_candidate(cur, obs_id, entity_key, norm)
+                _maybe_create_candidate(cur, obs_id, entity_key, norm, client_id)
 
     log.info("resolver: resolved %d / %d observations", resolved_count, len(rows) if rows else 0)
 
@@ -108,13 +123,21 @@ def drain_resolution(batch_size: int = 200) -> int:
     return resolved_count
 
 
-def _resolve_by_serial(cur, serial: str) -> uuid.UUID | None:
+def _load_source_ids(cur) -> dict[str, int]:
+    cur.execute("SELECT name, id FROM operations.sources")
+    return {row[0]: row[1] for row in cur.fetchall()}
+
+
+def _resolve_by_serial(cur, serial: str, client_id: uuid.UUID | None) -> uuid.UUID | None:
+    if client_id is None:
+        return None
     cur.execute(
         """
         SELECT id FROM operations.devices
         WHERE tenant_id = %s AND canonical_serial = %s AND deleted_at IS NULL
+          AND (%s::uuid IS NULL OR client_id = %s)
         """,
-        (TENANT_ID, serial),
+        (TENANT_ID, serial, client_id, client_id),
     )
     rows = cur.fetchall()
     if len(rows) == 1:
@@ -122,13 +145,33 @@ def _resolve_by_serial(cur, serial: str) -> uuid.UUID | None:
     return None
 
 
-def _resolve_by_hostname(cur, norm: str) -> uuid.UUID | None:
+def _resolve_by_vm_uuid(cur, vm_uuid: str, client_id: uuid.UUID | None) -> uuid.UUID | None:
+    if client_id is None:
+        return None
+    cur.execute(
+        """
+        SELECT id FROM operations.devices
+        WHERE tenant_id = %s AND canonical_vm_uuid = %s AND deleted_at IS NULL
+          AND (%s::uuid IS NULL OR client_id = %s)
+        """,
+        (TENANT_ID, vm_uuid, client_id, client_id),
+    )
+    rows = cur.fetchall()
+    if len(rows) == 1:
+        return rows[0][0]
+    return None
+
+
+def _resolve_by_hostname(cur, norm: str, client_id: uuid.UUID | None) -> uuid.UUID | None:
+    if client_id is None:
+        return None
     cur.execute(
         """
         SELECT id FROM operations.devices
         WHERE tenant_id = %s AND canonical_hostname = %s AND deleted_at IS NULL
+          AND (%s::uuid IS NULL OR client_id = %s)
         """,
-        (TENANT_ID, norm),
+        (TENANT_ID, norm, client_id, client_id),
     )
     rows = cur.fetchall()
     if len(rows) == 1:
@@ -136,18 +179,71 @@ def _resolve_by_hostname(cur, norm: str) -> uuid.UUID | None:
     return None
 
 
-def _maybe_create_candidate(cur, obs_id: uuid.UUID, entity_key: str, norm: str) -> None:
+def _attach_observation(
+    cur,
+    source_ids: dict[str, int],
+    obs_id: uuid.UUID | None,
+    device_id: uuid.UUID,
+    platform: str,
+    entity_key: str,
+    canonical_data: dict,
+    observed_at,
+    match_method: str,
+    match_confidence: float,
+) -> None:
+    display_name = (
+        canonical_data.get("hostname")
+        or canonical_data.get("guest_name")
+        or entity_key
+    )
+    source_id = source_ids.get(platform)
+    if source_id is not None:
+        cur.execute(
+            """
+            INSERT INTO operations.device_links
+                (id, version, tenant_id, device_id, source_id, external_id,
+                 external_name, first_seen_at, last_seen_at,
+                 match_method, match_confidence)
+            VALUES (gen_random_uuid(), 1, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (tenant_id, source_id, external_id)
+            DO UPDATE SET
+                device_id = EXCLUDED.device_id,
+                external_name = COALESCE(NULLIF(EXCLUDED.external_name, ''),
+                                         operations.device_links.external_name),
+                last_seen_at = GREATEST(
+                    COALESCE(operations.device_links.last_seen_at, EXCLUDED.last_seen_at),
+                    EXCLUDED.last_seen_at
+                ),
+                match_method = EXCLUDED.match_method,
+                match_confidence = EXCLUDED.match_confidence
+            """,
+            (
+                TENANT_ID, device_id, source_id, entity_key, display_name,
+                observed_at, observed_at, match_method, match_confidence,
+            ),
+        )
+    if obs_id is not None:
+        cur.execute(
+            "UPDATE operations.entity_observations SET device_id = %s WHERE observation_id = %s",
+            (device_id, obs_id),
+        )
+
+
+def _maybe_create_candidate(
+    cur, obs_id: uuid.UUID, entity_key: str, norm: str, client_id: uuid.UUID | None
+) -> None:
     """If multiple devices match the hostname, record an identity_candidate for review."""
     cur.execute(
         """
         SELECT id FROM operations.devices
         WHERE tenant_id = %s AND canonical_hostname = %s AND deleted_at IS NULL
+          AND (%s::uuid IS NULL OR client_id = %s)
         LIMIT 3
         """,
-        (TENANT_ID, norm),
+        (TENANT_ID, norm, client_id, client_id),
     )
     rows = cur.fetchall()
-    if len(rows) < 2:
+    if len(rows) < _MIN_IDENTITY_CANDIDATES:
         return
     device_id_a = rows[0][0]
     device_id_b = rows[1][0]
@@ -180,18 +276,16 @@ def _promote_unmatched_clusters(cur) -> int:
     on the fast path, and the cluster's observations are backfilled in
     place.
     """
-    cur.execute("SELECT name, id FROM operations.sources")
-    source_ids: dict[str, int] = {row[0]: row[1] for row in cur.fetchall()}
+    source_ids = _load_source_ids(cur)
 
     cur.execute(
         """
-        SELECT client_id, platform, entity_key,
+        SELECT client_id, platform, entity_type, entity_key,
                MIN(observed_at), MAX(observed_at),
                (ARRAY_AGG(canonical_data ORDER BY observed_at DESC))[1]
         FROM operations.entity_observations
         WHERE tenant_id = %s AND device_id IS NULL AND client_id IS NOT NULL
-          AND entity_type LIKE 'agent.%%'
-        GROUP BY client_id, platform, entity_key
+        GROUP BY client_id, platform, entity_type, entity_key
         """,
         (TENANT_ID,),
     )
@@ -199,54 +293,69 @@ def _promote_unmatched_clusters(cur) -> int:
     if not unresolved:
         return 0
 
-    cur.execute(
-        """
-        SELECT DISTINCT signals ->> 'hostname'
-        FROM operations.identity_candidates
-        WHERE tenant_id = %s AND status = 'pending'
-        """,
-        (TENANT_ID,),
-    )
-    pending_hostnames = {row[0] for row in cur.fetchall() if row[0]}
-
-    # (client_id, norm) → list of (platform, entity_key, first, last, cd)
+    # (client_id, norm) → list of (platform, entity_type, entity_key, first, last, cd)
     clusters: dict[tuple, list[tuple]] = {}
-    for client_id, platform, entity_key, first_seen, last_seen, cd in unresolved:
-        cd = cd or {}
+    for client_id, platform, entity_type, entity_key, first_seen, last_seen, raw_cd in unresolved:
+        cd = raw_cd or {}
         hostname = cd.get("hostname") or cd.get("guest_name")
         norm = normalize_hostname(hostname)
-        if not norm or norm in pending_hostnames:
+        if not norm:
             continue
         clusters.setdefault((client_id, norm), []).append(
-            (platform, entity_key, first_seen, last_seen, cd)
+            (platform, entity_type, entity_key, first_seen, last_seen, cd)
         )
 
     promoted = 0
     for (client_id, norm), entries in clusters.items():
         # Re-check existing devices — the resolution loop only scans the
         # newest batch, so an older match may exist that it never saw.
-        latest_cd = max(entries, key=lambda e: e[3])[4]
+        latest_cd = max(entries, key=lambda e: e[4])[5]
         serial = latest_cd.get("serial_number")
-        if serial and _resolve_by_serial(cur, serial):
-            continue
-        if _resolve_by_hostname(cur, norm):
+        existing_device_id = _resolve_by_serial(cur, serial, client_id) if serial else None
+        if existing_device_id is None:
+            vm_uuid = latest_cd.get("vm_uuid")
+            existing_device_id = (
+                _resolve_by_vm_uuid(cur, vm_uuid, client_id) if vm_uuid else None
+            )
+        if existing_device_id is None:
+            existing_device_id = _resolve_by_hostname(cur, norm, client_id)
+        if existing_device_id is not None:
+            for platform, _entity_type, entity_key, _first_seen, e_last, cd in entries:
+                _attach_observation(
+                    cur, source_ids, None, existing_device_id, platform,
+                    entity_key, cd, e_last, "hostname_strict", 0.900,
+                )
+                cur.execute(
+                    """
+                    UPDATE operations.entity_observations
+                    SET device_id = %s
+                    WHERE tenant_id = %s AND platform = %s AND entity_key = %s
+                      AND device_id IS NULL
+                    """,
+                    (existing_device_id, TENANT_ID, platform, entity_key),
+                )
             continue
         cur.execute(
             """
             SELECT COUNT(*) FROM operations.devices
             WHERE tenant_id = %s AND canonical_hostname = %s AND deleted_at IS NULL
+              AND client_id = %s
             """,
-            (TENANT_ID, norm),
+            (TENANT_ID, norm, client_id),
         )
-        if cur.fetchone()[0] >= 2:
+        if cur.fetchone()[0] >= _MIN_IDENTITY_CANDIDATES:
             continue  # ambiguous — leave for identity_candidates review
 
         display_name = latest_cd.get("hostname") or norm
-        roles = {e[4].get("device_type") for e in entries} - {None, ""}
+        roles = {
+            e[5].get("device_role") or e[5].get("device_type")
+            for e in entries
+        } - {None, ""}
         device_role = roles.pop() if len(roles) == 1 else "unknown"
+        device_type = _infer_form_factor(entries)
         os_name = next(
-            (e[4].get("os_name") for e in sorted(entries, key=lambda e: e[3], reverse=True)
-             if e[4].get("os_name")),
+            (e[5].get("os_name") for e in sorted(entries, key=lambda e: e[4], reverse=True)
+             if e[5].get("os_name")),
             None,
         )
         platforms = sorted({e[0] for e in entries})
@@ -259,18 +368,18 @@ def _promote_unmatched_clusters(cur) -> int:
                  os_name, os_family, exemptions,
                  created_at, created_reason, updated_at, updated_reason,
                  stale_reason, deleted_reason)
-            VALUES (%s, 1, %s, %s, %s, %s, '', 'unknown', %s,
+            VALUES (%s, 1, %s, %s, %s, %s, %s, %s, %s,
                     %s, %s, '{}'::jsonb,
                     NOW(), %s, NOW(), '', '', '')
             """,
             (
                 device_id, TENANT_ID, client_id, norm, serial or "",
-                device_role, os_name or "",
+                latest_cd.get("vm_uuid") or "", device_type, device_role, os_name or "",
                 os_family(os_name) if os_name else "",
                 f"auto-promoted from {', '.join(platforms)}"[:120],
             ),
         )
-        for platform, entity_key, _first, e_last, _cd in entries:
+        for platform, _entity_type, entity_key, _first, e_last, _cd in entries:
             source_id = source_ids.get(platform)
             if source_id is None:
                 continue
@@ -278,8 +387,10 @@ def _promote_unmatched_clusters(cur) -> int:
                 """
                 INSERT INTO operations.device_links
                     (id, version, tenant_id, device_id, source_id,
-                     external_id, external_name, first_seen_at, last_seen_at)
-                VALUES (gen_random_uuid(), 1, %s, %s, %s, %s, %s, %s, %s)
+                     external_id, external_name, first_seen_at, last_seen_at,
+                     match_method, match_confidence)
+                VALUES (gen_random_uuid(), 1, %s, %s, %s, %s, %s, %s, %s,
+                        'promoted', 0.850)
                 ON CONFLICT (tenant_id, source_id, external_id) DO NOTHING
                 """,
                 (TENANT_ID, device_id, source_id, entity_key, display_name,
@@ -303,3 +414,24 @@ def _promote_unmatched_clusters(cur) -> int:
     if promoted:
         log.info("resolver: promoted %d new devices", promoted)
     return promoted
+
+
+def _infer_form_factor(entries: list[tuple]) -> str:
+    values = [e[5] or {} for e in entries]
+    node_classes = {(cd.get("node_class") or "").upper() for cd in values}
+    entity_types = {e[1] for e in entries}
+    if any(et == "network.device" for et in entity_types) or any(
+        nc.startswith("NMS_") for nc in node_classes
+    ):
+        return "network-device"
+    if any(et == "vm.host" for et in entity_types) or any(
+        nc.endswith("_VM_HOST") or nc.endswith("_VMM_HOST") for nc in node_classes
+    ):
+        return "hypervisor-host"
+    if any(et == "vm.guest" for et in entity_types) or any(
+        bool(cd.get("is_vm")) for cd in values
+    ):
+        return "vm"
+    if any(et and et.startswith("agent.") for et in entity_types):
+        return "physical"
+    return "unknown"

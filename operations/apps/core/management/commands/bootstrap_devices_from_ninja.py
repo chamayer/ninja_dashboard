@@ -1,7 +1,8 @@
-"""Upsert operations.devices from ninja_core.devices.
+"""Legacy link-integrity sync for operations.devices from ninja_core.devices.
 
-Idempotent. Keyed on DeviceLink(source=Ninja, external_id=<device.id>) so
-Ninja renames update the canonical row without churning.
+Track E moves device creation to the observation/resolver path. This command is
+kept temporarily so older deployments can refresh existing Ninja link names,
+but it no longer creates canonical devices.
 
 Requires bootstrap_clients_from_ninja to have run first — devices are
 resolved to their canonical Client via ClientLink(source=Ninja,
@@ -21,23 +22,21 @@ import re
 from django.core.management.base import BaseCommand
 from django.db import connection, transaction
 
-from apps.core.models import Client, ClientLink, Device, DeviceLink, Source
+from apps.core.models import ClientLink, Device, DeviceLink, Source
 
 TENANT_ID = 1
 NINJA_SOURCE_NAME = "Ninja"
 
 
 def _classify(node_class: str, is_vm: bool) -> str:
-    """Map Ninja node_class to Operations DeviceType."""
+    """Map Ninja node_class to Operations form factor."""
     nc = (node_class or "").upper()
     if "VMHOST" in nc or nc.endswith("_HOST"):
         return Device.DeviceType.HYPERVISOR_HOST
     if "NMS" in nc:
         return Device.DeviceType.NETWORK_DEVICE
     if is_vm or nc.endswith("_GUEST"):
-        # Ninja only reports VMs where its agent is installed, so treat
-        # as agented VM. Agentless VMs come from vCenter/HyperV modules.
-        return Device.DeviceType.VM_WITH_AGENT
+        return Device.DeviceType.VM
     return Device.DeviceType.PHYSICAL
 
 
@@ -185,22 +184,7 @@ class Command(BaseCommand):
                         link.save(update_fields=["external_name"])
                     continue
 
-                device = Device.objects.create(
-                    tenant_id=TENANT_ID,
-                    client_id=client_id,
-                    canonical_hostname=hostname,
-                    canonical_serial=serial_number or "",
-                    canonical_vm_uuid=vm_uuid,
-                    device_type=kind,
-                )
-                DeviceLink.objects.create(
-                    tenant_id=TENANT_ID,
-                    device=device,
-                    source=source,
-                    external_id=external_id,
-                    external_name=display,
-                )
-                created += 1
+                orphaned += 1
 
         msg = (
             f"[bootstrap_devices_from_ninja] created={created} updated={updated} "

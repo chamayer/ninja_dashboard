@@ -44,10 +44,6 @@ _SOURCE_OVERDUE_HOURS = 24
 _CORROBORATION_WINDOW_HOURS = 48
 _LONG_OFFLINE_DAYS = 7
 _STALE_DATA_DAYS = 7
-# Form factors that never carry agents — parity with the legacy engine,
-# which only evaluated Ninja AgentDevice records. Role ('unknown'
-# included) does NOT gate coverage; requirements follow client defaults.
-_NON_AGENT_DEVICE_TYPES = ("network-device", "hypervisor-host", "vm-agentless")
 
 
 def evaluate(tenant_id: int, device_id: uuid.UUID | None = None) -> int:
@@ -197,10 +193,13 @@ def _sync_device_roles(cur: Any, tenant_id: int, now: datetime) -> int:
     cur.execute(
         """
         SELECT DISTINCT ON (device_id, platform)
-               device_id, platform, canonical_data ->> 'device_type'
+               device_id, platform,
+               COALESCE(canonical_data ->> 'device_role',
+                        canonical_data ->> 'device_type') AS device_role
         FROM operations.entity_observations
         WHERE tenant_id = %s AND device_id IS NOT NULL
-          AND canonical_data ->> 'device_type' IS NOT NULL
+          AND COALESCE(canonical_data ->> 'device_role',
+                       canonical_data ->> 'device_type') IS NOT NULL
           AND observed_at > now() - INTERVAL '7 days'
         ORDER BY device_id, platform, observed_at DESC
         """,
@@ -321,7 +320,7 @@ def _evaluate_coverage(
                AND apc.platform = %s
             WHERE d.tenant_id = %s
               AND d.deleted_at IS NULL
-              AND NOT (d.device_type = ANY(%s))
+              AND d.lifecycle_status != 'retired'
               AND (%s = 'all' OR d.device_role = %s)
               AND NOT jsonb_exists(d.exemptions, %s)
               AND (%s::uuid IS NULL OR d.client_id = %s)
@@ -329,7 +328,6 @@ def _evaluate_coverage(
             """,
             (
                 entity_type, platform, tenant_id,
-                list(_NON_AGENT_DEVICE_TYPES),
                 device_scope, device_scope, entity_type,
                 client_id, client_id, device_id, device_id,
             ),

@@ -345,6 +345,7 @@ def _write_ninja_observations(
                         r["system_name"] or r["display_name"] or r["dns_name"]
                     ),
                     "platform":      "Ninja",
+                    "entity_type":   entity_type,
                     "node_class":    r["node_class"],
                     "vm_uuid":       str(r["uid"]) if r.get("uid") else None,
                     "is_vm":         r.get("is_virtual_machine"),
@@ -352,7 +353,7 @@ def _write_ninja_observations(
                     "is_online":     None if offline is None else not offline,
                     "serial_number": r["serial_number"],
                     # None when node_class/os give no explicit signal — never guessed.
-                    "device_type":   infer_device_role(r["os_name"], r["node_class"]),
+                    "device_role":   infer_device_role(r["os_name"], r["node_class"]),
                     "os_name":       r["os_name"],
                     "os_family":     os_family(r["os_name"]),
                     # Ninja doesn't expose AD domain directly; the DNS suffix

@@ -5,6 +5,48 @@ only project-level pointers.
 
 ---
 
+## 2026-07-10 — Track E E2 prepared: identity/model correction
+
+**Why:** Live data showed inflated inventory and unreliable coverage because
+canonical devices still encoded agent presence in `device_type`, Ninja was
+being treated too much like one flat RMM source, and identity matching could
+fall through to global hostname/serial matches.
+
+**Work prepared locally (not committed/pushed yet):**
+
+- Migration 0024 adds `devices.lifecycle_status`,
+  `device_links.match_method`, and `device_links.match_confidence`; remaps
+  `vm-with-agent` / `vm-agentless` to pure `vm`.
+- `Device.DeviceType` is now form factor only:
+  physical / vm / hypervisor-host / network-device / unknown.
+- Ninja observations carry `entity_type` from `node_class` and store
+  server/workstation as `device_role`, not `device_type`.
+- Shared-source observations now compute client mapping before fast-path
+  identity resolution; serial/hostname matching is client-scoped and
+  clientless observations stay unresolved.
+- Resolver now considers all entity streams, adds VM UUID matching, attaches
+  same-client same-hostname observations as additional links, records match
+  method/confidence, and promotes unmatched visible entities without the old
+  pending-hostname suppression.
+- Coverage cards and drilldowns no longer hide devices by form factor;
+  requirement `entity_type` is carried into missing-platform URLs. Retired
+  lifecycle is the denominator exclusion.
+- `bootstrap_devices_from_ninja` no longer creates devices; it is only a
+  temporary link-integrity/canonical refresh path until E3 removes it from
+  startup.
+
+**Checks:** `python manage.py check`, targeted `py_compile`, and targeted
+ruff checks for new resolver/migration issues pass. Full
+`makemigrations --check --dry-run` still reports pre-existing model drift
+around inherited `version` fields/options on platform tables, unrelated to
+Track E.
+
+**Next:** commit/deploy this Track E set only, run migration 0024, then do
+the approved clean rebuild/re-ingest from corrected writers and verify counts
+from zero before resuming P2 notifications.
+
+---
+
 ## 2026-07-09 — Batch P1: evaluator parity live + device promotion + client-page card audit
 
 **Why:** Track 1 (evaluator parity) per BLUEPRINT P1; then user found the

@@ -186,15 +186,14 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
             with connection.cursor() as cur:
                 cur.execute("SET LOCAL operations.tenant_id = 1")
 
-                # Total devices per scope (device_role, synced by ingest —
-                # never guessed; 'unknown' still counts toward 'all').
+                # Total devices per scope. Device type is form factor only;
+                # coverage applicability comes from requirements/entity_type.
                 cur.execute(
                     """
                     SELECT od.device_role AS scope, COUNT(*)::int
                     FROM operations.devices od
                     WHERE od.tenant_id = 1 AND od.client_id = %s AND od.deleted_at IS NULL
-                      AND od.device_type NOT IN
-                          ('network-device', 'hypervisor-host', 'vm-agentless')
+                      AND od.lifecycle_status != 'retired'
                     GROUP BY 1
                     """,
                     [str(client.id)],
@@ -213,8 +212,7 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
                          ON od.id = ap.device_id AND od.deleted_at IS NULL
                     WHERE ap.tenant_id = 1 AND ap.client_id = %s
                       AND ap.last_observed_at > NOW() - INTERVAL '7 days'
-                      AND od.device_type NOT IN
-                          ('network-device', 'hypervisor-host', 'vm-agentless')
+                      AND od.lifecycle_status != 'retired'
                     GROUP BY 1, 2
                     """,
                     [str(client.id)],
@@ -298,6 +296,7 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
                 "gap":      max(0, total - present),
                 "last_seen": last_seen,
                 "role":     "" if scope == "all" else scope,
+                "entity_type": etype,
             }
         ctx["platform_coverage"] = platform_coverage
         ctx["active_finding_count"] = Finding.objects.filter(
@@ -374,6 +373,7 @@ def org_devices(request: HttpRequest, org_slug: str) -> HttpResponse:
     active_type = request.GET.get("type", "").strip()
     active_role = request.GET.get("role", "").strip()
     missing_platform = request.GET.get("missing", "").strip()
+    missing_entity_type = request.GET.get("entity_type", "agent.rmm").strip() or "agent.rmm"
     valid_types = {value for value, _label in Device.DeviceType.choices}
 
     devices_qs = base_qs
@@ -391,8 +391,7 @@ def org_devices(request: HttpRequest, org_slug: str) -> HttpResponse:
     else:
         active_role = ""
     if missing_platform in _SOURCES:
-        # Coverage-gap drilldown: agent-capable devices with no recent
-        # observation from this platform — mirrors the org_index card math.
+        # Coverage-gap drilldown for the requirement's entity type/platform.
         with transaction.atomic(), connection.cursor() as cur:
             cur.execute("SET LOCAL operations.tenant_id = 1")
             cur.execute(
@@ -400,14 +399,15 @@ def org_devices(request: HttpRequest, org_slug: str) -> HttpResponse:
                 SELECT DISTINCT device_id
                 FROM operations.agent_presence_current
                 WHERE tenant_id = 1 AND client_id = %s AND platform = %s
+                  AND entity_type = %s
                   AND last_observed_at > NOW() - INTERVAL '7 days'
                 """,
-                [str(client.id), missing_platform],
+                [str(client.id), missing_platform, missing_entity_type],
             )
             present_ids = [r[0] for r in cur.fetchall()]
-        devices_qs = devices_qs.exclude(
-            device_type__in=("network-device", "hypervisor-host", "vm-agentless")
-        ).exclude(id__in=present_ids)
+        devices_qs = devices_qs.exclude(id__in=present_ids).exclude(
+            lifecycle_status=Device.LifecycleStatus.RETIRED
+        )
     else:
         missing_platform = ""
 
@@ -441,6 +441,7 @@ def org_devices(request: HttpRequest, org_slug: str) -> HttpResponse:
             "active_type": active_type,
             "active_role": active_role,
             "missing_platform": missing_platform,
+            "missing_entity_type": missing_entity_type,
             "search_query": search_query,
             "page_query": page_query.urlencode(),
             "type_query": type_query.urlencode(),

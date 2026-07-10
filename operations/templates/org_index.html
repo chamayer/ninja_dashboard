@@ -112,7 +112,7 @@
             <span class="muted" style="font-size:0.75rem; font-weight:400; margin-left:0.4rem;">{{ cov.severity }}</span>
         </div>
         {% for scope, counts in cov.scopes.items %}
-        <a href="{% url 'org_devices' org_slug=current_client.slug %}?missing={{ platform }}{% if counts.role %}&amp;role={{ counts.role }}{% endif %}"
+        <a href="{% url 'org_devices' org_slug=current_client.slug %}?missing={{ platform }}&amp;entity_type={{ counts.entity_type|urlencode }}{% if counts.role %}&amp;role={{ counts.role }}{% endif %}"
            style="display:block; margin-top:0.6rem; text-decoration:none; color:inherit;"
            title="Show {{ scope }} missing {{ platform }}">
             <div class="cov-row">

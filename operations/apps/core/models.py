@@ -211,12 +211,19 @@ class ClientPolicy(UUIDTenantScopedModel):
 
 class Device(UUIDTenantScopedModel):
     class DeviceType(models.TextChoices):
+        # Pure form factor. Agent presence is an observation-derived fact
+        # (agent_presence_current), never encoded in the canonical device.
         PHYSICAL = "physical", "Physical"
-        VM_WITH_AGENT = "vm-with-agent", "VM with agent"
-        VM_AGENTLESS = "vm-agentless", "VM agentless"
+        VM = "vm", "VM"
         HYPERVISOR_HOST = "hypervisor-host", "Hypervisor host"
         NETWORK_DEVICE = "network-device", "Network device"
         UNKNOWN = "unknown", "Unknown"
+
+    class LifecycleStatus(models.TextChoices):
+        ACTIVE = "active", "Active"
+        OFFLINE_AGING = "offline_aging", "Offline (aging)"
+        PENDING_CLEANUP = "pending_cleanup", "Pending cleanup"
+        RETIRED = "retired", "Retired"
 
     client = models.ForeignKey(Client, on_delete=models.PROTECT, related_name="devices")
     canonical_hostname = models.CharField(max_length=255)
@@ -234,6 +241,13 @@ class Device(UUIDTenantScopedModel):
     # requirement scopes device_scope). Distinct from device_type
     # (form factor).
     device_role = models.CharField(max_length=16, default="unknown")
+    # Driven by platform last-contact + operator decisions. Retired stays
+    # fully queryable — visible, just out of coverage denominators.
+    lifecycle_status = models.CharField(
+        max_length=16,
+        choices=LifecycleStatus.choices,
+        default=LifecycleStatus.ACTIVE,
+    )
     os_name = models.CharField(max_length=200, blank=True, default="")
     # Abbreviated family (e.g. 'Windows Server 2022', 'Windows 11') —
     # legacy taxonomy, mirrored by operations.os_family(text).
@@ -259,6 +273,15 @@ class Device(UUIDTenantScopedModel):
 
 
 class DeviceLink(UUIDTenantScopedModel):
+    class MatchMethod(models.TextChoices):
+        SERIAL = "serial", "Serial"
+        VM_UUID = "vm_uuid", "VM UUID"
+        HOSTNAME_STRICT = "hostname_strict", "Hostname strict"
+        HOSTNAME_LOOSE = "hostname_loose", "Hostname loose"
+        MANUAL = "manual", "Manual"
+        PROMOTED = "promoted", "Promoted"
+        BOOTSTRAP = "bootstrap", "Bootstrap"
+
     device = models.ForeignKey(Device, on_delete=models.CASCADE, related_name="links")
     source = models.ForeignKey(Source, on_delete=models.PROTECT, related_name="device_links")
     external_id = models.CharField(max_length=240)
@@ -266,6 +289,12 @@ class DeviceLink(UUIDTenantScopedModel):
     first_seen_at = models.DateTimeField(null=True, blank=True)
     last_seen_at = models.DateTimeField(null=True, blank=True)
     missing_since = models.DateTimeField(null=True, blank=True)
+    match_method = models.CharField(
+        max_length=32,
+        choices=MatchMethod.choices,
+        default=MatchMethod.BOOTSTRAP,
+    )
+    match_confidence = models.DecimalField(max_digits=4, decimal_places=3, default=1)
 
     class Meta:
         db_table = "device_links"
