@@ -88,8 +88,8 @@
 
     <a class="summary-tile" href="{% url 'org_software' org_slug=current_client.slug %}">
         <div class="tile-label">Software</div>
-        <div class="tile-count">—</div>
-        <div class="tile-detail">View installed software</div>
+        <div class="tile-count">{{ software_count }}</div>
+        <div class="tile-detail">Distinct installed titles</div>
     </a>
 
     <a class="summary-tile" href="{% url 'org_policies' org_slug=current_client.slug %}">
@@ -112,7 +112,9 @@
             <span class="muted" style="font-size:0.75rem; font-weight:400; margin-left:0.4rem;">{{ cov.severity }}</span>
         </div>
         {% for scope, counts in cov.scopes.items %}
-        <div style="margin-top:0.6rem;">
+        <a href="{% url 'org_devices' org_slug=current_client.slug %}?missing={{ platform }}{% if counts.role %}&amp;role={{ counts.role }}{% endif %}"
+           style="display:block; margin-top:0.6rem; text-decoration:none; color:inherit;"
+           title="Show {{ scope }} missing {{ platform }}">
             <div class="cov-row">
                 <span class="muted" style="font-size:0.8rem; text-transform:capitalize;">{{ scope }}</span>
                 <span style="font-size:0.9rem; font-weight:600;">
@@ -128,7 +130,7 @@
                      style="width: {% widthratio counts.present counts.total 100 %}%"></div>
             </div>
             {% endif %}
-        </div>
+        </a>
         {% endfor %}
     </div>
     {% endfor %}

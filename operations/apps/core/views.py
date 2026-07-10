@@ -213,6 +213,8 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
                          ON od.id = ap.device_id AND od.deleted_at IS NULL
                     WHERE ap.tenant_id = 1 AND ap.client_id = %s
                       AND ap.last_observed_at > NOW() - INTERVAL '7 days'
+                      AND od.device_type NOT IN
+                          ('network-device', 'hypervisor-host', 'vm-agentless')
                     GROUP BY 1, 2
                     """,
                     [str(client.id)],
@@ -246,6 +248,16 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
                     [1, str(client.id)],
                 )
                 req_rows = cur.fetchall()
+
+                cur.execute(
+                    """
+                    SELECT COUNT(DISTINCT canonical_name)::int
+                    FROM operations.software_installations_current
+                    WHERE tenant_id = 1 AND client_id = %s AND deleted_at IS NULL
+                    """,
+                    [str(client.id)],
+                )
+                ctx["software_count"] = cur.fetchone()[0]
 
         # Build lookup: (platform, scope) → {present, last_seen}
         presence_map: dict = {}
@@ -285,6 +297,7 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
                 "present":  present,
                 "gap":      max(0, total - present),
                 "last_seen": last_seen,
+                "role":     "" if scope == "all" else scope,
             }
         ctx["platform_coverage"] = platform_coverage
         ctx["active_finding_count"] = Finding.objects.filter(
@@ -359,6 +372,8 @@ def org_devices(request: HttpRequest, org_slug: str) -> HttpResponse:
 
     search_query = request.GET.get("q", "").strip()
     active_type = request.GET.get("type", "").strip()
+    active_role = request.GET.get("role", "").strip()
+    missing_platform = request.GET.get("missing", "").strip()
     valid_types = {value for value, _label in Device.DeviceType.choices}
 
     devices_qs = base_qs
@@ -371,12 +386,37 @@ def org_devices(request: HttpRequest, org_slug: str) -> HttpResponse:
         devices_qs = devices_qs.filter(device_type=active_type)
     else:
         active_type = ""
+    if active_role in ("server", "workstation", "unknown"):
+        devices_qs = devices_qs.filter(device_role=active_role)
+    else:
+        active_role = ""
+    if missing_platform in _SOURCES:
+        # Coverage-gap drilldown: agent-capable devices with no recent
+        # observation from this platform — mirrors the org_index card math.
+        with transaction.atomic(), connection.cursor() as cur:
+            cur.execute("SET LOCAL operations.tenant_id = 1")
+            cur.execute(
+                """
+                SELECT DISTINCT device_id
+                FROM operations.agent_presence_current
+                WHERE tenant_id = 1 AND client_id = %s AND platform = %s
+                  AND last_observed_at > NOW() - INTERVAL '7 days'
+                """,
+                [str(client.id), missing_platform],
+            )
+            present_ids = [r[0] for r in cur.fetchall()]
+        devices_qs = devices_qs.exclude(
+            device_type__in=("network-device", "hypervisor-host", "vm-agentless")
+        ).exclude(id__in=present_ids)
+    else:
+        missing_platform = ""
 
     devices_qs = devices_qs.order_by("canonical_hostname").only(
         "id",
         "canonical_hostname",
         "canonical_serial",
         "device_type",
+        "device_role",
     )
     paginator = Paginator(devices_qs, DEVICE_PAGE_SIZE)
     page_obj = paginator.get_page(request.GET.get("page"))
@@ -399,6 +439,8 @@ def org_devices(request: HttpRequest, org_slug: str) -> HttpResponse:
             "filtered_count": paginator.count,
             "type_summary": _type_summary_from_counts(type_counts),
             "active_type": active_type,
+            "active_role": active_role,
+            "missing_platform": missing_platform,
             "search_query": search_query,
             "page_query": page_query.urlencode(),
             "type_query": type_query.urlencode(),

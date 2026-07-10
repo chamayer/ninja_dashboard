@@ -5,9 +5,9 @@ based resolution. On a unique match, updates device_id in place. On
 multiple candidates, creates an identity_candidates row for operator review.
 
 Observations that stay unresolved get promoted to new operations.devices
-rows once the same (client, hostname) has been observed for at least
-PROMOTION_MIN_SPAN_HOURS — legacy parity with the AC engine, which
-created a device row for every unmatched agent hostname.
+rows immediately — every source row comes from an authoritative platform
+inventory, so an unmatched hostname is a real device (legacy parity with
+the AC engine, which created a device row for every unmatched hostname).
 
 This is v1 (polling, not queue-governed). The identity.resolution queue
 registry entry exists for health monitoring only; this function reads
@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import timedelta
 
 from psycopg.types.json import Json
 
@@ -28,10 +27,6 @@ from ingest.normalize import normalize_hostname, os_family
 log = logging.getLogger(__name__)
 
 TENANT_ID = 1
-
-# A (client, hostname) cluster must span at least this long before we
-# create a device for it — filters one-off ghosts and mid-enrolment noise.
-PROMOTION_MIN_SPAN_HOURS = 24
 
 
 def drain_resolution(batch_size: int = 200) -> int:
@@ -176,14 +171,14 @@ def _maybe_create_candidate(cur, obs_id: uuid.UUID, entity_key: str, norm: str) 
 
 
 def _promote_unmatched_clusters(cur) -> int:
-    """Create devices for persistent unresolved (client, hostname) clusters.
+    """Create devices for unresolved (client, hostname) clusters.
 
     An observation cluster qualifies when: it is client-attributed, no
-    existing device matched by serial or hostname, no pending
-    identity_candidate covers the hostname, and the cluster spans at
-    least PROMOTION_MIN_SPAN_HOURS. The new device gets a device_link
-    per (platform, entity_key) so future observations resolve on the
-    fast path, and the cluster's observations are backfilled in place.
+    existing device matched by serial or hostname, and no pending
+    identity_candidate covers the hostname. The new device gets a
+    device_link per (platform, entity_key) so future observations resolve
+    on the fast path, and the cluster's observations are backfilled in
+    place.
     """
     cur.execute("SELECT name, id FROM operations.sources")
     source_ids: dict[str, int] = {row[0]: row[1] for row in cur.fetchall()}
@@ -227,13 +222,7 @@ def _promote_unmatched_clusters(cur) -> int:
         )
 
     promoted = 0
-    min_span = timedelta(hours=PROMOTION_MIN_SPAN_HOURS)
     for (client_id, norm), entries in clusters.items():
-        first = min(e[2] for e in entries)
-        last = max(e[3] for e in entries)
-        if last - first < min_span:
-            continue
-
         # Re-check existing devices — the resolution loop only scans the
         # newest batch, so an older match may exist that it never saw.
         latest_cd = max(entries, key=lambda e: e[3])[4]

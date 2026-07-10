@@ -477,6 +477,12 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 return
             threading.Thread(target=run_agent_compliance_evaluate_once, daemon=True).start()
             self._respond(202, b"agent compliance evaluate scheduled\n")
+        elif self.path == "/run/resolver":
+            if not _READY.is_set():
+                self._respond(503, b"still starting - try again shortly\n")
+                return
+            threading.Thread(target=run_identity_resolver_once, daemon=True).start()
+            self._respond(202, b"resolver run scheduled\n")
         elif self.path == "/run/agent-compliance-review-digest":
             if not _READY.is_set():
                 self._respond(503, b"still starting - try again shortly\n")
@@ -1855,6 +1861,7 @@ def _start_http_server() -> _ThreadingServer:
         "HTTP server listening on %s:%d "
         "(/healthz liveness, /readyz readiness, /run, /run/patches, "
         "/run/agent-compliance, /run/agent-compliance-evaluate, "
+        "/run/resolver, "
         "/run/software/enqueue, /run/software/scoped, /run/software/queue, "
         "/run/software/demand/<id>, /run/sources/enqueue, "
         "/run/sources/queue, /run/sources/demand/<id>, /bootstrap-metabase)",
