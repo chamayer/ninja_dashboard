@@ -250,9 +250,9 @@ def _maybe_create_candidate(
     cur.execute(
         """
         INSERT INTO operations.identity_candidates
-            (version, tenant_id, observation_id, device_id_a, device_id_b,
+            (id, version, tenant_id, observation_id, device_id_a, device_id_b,
              confidence, signals, status)
-        VALUES (1, %s, %s, %s, %s, 'low', %s, 'pending')
+        VALUES (gen_random_uuid(), 1, %s, %s, %s, %s, 'low', %s, 'pending')
         ON CONFLICT (observation_id) WHERE observation_id IS NOT NULL DO NOTHING
         """,
         (
