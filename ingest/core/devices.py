@@ -25,7 +25,7 @@ from psycopg.types.json import Json
 
 from ingest import db
 from ingest.ninja_client import NinjaClient
-from ingest.normalize import infer_device_role, os_family
+from ingest.normalize import entity_type_for_node_class, infer_device_role, os_family
 from ingest.runlog import run_log
 from ingest.util import ninja_epoch_to_dt
 
@@ -137,7 +137,7 @@ def _run(client: NinjaClient, snapshot_at: datetime) -> tuple[int, int]:
         stats["rows_inserted"] = snap_count
         stats["devices_marked_missing"] = missing_count
         log.info(
-            "Upserted %d devices, inserted %d snapshots, marked %d missing, wrote %d agent.rmm observations",
+            "Upserted %d devices, inserted %d snapshots, marked %d missing, wrote %d entity observations",
             dev_count, snap_count, missing_count, obs_count,
         )
         return dev_count, snap_count
@@ -274,7 +274,12 @@ def _record_source_run(
 def _write_ninja_observations(
     device_rows: list[dict], snapshot_rows: list[dict], snapshot_at: datetime
 ) -> int:
-    """Write one agent.rmm entity_observation per device seen in this sync.
+    """Write one entity_observation per Ninja record seen in this sync.
+
+    Ninja is an aggregator carrying multiple streams — entity_type comes
+    from node_class (agent.rmm / vm.guest / vm.host / network.device /
+    monitor.target). EVERY record is observed, linked or not; unlinked
+    rows get device_id NULL and flow through the identity resolver.
 
     Uses a per-run batch_id + per-device hash so re-runs of the same
     snapshot_at are idempotent (ON CONFLICT DO NOTHING).
@@ -306,12 +311,30 @@ def _write_ninja_observations(
             )
             link_map = {row[0]: (row[1], row[2]) for row in cur.fetchall()}
 
+            # org → client mapping so unlinked records still carry their client.
+            cur.execute(
+                """
+                SELECT cl.external_id, cl.client_id
+                FROM operations.client_links cl
+                JOIN operations.sources s ON s.id = cl.source_id AND s.name = 'Ninja'
+                WHERE cl.tenant_id = %s
+                """,
+                (_TENANT_ID,),
+            )
+            org_map = {row[0]: row[1] for row in cur.fetchall()}
+
             obs_rows = []
+            unknown_classes: dict[str, int] = {}
             for r in device_rows:
                 entry = link_map.get(str(r["id"]))
-                if not entry:
-                    continue
-                ops_device_id, client_id = entry
+                ops_device_id, client_id = entry if entry else (None, None)
+                if client_id is None:
+                    client_id = org_map.get(str(r["organization_id"]))
+                entity_type = entity_type_for_node_class(r["node_class"])
+                if entity_type == "unknown":
+                    unknown_classes[r["node_class"] or ""] = (
+                        unknown_classes.get(r["node_class"] or "", 0) + 1
+                    )
                 entity_key = str(r["id"])
                 obs_hash = hashlib.sha256(
                     f"{entity_key}:{snapshot_at.isoformat()}".encode()
@@ -322,6 +345,9 @@ def _write_ninja_observations(
                         r["system_name"] or r["display_name"] or r["dns_name"]
                     ),
                     "platform":      "Ninja",
+                    "node_class":    r["node_class"],
+                    "vm_uuid":       str(r["uid"]) if r.get("uid") else None,
+                    "is_vm":         r.get("is_virtual_machine"),
                     "last_seen_at":  last_contact.isoformat() if last_contact else None,
                     "is_online":     None if offline is None else not offline,
                     "serial_number": r["serial_number"],
@@ -343,7 +369,7 @@ def _write_ninja_observations(
                     "device_id":               ops_device_id,
                     "collector_instance_id":   INTERNAL_COLLECTOR_INSTANCE_ID,
                     "source_binding_id":       NINJA_SOURCE_BINDING_ID,
-                    "entity_type":             "agent.rmm",
+                    "entity_type":             entity_type,
                     "entity_key":              entity_key,
                     "platform":                "Ninja",
                     "subplatform":             "",
@@ -362,6 +388,12 @@ def _write_ninja_observations(
                     "operations.entity_observations",
                     obs_rows,
                     conflict_keys=["tenant_id", "collector_instance_id", "batch_id", "observation_hash"],
+                )
+            if unknown_classes:
+                # Never silently dropped — surfaced here, admin finding in E2.
+                log.warning(
+                    "Ninja records with unmapped node_class (observed as "
+                    "entity_type='unknown'): %s", unknown_classes,
                 )
             return len(obs_rows)
     except Exception:

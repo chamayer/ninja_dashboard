@@ -80,6 +80,39 @@ def parse_dt(value: Any) -> datetime | None:
         return None
 
 
+# Ninja is an aggregation agent carrying multiple observation streams;
+# node_class tells us which stream a record belongs to. A vm.guest
+# record proves the VM exists — NOT that an agent is on it.
+_AGENT_NODE_CLASSES = {
+    "WINDOWS_WORKSTATION",
+    "WINDOWS_SERVER",
+    "LINUX_WORKSTATION",
+    "LINUX_SERVER",
+    "MAC",
+    "MAC_SERVER",
+}
+
+
+def entity_type_for_node_class(node_class: str | None) -> str:
+    """Map a Ninja node_class to the observation stream it belongs to.
+
+    Returns 'unknown' for unmapped classes — callers must surface those
+    (admin finding / warning), never silently drop them.
+    """
+    nc = (node_class or "").upper()
+    if nc in _AGENT_NODE_CLASSES:
+        return "agent.rmm"
+    if nc.endswith("_VMM_GUEST") or nc.endswith("_VM_GUEST"):
+        return "vm.guest"
+    if nc.endswith("_VMM_HOST") or nc.endswith("_VM_HOST"):
+        return "vm.host"
+    if nc.startswith("NMS_"):
+        return "network.device"
+    if nc == "CLOUD_MONITOR_TARGET":
+        return "monitor.target"
+    return "unknown"
+
+
 def infer_device_type(os_name: str | None, ninja_node_class: str | None = None) -> str:
     node = (ninja_node_class or "").upper()
     if "SERVER" in node:
