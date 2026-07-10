@@ -251,8 +251,8 @@ def _maybe_create_candidate(
         """
         INSERT INTO operations.identity_candidates
             (id, version, tenant_id, observation_id, device_id_a, device_id_b,
-             confidence, signals, status, created_at)
-        VALUES (gen_random_uuid(), 1, %s, %s, %s, %s, 'low', %s, 'pending', NOW())
+             confidence, signals, status, created_at, resolved_by)
+        VALUES (gen_random_uuid(), 1, %s, %s, %s, %s, 'low', %s, 'pending', NOW(), '')
         ON CONFLICT (observation_id) WHERE observation_id IS NOT NULL DO NOTHING
         """,
         (
