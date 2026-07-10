@@ -125,10 +125,11 @@ AUTH_PASSWORD_VALIDATORS = [
 # ---------------------------------------------------------------------------
 # I18n / TZ
 # ---------------------------------------------------------------------------
-# UTC in DB per BLUEPRINT §4.13; display TZ resolved per-user at render time.
+# UTC in DB per BLUEPRINT §4.13 (USE_TZ keeps storage UTC); TIME_ZONE only
+# controls template rendering.
 
 LANGUAGE_CODE = "en-us"
-TIME_ZONE = "UTC"
+TIME_ZONE = "America/New_York"
 USE_I18N = False   # non-goal per BLUEPRINT §2
 USE_TZ = True
 
