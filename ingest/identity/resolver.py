@@ -241,7 +241,7 @@ def _promote_unmatched_clusters(cur) -> int:
         if cur.fetchone()[0] >= 2:
             continue  # ambiguous — leave for identity_candidates review
 
-        hostname = latest_cd.get("hostname") or norm
+        display_name = latest_cd.get("hostname") or norm
         roles = {e[4].get("device_type") for e in entries} - {None, ""}
         device_role = roles.pop() if len(roles) == 1 else "unknown"
         os_name = next(
@@ -264,7 +264,7 @@ def _promote_unmatched_clusters(cur) -> int:
                     NOW(), %s, NOW(), '', '', '')
             """,
             (
-                device_id, TENANT_ID, client_id, hostname, serial or "",
+                device_id, TENANT_ID, client_id, norm, serial or "",
                 device_role, os_name or "",
                 os_family(os_name) if os_name else "",
                 f"auto-promoted from {', '.join(platforms)}"[:120],
@@ -282,7 +282,7 @@ def _promote_unmatched_clusters(cur) -> int:
                 VALUES (gen_random_uuid(), 1, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (tenant_id, source_id, external_id) DO NOTHING
                 """,
-                (TENANT_ID, device_id, source_id, entity_key, hostname,
+                (TENANT_ID, device_id, source_id, entity_key, display_name,
                  _first, e_last),
             )
             cur.execute(

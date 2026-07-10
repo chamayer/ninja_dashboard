@@ -16,6 +16,8 @@ Runs at container startup from entrypoint.sh as operations_migrate
 
 from __future__ import annotations
 
+import re
+
 from django.core.management.base import BaseCommand
 from django.db import connection, transaction
 
@@ -39,7 +41,28 @@ def _classify(node_class: str, is_vm: bool) -> str:
     return Device.DeviceType.PHYSICAL
 
 
+_TRAILING_PARENS_RE = re.compile(r"\s*\(.*?\)\s*$")
+_HOST_STRIP_CHARS_RE = re.compile(r"[\s'`‘’]")
+
+
+def _normalize_hostname(name: str) -> str:
+    # Must stay identical to ingest.normalize.normalize_hostname — the
+    # identity resolver joins on this value.
+    clean = _TRAILING_PARENS_RE.sub("", name)
+    short = clean.split(".", 1)[0].lower().strip()
+    return _HOST_STRIP_CHARS_RE.sub("", short)
+
+
 def _canonical_hostname(display_name: str | None, system_name: str | None, dns_name: str | None) -> str:
+    for candidate in (display_name, system_name, dns_name):
+        if candidate:
+            normalized = _normalize_hostname(candidate)
+            if normalized:
+                return normalized
+    return "(unknown)"
+
+
+def _display_hostname(display_name: str | None, system_name: str | None, dns_name: str | None) -> str:
     for candidate in (display_name, system_name, dns_name):
         if candidate:
             return candidate
@@ -116,6 +139,7 @@ class Command(BaseCommand):
 
                 external_id = str(device_id)
                 hostname = _canonical_hostname(display_name, system_name, dns_name)
+                display = _display_hostname(display_name, system_name, dns_name)
                 kind = _classify(node_class, bool(is_vm))
                 vm_uuid = str(uid) if is_vm else ""
 
@@ -156,8 +180,8 @@ class Command(BaseCommand):
                     else:
                         unchanged += 1
 
-                    if link.external_name != hostname:
-                        link.external_name = hostname
+                    if link.external_name != display:
+                        link.external_name = display
                         link.save(update_fields=["external_name"])
                     continue
 
@@ -174,7 +198,7 @@ class Command(BaseCommand):
                     device=device,
                     source=source,
                     external_id=external_id,
-                    external_name=hostname,
+                    external_name=display,
                 )
                 created += 1
 

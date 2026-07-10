@@ -31,7 +31,7 @@ from psycopg.types.json import Json
 from ingest import db
 from ingest.connectors import logmein, screenconnect, sentinelone
 from ingest.identity.fast_path import resolve_device_fast
-from ingest.normalize import is_placeholder_org_name, os_family
+from ingest.normalize import is_placeholder_org_name, normalize_hostname, os_family
 from ingest.sources import SourceConfig
 
 log = logging.getLogger(__name__)
@@ -239,7 +239,7 @@ def _write_observations(
             device_id = resolve_device_fast(
                 cur, _TENANT_ID, source.platform, entity_key,
                 serial=serial,
-                hostname=hostname or None,
+                hostname=normalize_hostname(hostname) or None,
             )
 
             group_id = str(row.get("platform_group_id") or "").strip()
