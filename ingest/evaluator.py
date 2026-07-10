@@ -324,8 +324,8 @@ def _evaluate_coverage(
               AND NOT (d.device_type = ANY(%s))
               AND (%s = 'all' OR d.device_role = %s)
               AND NOT jsonb_exists(d.exemptions, %s)
-              AND (%s IS NULL OR d.client_id = %s)
-              AND (%s IS NULL OR d.id = %s)
+              AND (%s::uuid IS NULL OR d.client_id = %s)
+              AND (%s::uuid IS NULL OR d.id = %s)
             """,
             (
                 entity_type, platform, tenant_id,
@@ -400,7 +400,7 @@ def _evaluate_device_lifecycle(
               AND d.deleted_at IS NULL
               AND dl.missing_since IS NOT NULL
               AND dl.missing_since <= %s
-              AND (%s IS NULL OR d.id = %s)
+              AND (%s::uuid IS NULL OR d.id = %s)
             """,
             (tenant_id, threshold, device_id, device_id),
         )
@@ -560,7 +560,7 @@ def _auto_resolve(
             WHERE f.tenant_id = %s
               AND f.finding_type_id = %s
               AND f.status IN ('open', 'acknowledged')
-              AND (%s IS NULL OR f.subject_id = %s)
+              AND (%s::uuid IS NULL OR f.subject_id = %s)
               AND EXISTS (
                   SELECT 1 FROM operations.agent_presence_current apc
                   WHERE apc.tenant_id = f.tenant_id
@@ -585,7 +585,7 @@ def _auto_resolve(
             WHERE f.tenant_id = %s
               AND f.finding_type_id = %s
               AND f.status IN ('open', 'acknowledged')
-              AND (%s IS NULL OR f.subject_id = %s)
+              AND (%s::uuid IS NULL OR f.subject_id = %s)
               AND NOT EXISTS (
                   SELECT 1 FROM operations.device_links dl
                   WHERE dl.device_id = f.subject_id
