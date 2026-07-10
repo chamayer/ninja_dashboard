@@ -8,7 +8,7 @@ from typing import Any
 import httpx
 from psycopg.types.json import Json
 
-from ingest.normalize import infer_device_type, normalize_hostname, parse_dt
+from ingest.normalize import infer_device_role, normalize_hostname, parse_dt
 from ingest.sources import SourceConfig
 
 
@@ -45,7 +45,9 @@ def fetch(source: SourceConfig, observed_at: datetime) -> list[dict]:
                     "hostname": hostname,
                     "norm_name": norm,
                     "match_name": norm,
-                    "device_type": infer_device_type(agent.get("osName")),
+                    "device_type": infer_device_role(
+                        agent.get("osName"), machine_type=agent.get("machineType")
+                    ),
                     "os_name": agent.get("osName"),
                     "domain_name": agent.get("domain"),
                     "is_online": agent.get("isActive"),

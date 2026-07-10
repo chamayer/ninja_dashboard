@@ -25,6 +25,7 @@ from psycopg.types.json import Json
 
 from ingest import db
 from ingest.ninja_client import NinjaClient
+from ingest.normalize import infer_device_role, os_family
 from ingest.runlog import run_log
 from ingest.util import ninja_epoch_to_dt
 
@@ -37,6 +38,16 @@ INTERNAL_COLLECTOR_INSTANCE_ID = uuid.UUID("00000000-0000-4000-8000-000000000001
 
 def run(client: NinjaClient, snapshot_at: datetime) -> tuple[int, int]:
     """Returns (devices_upserted, snapshots_inserted)."""
+    try:
+        result = _run(client, snapshot_at)
+    except Exception as exc:
+        _record_source_run(snapshot_at, ok=False, rows=0, error=str(exc)[:2000])
+        raise
+    _record_source_run(snapshot_at, ok=True, rows=result[0])
+    return result
+
+
+def _run(client: NinjaClient, snapshot_at: datetime) -> tuple[int, int]:
     with run_log("core.devices") as stats:
         device_rows: list[dict] = []
         snapshot_rows: list[dict] = []
@@ -117,9 +128,10 @@ def run(client: NinjaClient, snapshot_at: datetime) -> tuple[int, int]:
             )
             missing_count = _mark_missing_devices(cur, current_ids, snapshot_at)
             _sync_operations_device_links(cur, current_ids, snapshot_at)
+            _sync_operations_device_roles(cur)
 
         _refresh_active_devices_view()
-        obs_count = _write_ninja_observations(device_rows, snapshot_at)
+        obs_count = _write_ninja_observations(device_rows, snapshot_rows, snapshot_at)
         _refresh_agent_presence_current()
         stats["rows_upserted"] = dev_count
         stats["rows_inserted"] = snap_count
@@ -190,7 +202,78 @@ def _sync_operations_device_links(cur: object, current_ids: list[int], snapshot_
     )
 
 
-def _write_ninja_observations(device_rows: list[dict], snapshot_at: datetime) -> int:
+def _sync_operations_device_roles(cur: object) -> None:
+    """Refresh device_role, os_name/os_family, and the NO-AV exemption
+    from the Ninja pull.
+
+    device_role is set from explicit signals only (node_class, server OS,
+    client OS) — devices with no signal keep their current role, never a
+    guessed default. The NO-AV marker ('no av' in tags or policy names)
+    sets exemptions['agent.edr']; when the marker is gone the ingest-set
+    exemption is removed, but operator-set values are left alone.
+    """
+    cur.execute(
+        """
+        UPDATE operations.devices d
+        SET device_role = CASE
+                WHEN UPPER(nd.node_class) LIKE '%%SERVER%%' THEN 'server'
+                WHEN UPPER(nd.node_class) LIKE '%%WORKSTATION%%' THEN 'workstation'
+                WHEN UPPER(nd.node_class) = 'MAC' THEN 'workstation'
+                WHEN LOWER(COALESCE(nd.os_name, '')) LIKE '%%server%%' THEN 'server'
+                WHEN LOWER(COALESCE(nd.os_name, '')) LIKE '%%windows%%' THEN 'workstation'
+                WHEN LOWER(COALESCE(nd.os_name, '')) LIKE '%%macos%%'
+                  OR LOWER(COALESCE(nd.os_name, '')) LIKE '%%os x%%' THEN 'workstation'
+                ELSE d.device_role
+            END,
+            os_name   = COALESCE(nd.os_name, d.os_name),
+            os_family = CASE
+                WHEN nd.os_name IS NULL THEN d.os_family
+                ELSE operations.os_family(nd.os_name)
+            END,
+            exemptions = CASE
+                WHEN (nd.data -> 'tags')::text ILIKE '%%no av%%'
+                  OR COALESCE(p.name, '') ILIKE '%%no av%%'
+                  OR COALESCE(rp.name, '') ILIKE '%%no av%%'
+                THEN d.exemptions || '{"agent.edr": "no_av_exempt"}'::jsonb
+                WHEN d.exemptions ->> 'agent.edr' = 'no_av_exempt'
+                THEN d.exemptions - 'agent.edr'
+                ELSE d.exemptions
+            END
+        FROM operations.device_links dl
+        JOIN operations.sources s ON s.id = dl.source_id AND s.name = 'Ninja'
+        JOIN ninja_core.devices nd ON nd.id::text = dl.external_id
+        LEFT JOIN ninja_core.policies p  ON p.id  = nd.policy_id
+        LEFT JOIN ninja_core.policies rp ON rp.id = nd.role_policy_id
+        WHERE dl.device_id = d.id
+          AND dl.tenant_id = d.tenant_id
+        """
+    )
+
+
+def _record_source_run(
+    started_at: datetime, ok: bool, rows: int, error: str = ""
+) -> None:
+    """Record the Ninja source run in operations.run_log (evaluator guard)."""
+    try:
+        with db.transaction() as cur:
+            cur.execute(f"SET LOCAL operations.tenant_id = {_TENANT_ID}")
+            cur.execute(
+                """
+                INSERT INTO operations.run_log
+                    (id, tenant_id, kind, subject_ref, started_at, ended_at,
+                     ok, rows, error)
+                VALUES (gen_random_uuid(), %s, 'source.Ninja', '{}'::jsonb,
+                        %s, NOW(), %s, %s, %s)
+                """,
+                (_TENANT_ID, started_at, ok, rows, error),
+            )
+    except Exception:
+        log.exception("operations.run_log write failed — continuing")
+
+
+def _write_ninja_observations(
+    device_rows: list[dict], snapshot_rows: list[dict], snapshot_at: datetime
+) -> int:
     """Write one agent.rmm entity_observation per device seen in this sync.
 
     Uses a per-run batch_id + per-device hash so re-runs of the same
@@ -199,6 +282,9 @@ def _write_ninja_observations(device_rows: list[dict], snapshot_at: datetime) ->
     if not device_rows:
         return 0
 
+    presence = {
+        r["device_id"]: (r["offline"], r["last_contact"]) for r in snapshot_rows
+    }
     ninja_ids = [str(r["id"]) for r in device_rows]
     batch_id = uuid.uuid4()
 
@@ -230,6 +316,26 @@ def _write_ninja_observations(device_rows: list[dict], snapshot_at: datetime) ->
                 obs_hash = hashlib.sha256(
                     f"{entity_key}:{snapshot_at.isoformat()}".encode()
                 ).digest()
+                offline, last_contact = presence.get(r["id"], (None, None))
+                canonical_data = {
+                    "hostname": (
+                        r["system_name"] or r["display_name"] or r["dns_name"]
+                    ),
+                    "platform":      "Ninja",
+                    "last_seen_at":  last_contact.isoformat() if last_contact else None,
+                    "is_online":     None if offline is None else not offline,
+                    "serial_number": r["serial_number"],
+                    # None when node_class/os give no explicit signal — never guessed.
+                    "device_type":   infer_device_role(r["os_name"], r["node_class"]),
+                    "os_name":       r["os_name"],
+                    "os_family":     os_family(r["os_name"]),
+                    # Ninja doesn't expose AD domain directly; the DNS suffix
+                    # is the closest factual equivalent.
+                    "domain": (
+                        r["dns_name"].split(".", 1)[1]
+                        if r["dns_name"] and "." in r["dns_name"] else None
+                    ),
+                }
                 obs_rows.append({
                     "observation_id":          uuid.uuid4(),
                     "tenant_id":               _TENANT_ID,
@@ -243,7 +349,7 @@ def _write_ninja_observations(device_rows: list[dict], snapshot_at: datetime) ->
                     "subplatform":             "",
                     "observed_at":             snapshot_at,
                     "raw_data":                Json({}),
-                    "canonical_data":          Json({}),
+                    "canonical_data":          Json(canonical_data),
                     "batch_id":                batch_id,
                     "observation_hash":        obs_hash,
                     "collector_version":       "",

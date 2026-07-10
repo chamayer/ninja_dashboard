@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 import httpx
 from psycopg.types.json import Json
 
-from ingest.normalize import infer_device_type, normalize_hostname, parse_dt
+from ingest.normalize import infer_device_role, normalize_hostname, parse_dt
 from ingest.sources import SourceConfig
 
 
@@ -82,7 +82,7 @@ def fetch(source: SourceConfig, observed_at: datetime) -> list[dict]:
             "hostname": hostname,
             "norm_name": norm,
             "match_name": norm,
-            "device_type": infer_device_type(guest.get("OperatingSystemName")),
+            "device_type": infer_device_role(guest.get("OperatingSystemName")),
             "os_name": guest.get("OperatingSystemName"),
             "domain_name": guest.get("MachineDomain"),
             "is_online": is_online,

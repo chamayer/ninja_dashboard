@@ -89,3 +89,79 @@ def infer_device_type(os_name: str | None, ninja_node_class: str | None = None) 
     if os_name and "server" in os_name.lower():
         return "server"
     return "workstation"
+
+
+def infer_device_role(
+    os_name: str | None,
+    node_class: str | None = None,
+    machine_type: str | None = None,
+) -> str | None:
+    """Server/workstation role from explicit signals only — never guessed.
+
+    Signals, in priority order: Ninja node_class, SentinelOne machineType,
+    then the OS name itself. Returns None when no signal identifies the
+    role (e.g. bare 'Linux'); callers must treat None as unknown, not
+    default it.
+    """
+    node = (node_class or "").upper()
+    if "SERVER" in node:
+        return "server"
+    if "WORKSTATION" in node or node == "MAC":
+        return "workstation"
+    machine = (machine_type or "").lower()
+    if machine == "server":
+        return "server"
+    if machine in ("desktop", "laptop"):
+        return "workstation"
+    os_lower = (os_name or "").lower()
+    if "server" in os_lower:
+        return "server"
+    if "windows" in os_lower or is_macos_name(os_name):
+        return "workstation"
+    return None
+
+
+# Ordered: first match wins. Ported from legacy matview taxonomy
+# (sql/migrations/051_agent_compliance_unresolved_and_macos.sql).
+_OS_FAMILY_PATTERNS: tuple[tuple[str, str], ...] = (
+    ("windows server 2025", "Windows Server 2025"),
+    ("windows server 2022", "Windows Server 2022"),
+    ("windows server 2019", "Windows Server 2019"),
+    ("windows server 2016", "Windows Server 2016"),
+    ("windows server 2012 r2", "Windows Server 2012 R2"),
+    ("windows server 2012", "Windows Server 2012"),
+    ("windows server 2008 r2", "Windows Server 2008 R2"),
+    ("windows server 2008", "Windows Server 2008"),
+    ("windows server", "Windows Server (other)"),
+    ("windows 11", "Windows 11"),
+    ("windows 10", "Windows 10"),
+    ("windows 8.1", "Windows 8.1"),
+    ("windows 8", "Windows 8"),
+    ("windows 7", "Windows 7"),
+    ("windows", "Windows (other)"),
+    ("macos 26", "macOS 26"),
+    ("macos 15", "macOS 15"),
+    ("macos 14", "macOS 14"),
+    ("macos 13", "macOS 13"),
+    ("macos 12", "macOS 12"),
+    ("macos 11", "macOS 11"),
+    ("macos 10", "macOS 10"),
+    ("macos", "macOS (other)"),
+    ("os x", "macOS (other)"),
+    ("darwin", "macOS (other)"),
+    ("linux", "Linux"),
+    ("ubuntu", "Linux"),
+    ("centos", "Linux"),
+    ("debian", "Linux"),
+    ("red hat", "Linux"),
+)
+
+
+def os_family(os_name: str | None) -> str:
+    if not os_name:
+        return "Unknown"
+    value = os_name.lower()
+    for needle, family in _OS_FAMILY_PATTERNS:
+        if needle in value:
+            return family
+    return "Other"

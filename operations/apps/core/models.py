@@ -228,6 +228,19 @@ class Device(UUIDTenantScopedModel):
         default=DeviceType.UNKNOWN,
         verbose_name="Type",
     )
+    # server/workstation from explicit source signals only, never guessed.
+    # 'unknown' = no source has identified the role; still coverage-
+    # evaluated under client defaults (role only matters when a
+    # requirement scopes device_scope). Distinct from device_type
+    # (form factor).
+    device_role = models.CharField(max_length=16, default="unknown")
+    os_name = models.CharField(max_length=200, blank=True, default="")
+    # Abbreviated family (e.g. 'Windows Server 2022', 'Windows 11') —
+    # legacy taxonomy, mirrored by operations.os_family(text).
+    os_family = models.CharField(max_length=40, blank=True, default="")
+    # {entity_type: reason} — evaluator skips requirements whose
+    # entity_type is present, e.g. {"agent.edr": "no_av_exempt"}.
+    exemptions = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     created_reason = models.CharField(max_length=120, blank=True, default="")
     updated_at = models.DateTimeField(auto_now=True)

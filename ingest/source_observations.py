@@ -31,7 +31,7 @@ from psycopg.types.json import Json
 from ingest import db
 from ingest.connectors import logmein, screenconnect, sentinelone
 from ingest.identity.fast_path import resolve_device_fast
-from ingest.normalize import is_placeholder_org_name
+from ingest.normalize import is_placeholder_org_name, os_family
 from ingest.sources import SourceConfig
 
 log = logging.getLogger(__name__)
@@ -71,14 +71,40 @@ def run_source_observations(
             rows = _FETCHERS[source.platform](source, observed_at)
             written = _write_observations(source, rows, batch_id, observed_at)
             counts[source.platform] = counts.get(source.platform, 0) + written
+            _record_source_run(source, observed_at, ok=True, rows=written)
             log.info(
                 "source_observations: source=%s written=%d", source.source_name, written
             )
-        except Exception:
+        except Exception as exc:
+            _record_source_run(
+                source, observed_at, ok=False, rows=0, error=str(exc)[:2000]
+            )
             log.exception(
                 "source_observations: source %s failed — continuing", source.source_name
             )
     return counts
+
+
+def _record_source_run(
+    source: SourceConfig, started_at: datetime, ok: bool, rows: int, error: str = ""
+) -> None:
+    """Record the source run in operations.run_log (evaluator source guard)."""
+    kind = f"source.{source.platform}.{source.source_key}".rstrip(".")[:80]
+    try:
+        with db.transaction() as cur:
+            cur.execute(f"SET LOCAL operations.tenant_id = {_TENANT_ID}")
+            cur.execute(
+                """
+                INSERT INTO operations.run_log
+                    (id, tenant_id, kind, subject_ref, started_at, ended_at,
+                     ok, rows, error)
+                VALUES (gen_random_uuid(), %s, %s, '{}'::jsonb,
+                        %s, NOW(), %s, %s, %s)
+                """,
+                (_TENANT_ID, kind, started_at, ok, rows, error),
+            )
+    except Exception:
+        log.exception("source_observations: run_log write failed — continuing")
 
 
 def _load_client_links(cur, source: SourceConfig) -> dict[str, uuid.UUID]:
@@ -179,6 +205,8 @@ def _write_observations(
                 continue
             hostname = row.get("hostname") or ""
             raw = row.get("raw_data") or {}
+            if isinstance(raw, Json):
+                raw = raw.obj  # connectors wrap payloads for the legacy writer
             if not isinstance(raw, dict):
                 raw = {}
             serial = (
@@ -187,6 +215,7 @@ def _write_observations(
                 or raw.get("serial_number")
                 or None
             )
+            os_name = row.get("os_name") or None
             canonical_data: dict[str, Any] = {
                 "hostname":      hostname,
                 "platform":      source.platform,
@@ -195,7 +224,14 @@ def _write_observations(
                 ),
                 "is_online":     row.get("is_online"),
                 "serial_number": serial,
+                # None when the source gives no explicit signal — never guessed.
+                "device_type":   row.get("device_type"),
+                "os_name":       os_name,
+                "os_family":     os_family(os_name),
+                "domain":        row.get("domain_name"),
             }
+            if raw.get("IsDup") is not None:
+                canonical_data["is_dup"] = bool(raw["IsDup"])
             obs_hash = hashlib.sha256(
                 f"{entity_key}:{observed_at.isoformat()}".encode()
             ).digest()
@@ -243,7 +279,7 @@ def _write_observations(
                 "platform":              source.platform,
                 "subplatform":           "",
                 "observed_at":           observed_at,
-                "raw_data":              Json({}),
+                "raw_data":              Json(raw),
                 "canonical_data":        Json(canonical_data),
                 "batch_id":              batch_id,
                 "observation_hash":      obs_hash,

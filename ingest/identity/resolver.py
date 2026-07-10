@@ -4,6 +4,11 @@ Scans entity_observations WHERE device_id IS NULL and attempts hostname-
 based resolution. On a unique match, updates device_id in place. On
 multiple candidates, creates an identity_candidates row for operator review.
 
+Observations that stay unresolved get promoted to new operations.devices
+rows once the same (client, hostname) has been observed for at least
+PROMOTION_MIN_SPAN_HOURS — legacy parity with the AC engine, which
+created a device row for every unmatched agent hostname.
+
 This is v1 (polling, not queue-governed). The identity.resolution queue
 registry entry exists for health monitoring only; this function reads
 entity_observations directly rather than consuming a queue table.
@@ -13,15 +18,20 @@ from __future__ import annotations
 
 import logging
 import uuid
+from datetime import timedelta
 
 from psycopg.types.json import Json
 
 from ingest import db
-from ingest.normalize import normalize_hostname
+from ingest.normalize import normalize_hostname, os_family
 
 log = logging.getLogger(__name__)
 
 TENANT_ID = 1
+
+# A (client, hostname) cluster must span at least this long before we
+# create a device for it — filters one-off ghosts and mid-enrolment noise.
+PROMOTION_MIN_SPAN_HOURS = 24
 
 
 def drain_resolution(batch_size: int = 200) -> int:
@@ -84,7 +94,15 @@ def drain_resolution(batch_size: int = 200) -> int:
 
     log.info("resolver: resolved %d / %d observations", resolved_count, len(rows) if rows else 0)
 
-    if resolved_count:
+    promoted_count = 0
+    try:
+        with db.transaction() as cur:
+            cur.execute(f"SET LOCAL operations.tenant_id = {TENANT_ID}")
+            promoted_count = _promote_unmatched_clusters(cur)
+    except Exception:
+        log.exception("resolver: device promotion failed — continuing")
+
+    if resolved_count or promoted_count:
         try:
             with db.transaction() as cur:
                 cur.execute("SELECT operations.refresh_agent_presence_current()")
@@ -155,3 +173,144 @@ def _maybe_create_candidate(cur, obs_id: uuid.UUID, entity_key: str, norm: str) 
             "resolver: identity_candidate created obs=%s hostname=%s device_count=%d",
             obs_id, norm, len(rows),
         )
+
+
+def _promote_unmatched_clusters(cur) -> int:
+    """Create devices for persistent unresolved (client, hostname) clusters.
+
+    An observation cluster qualifies when: it is client-attributed, no
+    existing device matched by serial or hostname, no pending
+    identity_candidate covers the hostname, and the cluster spans at
+    least PROMOTION_MIN_SPAN_HOURS. The new device gets a device_link
+    per (platform, entity_key) so future observations resolve on the
+    fast path, and the cluster's observations are backfilled in place.
+    """
+    cur.execute("SELECT name, id FROM operations.sources")
+    source_ids: dict[str, int] = {row[0]: row[1] for row in cur.fetchall()}
+
+    cur.execute(
+        """
+        SELECT client_id, platform, entity_key,
+               MIN(observed_at), MAX(observed_at),
+               (ARRAY_AGG(canonical_data ORDER BY observed_at DESC))[1]
+        FROM operations.entity_observations
+        WHERE tenant_id = %s AND device_id IS NULL AND client_id IS NOT NULL
+          AND entity_type LIKE 'agent.%%'
+        GROUP BY client_id, platform, entity_key
+        """,
+        (TENANT_ID,),
+    )
+    unresolved = cur.fetchall()
+    if not unresolved:
+        return 0
+
+    cur.execute(
+        """
+        SELECT DISTINCT signals ->> 'hostname'
+        FROM operations.identity_candidates
+        WHERE tenant_id = %s AND status = 'pending'
+        """,
+        (TENANT_ID,),
+    )
+    pending_hostnames = {row[0] for row in cur.fetchall() if row[0]}
+
+    # (client_id, norm) → list of (platform, entity_key, first, last, cd)
+    clusters: dict[tuple, list[tuple]] = {}
+    for client_id, platform, entity_key, first_seen, last_seen, cd in unresolved:
+        cd = cd or {}
+        hostname = cd.get("hostname") or cd.get("guest_name")
+        norm = normalize_hostname(hostname)
+        if not norm or norm in pending_hostnames:
+            continue
+        clusters.setdefault((client_id, norm), []).append(
+            (platform, entity_key, first_seen, last_seen, cd)
+        )
+
+    promoted = 0
+    min_span = timedelta(hours=PROMOTION_MIN_SPAN_HOURS)
+    for (client_id, norm), entries in clusters.items():
+        first = min(e[2] for e in entries)
+        last = max(e[3] for e in entries)
+        if last - first < min_span:
+            continue
+
+        # Re-check existing devices — the resolution loop only scans the
+        # newest batch, so an older match may exist that it never saw.
+        latest_cd = max(entries, key=lambda e: e[3])[4]
+        serial = latest_cd.get("serial_number")
+        if serial and _resolve_by_serial(cur, serial):
+            continue
+        if _resolve_by_hostname(cur, norm):
+            continue
+        cur.execute(
+            """
+            SELECT COUNT(*) FROM operations.devices
+            WHERE tenant_id = %s AND canonical_hostname = %s AND deleted_at IS NULL
+            """,
+            (TENANT_ID, norm),
+        )
+        if cur.fetchone()[0] >= 2:
+            continue  # ambiguous — leave for identity_candidates review
+
+        hostname = latest_cd.get("hostname") or norm
+        roles = {e[4].get("device_type") for e in entries} - {None, ""}
+        device_role = roles.pop() if len(roles) == 1 else "unknown"
+        os_name = next(
+            (e[4].get("os_name") for e in sorted(entries, key=lambda e: e[3], reverse=True)
+             if e[4].get("os_name")),
+            None,
+        )
+        platforms = sorted({e[0] for e in entries})
+        device_id = uuid.uuid4()
+        cur.execute(
+            """
+            INSERT INTO operations.devices
+                (id, version, tenant_id, client_id, canonical_hostname,
+                 canonical_serial, canonical_vm_uuid, device_type, device_role,
+                 os_name, os_family, exemptions,
+                 created_at, created_reason, updated_at, updated_reason,
+                 stale_reason, deleted_reason)
+            VALUES (%s, 1, %s, %s, %s, %s, '', 'unknown', %s,
+                    %s, %s, '{}'::jsonb,
+                    NOW(), %s, NOW(), '', '', '')
+            """,
+            (
+                device_id, TENANT_ID, client_id, hostname, serial or "",
+                device_role, os_name or "",
+                os_family(os_name) if os_name else "",
+                f"auto-promoted from {', '.join(platforms)}"[:120],
+            ),
+        )
+        for platform, entity_key, _first, e_last, _cd in entries:
+            source_id = source_ids.get(platform)
+            if source_id is None:
+                continue
+            cur.execute(
+                """
+                INSERT INTO operations.device_links
+                    (id, version, tenant_id, device_id, source_id,
+                     external_id, external_name, first_seen_at, last_seen_at)
+                VALUES (gen_random_uuid(), 1, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (tenant_id, source_id, external_id) DO NOTHING
+                """,
+                (TENANT_ID, device_id, source_id, entity_key, hostname,
+                 _first, e_last),
+            )
+            cur.execute(
+                """
+                UPDATE operations.entity_observations
+                SET device_id = %s
+                WHERE tenant_id = %s AND platform = %s AND entity_key = %s
+                  AND device_id IS NULL
+                """,
+                (device_id, TENANT_ID, platform, entity_key),
+            )
+        promoted += 1
+        log.info(
+            "resolver: promoted device %s hostname=%s client=%s platforms=%s",
+            device_id, norm, client_id, platforms,
+        )
+
+    if promoted:
+        log.info("resolver: promoted %d new devices", promoted)
+    return promoted

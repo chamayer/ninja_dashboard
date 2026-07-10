@@ -176,16 +176,6 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
             .order_by("category")
         )
 
-        # node_class → server/workstation: mirrors infer_device_type() in normalize.py.
-        # ninja_core.devices is the canonical source; no AC dependency.
-        _SCOPE_SQL = """
-            CASE
-                WHEN nd.node_class LIKE '%%SERVER%%'     THEN 'server'
-                WHEN nd.node_class LIKE '%%WORKSTATION%%' THEN 'workstation'
-                WHEN nd.os_name ILIKE '%%server%%'       THEN 'server'
-                ELSE 'workstation'
-            END
-        """
         _PLATFORM_SEVERITY = {
             "Ninja": "critical",
             "SentinelOne": "critical",
@@ -196,40 +186,31 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
             with connection.cursor() as cur:
                 cur.execute("SET LOCAL operations.tenant_id = 1")
 
-                # Total devices per scope for this client.
+                # Total devices per scope (device_role, synced by ingest —
+                # never guessed; 'unknown' still counts toward 'all').
                 cur.execute(
-                    f"""
-                    SELECT {_SCOPE_SQL} AS scope, COUNT(*)::int
+                    """
+                    SELECT od.device_role AS scope, COUNT(*)::int
                     FROM operations.devices od
-                    JOIN operations.device_links dl
-                         ON dl.device_id = od.id AND dl.missing_since IS NULL
-                    JOIN operations.sources s
-                         ON s.id = dl.source_id AND s.name = 'Ninja'
-                    JOIN ninja_core.devices nd
-                         ON nd.id = dl.external_id::bigint AND nd.is_current
                     WHERE od.tenant_id = 1 AND od.client_id = %s AND od.deleted_at IS NULL
+                      AND od.device_type NOT IN
+                          ('network-device', 'hypervisor-host', 'vm-agentless')
                     GROUP BY 1
                     """,
                     [str(client.id)],
                 )
-                scope_totals = dict(cur.fetchall())  # {'server': N, 'workstation': M}
+                scope_totals = dict(cur.fetchall())  # {'server': N, 'workstation': M, ...}
                 total_all = sum(scope_totals.values())
 
                 # Presence per platform per scope.
-                # Each observed device is classified via its Ninja device_link
-                # (Ninja is authoritative for device identity and node_class).
                 cur.execute(
-                    f"""
-                    SELECT ap.platform, {_SCOPE_SQL} AS scope,
+                    """
+                    SELECT ap.platform, od.device_role AS scope,
                            COUNT(DISTINCT ap.device_id)::int AS present,
                            MAX(ap.last_observed_at) AS last_seen
                     FROM operations.agent_presence_current ap
-                    JOIN operations.device_links dl
-                         ON dl.device_id = ap.device_id AND dl.missing_since IS NULL
-                    JOIN operations.sources s
-                         ON s.id = dl.source_id AND s.name = 'Ninja'
-                    JOIN ninja_core.devices nd
-                         ON nd.id = dl.external_id::bigint AND nd.is_current
+                    JOIN operations.devices od
+                         ON od.id = ap.device_id AND od.deleted_at IS NULL
                     WHERE ap.tenant_id = 1 AND ap.client_id = %s
                       AND ap.last_observed_at > NOW() - INTERVAL '7 days'
                     GROUP BY 1, 2
@@ -1022,22 +1003,37 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
 
 @login_required
 def sources_status(request: HttpRequest) -> HttpResponse:
-    """Source ingest run status and last observation timestamps."""
+    """Source ingest run status and last observation timestamps.
+
+    Run status comes from operations.run_log (kind 'source.<platform>[...]'),
+    which records every source run — scheduled and manual. The demand queue
+    is only consulted for pending/processing indicators.
+    """
     with transaction.atomic():
         with connection.cursor() as cur:
             cur.execute("SET LOCAL operations.tenant_id = 1")
 
-            # Last completed run per source
+            # Latest run per platform (any outcome)
             cur.execute("""
-                SELECT DISTINCT ON (df)
-                    df, status, completed_at, rows_seen, error, started_at, queued_at
-                FROM operations.source_run_queue
-                WHERE status IN ('done', 'failed')
-                ORDER BY df, completed_at DESC
+                SELECT DISTINCT ON (split_part(kind, '.', 2))
+                    split_part(kind, '.', 2), ok, ended_at, rows, error
+                FROM operations.run_log
+                WHERE kind LIKE 'source.%%'
+                ORDER BY split_part(kind, '.', 2), started_at DESC
             """)
             last_run = {r[0]: r for r in cur.fetchall()}
 
-            # Currently pending or processing
+            # Latest successful run per platform
+            cur.execute("""
+                SELECT DISTINCT ON (split_part(kind, '.', 2))
+                    split_part(kind, '.', 2), ended_at, rows
+                FROM operations.run_log
+                WHERE kind LIKE 'source.%%' AND ok
+                ORDER BY split_part(kind, '.', 2), started_at DESC
+            """)
+            last_ok = {r[0]: r for r in cur.fetchall()}
+
+            # Currently pending or processing (manual demand queue)
             cur.execute("""
                 SELECT df, status, queued_at, started_at
                 FROM operations.source_run_queue
@@ -1062,25 +1058,34 @@ def sources_status(request: HttpRequest) -> HttpResponse:
             """)
             reach = {r[0]: (int(r[1]), int(r[2])) for r in cur.fetchall()}
 
-            # Recent run history
+            # Recent run history — every recorded source run
             cur.execute("""
-                SELECT id, df, status, queued_at, started_at, completed_at,
-                       rows_seen, error
-                FROM operations.source_run_queue
-                ORDER BY queued_at DESC LIMIT 30
+                SELECT substring(kind FROM 8), ok, started_at, ended_at, rows, error
+                FROM operations.run_log
+                WHERE kind LIKE 'source.%%'
+                ORDER BY started_at DESC LIMIT 30
             """)
-            recent_cols = ["id", "source", "status", "queued_at", "started_at",
-                           "completed_at", "rows_seen", "error"]
-            recent_runs = [dict(zip(recent_cols, r)) for r in cur.fetchall()]
+            recent_runs = [
+                {
+                    "source":       r[0],
+                    "status":       "done" if r[1] else "failed",
+                    "started_at":   r[2],
+                    "completed_at": r[3],
+                    "rows_seen":    r[4],
+                    "error":        r[5] or None,
+                }
+                for r in cur.fetchall()
+            ]
 
     now = timezone.now()
     sources = []
     for source in _SOURCES:
         run = last_run.get(source)
+        ok_run = last_ok.get(source)
         act = active.get(source)
-        last_success = run[2] if run and run[1] == "done" else None
-        last_fail = run[2] if run and run[1] == "failed" else None
-        last_error = run[4] if run and run[1] == "failed" else None
+        last_success = ok_run[1] if ok_run else None
+        last_fail = run[2] if run and not run[1] else None
+        last_error = (run[4] or None) if run and not run[1] else None
         is_stale = last_success is None or (now - last_success).total_seconds() > 8 * 3600
         sources.append({
             "name":          source,
@@ -1088,7 +1093,7 @@ def sources_status(request: HttpRequest) -> HttpResponse:
             "has_pending":   bool(act and act[1] == "pending"),
             "last_success":  last_success,
             "last_failure":  last_fail,
-            "last_rows":     run[3] if run and run[1] == "done" else None,
+            "last_rows":     ok_run[2] if ok_run else None,
             "last_error":    last_error,
             "last_observed": last_obs.get(source),
             "client_count":  reach.get(source, (0, 0))[0],
