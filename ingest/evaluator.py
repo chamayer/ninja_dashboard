@@ -679,7 +679,9 @@ def _upsert_finding(
             %s, %s, %s, 'open',
             %s, %s, %s
         )
-        ON CONFLICT ON CONSTRAINT uq_findings_active_condition_key DO UPDATE SET
+        ON CONFLICT (tenant_id, condition_key)
+            WHERE condition_key > '' AND status IN ('open', 'acknowledged')
+        DO UPDATE SET
             confidence      = EXCLUDED.confidence,
             last_seen_at    = EXCLUDED.last_seen_at,
             last_detected_at = EXCLUDED.last_detected_at,
