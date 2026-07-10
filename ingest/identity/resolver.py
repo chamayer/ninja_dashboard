@@ -368,11 +368,11 @@ def _promote_unmatched_clusters(cur) -> int:
             INSERT INTO operations.devices
                 (id, version, tenant_id, client_id, canonical_hostname,
                  canonical_serial, canonical_vm_uuid, device_type, device_role,
-                 os_name, os_family, exemptions,
+                 lifecycle_status, os_name, os_family, exemptions,
                  created_at, created_reason, updated_at, updated_reason,
                  stale_reason, deleted_reason)
             VALUES (%s, 1, %s, %s, %s, %s, %s, %s, %s,
-                    %s, %s, '{}'::jsonb,
+                    'active', %s, %s, '{}'::jsonb,
                     NOW(), %s, NOW(), '', '', '')
             """,
             (
