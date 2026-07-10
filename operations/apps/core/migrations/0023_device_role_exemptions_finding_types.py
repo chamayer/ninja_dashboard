@@ -109,7 +109,9 @@ def unseed_finding_types(apps, schema_editor):
 def create_os_family_fn(apps, schema_editor):
     if schema_editor.connection.vendor != "postgresql":
         return
-    schema_editor.execute(_OS_FAMILY_FN)
+    # params=None so psycopg3 executes raw SQL — the ILIKE '%...%'
+    # patterns would otherwise be parsed as placeholders.
+    schema_editor.execute(_OS_FAMILY_FN, params=None)
 
 
 def drop_os_family_fn(apps, schema_editor):
