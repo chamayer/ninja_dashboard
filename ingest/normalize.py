@@ -49,6 +49,43 @@ def normalize_loose_hostname(name: str | None) -> str:
     return _HOST_LOOSE_CHARS_RE.sub("", short)
 
 
+# BIOS/SMBIOS placeholder serials seen in live fleet data. These are shared
+# by unrelated machines, so serial matching on them merges distinct devices
+# into one blob (observed: 100 UTA servers collapsed onto one device via
+# serial 'None').
+_JUNK_SERIALS = {
+    "",
+    "none",
+    "null",
+    "default string",
+    "to be filled by o.e.m.",
+    "to be filled by o.e.m",
+    "system serial number",
+    "chassis serial number",
+    "123-1234-123",
+    "invalid",
+    "not specified",
+    "not applicable",
+    "n/a",
+    "na",
+    "unknown",
+    "0",
+    "00000000",
+    "0123456789",
+}
+
+
+def is_usable_serial(serial: str | None) -> bool:
+    """True when a serial is specific enough to identify one machine."""
+    if not serial:
+        return False
+    value = serial.strip().lower()
+    if value in _JUNK_SERIALS or len(value) < 4:
+        return False
+    # All one repeated character (e.g. '0000000', 'FFFFFFFF') is filler.
+    return len(set(value)) > 1
+
+
 def is_macos_name(os_name: str | None) -> bool:
     if not os_name:
         return False

@@ -10,6 +10,8 @@ from __future__ import annotations
 import logging
 import uuid
 
+from ingest.normalize import is_usable_serial
+
 log = logging.getLogger(__name__)
 
 
@@ -54,8 +56,9 @@ def resolve_device_fast(
         )
         return None
 
-    # Step 2 — serial match (only when unique)
-    if serial:
+    # Step 2 — serial match (only when unique; BIOS placeholder serials
+    # like 'None' / 'Default string' are shared junk, never a match)
+    if is_usable_serial(serial):
         cur.execute(
             """
             SELECT id FROM operations.devices

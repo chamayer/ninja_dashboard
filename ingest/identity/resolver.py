@@ -22,7 +22,7 @@ import uuid
 from psycopg.types.json import Json
 
 from ingest import db
-from ingest.normalize import normalize_hostname, os_family
+from ingest.normalize import is_usable_serial, normalize_hostname, os_family
 
 log = logging.getLogger(__name__)
 
@@ -58,9 +58,11 @@ def drain_resolution(batch_size: int = 200) -> int:
         for obs_id, _entity_type, entity_key, platform, client_id, observed_at, canonical_data in rows:
             cd = canonical_data or {}
 
-            # Try serial number first (high confidence, unique hardware ID)
+            # Try serial number first (high confidence, unique hardware ID).
+            # BIOS placeholder serials ('None', 'Default string', ...) are
+            # shared across machines and must never drive a match.
             serial = cd.get("serial_number")
-            if serial:
+            if is_usable_serial(serial):
                 device_id = _resolve_by_serial(cur, serial, client_id)
                 if device_id is not None:
                     _attach_observation(
@@ -314,6 +316,8 @@ def _promote_unmatched_clusters(cur) -> int:
         # newest batch, so an older match may exist that it never saw.
         latest_cd = max(entries, key=lambda e: e[4])[5]
         serial = latest_cd.get("serial_number")
+        if not is_usable_serial(serial):
+            serial = None
         existing_device_id = _resolve_by_serial(cur, serial, client_id) if serial else None
         if existing_device_id is None:
             vm_uuid = latest_cd.get("vm_uuid")
