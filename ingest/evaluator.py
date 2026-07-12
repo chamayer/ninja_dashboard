@@ -62,6 +62,7 @@ def evaluate(tenant_id: int, device_id: uuid.UUID | None = None) -> int:
                 affected += _sync_device_roles(cur, tenant_id, now)
                 _sync_lifecycle_status(cur, tenant_id)
                 affected += _evaluate_unknown_entities(cur, tenant_id, now)
+                affected += _evaluate_duplicate_records(cur, tenant_id, now)
             corroborated = _load_corroborated_devices(cur, tenant_id)
             affected += _evaluate_coverage(
                 cur, tenant_id, device_id, now, skip_platforms, corroborated
@@ -332,6 +333,69 @@ def _evaluate_unknown_entities(cur: Any, tenant_id: int, now: datetime) -> int:
             cur, tenant_id, ft_id, ckey, "medium", now,
             {"node_class": node_class},
             {"recent_observations": n},
+        )
+        count += 1
+    cur.execute(
+        """
+        UPDATE operations.admin_findings
+        SET status = 'resolved', resolved_at = %s
+        WHERE tenant_id = %s AND finding_type_id = %s
+          AND status IN ('open', 'acknowledged')
+          AND NOT (condition_key = ANY(%s))
+        """,
+        (now, tenant_id, ft_id, present_keys),
+    )
+    return count
+
+
+# --------------------------------------------------------------------------
+# 2d. Same-stream hostname duplicates (license-consuming rows, never merged)
+# --------------------------------------------------------------------------
+
+def _evaluate_duplicate_records(cur: Any, tenant_id: int, now: datetime) -> int:
+    """Admin finding per (client, platform, stream, hostname) with >1 records.
+
+    Identity keeps these as separate device rows (hostname correlation is
+    cross-source only); this surfaces each duplicate group for cleanup since
+    every extra platform record consumes a license.
+    """
+    ft_id = _get_finding_type_id(cur, "duplicate_platform_record")
+    if ft_id is None:
+        return 0
+    cur.execute(
+        """
+        SELECT DISTINCT ON (platform, entity_type, entity_key)
+               platform, entity_type, entity_key, client_id,
+               canonical_data ->> 'hostname'
+        FROM operations.entity_observations
+        WHERE tenant_id = %s AND entity_type <> 'software'
+          AND observed_at > now() - INTERVAL '2 days'
+        ORDER BY platform, entity_type, entity_key, observed_at DESC
+        """,
+        (tenant_id,),
+    )
+    groups: dict[tuple, list[str]] = {}
+    for platform, entity_type, entity_key, client_id, hostname in cur.fetchall():
+        norm = normalize_hostname(hostname)
+        if not norm:
+            continue
+        groups.setdefault(
+            (platform, entity_type, str(client_id or ""), norm), []
+        ).append(entity_key)
+
+    count = 0
+    present_keys: list[str] = []
+    for (platform, entity_type, client_key, norm), keys in groups.items():
+        if len(keys) < 2:
+            continue
+        ckey = f"duplicate_record:{platform}:{entity_type}:{client_key}:{norm}"
+        present_keys.append(ckey)
+        severity = "high" if entity_type.startswith("agent.") else "low"
+        _upsert_admin_finding(
+            cur, tenant_id, ft_id, ckey, severity, now,
+            {"platform": platform, "entity_type": entity_type,
+             "hostname": norm, "client_id": client_key or None},
+            {"record_count": len(keys), "entity_keys": sorted(keys)},
         )
         count += 1
     cur.execute(

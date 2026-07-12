@@ -248,6 +248,7 @@ def _write_observations(
 
             device_id = resolve_device_fast(
                 cur, _TENANT_ID, source.platform, entity_key,
+                entity_type=source.entity_type,
                 serial=serial,
                 hostname=normalize_hostname(hostname) or None,
                 client_id=client_id,

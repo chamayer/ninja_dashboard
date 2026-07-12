@@ -20,6 +20,7 @@ def resolve_device_fast(
     tenant_id: int,
     source_name: str,
     external_id: str,
+    entity_type: str,
     serial: str | None = None,
     hostname: str | None = None,
     client_id: uuid.UUID | None = None,
@@ -33,6 +34,11 @@ def resolve_device_fast(
       1. Exact source + external_id match on device_links (certain).
       2. Unique serial match on devices within client scope (high confidence).
       3. Unique hostname match on devices within client scope (medium-high confidence).
+
+    Steps 2 and 3 correlate CROSS-source/stream only: a device that already
+    carries a different record of the same (platform, entity_type) stream is
+    never a match — that second record is a potential duplicate consuming a
+    license and must stay its own accounted row.
     """
     # Step 1 — exact source link
     cur.execute(
@@ -61,17 +67,25 @@ def resolve_device_fast(
     if is_usable_serial(serial):
         cur.execute(
             """
-            SELECT id FROM operations.devices
-            WHERE tenant_id = %s AND canonical_serial = %s AND deleted_at IS NULL
-              AND (%s::uuid IS NULL OR client_id = %s)
+            SELECT d.id FROM operations.devices d
+            WHERE d.tenant_id = %s AND d.canonical_serial = %s AND d.deleted_at IS NULL
+              AND (%s::uuid IS NULL OR d.client_id = %s)
+              AND NOT EXISTS (
+                  SELECT 1 FROM operations.entity_observations eo
+                  WHERE eo.tenant_id = d.tenant_id AND eo.device_id = d.id
+                    AND eo.platform = %s AND eo.entity_type = %s
+                    AND eo.entity_key <> %s
+              )
             """,
-            (tenant_id, serial, client_id, client_id),
+            (tenant_id, serial, client_id, client_id,
+             source_name, entity_type, external_id),
         )
         rows = cur.fetchall()
         if len(rows) == 1:
             return rows[0][0]
 
-    # Step 3 — hostname match (only when unique and no existing link for this source)
+    # Step 3 — hostname match (only when unique and the device carries no
+    # other record of this same stream — same-stream dups never merge)
     if hostname:
         cur.execute(
             """
@@ -80,12 +94,14 @@ def resolve_device_fast(
             WHERE d.tenant_id = %s AND d.canonical_hostname = %s AND d.deleted_at IS NULL
               AND (%s::uuid IS NULL OR d.client_id = %s)
               AND NOT EXISTS (
-                  SELECT 1 FROM operations.device_links dl2
-                  JOIN operations.sources s2 ON s2.id = dl2.source_id
-                  WHERE dl2.device_id = d.id AND s2.name = %s AND dl2.external_id = %s
+                  SELECT 1 FROM operations.entity_observations eo
+                  WHERE eo.tenant_id = d.tenant_id AND eo.device_id = d.id
+                    AND eo.platform = %s AND eo.entity_type = %s
+                    AND eo.entity_key <> %s
               )
             """,
-            (tenant_id, hostname, client_id, client_id, source_name, external_id),
+            (tenant_id, hostname, client_id, client_id,
+             source_name, entity_type, external_id),
         )
         rows = cur.fetchall()
         if len(rows) == 1:

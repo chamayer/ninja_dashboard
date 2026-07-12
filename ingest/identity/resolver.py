@@ -55,16 +55,23 @@ def drain_resolution(batch_size: int = 200) -> int:
 
         source_ids = _load_source_ids(cur)
 
-        for obs_id, _entity_type, entity_key, platform, client_id, observed_at, canonical_data in rows:
+        for obs_id, entity_type, entity_key, platform, client_id, observed_at, canonical_data in rows:
             cd = canonical_data or {}
 
             # Try serial number first (high confidence, unique hardware ID).
             # BIOS placeholder serials ('None', 'Default string', ...) are
             # shared across machines and must never drive a match.
+            # All signal matches correlate CROSS-source/stream only: a device
+            # that already carries a different record of the same
+            # (platform, entity_type) stream is never a match — that second
+            # record is a potential duplicate consuming a license and must
+            # stay its own accounted row.
             serial = cd.get("serial_number")
             if is_usable_serial(serial):
                 device_id = _resolve_by_serial(cur, serial, client_id)
-                if device_id is not None:
+                if device_id is not None and not _same_stream_conflict(
+                    cur, device_id, platform, entity_type, entity_key
+                ):
                     _attach_observation(
                         cur, source_ids, obs_id, device_id, platform, entity_key,
                         cd, observed_at, "serial", 0.980,
@@ -76,7 +83,9 @@ def drain_resolution(batch_size: int = 200) -> int:
             vm_uuid = cd.get("vm_uuid")
             if vm_uuid:
                 device_id = _resolve_by_vm_uuid(cur, vm_uuid, client_id)
-                if device_id is not None:
+                if device_id is not None and not _same_stream_conflict(
+                    cur, device_id, platform, entity_type, entity_key
+                ):
                     _attach_observation(
                         cur, source_ids, obs_id, device_id, platform, entity_key,
                         cd, observed_at, "vm_uuid", 0.950,
@@ -94,14 +103,16 @@ def drain_resolution(batch_size: int = 200) -> int:
                 continue
 
             device_id = _resolve_by_hostname(cur, norm, client_id)
-            if device_id is not None:
+            if device_id is not None and not _same_stream_conflict(
+                cur, device_id, platform, entity_type, entity_key
+            ):
                 _attach_observation(
                     cur, source_ids, obs_id, device_id, platform, entity_key,
                     cd, observed_at, "hostname_strict", 0.900,
                 )
                 resolved_count += 1
                 log.debug("resolver: hostname match %s → device %s", entity_key, device_id)
-            else:
+            elif device_id is None:
                 _maybe_create_candidate(cur, obs_id, entity_key, norm, client_id)
 
     log.info("resolver: resolved %d / %d observations", resolved_count, len(rows) if rows else 0)
@@ -169,6 +180,27 @@ def _resolve_by_vm_uuid(cur, vm_uuid: str, client_id: uuid.UUID | None) -> uuid.
     if len(rows) == 1:
         return rows[0][0]
     return None
+
+
+def _same_stream_conflict(
+    cur, device_id: uuid.UUID, platform: str, entity_type: str, entity_key: str
+) -> bool:
+    """True when the device already carries a DIFFERENT record of this stream.
+
+    Two records of the same (platform, entity_type) are potential duplicates
+    (each consumes a license); they must remain separate devices and are
+    surfaced by the evaluator as duplicate_platform_record findings.
+    """
+    cur.execute(
+        """
+        SELECT 1 FROM operations.entity_observations
+        WHERE tenant_id = %s AND device_id = %s
+          AND platform = %s AND entity_type = %s AND entity_key <> %s
+        LIMIT 1
+        """,
+        (TENANT_ID, device_id, platform, entity_type, entity_key),
+    )
+    return cur.fetchone() is not None
 
 
 def _resolve_by_hostname(cur, norm: str, client_id: uuid.UUID | None) -> uuid.UUID | None:
@@ -319,9 +351,26 @@ def _promote_unmatched_clusters(cur) -> int:
 
     promoted = 0
     for (client_id, norm), entries in clusters.items():
+        # Hostname correlation is CROSS-stream only. Within one
+        # (platform, entity_type) stream, keep the newest record in the
+        # cluster; every additional same-stream record is a potential
+        # duplicate consuming a license — it gets its OWN device row so
+        # every platform row stays accounted for.
+        by_stream: dict[tuple[str, str], list[tuple]] = {}
+        for e in entries:
+            by_stream.setdefault((e[0], e[1]), []).append(e)
+        primary: list[tuple] = []
+        extras: list[tuple] = []
+        for stream_entries in by_stream.values():
+            newest_first = sorted(
+                stream_entries, key=lambda e: e[4] or e[3], reverse=True
+            )
+            primary.append(newest_first[0])
+            extras.extend(newest_first[1:])
+
         # Re-check existing devices — the resolution loop only scans the
         # newest batch, so an older match may exist that it never saw.
-        latest_cd = max(entries, key=lambda e: e[4])[5]
+        latest_cd = max(primary, key=lambda e: e[4])[5]
         serial = latest_cd.get("serial_number")
         if not is_usable_serial(serial):
             serial = None
@@ -334,7 +383,13 @@ def _promote_unmatched_clusters(cur) -> int:
         if existing_device_id is None:
             existing_device_id = _resolve_by_hostname(cur, norm, client_id)
         if existing_device_id is not None:
-            for platform, _entity_type, entity_key, _first_seen, e_last, cd in entries:
+            for entry in primary:
+                platform, entity_type, entity_key, _first_seen, e_last, cd = entry
+                if _same_stream_conflict(
+                    cur, existing_device_id, platform, entity_type, entity_key
+                ):
+                    extras.append(entry)
+                    continue
                 _attach_observation(
                     cur, source_ids, None, existing_device_id, platform,
                     entity_key, cd, e_last, "hostname_strict", 0.900,
@@ -348,6 +403,9 @@ def _promote_unmatched_clusters(cur) -> int:
                     """,
                     (existing_device_id, TENANT_ID, platform, entity_key),
                 )
+            promoted += _promote_entries_individually(
+                cur, source_ids, client_id, norm, extras
+            )
             continue
         cur.execute(
             """
@@ -363,16 +421,16 @@ def _promote_unmatched_clusters(cur) -> int:
         display_name = latest_cd.get("hostname") or norm
         roles = {
             e[5].get("device_role") or e[5].get("device_type")
-            for e in entries
+            for e in primary
         } - {None, ""}
         device_role = roles.pop() if len(roles) == 1 else "unknown"
-        device_type = _infer_form_factor(entries)
+        device_type = _infer_form_factor(primary)
         os_name = next(
-            (e[5].get("os_name") for e in sorted(entries, key=lambda e: e[4], reverse=True)
+            (e[5].get("os_name") for e in sorted(primary, key=lambda e: e[4], reverse=True)
              if e[5].get("os_name")),
             None,
         )
-        platforms = sorted({e[0] for e in entries})
+        platforms = sorted({e[0] for e in primary})
         device_id = uuid.uuid4()
         cur.execute(
             """
@@ -393,7 +451,7 @@ def _promote_unmatched_clusters(cur) -> int:
                 f"auto-promoted from {', '.join(platforms)}"[:120],
             ),
         )
-        for platform, _entity_type, entity_key, _first, e_last, _cd in entries:
+        for platform, _entity_type, entity_key, _first, e_last, _cd in primary:
             source_id = source_ids.get(platform)
             if source_id is None:
                 continue
@@ -424,9 +482,81 @@ def _promote_unmatched_clusters(cur) -> int:
             "resolver: promoted device %s hostname=%s client=%s platforms=%s",
             device_id, norm, client_id, platforms,
         )
+        promoted += _promote_entries_individually(
+            cur, source_ids, client_id, norm, extras
+        )
 
     if promoted:
         log.info("resolver: promoted %d new devices", promoted)
+    return promoted
+
+
+def _promote_entries_individually(
+    cur, source_ids: dict[str, int], client_id, norm: str, entries: list[tuple]
+) -> int:
+    """One device per entry — same-stream hostname duplicates stay separate.
+
+    Each duplicate platform record consumes a license and must remain an
+    accounted row; the evaluator flags the group as duplicate_platform_record.
+    """
+    promoted = 0
+    for platform, entity_type, entity_key, first_seen, last_seen, cd in entries:
+        serial = cd.get("serial_number")
+        if not is_usable_serial(serial):
+            serial = None
+        os_name = cd.get("os_name")
+        device_id = uuid.uuid4()
+        cur.execute(
+            """
+            INSERT INTO operations.devices
+                (id, version, tenant_id, client_id, canonical_hostname,
+                 canonical_serial, canonical_vm_uuid, device_type, device_role,
+                 lifecycle_status, os_name, os_family, exemptions,
+                 created_at, created_reason, updated_at, updated_reason,
+                 stale_reason, deleted_reason)
+            VALUES (%s, 1, %s, %s, %s, %s, %s, %s, %s,
+                    'active', %s, %s, '{}'::jsonb,
+                    NOW(), %s, NOW(), '', '', '')
+            """,
+            (
+                device_id, TENANT_ID, client_id, norm, serial or "",
+                cd.get("vm_uuid") or "",
+                _infer_form_factor([(platform, entity_type, entity_key,
+                                     first_seen, last_seen, cd)]),
+                cd.get("device_role") or "unknown",
+                os_name or "", os_family(os_name) if os_name else "",
+                f"duplicate {platform} {entity_type} record — kept separate"[:120],
+            ),
+        )
+        source_id = source_ids.get(platform)
+        if source_id is not None:
+            cur.execute(
+                """
+                INSERT INTO operations.device_links
+                    (id, version, tenant_id, device_id, source_id,
+                     external_id, external_name, first_seen_at, last_seen_at,
+                     match_method, match_confidence)
+                VALUES (gen_random_uuid(), 1, %s, %s, %s, %s, %s, %s, %s,
+                        'promoted', 0.850)
+                ON CONFLICT (tenant_id, source_id, external_id) DO NOTHING
+                """,
+                (TENANT_ID, device_id, source_id, entity_key,
+                 cd.get("hostname") or norm, first_seen, last_seen),
+            )
+        cur.execute(
+            """
+            UPDATE operations.entity_observations
+            SET device_id = %s
+            WHERE tenant_id = %s AND platform = %s AND entity_key = %s
+              AND device_id IS NULL
+            """,
+            (device_id, TENANT_ID, platform, entity_key),
+        )
+        promoted += 1
+        log.info(
+            "resolver: promoted duplicate-record device %s hostname=%s platform=%s key=%s",
+            device_id, norm, platform, entity_key,
+        )
     return promoted
 
 
