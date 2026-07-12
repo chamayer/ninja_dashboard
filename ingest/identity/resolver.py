@@ -416,7 +416,14 @@ def _promote_unmatched_clusters(cur) -> int:
             (TENANT_ID, norm, client_id),
         )
         if cur.fetchone()[0] >= _MIN_IDENTITY_CANDIDATES:
-            continue  # ambiguous — leave for identity_candidates review
+            # Ambiguous — multiple devices already share this hostname.
+            # Never guess a merge, but never leave a platform record
+            # unaccounted either: each record becomes its own device row;
+            # identity_candidates + duplicate findings flag it for review.
+            promoted += _promote_entries_individually(
+                cur, source_ids, client_id, norm, primary + extras
+            )
+            continue
 
         display_name = latest_cd.get("hostname") or norm
         roles = {
