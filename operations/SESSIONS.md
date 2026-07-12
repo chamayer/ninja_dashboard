@@ -5,6 +5,54 @@ only project-level pointers.
 
 ---
 
+## 2026-07-12 — Track E completed: E2 deployed, E2b clean rebuild, E3 bootstrap retired
+
+**Why:** Finish Track E end-to-end (user-directed autonomous completion).
+Codex had shipped most of E2 (commits `96f83b8..ba602ef`: migration 0024,
+client-scoped resolver with match method/confidence, form-factor
+device_type, lifecycle field, legacy AC scheduler off); this session audited
+that work, closed its gaps, and ran the approved clean rebuild.
+
+**Work completed (commits `8b7c986`, `d50ad4d`):**
+
+- Migration 0025: `agent_presence_current` covers every non-software entity
+  stream (drops the `agent.%` filter) and adds `last_contact_at` from
+  platform truth (`canonical_data->>'last_seen_at'`). Seeds the
+  `unmapped_node_class` admin finding type.
+- Coverage presence is keyed on (platform, entity_type, scope) so vm/network
+  streams don't inflate agent coverage; fleet source reach stays
+  agent-scoped.
+- Evaluator: `_sync_lifecycle_status` (active <7d / offline_aging 7–30d /
+  pending_cleanup >30d from last platform contact; `retired` never touched)
+  and `_evaluate_unknown_entities` (admin finding per unmapped node_class;
+  currently zero — all node_classes map).
+- E2b clean rebuild executed on prod: truncated devices/device_links/
+  entity_observations/findings/admin_findings/identity_candidates/
+  notification_state+events/merge_candidates/unmatched_source_groups/
+  dead_letter_observations; kept clients (75), client_links (239),
+  coverage_requirements (17), rules, users. Full re-ingest + resolver +
+  evaluator from zero: 5,075 devices, 13,513 links, 1 linkless device,
+  30 unresolved observations (12 clientless LogMeIn hostnames + 18 nameless
+  Ninja vm.guests — correctly visible, not guessed). UTA gate: 981 Ninja
+  agent records → 948 canonical devices (33 same-hostname records linked,
+  by design); lifecycle 4,381 active / 264 offline_aging / 433
+  pending_cleanup after first sync.
+- E3: entrypoint no longer runs `bootstrap_devices_from_ninja` (devices are
+  created only via observations + resolution; command kept for manual
+  link-integrity). Device page shows per-stream platform last-contact and
+  per-link match method/confidence.
+
+**Known residuals:** attach-path labels serial/vm_uuid matches as
+`hostname_strict` (cosmetic); cross-client same-hostname candidate creation
+dropped by Codex (cross_client_conflict evaluator still covers it); one
+linkless device (`naftali2-pc`) from link reassignment — will surface as
+stale.
+
+**Next:** P2 notification dispatcher (uncommitted NOTIFY_* prep already in
+`ingest/config.py`).
+
+---
+
 ## 2026-07-10 — Track E E2 prepared: identity/model correction
 
 **Why:** Live data showed inflated inventory and unreliable coverage because

@@ -24,12 +24,18 @@ module-specific; root `../TODO.md` keeps cross-repo items and pointers.
 
 ### Parity blueprint (BLUEPRINT.md — Batches P1–P7)
 
-- [ ] Track E — entity model correction before P2. E1/E2 code prepared:
-      Ninja observations preserve `entity_type`; device identity is
-      client-scoped; `device_type` is form factor only; `device_links`
-      record match method/confidence. Next: commit/deploy, run migration
-      0024, then perform the approved clean rebuild/re-ingest and verify
-      source counts from zero.
+- [x] Track E — entity model correction before P2. 2026-07-12: complete.
+      E1 gate exact; E2 deployed (migrations 0024/0025, client-scoped
+      identity, form-factor device_type, lifecycle transitions, presence
+      matview covers all entity streams with platform last-contact);
+      E2b clean rebuild verified from zero (5,075 devices, UTA delta fully
+      explained by same-hostname linking); E3 entrypoint bootstrap retired.
+      Commits `8b7c986`, `d50ad4d` (+ Codex `96f83b8..ba602ef`).
+- [ ] Cosmetic: resolver attach path labels serial/vm_uuid matches as
+      `hostname_strict`; fix labels when next touching resolver.
+- [ ] Decide whether to restore cross-client same-hostname
+      identity_candidates (Codex dropped creation; cross_client_conflict
+      findings still cover detection).
 - [x] P1 — Track 1 evaluator parity: coverage matrix, lifecycle findings,
       device promotion (span killed — promote on first observation),
       `/run/resolver` endpoint, client-page card accuracy + clickthrough.

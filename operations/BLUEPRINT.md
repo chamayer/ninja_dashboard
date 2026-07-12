@@ -21,6 +21,12 @@ VirusTotal/MalwareTips reputation, user-risk scoring, DB role rename.
 
 ## Track E — Entity model correction (PRIORITY — before P2)
 
+**STATUS: COMPLETE 2026-07-12.** E1 gate exact; E2 deployed (0024/0025,
+client-scoped identity, lifecycle transitions, all-stream presence with
+platform last-contact); E2b clean rebuild verified from zero; E3 entrypoint
+bootstrap retired. See SESSIONS.md 2026-07-12 for verification numbers and
+residuals. P2 unblocked.
+
 Added 2026-07-10 after live data showed inflated inventory and broken
 coverage. Three user-set principles govern this track:
 
