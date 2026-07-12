@@ -204,7 +204,7 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
                 # Presence per platform per scope.
                 cur.execute(
                     """
-                    SELECT ap.platform, od.device_role AS scope,
+                    SELECT ap.platform, ap.entity_type, od.device_role AS scope,
                            COUNT(DISTINCT ap.device_id)::int AS present,
                            MAX(ap.last_observed_at) AS last_seen
                     FROM operations.agent_presence_current ap
@@ -213,7 +213,7 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
                     WHERE ap.tenant_id = 1 AND ap.client_id = %s
                       AND ap.last_observed_at > NOW() - INTERVAL '7 days'
                       AND od.lifecycle_status != 'retired'
-                    GROUP BY 1, 2
+                    GROUP BY 1, 2, 3
                     """,
                     [str(client.id)],
                 )
@@ -257,33 +257,36 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
                 )
                 ctx["software_count"] = cur.fetchone()[0]
 
-        # Build lookup: (platform, scope) → {present, last_seen}
+        # Build lookup: (platform, entity_type, scope) → {present, last_seen}
         presence_map: dict = {}
-        for platform, scope, present, last_seen in presence_rows:
-            presence_map[(platform, scope)] = {"present": present, "last_seen": last_seen}
+        for platform, etype, scope, present, last_seen in presence_rows:
+            presence_map[(platform, etype, scope)] = {
+                "present": present, "last_seen": last_seen,
+            }
 
         def _scope_total(scope: str) -> int:
             if scope == "all":
                 return total_all
             return scope_totals.get(scope, 0)
 
-        def _scope_present(platform: str, scope: str):
+        def _scope_present(platform: str, etype: str, scope: str):
             if scope == "all":
                 count = sum(
-                    v["present"] for (p, _), v in presence_map.items() if p == platform
+                    v["present"] for (p, e, _), v in presence_map.items()
+                    if p == platform and e == etype
                 )
                 last = max(
-                    (v["last_seen"] for (p, _), v in presence_map.items()
-                     if p == platform and v["last_seen"]),
+                    (v["last_seen"] for (p, e, _), v in presence_map.items()
+                     if p == platform and e == etype and v["last_seen"]),
                     default=None,
                 )
                 return count, last
-            v = presence_map.get((platform, scope), {})
+            v = presence_map.get((platform, etype, scope), {})
             return v.get("present", 0), v.get("last_seen")
 
         platform_coverage: dict = {}
         for platform, etype, scope, severity in req_rows:
-            present, last_seen = _scope_present(platform, scope)
+            present, last_seen = _scope_present(platform, etype, scope)
             total = _scope_total(scope)
             entry = platform_coverage.setdefault(platform, {
                 "severity": _PLATFORM_SEVERITY.get(platform, severity),
@@ -338,6 +341,7 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
                 SELECT platform, COUNT(DISTINCT client_id)
                 FROM operations.agent_presence_current
                 WHERE client_id IS NOT NULL
+                  AND entity_type LIKE 'agent.%'
                 GROUP BY platform
                 ORDER BY platform
                 """

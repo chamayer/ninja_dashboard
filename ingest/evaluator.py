@@ -60,6 +60,8 @@ def evaluate(tenant_id: int, device_id: uuid.UUID | None = None) -> int:
             skip_platforms = _source_failure_guard(cur, tenant_id, now)
             if device_id is None:
                 affected += _sync_device_roles(cur, tenant_id, now)
+                _sync_lifecycle_status(cur, tenant_id)
+                affected += _evaluate_unknown_entities(cur, tenant_id, now)
             corroborated = _load_corroborated_devices(cur, tenant_id)
             affected += _evaluate_coverage(
                 cur, tenant_id, device_id, now, skip_platforms, corroborated
@@ -253,6 +255,95 @@ def _sync_device_roles(cur: Any, tenant_id: int, now: datetime) -> int:
 
     if ft_id:
         _resolve_findings_absent(cur, tenant_id, ft_id, conflict_ids, now)
+    return count
+
+
+# --------------------------------------------------------------------------
+# 2b. Lifecycle status sync (platform truth from agent_presence_current)
+# --------------------------------------------------------------------------
+
+def _sync_lifecycle_status(cur: Any, tenant_id: int) -> None:
+    """Advance/reset lifecycle_status from last platform contact.
+
+    active <7d, offline_aging 7-30d, pending_cleanup >30d, measured from
+    the newest last_contact_at across all entity streams (falling back to
+    fetch time where the source carries no contact clock). 'retired' is an
+    operator decision — never touched here.
+    """
+    cur.execute(
+        """
+        WITH contact AS (
+            SELECT device_id,
+                   MAX(COALESCE(last_contact_at, last_observed_at)) AS last_contact
+            FROM operations.agent_presence_current
+            WHERE tenant_id = %s
+            GROUP BY device_id
+        ), target AS (
+            SELECT device_id,
+                   CASE
+                       WHEN last_contact < now() - INTERVAL '30 days' THEN 'pending_cleanup'
+                       WHEN last_contact < now() - INTERVAL '7 days'  THEN 'offline_aging'
+                       ELSE 'active'
+                   END AS status
+            FROM contact
+        )
+        UPDATE operations.devices d
+        SET lifecycle_status = t.status
+        FROM target t
+        WHERE d.id = t.device_id
+          AND d.tenant_id = %s
+          AND d.deleted_at IS NULL
+          AND d.lifecycle_status <> 'retired'
+          AND d.lifecycle_status <> t.status
+        """,
+        (tenant_id, tenant_id),
+    )
+    if cur.rowcount:
+        log.info("lifecycle sync: %d devices transitioned", cur.rowcount)
+
+
+# --------------------------------------------------------------------------
+# 2c. Unmapped node_class surveillance (nothing dropped silently)
+# --------------------------------------------------------------------------
+
+def _evaluate_unknown_entities(cur: Any, tenant_id: int, now: datetime) -> int:
+    """Admin finding per Ninja node_class that has no entity_type mapping."""
+    ft_id = _get_finding_type_id(cur, "unmapped_node_class")
+    if ft_id is None:
+        return 0
+    cur.execute(
+        """
+        SELECT COALESCE(canonical_data ->> 'node_class', '(none)'),
+               COUNT(*)::int
+        FROM operations.entity_observations
+        WHERE tenant_id = %s AND entity_type = 'unknown'
+          AND observed_at > now() - INTERVAL '2 days'
+        GROUP BY 1
+        """,
+        (tenant_id,),
+    )
+    rows = cur.fetchall()
+    count = 0
+    present_keys: list[str] = []
+    for node_class, n in rows:
+        ckey = f"unmapped_node_class:{node_class}"
+        present_keys.append(ckey)
+        _upsert_admin_finding(
+            cur, tenant_id, ft_id, ckey, "medium", now,
+            {"node_class": node_class},
+            {"recent_observations": n},
+        )
+        count += 1
+    cur.execute(
+        """
+        UPDATE operations.admin_findings
+        SET status = 'resolved', resolved_at = %s
+        WHERE tenant_id = %s AND finding_type_id = %s
+          AND status IN ('open', 'acknowledged')
+          AND NOT (condition_key = ANY(%s))
+        """,
+        (now, tenant_id, ft_id, present_keys),
+    )
     return count
 
 
