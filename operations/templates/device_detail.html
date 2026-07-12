@@ -58,14 +58,16 @@
                 <th style="padding: 0.45rem 0.6rem;">Platform</th>
                 <th style="padding: 0.45rem 0.6rem;">Agent type</th>
                 <th style="padding: 0.45rem 0.6rem;">Last observed</th>
+                <th style="padding: 0.45rem 0.6rem;">Last contact (platform)</th>
             </tr>
         </thead>
         <tbody>
-            {% for platform, entity_type, last_seen in agent_presence %}
+            {% for platform, entity_type, last_seen, last_contact in agent_presence %}
             <tr>
                 <td style="padding: 0.4rem 0.6rem; font-weight: 600;">{{ platform }}</td>
                 <td style="padding: 0.4rem 0.6rem;" class="muted">{{ entity_type }}</td>
                 <td style="padding: 0.4rem 0.6rem; white-space:nowrap;" class="muted">{{ last_seen|date:"Y-m-d H:i" }}</td>
+                <td style="padding: 0.4rem 0.6rem; white-space:nowrap;" class="muted">{% if last_contact %}{{ last_contact|date:"Y-m-d H:i" }}{% else %}&mdash;{% endif %}</td>
             </tr>
             {% endfor %}
         </tbody>
@@ -84,6 +86,7 @@
                 <th style="padding: 0.45rem 0.6rem;">Source</th>
                 <th style="padding: 0.45rem 0.6rem;">Name in that system</th>
                 <th style="padding: 0.45rem 0.6rem;">External ID</th>
+                <th style="padding: 0.45rem 0.6rem;">Matched by</th>
                 <th style="padding: 0.45rem 0.6rem;">Last seen</th>
             </tr>
         </thead>
@@ -93,6 +96,7 @@
                 <td style="padding: 0.4rem 0.6rem;">{{ link.source.name }}</td>
                 <td style="padding: 0.4rem 0.6rem;">{{ link.external_name }}</td>
                 <td style="padding: 0.4rem 0.6rem;"><code style="font-size:0.82rem;">{{ link.external_id }}</code></td>
+                <td style="padding: 0.4rem 0.6rem;" class="muted">{{ link.get_match_method_display }} ({{ link.match_confidence }})</td>
                 <td style="padding: 0.4rem 0.6rem; white-space:nowrap;" class="muted">{{ link.last_seen_at|default:"—" }}</td>
             </tr>
             {% endfor %}

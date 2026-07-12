@@ -56,9 +56,6 @@ python manage.py set_initial_admin_password
 echo "[operations] bootstrapping clients from ninja_core.organizations..."
 python manage.py bootstrap_clients_from_ninja
 
-echo "[operations] bootstrapping devices from ninja_core.devices..."
-python manage.py bootstrap_devices_from_ninja
-
 echo "[operations] collecting static files..."
 python manage.py collectstatic --noinput --clear
 

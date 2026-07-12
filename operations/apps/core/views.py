@@ -496,7 +496,9 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
             cur.execute("SET LOCAL operations.tenant_id = 1")
             cur.execute(
                 """
-                SELECT platform, entity_type, MAX(last_observed_at) AS last_seen
+                SELECT platform, entity_type,
+                       MAX(last_observed_at) AS last_seen,
+                       MAX(last_contact_at)  AS last_contact
                 FROM operations.agent_presence_current
                 WHERE tenant_id = %s AND device_id = %s
                 GROUP BY platform, entity_type
