@@ -5,7 +5,58 @@ only project-level pointers.
 
 ---
 
+## 2026-07-12 (later) — Rebuild #1 corrupted; identity rule hardened; rebuilds #2/#3
+
+**Why:** User compared the dashboard against the Ninja console: "i see in
+ninja 110 servers for UTA and you show only 97." Investigation showed the
+first rebuild (5,075 devices, below) was **corrupted** — BIOS placeholder
+serial `'None'` (108 records) merged ~100 UTA servers into one device.
+User then issued two hard rules: same-platform hostname dups must NOT be
+merged ("it is a valid finding but i need EVERY ROW ACCOUNTED FOR. THEY ARE
+CONSUMING LICENSES") and "hostname matches should only be used cross source
+... NEVER IN THE SAME SOURCE."
+
+**Work completed (commits `3a7168a`, `11202d3`, `00b0c05`, `efe8ecb`):**
+
+- `3a7168a` — `is_usable_serial()` junk-serial guard in `ingest/normalize.py`
+  ('None', 'Default string', 'To Be Filled By O.E.M.', <4 chars,
+  single-repeated-char). Junk serials never drive a match.
+- `11202d3` — `_sync_device_attributes()` in the resolver: role/device_type/
+  os backfill each cycle so attach-path devices aren't frozen at whatever
+  the first-resolving source knew (UTA showed only 40 role=server despite
+  108 correct devices).
+- `00b0c05` — same-stream separation: two records of one
+  (platform, entity_type) stream sharing a hostname/serial get SEPARATE
+  device rows (`_same_stream_conflict` in resolver + fast_path guards);
+  cluster promotion keeps newest per stream, promotes extras individually;
+  new `duplicate_platform_record` admin finding (evaluator section 2d,
+  migration 0026, severity high for agent streams). Cross-stream merging
+  (Ninja agent.rmm + vm.guest = one machine) preserved.
+- `efe8ecb` — ambiguous-hostname clusters (≥2 existing devices share the
+  hostname) promote every entry individually instead of hanging unresolved
+  (10 UTA CTXDESKTOP records were stuck after rebuild #3's mid-ingest
+  resolver pass).
+
+**Final verified state (rebuild #3 + efe8ecb pass):** 5,168 devices.
+UTA: 110 Ninja WINDOWS_SERVER records → exactly 110 devices, 0 unresolved.
+Ninja: 5,458 distinct non-software records → 4,842 distinct devices
+(607 cross-stream merges) + 9 nameless vm.guests visible as unresolved.
+39 duplicate_platform_record findings open. Unresolved fleet-wide: 18
+with-client (nameless) + 24 clientless — visible by design.
+
+**Lesson:** always verify per-device merge traces against source console
+counts; never accept plausible aggregate explanations. The "5,075 devices /
+UTA 981→948 by design" numbers in the entry below are superseded.
+
+**Next:** P2 notification dispatcher (uncommitted NOTIFY_* prep in
+`ingest/config.py`). Residual: attach-path match_method mislabel persists.
+
+---
+
 ## 2026-07-12 — Track E completed: E2 deployed, E2b clean rebuild, E3 bootstrap retired
+
+> **Superseded (same day):** the rebuild numbers below were corrupted by the
+> junk-serial bug — see the entry above.
 
 **Why:** Finish Track E end-to-end (user-directed autonomous completion).
 Codex had shipped most of E2 (commits `96f83b8..ba602ef`: migration 0024,

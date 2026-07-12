@@ -24,13 +24,20 @@ module-specific; root `../TODO.md` keeps cross-repo items and pointers.
 
 ### Parity blueprint (BLUEPRINT.md — Batches P1–P7)
 
-- [x] Track E — entity model correction before P2. 2026-07-12: complete.
-      E1 gate exact; E2 deployed (migrations 0024/0025, client-scoped
-      identity, form-factor device_type, lifecycle transitions, presence
-      matview covers all entity streams with platform last-contact);
-      E2b clean rebuild verified from zero (5,075 devices, UTA delta fully
-      explained by same-hostname linking); E3 entrypoint bootstrap retired.
-      Commits `8b7c986`, `d50ad4d` (+ Codex `96f83b8..ba602ef`).
+- [x] Track E — entity model correction before P2. 2026-07-12: complete
+      after THREE rebuilds. E1 gate exact; E2 deployed (migrations
+      0024/0025, client-scoped identity, form-factor device_type,
+      lifecycle transitions, presence matview all streams); E3 entrypoint
+      bootstrap retired. Rebuild #1 (5,075 devices) was CORRUPTED — junk
+      BIOS serial 'None' merged ~100 UTA servers; user caught it via
+      console comparison. Fixes: `3a7168a` junk-serial guard, `11202d3`
+      attribute sync, `00b0c05` same-stream dup separation +
+      duplicate_platform_record finding (migration 0026), `efe8ecb`
+      ambiguous-hostname individual promotion. Final verified: 5,168
+      devices; UTA 110 Ninja server records → 110 devices; Ninja 5,458
+      records → 4,842 devices (607 cross-stream merges) + 9 nameless
+      vm.guests unresolved-visible; 39 dup findings. Commits `8b7c986`,
+      `d50ad4d` (+ Codex `96f83b8..ba602ef`) + the 4 fixes.
 - [ ] Cosmetic: resolver attach path labels serial/vm_uuid matches as
       `hostname_strict`; fix labels when next touching resolver.
 - [ ] Decide whether to restore cross-client same-hostname
