@@ -114,6 +114,13 @@ def drain_resolution(batch_size: int = 200) -> int:
     except Exception:
         log.exception("resolver: device promotion failed — continuing")
 
+    try:
+        with db.transaction() as cur:
+            cur.execute(f"SET LOCAL operations.tenant_id = {TENANT_ID}")
+            _sync_device_attributes(cur)
+    except Exception:
+        log.exception("resolver: device attribute sync failed — continuing")
+
     if resolved_count or promoted_count:
         try:
             with db.transaction() as cur:
@@ -421,6 +428,105 @@ def _promote_unmatched_clusters(cur) -> int:
     if promoted:
         log.info("resolver: promoted %d new devices", promoted)
     return promoted
+
+
+def _sync_device_attributes(cur) -> None:
+    """Recompute device_role / device_type / os_* from ALL linked observations.
+
+    Devices are created from whichever observation group resolves first, so
+    a device promoted from an LMI-only cluster gets role 'unknown' even
+    though the Ninja record that attaches later carries node_class=SERVER.
+    Set-based and idempotent — attribute truth is order-independent.
+    """
+    # Role: fill 'unknown' only when linked observations agree on exactly
+    # one explicit role. Conflicts stay 'unknown' (visible), never guessed.
+    cur.execute(
+        """
+        WITH sig AS (
+            SELECT device_id,
+                   ARRAY_AGG(DISTINCT canonical_data->>'device_role')
+                       FILTER (WHERE COALESCE(canonical_data->>'device_role', '') <> '') AS roles
+            FROM operations.entity_observations
+            WHERE tenant_id = %s AND device_id IS NOT NULL
+            GROUP BY device_id
+        )
+        UPDATE operations.devices d
+        SET device_role = sig.roles[1],
+            updated_at = NOW(),
+            updated_reason = 'attribute sync from observations'
+        FROM sig
+        WHERE d.id = sig.device_id
+          AND COALESCE(d.device_role, 'unknown') IN ('unknown', '')
+          AND cardinality(sig.roles) = 1
+        """,
+        (TENANT_ID,),
+    )
+    if cur.rowcount:
+        log.info("resolver: attribute sync set device_role on %d devices", cur.rowcount)
+
+    # Form factor: same precedence as _infer_form_factor, over all streams.
+    cur.execute(
+        """
+        WITH ft AS (
+            SELECT eo.device_id,
+                   BOOL_OR(eo.entity_type = 'network.device'
+                           OR COALESCE(eo.canonical_data->>'node_class', '') ~ '^NMS_') AS is_net,
+                   BOOL_OR(eo.entity_type = 'vm.host'
+                           OR COALESCE(eo.canonical_data->>'node_class', '') ~ '(_VMM_HOST|_VM_HOST)$') AS is_host,
+                   BOOL_OR(eo.entity_type = 'vm.guest'
+                           OR COALESCE(eo.canonical_data->>'node_class', '') ~ '(_VMM_GUEST|_VM_GUEST)$'
+                           OR COALESCE(eo.canonical_data->>'is_vm', '') IN ('true', 'True', '1')) AS is_vm,
+                   BOOL_OR(eo.entity_type LIKE 'agent.%%') AS is_agent
+            FROM operations.entity_observations eo
+            WHERE eo.tenant_id = %s AND eo.device_id IS NOT NULL
+            GROUP BY eo.device_id
+        )
+        UPDATE operations.devices d
+        SET device_type = t.target,
+            updated_at = NOW(),
+            updated_reason = 'attribute sync from observations'
+        FROM (
+            SELECT device_id,
+                   CASE WHEN is_net THEN 'network-device'
+                        WHEN is_host THEN 'hypervisor-host'
+                        WHEN is_vm THEN 'vm'
+                        WHEN is_agent THEN 'physical'
+                        ELSE 'unknown' END AS target
+            FROM ft
+        ) t
+        WHERE d.id = t.device_id AND d.device_type IS DISTINCT FROM t.target
+        """,
+        (TENANT_ID,),
+    )
+    if cur.rowcount:
+        log.info("resolver: attribute sync set device_type on %d devices", cur.rowcount)
+
+    # OS: backfill devices with no os_name from the newest observation
+    # that carries one (os_family derives in Python, so update per row).
+    cur.execute(
+        """
+        SELECT DISTINCT ON (eo.device_id) eo.device_id, eo.canonical_data->>'os_name'
+        FROM operations.entity_observations eo
+        JOIN operations.devices d ON d.id = eo.device_id
+        WHERE eo.tenant_id = %s AND COALESCE(d.os_name, '') = ''
+          AND COALESCE(eo.canonical_data->>'os_name', '') <> ''
+        ORDER BY eo.device_id, eo.observed_at DESC
+        """,
+        (TENANT_ID,),
+    )
+    os_rows = cur.fetchall()
+    for device_id, os_name in os_rows:
+        cur.execute(
+            """
+            UPDATE operations.devices
+            SET os_name = %s, os_family = %s,
+                updated_at = NOW(), updated_reason = 'attribute sync from observations'
+            WHERE id = %s
+            """,
+            (os_name, os_family(os_name), device_id),
+        )
+    if os_rows:
+        log.info("resolver: attribute sync set os_name on %d devices", len(os_rows))
 
 
 def _infer_form_factor(entries: list[tuple]) -> str:
