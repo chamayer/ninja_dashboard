@@ -65,8 +65,29 @@ module-specific; root `../TODO.md` keeps cross-repo items and pointers.
       auto-attached on S1+LMI, Spencer/Glas attached via alias; 6
       open candidates (Silvercup, A.M.Rose Internal, DJ Direct GA,
       Gla, Silk Edge, Trimworx/Deco/BGG); 7 unattached_group findings;
-      1 client_name_conflict drift finding. Next: C3 evidence panel +
-      acceptance UI + requirement profiles.
+      1 client_name_conflict drift finding. Batch C3 pushed
+      (`a61c486` C3a data model + evaluator, `e760e2b` C3b evidence
+      panel, `c5d1c56` C3c accept/map/exclude/fix + audit). C3a:
+      requirement_profiles + requirement_profile_items with
+      Django-partial-unique tenant-default; Client.requirement_profile
+      FK; migration 0029 seeds "Standard" profile with 3 items from
+      current global coverage_requirements (agent.rmm/Ninja,
+      agent.edr/SentinelOne, agent.remote_access/LogMeIn) marked
+      is_tenant_default. Evaluator: platform='any' wildcard via
+      LATERAL subquery per-device, client-scoped rows REPLACE global
+      rows (override index; COALESCE guards NULL client_id + empty
+      override array). C3b: /clients/candidates/ queue + evidence
+      detail (per-source records, sample devices, device-overlap
+      signal, fuzzy suggestions vs display_name + aliases); nav
+      badge via context processor. C3c: four POST endpoints with
+      AuditLog; accept mints client with slug+display_name, attaches
+      every source group via _attach_group_to_client, adds manual
+      alias, instantiates chosen profile's items as per-client
+      coverage_requirements. Verified on am-ch-01: migration 0029
+      applied, Standard profile + 3 items seeded, /clients/candidates/
+      renders 200, wildcard+override SQL executes cleanly (5,127
+      devices matched). End-to-end candidate accept awaits operator
+      click. Track C complete pending live acceptance.
 - [ ] ScreenConnect fetch returns exactly 1,000 sessions — suspected
       GetSessionsByFilter page cap; verify against SC console count and
       page if needed.

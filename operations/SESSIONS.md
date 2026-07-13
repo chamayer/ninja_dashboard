@@ -5,7 +5,79 @@ only project-level pointers.
 
 ---
 
-## 2026-07-13 (latest) — Track C batch C2: client resolver + candidates + client findings + legacy import
+## 2026-07-13 (latest) — Track C batch C3: evidence panel + acceptance UI + requirement profiles
+
+**Why:** C1 emitted org observations, C2 resolved id-link + exact-name
++ recorded the residual as candidates + findings. C3 turns those
+candidates into decisions and folds in the compliance-shape fixes
+(platform 'any' wildcard, client override precedence, tenant-default
+requirement profile as a data row).
+
+**Commits:**
+
+- `a61c486` — C3a. `RequirementProfile` +
+  `RequirementProfileItem` models; `Client.requirement_profile`
+  nullable FK; migration 0029 (RLS + grants, partial-unique
+  is_tenant_default) seeds a "Standard" profile from the tenant's
+  global coverage_requirements (3 items: agent.rmm/Ninja,
+  agent.edr/SentinelOne, agent.remote_access/LogMeIn, all severity
+  matched original rows). Evaluator (`_evaluate_coverage`) rewritten:
+  LATERAL subquery aggregates `agent_presence_current` per device so
+  `platform='any'` correctly means "some platform of this entity_type
+  present"; client-scoped requirement rows for (entity_type,
+  device_scope) now REPLACE global rows for that client's devices
+  (override index built once per pass, COALESCE guards NULL
+  client_id + empty override arrays).
+- `e760e2b` — C3b. `/clients/candidates/` queue view + evidence
+  detail view: per-source group records (device_count, run_count,
+  first/last seen from entity_observations), sample devices in the
+  group (via `canonical_data->>platform_group_id`), device-overlap
+  signal (which existing client's devices already resolve inside
+  this group — strongest map-to-existing hint), fuzzy suggestions
+  via `difflib.get_close_matches` against Client.display_name and
+  enabled `client_name_aliases`. Nav badge from
+  `nav_pending_client_candidates` context processor.
+- `c5d1c56` — C3c. Four POST endpoints on
+  `/clients/candidates/<uuid>/`:
+    * `accept`  — mint Client (slugified display_name with -N
+      collision suffix), attach every source group via shared
+      `_attach_group_to_client` helper (mints client_link with
+      `created_reason='candidate.accept'`, backfills org + device
+      observations, clears unmatched_source_groups), add manual-tier
+      ClientNameAlias, instantiate the chosen profile's items as
+      per-client CoverageRequirement rows. Defaults to tenant-default
+      profile.
+    * `map`     — same attach flow into an existing client, no mint.
+    * `exclude` — add `client_org_excludes` row.
+    * `fix`     — record operator note only, candidate stays open.
+  Every action writes an `AuditLog` row (actor_kind=user, source=ui,
+  entity_type='client_candidate', before/after JSON). Detail page
+  grows collapsible action forms.
+
+**Verified on am-ch-01:**
+
+Migration 0029 applied; Standard profile with 3 items seeded and
+`is_tenant_default=true`. `/clients/candidates/` returns 200.
+Wildcard+override evaluator SQL executes cleanly:
+`SELECT ... LATERAL ... NOT COALESCE(d.client_id = ANY(ARRAY[]::uuid[]), FALSE)`
+matches 5,127 devices (~ full tenant); 4,122 have S1 presence — the
+denominator/numerator relationship the wildcard is meant to express.
+
+End-to-end candidate accept via the UI awaits an operator click
+(Silvercup, DJ Direct GA, Silk Edge, etc. are ready for review).
+
+**Track C is functionally complete** — every gate from C.8 except
+the live accept-round-trip is green. C1 org observations reconcile
+per platform; TSK auto-attached by exact name on both S1 + LMI at
+C2; candidates surface for the correct residual; profile
+infrastructure and evaluator wildcard/override work.
+
+**Next:** await operator use of the acceptance UI, then P2
+(notification dispatcher, previously paused for Track E → Track C).
+
+---
+
+## 2026-07-13 (later evening) — Track C batch C2: client resolver + candidates + client findings + legacy import
 
 **Why:** C1 shipped the raw org observations and empty name-mapping tables;
 C2 is the engine that turns those observations into decisions. Strictly
