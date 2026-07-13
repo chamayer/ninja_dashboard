@@ -46,6 +46,15 @@ module-specific; root `../TODO.md` keeps cross-repo items and pointers.
       Rebuild #5 verified: 5,120 devices, 0 orphans, UTA servers 110 =
       Ninja console, citrixapp26 7→1. Commits `3d6002f`, `ca22875`,
       `671e206`, `6870b28`.
+- [ ] Track C — client entity (BLUEPRINT Track C, priority before P2).
+      2026-07-13: blueprint written (`3a4f10d`); batch C1 pushed
+      (`500e419`): org observations per container from every source
+      (Ninja orgs incl. empty, S1 /sites, LMI groups incl. empty, SC per
+      instance), migration 0027 client_name_aliases / client_org_excludes
+      / placeholder_org_names, hardcoded _PLACEHOLDER_ORG_NAMES retired,
+      device resolver skips org rows. Next: C2 client resolver +
+      candidates + client findings + legacy alias/exclude import; C3
+      evidence panel + acceptance UI + requirement profiles.
 - [ ] ScreenConnect fetch returns exactly 1,000 sessions — suspected
       GetSessionsByFilter page cap; verify against SC console count and
       page if needed.

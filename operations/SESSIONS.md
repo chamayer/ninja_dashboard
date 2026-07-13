@@ -5,6 +5,50 @@ only project-level pointers.
 
 ---
 
+## 2026-07-13 (later) — Track C blueprint + batch C1: org observations, name mapping tables
+
+**Why:** 24 clientless LMI observations proved the client-learning gap —
+client "TSK" exists yet LMI group "TSK" sat unmatched, and no client means
+zero compliance evaluation. User set the track's principles: clients are
+first-class entities (observations → resolution → lifecycle → findings),
+NO source authority (supersedes the bootstrap_clients_from_ninja
+exception), NO auto-mint (every new name is a candidate needing
+acceptance), all mappings in admin-maintainable data, id-link mappings
+short-circuit all matching (name drift = finding, never re-match).
+
+**Commits:**
+
+- `3a4f10d` — BLUEPRINT Track C written (C.1 entity taxonomy pin, C.2 org
+  observations, C.3 strictly-exclusive resolver ladder, C.4 candidates +
+  evidence panel, C.5 client findings, C.6 requirement profiles +
+  platform-any wildcard + client override semantics, C.7 legacy parity
+  migration 273/8 rows, C.8 clean-run gates; PC batch row before P2).
+- `500e419` — batch C1: every source emits one `entity_type='org'`
+  observation per container per run keyed by stable group id (Ninja: all
+  ninja_core.organizations incl. empty; S1: /sites fetch so zero-agent
+  sites observed; LMI: payload groups list incl. empty; SC: one per
+  client-scoped instance). Migration 0027: client_name_aliases /
+  client_org_excludes / placeholder_org_names (+RLS/grants, placeholder
+  seed); hardcoded `_PLACEHOLDER_ORG_NAMES` deleted — writer reads the
+  table. `_org_only` fetcher row contract for container-only records.
+  Device resolver queries exclude `entity_type='org'` (containers resolve
+  to clients in C2, not devices). Attachment at write is rung 1 only
+  (existing client_links / client-scoped instance); client_id stays NULL
+  otherwise for the C2 resolver.
+
+**Verified (first post-deploy run):** Ninja 75/75 org obs attached =
+console exact; SC 1/1; S1 78 sites/run (71 attached, 7 unattached incl.
+TSK/SilverCup/Glas/"Default site" flagged placeholder); LMI 102 groups
+(92 attached; unattached = TSK/Ready/Silk Edge/Silvercup with devices,
+4 empty groups, junk "-1", placeholders "Unknown"/".Default" flagged).
+0 new devices, 0 orphans, resolver untouched by org rows. S1 appearing
+2× = two runs (startup + enqueue) — per-run time series, by design.
+
+**Next:** C2 — client resolver + candidates + client findings + legacy
+alias/exclude import.
+
+---
+
 ## 2026-07-13 — Confidence-tiered dup collapse; stream-agnostic grouping; rebuild #5
 
 **Why:** UTA showed 135 server rows vs 110 in the Ninja console — 24 phantom
