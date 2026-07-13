@@ -390,6 +390,14 @@ def _promote_unmatched_clusters(cur) -> int:
     on the fast path, and the cluster's observations are backfilled in
     place.
     """
+    # The source queue drains resolution from one thread per source, so
+    # concurrent promotions see the same NULL observations and each mint a
+    # device — the loser's link INSERTs conflict away, leaving orphan
+    # device rows. Serialize promotion; the linked-entity-key guard below
+    # then turns later passes into pure backfills.
+    cur.execute(
+        "SELECT pg_advisory_xact_lock(hashtext('operations.resolver_promotion'))"
+    )
     source_ids = _load_source_ids(cur)
 
     cur.execute(
