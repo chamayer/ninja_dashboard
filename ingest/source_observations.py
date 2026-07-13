@@ -214,10 +214,12 @@ def _write_observations(
                 raw = raw.obj  # connectors wrap payloads for the legacy writer
             if not isinstance(raw, dict):
                 raw = {}
+            guest_info = raw.get("GuestInfo") if isinstance(raw.get("GuestInfo"), dict) else {}
             serial = (
                 raw.get("serialNumber")
                 or raw.get("biosSerialNumber")
                 or raw.get("serial_number")
+                or guest_info.get("MachineSerialNumber")
                 or None
             )
             os_name = row.get("os_name") or None

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 
 import httpx
 from psycopg.types.json import Json
@@ -29,36 +29,33 @@ def fetch(source: SourceConfig, observed_at: datetime) -> list[dict]:
         resp.raise_for_status()
         sessions = resp.json()
 
-    best: dict[str, tuple[datetime | None, dict]] = {}
-    # Track how many distinct ScreenConnect sessions resolved to each
-    # normalized hostname. The original PowerShell stamped IsDup=True
-    # on the survivor when more than one session collapsed to the same
-    # NormName; the matrix builder reads `raw_data.IsDup` to surface
-    # `screenconnect_dup` on compliance_matrix_current.
+    # EVERY live session becomes an observation — same-hostname sessions are
+    # potential duplicate agents (each consumes a license) and must stay
+    # accounted rows. The identity layer collapses sessions proven to be one
+    # machine (serial/MAC) onto one device; the evaluator flags the group as
+    # duplicate_platform_record. session_counts keeps the legacy IsDup flag
+    # the matrix builder reads (`screenconnect_dup`).
+    kept: list[dict] = []
     session_counts: dict[str, int] = {}
     for session in sessions or []:
+        if session.get("IsDeleted") or session.get("IsEnded"):
+            continue
         guest = session.get("GuestInfo") or {}
         hostname = guest.get("MachineName") or session.get("Name")
         norm = normalize_hostname(hostname)
         if not hostname or not norm:
             continue
         session_counts[norm] = session_counts.get(norm, 0) + 1
+        kept.append(session)
+
+    observations: list[dict] = []
+    for session in kept:
+        guest = session.get("GuestInfo") or {}
+        hostname = guest.get("MachineName") or session.get("Name")
+        norm = normalize_hostname(hostname)
         last_seen = parse_dt(guest.get("LastActivityTime"))
         if last_seen and last_seen.year <= 1:
             last_seen = None
-        existing = best.get(norm)
-        if existing is None:
-            best[norm] = (last_seen, session)
-            continue
-        old_seen = existing[0] or datetime.min.replace(tzinfo=timezone.utc)
-        new_seen = last_seen or datetime.min.replace(tzinfo=timezone.utc)
-        if new_seen > old_seen:
-            best[norm] = (last_seen, session)
-
-    observations: list[dict] = []
-    for norm, (last_seen, session) in best.items():
-        guest = session.get("GuestInfo") or {}
-        hostname = guest.get("MachineName") or session.get("Name")
         is_online = any(
             conn.get("ProcessType") == 2
             for conn in session.get("ActiveConnections") or []

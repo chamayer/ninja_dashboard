@@ -109,8 +109,11 @@ def extract_macs(raw: dict) -> list[str]:
     for ni in raw.get("networkInterfaces") or []:  # SentinelOne
         if isinstance(ni, dict):
             candidates.append(ni.get("physical"))
-    for key in ("macAddress", "MacAddress", "macAddresses", "GuestHardwareNetworkAddress"):
+    for key in ("macAddress", "MacAddress", "macAddresses"):
         candidates.append(raw.get(key))
+    guest = raw.get("GuestInfo")  # ScreenConnect
+    if isinstance(guest, dict):
+        candidates.append(guest.get("HardwareNetworkAddress"))
     flat: list[Any] = []
     for c in candidates:
         if isinstance(c, list):
