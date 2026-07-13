@@ -10,20 +10,25 @@ from django.db.models import Count, Prefetch, Q
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
+from django.utils.text import slugify
 from django.views.decorators.http import require_GET, require_POST
 
 from .forms import ClientPolicyForm
 from .models import (
     AdminFinding,
+    AuditLog,
     Client,
     ClientCandidate,
     ClientLink,
     ClientNameAlias,
+    ClientOrgExclude,
     ClientPolicy,
+    CoverageRequirement,
     Device,
     Finding,
     FindingType,
     MergeCandidate,
+    RequirementProfile,
     SoftwareDecision,
     Source,
 )
@@ -1329,6 +1334,13 @@ def client_candidate_detail(request: HttpRequest, candidate_id) -> HttpResponse:
             kind, cid, cname = known_names[m]
             fuzzy.append({"match": m, "kind": kind, "client_id": cid, "client_name": cname})
 
+    all_clients = list(
+        Client.objects.filter(tenant_id=1, deleted_at__isnull=True)
+        .order_by("display_name")
+    )
+    profiles = list(RequirementProfile.objects.filter(tenant_id=1).order_by("name"))
+    default_profile = next((p for p in profiles if p.is_tenant_default), None)
+
     return render(request, "client_candidate_detail.html", {
         "candidate": candidate,
         "per_source": per_source,
@@ -1337,4 +1349,306 @@ def client_candidate_detail(request: HttpRequest, candidate_id) -> HttpResponse:
             device_overlap.values(), key=lambda x: -x["device_count"]
         ),
         "fuzzy": fuzzy,
+        "all_clients": all_clients,
+        "profiles": profiles,
+        "default_profile": default_profile,
     })
+
+
+# ── Candidate actions (Track C.4) — all audited ─────────────────────────────
+
+
+def _audit(request, action: str, entity_id, before, after) -> None:
+    AuditLog.objects.create(
+        tenant_id=1,
+        actor=request.user if request.user.is_authenticated else None,
+        actor_kind=AuditLog.ActorKind.USER,
+        source=AuditLog.Source.UI,
+        action=action,
+        entity_type="client_candidate",
+        entity_id=entity_id,
+        before_state=before,
+        after_state=after,
+        ip_address=request.META.get("REMOTE_ADDR") or None,
+        user_agent=(request.META.get("HTTP_USER_AGENT") or "")[:2000],
+    )
+
+
+def _attach_group_to_client(
+    cur, source_id: int, external_id: str, external_name: str,
+    client_id, reason: str,
+) -> None:
+    """Backfill org + device observations for this group to a client,
+    and mint / update the client_link. Mirrors client_resolver._attach_group."""
+    cur.execute(
+        """
+        INSERT INTO operations.client_links
+            (id, version, tenant_id, client_id, source_id, external_id,
+             external_name, created_at, created_reason)
+        VALUES (gen_random_uuid(), 0, 1, %s, %s, %s, %s, NOW(), %s)
+        ON CONFLICT (tenant_id, source_id, external_id)
+        DO UPDATE SET external_name = EXCLUDED.external_name
+        """,
+        (client_id, source_id, external_id, external_name, reason),
+    )
+    cur.execute(
+        """
+        UPDATE operations.entity_observations eo
+        SET client_id = %s
+        FROM operations.source_bindings sb, operations.source_instances si
+        WHERE eo.source_binding_id = sb.id
+          AND sb.source_instance_id = si.id
+          AND si.source_id = %s
+          AND eo.tenant_id = 1
+          AND eo.entity_type = 'org'
+          AND eo.entity_key = %s
+          AND eo.client_id IS NULL
+        """,
+        (client_id, source_id, external_id),
+    )
+    cur.execute(
+        """
+        UPDATE operations.entity_observations eo
+        SET client_id = %s
+        FROM operations.source_bindings sb, operations.source_instances si
+        WHERE eo.source_binding_id = sb.id
+          AND sb.source_instance_id = si.id
+          AND si.source_id = %s
+          AND eo.tenant_id = 1
+          AND eo.entity_type <> 'org'
+          AND eo.client_id IS NULL
+          AND eo.canonical_data ->> 'platform_group_id' = %s
+        """,
+        (client_id, source_id, external_id),
+    )
+    cur.execute(
+        """
+        DELETE FROM operations.unmatched_source_groups
+        WHERE tenant_id = 1 AND source_id = %s AND external_id = %s
+        """,
+        (source_id, external_id),
+    )
+
+
+def _resolve_finding_for_group(cur, source_binding_id, external_id: str) -> None:
+    """Close any client_unattached_group admin finding for a now-attached group."""
+    import hashlib
+    raw = f"client_resolver:{source_binding_id}:{external_id}"
+    condition_key = hashlib.sha256(raw.encode()).hexdigest()[:64]
+    cur.execute(
+        """
+        UPDATE operations.admin_findings af
+        SET status = 'resolved', resolved_at = NOW()
+        FROM operations.finding_types ft
+        WHERE af.finding_type_id = ft.id
+          AND ft.name = 'client_unattached_group'
+          AND af.tenant_id = 1
+          AND af.condition_key = %s
+          AND af.status IN ('open', 'acknowledged')
+        """,
+        (condition_key,),
+    )
+
+
+@login_required
+@require_POST
+@transaction.atomic
+def client_candidate_accept(request, candidate_id) -> HttpResponse:
+    """Create a new client from the candidate, attach every contributing
+    source group, mint an alias row, and instantiate the requirement
+    profile as per-client coverage_requirements."""
+    candidate = get_object_or_404(
+        ClientCandidate, id=candidate_id, tenant_id=1, status="open",
+    )
+    display_name = (request.POST.get("display_name") or candidate.display_name or "").strip()
+    if not display_name:
+        messages.error(request, "Display name required.")
+        return redirect("client_candidate_detail", candidate_id=candidate.id)
+    profile_id = request.POST.get("profile_id") or None
+    profile = None
+    if profile_id:
+        profile = get_object_or_404(RequirementProfile, id=profile_id, tenant_id=1)
+    else:
+        profile = RequirementProfile.objects.filter(
+            tenant_id=1, is_tenant_default=True,
+        ).first()
+
+    base_slug = slugify(display_name)[:110] or "client"
+    slug = base_slug
+    suffix = 1
+    while Client.objects.filter(tenant_id=1, slug=slug).exists():
+        suffix += 1
+        slug = f"{base_slug}-{suffix}"
+
+    client = Client.objects.create(
+        tenant_id=1, slug=slug, display_name=display_name,
+        requirement_profile=profile,
+        created_reason=f"candidate.accept:{candidate.id}",
+    )
+
+    ClientNameAlias.objects.update_or_create(
+        tenant_id=1, normalized_name=candidate.normalized_name,
+        defaults={
+            "client": client,
+            "alias": display_name,
+            "tier": ClientNameAlias.Tier.MANUAL,
+            "enabled": True,
+            "created_by": request.user.get_username(),
+            "created_reason": f"accept candidate {candidate.id}",
+        },
+    )
+
+    with connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        for ref in candidate.source_refs or []:
+            sid = ref.get("source_id")
+            ext_id = ref.get("external_id")
+            if not (sid and ext_id):
+                continue
+            _attach_group_to_client(
+                cur, sid, ext_id, ref.get("external_name") or display_name,
+                client.id, "candidate.accept",
+            )
+
+    if profile:
+        for item in profile.items.filter(tenant_id=1):
+            CoverageRequirement.objects.get_or_create(
+                tenant_id=1, client=client,
+                entity_type=item.entity_type,
+                platform=item.platform,
+                device_scope=item.device_scope,
+                defaults={
+                    "severity": item.severity,
+                    "gap_after_hours": item.gap_after_hours,
+                    "confidence_probable": item.confidence_probable,
+                    "confidence_confirmed": item.confidence_confirmed,
+                },
+            )
+
+    candidate.status = ClientCandidate.Status.ACCEPTED
+    candidate.resolved_client = client
+    candidate.resolved_at = timezone.now()
+    candidate.resolved_by = request.user.get_username()
+    candidate.resolved_reason = "accepted → new client"
+    candidate.save()
+
+    _audit(
+        request, "client_candidate.accept", candidate.id,
+        {"normalized_name": candidate.normalized_name, "status": "open"},
+        {
+            "status": "accepted",
+            "client_id": str(client.id),
+            "display_name": display_name,
+            "profile_id": str(profile.id) if profile else None,
+        },
+    )
+    messages.success(request, f"Accepted — created client “{display_name}”.")
+    return redirect("client_candidates_queue")
+
+
+@login_required
+@require_POST
+@transaction.atomic
+def client_candidate_map(request, candidate_id) -> HttpResponse:
+    """Map candidate's source groups to an existing client."""
+    candidate = get_object_or_404(
+        ClientCandidate, id=candidate_id, tenant_id=1, status="open",
+    )
+    target_id = request.POST.get("client_id")
+    if not target_id:
+        messages.error(request, "Choose a client to map into.")
+        return redirect("client_candidate_detail", candidate_id=candidate.id)
+    target = get_object_or_404(Client, id=target_id, tenant_id=1, deleted_at__isnull=True)
+
+    ClientNameAlias.objects.update_or_create(
+        tenant_id=1, normalized_name=candidate.normalized_name,
+        defaults={
+            "client": target,
+            "alias": candidate.display_name or candidate.normalized_name,
+            "tier": ClientNameAlias.Tier.MANUAL,
+            "enabled": True,
+            "created_by": request.user.get_username(),
+            "created_reason": f"map candidate {candidate.id} → {target.slug}",
+        },
+    )
+
+    with connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        for ref in candidate.source_refs or []:
+            sid = ref.get("source_id")
+            ext_id = ref.get("external_id")
+            if not (sid and ext_id):
+                continue
+            _attach_group_to_client(
+                cur, sid, ext_id,
+                ref.get("external_name") or target.display_name,
+                target.id, "candidate.map",
+            )
+
+    candidate.status = ClientCandidate.Status.MAPPED
+    candidate.resolved_client = target
+    candidate.resolved_at = timezone.now()
+    candidate.resolved_by = request.user.get_username()
+    candidate.resolved_reason = f"mapped → {target.display_name}"
+    candidate.save()
+
+    _audit(
+        request, "client_candidate.map", candidate.id,
+        {"normalized_name": candidate.normalized_name, "status": "open"},
+        {"status": "mapped", "client_id": str(target.id)},
+    )
+    messages.success(request, f"Mapped candidate to “{target.display_name}”.")
+    return redirect("client_candidates_queue")
+
+
+@login_required
+@require_POST
+@transaction.atomic
+def client_candidate_exclude(request, candidate_id) -> HttpResponse:
+    """Add the candidate's normalized name to client_org_excludes."""
+    candidate = get_object_or_404(
+        ClientCandidate, id=candidate_id, tenant_id=1, status="open",
+    )
+    reason = (request.POST.get("reason") or "").strip() or "excluded from candidate view"
+    ClientOrgExclude.objects.get_or_create(
+        tenant_id=1, normalized_name=candidate.normalized_name,
+        defaults={
+            "reason": reason[:240],
+            "created_by": request.user.get_username(),
+            "enabled": True,
+        },
+    )
+    candidate.status = ClientCandidate.Status.EXCLUDED
+    candidate.resolved_at = timezone.now()
+    candidate.resolved_by = request.user.get_username()
+    candidate.resolved_reason = reason[:240]
+    candidate.save()
+
+    _audit(
+        request, "client_candidate.exclude", candidate.id,
+        {"normalized_name": candidate.normalized_name, "status": "open"},
+        {"status": "excluded", "reason": reason},
+    )
+    messages.success(request, "Candidate excluded.")
+    return redirect("client_candidates_queue")
+
+
+@login_required
+@require_POST
+def client_candidate_fix(request, candidate_id) -> HttpResponse:
+    """Record an operator note — candidate stays open and re-resolves
+    when the source is fixed."""
+    candidate = get_object_or_404(
+        ClientCandidate, id=candidate_id, tenant_id=1, status="open",
+    )
+    note = (request.POST.get("note") or "").strip()
+    if not note:
+        messages.error(request, "A note is required for fix-at-source.")
+        return redirect("client_candidate_detail", candidate_id=candidate.id)
+    _audit(
+        request, "client_candidate.fix_at_source", candidate.id,
+        {"normalized_name": candidate.normalized_name, "status": "open"},
+        {"status": "open", "note": note},
+    )
+    messages.success(request, "Note recorded — candidate remains open.")
+    return redirect("client_candidate_detail", candidate_id=candidate.id)

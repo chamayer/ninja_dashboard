@@ -121,11 +121,84 @@
     {% endif %}
 </div>
 
+{% if candidate.status == "open" %}
 <div class="card">
     <h2>Actions</h2>
-    <p class="muted">
-        Accept / map / exclude / fix actions land in batch C3c. For now,
-        use Django admin or SQL to change candidate status.
-    </p>
+
+    {% if messages %}
+        {% for m in messages %}
+            <p style="color: {% if m.tags == 'error' %}#b91c1c{% else %}#065f46{% endif %};">{{ m }}</p>
+        {% endfor %}
+    {% endif %}
+
+    <details style="margin-bottom: 0.5rem;">
+        <summary style="cursor: pointer; padding: 0.5rem 0;"><strong>Accept</strong> — create a new client from this candidate</summary>
+        <form method="post" action="{% url 'client_candidate_accept' candidate_id=candidate.id %}" style="padding: 0.5rem 0;">
+            {% csrf_token %}
+            <label style="display: block; margin: 0.4rem 0;">Display name
+                <input name="display_name" value="{{ candidate.display_name }}" style="width: 100%; padding: 0.3rem;">
+            </label>
+            <label style="display: block; margin: 0.4rem 0;">Requirement profile
+                <select name="profile_id" style="width: 100%; padding: 0.3rem;">
+                    {% for p in profiles %}
+                        <option value="{{ p.id }}"{% if p == default_profile %} selected{% endif %}>{{ p.name }}{% if p.is_tenant_default %} (default){% endif %}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <button type="submit" style="padding: 0.5rem 1rem; margin-top: 0.4rem;">Accept</button>
+        </form>
+    </details>
+
+    <details style="margin-bottom: 0.5rem;">
+        <summary style="cursor: pointer; padding: 0.5rem 0;"><strong>Map to existing</strong> — attach these groups to an existing client</summary>
+        <form method="post" action="{% url 'client_candidate_map' candidate_id=candidate.id %}" style="padding: 0.5rem 0;">
+            {% csrf_token %}
+            <label style="display: block; margin: 0.4rem 0;">Existing client
+                <select name="client_id" style="width: 100%; padding: 0.3rem;">
+                    <option value="">— pick one —</option>
+                    {% for c in all_clients %}
+                        <option value="{{ c.id }}">{{ c.display_name }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <button type="submit" style="padding: 0.5rem 1rem; margin-top: 0.4rem;">Map</button>
+        </form>
+    </details>
+
+    <details style="margin-bottom: 0.5rem;">
+        <summary style="cursor: pointer; padding: 0.5rem 0;"><strong>Exclude</strong> — this name will never be a candidate again</summary>
+        <form method="post" action="{% url 'client_candidate_exclude' candidate_id=candidate.id %}" style="padding: 0.5rem 0;">
+            {% csrf_token %}
+            <label style="display: block; margin: 0.4rem 0;">Reason
+                <input name="reason" placeholder="e.g. placeholder site, ex-employee lab" style="width: 100%; padding: 0.3rem;">
+            </label>
+            <button type="submit" style="padding: 0.5rem 1rem; margin-top: 0.4rem;">Exclude</button>
+        </form>
+    </details>
+
+    <details>
+        <summary style="cursor: pointer; padding: 0.5rem 0;"><strong>Fix at source</strong> — record a note; candidate re-resolves when source data changes</summary>
+        <form method="post" action="{% url 'client_candidate_fix' candidate_id=candidate.id %}" style="padding: 0.5rem 0;">
+            {% csrf_token %}
+            <label style="display: block; margin: 0.4rem 0;">Note
+                <input name="note" placeholder="e.g. rename group in LMI console" style="width: 100%; padding: 0.3rem;">
+            </label>
+            <button type="submit" style="padding: 0.5rem 1rem; margin-top: 0.4rem;">Record note</button>
+        </form>
+    </details>
 </div>
+{% else %}
+<div class="card">
+    <h2>Resolution</h2>
+    <p>
+        <span class="badge badge-{{ candidate.status }}">{{ candidate.get_status_display }}</span>
+        by {{ candidate.resolved_by|default:"—" }}
+        at {{ candidate.resolved_at|date:"Y-m-d H:i"|default:"—" }} ·
+        {{ candidate.resolved_reason }}
+    </p>
+    {% if candidate.resolved_client %}
+    <p class="muted">Bound to client: <strong>{{ candidate.resolved_client.display_name }}</strong></p>
+    {% endif %}
+</div>
+{% endif %}
 {% endblock %}

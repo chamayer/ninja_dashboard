@@ -12,7 +12,11 @@ from drf_spectacular.views import (
 
 from apps.core.views import (
     admin_finding_acknowledge,
+    client_candidate_accept,
     client_candidate_detail,
+    client_candidate_exclude,
+    client_candidate_fix,
+    client_candidate_map,
     client_candidates_queue,
     client_policy_delete,
     client_policy_edit,
@@ -57,6 +61,10 @@ urlpatterns = [
     path("merge-candidates/", merge_candidates_queue, name="merge_candidates_queue"),
     path("clients/candidates/", client_candidates_queue, name="client_candidates_queue"),
     path("clients/candidates/<uuid:candidate_id>/", client_candidate_detail, name="client_candidate_detail"),
+    path("clients/candidates/<uuid:candidate_id>/accept", client_candidate_accept, name="client_candidate_accept"),
+    path("clients/candidates/<uuid:candidate_id>/map", client_candidate_map, name="client_candidate_map"),
+    path("clients/candidates/<uuid:candidate_id>/exclude", client_candidate_exclude, name="client_candidate_exclude"),
+    path("clients/candidates/<uuid:candidate_id>/fix", client_candidate_fix, name="client_candidate_fix"),
     path("switch/", client_switch, name="client_switch"),
     path("admin/", admin.site.urls),
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
