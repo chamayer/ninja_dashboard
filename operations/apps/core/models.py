@@ -151,6 +151,12 @@ class Client(UUIDTenantScopedModel):
     slug = models.SlugField(max_length=120)
     display_name = models.CharField(max_length=240)
     timezone = models.CharField(max_length=64, default="UTC")
+    requirement_profile = models.ForeignKey(
+        "RequirementProfile",
+        on_delete=models.PROTECT,
+        null=True, blank=True,
+        related_name="clients",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     created_reason = models.CharField(max_length=120, blank=True, default="")
     updated_at = models.DateTimeField(auto_now=True)
@@ -738,6 +744,69 @@ class Finding(UUIDTenantScopedModel):
 
     def __str__(self) -> str:
         return f"{self.finding_type_id}:{self.subject_type}:{self.subject_id}"
+
+
+class RequirementProfile(UUIDTenantScopedModel):
+    """A named template of coverage requirements.
+
+    Client acceptance (Track C.4) instantiates a profile's items as
+    per-client coverage_requirements rows. The tenant-default profile is
+    a data row (marked is_tenant_default), not code — the operator can
+    change it in the admin.
+    """
+
+    name = models.CharField(max_length=120)
+    description = models.CharField(max_length=240, blank=True, default="")
+    is_tenant_default = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "requirement_profiles"
+        constraints = (
+            models.UniqueConstraint(
+                fields=("tenant", "name"),
+                name="uq_requirement_profiles_tenant_name",
+            ),
+            models.UniqueConstraint(
+                fields=("tenant",),
+                condition=Q(is_tenant_default=True),
+                name="uq_requirement_profiles_tenant_default",
+            ),
+        )
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class RequirementProfileItem(UUIDTenantScopedModel):
+    """One (entity_type, platform, device_scope) row within a profile.
+
+    Shape mirrors CoverageRequirement (minus client). On accept, each
+    item spawns a CoverageRequirement bound to the new client.
+    """
+
+    profile = models.ForeignKey(
+        RequirementProfile, on_delete=models.CASCADE, related_name="items"
+    )
+    entity_type = models.CharField(max_length=80)
+    platform = models.CharField(max_length=80, blank=True, default="")
+    device_scope = models.CharField(max_length=40, default="all")
+    severity = models.CharField(max_length=16, default="high")
+    gap_after_hours = models.PositiveIntegerField(default=24)
+    confidence_probable = models.PositiveIntegerField(default=48)
+    confidence_confirmed = models.PositiveIntegerField(default=168)
+
+    class Meta:
+        db_table = "requirement_profile_items"
+        constraints = (
+            models.UniqueConstraint(
+                fields=("tenant", "profile", "entity_type", "platform", "device_scope"),
+                name="uq_requirement_profile_items_shape",
+            ),
+        )
+
+    def __str__(self) -> str:
+        return f"{self.profile_id}:{self.entity_type}:{self.platform or '*'}"
 
 
 class CoverageRequirement(TenantScopedModel):

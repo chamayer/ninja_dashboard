@@ -467,6 +467,16 @@ def _evaluate_coverage(
     if not requirements:
         return 0
 
+    # Track C.6 override: a client-scoped row for (entity_type, device_scope)
+    # REPLACES the global row for that client's devices — no additive stacking.
+    # Build the override index once so the per-row loop can skip devices whose
+    # client has a client-specific requirement of the same shape.
+    override_shape_clients: dict[tuple[str, str], set[uuid.UUID]] = {}
+    for row in requirements:
+        _, r_client, r_entity, _r_platform, r_scope, *_ = row
+        if r_client is not None:
+            override_shape_clients.setdefault((r_entity, r_scope), set()).add(r_client)
+
     missing_ft = _get_finding_type_id(cur, "missing_required_platform")
     stale_ft = _get_finding_type_id(cur, "stale_required_platform")
     if missing_ft is None:
@@ -478,16 +488,30 @@ def _evaluate_coverage(
          severity, gap_hours, prob_hours, conf_hours) in requirements:
         if platform in skip_platforms:
             continue
+        # Global rows exclude clients whose own row for the same
+        # (entity_type, device_scope) shape overrides them.
+        override_clients = (
+            override_shape_clients.get((entity_type, device_scope), set())
+            if client_id is None else set()
+        )
+        # Track C.6 wildcard: platform='any' satisfies when ANY platform of
+        # this entity_type is present (e.g. "some EDR present"). The
+        # agent_presence_current row must be aggregated per-device rather
+        # than joined per-(device, platform), or 'any' would misfire against
+        # a device that has ONE platform but is missing the required one.
         cur.execute(
             """
             SELECT d.id, d.client_id, d.canonical_hostname,
-                   apc.last_observed_at, d.created_at
+                   presence.last_observed_at, d.created_at
             FROM operations.devices d
-            LEFT JOIN operations.agent_presence_current apc
-                ON apc.tenant_id = d.tenant_id
-               AND apc.device_id = d.id
-               AND apc.entity_type = %s
-               AND apc.platform = %s
+            LEFT JOIN LATERAL (
+                SELECT MAX(apc.last_observed_at) AS last_observed_at
+                FROM operations.agent_presence_current apc
+                WHERE apc.tenant_id = d.tenant_id
+                  AND apc.device_id = d.id
+                  AND apc.entity_type = %s
+                  AND (%s = 'any' OR apc.platform = %s)
+            ) presence ON TRUE
             WHERE d.tenant_id = %s
               AND d.deleted_at IS NULL
               AND d.lifecycle_status != 'retired'
@@ -495,11 +519,13 @@ def _evaluate_coverage(
               AND NOT jsonb_exists(d.exemptions, %s)
               AND (%s::uuid IS NULL OR d.client_id = %s)
               AND (%s::uuid IS NULL OR d.id = %s)
+              AND NOT COALESCE(d.client_id = ANY(%s::uuid[]), FALSE)
             """,
             (
-                entity_type, platform, tenant_id,
+                entity_type, platform, platform, tenant_id,
                 device_scope, device_scope, entity_type,
                 client_id, client_id, device_id, device_id,
+                list(override_clients),
             ),
         )
         devices = cur.fetchall()
