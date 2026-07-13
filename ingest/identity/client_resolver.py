@@ -308,9 +308,10 @@ def _upsert_candidate(
             INSERT INTO operations.client_candidates
                 (id, version, tenant_id, normalized_name, display_name,
                  status, seen_count, source_refs,
-                 first_seen_at, last_seen_at)
+                 first_seen_at, last_seen_at,
+                 resolved_by, resolved_reason)
             VALUES (gen_random_uuid(), 1, %s, %s, %s, 'open', 1, %s::jsonb,
-                    NOW(), NOW())
+                    NOW(), NOW(), '', '')
             ON CONFLICT (tenant_id, normalized_name) DO NOTHING
             """,
             (_TENANT_ID, normalized, display_name, json.dumps([ref])),
