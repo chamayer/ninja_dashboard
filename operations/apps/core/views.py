@@ -16,13 +16,16 @@ from .forms import ClientPolicyForm
 from .models import (
     AdminFinding,
     Client,
+    ClientCandidate,
     ClientLink,
+    ClientNameAlias,
     ClientPolicy,
     Device,
     Finding,
     FindingType,
     MergeCandidate,
     SoftwareDecision,
+    Source,
 )
 
 DEVICE_PAGE_SIZE = 100
@@ -1155,4 +1158,183 @@ def sources_status(request: HttpRequest) -> HttpResponse:
         "sources": sources,
         "recent_runs": recent_runs,
         "stale_count": stale_count,
+    })
+
+
+# ── Client candidates (Track C.4 evidence panel) ─────────────────────────────
+
+
+@login_required
+def client_candidates_queue(request: HttpRequest) -> HttpResponse:
+    """Every unattached source group that resolved neither by id-link nor by
+    name lands here. The operator accepts, maps, excludes, or fixes.
+    """
+    status_filter = request.GET.get("status", "open")
+    qs = ClientCandidate.objects.filter(tenant_id=1)
+    if status_filter != "all":
+        qs = qs.filter(status=status_filter)
+    candidates = list(qs.order_by("-seen_count", "display_name"))
+
+    source_names = {s.id: s.name for s in Source.objects.all()}
+    rows = []
+    for c in candidates:
+        refs = c.source_refs or []
+        by_source: dict[str, int] = {}
+        latest_seen = None
+        for r in refs:
+            sid = r.get("source_id")
+            name = source_names.get(sid, "?") if sid else "?"
+            by_source[name] = by_source.get(name, 0) + 1
+            seen = r.get("observed_at")
+            if seen and (latest_seen is None or seen > latest_seen):
+                latest_seen = seen
+        rows.append({
+            "candidate": c,
+            "sources": sorted(by_source),
+            "source_count": len(by_source),
+            "latest_seen": latest_seen,
+        })
+
+    counts = {
+        row["status"]: row["n"]
+        for row in ClientCandidate.objects.filter(tenant_id=1)
+        .values("status").annotate(n=Count("id"))
+    }
+
+    return render(request, "client_candidates_queue.html", {
+        "rows": rows,
+        "active_status": status_filter,
+        "counts": counts,
+        "status_choices": ClientCandidate.Status.choices,
+    })
+
+
+@login_required
+def client_candidate_detail(request: HttpRequest, candidate_id) -> HttpResponse:
+    """Full evidence for one candidate: source records, sample devices,
+    device-overlap signal, fuzzy suggestions."""
+    from difflib import get_close_matches
+
+    candidate = get_object_or_404(ClientCandidate, id=candidate_id, tenant_id=1)
+    refs = candidate.source_refs or []
+
+    source_names = {s.id: s.name for s in Source.objects.all()}
+    external_ids = [r.get("external_id") for r in refs if r.get("external_id")]
+
+    per_source = []
+    device_overlap: dict[str, dict] = {}
+    sample_devices: list[dict] = []
+
+    with transaction.atomic():
+        with connection.cursor() as cur:
+            cur.execute("SET LOCAL operations.tenant_id = 1")
+
+            for ref in refs:
+                sid = ref.get("source_id")
+                ext_id = ref.get("external_id")
+                if not (sid and ext_id):
+                    continue
+                cur.execute(
+                    """
+                    SELECT MIN(observed_at), MAX(observed_at), COUNT(*)
+                    FROM operations.entity_observations eo
+                    JOIN operations.source_bindings sb
+                         ON sb.id = eo.source_binding_id
+                    JOIN operations.source_instances si
+                         ON si.id = sb.source_instance_id
+                    WHERE eo.tenant_id = 1
+                      AND eo.entity_type = 'org'
+                      AND eo.entity_key = %s
+                      AND si.source_id = %s
+                    """,
+                    (ext_id, sid),
+                )
+                first_seen, last_seen, run_count = cur.fetchone()
+
+                cur.execute(
+                    """
+                    SELECT MAX((canonical_data->>'device_count')::int)
+                    FROM operations.entity_observations eo
+                    JOIN operations.source_bindings sb
+                         ON sb.id = eo.source_binding_id
+                    JOIN operations.source_instances si
+                         ON si.id = sb.source_instance_id
+                    WHERE eo.tenant_id = 1
+                      AND eo.entity_type = 'org'
+                      AND eo.entity_key = %s
+                      AND si.source_id = %s
+                    """,
+                    (ext_id, sid),
+                )
+                (device_count,) = cur.fetchone()
+
+                per_source.append({
+                    "source":       source_names.get(sid, "?"),
+                    "external_id":  ext_id,
+                    "external_name": ref.get("external_name") or "",
+                    "first_seen":   first_seen,
+                    "last_seen":    last_seen,
+                    "run_count":    run_count,
+                    "device_count": device_count or 0,
+                })
+
+            # Sample devices seen inside these groups AND client overlap.
+            if external_ids:
+                cur.execute(
+                    """
+                    SELECT DISTINCT ON (eo.entity_key, eo.platform)
+                        eo.platform,
+                        eo.canonical_data->>'hostname' AS hostname,
+                        eo.device_id,
+                        d.client_id,
+                        c.display_name
+                    FROM operations.entity_observations eo
+                    LEFT JOIN operations.devices d
+                        ON d.id = eo.device_id AND d.deleted_at IS NULL
+                    LEFT JOIN operations.clients c
+                        ON c.id = d.client_id
+                    WHERE eo.tenant_id = 1
+                      AND eo.entity_type <> 'org'
+                      AND eo.canonical_data->>'platform_group_id' = ANY(%s)
+                    ORDER BY eo.entity_key, eo.platform, eo.observed_at DESC
+                    LIMIT 25
+                    """,
+                    (external_ids,),
+                )
+                for platform, hostname, device_id, cid, cname in cur.fetchall():
+                    sample_devices.append({
+                        "platform": platform,
+                        "hostname": hostname or "—",
+                        "resolved_client_id": cid,
+                        "resolved_client_name": cname or "",
+                    })
+                    if cid and cname:
+                        overlap = device_overlap.setdefault(str(cid), {
+                            "client_id": str(cid),
+                            "display_name": cname,
+                            "device_count": 0,
+                        })
+                        overlap["device_count"] += 1
+
+    # Fuzzy suggestions against known client display names + aliases.
+    known_names: dict[str, tuple] = {}
+    for c in Client.objects.filter(tenant_id=1, deleted_at__isnull=True):
+        known_names[c.display_name] = ("client", c.id, c.display_name)
+    for a in ClientNameAlias.objects.filter(tenant_id=1, enabled=True).select_related("client"):
+        known_names[a.alias] = ("alias", a.client_id, a.client.display_name)
+    fuzzy = []
+    if candidate.display_name:
+        matches = get_close_matches(candidate.display_name, list(known_names.keys()), n=5, cutoff=0.6)
+        for m in matches:
+            kind, cid, cname = known_names[m]
+            fuzzy.append({"match": m, "kind": kind, "client_id": cid, "client_name": cname})
+
+    return render(request, "client_candidate_detail.html", {
+        "candidate": candidate,
+        "per_source": per_source,
+        "sample_devices": sample_devices,
+        "device_overlap": sorted(
+            device_overlap.values(), key=lambda x: -x["device_count"]
+        ),
+        "fuzzy": fuzzy,
     })

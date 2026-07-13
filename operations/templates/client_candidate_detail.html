@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+
+{% block title %}Client candidate — {{ candidate.display_name }}{% endblock %}
+
+{% block content %}
+<div class="card">
+    <p style="margin: 0 0 0.5rem 0; font-size: 0.85rem;">
+        <a href="{% url 'client_candidates_queue' %}">← All candidates</a>
+    </p>
+    <h1 style="margin: 0;">{{ candidate.display_name|default:candidate.normalized_name }}</h1>
+    <p class="muted">
+        Normalized: <code>{{ candidate.normalized_name }}</code> ·
+        seen {{ candidate.seen_count }}× across {{ per_source|length }} source group{{ per_source|length|pluralize }} ·
+        status <span class="badge badge-{{ candidate.status }}">{{ candidate.get_status_display }}</span>
+    </p>
+</div>
+
+<div class="card">
+    <h2>Source groups feeding this candidate</h2>
+    {% if per_source %}
+    <table style="width: 100%; border-collapse: collapse;">
+        <thead>
+            <tr style="text-align: left; border-bottom: 1px solid var(--border);">
+                <th style="padding: 0.4rem;">Source</th>
+                <th style="padding: 0.4rem;">External name</th>
+                <th style="padding: 0.4rem;">External id</th>
+                <th style="padding: 0.4rem;">Devices</th>
+                <th style="padding: 0.4rem;">Runs</th>
+                <th style="padding: 0.4rem;">First seen</th>
+                <th style="padding: 0.4rem;">Last seen</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for s in per_source %}
+            <tr style="border-bottom: 1px solid var(--border);">
+                <td style="padding: 0.4rem;"><span class="badge badge-info">{{ s.source }}</span></td>
+                <td style="padding: 0.4rem;">{{ s.external_name }}</td>
+                <td style="padding: 0.4rem;"><code style="font-size: 0.8rem;">{{ s.external_id }}</code></td>
+                <td style="padding: 0.4rem;">{{ s.device_count }}</td>
+                <td style="padding: 0.4rem;">{{ s.run_count }}</td>
+                <td style="padding: 0.4rem;">{{ s.first_seen|date:"Y-m-d H:i" }}</td>
+                <td style="padding: 0.4rem;">{{ s.last_seen|date:"Y-m-d H:i" }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="muted">No source records — candidate is stale.</p>
+    {% endif %}
+</div>
+
+<div class="card">
+    <h2>Device overlap with existing clients</h2>
+    <p class="muted" style="font-size: 0.85rem; margin-top: 0;">
+        Devices in this group whose identity already resolves to an
+        existing client's devices — the strongest map-to-existing signal.
+    </p>
+    {% if device_overlap %}
+    <table style="width: 100%; border-collapse: collapse;">
+        <thead>
+            <tr style="text-align: left; border-bottom: 1px solid var(--border);">
+                <th style="padding: 0.4rem;">Existing client</th>
+                <th style="padding: 0.4rem;">Overlapping devices</th>
+                <th style="padding: 0.4rem;"></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for o in device_overlap %}
+            <tr style="border-bottom: 1px solid var(--border);">
+                <td style="padding: 0.4rem;"><strong>{{ o.display_name }}</strong></td>
+                <td style="padding: 0.4rem;">{{ o.device_count }}</td>
+                <td style="padding: 0.4rem;"><em class="muted">Suggests: map to this client</em></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="muted">No device overlap with any known client.</p>
+    {% endif %}
+</div>
+
+<div class="card">
+    <h2>Fuzzy name suggestions</h2>
+    {% if fuzzy %}
+    <ul>
+        {% for f in fuzzy %}
+        <li>
+            <strong>{{ f.match }}</strong>
+            {% if f.kind == "alias" %}(alias of <em>{{ f.client_name }}</em>){% endif %}
+        </li>
+        {% endfor %}
+    </ul>
+    {% else %}
+    <p class="muted">No close-name matches against known clients or aliases.</p>
+    {% endif %}
+</div>
+
+<div class="card">
+    <h2>Sample devices in this group</h2>
+    {% if sample_devices %}
+    <table style="width: 100%; border-collapse: collapse;">
+        <thead>
+            <tr style="text-align: left; border-bottom: 1px solid var(--border);">
+                <th style="padding: 0.4rem;">Platform</th>
+                <th style="padding: 0.4rem;">Hostname</th>
+                <th style="padding: 0.4rem;">Already resolves to</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for d in sample_devices %}
+            <tr style="border-bottom: 1px solid var(--border);">
+                <td style="padding: 0.4rem;"><span class="badge badge-info">{{ d.platform }}</span></td>
+                <td style="padding: 0.4rem;">{{ d.hostname }}</td>
+                <td style="padding: 0.4rem;">{{ d.resolved_client_name|default:"—" }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="muted">No devices resolved in this group yet.</p>
+    {% endif %}
+</div>
+
+<div class="card">
+    <h2>Actions</h2>
+    <p class="muted">
+        Accept / map / exclude / fix actions land in batch C3c. For now,
+        use Django admin or SQL to change candidate status.
+    </p>
+</div>
+{% endblock %}

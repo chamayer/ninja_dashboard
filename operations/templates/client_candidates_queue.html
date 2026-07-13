@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+
+{% block title %}Client candidates{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h1>Client candidates</h1>
+    <p class="muted">
+        Source groups that don't map to any known client. Each row is
+        awaiting an operator decision — accept (create a new client),
+        map to an existing client, exclude, or fix at the source.
+    </p>
+</div>
+
+<div class="card">
+    <form action="" method="get" style="display: flex; gap: 1rem; flex-wrap: wrap; align-items: end;">
+        <div>
+            <label for="filter-status" style="display: block; font-size: 0.8rem; color: var(--muted);">Status</label>
+            <select id="filter-status" name="status">
+                <option value="all"{% if active_status == "all" %} selected{% endif %}>All</option>
+                {% for value, label in status_choices %}
+                    <option value="{{ value }}"{% if active_status == value %} selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <button type="submit" style="padding: 0.5rem 1rem;">Apply</button>
+        </div>
+    </form>
+</div>
+
+<div class="card">
+    {% if rows %}
+    <table data-sortable style="width: 100%; border-collapse: collapse;">
+        <thead>
+            <tr style="text-align: left; border-bottom: 1px solid var(--border);">
+                <th style="padding: 0.5rem;">Name</th>
+                <th style="padding: 0.5rem;">Normalized</th>
+                <th style="padding: 0.5rem;">Sources</th>
+                <th style="padding: 0.5rem;">Seen</th>
+                <th style="padding: 0.5rem;">First seen</th>
+                <th style="padding: 0.5rem;">Last seen</th>
+                <th style="padding: 0.5rem;">Status</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for r in rows %}
+            <tr style="border-bottom: 1px solid var(--border);">
+                <td style="padding: 0.5rem;">
+                    <a href="{% url 'client_candidate_detail' candidate_id=r.candidate.id %}">
+                        {{ r.candidate.display_name|default:r.candidate.normalized_name }}
+                    </a>
+                </td>
+                <td style="padding: 0.5rem;"><code>{{ r.candidate.normalized_name }}</code></td>
+                <td style="padding: 0.5rem;">
+                    {% for s in r.sources %}<span class="badge badge-info">{{ s }}</span>{% endfor %}
+                </td>
+                <td style="padding: 0.5rem;">{{ r.candidate.seen_count }}</td>
+                <td style="padding: 0.5rem;">{{ r.candidate.first_seen_at|date:"Y-m-d H:i" }}</td>
+                <td style="padding: 0.5rem;">{{ r.candidate.last_seen_at|date:"Y-m-d H:i" }}</td>
+                <td style="padding: 0.5rem;"><span class="badge badge-{{ r.candidate.status }}">{{ r.candidate.get_status_display }}</span></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="muted">No candidates in this view.</p>
+    {% endif %}
+</div>
+{% endblock %}

@@ -12,6 +12,8 @@ from drf_spectacular.views import (
 
 from apps.core.views import (
     admin_finding_acknowledge,
+    client_candidate_detail,
+    client_candidates_queue,
     client_policy_delete,
     client_policy_edit,
     client_policy_new,
@@ -53,6 +55,8 @@ urlpatterns = [
     path("coverage/", fleet_coverage, name="fleet_coverage"),
     path("sources/", sources_status, name="sources_status"),
     path("merge-candidates/", merge_candidates_queue, name="merge_candidates_queue"),
+    path("clients/candidates/", client_candidates_queue, name="client_candidates_queue"),
+    path("clients/candidates/<uuid:candidate_id>/", client_candidate_detail, name="client_candidate_detail"),
     path("switch/", client_switch, name="client_switch"),
     path("admin/", admin.site.urls),
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),

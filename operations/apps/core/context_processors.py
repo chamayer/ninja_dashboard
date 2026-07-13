@@ -5,7 +5,7 @@ from __future__ import annotations
 from django.conf import settings
 from django.http import HttpRequest
 
-from .models import Client, Finding, MergeCandidate
+from .models import Client, ClientCandidate, Finding, MergeCandidate
 
 _FINDING_ACTIVE_STATUSES = (
     Finding.Status.OPEN,
@@ -28,6 +28,7 @@ def brand(request: HttpRequest) -> dict:
         "current_client": getattr(request, "current_client", None),
         "nav_findings_count": 0,
         "nav_pending_merges": 0,
+        "nav_pending_client_candidates": 0,
     }
 
     if getattr(request, "user", None) and request.user.is_authenticated:
@@ -45,6 +46,10 @@ def brand(request: HttpRequest) -> dict:
         ctx["nav_pending_merges"] = MergeCandidate.objects.filter(
             tenant_id=tenant_id,
             status="pending",
+        ).count()
+        ctx["nav_pending_client_candidates"] = ClientCandidate.objects.filter(
+            tenant_id=tenant_id,
+            status=ClientCandidate.Status.OPEN,
         ).count()
     else:
         ctx["clients"] = []
