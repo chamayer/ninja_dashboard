@@ -415,30 +415,56 @@ def _promote_unmatched_clusters(cur) -> int:
         norm = normalize_hostname(hostname)
         if not norm:
             continue
+        # A record that already carries a device_link was resolved in an
+        # earlier pass — these stale NULL observations just backfill; a new
+        # device for them would be an empty orphan row.
+        source_id = source_ids.get(platform)
+        if source_id is not None:
+            cur.execute(
+                """
+                SELECT device_id FROM operations.device_links
+                WHERE tenant_id = %s AND source_id = %s AND external_id = %s
+                """,
+                (TENANT_ID, source_id, entity_key),
+            )
+            linked = cur.fetchone()
+            if linked:
+                cur.execute(
+                    """
+                    UPDATE operations.entity_observations
+                    SET device_id = %s
+                    WHERE tenant_id = %s AND platform = %s AND entity_key = %s
+                      AND device_id IS NULL
+                    """,
+                    (linked[0], TENANT_ID, platform, entity_key),
+                )
+                continue
         clusters.setdefault((client_id, norm), []).append(
             (platform, entity_type, entity_key, first_seen, last_seen, cd)
         )
 
     promoted = 0
     for (client_id, norm), entries in clusters.items():
-        # Hostname correlation is CROSS-stream only. Within one
-        # (platform, entity_type) stream, entries are partitioned into
-        # machine groups by hard proof (serial / vm_uuid / MAC): a proven
-        # group is one machine with duplicate agents (one device, one link
-        # per record); unproven same-hostname records stay separate devices.
-        # The newest group per stream represents the stream on the cluster
-        # device; other groups get their own device rows so every platform
-        # row stays accounted for.
-        by_stream: dict[tuple[str, str], list[tuple]] = {}
-        for e in entries:
-            by_stream.setdefault((e[0], e[1]), []).append(e)
-        stream_primary_groups: list[list[tuple]] = []
+        # Hardware proof (serial / vm_uuid / MAC) is stream-agnostic, so the
+        # whole cluster partitions into machine groups first: a Ninja rmm
+        # record, its vm.guest twin, and both S1 agents sharing one MAC are
+        # ONE machine. Hostname-only correlation then merges at most one
+        # group per stream onto the cluster device (cross-stream rule);
+        # any further group re-using an already-covered stream is a
+        # potential duplicate machine/agent and gets its own device row so
+        # every platform row stays accounted for.
+        groups = _group_same_machine(entries)
+        primary_groups: list[list[tuple]] = []
         extra_groups: list[list[tuple]] = []
-        for stream_entries in by_stream.values():
-            groups = _group_same_machine(stream_entries)
-            stream_primary_groups.append(groups[0])
-            extra_groups.extend(groups[1:])
-        primary: list[tuple] = [g[0] for g in stream_primary_groups]
+        covered_streams: set[tuple[str, str]] = set()
+        for group in groups:
+            streams = {(e[0], e[1]) for e in group}
+            if covered_streams & streams:
+                extra_groups.append(group)
+            else:
+                primary_groups.append(group)
+                covered_streams |= streams
+        primary: list[tuple] = [e for g in primary_groups for e in g]
 
         # Re-check existing devices — the resolution loop only scans the
         # newest batch, so an older match may exist that it never saw.
@@ -455,7 +481,7 @@ def _promote_unmatched_clusters(cur) -> int:
         if existing_device_id is None:
             existing_device_id = _resolve_by_hostname(cur, norm, client_id)
         if existing_device_id is not None:
-            for group in stream_primary_groups:
+            for group in primary_groups:
                 head = group[0]
                 platform, entity_type, entity_key, _first_seen, e_last, cd = head
                 if _same_stream_conflict(
@@ -486,24 +512,6 @@ def _promote_unmatched_clusters(cur) -> int:
                     )
             promoted += _promote_entry_groups(
                 cur, source_ids, client_id, norm, extra_groups
-            )
-            continue
-        cur.execute(
-            """
-            SELECT COUNT(*) FROM operations.devices
-            WHERE tenant_id = %s AND canonical_hostname = %s AND deleted_at IS NULL
-              AND client_id = %s
-            """,
-            (TENANT_ID, norm, client_id),
-        )
-        if cur.fetchone()[0] >= _MIN_IDENTITY_CANDIDATES:
-            # Ambiguous — multiple devices already share this hostname.
-            # Never guess a merge, but never leave a platform record
-            # unaccounted either: each machine group becomes its own device
-            # row; identity_candidates + duplicate findings flag it.
-            promoted += _promote_entry_groups(
-                cur, source_ids, client_id, norm,
-                stream_primary_groups + extra_groups,
             )
             continue
 
@@ -540,7 +548,7 @@ def _promote_unmatched_clusters(cur) -> int:
                 f"auto-promoted from {', '.join(platforms)}"[:120],
             ),
         )
-        for group in stream_primary_groups:
+        for group in primary_groups:
             head = group[0]
             for i, entry in enumerate(group):
                 platform, _entity_type, entity_key, _first, e_last, e_cd = entry
