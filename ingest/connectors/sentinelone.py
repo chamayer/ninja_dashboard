@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from typing import Any
 
@@ -10,6 +11,8 @@ from psycopg.types.json import Json
 
 from ingest.normalize import infer_device_role, normalize_hostname, parse_dt
 from ingest.sources import SourceConfig
+
+log = logging.getLogger(__name__)
 
 
 def fetch(source: SourceConfig, observed_at: datetime) -> list[dict]:
@@ -57,4 +60,39 @@ def fetch(source: SourceConfig, observed_at: datetime) -> list[dict]:
             cursor = (payload.get("pagination") or {}).get("nextCursor")
             if not cursor:
                 break
+        observations.extend(_fetch_sites(client, base_url, headers))
     return observations
+
+
+def _fetch_sites(client: httpx.Client, base_url: str, headers: dict) -> list[dict]:
+    """Container-only rows so sites with zero agents still produce an `org`
+    observation. A sites-endpoint failure never blocks the agent run —
+    device-derived groups still emit."""
+    rows: list[dict] = []
+    cursor: str | None = None
+    try:
+        while True:
+            params: dict[str, Any] = {"limit": 200}
+            if cursor:
+                params["cursor"] = cursor
+            resp = client.get(f"{base_url}/sites", headers=headers, params=params)
+            resp.raise_for_status()
+            payload = resp.json()
+            data = payload.get("data") or {}
+            sites = data.get("sites") if isinstance(data, dict) else data
+            for site in sites or []:
+                site_id = site.get("id")
+                if not site_id:
+                    continue
+                rows.append({
+                    "_org_only": True,
+                    "platform": "SentinelOne",
+                    "platform_group_id": str(site_id),
+                    "platform_group_name": site.get("name"),
+                })
+            cursor = (payload.get("pagination") or {}).get("nextCursor")
+            if not cursor:
+                break
+    except Exception:
+        log.exception("SentinelOne sites fetch failed — continuing with agent-derived groups")
+    return rows

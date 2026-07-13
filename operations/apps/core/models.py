@@ -190,6 +190,72 @@ class ClientLink(UUIDTenantScopedModel):
         return f"{self.source_id}:{self.external_id}"
 
 
+class ClientNameAlias(UUIDTenantScopedModel):
+    class Tier(models.TextChoices):
+        MANUAL = "manual", "Manual"
+        SEED = "seed", "Seed"
+        ALIGNMENT = "alignment", "Alignment"
+        SOURCE = "source", "Source"
+
+    client = models.ForeignKey(Client, on_delete=models.CASCADE, related_name="name_aliases")
+    alias = models.CharField(max_length=240)
+    normalized_name = models.CharField(max_length=240)
+    tier = models.CharField(max_length=16, choices=Tier.choices, default=Tier.MANUAL)
+    enabled = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    created_by = models.CharField(max_length=120, blank=True, default="")
+    created_reason = models.CharField(max_length=120, blank=True, default="")
+
+    class Meta:
+        db_table = "client_name_aliases"
+        constraints = (
+            models.UniqueConstraint(
+                fields=("tenant", "normalized_name"),
+                name="uq_client_name_aliases_tenant_normalized",
+            ),
+        )
+
+    def __str__(self) -> str:
+        return f"{self.alias} -> {self.client_id}"
+
+
+class ClientOrgExclude(UUIDTenantScopedModel):
+    source = models.ForeignKey(
+        Source, on_delete=models.PROTECT, null=True, blank=True,
+        related_name="org_excludes",
+    )
+    external_id = models.CharField(max_length=240, blank=True, default="")
+    normalized_name = models.CharField(max_length=240, blank=True, default="")
+    reason = models.CharField(max_length=240, blank=True, default="")
+    enabled = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    created_by = models.CharField(max_length=120, blank=True, default="")
+
+    class Meta:
+        db_table = "client_org_excludes"
+
+    def __str__(self) -> str:
+        return self.normalized_name or self.external_id
+
+
+class PlaceholderOrgName(UUIDTenantScopedModel):
+    normalized_name = models.CharField(max_length=240)
+    note = models.CharField(max_length=240, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "placeholder_org_names"
+        constraints = (
+            models.UniqueConstraint(
+                fields=("tenant", "normalized_name"),
+                name="uq_placeholder_org_names_tenant_normalized",
+            ),
+        )
+
+    def __str__(self) -> str:
+        return self.normalized_name
+
+
 class ClientPolicy(UUIDTenantScopedModel):
     client = models.ForeignKey(Client, on_delete=models.CASCADE, related_name="policies")
     category = models.CharField(max_length=80)

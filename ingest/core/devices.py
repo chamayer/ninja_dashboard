@@ -29,6 +29,7 @@ from ingest.normalize import (
     entity_type_for_node_class,
     infer_device_role,
     normalize_mac,
+    normalize_org_name,
     os_family,
 )
 from ingest.runlog import run_log
@@ -393,6 +394,47 @@ def _write_ninja_observations(
                     "observation_hash":        obs_hash,
                     "collector_version":       "",
                     "schema_version":          1,
+                })
+
+            # One `org` observation per Ninja organization per run (BLUEPRINT
+            # Track C.2) — every org, including ones with zero devices.
+            # client_id here is rung 1 only (existing client_links); rungs
+            # 2-4 belong to the client resolver (C2).
+            org_counts: dict[str, int] = {}
+            for r in device_rows:
+                oid = str(r["organization_id"])
+                org_counts[oid] = org_counts.get(oid, 0) + 1
+            cur.execute("SELECT id, name FROM ninja_core.organizations")
+            for org_id, org_name in cur.fetchall():
+                oid = str(org_id)
+                obs_rows.append({
+                    "observation_id":        uuid.uuid4(),
+                    "tenant_id":             _TENANT_ID,
+                    "client_id":             org_map.get(oid),
+                    "device_id":             None,
+                    "collector_instance_id": INTERNAL_COLLECTOR_INSTANCE_ID,
+                    "source_binding_id":     NINJA_SOURCE_BINDING_ID,
+                    "entity_type":           "org",
+                    "entity_key":            oid,
+                    "platform":              "Ninja",
+                    "subplatform":           "",
+                    "observed_at":           snapshot_at,
+                    "raw_data":              Json({}),
+                    "canonical_data":        Json({
+                        "name":            org_name,
+                        "normalized_name": normalize_org_name(org_name),
+                        "platform":        "Ninja",
+                        "entity_type":     "org",
+                        "device_count":    org_counts.get(oid, 0),
+                    }),
+                    "batch_id":              batch_id,
+                    # entity_type prefixed so an org key can never collide
+                    # with a device key in the same batch.
+                    "observation_hash":      hashlib.sha256(
+                        f"org:{oid}:{snapshot_at.isoformat()}".encode()
+                    ).digest(),
+                    "collector_version":     "",
+                    "schema_version":        1,
                 })
 
             if obs_rows:

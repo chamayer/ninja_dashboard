@@ -46,6 +46,7 @@ def drain_resolution(batch_size: int = 200) -> int:
                    observed_at, canonical_data
             FROM operations.entity_observations
             WHERE tenant_id = %s AND device_id IS NULL
+              AND entity_type <> 'org'  -- containers resolve to clients, not devices
             ORDER BY observed_at DESC
             LIMIT %s
             """,
@@ -407,6 +408,7 @@ def _promote_unmatched_clusters(cur) -> int:
                (ARRAY_AGG(canonical_data ORDER BY observed_at DESC))[1]
         FROM operations.entity_observations
         WHERE tenant_id = %s AND device_id IS NULL AND client_id IS NOT NULL
+          AND entity_type <> 'org'  -- containers resolve to clients, not devices
         GROUP BY client_id, platform, entity_type, entity_key
         """,
         (TENANT_ID,),

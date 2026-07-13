@@ -117,4 +117,13 @@ def fetch(source: SourceConfig, observed_at: datetime) -> list[dict]:
             "last_seen_at": parse_dt(_ci_get(host, "hostStateChangeDate") or _ci_get(host, "lastSeen") or _ci_get(host, "lastOnline")),
             "raw_data": Json(raw_data),
         })
+    # Container-only rows so groups with zero hosts still produce an `org`
+    # observation (the payload's groups list is authoritative for LMI).
+    for group_id, group_name in group_map.items():
+        observations.append({
+            "_org_only": True,
+            "platform": "LogMeIn",
+            "platform_group_id": str(group_id),
+            "platform_group_name": group_name,
+        })
     return observations

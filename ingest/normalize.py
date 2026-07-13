@@ -10,12 +10,6 @@ _TRAILING_PARENS_RE = re.compile(r"\s*\(.*?\)\s*$")
 _HOST_STRIP_CHARS_RE = re.compile(r"[\s'`\u2018\u2019]")
 _HOST_LOOSE_CHARS_RE = re.compile(r"[^a-z0-9]")
 _ORG_STRIP_CHARS_RE = re.compile(r"[\s\-_.]")
-_PLACEHOLDER_ORG_NAMES = {
-    "defaultsite",
-    "default",
-    "unknown",
-    "various",
-}
 
 PLATFORM_ALIASES = {
     "ninja": "Ninja",
@@ -139,12 +133,6 @@ def normalize_org_name(name: str | None) -> str:
     if not name:
         return ""
     return _ORG_STRIP_CHARS_RE.sub("", name).lower().strip()
-
-
-def is_placeholder_org_name(name: str | None) -> bool:
-    if not name:
-        return False
-    return normalize_org_name(name) in _PLACEHOLDER_ORG_NAMES
 
 
 def parse_dt(value: Any) -> datetime | None:

@@ -16,6 +16,12 @@ Client resolution order per observation:
   3. Resolved device's client (fallback, requires identity match).
 Groups that resolve no client are recorded in
 operations.unmatched_source_groups for operator review.
+
+Containers are entities too (BLUEPRINT Track C): every source group seen in
+a run is written as one `org` observation keyed by its stable group id.
+Fetchers may return container-only rows (`_org_only: True` with
+platform_group_id/platform_group_name) so groups with zero devices are
+still observed.
 """
 
 from __future__ import annotations
@@ -33,8 +39,8 @@ from ingest.connectors import logmein, screenconnect, sentinelone
 from ingest.identity.fast_path import resolve_device_fast
 from ingest.normalize import (
     extract_macs,
-    is_placeholder_org_name,
     normalize_hostname,
+    normalize_org_name,
     os_family,
 )
 from ingest.sources import SourceConfig
@@ -112,6 +118,16 @@ def _record_source_run(
         log.exception("source_observations: run_log write failed — continuing")
 
 
+def _load_placeholder_names(cur) -> set[str]:
+    """Placeholder container names live in data (Track C principle 4)."""
+    cur.execute(
+        "SELECT normalized_name FROM operations.placeholder_org_names"
+        " WHERE tenant_id = %s",
+        (_TENANT_ID,),
+    )
+    return {row[0] for row in cur.fetchall()}
+
+
 def _load_client_links(cur, source: SourceConfig) -> dict[str, uuid.UUID]:
     """Return {external_id: client_id} for this source's client_links."""
     if not source.ops_source_id:
@@ -166,12 +182,13 @@ def _record_unmatched_groups(
     cur,
     source: SourceConfig,
     unmatched: dict[str, tuple[str, int]],
+    placeholder_names: set[str],
 ) -> None:
     """Upsert operator-review rows for source groups that resolved no client."""
     if not source.ops_source_id:
         return
     for group_id, (group_name, device_count) in unmatched.items():
-        if is_placeholder_org_name(group_name):
+        if normalize_org_name(group_name) in placeholder_names:
             continue
         cur.execute(
             """
@@ -201,10 +218,20 @@ def _write_observations(
     obs_rows: list[dict[str, Any]] = []
     resolved_groups: dict[str, tuple[uuid.UUID, str]] = {}  # group_id → (client, name)
     unmatched_groups: dict[str, tuple[str, int]] = {}       # group_id → (name, count)
+    all_groups: dict[str, list] = {}                        # group_id → [name, count]
     with db.transaction() as cur:
         cur.execute(f"SET LOCAL operations.tenant_id = {_TENANT_ID}")
         link_map = _load_client_links(cur, source)
+        placeholder_names = _load_placeholder_names(cur)
         for row in rows:
+            if row.get("_org_only"):
+                # Container-only record (e.g. a group with zero devices) —
+                # registers the group for the org observation, no device row.
+                gid = str(row.get("platform_group_id") or "").strip()
+                gname = (row.get("platform_group_name") or "").strip()
+                if gid and gid not in all_groups:
+                    all_groups[gid] = [gname, 0]
+                continue
             entity_key = str(row.get("platform_device_id") or "")
             if not entity_key:
                 continue
@@ -277,6 +304,10 @@ def _write_observations(
                 elif group_id:
                     name, count = unmatched_groups.get(group_id, (group_name, 0))
                     unmatched_groups[group_id] = (name or group_name, count + 1)
+            if group_id:
+                entry = all_groups.setdefault(group_id, [group_name, 0])
+                entry[0] = entry[0] or group_name
+                entry[1] += 1
 
             obs_rows.append({
                 "observation_id":        uuid.uuid4(),
@@ -298,6 +329,57 @@ def _write_observations(
                 "schema_version":        1,
             })
 
+        # One `org` observation per container per run (BLUEPRINT Track C.2).
+        # entity_key = stable group id (never the display name). Attachment
+        # here is rung 1 only (existing id-link / client-scoped instance);
+        # rungs 2-4 belong to the client resolver (C2).
+        device_row_count = len(obs_rows)
+        if not source.is_shared:
+            org_containers = {
+                source.source_key or source.source_name: [
+                    source.source_name, device_row_count
+                ]
+            }
+        else:
+            org_containers = all_groups
+        for gid, (gname, gcount) in org_containers.items():
+            if not gid:
+                continue
+            org_client_id = (
+                source.client_id if not source.is_shared else link_map.get(gid)
+            )
+            normalized = normalize_org_name(gname)
+            obs_rows.append({
+                "observation_id":        uuid.uuid4(),
+                "tenant_id":             _TENANT_ID,
+                "client_id":             org_client_id,
+                "device_id":             None,
+                "collector_instance_id": _INTERNAL_COLLECTOR_INSTANCE_ID,
+                "source_binding_id":     source.source_binding_id,
+                "entity_type":           "org",
+                "entity_key":            gid,
+                "platform":              source.platform,
+                "subplatform":           "",
+                "observed_at":           observed_at,
+                "raw_data":              Json({}),
+                "canonical_data":        Json({
+                    "name":            gname,
+                    "normalized_name": normalized,
+                    "platform":        source.platform,
+                    "entity_type":     "org",
+                    "device_count":    gcount,
+                    "is_placeholder":  normalized in placeholder_names,
+                }),
+                "batch_id":              batch_id,
+                # entity_type prefixed so an org key can never collide with a
+                # device key in the same batch.
+                "observation_hash":      hashlib.sha256(
+                    f"org:{gid}:{observed_at.isoformat()}".encode()
+                ).digest(),
+                "collector_version":     "",
+                "schema_version":        1,
+            })
+
         if obs_rows:
             db.insert_ignore(
                 cur,
@@ -311,5 +393,5 @@ def _write_observations(
             for gid in resolved_groups:
                 unmatched_groups.pop(gid, None)
             _upsert_client_links(cur, source, resolved_groups)
-            _record_unmatched_groups(cur, source, unmatched_groups)
+            _record_unmatched_groups(cur, source, unmatched_groups, placeholder_names)
     return len(obs_rows)
