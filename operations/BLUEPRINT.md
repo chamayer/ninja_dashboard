@@ -163,10 +163,12 @@ review must still be visible (as candidates), not absent.
 | 7 | Hostname ambiguity → bail instead of link | `resolver.py` COUNT>=2 skip | E.3 |
 | 8 | Identity-pending entities hidden from promotion | `resolver.py` pending_hostnames skip | E.8 |
 
-Accepted exception: `bootstrap_clients_from_ninja` — canonical clients
-seed from Ninja orgs (a business-authority decision, not observation
-flattening); other sources map via client_links. Revisit only if a
-non-Ninja client authority emerges.
+~~Accepted exception: `bootstrap_clients_from_ninja` — canonical clients
+seed from Ninja orgs.~~ **SUPERSEDED 2026-07-13 by Track C**: no source
+is a client authority. Ninja orgs flow through `org` observations and
+the client resolver like every other source's container; the existing
+75 clients + client_links survive as already-accepted state, and the
+bootstrap is retired in C.7.
 
 ### Future direction (backlog, design must not preclude)
 
@@ -189,6 +191,218 @@ zero devices with 0 links; every unmapped node_class has an admin finding.
 | E1 | E.1 audit + E.2 writer (dual-write) | observation counts per entity_type match ninja_core node_class counts |
 | E2 | E.3 resolver + E.5 repair | inventory counts reconcile; no same-client strict-hostname twins as separate devices |
 | E3 | E.4 bootstrap retire + E.6 semantics | one clean cycle; coverage cards match manual console checks |
+
+---
+
+## Track C — Client entity (clients are first-class entities)
+
+Added 2026-07-13. User-set principles governing this track:
+
+1. **A client is an entity like a device.** Every entity type flows
+   through the same pipeline: observations → identity resolution →
+   lifecycle → findings. Each source emits its *container* as an `org`
+   observation (Ninja organization, S1 site, LMI group, SC company/
+   instance) exactly as it emits device streams.
+2. **NO source authority.** Nobody's org list mints or renames clients.
+   Resolution does the work; conflicts become findings. (Supersedes the
+   Track E `bootstrap_clients_from_ninja` exception.)
+3. **NO auto-mint.** A new name — however many sources corroborate it —
+   becomes a **client candidate** requiring operator acceptance
+   (accept / map to existing / exclude / fix at source). Client
+   onboarding is managed; silent client creation is a bug, not a
+   feature.
+4. **Mappings live in data, never code.** Every mapping fact (name
+   aliases, id-links, excludes, placeholder-name list, suggestion
+   preference order, default requirements profile) is a data row with
+   an admin surface to view/maintain it. Hardcoded lists like
+   `_PLACEHOLDER_ORG_NAMES` (normalize.py:60-68) are the anti-pattern
+   and get migrated to tables.
+5. **Clean run for clients** like devices got: rebuild client
+   resolution from zero and reconcile per-source group counts against
+   the consoles.
+
+Why this matters operationally: compliance hangs off clients. No
+client on an observation ⇒ no `coverage_requirements` apply ⇒ device
+compliance is silently OFF. Today's 24 clientless LMI observations
+(11 hosts in groups TSK / Ready / Silk Edge / Silvercup / "-1") are
+invisible to compliance even though client "TSK" exists — proving the
+name-based learning gap.
+
+### C.1 Entity taxonomy (lock naming now, avoid rearchitecting)
+
+Naming grammar: `<domain>.<stream>`, pinned from live data:
+
+| Entity type | Tier | Today | Notes |
+|---|---|---|---|
+| `agent.rmm` / `agent.edr` / `agent.remote_access` | 1 (identity+lifecycle) | live | Track E |
+| `vm.guest` / `vm.host` | 1 | live (860 / 99) | Track E |
+| `network.device`, `monitor.target` | 1 | live (2 / 1) | Track E |
+| `org` | 1 | **this track** | source containers → clients |
+| `org.location` | 1 | backlog | ninja_core.locations (245) |
+| `software` | 1 | partial (P4) | 5,225 titles |
+| `policy` | 1 | backlog | ninja_core.policies (90) |
+| `user.*` | 1 | future | AD/M365; client_users exists |
+| activities / health / patch facts | 2 (measurements) | live | never entities; attach to entities |
+
+Rule: a Tier-1 entity gets identity resolution + lifecycle + findings;
+a Tier-2 stream is evidence attached to a Tier-1 entity. New sources
+MUST emit their container as `org` observations from day one.
+
+### C.2 `org` observations from every connector
+
+Each connector emits one `entity_observations` row per container per
+run, `entity_type='org'`, `entity_key` = the stable group id (Ninja org
+id, S1 site id, LMI group id, SC company name/instance), never the
+display name. `canonical_data`: name, normalized name
+(`normalize_org_name`), device count in group, source-native metadata.
+`client_id` left NULL — the client resolver owns attachment.
+
+### C.3 Client resolver (evidence-based, no authority)
+
+New `ingest/identity/client_resolver.py`, run in `drain_resolution`
+before device promotion (devices need client scope). Match ladder per
+unattached `org` observation:
+
+Rungs are **strictly exclusive** — a hit on a rung short-circuits;
+lower rungs never run:
+
+1. **id-link** (proof, survives renames): `operations.client_links`
+   row for (source, external group id) → attach, DONE. No name
+   matching of any kind runs against a mapped group — a mapping is an
+   explicit operator decision (or minted proof) and heuristics never
+   second-guess it. Name drift on a mapped group (group name no longer
+   equals the linked client's name/aliases — cheap equality check, not
+   a matching pass) → `client_name_conflict` finding (C.5) with
+   one-click apply; the link holds regardless.
+2. **exact normalized name** match to an existing client (canonical
+   name or alias row) → attach + create the id-link row so the match
+   becomes proof (audited, `created_reason='resolver.name_match'`).
+3. **fuzzy / prefix / device-overlap** → NEVER auto-attach. Feeds the
+   candidate evidence panel as a suggestion only.
+4. No match → client candidate (C.4). Placeholder names (from the
+   placeholder table, not code) are excluded from candidacy but still
+   visible as unattached observations.
+
+Name tables (all admin-maintainable, per principle 4):
+
+- `operations.client_name_aliases` (client, alias, normalized, tier:
+  manual > seed > alignment > source, created_by/reason) — replaces
+  legacy `client_aliases` (config_loader.py:158-316).
+- `operations.client_org_excludes` (source, external id/name pattern,
+  reason) — replaces `org_excludes`.
+- `operations.placeholder_org_names` — replaces
+  `_PLACEHOLDER_ORG_NAMES`.
+
+### C.4 Client candidates + evidence panel (no auto-mint)
+
+`operations.client_candidates`: (tenant, normalized name, status
+open / accepted / mapped / excluded, first_seen, last_seen,
+seen_count, per-source group refs JSONB). Re-seen bumps last_seen +
+count (legacy org_candidates parity, config_loader.py:319-648).
+
+Acceptance UI shows FULL supporting evidence per candidate:
+
+- per-source records (source, group id, native name, device count,
+  first/last seen);
+- sample devices in the group (hostnames, platforms);
+- **device-overlap signal**: devices in this group whose identity
+  already resolves to an existing client's devices → strongest
+  map-to-existing evidence (legacy name-matching never had this);
+- fuzzy-name suggestions against existing clients + aliases, ranked;
+- recommended action.
+
+Operator actions (all audited):
+
+- **Accept** → create client, id-link every contributing source group,
+  create alias rows, **assign a requirements profile** (C.6) — a
+  client is never born without compliance semantics.
+- **Map to existing** → id-link groups to the chosen client + alias
+  the name.
+- **Exclude** → org_excludes row (reversible: excludes list has
+  restore).
+- **Fix at source** → candidate stays open with a note; re-resolves
+  when the source data changes.
+
+### C.5 Client findings
+
+A name/attachment problem on a KNOWN client is a finding, not a
+candidate. Seed finding types (entity class `client`, source_module
+`platform.client_resolver`, auto_resolvable):
+
+| Type | Condition |
+|---|---|
+| `client_name_conflict` | source group renamed away from the linked client's name (e.g. Ninja org rename) — finding + one-click "apply rename" action |
+| `client_link_collision` | one source group name-matches ≥2 clients, or two groups from one source claim the same client where the source models 1:1 |
+| `client_unattached_group` | non-placeholder group unattached > threshold (candidate exists but stale) |
+
+Legacy demotion-on-collision (promoted candidate colliding with a new
+client) becomes `client_link_collision` instead of silent demotion.
+
+### C.6 Requirements assignment fixes (folded in)
+
+`coverage_requirements` semantics today: rows are (entity_type,
+platform, device_scope, client_id NULLable); multiple same-type rows
+are additive (evaluator.py:457-542 iterates all enabled rows). Two
+gaps fixed here:
+
+- **Platform wildcard/list**: `platform` gains `'any'` (any source of
+  that entity_type satisfies — "some EDR present") and the evaluator's
+  presence join honors it. Specific-platform rows keep meaning "this
+  EDR".
+- **Override precedence**: client-scoped rows currently ADD to global
+  rows; fix so a client row for (entity_type, device_scope) REPLACES
+  the global row for that client (documented, tested).
+- **Requirements profiles**: `operations.requirement_profiles` +
+  profile→requirement template rows; acceptance (C.4) instantiates the
+  chosen profile for the new client. **Tenant default profile is a
+  data row**, not code.
+
+### C.7 Legacy parity + data migration
+
+From the 23-item agent_compliance inventory
+(config_loader.py:158-648, `sync_clients_from_observations`,
+`load_id_links`, `load_org_excludes`). Migration (RunPython), imported
+as **pre-approved** operator state:
+
+- 273 `client_aliases` → `client_name_aliases` (tier preserved);
+- 563 `client_platform_links` → `operations.client_links` id-links
+  (rows already partially seeded in 0018 — dedupe on
+  (source, external_id));
+- 8 `org_excludes` → `client_org_excludes`;
+- 151 `org_candidates` history NOT imported — candidates regenerate
+  from live observations on the clean run.
+
+Parity behaviors carried: alias tiers, candidate re-seen counting,
+enable/disable soft-delete on links, canonical-name preference order
+(Ninja > S1 > LMI — as a data row in a preference table, per
+principle 4), alignment status per client×source
+(MATCHED / FUZZY / MISSING / NA) rebuilt as a view over
+client_links + org observations. `bootstrap_clients_from_ninja`
+retired from entrypoint after one clean cycle (same pattern as E.4).
+
+### C.8 Clean run + verify
+
+Truncate `org` observations + candidates (keep clients, client_links,
+aliases, excludes, requirements), full re-ingest, then gates:
+
+- 75 Ninja orgs reconcile: every org attaches via existing id-links,
+  zero new candidates from Ninja names already known;
+- TSK / Ready / Silk Edge / Silvercup surface — TSK as a name-match or
+  map-to-existing suggestion, the others as candidates with evidence;
+- zero silent clientless observations: every unattached `org`
+  observation is either a candidate, excluded, or placeholder-listed;
+- per-source group counts match the consoles (Ninja orgs, S1 sites,
+  LMI groups, SC instances);
+- accept one candidate end-to-end: client created, profile
+  instantiated, its devices gain coverage evaluation next cycle.
+
+### Batches
+
+| Batch | Content | Gate |
+|---|---|---|
+| C1 | taxonomy pin + `org` observation emit (all connectors) + name/exclude/placeholder tables + migration | org observation counts = console group counts per source |
+| C2 | client resolver + candidates + findings + legacy data migration | 75 Ninja orgs auto-attach via id-links; clientless-LMI groups become candidates |
+| C3 | evidence panel + acceptance UI + requirements profiles + wildcard/override fixes | accept round-trip verified; C.8 gates all green |
 
 ---
 
@@ -623,6 +837,7 @@ batch is a single commit series; batches are sequential.
 |---|---|---|
 | P0 | Track 0 (severance) + migration 0018 | S1/SC/LMI observation counts unchanged; zero legacy imports in new pipeline |
 | P1 | Track 1 (evaluator parity) + migration 0019 | Finding counts vs legacy within tolerance |
+| PC | Track C batches C1–C3 (client entity) — **priority, before P2** | C.8 clean-run gates green |
 | P2 | Track 2 (dispatcher) + migration 0020 — rules disabled | Webhook test delivery + cooldown verified |
 | P3 | Track U (UI framework + canonical device page) | Browser check on refactored pages |
 | P4 | Track 3 (software findings) + migration 0021 + review UI | Classifier counts sane; decision round-trip works |
