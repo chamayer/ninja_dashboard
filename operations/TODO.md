@@ -38,6 +38,22 @@ module-specific; root `../TODO.md` keeps cross-repo items and pointers.
       records → 4,842 devices (607 cross-stream merges) + 9 nameless
       vm.guests unresolved-visible; 39 dup findings. Commits `8b7c986`,
       `d50ad4d` (+ Codex `96f83b8..ba602ef`) + the 4 fixes.
+- [x] Confidence-tiered dup collapse. 2026-07-13: hardware proof
+      (serial / vm_uuid / MAC) merges duplicate same-stream records onto one
+      device (reprovisioned VDI agents), stream-agnostic grouping, SC emits
+      every live session + serial, promotion serialized via advisory lock
+      (35 orphan devices from concurrent per-source resolver threads).
+      Rebuild #5 verified: 5,120 devices, 0 orphans, UTA servers 110 =
+      Ninja console, citrixapp26 7→1. Commits `3d6002f`, `ca22875`,
+      `671e206`, `6870b28`.
+- [ ] ScreenConnect fetch returns exactly 1,000 sessions — suspected
+      GetSessionsByFilter page cap; verify against SC console count and
+      page if needed.
+- [ ] Findings enrichment candidates from raw-payload audit: S1
+      `infected`/`activeThreats`, agentVersion/isUpToDate, scanStatus
+      staleness, encryptedApplications, machineSid (matching); SC
+      LastBootTime, IsLocalAdminPresent, model/manufacturer. LMI stays
+      hostname-only unless Central inventory API is added.
 - [ ] Cosmetic: resolver attach path labels serial/vm_uuid matches as
       `hostname_strict`; fix labels when next touching resolver.
 - [ ] Decide whether to restore cross-client same-hostname

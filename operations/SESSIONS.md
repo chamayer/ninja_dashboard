@@ -5,6 +5,52 @@ only project-level pointers.
 
 ---
 
+## 2026-07-13 — Confidence-tiered dup collapse; stream-agnostic grouping; rebuild #5
+
+**Why:** UTA showed 135 server rows vs 110 in the Ninja console — 24 phantom
+rows were duplicate S1 agent records on reprovisioned Citrix VDI hosts
+(same serial + MAC, new agent uuid daily, old record `isActive=false`).
+User approved hardware-proof collapse: "yes, but at the same time make sure
+that dups and offline are findings."
+
+**Design:** records proven to be ONE machine (equal usable serial, equal
+vm_uuid, or shared MAC) collapse onto one device with a link per record —
+`duplicate_platform_record` keeps firing (observation-level, now with
+per-record `is_online`/`last_seen_at`/serial + `offline_count`). Unproven
+same-hostname records stay separate device rows. Proof is **stream-agnostic**
+(citrixapp26: Ninja agent.rmm + vm.guest + S1 records share one MAC = one
+machine), so machine groups are built across the whole (client, hostname)
+cluster before stream-coverage rules apply.
+
+**Commits:**
+
+- `3d6002f` — MAC extraction (`normalize_mac`/`extract_macs` incl. SC
+  `GuestInfo.HardwareNetworkAddress`, S1 `networkInterfaces[].physical`,
+  Ninja `mac_addresses`); serial-proof merges bypass same-stream guard;
+  `_group_same_machine` / `_promote_entry_groups` / `_same_machine_on_device`;
+  dup finding enriched with records[] + offline_count.
+- `ca22875` — ScreenConnect connector emits EVERY live session (fetch-time
+  hostname dedup removed); `GuestInfo.MachineSerialNumber` → canonical serial.
+- `671e206` — stream-agnostic cluster grouping; entity_keys already in
+  device_links backfill instead of minting orphans; ambiguity-scatter branch
+  removed (proven groups merge normally, unproven extras get own rows).
+- `6870b28` — `pg_advisory_xact_lock` serializes device promotion: the source
+  queue drains resolution one thread per source, and racing promotions minted
+  35 orphan devices (no links, no obs) in rebuild #5. Orphans deleted.
+
+**Rebuild #5 verified:** 5,120 devices, 0 orphans. UTA servers 135 → 110
+(matches Ninja console). citrixapp26: 7 rows → 1 device (rmm + vm.guest via
+MAC + S1 + LMI). Unassigned obs: 24 LMI clientless (unmatched group, by
+design) + 9 nameless Ninja vm.guests.
+
+**Open items:** ScreenConnect fetch returned exactly 1,000 sessions twice —
+suspected API page cap, verify against SC console. Raw-payload audit found
+unmapped matching/finding fields (S1 `machineSid`, `infected`/`activeThreats`,
+agent version/scan staleness, encryption; SC `LastBootTime`,
+`IsLocalAdminPresent`, model/manufacturer) — candidates for new findings.
+
+---
+
 ## 2026-07-12 (later) — Rebuild #1 corrupted; identity rule hardened; rebuilds #2/#3
 
 **Why:** User compared the dashboard against the Ninja console: "i see in
