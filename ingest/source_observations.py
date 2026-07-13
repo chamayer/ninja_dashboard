@@ -31,7 +31,12 @@ from psycopg.types.json import Json
 from ingest import db
 from ingest.connectors import logmein, screenconnect, sentinelone
 from ingest.identity.fast_path import resolve_device_fast
-from ingest.normalize import is_placeholder_org_name, normalize_hostname, os_family
+from ingest.normalize import (
+    extract_macs,
+    is_placeholder_org_name,
+    normalize_hostname,
+    os_family,
+)
 from ingest.sources import SourceConfig
 
 log = logging.getLogger(__name__)
@@ -225,6 +230,7 @@ def _write_observations(
                 ),
                 "is_online":     row.get("is_online"),
                 "serial_number": serial,
+                "macs":          extract_macs(raw),
                 # None when the source gives no explicit signal — never guessed.
                 "device_role":   row.get("device_type"),
                 "os_name":       os_name,

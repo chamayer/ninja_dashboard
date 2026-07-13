@@ -86,6 +86,45 @@ def is_usable_serial(serial: str | None) -> bool:
     return len(set(value)) > 1
 
 
+_MAC_RE = re.compile(r"^[0-9a-f]{2}([:-][0-9a-f]{2}){5}$")
+# All-zero/all-FF are filler; VirtualBox default NAT MAC shows on many VMs.
+_JUNK_MACS = {"00:00:00:00:00:00", "ff:ff:ff:ff:ff:ff", "02:00:4c:4f:4f:50"}
+
+
+def normalize_mac(value: str | None) -> str:
+    if not value:
+        return ""
+    mac = value.strip().lower().replace("-", ":")
+    if len(mac) == 12 and ":" not in mac:
+        mac = ":".join(mac[i:i + 2] for i in range(0, 12, 2))
+    if not _MAC_RE.match(mac) or mac in _JUNK_MACS:
+        return ""
+    return mac
+
+
+def extract_macs(raw: dict) -> list[str]:
+    """Collect usable MAC addresses from a raw platform payload."""
+    found: set[str] = set()
+    candidates: list[Any] = []
+    for ni in raw.get("networkInterfaces") or []:  # SentinelOne
+        if isinstance(ni, dict):
+            candidates.append(ni.get("physical"))
+    for key in ("macAddress", "MacAddress", "macAddresses", "GuestHardwareNetworkAddress"):
+        candidates.append(raw.get(key))
+    flat: list[Any] = []
+    for c in candidates:
+        if isinstance(c, list):
+            flat.extend(c)
+        else:
+            flat.append(c)
+    for c in flat:
+        if isinstance(c, str):
+            mac = normalize_mac(c)
+            if mac:
+                found.add(mac)
+    return sorted(found)
+
+
 def is_macos_name(os_name: str | None) -> bool:
     if not os_name:
         return False

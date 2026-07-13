@@ -25,7 +25,12 @@ from psycopg.types.json import Json
 
 from ingest import db
 from ingest.ninja_client import NinjaClient
-from ingest.normalize import entity_type_for_node_class, infer_device_role, os_family
+from ingest.normalize import (
+    entity_type_for_node_class,
+    infer_device_role,
+    normalize_mac,
+    os_family,
+)
 from ingest.runlog import run_log
 from ingest.util import ninja_epoch_to_dt
 
@@ -352,6 +357,13 @@ def _write_ninja_observations(
                     "last_seen_at":  last_contact.isoformat() if last_contact else None,
                     "is_online":     None if offline is None else not offline,
                     "serial_number": r["serial_number"],
+                    "macs": sorted({
+                        m for m in (
+                            normalize_mac(x)
+                            for x in (r.get("mac_addresses") or [])
+                            if isinstance(x, str)
+                        ) if m
+                    }),
                     # None when node_class/os give no explicit signal — never guessed.
                     "device_role":   infer_device_role(r["os_name"], r["node_class"]),
                     "os_name":       r["os_name"],

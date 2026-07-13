@@ -35,10 +35,13 @@ def resolve_device_fast(
       2. Unique serial match on devices within client scope (high confidence).
       3. Unique hostname match on devices within client scope (medium-high confidence).
 
-    Steps 2 and 3 correlate CROSS-source/stream only: a device that already
-    carries a different record of the same (platform, entity_type) stream is
-    never a match — that second record is a potential duplicate consuming a
-    license and must stay its own accounted row.
+    A usable serial match (step 2) is proof of the same machine, so it may
+    attach even alongside another record of the same (platform, entity_type)
+    stream — a duplicate agent on one box gets its own link and a
+    duplicate_platform_record finding. Hostname (step 3) stays cross-stream
+    only: same name with no hardware proof could be two real machines, so a
+    device already carrying a different record of that stream is never a
+    hostname match.
     """
     # Step 1 — exact source link
     cur.execute(
@@ -70,15 +73,8 @@ def resolve_device_fast(
             SELECT d.id FROM operations.devices d
             WHERE d.tenant_id = %s AND d.canonical_serial = %s AND d.deleted_at IS NULL
               AND (%s::uuid IS NULL OR d.client_id = %s)
-              AND NOT EXISTS (
-                  SELECT 1 FROM operations.entity_observations eo
-                  WHERE eo.tenant_id = d.tenant_id AND eo.device_id = d.id
-                    AND eo.platform = %s AND eo.entity_type = %s
-                    AND eo.entity_key <> %s
-              )
             """,
-            (tenant_id, serial, client_id, client_id,
-             source_name, entity_type, external_id),
+            (tenant_id, serial, client_id, client_id),
         )
         rows = cur.fetchall()
         if len(rows) == 1:

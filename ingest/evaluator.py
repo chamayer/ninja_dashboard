@@ -366,7 +366,10 @@ def _evaluate_duplicate_records(cur: Any, tenant_id: int, now: datetime) -> int:
         """
         SELECT DISTINCT ON (platform, entity_type, entity_key)
                platform, entity_type, entity_key, client_id,
-               canonical_data ->> 'hostname'
+               canonical_data ->> 'hostname',
+               canonical_data ->> 'is_online',
+               canonical_data ->> 'last_seen_at',
+               canonical_data ->> 'serial_number'
         FROM operations.entity_observations
         WHERE tenant_id = %s AND entity_type <> 'software'
           AND observed_at > now() - INTERVAL '2 days'
@@ -374,28 +377,40 @@ def _evaluate_duplicate_records(cur: Any, tenant_id: int, now: datetime) -> int:
         """,
         (tenant_id,),
     )
-    groups: dict[tuple, list[str]] = {}
-    for platform, entity_type, entity_key, client_id, hostname in cur.fetchall():
+    groups: dict[tuple, list[dict]] = {}
+    for (platform, entity_type, entity_key, client_id, hostname,
+         is_online, last_seen, serial) in cur.fetchall():
         norm = normalize_hostname(hostname)
         if not norm:
             continue
         groups.setdefault(
             (platform, entity_type, str(client_id or ""), norm), []
-        ).append(entity_key)
+        ).append({
+            "entity_key": entity_key,
+            "is_online": is_online,
+            "last_seen_at": last_seen,
+            "serial_number": serial,
+        })
 
     count = 0
     present_keys: list[str] = []
-    for (platform, entity_type, client_key, norm), keys in groups.items():
-        if len(keys) < 2:
+    for (platform, entity_type, client_key, norm), records in groups.items():
+        if len(records) < 2:
             continue
         ckey = f"duplicate_record:{platform}:{entity_type}:{client_key}:{norm}"
         present_keys.append(ckey)
         severity = "high" if entity_type.startswith("agent.") else "low"
+        records.sort(key=lambda r: r["last_seen_at"] or "", reverse=True)
         _upsert_admin_finding(
             cur, tenant_id, ft_id, ckey, severity, now,
             {"platform": platform, "entity_type": entity_type,
              "hostname": norm, "client_id": client_key or None},
-            {"record_count": len(keys), "entity_keys": sorted(keys)},
+            {"record_count": len(records),
+             "entity_keys": [r["entity_key"] for r in records],
+             "records": records,
+             "offline_count": sum(
+                 1 for r in records if r["is_online"] in ("false", "False")
+             )},
         )
         count += 1
     cur.execute(
