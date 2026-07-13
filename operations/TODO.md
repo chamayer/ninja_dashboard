@@ -52,9 +52,21 @@ module-specific; root `../TODO.md` keeps cross-repo items and pointers.
       (Ninja orgs incl. empty, S1 /sites, LMI groups incl. empty, SC per
       instance), migration 0027 client_name_aliases / client_org_excludes
       / placeholder_org_names, hardcoded _PLACEHOLDER_ORG_NAMES retired,
-      device resolver skips org rows. Next: C2 client resolver +
-      candidates + client findings + legacy alias/exclude import; C3
-      evidence panel + acceptance UI + requirement profiles.
+      device resolver skips org rows. Batch C2 pushed (`954d635` +
+      fixes `04e845c` / `a74f064` for two Django-default NOT NULL raw
+      INSERT bugs): ingest/identity/client_resolver.py implements the
+      strictly-exclusive ladder (id-link short-circuit → exact-name
+      attach + mint client_link → collision detect → candidate), runs
+      before device resolver with its own advisory lock; migration 0028
+      adds client_candidates + client_links.created_at/created_reason +
+      3 finding types (client_name_conflict, client_link_collision,
+      client_unattached_group) + legacy import (50 aliases after
+      dedupe from 267, 7 org_excludes). Verified on am-ch-01: TSK
+      auto-attached on S1+LMI, Spencer/Glas attached via alias; 6
+      open candidates (Silvercup, A.M.Rose Internal, DJ Direct GA,
+      Gla, Silk Edge, Trimworx/Deco/BGG); 7 unattached_group findings;
+      1 client_name_conflict drift finding. Next: C3 evidence panel +
+      acceptance UI + requirement profiles.
 - [ ] ScreenConnect fetch returns exactly 1,000 sessions — suspected
       GetSessionsByFilter page cap; verify against SC console count and
       page if needed.

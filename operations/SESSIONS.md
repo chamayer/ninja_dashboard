@@ -5,6 +5,62 @@ only project-level pointers.
 
 ---
 
+## 2026-07-13 (latest) — Track C batch C2: client resolver + candidates + client findings + legacy import
+
+**Why:** C1 shipped the raw org observations and empty name-mapping tables;
+C2 is the engine that turns those observations into decisions. Strictly
+exclusive ladder per the tightened C.3: an id-link short-circuits all
+matching (drift becomes an operator finding, never a re-match), exact
+normalized-name attaches and mints the link, everything else becomes a
+candidate.
+
+**Commits:**
+
+- `954d635` — batch C2. `ingest/identity/client_resolver.py`
+  (`drain_client_resolution`) with its own `pg_advisory_xact_lock`.
+  Wired into `source_run_queue.process_entry` and
+  `main.run_identity_resolver_once` to run before device promotion.
+  Device observations now carry `canonical_data.platform_group_id`
+  so the resolver can backfill devices when it attaches an org.
+  Migration 0028: `client_candidates` table with RLS + grants;
+  `client_links.created_at` + `created_reason` via
+  `SeparateDatabaseAndState`; three finding types
+  (`client_name_conflict` entity/medium/auto,
+  `client_link_collision` admin/high/manual,
+  `client_unattached_group` admin/medium/auto); legacy import — 267
+  `client_aliases` rows deduped by tier rank
+  (manual > seed > alignment > source) to 50 `client_name_aliases`;
+  7 `org_excludes` rows → `client_org_excludes`.
+- `04e845c` — fix: `client_candidates.first_seen_at` (Django
+  `auto_now_add`) is NOT NULL with no DB default; raw INSERT must
+  supply `NOW()`.
+- `a74f064` — fix (same class): `resolved_by` and `resolved_reason`
+  (`CharField(default="")`) also have no DB default; supply `''`.
+
+**Verified on am-ch-01:**
+
+Rung-2 auto-attaches minted 4 `client_links` with
+`created_reason='resolver.name_match'`: TSK on LogMeIn, TSK on
+SentinelOne, "Spencer Myrtle / Express Builders" on SentinelOne, Glas
+on SentinelOne. C.8 gate: TSK attaches by exact name on both S1 and
+LMI without operator intervention.
+
+6 open `client_candidates` (the correct residual): Silvercup (seen 4×,
+2 sources), A.M.Rose Internal, DJ Direct GA, Gla, Silk Edge,
+Trimworx/Deco/BGG. 7 `client_unattached_group` admin findings
+(Silvercup surfaces once per source-binding = 2 findings for 1
+candidate). 1 `client_name_conflict` drift finding. 0 collisions.
+
+Placeholders ("Default site" S1, "Unknown"/".Default" LMI) and empty-
+name LMI "-1" group correctly stayed out of candidacy.
+
+**Next:** batch C3 — evidence panel + acceptance UI (accept mints
+client / map attaches to existing / exclude adds row / fix renames
+source-side, all audited) + requirement_profiles + platform-any
+wildcard + client-row-replaces-global override semantics.
+
+---
+
 ## 2026-07-13 (later) — Track C blueprint + batch C1: org observations, name mapping tables
 
 **Why:** 24 clientless LMI observations proved the client-learning gap —
