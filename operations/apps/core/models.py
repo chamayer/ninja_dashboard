@@ -176,6 +176,8 @@ class ClientLink(UUIDTenantScopedModel):
     source = models.ForeignKey(Source, on_delete=models.PROTECT, related_name="client_links")
     external_id = models.CharField(max_length=240)
     external_name = models.CharField(max_length=240, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    created_reason = models.CharField(max_length=120, blank=True, default="")
 
     class Meta:
         db_table = "client_links"
@@ -254,6 +256,48 @@ class PlaceholderOrgName(UUIDTenantScopedModel):
 
     def __str__(self) -> str:
         return self.normalized_name
+
+
+class ClientCandidate(UUIDTenantScopedModel):
+    """A source group name that did not resolve to any client.
+
+    Written by the client resolver when rungs 1-2 fail (no id-link, no
+    exact-name match). Every candidate needs one of: accept (mint client),
+    map (attach to existing client), exclude, fix (rename source-side).
+    """
+
+    class Status(models.TextChoices):
+        OPEN = "open", "Open"
+        ACCEPTED = "accepted", "Accepted"
+        MAPPED = "mapped", "Mapped"
+        EXCLUDED = "excluded", "Excluded"
+
+    normalized_name = models.CharField(max_length=240)
+    display_name = models.CharField(max_length=240, blank=True, default="")
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.OPEN)
+    seen_count = models.PositiveIntegerField(default=1)
+    first_seen_at = models.DateTimeField(auto_now_add=True)
+    last_seen_at = models.DateTimeField(auto_now=True)
+    source_refs = models.JSONField(default=list, blank=True)
+    resolved_client = models.ForeignKey(
+        Client, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="resolved_candidates",
+    )
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    resolved_by = models.CharField(max_length=120, blank=True, default="")
+    resolved_reason = models.CharField(max_length=240, blank=True, default="")
+
+    class Meta:
+        db_table = "client_candidates"
+        constraints = (
+            models.UniqueConstraint(
+                fields=("tenant", "normalized_name"),
+                name="uq_client_candidates_tenant_normalized",
+            ),
+        )
+
+    def __str__(self) -> str:
+        return self.display_name or self.normalized_name
 
 
 class ClientPolicy(UUIDTenantScopedModel):

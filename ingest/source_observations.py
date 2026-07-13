@@ -254,6 +254,9 @@ def _write_observations(
                 "hostname":      hostname,
                 "platform":      source.platform,
                 "entity_type":   source.entity_type,
+                # platform_group_id lets the client resolver backfill
+                # device observations once the org attaches to a client.
+                "platform_group_id": str(row.get("platform_group_id") or ""),
                 "last_seen_at":  (
                     row["last_seen_at"].isoformat() if row.get("last_seen_at") else None
                 ),

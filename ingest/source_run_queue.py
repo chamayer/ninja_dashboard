@@ -138,6 +138,7 @@ def process_entry(entry_id: int) -> None:
     # Late imports to avoid circular deps at module load time.
     from ingest.source_observations import run_source_observations
     from ingest.sources import load_sources
+    from ingest.identity.client_resolver import drain_client_resolution
     from ingest.identity.resolver import drain_resolution
 
     with db.pool.connection() as conn, conn.cursor() as cur:
@@ -171,6 +172,10 @@ def process_entry(entry_id: int) -> None:
             counts = run_source_observations(sources, observed_at)
             rows_seen = sum(counts.values())
             if rows_seen:
+                try:
+                    drain_client_resolution()
+                except Exception:
+                    log.exception("source_run_queue: client_resolver failed — continuing")
                 drain_resolution(batch_size=500)
         else:
             raise ValueError(f"Unknown source: {df!r}")

@@ -71,6 +71,7 @@ from ingest.core import (
 from ingest.policy_scope import sync_patching_enabled_policies
 from ingest.ninja_client import NinjaClient
 from ingest.evaluator import evaluate as platform_evaluate
+from ingest.identity.client_resolver import drain_client_resolution as _drain_client_resolution
 from ingest.identity.resolver import drain_resolution as _drain_resolution
 from ingest import scope_selector as _scope_selector
 from ingest.patches import ingest as patches_ingest
@@ -125,6 +126,11 @@ def _refresh_inventory_current(reason: str) -> None:
 
 def run_identity_resolver_once() -> None:
     """Drain unresolved entity_observations and refresh agent_presence_current."""
+    try:
+        attached = _drain_client_resolution()
+        log.info("Client resolver complete: attached=%d", attached)
+    except Exception:
+        log.exception("Client resolver failed")
     try:
         resolved = _drain_resolution(batch_size=500)
         log.info("Identity resolver complete: resolved=%d", resolved)
