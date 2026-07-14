@@ -17,7 +17,8 @@ Pipeline per run (device_id=None means full sweep):
      entity_types. Confidence is capped at 'probable' unless another
      source saw the device online recently (corroboration).
   4. Lifecycle — device_missing_from_source, device_long_offline,
-     device_stale_data, cross_client_conflict.
+     device_stale_data. (cross_client_conflict removed 2026-07-14 —
+     see BLUEPRINT §1.7.)
   5. Auto-resolve for all of the above once conditions clear.
 
 All operations.* access runs under SET LOCAL operations.tenant_id so RLS
@@ -74,8 +75,9 @@ def evaluate(tenant_id: int, device_id: uuid.UUID | None = None) -> int:
                 )
                 affected += _evaluate_unenrolled(cur, tenant_id, device_id, now)
                 affected += _evaluate_device_lifecycle(cur, tenant_id, device_id, now)
-                if device_id is None:
-                    affected += _evaluate_cross_client(cur, tenant_id, now)
+                # cross_client_conflict emitter removed 2026-07-14 — see
+                # BLUEPRINT §1.7 for design rationale. Existing findings
+                # closed in migration 0034.
                 affected += _auto_resolve(cur, tenant_id, device_id, now)
     except Exception as exc:
         error_msg = str(exc)[:2000]
@@ -888,41 +890,15 @@ def _evaluate_stale_data(cur: Any, tenant_id: int, now: datetime) -> int:
     return count
 
 
-def _evaluate_cross_client(cur: Any, tenant_id: int, now: datetime) -> int:
-    """Same normalized hostname under different clients → conflict finding."""
-    ft_id = _get_finding_type_id(cur, "cross_client_conflict")
-    if ft_id is None:
-        return 0
-    cur.execute(
-        """
-        SELECT id, client_id, canonical_hostname
-        FROM operations.devices
-        WHERE tenant_id = %s AND deleted_at IS NULL
-        """,
-        (tenant_id,),
-    )
-    by_norm: dict[str, list[tuple[uuid.UUID, Any, str]]] = {}
-    for dev_id, client_id, hostname in cur.fetchall():
-        norm = normalize_hostname(hostname)
-        if norm:
-            by_norm.setdefault(norm, []).append((dev_id, client_id, hostname))
-
-    count = 0
-    offenders: list[uuid.UUID] = []
-    for norm, entries in by_norm.items():
-        clients = {e[1] for e in entries}
-        if len(clients) < 2:
-            continue
-        for dev_id, client_id, hostname in entries:
-            offenders.append(dev_id)
-            ckey = _condition_key(tenant_id, client_id, dev_id, "cross_client_conflict", norm)
-            count += _upsert_finding(
-                cur, tenant_id, ft_id, client_id, dev_id,
-                ckey, "medium", "confirmed", now,
-                {"hostname": hostname, "client_count": len(clients)},
-            )
-    _resolve_findings_absent(cur, tenant_id, ft_id, offenders, now)
-    return count
+# cross_client_conflict emitter removed 2026-07-14.
+# The finding was a legacy-AC port: "hostname X exists under multiple
+# clients → possible identity issue." In the operations resolver the
+# only way two devices can end up with the same hostname across clients
+# is if they have DIFFERENT hardware (else the resolver would have
+# merged them into ONE canonical device at resolve time). So this
+# finding could ONLY fire on naming coincidence — 100% false positives
+# on this fleet (0 of 1,685 pairs had hardware corroboration).
+# BLUEPRINT §1.7 updated to reflect the removal.
 
 
 # --------------------------------------------------------------------------

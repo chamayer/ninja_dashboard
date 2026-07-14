@@ -571,13 +571,37 @@ platform within that platform's staleness window — check
 `canonical_data->>'is_online' = 'true'`. Otherwise cap at `probable`.
 Port of legacy `confirmed_gap` (ingest.py:887-908).
 
-### 1.7 cross_client_conflict findings
+### 1.7 cross_client_conflict findings — REMOVED 2026-07-14
 
-Same `normalize_hostname` resolving to devices under different clients
-(legacy ingest.py:516, :608-620). Emit finding type
-`cross_client_conflict` (entity, severity medium, subject = each
-device) with the peer device/client in finding_details. Seed type in
-migration 0019.
+Originally spec'd (from legacy AC ingest.py:516, :608-620): same
+`normalize_hostname` resolving to devices under different clients
+emits `cross_client_conflict`, severity medium, one per device.
+
+**Removed after operational analysis.** The finding's premise doesn't
+survive the ops resolver design:
+
+- The resolver merges cross-source records with matching hardware
+  (serial / vm_uuid / MAC) into ONE canonical device at resolve time
+  (Track E, resolver.py `_group_same_machine`).
+- Therefore two devices with the same hostname across different
+  clients can ONLY coexist if they have DIFFERENT (or unknown)
+  hardware IDs — i.e., they are genuinely different machines that
+  happen to share a generic name (`dc`, `sql`, `fileserver`, `rd`, …).
+- Data confirms it: 0 of 1,685 cross-client hostname pairs on this
+  fleet had hardware corroboration; 282 open findings were 100%
+  naming coincidence.
+
+Legacy AC needed this finding because its resolver did NOT merge by
+hardware ID as aggressively; the new resolver eliminates the class of
+problem the finding was trying to detect. Migration 0034 resolves
+existing findings; emitter deleted from `_evaluate_cross_client`.
+Finding type row retained for historical audit only, no re-emission.
+
+If a real cross-client duplicate ever needs surfacing (hardware match
+that slipped through resolver, e.g. junk-serial edge cases), the
+better shape is an `identity_candidate(device_a, device_b)` with
+hardware corroboration in its signals — surfaced through the
+identity-review workflow rather than a finding.
 
 ### 1.8 device_long_offline / device_stale_data
 
