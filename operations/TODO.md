@@ -155,6 +155,13 @@ module-specific; root `../TODO.md` keeps cross-repo items and pointers.
       `SuppressionRule` scoped to that condition_key (optionally with
       expires_at), so future runs of the same condition don't re-emit
       notifications. AuditLog entry per suppression.
+- [ ] Sweep other pages for hostname → device clickthroughs (parked
+      2026-07-14). Same pattern as findings queue: templates that
+      render a hostname without linking to the device detail page.
+      Candidates: `findings_admin_health.html`,
+      `client_candidate_detail.html` (sample_devices list),
+      `merge_candidates_queue.html`, any hostname mention in
+      dashboard/coverage pages. One template pass.
 - [ ] Rename `agent_presence_current` → `device_presence_current`
       (parked 2026-07-14). Matview has covered all non-software entity
       streams (agent.*, vm.guest, vm.host, network.device, monitor.target)
