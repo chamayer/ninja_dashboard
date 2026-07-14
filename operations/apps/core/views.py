@@ -1429,6 +1429,36 @@ def _attach_group_to_client(
         (source_id, external_id),
     )
 
+    # Auto-resolve client_unattached_group findings for every binding
+    # of this source that pointed at this external_id. The resolver
+    # keys condition_key on source_binding_id, so we enumerate bindings.
+    import hashlib
+    cur.execute(
+        """
+        SELECT sb.id FROM operations.source_bindings sb
+        JOIN operations.source_instances si ON si.id = sb.source_instance_id
+        WHERE si.source_id = %s AND si.tenant_id = 1
+        """,
+        (source_id,),
+    )
+    binding_ids = [row[0] for row in cur.fetchall()]
+    for bid in binding_ids:
+        raw = f"client_resolver:{bid}:{external_id}"
+        ckey = hashlib.sha256(raw.encode()).hexdigest()[:64]
+        cur.execute(
+            """
+            UPDATE operations.admin_findings af
+            SET status = 'resolved', resolved_at = NOW()
+            FROM operations.finding_types ft
+            WHERE af.finding_type_id = ft.id
+              AND ft.name = 'client_unattached_group'
+              AND af.tenant_id = 1
+              AND af.condition_key = %s
+              AND af.status IN ('open', 'acknowledged')
+            """,
+            (ckey,),
+        )
+
 
 def _resolve_finding_for_group(cur, source_binding_id, external_id: str) -> None:
     """Close any client_unattached_group admin finding for a now-attached group."""
