@@ -155,6 +155,13 @@ module-specific; root `../TODO.md` keeps cross-repo items and pointers.
       `SuppressionRule` scoped to that condition_key (optionally with
       expires_at), so future runs of the same condition don't re-emit
       notifications. AuditLog entry per suppression.
+- [ ] Rename `agent_presence_current` → `device_presence_current`
+      (parked 2026-07-14). Matview has covered all non-software entity
+      streams (agent.*, vm.guest, vm.host, network.device, monitor.target)
+      since migration 0025, and now carries `last_power_state`. Name is
+      historically misleading. Migration: rename table + refresh function,
+      grep-and-replace across evaluator / views / findings queue / coverage
+      loaders. No logic change, one push.
 - [ ] device_unenrolled UI polish (parked 2026-07-14). Findings queue
       renders these in the generic row shape today. Add a dedicated
       column set — power_state + days_since_last_seen + hypervisor
