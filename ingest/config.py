@@ -97,6 +97,86 @@ class Settings(BaseSettings):
     AGENT_COMPLIANCE_ZENDESK_AUTH_USERNAME: str = ""
     AGENT_COMPLIANCE_ZENDESK_AUTH_TOKEN: SecretStr = SecretStr("")
 
+    # ── Notifications (Track 2 dispatcher) ───────────────────────────
+    # v1 falls back to the AGENT_COMPLIANCE_* values already set on the
+    # server; the old names are removed at Track 6 cutover.
+    NOTIFY_ENABLED: bool = False
+    NOTIFY_DISPATCH_SCHEDULE_MINUTES: int = Field(default=60, ge=5, le=1440)
+    NOTIFY_DIGEST_ENABLED: bool = False
+    NOTIFY_DIGEST_HOUR: int = Field(default=8, ge=0, le=23)
+    NOTIFY_SMTP_HOST: str = ""
+    NOTIFY_SMTP_PORT: int = 0
+    NOTIFY_SMTP_USERNAME: str = ""
+    NOTIFY_SMTP_PASSWORD: SecretStr = SecretStr("")
+    NOTIFY_EMAIL_FROM: str = ""
+    NOTIFY_EMAIL_TO: str = ""
+    NOTIFY_ZENDESK_URL: str = ""
+    NOTIFY_ZENDESK_REQUESTER_EMAIL: str = ""
+    NOTIFY_ZENDESK_REQUESTER_NAME: str = ""
+    NOTIFY_ZENDESK_AUTH_USERNAME: str = ""
+    NOTIFY_ZENDESK_AUTH_TOKEN: SecretStr = SecretStr("")
+
+    @property
+    def notify_smtp_host(self) -> str:
+        return self.NOTIFY_SMTP_HOST or self.AGENT_COMPLIANCE_SMTP_HOST
+
+    @property
+    def notify_smtp_port(self) -> int:
+        return self.NOTIFY_SMTP_PORT or self.AGENT_COMPLIANCE_SMTP_PORT
+
+    @property
+    def notify_smtp_username(self) -> str:
+        return self.NOTIFY_SMTP_USERNAME or self.AGENT_COMPLIANCE_SMTP_USERNAME
+
+    @property
+    def notify_smtp_password(self) -> SecretStr:
+        if self.NOTIFY_SMTP_PASSWORD.get_secret_value():
+            return self.NOTIFY_SMTP_PASSWORD
+        return self.AGENT_COMPLIANCE_SMTP_PASSWORD
+
+    @property
+    def notify_smtp_starttls(self) -> bool:
+        return self.AGENT_COMPLIANCE_SMTP_STARTTLS
+
+    @property
+    def notify_email_from(self) -> str:
+        return self.NOTIFY_EMAIL_FROM or self.AGENT_COMPLIANCE_ALERT_EMAIL_FROM
+
+    @property
+    def notify_email_to(self) -> str:
+        return self.NOTIFY_EMAIL_TO or self.AGENT_COMPLIANCE_ALERT_EMAIL_TO
+
+    @property
+    def notify_zendesk_url(self) -> str:
+        return self.NOTIFY_ZENDESK_URL or self.AGENT_COMPLIANCE_ZENDESK_URL
+
+    @property
+    def notify_zendesk_requester_email(self) -> str:
+        return (
+            self.NOTIFY_ZENDESK_REQUESTER_EMAIL
+            or self.AGENT_COMPLIANCE_ZENDESK_REQUESTER_EMAIL
+        )
+
+    @property
+    def notify_zendesk_requester_name(self) -> str:
+        return (
+            self.NOTIFY_ZENDESK_REQUESTER_NAME
+            or self.AGENT_COMPLIANCE_ZENDESK_REQUESTER_NAME
+        )
+
+    @property
+    def notify_zendesk_auth_username(self) -> str:
+        return (
+            self.NOTIFY_ZENDESK_AUTH_USERNAME
+            or self.AGENT_COMPLIANCE_ZENDESK_AUTH_USERNAME
+        )
+
+    @property
+    def notify_zendesk_auth_token(self) -> SecretStr:
+        if self.NOTIFY_ZENDESK_AUTH_TOKEN.get_secret_value():
+            return self.NOTIFY_ZENDESK_AUTH_TOKEN
+        return self.AGENT_COMPLIANCE_ZENDESK_AUTH_TOKEN
+
     @property
     def activity_sources(self) -> list[str]:
         return [s.strip() for s in self.INGEST_ACTIVITY_SOURCES.split(",") if s.strip()]

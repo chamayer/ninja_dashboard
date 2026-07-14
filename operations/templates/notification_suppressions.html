@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+
+{% block title %}Notification suppressions{% endblock %}
+
+{% block content %}
+<div class="card">
+    <p class="muted"><a href="{% url 'notification_rules_list' %}">← Notification rules</a></p>
+    <h1>Suppressions</h1>
+    <p class="muted">
+        Filters that prevent notifications for a matching finding subject.
+        `subject_match` JSONB matches on client_id / device_id / platform /
+        finding_type (empty = wildcard).
+    </p>
+</div>
+
+<div class="card">
+    {% if suppressions %}
+    <table class="ops-table">
+        <thead>
+            <tr>
+                <th>Finding type</th>
+                <th>Subject match</th>
+                <th>Reason</th>
+                <th>Expires</th>
+                <th>Created by</th>
+                <th>Created at</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for s in suppressions %}
+            <tr>
+                <td>{{ s.finding_type.name }}</td>
+                <td class="mono">{{ s.subject_match|default:"— wildcard —" }}</td>
+                <td>{{ s.reason }}</td>
+                <td class="muted num">{{ s.expires_at|date:"Y-m-d"|default:"never" }}</td>
+                <td class="muted">{{ s.created_by.username|default:"—" }}</td>
+                <td class="muted num">{{ s.created_at|date:"Y-m-d H:i" }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="muted">No suppressions configured. Add via Django admin.</p>
+    {% endif %}
+</div>
+{% endblock %}

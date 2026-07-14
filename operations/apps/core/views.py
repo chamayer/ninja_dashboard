@@ -28,9 +28,13 @@ from .models import (
     Finding,
     FindingType,
     MergeCandidate,
+    NotificationEvent,
+    NotificationRoute,
+    NotificationRule,
     RequirementProfile,
     SoftwareDecision,
     Source,
+    SuppressionRule,
 )
 
 DEVICE_PAGE_SIZE = 100
@@ -1686,3 +1690,57 @@ def client_candidate_fix(request, candidate_id) -> HttpResponse:
     )
     messages.success(request, "Note recorded — candidate remains open.")
     return redirect("client_candidate_detail", candidate_id=candidate.id)
+
+
+# ── Notification dispatcher UI (Track 2.4) ──────────────────────────────
+
+
+@login_required
+def notification_rules_list(request: HttpRequest) -> HttpResponse:
+    rules = list(
+        NotificationRule.objects.filter(tenant_id=1)
+        .select_related("finding_type", "route", "client")
+        .order_by("finding_type__name", "client__display_name")
+    )
+    events = list(
+        NotificationEvent.objects.filter(tenant_id=1)
+        .order_by("-sent_at")[:50]
+    )
+    routes = list(NotificationRoute.objects.filter(tenant_id=1))
+    return render(request, "notification_rules.html", {
+        "rules": rules,
+        "events": events,
+        "routes": routes,
+        "enabled_count": sum(1 for r in rules if r.enabled),
+        "disabled_count": sum(1 for r in rules if not r.enabled),
+    })
+
+
+@login_required
+@require_POST
+@transaction.atomic
+def notification_rule_toggle(request: HttpRequest, rule_id) -> HttpResponse:
+    rule = get_object_or_404(NotificationRule, id=rule_id, tenant_id=1)
+    prev = rule.enabled
+    rule.enabled = not prev
+    rule.save(update_fields=["enabled"])
+    _audit(
+        request, "notification_rule.toggle", rule.id,
+        {"enabled": prev},
+        {"enabled": rule.enabled},
+    )
+    messages.success(
+        request,
+        f"Rule for {rule.finding_type.name} is now {'enabled' if rule.enabled else 'disabled'}.",
+    )
+    return redirect("notification_rules_list")
+
+
+@login_required
+def notification_suppressions_list(request: HttpRequest) -> HttpResponse:
+    rows = list(
+        SuppressionRule.objects.filter(tenant_id=1)
+        .select_related("finding_type", "created_by")
+        .order_by("-created_at")
+    )
+    return render(request, "notification_suppressions.html", {"suppressions": rows})

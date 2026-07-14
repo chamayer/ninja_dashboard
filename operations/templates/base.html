@@ -278,6 +278,8 @@
                href="{% url 'merge_candidates_queue' %}">Merges{% if nav_pending_merges %} <span class="nav-badge nav-badge-muted">{{ nav_pending_merges }}</span>{% endif %}</a>
             <a class="nav-link nav-admin {% if request.resolver_match and 'client_candidate' in request.resolver_match.url_name %}active{% endif %}"
                href="{% url 'client_candidates_queue' %}">Clients{% if nav_pending_client_candidates %} <span class="nav-badge">{{ nav_pending_client_candidates }}</span>{% endif %}</a>
+            <a class="nav-link nav-admin {% if request.resolver_match and 'notification' in request.resolver_match.url_name %}active{% endif %}"
+               href="{% url 'notification_rules_list' %}">Notifications</a>
             <a class="nav-link nav-admin" href="{% url 'admin:index' %}">⚙</a>
         </div>
     </nav>

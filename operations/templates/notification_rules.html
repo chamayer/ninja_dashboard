@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+
+{% block title %}Notification rules{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h1>Notification rules</h1>
+    <p class="muted">
+        Every finding is matched against these rules (most-specific first),
+        routed via `notification_routes`, and cooldown-tracked. Rules
+        seeded from legacy alert_rules start <strong>disabled</strong>;
+        enable each after reviewing the target route.
+        {{ enabled_count }} enabled · {{ disabled_count }} disabled.
+    </p>
+</div>
+
+<div class="card">
+    <h2>Rules</h2>
+    {% if rules %}
+    <table data-sortable class="ops-table">
+        <thead>
+            <tr>
+                <th>Finding type</th>
+                <th>Class</th>
+                <th>Client</th>
+                <th>Match</th>
+                <th>Min severity</th>
+                <th>Min confidence</th>
+                <th>Route</th>
+                <th>Cooldown</th>
+                <th>Status</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for r in rules %}
+            <tr>
+                <td>{{ r.finding_type.name }}</td>
+                <td class="muted">{{ r.finding_class }}</td>
+                <td>{{ r.client.display_name|default:"— all —" }}</td>
+                <td class="mono">{% for k, v in r.match_criteria.items %}{{ k }}={{ v }} {% endfor %}</td>
+                <td class="muted">{{ r.min_severity|default:"—" }}</td>
+                <td class="muted">{{ r.min_confidence|default:"—" }}</td>
+                <td>{{ r.route.channel }}: {{ r.route.target|truncatechars:40 }}</td>
+                <td>{{ r.cooldown_hours }}h</td>
+                <td>{% if r.enabled %}<span class="badge badge-open">enabled</span>{% else %}<span class="badge badge-suppressed">disabled</span>{% endif %}</td>
+                <td>
+                    <form method="post" action="{% url 'notification_rule_toggle' rule_id=r.id %}" style="display: inline;">
+                        {% csrf_token %}
+                        <button type="submit" style="padding: 0.25rem 0.6rem; font-size: 0.8rem;">
+                            {% if r.enabled %}Disable{% else %}Enable{% endif %}
+                        </button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="muted">No rules yet. Migration 0031 seeds from legacy alert_rules.</p>
+    {% endif %}
+</div>
+
+<div class="card">
+    <h2>Routes</h2>
+    {% if routes %}
+    <table class="ops-table">
+        <thead>
+            <tr>
+                <th>Channel</th>
+                <th>Target</th>
+                <th>Mode</th>
+                <th>Severity min</th>
+                <th>Client</th>
+                <th>Finding type</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for rt in routes %}
+            <tr>
+                <td><span class="badge badge-info">{{ rt.channel }}</span></td>
+                <td class="mono">{{ rt.target|truncatechars:60 }}</td>
+                <td class="muted">{{ rt.mode }}</td>
+                <td class="muted">{{ rt.severity_min }}</td>
+                <td class="muted">{{ rt.client.display_name|default:"—" }}</td>
+                <td class="muted">{{ rt.finding_type.name|default:"—" }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="muted">No routes configured. Add via Django admin until config UI lands.</p>
+    {% endif %}
+</div>
+
+<div class="card">
+    <h2>Recent events</h2>
+    {% if events %}
+    <table class="ops-table">
+        <thead>
+            <tr>
+                <th>Sent at</th>
+                <th>Rule</th>
+                <th>Channel</th>
+                <th>Status</th>
+                <th>Fingerprint</th>
+                <th>Error</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for e in events %}
+            <tr>
+                <td class="muted num">{{ e.sent_at|date:"Y-m-d H:i" }}</td>
+                <td>{{ e.rule_id|default:"—" }}</td>
+                <td>{{ e.channel|default:"—" }}</td>
+                <td><span class="badge badge-{{ e.status }}">{{ e.status }}</span></td>
+                <td class="mono">{{ e.fingerprint|slice:":16" }}</td>
+                <td class="muted">{{ e.error|truncatechars:80 }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="muted">No delivery attempts yet.</p>
+    {% endif %}
+</div>
+
+<p style="margin-top: 1rem; font-size: 0.85rem;">
+    <a href="{% url 'notification_suppressions_list' %}">Suppressions →</a>
+</p>
+{% endblock %}

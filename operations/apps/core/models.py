@@ -835,7 +835,7 @@ class CoverageRequirement(VersionedTenantScopedModel):
         return f"{self.entity_type}:{self.platform or '*'}:{self.device_scope}"
 
 
-class AdminFinding(TenantScopedModel):
+class AdminFinding(VersionedTenantScopedModel):
     """Platform health findings — about the Operations platform itself, not devices."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -890,7 +890,7 @@ class QueueRegistry(models.Model):
         return self.queue_key
 
 
-class IdentityCandidate(TenantScopedModel):
+class IdentityCandidate(VersionedTenantScopedModel):
     """Uncertain cross-source device matches awaiting operator review."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -921,7 +921,7 @@ class IdentityCandidate(TenantScopedModel):
         return f"{self.device_a_id}↔{self.device_b_id}:{self.confidence}"
 
 
-class NotificationRule(TenantScopedModel):
+class NotificationRule(VersionedTenantScopedModel):
     """Rule engine: maps finding types to delivery routes with filters."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -1034,6 +1034,7 @@ class NotificationRoute(TenantScopedModel):
         SLACK = "slack", "Slack"
         TEAMS = "teams", "Teams"
         WEBHOOK = "webhook", "Webhook"
+        ZENDESK = "zendesk", "Zendesk"
 
     class Mode(models.TextChoices):
         IMMEDIATE = "immediate", "Immediate"

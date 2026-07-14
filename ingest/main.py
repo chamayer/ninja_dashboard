@@ -71,6 +71,8 @@ from ingest.core import (
 from ingest.policy_scope import sync_patching_enabled_policies
 from ingest.ninja_client import NinjaClient
 from ingest.evaluator import evaluate as platform_evaluate
+from ingest.notifications import dispatch as notify_dispatch
+from ingest.notifications_digest import send_digest as notify_send_digest
 from ingest.identity.client_resolver import drain_client_resolution as _drain_client_resolution
 from ingest.identity.resolver import drain_resolution as _drain_resolution
 from ingest import scope_selector as _scope_selector
@@ -276,6 +278,22 @@ def run_platform_evaluate_once() -> None:
         log.info("Platform evaluate complete: findings_affected=%d", affected)
     except Exception:
         log.exception("Platform evaluate failed")
+
+
+def run_notifications_dispatch_once() -> None:
+    try:
+        sent = notify_dispatch(tenant_id=1)
+        log.info("Notifications dispatch complete: sent=%d", sent)
+    except Exception:
+        log.exception("Notifications dispatch failed")
+
+
+def run_notifications_digest_once() -> None:
+    try:
+        fired = notify_send_digest(tenant_id=1)
+        log.info("Notifications digest complete: routes_fired=%d", fired)
+    except Exception:
+        log.exception("Notifications digest failed")
 
 
 def run_review_digest_once() -> None:
@@ -495,6 +513,18 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 return
             threading.Thread(target=run_review_digest_once, daemon=True).start()
             self._respond(202, b"review digest scheduled\n")
+        elif self.path == "/run/notifications/dispatch":
+            if not _READY.is_set():
+                self._respond(503, b"still starting - try again shortly\n")
+                return
+            threading.Thread(target=run_notifications_dispatch_once, daemon=True).start()
+            self._respond(202, b"notifications dispatch scheduled\n")
+        elif self.path == "/run/notifications/digest":
+            if not _READY.is_set():
+                self._respond(503, b"still starting - try again shortly\n")
+                return
+            threading.Thread(target=run_notifications_digest_once, daemon=True).start()
+            self._respond(202, b"notifications digest scheduled\n")
         elif self.path == "/run/software/enqueue" or self.path.startswith("/run/software/enqueue?"):
             self._handle_software_enqueue()
         elif self.path == "/run/software/scoped" or self.path.startswith("/run/software/scoped?"):
@@ -1931,6 +1961,23 @@ def main() -> None:
         id="platform_evaluate_cycle",
         max_instances=1,
     )
+    if settings.NOTIFY_ENABLED:
+        scheduler.add_job(
+            run_notifications_dispatch_once,
+            "interval",
+            minutes=settings.NOTIFY_DISPATCH_SCHEDULE_MINUTES,
+            id="notifications_dispatch_cycle",
+            max_instances=1,
+        )
+    if settings.NOTIFY_DIGEST_ENABLED:
+        scheduler.add_job(
+            run_notifications_digest_once,
+            "cron",
+            hour=settings.NOTIFY_DIGEST_HOUR,
+            minute=0,
+            id="notifications_digest_cycle",
+            max_instances=1,
+        )
     if settings.SOFTWARE_QUEUE_ENABLED:
         scheduler.add_job(
             enqueue_all_orgs_once,
