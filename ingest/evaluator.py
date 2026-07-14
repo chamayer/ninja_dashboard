@@ -49,28 +49,59 @@ _STALE_DATA_DAYS = 7
 def evaluate(tenant_id: int, device_id: uuid.UUID | None = None) -> int:
     """Evaluate coverage gaps and lifecycle events for a tenant.
 
-    Returns the number of findings opened or updated.
+    Returns the number of findings opened or updated. Writes a
+    `platform_evaluator` row to operations.run_log so operators can see
+    when the evaluator ran and how many findings the run touched.
     """
     now = datetime.now(timezone.utc)
     affected = 0
+    error_msg: str | None = None
+    skip_platforms: set[str] = set()
 
-    with db.pool.connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(f"SET LOCAL operations.tenant_id = {tenant_id}")
-            skip_platforms = _source_failure_guard(cur, tenant_id, now)
-            if device_id is None:
-                affected += _sync_device_roles(cur, tenant_id, now)
-                _sync_lifecycle_status(cur, tenant_id)
-                affected += _evaluate_unknown_entities(cur, tenant_id, now)
-                affected += _evaluate_duplicate_records(cur, tenant_id, now)
-            corroborated = _load_corroborated_devices(cur, tenant_id)
-            affected += _evaluate_coverage(
-                cur, tenant_id, device_id, now, skip_platforms, corroborated
-            )
-            affected += _evaluate_device_lifecycle(cur, tenant_id, device_id, now)
-            if device_id is None:
-                affected += _evaluate_cross_client(cur, tenant_id, now)
-            affected += _auto_resolve(cur, tenant_id, device_id, now)
+    try:
+        with db.pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"SET LOCAL operations.tenant_id = {tenant_id}")
+                skip_platforms = _source_failure_guard(cur, tenant_id, now)
+                if device_id is None:
+                    affected += _sync_device_roles(cur, tenant_id, now)
+                    _sync_lifecycle_status(cur, tenant_id)
+                    affected += _evaluate_unknown_entities(cur, tenant_id, now)
+                    affected += _evaluate_duplicate_records(cur, tenant_id, now)
+                corroborated = _load_corroborated_devices(cur, tenant_id)
+                affected += _evaluate_coverage(
+                    cur, tenant_id, device_id, now, skip_platforms, corroborated
+                )
+                affected += _evaluate_device_lifecycle(cur, tenant_id, device_id, now)
+                if device_id is None:
+                    affected += _evaluate_cross_client(cur, tenant_id, now)
+                affected += _auto_resolve(cur, tenant_id, device_id, now)
+    except Exception as exc:
+        error_msg = str(exc)[:2000]
+        raise
+    finally:
+        try:
+            with db.transaction() as cur:
+                cur.execute(f"SET LOCAL operations.tenant_id = {tenant_id}")
+                cur.execute(
+                    """
+                    INSERT INTO operations.run_log
+                        (id, tenant_id, kind, subject_ref, started_at,
+                         ended_at, ok, rows, error)
+                    VALUES (gen_random_uuid(), %s, 'platform_evaluator',
+                            %s::jsonb, %s, NOW(), %s, %s, %s)
+                    """,
+                    (
+                        tenant_id,
+                        json.dumps({"device_id": str(device_id) if device_id else None}),
+                        now,
+                        error_msg is None,
+                        affected,
+                        error_msg or "",
+                    ),
+                )
+        except Exception:
+            log.exception("evaluator: run_log write failed — continuing")
 
     log.info(
         "evaluator: tenant=%d findings_affected=%d skipped_platforms=%s",

@@ -519,6 +519,12 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 return
             threading.Thread(target=run_notifications_dispatch_once, daemon=True).start()
             self._respond(202, b"notifications dispatch scheduled\n")
+        elif self.path == "/run/platform-evaluate":
+            if not _READY.is_set():
+                self._respond(503, b"still starting - try again shortly\n")
+                return
+            threading.Thread(target=run_platform_evaluate_once, daemon=True).start()
+            self._respond(202, b"platform evaluate scheduled\n")
         elif self.path == "/run/notifications/digest":
             if not _READY.is_set():
                 self._respond(503, b"still starting - try again shortly\n")
