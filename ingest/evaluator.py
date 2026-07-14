@@ -561,26 +561,33 @@ def _evaluate_coverage(
         )
         devices = cur.fetchall()
 
-        for dev_id, dev_client_id, hostname, last_observed, dev_created_at in devices:
-            reference_ts = last_observed or dev_created_at
-            if reference_ts is None:
-                continue
-            if reference_ts.tzinfo is None:
-                reference_ts = reference_ts.replace(tzinfo=timezone.utc)
-            gap_age_hours = (now - reference_ts).total_seconds() / 3600
-            if gap_age_hours < gap_hours:
-                continue
-
-            if gap_age_hours >= conf_hours:
-                confidence = "confirmed"
-            elif gap_age_hours >= prob_hours:
-                confidence = "probable"
+        for dev_id, dev_client_id, hostname, last_observed, _dev_created_at in devices:
+            # BLUEPRINT 1.4 split:
+            #   - MISSING (last_observed IS NULL): emit immediately at
+            #     `confirmed` if corroborated, else `probable`. No
+            #     grace-period suppression using dev_created_at.
+            #   - STALE (last_observed present but gap_age > gap_hours):
+            #     confidence ladder against gap_after_hours /
+            #     confidence_probable / confidence_confirmed.
+            if last_observed is None:
+                confidence = "confirmed" if dev_id in corroborated else "probable"
+                gap_age_hours = None
             else:
-                confidence = "possible"
-            # Corroboration: only call a gap 'confirmed' when another
-            # source saw the device online recently (legacy confirmed_gap).
-            if confidence == "confirmed" and dev_id not in corroborated:
-                confidence = "probable"
+                if last_observed.tzinfo is None:
+                    last_observed = last_observed.replace(tzinfo=timezone.utc)
+                gap_age_hours = (now - last_observed).total_seconds() / 3600
+                if gap_age_hours < gap_hours:
+                    continue
+                if gap_age_hours >= conf_hours:
+                    confidence = "confirmed"
+                elif gap_age_hours >= prob_hours:
+                    confidence = "probable"
+                else:
+                    confidence = "possible"
+                # Corroboration: only call a gap 'confirmed' when another
+                # source saw the device online recently (legacy confirmed_gap).
+                if confidence == "confirmed" and dev_id not in corroborated:
+                    confidence = "probable"
 
             if last_observed is None:
                 ftype, ft_name, sev = missing_ft, "missing_required_platform", severity
