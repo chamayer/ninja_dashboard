@@ -567,6 +567,13 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     platform_filter = request.GET.get("platform", "")
     online_filter = request.GET.get("online", "")
 
+    # Source names come from operations.sources (admin-editable
+    # reference data) — never hardcoded in code.
+    source_names = list(
+        Source.objects.order_by("name").values_list("name", flat=True)
+    )
+    source_names_set = set(source_names)
+
     qs = Finding.objects.filter(tenant_id=1).select_related("finding_type", "client", "owner")
 
     if status_filter == "active":
@@ -588,38 +595,45 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     _SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
     findings = sorted(qs[:500], key=lambda f: (_SEVERITY_ORDER.get(f.severity, 9), -(f.last_detected_at or f.last_seen_at).timestamp()))
 
-    # Online status map: device_id → bool (has any is_online=true agent
-    # presence in the last 24h). Compute in one round-trip over the
-    # findings' subject_ids.
+    # Per-device map of platforms currently in contact:
+    #   device_id → sorted list of platform names (empty = offline).
+    # "In contact" = platform last_contact within 24h; fall back to
+    # last_observed_at when the source doesn't distinguish (LMI/SC).
     subject_ids = [f.subject_id for f in findings if f.subject_id]
-    online_map: dict[str, bool] = {}
+    online_map: dict[str, list[str]] = {}
     if subject_ids:
         with transaction.atomic(), connection.cursor() as cur:
             cur.execute("SET LOCAL operations.tenant_id = 1")
-            # "Online" = the platform reports a last_contact within
-            # 24h on any agent stream for the device. Absent
-            # last_contact falls back to last_observed_at (some
-            # sources don't report contact separately). agent_presence_current
-            # has no is_online boolean — the presence signal is the
-            # freshness of the timestamps.
+            # Online per source, computed off the presence matview.
+            # Agent streams: fresh last_contact / last_observed.
+            # vm.guest / vm.host streams: last_power_state = 'poweredon'
+            #   (hypervisor's own signal — the VM is running even if
+            #   no agent is installed). Source name for those rows is
+            #   the observing source (e.g. Ninja for Hyper-V/VMware).
             cur.execute(
                 """
-                SELECT device_id::text
+                SELECT device_id::text, platform
                 FROM operations.agent_presence_current
                 WHERE device_id = ANY(%s::uuid[])
-                  AND entity_type LIKE 'agent.%%'
-                  AND COALESCE(last_contact_at, last_observed_at) > NOW() - INTERVAL '24 hours'
-                GROUP BY device_id
+                  AND (
+                    (entity_type LIKE 'agent.%%'
+                     AND COALESCE(last_contact_at, last_observed_at) > NOW() - INTERVAL '24 hours')
+                    OR
+                    (entity_type IN ('vm.guest', 'vm.host')
+                     AND last_power_state = 'poweredon')
+                  )
                 """,
                 ([str(sid) for sid in subject_ids],),
             )
-            online_map = {row[0]: True for row in cur.fetchall()}
+            for did, platform in cur.fetchall():
+                online_map.setdefault(did, []).append(platform)
+    for did in online_map:
+        online_map[did] = sorted(set(online_map[did]))
 
-    # Coalesce noise: for a device offline > 1 day, suppress missing/
-    # stale_required_platform findings from the queue — they aren't
-    # actionable while the device isn't reachable. The findings still
-    # exist and appear on the device detail page; the queue's job is
-    # actionable work.
+    # Coalesce noise: for a device with no source in contact, suppress
+    # missing/stale_required_platform findings from the queue — they
+    # aren't actionable while the device isn't reachable. Findings still
+    # exist and appear on the device detail page.
     _COALESCED_TYPES = {"missing_required_platform", "stale_required_platform"}
     findings = [
         f for f in findings
@@ -630,11 +644,18 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
         )
     ]
 
-    # Apply online filter in Python (already have the map).
+    # Online filter: "" any, "online" any source in contact, "offline"
+    # none, or a specific source name to filter to devices reached by
+    # that source right now.
     if online_filter == "online":
         findings = [f for f in findings if online_map.get(str(f.subject_id))]
     elif online_filter == "offline":
         findings = [f for f in findings if f.subject_id and not online_map.get(str(f.subject_id))]
+    elif online_filter in source_names_set:
+        findings = [
+            f for f in findings
+            if f.subject_id and online_filter in online_map.get(str(f.subject_id), [])
+        ]
 
     # Build a per-finding detail string for the inline column.
     _DAYS_KEYS = ("days_since_last_seen", "days_offline")
@@ -660,7 +681,11 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
         return d.get("platform") or ""
 
     findings_with_detail = [
-        {"f": f, "detail": _detail_string(f), "online": online_map.get(str(f.subject_id)) if f.subject_id else None}
+        {
+            "f": f,
+            "detail": _detail_string(f),
+            "online_sources": online_map.get(str(f.subject_id)) if f.subject_id else None,
+        }
         for f in findings
     ]
 
@@ -684,8 +709,11 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             "status_choices": Finding.Status.choices,
             "severity_choices": Finding.Severity.choices,
             "confidence_choices": Finding.Confidence.choices,
-            "platform_choices": [("Ninja","Ninja"),("SentinelOne","SentinelOne"),("LogMeIn","LogMeIn"),("ScreenConnect","ScreenConnect")],
-            "online_choices": [("online","Online"),("offline","Offline")],
+            "platform_choices": [(name, name) for name in source_names],
+            "online_choices": (
+                [("online", "Online (any source)"), ("offline", "Offline (no source)")]
+                + [(name, f"via {name}") for name in source_names]
+            ),
             "active_status": status_filter,
             "active_severity": severity_filter,
             "active_type": type_filter,

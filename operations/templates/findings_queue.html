@@ -107,9 +107,9 @@
                 <td>{{ f.finding_type.name }}</td>
                 <td>{{ row.detail|default:"—" }}</td>
                 <td>
-                    {% if row.online == True %}
-                        <span class="badge badge-low">online</span>
-                    {% elif row.online == False %}
+                    {% if row.online_sources %}
+                        {% for src in row.online_sources %}<span class="badge badge-low">{{ src }}</span> {% endfor %}
+                    {% elif row.online_sources is not None %}
                         <span class="badge badge-suppressed">offline</span>
                     {% else %}
                         <span class="muted">—</span>
