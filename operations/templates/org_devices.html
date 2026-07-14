@@ -17,134 +17,56 @@
 </div>
 
 <div class="card">
-    <style>
-        .type-badge {
-            display: inline-block;
-            padding: 2px 8px;
-            border-radius: 10px;
-            font-size: 0.75rem;
-            font-weight: 500;
-            line-height: 1.4;
-            white-space: nowrap;
-        }
-        .type-badge[data-type="physical"]         { background: #e0edff; color: #1e3a8a; }
-        .type-badge[data-type="vm"]               { background: #e6f9ea; color: #14532d; }
-        .type-badge[data-type="hypervisor-host"]  { background: #f3e8ff; color: #581c87; }
-        .type-badge[data-type="network-device"]   { background: #fce7f3; color: #831843; }
-        .type-badge[data-type="unknown"]          { background: #f3f4f6; color: #374151; }
-        .filter-chip {
-            padding: 0.35rem 0.75rem;
-            font-size: 0.8rem;
-            border-radius: 999px;
-            border: 1px solid var(--border);
-            background: white;
-            cursor: pointer;
-            user-select: none;
-        }
-        .filter-chip[data-active="true"] {
-            background: var(--header-bg);
-            color: white;
-            border-color: var(--header-bg);
-        }
-        .filter-chip:hover {
-            border-color: var(--accent);
-        }
-        .device-row:nth-child(odd) { background: #fafbfc; }
-        .device-row td { padding: 0.4rem 0.5rem; }
-        .pager {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 1rem;
-            margin-top: 1rem;
-            flex-wrap: wrap;
-        }
-        .pager-links {
-            display: flex;
-            gap: 0.4rem;
-            align-items: center;
-            flex-wrap: wrap;
-        }
-        .pager-link {
-            display: inline-block;
-            padding: 0.35rem 0.65rem;
-            border: 1px solid var(--border);
-            border-radius: 4px;
-            text-decoration: none;
-            color: inherit;
-            background: white;
-            font-size: 0.85rem;
-        }
-        .pager-link:hover {
-            border-color: var(--accent);
-        }
-    </style>
-
-    <form method="get" style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-bottom: 1rem;">
+    <form method="get" class="filterbar">
         {% if active_type %}<input type="hidden" name="type" value="{{ active_type }}">{% endif %}
         {% if active_role %}<input type="hidden" name="role" value="{{ active_role }}">{% endif %}
         {% if missing_platform %}<input type="hidden" name="missing" value="{{ missing_platform }}">{% endif %}
-        <input type="search" name="q" value="{{ search_query }}" placeholder="Search hostname or serial..."
-               style="flex: 1; min-width: 220px; padding: 0.45rem 0.75rem; border: 1px solid var(--border); border-radius: 4px;">
-        <button type="submit" class="filter-chip" data-active="true">Search</button>
-        {% if search_query or active_type %}
-            <a href="{% url 'org_devices' org_slug=client.slug %}" class="filter-chip" style="text-decoration: none;">Clear</a>
-        {% endif %}
+        <div>
+            <label>Search</label>
+            <input type="search" name="q" value="{{ search_query }}" placeholder="hostname or serial…" style="min-width: 240px;">
+        </div>
+        <div>
+            <button type="submit">Apply</button>
+            {% if search_query or active_type %}
+                <a class="reset" href="{% url 'org_devices' org_slug=client.slug %}">Clear</a>
+            {% endif %}
+        </div>
     </form>
 
     {% if device_count %}
         <div style="display: flex; gap: 0.35rem; flex-wrap: wrap; margin-bottom: 1rem;">
             <a href="{% url 'org_devices' org_slug=client.slug %}{% if type_query %}?{{ type_query }}{% endif %}"
-               class="filter-chip" data-active="{% if not active_type %}true{% else %}false{% endif %}"
-               style="text-decoration: none;">All · {{ device_count }}</a>
+               class="filter-chip" data-active="{% if not active_type %}true{% else %}false{% endif %}">All · {{ device_count }}</a>
             {% for type_value, label, count in type_summary %}
                 <a href="{% url 'org_devices' org_slug=client.slug %}?{% if type_query %}{{ type_query }}&amp;{% endif %}type={{ type_value }}"
-                   class="filter-chip" data-active="{% if active_type == type_value %}true{% else %}false{% endif %}"
-                   style="text-decoration: none;">{{ label }} · {{ count }}</a>
+                   class="filter-chip" data-active="{% if active_type == type_value %}true{% else %}false{% endif %}">{{ label }} · {{ count }}</a>
             {% endfor %}
         </div>
     {% endif %}
 
     {% if devices %}
-    <table id="devices-table" data-sortable style="width: 100%; border-collapse: collapse; font-size: 0.9rem;">
+    <table id="devices-table" data-sortable class="ops-table">
         <thead>
-            <tr style="text-align: left; border-bottom: 2px solid var(--border);">
-                <th style="padding: 0.5rem;">Hostname</th>
-                <th style="padding: 0.5rem;">Type</th>
-                <th style="padding: 0.5rem;">Role</th>
-                <th style="padding: 0.5rem;">Serial</th>
+            <tr>
+                <th>Hostname</th>
+                <th>Type</th>
+                <th>Role</th>
+                <th>Serial</th>
             </tr>
         </thead>
         <tbody>
             {% for d in devices %}
-            <tr class="device-row">
+            <tr class="striped">
                 <td><a href="{% url 'device_detail' org_slug=client.slug device_id=d.id %}">{{ d.canonical_hostname }}</a></td>
                 <td><span class="type-badge" data-type="{{ d.device_type }}">{{ d.get_device_type_display }}</span></td>
                 <td class="muted" style="text-transform: capitalize;">{{ d.device_role }}</td>
-                <td><code style="font-size: 0.85rem;">{{ d.canonical_serial|default:"—" }}</code></td>
+                <td class="mono">{{ d.canonical_serial|default:"—" }}</td>
             </tr>
             {% endfor %}
         </tbody>
     </table>
 
-    {% if page_obj.has_other_pages %}
-    <div class="pager">
-        <p class="muted" style="margin: 0;">
-            Page {{ page_obj.number }} of {{ paginator.num_pages }} ·
-            {{ page_size }} per page
-        </p>
-        <div class="pager-links">
-            {% if page_obj.has_previous %}
-                <a class="pager-link" href="?{% if page_query %}{{ page_query }}&amp;{% endif %}page=1">First</a>
-                <a class="pager-link" href="?{% if page_query %}{{ page_query }}&amp;{% endif %}page={{ page_obj.previous_page_number }}">Previous</a>
-            {% endif %}
-            {% if page_obj.has_next %}
-                <a class="pager-link" href="?{% if page_query %}{{ page_query }}&amp;{% endif %}page={{ page_obj.next_page_number }}">Next</a>
-                <a class="pager-link" href="?{% if page_query %}{{ page_query }}&amp;{% endif %}page={{ paginator.num_pages }}">Last</a>
-            {% endif %}
-        </div>
-    </div>
-    {% endif %}
+    {% include "_pagination.html" with page_obj=page_obj paginator=paginator page_query=page_query page_size=page_size %}
     {% else %}
         {% if search_query or active_type %}
             <p class="muted">No devices match your filters.</p>

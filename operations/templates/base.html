@@ -114,6 +114,74 @@
         .nav-badge-muted { background: #4b5563; }
         .nav-sep { border-left: 1px solid #2a2a4e; margin: 0.3rem 0.35rem; align-self: stretch; }
         .nav-fill { flex: 1; }
+
+        /* Shared grammar (Track U) — see templates/_*.html includes */
+        .filterbar { display: flex; gap: 0.5rem; align-items: end; flex-wrap: wrap; margin-bottom: 1rem; }
+        .filterbar > div { display: flex; flex-direction: column; gap: 0.15rem; }
+        .filterbar label { font-size: 0.78rem; color: var(--muted); }
+        .filterbar select, .filterbar input[type="search"], .filterbar input[type="text"] {
+            padding: 0.4rem 0.65rem; border: 1px solid var(--border);
+            border-radius: 4px; font-size: 0.88rem; min-width: 160px;
+        }
+        .filterbar button { padding: 0.5rem 1rem; font-size: 0.88rem; cursor: pointer; }
+        .filterbar a.reset { font-size: 0.82rem; color: var(--muted); align-self: center; }
+
+        .filter-chip {
+            padding: 0.35rem 0.75rem; font-size: 0.8rem; border-radius: 999px;
+            border: 1px solid var(--border); background: white; cursor: pointer;
+            user-select: none; text-decoration: none; color: inherit;
+        }
+        .filter-chip[data-active="true"] {
+            background: var(--header-bg); color: white; border-color: var(--header-bg);
+        }
+        .filter-chip:hover { border-color: var(--accent); }
+
+        .type-badge {
+            display: inline-block; padding: 2px 8px; border-radius: 10px;
+            font-size: 0.75rem; font-weight: 500; line-height: 1.4; white-space: nowrap;
+        }
+        .type-badge[data-type="physical"]        { background: #e0edff; color: #1e3a8a; }
+        .type-badge[data-type="vm"]              { background: #e6f9ea; color: #14532d; }
+        .type-badge[data-type="hypervisor-host"] { background: #f3e8ff; color: #581c87; }
+        .type-badge[data-type="network-device"]  { background: #fce7f3; color: #831843; }
+        .type-badge[data-type="unknown"]         { background: #f3f4f6; color: #374151; }
+
+        table.ops-table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
+        table.ops-table thead tr { text-align: left; border-bottom: 2px solid var(--border); }
+        table.ops-table th, table.ops-table td { padding: 0.45rem 0.6rem; }
+        table.ops-table tbody tr { border-bottom: 1px solid var(--border); }
+        table.ops-table tbody tr:hover { background: #f4f7fb; }
+        table.ops-table tbody tr.striped:nth-child(odd) { background: #fafbfc; }
+        table.ops-table td.num { white-space: nowrap; }
+        table.ops-table td.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.83rem; }
+
+        .pager {
+            display: flex; align-items: center; justify-content: space-between;
+            gap: 1rem; margin-top: 1rem; flex-wrap: wrap;
+        }
+        .pager-links { display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap; }
+        .pager-link {
+            display: inline-block; padding: 0.35rem 0.65rem;
+            border: 1px solid var(--border); border-radius: 4px;
+            text-decoration: none; color: inherit; background: white; font-size: 0.85rem;
+        }
+        .pager-link:hover { border-color: var(--accent); }
+
+        .tile-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 1rem; }
+        .tile {
+            background: var(--surface); border: 1px solid var(--border);
+            border-radius: 6px; padding: 1rem; text-decoration: none; color: inherit;
+        }
+        .tile:hover { border-color: var(--accent); }
+        .tile-label { color: var(--muted); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; }
+        .tile-value { font-size: 1.6rem; font-weight: 600; margin: 0.35rem 0 0; }
+
+        .freshness { font-size: 0.82rem; color: var(--muted); display: inline-flex; gap: 0.35rem; align-items: center; }
+        .freshness .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+        .freshness .dot.ok { background: #10b981; }
+        .freshness .dot.stale { background: #f59e0b; }
+        .freshness .dot.fail { background: #dc2626; }
+        .freshness .dot.unknown { background: #9ca3af; }
     </style>
     <script>
     (function() {

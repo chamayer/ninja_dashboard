@@ -1,0 +1,13 @@
+{% comment %}
+Shared freshness indicator (Track U).
+
+Args:
+  freshness — dict {status: "ok"|"stale"|"fail"|"unknown", label: "human string"}
+
+Emits a colored dot + label. `context_processors.brand` can populate a
+`freshness_map[<kind>]` if you want lookup by kind name across pages.
+{% endcomment %}
+<span class="freshness">
+    <span class="dot {{ freshness.status|default:'unknown' }}"></span>
+    <span>{{ freshness.label|default:"unknown" }}</span>
+</span>

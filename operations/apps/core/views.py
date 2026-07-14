@@ -582,6 +582,9 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     finding_types = FindingType.objects.order_by("name")
     clients = Client.objects.filter(tenant_id=1, deleted_at__isnull=True).order_by("display_name")
 
+    page_query = request.GET.copy()
+    page_query.pop("page", None)
+
     return render(
         request,
         "findings_queue.html",
@@ -598,6 +601,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             "active_type": type_filter,
             "active_confidence": confidence_filter,
             "active_client": client_filter,
+            "page_query": page_query.urlencode(),
         },
     )
 

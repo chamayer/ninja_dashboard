@@ -11,7 +11,8 @@
     </p>
     <h1 style="margin: 0 0 0.25rem;">{{ device.canonical_hostname }}</h1>
     <p class="muted" style="margin: 0;">
-        {{ device.get_device_type_display }}
+        <span class="type-badge" data-type="{{ device.device_type }}">{{ device.get_device_type_display }}</span>
+        &nbsp;·&nbsp; role: <em>{{ device.device_role|default:"unknown" }}</em>
         {% if device.canonical_serial %}&nbsp;·&nbsp; <code>{{ device.canonical_serial }}</code>{% endif %}
         {% if device.canonical_vm_uuid %}&nbsp;·&nbsp; VM <code>{{ device.canonical_vm_uuid }}</code>{% endif %}
     </p>
@@ -20,28 +21,24 @@
 {% if active_findings %}
 <div class="card">
     <h2>Active Findings</h2>
-    <table data-sortable>
+    <table data-sortable class="ops-table">
         <thead>
             <tr>
-                <th style="padding: 0.45rem 0.6rem;">Severity</th>
-                <th style="padding: 0.45rem 0.6rem;">Finding</th>
-                <th style="padding: 0.45rem 0.6rem;">Status</th>
-                <th style="padding: 0.45rem 0.6rem;">First seen</th>
-                <th style="padding: 0.45rem 0.6rem;">Last seen</th>
+                <th>Severity</th>
+                <th>Finding</th>
+                <th>Status</th>
+                <th>First seen</th>
+                <th>Last seen</th>
             </tr>
         </thead>
         <tbody>
             {% for f in active_findings %}
             <tr>
-                <td style="padding: 0.4rem 0.6rem;">
-                    <span class="badge badge-{{ f.severity }}">{{ f.severity }}</span>
-                </td>
-                <td style="padding: 0.4rem 0.6rem;">{{ f.finding_type.name }}</td>
-                <td style="padding: 0.4rem 0.6rem;">
-                    <span class="badge badge-{{ f.status }}">{{ f.get_status_display }}</span>
-                </td>
-                <td style="padding: 0.4rem 0.6rem; white-space:nowrap;" class="muted">{{ f.first_seen_at|date:"Y-m-d" }}</td>
-                <td style="padding: 0.4rem 0.6rem; white-space:nowrap;" class="muted">{{ f.last_seen_at|date:"Y-m-d" }}</td>
+                <td><span class="badge badge-{{ f.severity }}">{{ f.severity }}</span></td>
+                <td>{{ f.finding_type.name }}</td>
+                <td><span class="badge badge-{{ f.status }}">{{ f.get_status_display }}</span></td>
+                <td class="muted num">{{ f.first_seen_at|date:"Y-m-d" }}</td>
+                <td class="muted num">{{ f.last_seen_at|date:"Y-m-d" }}</td>
             </tr>
             {% endfor %}
         </tbody>
@@ -52,22 +49,22 @@
 <div class="card">
     <h2>Agent Presence</h2>
     {% if agent_presence %}
-    <table data-sortable>
+    <table data-sortable class="ops-table">
         <thead>
             <tr>
-                <th style="padding: 0.45rem 0.6rem;">Platform</th>
-                <th style="padding: 0.45rem 0.6rem;">Agent type</th>
-                <th style="padding: 0.45rem 0.6rem;">Last observed</th>
-                <th style="padding: 0.45rem 0.6rem;">Last contact (platform)</th>
+                <th>Platform</th>
+                <th>Agent type</th>
+                <th>Last observed</th>
+                <th>Last contact (platform)</th>
             </tr>
         </thead>
         <tbody>
             {% for platform, entity_type, last_seen, last_contact in agent_presence %}
             <tr>
-                <td style="padding: 0.4rem 0.6rem; font-weight: 600;">{{ platform }}</td>
-                <td style="padding: 0.4rem 0.6rem;" class="muted">{{ entity_type }}</td>
-                <td style="padding: 0.4rem 0.6rem; white-space:nowrap;" class="muted">{{ last_seen|date:"Y-m-d H:i" }}</td>
-                <td style="padding: 0.4rem 0.6rem; white-space:nowrap;" class="muted">{% if last_contact %}{{ last_contact|date:"Y-m-d H:i" }}{% else %}&mdash;{% endif %}</td>
+                <td style="font-weight: 600;">{{ platform }}</td>
+                <td class="muted">{{ entity_type }}</td>
+                <td class="muted num">{{ last_seen|date:"Y-m-d H:i" }}</td>
+                <td class="muted num">{% if last_contact %}{{ last_contact|date:"Y-m-d H:i" }}{% else %}&mdash;{% endif %}</td>
             </tr>
             {% endfor %}
         </tbody>
@@ -80,24 +77,24 @@
 <div class="card">
     <h2>Source Identities</h2>
     {% if links %}
-    <table data-sortable>
+    <table data-sortable class="ops-table">
         <thead>
             <tr>
-                <th style="padding: 0.45rem 0.6rem;">Source</th>
-                <th style="padding: 0.45rem 0.6rem;">Name in that system</th>
-                <th style="padding: 0.45rem 0.6rem;">External ID</th>
-                <th style="padding: 0.45rem 0.6rem;">Matched by</th>
-                <th style="padding: 0.45rem 0.6rem;">Last seen</th>
+                <th>Source</th>
+                <th>Name in that system</th>
+                <th>External ID</th>
+                <th>Matched by</th>
+                <th>Last seen</th>
             </tr>
         </thead>
         <tbody>
             {% for link in links %}
             <tr>
-                <td style="padding: 0.4rem 0.6rem;">{{ link.source.name }}</td>
-                <td style="padding: 0.4rem 0.6rem;">{{ link.external_name }}</td>
-                <td style="padding: 0.4rem 0.6rem;"><code style="font-size:0.82rem;">{{ link.external_id }}</code></td>
-                <td style="padding: 0.4rem 0.6rem;" class="muted">{{ link.get_match_method_display }} ({{ link.match_confidence }})</td>
-                <td style="padding: 0.4rem 0.6rem; white-space:nowrap;" class="muted">{{ link.last_seen_at|default:"—" }}</td>
+                <td>{{ link.source.name }}</td>
+                <td>{{ link.external_name }}</td>
+                <td class="mono">{{ link.external_id }}</td>
+                <td class="muted">{{ link.get_match_method_display }} ({{ link.match_confidence }})</td>
+                <td class="muted num">{{ link.last_seen_at|default:"—" }}</td>
             </tr>
             {% endfor %}
         </tbody>
@@ -115,26 +112,26 @@
                oninput="swFilter(this.value)"
                style="padding: 0.4rem 0.7rem; border: 1px solid var(--border); border-radius: 4px; font-size: 0.85rem; min-width: 240px;">
     </div>
-    <table data-sortable>
+    <table data-sortable class="ops-table">
         <thead>
             <tr>
-                <th style="padding: 0.45rem 0.6rem;">Name</th>
-                <th style="padding: 0.45rem 0.6rem;">Publisher</th>
-                <th style="padding: 0.45rem 0.6rem;">Version</th>
-                <th style="padding: 0.45rem 0.6rem;">Installed</th>
-                <th style="padding: 0.45rem 0.6rem;">Last seen</th>
-                <th style="padding: 0.45rem 0.6rem;">Location</th>
+                <th>Name</th>
+                <th>Publisher</th>
+                <th>Version</th>
+                <th>Installed</th>
+                <th>Last seen</th>
+                <th>Location</th>
             </tr>
         </thead>
         <tbody id="sw-tbody">
             {% for name, publisher, version, install_date, last_seen, location in software_rows %}
             <tr>
-                <td style="padding: 0.4rem 0.6rem; font-size: 0.88rem;">{{ name }}</td>
-                <td style="padding: 0.4rem 0.6rem; font-size: 0.83rem;" class="muted">{{ publisher|default:"—" }}</td>
-                <td style="padding: 0.4rem 0.6rem; font-size: 0.83rem;" class="muted">{{ version|default:"—" }}</td>
-                <td style="padding: 0.4rem 0.6rem; font-size: 0.8rem; white-space:nowrap;" class="muted">{{ install_date|date:"Y-m-d"|default:"—" }}</td>
-                <td style="padding: 0.4rem 0.6rem; font-size: 0.8rem; white-space:nowrap;" class="muted">{{ last_seen|date:"Y-m-d"|default:"—" }}</td>
-                <td style="padding: 0.4rem 0.6rem; font-size: 0.78rem;" class="muted">{{ location|default:"—" }}</td>
+                <td>{{ name }}</td>
+                <td class="muted">{{ publisher|default:"—" }}</td>
+                <td class="muted">{{ version|default:"—" }}</td>
+                <td class="muted num">{{ install_date|date:"Y-m-d"|default:"—" }}</td>
+                <td class="muted num">{{ last_seen|date:"Y-m-d"|default:"—" }}</td>
+                <td class="muted">{{ location|default:"—" }}</td>
             </tr>
             {% endfor %}
         </tbody>

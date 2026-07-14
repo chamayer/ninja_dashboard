@@ -1,0 +1,9 @@
+{% comment %}
+Shared badge helpers (Track U). Include with `with kind=... value=... label=...`.
+
+Kinds:
+  severity   — critical / high / medium / low / info
+  status     — open / acknowledged / resolved / suppressed / mapped / accepted / excluded
+  confidence — possible / probable / confirmed
+{% endcomment %}
+<span class="badge badge-{{ value }}">{{ label|default:value }}</span>

@@ -1,0 +1,27 @@
+{% comment %}
+Shared pagination controls (Track U).
+
+Args:
+  page_obj    — Django Page object (required)
+  paginator   — Django Paginator (required, or use page_obj.paginator)
+  page_query  — urlencoded query-string sans `page=` (optional; empty ok)
+  page_size   — items per page label (optional int)
+{% endcomment %}
+{% if page_obj.has_other_pages %}
+<div class="pager">
+    <p class="muted" style="margin: 0;">
+        Page {{ page_obj.number }} of {{ paginator.num_pages|default:page_obj.paginator.num_pages }}
+        {% if page_size %} · {{ page_size }} per page{% endif %}
+    </p>
+    <div class="pager-links">
+        {% if page_obj.has_previous %}
+            <a class="pager-link" href="?{% if page_query %}{{ page_query }}&amp;{% endif %}page=1">First</a>
+            <a class="pager-link" href="?{% if page_query %}{{ page_query }}&amp;{% endif %}page={{ page_obj.previous_page_number }}">Previous</a>
+        {% endif %}
+        {% if page_obj.has_next %}
+            <a class="pager-link" href="?{% if page_query %}{{ page_query }}&amp;{% endif %}page={{ page_obj.next_page_number }}">Next</a>
+            <a class="pager-link" href="?{% if page_query %}{{ page_query }}&amp;{% endif %}page={{ paginator.num_pages|default:page_obj.paginator.num_pages }}">Last</a>
+        {% endif %}
+    </div>
+</div>
+{% endif %}

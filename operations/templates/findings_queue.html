@@ -9,9 +9,9 @@
 </div>
 
 <div class="card">
-    <form action="" method="get" style="display: flex; gap: 1rem; flex-wrap: wrap; align-items: end;">
+    <form action="" method="get" class="filterbar">
         <div>
-            <label style="display: block; font-size: 0.8rem; color: var(--muted);">Status</label>
+            <label>Status</label>
             <select name="status">
                 <option value="active"{% if active_status == "active" %} selected{% endif %}>Active</option>
                 <option value="all"{% if active_status == "all" %} selected{% endif %}>All</option>
@@ -21,7 +21,7 @@
             </select>
         </div>
         <div>
-            <label style="display: block; font-size: 0.8rem; color: var(--muted);">Severity</label>
+            <label>Severity</label>
             <select name="severity">
                 <option value="">Any</option>
                 {% for value, label in severity_choices %}
@@ -30,7 +30,7 @@
             </select>
         </div>
         <div>
-            <label style="display: block; font-size: 0.8rem; color: var(--muted);">Confidence</label>
+            <label>Confidence</label>
             <select name="confidence">
                 <option value="">Any</option>
                 {% for value, label in confidence_choices %}
@@ -39,7 +39,7 @@
             </select>
         </div>
         <div>
-            <label style="display: block; font-size: 0.8rem; color: var(--muted);">Type</label>
+            <label>Type</label>
             <select name="type">
                 <option value="">Any</option>
                 {% for ft in finding_types %}
@@ -48,7 +48,7 @@
             </select>
         </div>
         <div>
-            <label style="display: block; font-size: 0.8rem; color: var(--muted);">Client</label>
+            <label>Client</label>
             <select name="client">
                 <option value="">Any</option>
                 {% for c in clients %}
@@ -57,41 +57,41 @@
             </select>
         </div>
         <div>
-            <button type="submit" style="padding: 0.5rem 1rem;">Apply</button>
-            <a href="?" style="margin-left: 0.5rem; font-size: 0.85rem;">Reset</a>
+            <button type="submit">Apply</button>
+            <a class="reset" href="?">Reset</a>
         </div>
     </form>
 </div>
 
 <div class="card">
     {% if findings %}
-    <table data-sortable style="width: 100%; border-collapse: collapse;">
+    <table data-sortable class="ops-table">
         <thead>
-            <tr style="text-align: left; border-bottom: 1px solid var(--border);">
-                <th style="padding: 0.5rem;">Severity</th>
-                <th style="padding: 0.5rem;">Confidence</th>
-                <th style="padding: 0.5rem;">Type</th>
-                <th style="padding: 0.5rem;">Client</th>
-                <th style="padding: 0.5rem;">Subject</th>
-                <th style="padding: 0.5rem;">Status</th>
-                <th style="padding: 0.5rem;">Last detected</th>
-                <th style="padding: 0.5rem;"></th>
+            <tr>
+                <th>Severity</th>
+                <th>Confidence</th>
+                <th>Type</th>
+                <th>Client</th>
+                <th>Subject</th>
+                <th>Status</th>
+                <th>Last detected</th>
+                <th></th>
             </tr>
         </thead>
         <tbody>
             {% for f in findings %}
-            <tr style="border-bottom: 1px solid var(--border);">
-                <td style="padding: 0.5rem;"><strong>{{ f.get_severity_display }}</strong></td>
-                <td style="padding: 0.5rem;" class="muted">{{ f.confidence|default:"—" }}</td>
-                <td style="padding: 0.5rem;">{{ f.finding_type.name }}</td>
-                <td style="padding: 0.5rem;">{{ f.client.display_name|default:"—" }}</td>
-                <td style="padding: 0.5rem;">
+            <tr>
+                <td><span class="badge badge-{{ f.severity }}">{{ f.get_severity_display }}</span></td>
+                <td class="muted">{{ f.confidence|default:"—" }}</td>
+                <td>{{ f.finding_type.name }}</td>
+                <td>{{ f.client.display_name|default:"—" }}</td>
+                <td>
                     <span class="muted">{{ f.get_subject_type_display }}</span>
                     {% if f.finding_details.hostname %}<br><code>{{ f.finding_details.hostname }}</code>{% endif %}
                 </td>
-                <td style="padding: 0.5rem;">{{ f.get_status_display }}</td>
-                <td style="padding: 0.5rem;" class="muted">{{ f.last_detected_at|default:f.last_seen_at }}</td>
-                <td style="padding: 0.5rem;">
+                <td><span class="badge badge-{{ f.status }}">{{ f.get_status_display }}</span></td>
+                <td class="muted num">{{ f.last_detected_at|default:f.last_seen_at }}</td>
+                <td>
                     {% if f.status == "open" %}
                     <form method="post" action="{% url 'finding_acknowledge' f.id %}" style="display: inline;">
                         {% csrf_token %}
@@ -103,17 +103,7 @@
             {% endfor %}
         </tbody>
     </table>
-    {% if page_obj.has_other_pages %}
-    <div style="margin-top: 1rem; display: flex; gap: 0.5rem; align-items: center;">
-        {% if page_obj.has_previous %}
-            <a href="?page={{ page_obj.previous_page_number }}&status={{ active_status }}&severity={{ active_severity }}&confidence={{ active_confidence }}&type={{ active_type }}&client={{ active_client }}">&laquo; Prev</a>
-        {% endif %}
-        <span class="muted">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
-        {% if page_obj.has_next %}
-            <a href="?page={{ page_obj.next_page_number }}&status={{ active_status }}&severity={{ active_severity }}&confidence={{ active_confidence }}&type={{ active_type }}&client={{ active_client }}">Next &raquo;</a>
-        {% endif %}
-    </div>
-    {% endif %}
+    {% include "_pagination.html" with page_obj=page_obj paginator=page_obj.paginator page_query=page_query %}
     {% else %}
     <p class="muted">No findings match the current filters.</p>
     {% endif %}

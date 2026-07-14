@@ -1,0 +1,21 @@
+{% comment %}
+Shared tile grid (Track U).
+
+Args:
+  tiles — iterable of {label, value, href (optional)}
+{% endcomment %}
+<div class="tile-grid">
+    {% for t in tiles %}
+        {% if t.href %}
+            <a class="tile" href="{{ t.href }}">
+                <div class="tile-label">{{ t.label }}</div>
+                <div class="tile-value">{{ t.value }}</div>
+            </a>
+        {% else %}
+            <div class="tile">
+                <div class="tile-label">{{ t.label }}</div>
+                <div class="tile-value">{{ t.value }}</div>
+            </div>
+        {% endif %}
+    {% endfor %}
+</div>
