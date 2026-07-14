@@ -118,7 +118,13 @@
                 <td>{{ f.client.display_name|default:"—" }}</td>
                 <td>
                     <span class="muted">{{ f.get_subject_type_display }}</span>
-                    {% if f.finding_details.hostname %}<br><code>{{ f.finding_details.hostname }}</code>{% endif %}
+                    {% if f.finding_details.hostname %}<br>
+                        {% if f.subject_type == "device" and f.client %}
+                            <a href="{% url 'device_detail' org_slug=f.client.slug device_id=f.subject_id %}"><code>{{ f.finding_details.hostname }}</code></a>
+                        {% else %}
+                            <code>{{ f.finding_details.hostname }}</code>
+                        {% endif %}
+                    {% endif %}
                 </td>
                 <td><span class="badge badge-{{ f.status }}">{{ f.get_status_display }}</span></td>
                 <td class="muted num">{{ f.last_detected_at|default:f.last_seen_at }}</td>
