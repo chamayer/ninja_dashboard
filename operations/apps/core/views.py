@@ -651,9 +651,9 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             days = d.get("days_since_last_seen")
             via = d.get("observed_via") or "tracked"
             return f"{ps}" + (f" · {days}d" if days is not None else "") + f" · via {via}"
-        if name == "device_long_offline":
-            days = d.get("days_offline") or d.get("days")
-            return f"offline {days}d" if days else "offline"
+        if name in ("device_offline", "device_long_offline"):
+            lc = d.get("last_contact_at") or d.get("last_seen_at")
+            return f"no source has contact since {lc[:10]}" if lc else "no source has contact"
         if name == "device_role_conflict":
             return f"{d.get('previous_role', '?')} → {d.get('new_role', '?')}"
         # Fallback: platform if present, else empty

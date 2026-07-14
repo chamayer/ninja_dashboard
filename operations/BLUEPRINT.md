@@ -603,12 +603,31 @@ better shape is an `identity_candidate(device_a, device_b)` with
 hardware corroboration in its signals — surfaced through the
 identity-review workflow rather than a finding.
 
-### 1.8 device_long_offline / device_stale_data
+### 1.8 device_offline / device_stale_data (source-agnostic)
 
-Finding types already seeded (migration 0013). Add emission:
-`device_long_offline` when Ninja reports `is_online=false` continuously
-> 7d (from agent.rmm observations); `device_stale_data` when a device's
-newest observation across ALL platforms > 7d old. Auto-resolve both.
+Original spec fired `device_long_offline` based on Ninja's `lastContact`
+alone. That was ported literally but the name misled — the finding
+implied device-level state while checking a single source. Revised
+2026-07-14 per the "findings must be generic and functional" principle:
+
+- **`stale_required_platform`** — per-source staleness. Reads platform
+  `last_contact_at` (BLUEPRINT E.6, not our fetch time). Fires per
+  (device, agent) pair when that agent's contact is past `gap_hours`.
+  A device where only Ninja is silent while S1/LMI/SC still contact
+  emits one stale finding with `platform=Ninja`. Operator action:
+  "reinstall / debug Ninja on this device."
+- **`device_offline`** — device-level. Fires only when EVERY agent on
+  the device has lost contact past the offline threshold
+  (`_LONG_OFFLINE_DAYS`). Real "device is unreachable" signal.
+  Operator action: "recover the device."
+- **`device_stale_data`** — unchanged concept: device where no source
+  has produced any observation at all in the stale window. Distinct
+  from `device_offline` (which fires when agents are still emitting
+  observations but their platform-side contact is stale).
+
+Migration 0035 resolves legacy `device_long_offline` findings and
+seeds the new `device_offline` type. Old finding_type row retained
+for historical audit only, no re-emission.
 
 **Verify (per phase):** SQL counts of findings by type vs. legacy
 `compliance_findings` for the same fleet; spot-check 5 devices per

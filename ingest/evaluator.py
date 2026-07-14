@@ -16,7 +16,7 @@ Pipeline per run (device_id=None means full sweep):
      threshold). Requirements filter on device_scope and skip exempted
      entity_types. Confidence is capped at 'probable' unless another
      source saw the device online recently (corroboration).
-  4. Lifecycle — device_missing_from_source, device_long_offline,
+  4. Lifecycle — device_missing_from_source, device_offline,
      device_stale_data. (cross_client_conflict removed 2026-07-14 —
      see BLUEPRINT §1.7.)
   5. Auto-resolve for all of the above once conditions clear.
@@ -36,7 +36,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from ingest import db
-from ingest.normalize import normalize_hostname, parse_dt
+from ingest.normalize import normalize_hostname
 
 log = logging.getLogger(__name__)
 
@@ -641,9 +641,15 @@ def _evaluate_coverage(
 
             # Per-device presence for this (entity_type, platform), 'any'
             # honored (BLUEPRINT C.6 wildcard).
+            # BLUEPRINT E.6: staleness uses platform LAST CONTACT, not our
+            # fetch time. `last_observed_at` is when WE polled the source
+            # API — always recent; `last_contact_at` is when the source
+            # last heard from the DEVICE. Fall back only when contact is
+            # unpopulated (some sources don't distinguish).
             cur.execute(
                 """
-                SELECT MAX(apc.last_observed_at) FROM operations.agent_presence_current apc
+                SELECT MAX(COALESCE(apc.last_contact_at, apc.last_observed_at))
+                FROM operations.agent_presence_current apc
                 WHERE apc.tenant_id = %s AND apc.device_id = %s
                   AND apc.entity_type = %s
                   AND (%s = 'any' OR apc.platform = %s)
@@ -778,7 +784,7 @@ def _evaluate_device_lifecycle(
     device_id: uuid.UUID | None,
     now: datetime,
 ) -> int:
-    """device_missing_from_source, device_long_offline, device_stale_data."""
+    """device_missing_from_source, device_offline, device_stale_data."""
     count = 0
 
     missing_type_id = _get_finding_type_id(cur, "device_missing_from_source")
@@ -807,49 +813,56 @@ def _evaluate_device_lifecycle(
             )
 
     if device_id is None:
-        count += _evaluate_long_offline(cur, tenant_id, now)
+        count += _evaluate_device_offline(cur, tenant_id, now)
         count += _evaluate_stale_data(cur, tenant_id, now)
     return count
 
 
-def _evaluate_long_offline(cur: Any, tenant_id: int, now: datetime) -> int:
-    """Devices Ninja still reports but that haven't contacted it in a week."""
-    ft_id = _get_finding_type_id(cur, "device_long_offline")
+def _evaluate_device_offline(cur: Any, tenant_id: int, now: datetime) -> int:
+    """Device is unreachable via EVERY agent source (BLUEPRINT §1.8).
+
+    Fires when a device has agent presence rows but the most recent
+    platform last-contact across ALL agents is older than the threshold
+    — i.e., no source is hearing the device.
+
+    This is device-level truth. A device where one agent (say Ninja)
+    stopped talking while others (S1/LMI) are still in contact is NOT
+    "offline" — it's a per-source staleness case handled by
+    `stale_required_platform` with `platform=<source>` in details.
+    """
+    ft_id = _get_finding_type_id(cur, "device_offline")
     if ft_id is None:
         return 0
+    threshold_interval = f"{_LONG_OFFLINE_DAYS} days"
     cur.execute(
         """
-        SELECT DISTINCT ON (eo.device_id)
-               eo.device_id, d.client_id, d.canonical_hostname,
-               eo.canonical_data ->> 'last_seen_at'
-        FROM operations.entity_observations eo
+        SELECT apc.device_id, d.client_id, d.canonical_hostname,
+               MAX(COALESCE(apc.last_contact_at, apc.last_observed_at))
+        FROM operations.agent_presence_current apc
         JOIN operations.devices d
-             ON d.id = eo.device_id AND d.tenant_id = eo.tenant_id
-        WHERE eo.tenant_id = %s AND eo.platform = 'Ninja'
-          AND eo.device_id IS NOT NULL
-          AND eo.observed_at > now() - INTERVAL '2 days'
+             ON d.id = apc.device_id AND d.tenant_id = apc.tenant_id
+        WHERE apc.tenant_id = %s
+          AND apc.entity_type LIKE 'agent.%%'
           AND d.deleted_at IS NULL
-        ORDER BY eo.device_id, eo.observed_at DESC
+          AND d.lifecycle_status <> 'retired'
+        GROUP BY apc.device_id, d.client_id, d.canonical_hostname
+        HAVING MAX(COALESCE(apc.last_contact_at, apc.last_observed_at))
+             < NOW() - %s::interval
         """,
-        (tenant_id,),
+        (tenant_id, threshold_interval),
     )
-    threshold = now - timedelta(days=_LONG_OFFLINE_DAYS)
     count = 0
     offenders: list[uuid.UUID] = []
-    for dev_id, client_id, hostname, last_seen_raw in cur.fetchall():
-        last_seen = parse_dt(last_seen_raw)
-        if last_seen is None:
-            continue
-        if last_seen.tzinfo is None:
-            last_seen = last_seen.replace(tzinfo=timezone.utc)
-        if last_seen >= threshold:
-            continue
+    for dev_id, client_id, hostname, last_contact in cur.fetchall():
         offenders.append(dev_id)
-        ckey = _condition_key(tenant_id, client_id, dev_id, "device_long_offline", "")
+        ckey = _condition_key(tenant_id, client_id, dev_id, "device_offline", "")
         count += _upsert_finding(
             cur, tenant_id, ft_id, client_id, dev_id,
             ckey, "medium", "confirmed", now,
-            {"hostname": hostname, "last_seen_at": last_seen_raw},
+            {
+                "hostname": hostname,
+                "last_contact_at": last_contact.isoformat() if last_contact else None,
+            },
         )
     _resolve_findings_absent(cur, tenant_id, ft_id, offenders, now)
     return count
