@@ -57,11 +57,22 @@ def _run(client: NinjaClient, snapshot_at: datetime) -> tuple[int, int]:
     with run_log("core.devices") as stats:
         device_rows: list[dict] = []
         snapshot_rows: list[dict] = []
+        # Extra vm-tracking payload fields for the observation writer —
+        # stored side-band so we don't try to insert non-existent
+        # columns into ninja_core.devices.
+        vm_tracking: dict[int, dict[str, object]] = {}
 
         for d in client.paginate_after("/devices-detailed"):
             os_data = d.get("os") or {}
             system_data = d.get("system") or {}
             maintenance = d.get("maintenance") or {}
+            nc = (d.get("nodeClass") or "").upper()
+            if nc.endswith(("_VMM_GUEST", "_VM_GUEST", "_VMM_HOST", "_VM_HOST")):
+                vm_tracking[d["id"]] = {
+                    "power_state":       d.get("powerState"),
+                    "parent_device_id":  d.get("parentDeviceId"),
+                    "last_boot_time":    d.get("lastBootTime"),
+                }
 
             device_rows.append({
                 "id":                  d["id"],
@@ -137,7 +148,9 @@ def _run(client: NinjaClient, snapshot_at: datetime) -> tuple[int, int]:
             _sync_operations_device_roles(cur)
 
         _refresh_active_devices_view()
-        obs_count = _write_ninja_observations(device_rows, snapshot_rows, snapshot_at)
+        obs_count = _write_ninja_observations(
+            device_rows, snapshot_rows, snapshot_at, vm_tracking,
+        )
         _refresh_agent_presence_current()
         stats["rows_upserted"] = dev_count
         stats["rows_inserted"] = snap_count
@@ -236,6 +249,13 @@ def _sync_operations_device_roles(cur: object) -> None:
                 WHEN nd.os_name IS NULL THEN d.os_family
                 ELSE operations.os_family(nd.os_name)
             END,
+            os_group = COALESCE(
+                (SELECT m.os_group FROM operations.os_group_mappings m
+                 WHERE (CASE WHEN nd.os_name IS NULL THEN d.os_family
+                             ELSE operations.os_family(nd.os_name) END) LIKE m.pattern
+                 ORDER BY m.priority ASC LIMIT 1),
+                'Unknown'
+            ),
             exemptions = CASE
                 WHEN (nd.data -> 'tags')::text ILIKE '%%no av%%'
                   OR COALESCE(p.name, '') ILIKE '%%no av%%'
@@ -278,7 +298,10 @@ def _record_source_run(
 
 
 def _write_ninja_observations(
-    device_rows: list[dict], snapshot_rows: list[dict], snapshot_at: datetime
+    device_rows: list[dict],
+    snapshot_rows: list[dict],
+    snapshot_at: datetime,
+    vm_tracking: dict[int, dict[str, object]] | None = None,
 ) -> int:
     """Write one entity_observation per Ninja record seen in this sync.
 
@@ -376,6 +399,16 @@ def _write_ninja_observations(
                         if r["dns_name"] and "." in r["dns_name"] else None
                     ),
                 }
+                # vm.guest / vm.host tracking payload — sourced from the
+                # side-band lookup populated during fetch.
+                vm_extras = (vm_tracking or {}).get(r["id"])
+                if vm_extras:
+                    ps = vm_extras.get("power_state")
+                    canonical_data["power_state"] = (
+                        ps.lower() if isinstance(ps, str) else None
+                    )
+                    canonical_data["parent_ninja_id"] = vm_extras.get("parent_device_id")
+                    canonical_data["last_boot_time_at"] = vm_extras.get("last_boot_time")
                 obs_rows.append({
                     "observation_id":          uuid.uuid4(),
                     "tenant_id":               _TENANT_ID,

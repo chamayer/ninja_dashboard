@@ -368,6 +368,10 @@ class Device(UUIDTenantScopedModel):
     # Abbreviated family (e.g. 'Windows Server 2022', 'Windows 11') —
     # legacy taxonomy, mirrored by operations.os_family(text).
     os_family = models.CharField(max_length=40, blank=True, default="")
+    # Coarse family: Windows / macOS / Linux / Other / Unknown.
+    # Derived from os_family via OsGroupMapping; agent applicability
+    # gates on this rather than the granular os_family value.
+    os_group = models.CharField(max_length=16, blank=True, default="Unknown")
     # {entity_type: reason} — evaluator skips requirements whose
     # entity_type is present, e.g. {"agent.edr": "no_av_exempt"}.
     exemptions = models.JSONField(default=dict, blank=True)
@@ -778,19 +782,80 @@ class RequirementProfile(UUIDTenantScopedModel):
         return self.name
 
 
-class RequirementProfileItem(UUIDTenantScopedModel):
-    """One (entity_type, platform, device_scope) row within a profile.
+class Agent(models.Model):
+    """Reference data: an agent product (Ninja / SentinelOne / etc).
 
-    Shape mirrors CoverageRequirement (minus client). On accept, each
-    item spawns a CoverageRequirement bound to the new client.
+    Encodes the technical ceiling — which OS groups the agent CAN run on
+    (physics) — plus default severity/gap thresholds. Requirement rows
+    point to an Agent instead of hardcoding entity_type + platform.
+    Global reference data (not tenant-scoped).
+    """
+
+    id = models.SmallAutoField(primary_key=True)
+    name = models.CharField(max_length=80, unique=True)
+    entity_type = models.CharField(max_length=80)
+    # OS groups this agent supports installing on (Windows/macOS/Linux/…).
+    # A device whose os_group is not in this list cannot receive the agent —
+    # coverage skips it for this agent regardless of client policy.
+    supported_os_groups = models.JSONField(default=list)
+    default_severity = models.CharField(max_length=16, default="high")
+    default_gap_after_hours = models.PositiveIntegerField(default=24)
+    default_confidence_probable = models.PositiveIntegerField(default=48)
+    default_confidence_confirmed = models.PositiveIntegerField(default=168)
+
+    class Meta:
+        db_table = "agents"
+        ordering = ("name",)
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class OsGroupMapping(models.Model):
+    """Maps os_family patterns to a coarse os_group.
+
+    Data-driven so operators can adjust groupings without a deploy.
+    First match wins by ascending `priority`.
+    """
+
+    id = models.SmallAutoField(primary_key=True)
+    pattern = models.CharField(max_length=80)  # SQL LIKE-style, e.g. "Windows Server %"
+    os_group = models.CharField(max_length=16)
+    priority = models.PositiveIntegerField(default=100)
+
+    class Meta:
+        db_table = "os_group_mappings"
+        ordering = ("priority", "pattern")
+
+    def __str__(self) -> str:
+        return f"{self.pattern} → {self.os_group}"
+
+
+class RequirementProfileItem(UUIDTenantScopedModel):
+    """One row within a profile — 'this client requires this agent for
+    this device scope.'
+
+    Points to an Agent (agent physics: which OS it supports, default
+    thresholds). Operator can override severity / gap / applicable OS
+    groups per item.
     """
 
     profile = models.ForeignKey(
         RequirementProfile, on_delete=models.CASCADE, related_name="items"
     )
-    entity_type = models.CharField(max_length=80)
+    agent = models.ForeignKey(
+        Agent, on_delete=models.PROTECT, null=True, blank=True,
+        related_name="profile_items",
+    )
+    # Deprecated pair — retained through migration transition, will be
+    # dropped once every row has agent_id populated.
+    entity_type = models.CharField(max_length=80, blank=True, default="")
     platform = models.CharField(max_length=80, blank=True, default="")
     device_scope = models.CharField(max_length=40, default="all")
+    # NULL = use Agent.supported_os_groups. A list narrows it (client
+    # policy override — e.g. "we only require Ninja on Windows even
+    # though it also runs on Linux").
+    applicable_os_groups = models.JSONField(null=True, blank=True)
     severity = models.CharField(max_length=16, default="high")
     gap_after_hours = models.PositiveIntegerField(default=24)
     confidence_probable = models.PositiveIntegerField(default=48)
@@ -817,9 +882,15 @@ class CoverageRequirement(VersionedTenantScopedModel):
         "Client", on_delete=models.PROTECT, null=True, blank=True,
         related_name="coverage_requirements",
     )
-    entity_type = models.CharField(max_length=80)
+    agent = models.ForeignKey(
+        Agent, on_delete=models.PROTECT, null=True, blank=True,
+        related_name="coverage_requirements",
+    )
+    # Deprecated pair — retained through migration transition.
+    entity_type = models.CharField(max_length=80, blank=True, default="")
     platform = models.CharField(max_length=80, blank=True, default="")
     device_scope = models.CharField(max_length=40, default="all")
+    applicable_os_groups = models.JSONField(null=True, blank=True)
     severity = models.CharField(max_length=16, choices=Finding.Severity.choices, default="high")
     gap_after_hours = models.PositiveIntegerField(default=24)
     confidence_probable = models.PositiveIntegerField(default=48)

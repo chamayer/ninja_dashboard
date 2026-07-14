@@ -72,6 +72,7 @@ def evaluate(tenant_id: int, device_id: uuid.UUID | None = None) -> int:
                 affected += _evaluate_coverage(
                     cur, tenant_id, device_id, now, skip_platforms, corroborated
                 )
+                affected += _evaluate_unenrolled(cur, tenant_id, device_id, now)
                 affected += _evaluate_device_lifecycle(cur, tenant_id, device_id, now)
                 if device_id is None:
                     affected += _evaluate_cross_client(cur, tenant_id, now)
@@ -500,10 +501,24 @@ def _evaluate_coverage(
     A profile-bound client with ZERO items (e.g. A.M.Rose) fires no
     coverage findings at all.
     """
-    # Global rows (fallback for clients without a profile).
+    # Agent reference: id → (name, entity_type, supported_os_groups)
     cur.execute(
         """
-        SELECT id, client_id, entity_type, platform, device_scope,
+        SELECT id, name, entity_type, supported_os_groups
+        FROM operations.agents
+        """
+    )
+    agents_by_id: dict[int, tuple] = {
+        row[0]: (row[1], row[2], row[3] or []) for row in cur.fetchall()
+    }
+
+    # Global rows (fallback for clients without a profile). Tuple shape:
+    #   (id, client_id, agent_id, entity_type, platform, scope, applicable_os_groups,
+    #    severity, gap, prob, conf)
+    cur.execute(
+        """
+        SELECT id, client_id, agent_id, entity_type, platform, device_scope,
+               applicable_os_groups,
                severity, gap_after_hours, confidence_probable, confidence_confirmed
         FROM operations.coverage_requirements
         WHERE tenant_id = %s AND enabled = TRUE AND client_id IS NULL
@@ -516,7 +531,8 @@ def _evaluate_coverage(
     cur.execute(
         """
         SELECT rpi.profile_id, NULL::uuid AS id, NULL AS client_id,
-               rpi.entity_type, rpi.platform, rpi.device_scope,
+               rpi.agent_id, rpi.entity_type, rpi.platform, rpi.device_scope,
+               rpi.applicable_os_groups,
                rpi.severity, rpi.gap_after_hours,
                rpi.confidence_probable, rpi.confidence_confirmed
         FROM operations.requirement_profile_items rpi
@@ -526,16 +542,16 @@ def _evaluate_coverage(
     )
     profile_rows = cur.fetchall()
 
-    # profile_id → list of (dummy_id, None, entity_type, platform, scope, ...)
+    # profile_id → scope → list of item tuples
     profile_tiers: dict[Any, dict[str, list[tuple]]] = {}
-    for pid, _id, _cid, entity_type, platform, scope, *rest in profile_rows:
+    for pid, _id, _cid, agent_id, entity_type, platform, scope, aog, *rest in profile_rows:
         profile_tiers.setdefault(pid, {}).setdefault(scope, []).append(
-            (None, None, entity_type, platform, scope, *rest)
+            (None, None, agent_id, entity_type, platform, scope, aog, *rest)
         )
 
     global_tiers: dict[str, list[tuple]] = {}
     for row in global_rows:
-        _rid, _cid, _entity, _plat, scope, *_ = row
+        scope = row[5]
         global_tiers.setdefault(scope, []).append(row)
 
     # client_id → profile_id
@@ -575,12 +591,14 @@ def _evaluate_coverage(
         log.warning("evaluator: finding_type 'missing_required_platform' not found")
         return 0
 
-    # Pull every device once — we iterate per device, resolving its tier
-    # in Python rather than doing a query per-requirement.
+    # Pull every device + agent-universe flag once.
     cur.execute(
         """
         SELECT d.id, d.client_id, d.canonical_hostname, d.device_role,
-               d.exemptions
+               d.exemptions, d.os_group,
+               EXISTS(SELECT 1 FROM operations.agent_presence_current apc
+                      WHERE apc.tenant_id = d.tenant_id AND apc.device_id = d.id
+                        AND apc.entity_type LIKE 'agent.%%') AS in_agent_universe
         FROM operations.devices d
         WHERE d.tenant_id = %s
           AND d.deleted_at IS NULL
@@ -592,14 +610,31 @@ def _evaluate_coverage(
     devices = cur.fetchall()
 
     count = 0
-    for dev_id, dev_client_id, hostname, dev_role, exemptions in devices:
+    for dev_id, dev_client_id, hostname, dev_role, exemptions, os_group, in_universe in devices:
         exemptions = exemptions or {}
+        # BLUEPRINT E.6: coverage evaluates against entity types. A device
+        # with zero agent.* observations is not in the coverage universe —
+        # it's a hypervisor / NMS tracking record. Skipped here; picked up
+        # by _evaluate_unenrolled instead.
+        if not in_universe:
+            continue
         tier_rows = resolve_tier(dev_client_id, dev_role or "all")
-        for (_rid, _rclient, entity_type, platform, _rscope,
+        for (_rid, _rclient, agent_id, entity_type, platform, _rscope, aog,
              severity, gap_hours, prob_hours, conf_hours) in tier_rows:
             if platform in skip_platforms:
                 continue
             if entity_type in exemptions:
+                continue
+            # Agent physics: skip if device's os_group isn't in the
+            # supported set (LMI on Linux etc). applicable_os_groups on
+            # the item narrows further if set; else falls to the Agent's
+            # supported_os_groups.
+            allowed_groups = None
+            if aog:
+                allowed_groups = set(aog)
+            elif agent_id and agent_id in agents_by_id:
+                allowed_groups = set(agents_by_id[agent_id][2])
+            if allowed_groups is not None and os_group not in allowed_groups:
                 continue
 
             # Per-device presence for this (entity_type, platform), 'any'
@@ -646,6 +681,88 @@ def _evaluate_coverage(
                 {"entity_type": entity_type, "platform": platform, "hostname": hostname},
             )
 
+    return count
+
+
+# --------------------------------------------------------------------------
+# 3b. Unenrolled devices (outside agent universe)
+# --------------------------------------------------------------------------
+
+def _evaluate_unenrolled(
+    cur: Any,
+    tenant_id: int,
+    device_id: uuid.UUID | None,
+    now: datetime,
+) -> int:
+    """Emit `device_unenrolled` for devices tracked by hypervisor / NMS /
+    monitor sources but never observed as an agent target.
+
+    finding_details pulls power_state, hypervisor host, last_boot_time,
+    last observation timestamp from the latest vm.guest / vm.host /
+    network.device / monitor.target observation, so the operator has
+    triage data (running vs powered off, hypervisor host name, when it
+    was last seen).
+    """
+    ft_id = _get_finding_type_id(cur, "device_unenrolled")
+    if ft_id is None:
+        return 0
+
+    cur.execute(
+        """
+        WITH latest_tracking AS (
+            SELECT DISTINCT ON (eo.device_id)
+                   eo.device_id, eo.entity_type, eo.observed_at,
+                   eo.canonical_data
+            FROM operations.entity_observations eo
+            WHERE eo.tenant_id = %s
+              AND eo.device_id IS NOT NULL
+              AND eo.entity_type IN ('vm.guest', 'vm.host', 'network.device',
+                                     'monitor.target')
+            ORDER BY eo.device_id, eo.observed_at DESC
+        )
+        SELECT d.id, d.client_id, d.canonical_hostname, d.device_type,
+               lt.entity_type, lt.observed_at, lt.canonical_data
+        FROM operations.devices d
+        JOIN latest_tracking lt ON lt.device_id = d.id
+        WHERE d.tenant_id = %s
+          AND d.deleted_at IS NULL
+          AND d.lifecycle_status != 'retired'
+          AND (%s::uuid IS NULL OR d.id = %s)
+          AND NOT EXISTS(
+              SELECT 1 FROM operations.agent_presence_current apc
+              WHERE apc.tenant_id = d.tenant_id AND apc.device_id = d.id
+                AND apc.entity_type LIKE 'agent.%%'
+          )
+        """,
+        (tenant_id, tenant_id, device_id, device_id),
+    )
+    unenrolled = cur.fetchall()
+
+    count = 0
+    for dev_id, dev_client_id, hostname, device_type, entity_type, obs_at, cd in unenrolled:
+        cd = cd or {}
+        if obs_at and obs_at.tzinfo is None:
+            obs_at = obs_at.replace(tzinfo=timezone.utc)
+        days = (
+            int((now - obs_at).total_seconds() // 86400) if obs_at else None
+        )
+        details = {
+            "hostname": hostname,
+            "device_type": device_type,
+            "observed_via": entity_type,
+            "power_state": cd.get("power_state"),
+            "parent_ninja_id": cd.get("parent_ninja_id"),
+            "last_boot_time_at": cd.get("last_boot_time_at"),
+            "last_observed_at": obs_at.isoformat() if obs_at else None,
+            "days_since_last_seen": days,
+        }
+        ckey = _condition_key(
+            tenant_id, dev_client_id, dev_id, "device_unenrolled", "",
+        )
+        count += _upsert_finding(
+            cur, tenant_id, ft_id, dev_client_id, dev_id,
+            ckey, "medium", "confirmed", now, details,
+        )
     return count
 
 
@@ -904,6 +1021,54 @@ def _auto_resolve(
               )
             """,
             (now, tenant_id, ft_id, device_id, device_id),
+        )
+        count += cur.rowcount or 0
+
+    # Close any missing/stale_required_platform finding whose device left
+    # the agent universe (no agent.* observation exists anymore). New
+    # emission is already gated by the universe filter in
+    # _evaluate_coverage; this closes legacy rows so they don't linger.
+    for ft_name in ("missing_required_platform", "stale_required_platform"):
+        ft_id = _get_finding_type_id(cur, ft_name)
+        if not ft_id:
+            continue
+        cur.execute(
+            """
+            UPDATE operations.findings f
+            SET status = 'resolved', last_seen_at = %s
+            WHERE f.tenant_id = %s AND f.finding_type_id = %s
+              AND f.status IN ('open', 'acknowledged')
+              AND (%s::uuid IS NULL OR f.subject_id = %s)
+              AND NOT EXISTS (
+                  SELECT 1 FROM operations.agent_presence_current apc
+                  WHERE apc.tenant_id = f.tenant_id
+                    AND apc.device_id = f.subject_id
+                    AND apc.entity_type LIKE 'agent.%%'
+              )
+            """,
+            (now, tenant_id, ft_id, device_id, device_id),
+        )
+        count += cur.rowcount or 0
+
+    # Resolve device_unenrolled when the device joins the agent universe
+    # (any agent.* observation appears).
+    unenrolled_ft_id = _get_finding_type_id(cur, "device_unenrolled")
+    if unenrolled_ft_id:
+        cur.execute(
+            """
+            UPDATE operations.findings f
+            SET status = 'resolved', last_seen_at = %s
+            WHERE f.tenant_id = %s AND f.finding_type_id = %s
+              AND f.status IN ('open', 'acknowledged')
+              AND (%s::uuid IS NULL OR f.subject_id = %s)
+              AND EXISTS (
+                  SELECT 1 FROM operations.agent_presence_current apc
+                  WHERE apc.tenant_id = f.tenant_id
+                    AND apc.device_id = f.subject_id
+                    AND apc.entity_type LIKE 'agent.%%'
+              )
+            """,
+            (now, tenant_id, unenrolled_ft_id, device_id, device_id),
         )
         count += cur.rowcount or 0
 
