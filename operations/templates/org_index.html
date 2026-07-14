@@ -49,7 +49,24 @@
     <h1 style="margin: 0 0 0.25rem;">{{ current_client.display_name }}</h1>
     <p class="muted" style="margin: 0;">
         Slug: <code>{{ current_client.slug }}</code> &middot; timezone {{ current_client.timezone }}
+        &middot; requirement profile:
+        <strong>{{ current_client.requirement_profile.name|default:"— global fallback —" }}</strong>
     </p>
+    {% if request.user.is_authenticated %}
+    <form method="post" action="{% url 'client_profile_assign' org_slug=current_client.slug %}" style="margin-top: 0.5rem; display: flex; gap: 0.4rem; align-items: center;">
+        {% csrf_token %}
+        <label style="font-size: 0.85rem; color: var(--muted);">Change profile:</label>
+        <select name="profile_id" style="padding: 0.3rem 0.5rem; font-size: 0.85rem;">
+            <option value="">— global fallback —</option>
+            {% for p in all_profiles %}
+            <option value="{{ p.id }}"{% if current_client.requirement_profile_id == p.id %} selected{% endif %}>
+                {{ p.name }}{% if p.is_tenant_default %} (default){% endif %}
+            </option>
+            {% endfor %}
+        </select>
+        <button type="submit" style="padding: 0.3rem 0.7rem; font-size: 0.85rem;">Apply</button>
+    </form>
+    {% endif %}
 </div>
 
 <style>

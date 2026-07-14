@@ -23,7 +23,6 @@ from .models import (
     ClientNameAlias,
     ClientOrgExclude,
     ClientPolicy,
-    CoverageRequirement,
     Device,
     Finding,
     FindingType,
@@ -369,6 +368,11 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
         ctx["open_finding_count"] = Finding.objects.filter(
             tenant_id=1, status__in=_FINDING_ACTIVE_STATUSES
         ).count()
+    ctx["all_profiles"] = list(
+        RequirementProfile.objects.filter(tenant_id=1).order_by(
+            "-is_tenant_default", "name"
+        )
+    )
     return render(request, "org_index.html", ctx)
 
 
@@ -1548,20 +1552,9 @@ def client_candidate_accept(request, candidate_id) -> HttpResponse:
                 client.id, "candidate.accept",
             )
 
-    if profile:
-        for item in profile.items.filter(tenant_id=1):
-            CoverageRequirement.objects.get_or_create(
-                tenant_id=1, client=client,
-                entity_type=item.entity_type,
-                platform=item.platform,
-                device_scope=item.device_scope,
-                defaults={
-                    "severity": item.severity,
-                    "gap_after_hours": item.gap_after_hours,
-                    "confidence_probable": item.confidence_probable,
-                    "confidence_confirmed": item.confidence_confirmed,
-                },
-            )
+    # Profile is source of truth per BLUEPRINT C.6 — assigning
+    # client.requirement_profile above is sufficient. No per-client
+    # CoverageRequirement instantiation.
 
     candidate.status = ClientCandidate.Status.ACCEPTED
     candidate.resolved_client = client
@@ -1690,6 +1683,55 @@ def client_candidate_fix(request, candidate_id) -> HttpResponse:
     )
     messages.success(request, "Note recorded — candidate remains open.")
     return redirect("client_candidate_detail", candidate_id=candidate.id)
+
+
+# ── Requirement profiles (Track C.6 admin knob) ─────────────────────────────
+
+
+@login_required
+def requirement_profiles_list(request: HttpRequest) -> HttpResponse:
+    profiles = list(
+        RequirementProfile.objects.filter(tenant_id=1)
+        .prefetch_related("items")
+        .order_by("-is_tenant_default", "name")
+    )
+    rows = []
+    for p in profiles:
+        client_count = Client.objects.filter(
+            tenant_id=1, requirement_profile=p, deleted_at__isnull=True,
+        ).count()
+        rows.append({
+            "profile": p,
+            "items": list(p.items.all().order_by("device_scope", "entity_type", "platform")),
+            "client_count": client_count,
+        })
+    return render(request, "requirement_profiles.html", {"rows": rows})
+
+
+@login_required
+@require_POST
+@transaction.atomic
+def client_profile_assign(request: HttpRequest, org_slug: str) -> HttpResponse:
+    client = _get_client_by_slug(org_slug)
+    profile_id = request.POST.get("profile_id") or ""
+    prev_profile = client.requirement_profile_id
+    if profile_id == "":
+        client.requirement_profile = None
+    else:
+        profile = get_object_or_404(RequirementProfile, id=profile_id, tenant_id=1)
+        client.requirement_profile = profile
+    client.save(update_fields=["requirement_profile"])
+    _audit(
+        request, "client.requirement_profile.assign", client.id,
+        {"requirement_profile_id": str(prev_profile) if prev_profile else None},
+        {"requirement_profile_id": str(client.requirement_profile_id) if client.requirement_profile_id else None},
+    )
+    messages.success(
+        request,
+        f"Requirement profile for {client.display_name} set to "
+        f"{client.requirement_profile.name if client.requirement_profile else '— global fallback —'}.",
+    )
+    return redirect("org_index", org_slug=client.slug)
 
 
 # ── Notification dispatcher UI (Track 2.4) ──────────────────────────────

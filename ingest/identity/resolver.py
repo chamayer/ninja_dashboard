@@ -18,11 +18,18 @@ from __future__ import annotations
 
 import logging
 import uuid
+from typing import Any
 
 from psycopg.types.json import Json
 
 from ingest import db
-from ingest.normalize import is_usable_serial, normalize_hostname, os_family
+from ingest.normalize import (
+    is_macos_name,
+    is_usable_serial,
+    normalize_hostname,
+    normalize_loose_hostname,
+    os_family,
+)
 
 log = logging.getLogger(__name__)
 
@@ -381,6 +388,100 @@ def _maybe_create_candidate(
         )
 
 
+def _collapse_mac_variants(
+    clusters: dict[tuple, list[tuple]],
+) -> dict[tuple, list[tuple]]:
+    """Merge Mac hostname separator variants within a client.
+
+    Legacy `_apply_mac_safe_matches` port. `GCNY-25s-iMac.local` and
+    `GCNY-25's iMac` share a loose_hostname (`gcny25simac`) that the
+    strict normalizer drops apart. Collapse them into ONE cluster only
+    when the same client sees them across ≥2 platforms AND no single
+    platform has >1 entity_key under the loose key (otherwise we'd
+    merge distinct devices).
+    """
+    # (client_id, loose_key) → list of (cluster_key, cluster_entries)
+    grouped: dict[tuple, list[tuple]] = {}
+    for key, entries in clusters.items():
+        client_id, norm = key
+        # Any Mac-family entry qualifies the cluster for loose matching.
+        head_cd = entries[0][5] if entries else {}
+        os_name = head_cd.get("os_name") or head_cd.get("osName") or ""
+        if not is_macos_name(os_name):
+            continue
+        hostname = head_cd.get("hostname") or head_cd.get("guest_name") or norm
+        loose = normalize_loose_hostname(str(hostname))
+        if not loose or len(loose) < 6:
+            continue
+        grouped.setdefault((client_id, loose), []).append((key, entries))
+
+    # Pick a canonical cluster per (client, loose) group and merge others in.
+    for (_client_id, _loose), group in grouped.items():
+        if len(group) < 2:
+            continue
+        # Count platforms and per-platform entity_key counts.
+        platforms: set[str] = set()
+        ids_by_platform: dict[str, set[str]] = {}
+        for _key, entries in group:
+            for platform, _entity_type, entity_key, _first, _last, _cd in entries:
+                platforms.add(platform)
+                ids_by_platform.setdefault(platform, set()).add(entity_key)
+        if len(platforms) < 2:
+            continue
+        if any(len(ids) > 1 for ids in ids_by_platform.values()):
+            continue
+        # Safe to merge — pick the longest norm as canonical (most information).
+        canonical_key = max(group, key=lambda kv: len(kv[0][1]))[0]
+        merged: list[tuple] = []
+        for key, entries in group:
+            merged.extend(entries)
+            if key != canonical_key:
+                clusters.pop(key, None)
+        clusters[canonical_key] = merged
+
+    return clusters
+
+
+def _collapse_prefix_variants(
+    clusters: dict[tuple, list[tuple]],
+) -> dict[tuple, list[tuple]]:
+    """Merge truncated hostname variants within a client.
+
+    Legacy `_apply_prefix_matches` port. If `norm_A` is a prefix of
+    `norm_B` (both ≥10 chars) and B is the unique such peer for A within
+    the same client, treat them as the same machine (longer wins as
+    canonical — has more information).
+    """
+    # client_id → set(norm)
+    norms_by_client: dict[Any, set[str]] = {}
+    for (client_id, norm), _entries in clusters.items():
+        norms_by_client.setdefault(client_id, set()).add(norm)
+
+    rewrites: dict[tuple, tuple] = {}
+    for client_id, norms in norms_by_client.items():
+        for norm in norms:
+            candidates = [
+                other for other in norms
+                if other != norm
+                and min(len(other), len(norm)) >= 10
+                and (other.startswith(norm) or norm.startswith(other))
+            ]
+            if len(candidates) != 1:
+                continue
+            candidate = candidates[0]
+            canonical = candidate if len(candidate) > len(norm) else norm
+            if canonical == norm:
+                continue
+            rewrites[(client_id, norm)] = (client_id, canonical)
+
+    for src, dst in rewrites.items():
+        src_entries = clusters.pop(src, None)
+        if src_entries is None:
+            continue
+        clusters.setdefault(dst, []).extend(src_entries)
+    return clusters
+
+
 def _promote_unmatched_clusters(cur) -> int:
     """Create devices for unresolved (client, hostname) clusters.
 
@@ -452,6 +553,9 @@ def _promote_unmatched_clusters(cur) -> int:
         clusters.setdefault((client_id, norm), []).append(
             (platform, entity_type, entity_key, first_seen, last_seen, cd)
         )
+
+    clusters = _collapse_mac_variants(clusters)
+    clusters = _collapse_prefix_variants(clusters)
 
     promoted = 0
     for (client_id, norm), entries in clusters.items():

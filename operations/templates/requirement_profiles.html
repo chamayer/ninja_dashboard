@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+
+{% block title %}Requirement profiles{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h1>Requirement profiles</h1>
+    <p class="muted">
+        Each profile is a client's complete declared policy — the required
+        (entity_type, platform, device_scope) rows evaluated per device.
+        A client's profile is source of truth; global coverage_requirements
+        apply only to clients without a profile assigned.
+        Edit items via <a href="{% url 'admin:index' %}">Django admin</a>
+        until inline CRUD lands.
+    </p>
+</div>
+
+{% for r in rows %}
+<div class="card">
+    <h2 style="margin-top: 0;">
+        {{ r.profile.name }}
+        {% if r.profile.is_tenant_default %}<span class="badge badge-info">tenant default</span>{% endif %}
+        <span class="muted" style="font-size: 0.85rem; font-weight: 400; margin-left: 0.5rem;">
+            {{ r.client_count }} client{{ r.client_count|pluralize }} · {{ r.items|length }} item{{ r.items|length|pluralize }}
+        </span>
+    </h2>
+    {% if r.profile.description %}
+    <p class="muted">{{ r.profile.description }}</p>
+    {% endif %}
+
+    {% if r.items %}
+    <table class="ops-table">
+        <thead>
+            <tr>
+                <th>Entity type</th>
+                <th>Platform</th>
+                <th>Scope</th>
+                <th>Severity</th>
+                <th>Gap (h)</th>
+                <th>Probable</th>
+                <th>Confirmed</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for i in r.items %}
+            <tr>
+                <td class="mono">{{ i.entity_type }}</td>
+                <td>{{ i.platform }}</td>
+                <td class="muted">{{ i.device_scope }}</td>
+                <td><span class="badge badge-{{ i.severity }}">{{ i.severity }}</span></td>
+                <td class="num">{{ i.gap_after_hours }}</td>
+                <td class="num">{{ i.confidence_probable }}</td>
+                <td class="num">{{ i.confidence_confirmed }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="muted"><em>Empty profile — this client declares no required platforms.
+        No coverage findings will fire for their devices.</em></p>
+    {% endif %}
+</div>
+{% empty %}
+<div class="card">
+    <p class="muted">No requirement profiles configured yet.</p>
+</div>
+{% endfor %}
+{% endblock %}

@@ -280,6 +280,8 @@
                href="{% url 'client_candidates_queue' %}">Clients{% if nav_pending_client_candidates %} <span class="nav-badge">{{ nav_pending_client_candidates }}</span>{% endif %}</a>
             <a class="nav-link nav-admin {% if request.resolver_match and 'notification' in request.resolver_match.url_name %}active{% endif %}"
                href="{% url 'notification_rules_list' %}">Notifications</a>
+            <a class="nav-link nav-admin {% if request.resolver_match and 'requirement_profile' in request.resolver_match.url_name %}active{% endif %}"
+               href="{% url 'requirement_profiles_list' %}">Profiles</a>
             <a class="nav-link nav-admin" href="{% url 'admin:index' %}">⚙</a>
         </div>
     </nav>

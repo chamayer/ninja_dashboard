@@ -486,45 +486,85 @@ def _evaluate_coverage(
 ) -> int:
     """Emit missing_/stale_required_platform findings per tiered lookup.
 
-    Requirement resolution mirrors the legacy config_loader.get_requirement
-    tier order for each device (BLUEPRINT C.6 corrected):
+    Requirement resolution is profile-first (BLUEPRINT C.6):
 
-        (client_id, device_role) → (client_id, "all")
-        → (None, device_role) → (None, "all")
+        1. If Client.requirement_profile IS NOT NULL → use profile.items,
+           tier order (profile, device_role) → (profile, "all"). Empty
+           profile = "nothing required," no fall-through to global.
+        2. Else → fall through to global coverage_requirements
+           (client_id IS NULL), tier order (None, device_role) →
+           (None, "all").
 
-    First tier that has ANY rows wins for that device — the tier's row
-    set is the client's COMPLETE required-platform list. No additive
-    stacking, no fall-through to a lower tier once a higher tier hits.
-    A client with a single (client, "all") row saying "Ninja only" gets
+    A profile-bound client with ONE (all) item saying "Ninja only" gets
     Ninja evaluated and nothing else — S1/LMI globals do not apply.
+    A profile-bound client with ZERO items (e.g. A.M.Rose) fires no
+    coverage findings at all.
     """
+    # Global rows (fallback for clients without a profile).
     cur.execute(
         """
         SELECT id, client_id, entity_type, platform, device_scope,
                severity, gap_after_hours, confidence_probable, confidence_confirmed
         FROM operations.coverage_requirements
-        WHERE tenant_id = %s AND enabled = TRUE
+        WHERE tenant_id = %s AND enabled = TRUE AND client_id IS NULL
         """,
         (tenant_id,),
     )
-    requirements = cur.fetchall()
-    if not requirements:
+    global_rows = cur.fetchall()
+
+    # Profile-based tiers.
+    cur.execute(
+        """
+        SELECT rpi.profile_id, NULL::uuid AS id, NULL AS client_id,
+               rpi.entity_type, rpi.platform, rpi.device_scope,
+               rpi.severity, rpi.gap_after_hours,
+               rpi.confidence_probable, rpi.confidence_confirmed
+        FROM operations.requirement_profile_items rpi
+        WHERE rpi.tenant_id = %s
+        """,
+        (tenant_id,),
+    )
+    profile_rows = cur.fetchall()
+
+    # profile_id → list of (dummy_id, None, entity_type, platform, scope, ...)
+    profile_tiers: dict[Any, dict[str, list[tuple]]] = {}
+    for pid, _id, _cid, entity_type, platform, scope, *rest in profile_rows:
+        profile_tiers.setdefault(pid, {}).setdefault(scope, []).append(
+            (None, None, entity_type, platform, scope, *rest)
+        )
+
+    global_tiers: dict[str, list[tuple]] = {}
+    for row in global_rows:
+        _rid, _cid, _entity, _plat, scope, *_ = row
+        global_tiers.setdefault(scope, []).append(row)
+
+    # client_id → profile_id
+    cur.execute(
+        """
+        SELECT id, requirement_profile_id
+        FROM operations.clients
+        WHERE tenant_id = %s AND deleted_at IS NULL
+        """,
+        (tenant_id,),
+    )
+    client_profile: dict[Any, Any] = {row[0]: row[1] for row in cur.fetchall()}
+
+    if not global_rows and not profile_rows:
         return 0
 
-    # Index rows by (client_id or None, device_scope) → list of req tuples.
-    tiers: dict[tuple[Any, str], list[tuple]] = {}
-    for row in requirements:
-        _rid, r_client, _rentity, _rplat, r_scope, *_rest = row
-        tiers.setdefault((r_client, r_scope), []).append(row)
-
     def resolve_tier(dev_client_id, dev_role: str) -> list[tuple]:
-        for key in (
-            (dev_client_id, dev_role),
-            (dev_client_id, "all"),
-            (None, dev_role),
-            (None, "all"),
-        ):
-            rows = tiers.get(key)
+        profile_id = client_profile.get(dev_client_id)
+        if profile_id is not None:
+            scopes = profile_tiers.get(profile_id, {})
+            # Profile-bound: use profile items only. Empty profile → [].
+            for scope_key in (dev_role, "all"):
+                rows = scopes.get(scope_key)
+                if rows:
+                    return rows
+            return []
+        # No profile → global fallback.
+        for scope_key in (dev_role, "all"):
+            rows = global_tiers.get(scope_key)
             if rows:
                 return rows
         return []
