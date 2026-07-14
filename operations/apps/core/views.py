@@ -596,13 +596,19 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     if subject_ids:
         with transaction.atomic(), connection.cursor() as cur:
             cur.execute("SET LOCAL operations.tenant_id = 1")
+            # "Online" = the platform reports a last_contact within
+            # 24h on any agent stream for the device. Absent
+            # last_contact falls back to last_observed_at (some
+            # sources don't report contact separately). agent_presence_current
+            # has no is_online boolean — the presence signal is the
+            # freshness of the timestamps.
             cur.execute(
                 """
                 SELECT device_id::text
                 FROM operations.agent_presence_current
                 WHERE device_id = ANY(%s::uuid[])
-                  AND is_online = TRUE
-                  AND last_observed_at > NOW() - INTERVAL '24 hours'
+                  AND entity_type LIKE 'agent.%%'
+                  AND COALESCE(last_contact_at, last_observed_at) > NOW() - INTERVAL '24 hours'
                 GROUP BY device_id
                 """,
                 ([str(sid) for sid in subject_ids],),
