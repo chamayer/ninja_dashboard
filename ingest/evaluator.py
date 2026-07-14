@@ -821,6 +821,64 @@ def _auto_resolve(
     """Resolve findings where the condition has cleared."""
     count = 0
 
+    # Resolve missing/stale_required_platform whose (entity_type, platform)
+    # is no longer required by the device's client policy. Fires when the
+    # operator changes a client's requirement_profile (or empties it) —
+    # findings that were legitimate under the old policy become stale
+    # once the policy is edited. Reconciles per (device, entity_type,
+    # platform) tuple:
+    #   * client has profile → required = union of profile.items scoped to
+    #     the device's role or 'all'
+    #   * client has no profile → required = union of global
+    #     coverage_requirements scoped to the device's role or 'all'
+    for ft_name in ("missing_required_platform", "stale_required_platform"):
+        ft_id = _get_finding_type_id(cur, ft_name)
+        if not ft_id:
+            continue
+        cur.execute(
+            """
+            WITH required_for_device AS (
+                -- Profile-bound clients: their profile.items are the truth
+                SELECT d.id AS device_id, rpi.entity_type, rpi.platform
+                FROM operations.devices d
+                JOIN operations.clients c ON c.id = d.client_id
+                JOIN operations.requirement_profile_items rpi
+                  ON rpi.tenant_id = c.tenant_id
+                 AND rpi.profile_id = c.requirement_profile_id
+                 AND (rpi.device_scope = 'all' OR rpi.device_scope = d.device_role)
+                WHERE d.tenant_id = %s AND d.deleted_at IS NULL
+                  AND c.requirement_profile_id IS NOT NULL
+
+                UNION
+
+                -- Clients without a profile: fall through to global rows
+                SELECT d.id AS device_id, cr.entity_type, cr.platform
+                FROM operations.devices d
+                JOIN operations.clients c ON c.id = d.client_id
+                JOIN operations.coverage_requirements cr
+                  ON cr.tenant_id = c.tenant_id
+                 AND cr.client_id IS NULL AND cr.enabled
+                 AND (cr.device_scope = 'all' OR cr.device_scope = d.device_role)
+                WHERE d.tenant_id = %s AND d.deleted_at IS NULL
+                  AND c.requirement_profile_id IS NULL
+            )
+            UPDATE operations.findings f
+            SET status = 'resolved', last_seen_at = %s
+            WHERE f.tenant_id = %s
+              AND f.finding_type_id = %s
+              AND f.status IN ('open', 'acknowledged')
+              AND (%s::uuid IS NULL OR f.subject_id = %s)
+              AND NOT EXISTS (
+                  SELECT 1 FROM required_for_device r
+                  WHERE r.device_id = f.subject_id
+                    AND r.entity_type = (f.finding_details->>'entity_type')
+                    AND r.platform    = (f.finding_details->>'platform')
+              )
+            """,
+            (tenant_id, tenant_id, now, tenant_id, ft_id, device_id, device_id),
+        )
+        count += cur.rowcount or 0
+
     # Resolve missing/stale_required_platform when the platform has
     # observed the device again recently.
     for ft_name in ("missing_required_platform", "stale_required_platform"):
