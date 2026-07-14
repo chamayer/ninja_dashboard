@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+
+{% block title %}Software decisions{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h1>Software review</h1>
+    <p class="muted">
+        Software installations that generated a classifier finding and haven't
+        been decided yet. Ranked by fleet spread (device_count) — biggest
+        impact first. Decisions apply globally by default; use the per-client
+        or per-device form on each row for narrower scope.
+    </p>
+</div>
+
+<div class="card">
+    <form action="" method="get" class="filterbar">
+        <div>
+            <label>Category</label>
+            <select name="category" onchange="this.form.submit()">
+                <option value="">Any</option>
+                {% for c in categories %}
+                    <option value="{{ c }}"{% if active_category == c %} selected{% endif %}>{{ c }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div><button type="submit">Apply</button></div>
+    </form>
+</div>
+
+<div class="card">
+    {% if rows %}
+    <table data-sortable class="ops-table">
+        <thead>
+            <tr>
+                <th>Canonical name</th>
+                <th>Category</th>
+                <th>Devices</th>
+                <th>Latest finding</th>
+                <th>Current global decision</th>
+                <th>Decide (global scope)</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for r in rows %}
+            <tr>
+                <td><code>{{ r.canonical }}</code></td>
+                <td class="muted">{{ r.category|default:"—" }}</td>
+                <td class="num">{{ r.device_count }}</td>
+                <td class="muted num">{{ r.latest|date:"Y-m-d H:i" }}</td>
+                <td>
+                    {% if r.global_decision %}
+                        <span class="badge badge-info">{{ r.global_decision }}</span>
+                    {% else %}
+                        <span class="muted">— none —</span>
+                    {% endif %}
+                </td>
+                <td>
+                    <form method="post" action="{% url 'software_decision_create' %}" style="display: flex; gap: 0.3rem; align-items: center;">
+                        {% csrf_token %}
+                        <input type="hidden" name="canonical_name" value="{{ r.canonical }}">
+                        <input type="hidden" name="scope" value="global">
+                        <select name="decision" style="padding: 0.25rem 0.5rem; font-size: 0.85rem;">
+                            {% for value, label in decision_choices %}
+                                <option value="{{ value }}">{{ label }}</option>
+                            {% endfor %}
+                        </select>
+                        <button type="submit" style="padding: 0.25rem 0.6rem; font-size: 0.8rem;">Apply</button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="muted">No software findings awaiting review.</p>
+    {% endif %}
+</div>
+
+<p class="muted" style="margin-top: 1rem; font-size: 0.85rem;">
+    Per-client or per-device decisions can be created via Django admin,
+    or by picking the specific finding row in the
+    <a href="{% url 'findings_queue' %}?category=software">software findings queue</a>
+    (dedicated per-row scope pickers land in a follow-up).
+</p>
+{% endblock %}

@@ -282,6 +282,8 @@
                href="{% url 'notification_rules_list' %}">Notifications</a>
             <a class="nav-link nav-admin {% if request.resolver_match and 'requirement_profile' in request.resolver_match.url_name %}active{% endif %}"
                href="{% url 'requirement_profiles_list' %}">Profiles</a>
+            <a class="nav-link nav-admin {% if request.resolver_match and 'software_decision' in request.resolver_match.url_name %}active{% endif %}"
+               href="{% url 'software_decisions_queue' %}">Software</a>
             <a class="nav-link nav-admin" href="{% url 'admin:index' %}">⚙</a>
         </div>
     </nav>

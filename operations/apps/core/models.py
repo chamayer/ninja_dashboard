@@ -118,6 +118,24 @@ class Collector(models.Model):
         return self.name
 
 
+class FindingCategory(models.Model):
+    """Admin-editable classification of finding types (coverage, identity,
+    software, lifecycle, platform_health, data_quality, ...). Data-driven;
+    operators add new categories without a schema change."""
+
+    id = models.SmallAutoField(primary_key=True)
+    name = models.CharField(max_length=32, unique=True)
+    description = models.CharField(max_length=240, blank=True, default="")
+    display_order = models.PositiveIntegerField(default=100)
+
+    class Meta:
+        db_table = "finding_categories"
+        ordering = ("display_order", "name")
+
+    def __str__(self) -> str:
+        return self.name
+
+
 class FindingType(models.Model):
     class Severity(models.TextChoices):
         INFO = "info", "Info"
@@ -134,6 +152,10 @@ class FindingType(models.Model):
     name = models.CharField(max_length=120, unique=True)
     default_severity = models.CharField(max_length=16, choices=Severity.choices, default=Severity.MEDIUM)
     finding_class = models.CharField(max_length=16, choices=FindingClass.choices, default=FindingClass.ENTITY)
+    category = models.ForeignKey(
+        FindingCategory, on_delete=models.PROTECT, null=True, blank=True,
+        related_name="finding_types",
+    )
     source_module = models.CharField(max_length=80, blank=True, default="")
     auto_resolvable = models.BooleanField(default=True)
     runbook_path = models.CharField(max_length=255, blank=True)
@@ -632,7 +654,20 @@ class SoftwareDecision(UUIDTenantScopedModel):
         INVESTIGATE = "investigate", "Investigate"
         APPROVE_PUBLISHER = "approve_publisher", "Approve publisher"
 
-    client = models.ForeignKey(Client, on_delete=models.PROTECT, related_name="software_decisions")
+    # Scope tier (resolver order):
+    #   (device set) → most specific, applies only to that device
+    #   (client set, device NULL) → per-client
+    #   (client NULL, device NULL) → global (all tenant clients)
+    client = models.ForeignKey(
+        Client, on_delete=models.PROTECT,
+        null=True, blank=True,
+        related_name="software_decisions",
+    )
+    device = models.ForeignKey(
+        Device, on_delete=models.CASCADE,
+        null=True, blank=True,
+        related_name="software_decisions",
+    )
     canonical_name = models.CharField(max_length=255)
     decision = models.CharField(max_length=32, choices=Decision.choices)
     reason = models.TextField(blank=True)
@@ -646,14 +681,64 @@ class SoftwareDecision(UUIDTenantScopedModel):
     class Meta:
         db_table = "software_decisions"
         constraints = (
+            # One decision per (scope, canonical_name). Scope key uses
+            # COALESCE via distinct constraints — Django doesn't express
+            # multi-column-with-nulls cleanly in one UC, so we use
+            # three partial constraints keyed by the scope shape.
+            models.UniqueConstraint(
+                fields=("tenant", "canonical_name"),
+                condition=Q(client__isnull=True) & Q(device__isnull=True),
+                name="uq_software_decisions_global",
+            ),
             models.UniqueConstraint(
                 fields=("tenant", "client", "canonical_name"),
-                name="uq_software_decisions_tenant_client_name",
+                condition=Q(client__isnull=False) & Q(device__isnull=True),
+                name="uq_software_decisions_client",
+            ),
+            models.UniqueConstraint(
+                fields=("tenant", "device", "canonical_name"),
+                condition=Q(device__isnull=False),
+                name="uq_software_decisions_device",
             ),
         )
 
     def __str__(self) -> str:
         return f"{self.client_id}:{self.canonical_name}:{self.decision}"
+
+
+class SoftwareClassifierRule(models.Model):
+    """Data-driven regex / literal patterns for the software classifier.
+
+    Every rule the classifier applies lives here so operators can add /
+    edit / disable rules via the admin UI without a deploy. Global
+    (tenant-null) reference data.
+    """
+
+    class RuleType(models.TextChoices):
+        SUSPICIOUS_NAME = "suspicious_name", "Suspicious name"
+        INSTALL_PATH_SUSPICIOUS = "install_path_suspicious", "Suspicious install path"
+        EOL_RUNTIME = "eol_runtime", "End-of-life runtime"
+
+    id = models.SmallAutoField(primary_key=True)
+    rule_type = models.CharField(max_length=32, choices=RuleType.choices)
+    pattern = models.CharField(max_length=255)
+    is_regex = models.BooleanField(default=True)
+    enabled = models.BooleanField(default=True)
+    note = models.CharField(max_length=240, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "software_classifier_rules"
+        ordering = ("rule_type", "pattern")
+        constraints = (
+            models.UniqueConstraint(
+                fields=("rule_type", "pattern"),
+                name="uq_software_classifier_rules_type_pattern",
+            ),
+        )
+
+    def __str__(self) -> str:
+        return f"{self.rule_type}:{self.pattern}"
 
 
 class MergeCandidate(UUIDTenantScopedModel):

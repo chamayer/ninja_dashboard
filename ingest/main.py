@@ -73,6 +73,7 @@ from ingest.ninja_client import NinjaClient
 from ingest.evaluator import evaluate as platform_evaluate
 from ingest.notifications import dispatch as notify_dispatch
 from ingest.notifications_digest import send_digest as notify_send_digest
+from ingest.software_findings import classify as software_classify
 from ingest.identity.client_resolver import drain_client_resolution as _drain_client_resolution
 from ingest.identity.resolver import drain_resolution as _drain_resolution
 from ingest import scope_selector as _scope_selector
@@ -294,6 +295,14 @@ def run_notifications_digest_once() -> None:
         log.info("Notifications digest complete: routes_fired=%d", fired)
     except Exception:
         log.exception("Notifications digest failed")
+
+
+def run_software_classify_once() -> None:
+    try:
+        affected = software_classify(tenant_id=1)
+        log.info("Software classifier complete: affected=%d", affected)
+    except Exception:
+        log.exception("Software classifier failed")
 
 
 def run_review_digest_once() -> None:
@@ -525,6 +534,12 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 return
             threading.Thread(target=run_platform_evaluate_once, daemon=True).start()
             self._respond(202, b"platform evaluate scheduled\n")
+        elif self.path == "/run/software-classify":
+            if not _READY.is_set():
+                self._respond(503, b"still starting - try again shortly\n")
+                return
+            threading.Thread(target=run_software_classify_once, daemon=True).start()
+            self._respond(202, b"software classify scheduled\n")
         elif self.path == "/run/notifications/digest":
             if not _READY.is_set():
                 self._respond(503, b"still starting - try again shortly\n")

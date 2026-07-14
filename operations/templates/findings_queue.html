@@ -39,6 +39,15 @@
             </select>
         </div>
         <div>
+            <label>Category</label>
+            <select name="category" onchange="this.form.submit()">
+                <option value="">Any</option>
+                {% for c in categories %}
+                    <option value="{{ c.name }}"{% if active_category == c.name %} selected{% endif %}>{{ c.name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
             <label>Type</label>
             <select name="type">
                 <option value="">Any</option>

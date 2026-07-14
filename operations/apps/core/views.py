@@ -25,12 +25,15 @@ from .models import (
     ClientPolicy,
     Device,
     Finding,
+    FindingCategory,
     FindingType,
     MergeCandidate,
     NotificationEvent,
     NotificationRoute,
     NotificationRule,
     RequirementProfile,
+    SoftwareCatalog,
+    SoftwareClassifierRule,
     SoftwareDecision,
     Source,
     SuppressionRule,
@@ -562,6 +565,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     status_filter = request.GET.get("status", "active")
     severity_filter = request.GET.get("severity", "")
     type_filter = request.GET.get("type", "")
+    category_filter = request.GET.get("category", "")
     confidence_filter = request.GET.get("confidence", "")
     client_filter = request.GET.get("client", "")
     platform_filter = request.GET.get("platform", "")
@@ -574,7 +578,9 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     )
     source_names_set = set(source_names)
 
-    qs = Finding.objects.filter(tenant_id=1).select_related("finding_type", "client", "owner")
+    qs = Finding.objects.filter(tenant_id=1).select_related(
+        "finding_type", "finding_type__category", "client", "owner",
+    )
 
     if status_filter == "active":
         qs = qs.filter(status__in=_FINDING_ACTIVE_STATUSES)
@@ -583,6 +589,8 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
 
     if severity_filter:
         qs = qs.filter(severity=severity_filter)
+    if category_filter:
+        qs = qs.filter(finding_type__category__name=category_filter)
     if type_filter:
         qs = qs.filter(finding_type__name=type_filter)
     if confidence_filter:
@@ -692,7 +700,12 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     paginator = Paginator(findings_with_detail, 50)
     page = paginator.get_page(request.GET.get("page"))
 
-    finding_types = FindingType.objects.order_by("name")
+    # Type dropdown cascades: if category selected, only show types in it.
+    ft_qs = FindingType.objects.select_related("category").order_by("name")
+    if category_filter:
+        ft_qs = ft_qs.filter(category__name=category_filter)
+    finding_types = list(ft_qs)
+    categories = list(FindingCategory.objects.order_by("display_order", "name"))
     clients = Client.objects.filter(tenant_id=1, deleted_at__isnull=True).order_by("display_name")
 
     page_query = request.GET.copy()
@@ -705,6 +718,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             "page_obj": page,
             "findings": page.object_list,
             "finding_types": finding_types,
+            "categories": categories,
             "clients": clients,
             "status_choices": Finding.Status.choices,
             "severity_choices": Finding.Severity.choices,
@@ -717,6 +731,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             "active_status": status_filter,
             "active_severity": severity_filter,
             "active_type": type_filter,
+            "active_category": category_filter,
             "active_platform": platform_filter,
             "active_online": online_filter,
             "active_confidence": confidence_filter,
@@ -1795,6 +1810,139 @@ def client_candidate_fix(request, candidate_id) -> HttpResponse:
     )
     messages.success(request, "Note recorded — candidate remains open.")
     return redirect("client_candidate_detail", candidate_id=candidate.id)
+
+
+# ── Software findings review (Track 3.3) ────────────────────────────────
+
+
+@login_required
+def software_decisions_queue(request: HttpRequest) -> HttpResponse:
+    """Review queue: software with open findings that need a decision.
+
+    Grouped by canonical_name; each row shows category, fleet-wide
+    device count, and (if a decision exists) the current disposition.
+    Actions POST to `/software/decisions/<id>/decide` — global,
+    per-client, or per-device scope.
+    """
+    category_filter = request.GET.get("category", "")
+    with transaction.atomic():
+        with connection.cursor() as cur:
+            cur.execute("SET LOCAL operations.tenant_id = 1")
+            cur.execute(
+                """
+                SELECT
+                    f.finding_details->>'canonical_name' AS canonical,
+                    f.finding_details->>'category' AS category,
+                    MIN(sc.categories::text) AS catalog_categories,
+                    COUNT(DISTINCT f.subject_id) AS device_count,
+                    MAX(f.last_seen_at) AS latest
+                FROM operations.findings f
+                JOIN operations.finding_types ft
+                  ON ft.id = f.finding_type_id
+                LEFT JOIN operations.software_catalog sc
+                  ON LOWER(sc.canonical_name) = LOWER(f.finding_details->>'canonical_name')
+                 AND (sc.tenant_id IS NULL OR sc.tenant_id = f.tenant_id)
+                WHERE f.tenant_id = 1
+                  AND f.status IN ('open', 'acknowledged')
+                  AND ft.source_module = 'platform.software_findings'
+                  AND f.finding_details->>'canonical_name' IS NOT NULL
+                GROUP BY 1, 2
+                ORDER BY device_count DESC, canonical
+                LIMIT 500
+                """,
+            )
+            rows = cur.fetchall()
+
+    # Attach existing decision (global scope) to each row
+    canonical_names = [r[0] for r in rows if r[0]]
+    dec_map = {
+        (d.canonical_name.lower(), d.client_id, d.device_id): d
+        for d in SoftwareDecision.objects.filter(
+            tenant_id=1,
+            canonical_name__in=canonical_names,
+            client__isnull=True,
+            device__isnull=True,
+        )
+    }
+    display_rows = []
+    for canonical, category, catalog_cats, device_count, latest in rows:
+        dec = dec_map.get((canonical.lower(), None, None))
+        display_rows.append({
+            "canonical": canonical,
+            "category": category or (catalog_cats or ""),
+            "device_count": device_count,
+            "latest": latest,
+            "global_decision": dec.decision if dec else "",
+        })
+
+    if category_filter:
+        display_rows = [r for r in display_rows if category_filter in (r["category"] or "")]
+
+    categories_seen = sorted({r["category"] for r in display_rows if r["category"]})
+
+    return render(request, "software_decisions.html", {
+        "rows": display_rows,
+        "categories": categories_seen,
+        "active_category": category_filter,
+        "decision_choices": SoftwareDecision.Decision.choices,
+    })
+
+
+@login_required
+@require_POST
+@transaction.atomic
+def software_decision_create(request: HttpRequest) -> HttpResponse:
+    """Create or update a SoftwareDecision at the requested scope
+    (global / per-client / per-device). Audited."""
+    canonical_name = (request.POST.get("canonical_name") or "").strip()
+    decision = (request.POST.get("decision") or "").strip()
+    scope = request.POST.get("scope") or "global"
+    client_slug = request.POST.get("client_slug") or ""
+    device_id_str = request.POST.get("device_id") or ""
+    reason = (request.POST.get("reason") or "").strip()
+
+    if not canonical_name or decision not in dict(SoftwareDecision.Decision.choices):
+        messages.error(request, "canonical_name and a valid decision are required.")
+        return redirect("software_decisions_queue")
+
+    client = None
+    device = None
+    if scope == "client" and client_slug:
+        client = get_object_or_404(Client, slug=client_slug, tenant_id=1)
+    elif scope == "device" and device_id_str:
+        device = get_object_or_404(Device, id=device_id_str, tenant_id=1)
+        client = device.client
+    # scope == "global": both remain None
+
+    obj, created = SoftwareDecision.objects.update_or_create(
+        tenant_id=1,
+        canonical_name=canonical_name,
+        client=client,
+        device=device,
+        defaults={
+            "decision": decision,
+            "reason": reason,
+            "decided_by": request.user,
+            "decided_at": timezone.now(),
+        },
+    )
+    _audit(
+        request, "software_decision.set", obj.id,
+        {},
+        {
+            "canonical_name": canonical_name,
+            "scope": scope,
+            "client_id": str(client.id) if client else None,
+            "device_id": str(device.id) if device else None,
+            "decision": decision,
+        },
+    )
+    messages.success(
+        request,
+        f"{decision} recorded for {canonical_name} ({scope})."
+        + (" Created." if created else " Updated."),
+    )
+    return redirect("software_decisions_queue")
 
 
 # ── Requirement profiles (Track C.6 admin knob) ─────────────────────────────
