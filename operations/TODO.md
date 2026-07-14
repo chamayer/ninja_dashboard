@@ -125,6 +125,16 @@ module-specific; root `../TODO.md` keeps cross-repo items and pointers.
       SentinelOne/critical, LogMeIn/high), manual alias, candidate
       open → accepted, 14 S1 + 9 LMI org observations attached, 8
       device observations backfilled. **Track C is done.**
+- [ ] `_infer_form_factor` guesses 'physical' from agent presence
+      (parked 2026-07-14, ingest/identity/resolver.py:912). Contradicts
+      BLUEPRINT E.7 ("device_type = form factor only; agent presence
+      via agent_presence_current only"). When the only signal is
+      `agent.*` (S1-only / LMI-only / SC-only device with no Ninja
+      is_vm signal and no vm.guest observation), the resolver mints
+      the device as `physical` instead of `unknown`. Zero impact
+      today (all classified physical devices have Ninja is_vm=false
+      backing) but wrong for future S1-only clients or agents on VMs
+      Ninja doesn't see. Fix: return 'unknown' from the fallback.
 - [ ] Coverage-requirement override semantics (parked 2026-07-14).
       Legacy tiered-replace (client tier fully replaces global tier) is
       restored in the evaluator. Optional Shape 1 extension for legit
