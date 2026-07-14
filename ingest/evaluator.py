@@ -1006,7 +1006,7 @@ def _auto_resolve(
                     AND apc.device_id = f.subject_id
                     AND apc.entity_type = (f.finding_details->>'entity_type')
                     AND apc.platform = (f.finding_details->>'platform')
-                    AND apc.last_observed_at > now() - INTERVAL '48 hours'
+                    AND COALESCE(apc.last_contact_at, apc.last_observed_at) > now() - INTERVAL '48 hours'
               )
             """,
             (now, tenant_id, ft_id, device_id, device_id),
