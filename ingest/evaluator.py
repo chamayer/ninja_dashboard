@@ -484,7 +484,20 @@ def _evaluate_coverage(
     skip_platforms: set[str],
     corroborated: set[uuid.UUID],
 ) -> int:
-    """Open/update missing/stale_required_platform findings per requirement."""
+    """Emit missing_/stale_required_platform findings per tiered lookup.
+
+    Requirement resolution mirrors the legacy config_loader.get_requirement
+    tier order for each device (BLUEPRINT C.6 corrected):
+
+        (client_id, device_role) → (client_id, "all")
+        → (None, device_role) → (None, "all")
+
+    First tier that has ANY rows wins for that device — the tier's row
+    set is the client's COMPLETE required-platform list. No additive
+    stacking, no fall-through to a lower tier once a higher tier hits.
+    A client with a single (client, "all") row saying "Ninja only" gets
+    Ninja evaluated and nothing else — S1/LMI globals do not apply.
+    """
     cur.execute(
         """
         SELECT id, client_id, entity_type, platform, device_scope,
@@ -498,15 +511,23 @@ def _evaluate_coverage(
     if not requirements:
         return 0
 
-    # Track C.6 override: a client-scoped row for (entity_type, device_scope)
-    # REPLACES the global row for that client's devices — no additive stacking.
-    # Build the override index once so the per-row loop can skip devices whose
-    # client has a client-specific requirement of the same shape.
-    override_shape_clients: dict[tuple[str, str], set[uuid.UUID]] = {}
+    # Index rows by (client_id or None, device_scope) → list of req tuples.
+    tiers: dict[tuple[Any, str], list[tuple]] = {}
     for row in requirements:
-        _, r_client, r_entity, _r_platform, r_scope, *_ = row
-        if r_client is not None:
-            override_shape_clients.setdefault((r_entity, r_scope), set()).add(r_client)
+        _rid, r_client, _rentity, _rplat, r_scope, *_rest = row
+        tiers.setdefault((r_client, r_scope), []).append(row)
+
+    def resolve_tier(dev_client_id, dev_role: str) -> list[tuple]:
+        for key in (
+            (dev_client_id, dev_role),
+            (dev_client_id, "all"),
+            (None, dev_role),
+            (None, "all"),
+        ):
+            rows = tiers.get(key)
+            if rows:
+                return rows
+        return []
 
     missing_ft = _get_finding_type_id(cur, "missing_required_platform")
     stale_ft = _get_finding_type_id(cur, "stale_required_platform")
@@ -514,64 +535,52 @@ def _evaluate_coverage(
         log.warning("evaluator: finding_type 'missing_required_platform' not found")
         return 0
 
+    # Pull every device once — we iterate per device, resolving its tier
+    # in Python rather than doing a query per-requirement.
+    cur.execute(
+        """
+        SELECT d.id, d.client_id, d.canonical_hostname, d.device_role,
+               d.exemptions
+        FROM operations.devices d
+        WHERE d.tenant_id = %s
+          AND d.deleted_at IS NULL
+          AND d.lifecycle_status != 'retired'
+          AND (%s::uuid IS NULL OR d.id = %s)
+        """,
+        (tenant_id, device_id, device_id),
+    )
+    devices = cur.fetchall()
+
     count = 0
-    for (req_id, client_id, entity_type, platform, device_scope,
-         severity, gap_hours, prob_hours, conf_hours) in requirements:
-        if platform in skip_platforms:
-            continue
-        # Global rows exclude clients whose own row for the same
-        # (entity_type, device_scope) shape overrides them.
-        override_clients = (
-            override_shape_clients.get((entity_type, device_scope), set())
-            if client_id is None else set()
-        )
-        # Track C.6 wildcard: platform='any' satisfies when ANY platform of
-        # this entity_type is present (e.g. "some EDR present"). The
-        # agent_presence_current row must be aggregated per-device rather
-        # than joined per-(device, platform), or 'any' would misfire against
-        # a device that has ONE platform but is missing the required one.
-        cur.execute(
-            """
-            SELECT d.id, d.client_id, d.canonical_hostname,
-                   presence.last_observed_at, d.created_at
-            FROM operations.devices d
-            LEFT JOIN LATERAL (
-                SELECT MAX(apc.last_observed_at) AS last_observed_at
-                FROM operations.agent_presence_current apc
-                WHERE apc.tenant_id = d.tenant_id
-                  AND apc.device_id = d.id
+    for dev_id, dev_client_id, hostname, dev_role, exemptions in devices:
+        exemptions = exemptions or {}
+        tier_rows = resolve_tier(dev_client_id, dev_role or "all")
+        for (_rid, _rclient, entity_type, platform, _rscope,
+             severity, gap_hours, prob_hours, conf_hours) in tier_rows:
+            if platform in skip_platforms:
+                continue
+            if entity_type in exemptions:
+                continue
+
+            # Per-device presence for this (entity_type, platform), 'any'
+            # honored (BLUEPRINT C.6 wildcard).
+            cur.execute(
+                """
+                SELECT MAX(apc.last_observed_at) FROM operations.agent_presence_current apc
+                WHERE apc.tenant_id = %s AND apc.device_id = %s
                   AND apc.entity_type = %s
                   AND (%s = 'any' OR apc.platform = %s)
-            ) presence ON TRUE
-            WHERE d.tenant_id = %s
-              AND d.deleted_at IS NULL
-              AND d.lifecycle_status != 'retired'
-              AND (%s = 'all' OR d.device_role = %s)
-              AND NOT jsonb_exists(d.exemptions, %s)
-              AND (%s::uuid IS NULL OR d.client_id = %s)
-              AND (%s::uuid IS NULL OR d.id = %s)
-              AND NOT COALESCE(d.client_id = ANY(%s::uuid[]), FALSE)
-            """,
-            (
-                entity_type, platform, platform, tenant_id,
-                device_scope, device_scope, entity_type,
-                client_id, client_id, device_id, device_id,
-                list(override_clients),
-            ),
-        )
-        devices = cur.fetchall()
+                """,
+                (tenant_id, dev_id, entity_type, platform, platform),
+            )
+            (last_observed,) = cur.fetchone()
 
-        for dev_id, dev_client_id, hostname, last_observed, _dev_created_at in devices:
             # BLUEPRINT 1.4 split:
-            #   - MISSING (last_observed IS NULL): emit immediately at
-            #     `confirmed` if corroborated, else `probable`. No
-            #     grace-period suppression using dev_created_at.
-            #   - STALE (last_observed present but gap_age > gap_hours):
-            #     confidence ladder against gap_after_hours /
-            #     confidence_probable / confidence_confirmed.
+            #   MISSING (last_observed IS NULL) → emit immediately.
+            #   STALE (present but past gap_hours) → confidence ladder.
             if last_observed is None:
                 confidence = "confirmed" if dev_id in corroborated else "probable"
-                gap_age_hours = None
+                ftype, ft_name, sev = missing_ft, "missing_required_platform", severity
             else:
                 if last_observed.tzinfo is None:
                     last_observed = last_observed.replace(tzinfo=timezone.utc)
@@ -584,14 +593,8 @@ def _evaluate_coverage(
                     confidence = "probable"
                 else:
                     confidence = "possible"
-                # Corroboration: only call a gap 'confirmed' when another
-                # source saw the device online recently (legacy confirmed_gap).
                 if confidence == "confirmed" and dev_id not in corroborated:
                     confidence = "probable"
-
-            if last_observed is None:
-                ftype, ft_name, sev = missing_ft, "missing_required_platform", severity
-            else:
                 if stale_ft is None:
                     continue
                 ftype, ft_name, sev = stale_ft, "stale_required_platform", "medium"

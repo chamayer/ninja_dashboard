@@ -125,6 +125,26 @@ module-specific; root `../TODO.md` keeps cross-repo items and pointers.
       SentinelOne/critical, LogMeIn/high), manual alias, candidate
       open → accepted, 14 S1 + 9 LMI org observations attached, 8
       device observations backfilled. **Track C is done.**
+- [ ] Coverage-requirement override semantics (parked 2026-07-14).
+      Legacy tiered-replace (client tier fully replaces global tier) is
+      restored in the evaluator. Optional Shape 1 extension for legit
+      per-client add/remove: `CoverageRequirement.mode` enum
+      `replace` (default) | `add` | `remove`. `add` rows always applied
+      on top of the resolved tier; `remove` rows subtract from it.
+      Enables "globals + FooAgent" and "globals − LMI" per-client
+      cases without duplicating the base list. Not urgent — legacy
+      duplicate-the-list workaround still works.
+- [ ] Per-device exemption UI (parked 2026-07-14). Currently the only
+      write path into `devices.exemptions` JSONB is auto from Ninja's
+      `no_av_exempt` custom field (66 devices). Need a clickable
+      "exempt this device from <entity_type>" affordance on the device
+      page; audited. Distinct from suppressing a finding (which
+      acknowledges a real gap without carving it out policy-wise).
+- [ ] Suppress-this-finding action (parked 2026-07-14). Findings queue
+      currently has ack; needs a "suppress" that creates a
+      `SuppressionRule` scoped to that condition_key (optionally with
+      expires_at), so future runs of the same condition don't re-emit
+      notifications. AuditLog entry per suppression.
 - [ ] ScreenConnect fetch returns exactly 1,000 sessions — suspected
       GetSessionsByFilter page cap; verify against SC console count and
       page if needed.
