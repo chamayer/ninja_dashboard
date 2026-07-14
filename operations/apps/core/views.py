@@ -564,6 +564,8 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     type_filter = request.GET.get("type", "")
     confidence_filter = request.GET.get("confidence", "")
     client_filter = request.GET.get("client", "")
+    platform_filter = request.GET.get("platform", "")
+    online_filter = request.GET.get("online", "")
 
     qs = Finding.objects.filter(tenant_id=1).select_related("finding_type", "client", "owner")
 
@@ -580,11 +582,83 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
         qs = qs.filter(confidence=confidence_filter)
     if client_filter:
         qs = qs.filter(client__slug=client_filter)
+    if platform_filter:
+        qs = qs.filter(finding_details__platform=platform_filter)
 
     _SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
     findings = sorted(qs[:500], key=lambda f: (_SEVERITY_ORDER.get(f.severity, 9), -(f.last_detected_at or f.last_seen_at).timestamp()))
 
-    paginator = Paginator(findings, 50)
+    # Online status map: device_id → bool (has any is_online=true agent
+    # presence in the last 24h). Compute in one round-trip over the
+    # findings' subject_ids.
+    subject_ids = [f.subject_id for f in findings if f.subject_id]
+    online_map: dict[str, bool] = {}
+    if subject_ids:
+        with transaction.atomic(), connection.cursor() as cur:
+            cur.execute("SET LOCAL operations.tenant_id = 1")
+            cur.execute(
+                """
+                SELECT device_id::text
+                FROM operations.agent_presence_current
+                WHERE device_id = ANY(%s::uuid[])
+                  AND is_online = TRUE
+                  AND last_observed_at > NOW() - INTERVAL '24 hours'
+                GROUP BY device_id
+                """,
+                ([str(sid) for sid in subject_ids],),
+            )
+            online_map = {row[0]: True for row in cur.fetchall()}
+
+    # Coalesce noise: for a device offline > 1 day, suppress missing/
+    # stale_required_platform findings from the queue — they aren't
+    # actionable while the device isn't reachable. The findings still
+    # exist and appear on the device detail page; the queue's job is
+    # actionable work.
+    _COALESCED_TYPES = {"missing_required_platform", "stale_required_platform"}
+    findings = [
+        f for f in findings
+        if not (
+            f.finding_type.name in _COALESCED_TYPES
+            and f.subject_id
+            and not online_map.get(str(f.subject_id))
+        )
+    ]
+
+    # Apply online filter in Python (already have the map).
+    if online_filter == "online":
+        findings = [f for f in findings if online_map.get(str(f.subject_id))]
+    elif online_filter == "offline":
+        findings = [f for f in findings if f.subject_id and not online_map.get(str(f.subject_id))]
+
+    # Build a per-finding detail string for the inline column.
+    _DAYS_KEYS = ("days_since_last_seen", "days_offline")
+    def _detail_string(finding: Finding) -> str:
+        d = finding.finding_details or {}
+        name = finding.finding_type.name
+        if name == "missing_required_platform":
+            return f"missing {d.get('platform', '?')}"
+        if name == "stale_required_platform":
+            hours = d.get("gap_age_hours") or d.get("gap_hours")
+            return f"stale {d.get('platform', '?')}" + (f" · {int(hours)}h" if hours else "")
+        if name == "device_unenrolled":
+            ps = d.get("power_state") or "unknown"
+            days = d.get("days_since_last_seen")
+            via = d.get("observed_via") or "tracked"
+            return f"{ps}" + (f" · {days}d" if days is not None else "") + f" · via {via}"
+        if name == "device_long_offline":
+            days = d.get("days_offline") or d.get("days")
+            return f"offline {days}d" if days else "offline"
+        if name == "device_role_conflict":
+            return f"{d.get('previous_role', '?')} → {d.get('new_role', '?')}"
+        # Fallback: platform if present, else empty
+        return d.get("platform") or ""
+
+    findings_with_detail = [
+        {"f": f, "detail": _detail_string(f), "online": online_map.get(str(f.subject_id)) if f.subject_id else None}
+        for f in findings
+    ]
+
+    paginator = Paginator(findings_with_detail, 50)
     page = paginator.get_page(request.GET.get("page"))
 
     finding_types = FindingType.objects.order_by("name")
@@ -604,9 +678,13 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             "status_choices": Finding.Status.choices,
             "severity_choices": Finding.Severity.choices,
             "confidence_choices": Finding.Confidence.choices,
+            "platform_choices": [("Ninja","Ninja"),("SentinelOne","SentinelOne"),("LogMeIn","LogMeIn"),("ScreenConnect","ScreenConnect")],
+            "online_choices": [("online","Online"),("offline","Offline")],
             "active_status": status_filter,
             "active_severity": severity_filter,
             "active_type": type_filter,
+            "active_platform": platform_filter,
+            "active_online": online_filter,
             "active_confidence": confidence_filter,
             "active_client": client_filter,
             "page_query": page_query.urlencode(),

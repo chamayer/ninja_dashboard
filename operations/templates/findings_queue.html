@@ -48,6 +48,24 @@
             </select>
         </div>
         <div>
+            <label>Platform</label>
+            <select name="platform">
+                <option value="">Any</option>
+                {% for value, label in platform_choices %}
+                    <option value="{{ value }}"{% if active_platform == value %} selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <label>Online</label>
+            <select name="online">
+                <option value="">Any</option>
+                {% for value, label in online_choices %}
+                    <option value="{{ value }}"{% if active_online == value %} selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
             <label>Client</label>
             <select name="client">
                 <option value="">Any</option>
@@ -71,6 +89,8 @@
                 <th>Severity</th>
                 <th>Confidence</th>
                 <th>Type</th>
+                <th>Detail</th>
+                <th>Online</th>
                 <th>Client</th>
                 <th>Subject</th>
                 <th>Status</th>
@@ -79,11 +99,22 @@
             </tr>
         </thead>
         <tbody>
-            {% for f in findings %}
+            {% for row in findings %}
+            {% with f=row.f %}
             <tr>
                 <td><span class="badge badge-{{ f.severity }}">{{ f.get_severity_display }}</span></td>
                 <td class="muted">{{ f.confidence|default:"—" }}</td>
                 <td>{{ f.finding_type.name }}</td>
+                <td>{{ row.detail|default:"—" }}</td>
+                <td>
+                    {% if row.online == True %}
+                        <span class="badge badge-low">online</span>
+                    {% elif row.online == False %}
+                        <span class="badge badge-suppressed">offline</span>
+                    {% else %}
+                        <span class="muted">—</span>
+                    {% endif %}
+                </td>
                 <td>{{ f.client.display_name|default:"—" }}</td>
                 <td>
                     <span class="muted">{{ f.get_subject_type_display }}</span>
@@ -100,6 +131,7 @@
                     {% endif %}
                 </td>
             </tr>
+            {% endwith %}
             {% endfor %}
         </tbody>
     </table>
