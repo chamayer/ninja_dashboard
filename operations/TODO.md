@@ -155,6 +155,19 @@ module-specific; root `../TODO.md` keeps cross-repo items and pointers.
       `SuppressionRule` scoped to that condition_key (optionally with
       expires_at), so future runs of the same condition don't re-emit
       notifications. AuditLog entry per suppression.
+- [ ] device_unenrolled UI polish (parked 2026-07-14). Findings queue
+      renders these in the generic row shape today. Add a dedicated
+      column set — power_state + days_since_last_seen + hypervisor
+      host name — so operator can sort/filter "poweredoff = retire
+      candidate" vs "poweredon = enroll candidate." Small view change.
+- [ ] Auto-suggest profiles for global-fallback clients (parked
+      2026-07-14). Remaining ~834 missing findings concentrate on the
+      ~40 clients still without a `requirement_profile`. Heuristic
+      scan: for each such client, look at actual agent coverage across
+      their fleet; if most devices consistently have Ninja + S1 (say)
+      but not LMI, propose a profile matching that shape. Operator
+      accepts per-client via the profile picker. Would collapse a
+      large fraction of the residual missing findings.
 - [ ] ScreenConnect fetch returns exactly 1,000 sessions — suspected
       GetSessionsByFilter page cap; verify against SC console count and
       page if needed.
