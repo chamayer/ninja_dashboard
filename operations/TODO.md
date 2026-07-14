@@ -86,8 +86,19 @@ module-specific; root `../TODO.md` keeps cross-repo items and pointers.
       coverage_requirements. Verified on am-ch-01: migration 0029
       applied, Standard profile + 3 items seeded, /clients/candidates/
       renders 200, wildcard+override SQL executes cleanly (5,127
-      devices matched). End-to-end candidate accept awaits operator
-      click. Track C complete pending live acceptance.
+      devices matched). C.8 gate closed 2026-07-14 by scripted accept of
+      Silvercup (exercises the view-layer code path). Fix `08d4b26`
+      en route resolved a real bug the operator's first click would
+      have hit: CoverageRequirement model missed `version`, DB
+      column NOT NULL → NotNull violation during profile
+      instantiate. Migration 0030 (state-only) syncs Django state to
+      the pre-existing column. Round-trip: client mint
+      (slug=silvercup, tenant-default profile), 2 client_links
+      minted with created_reason='candidate.accept', 3
+      coverage_requirements instantiated (Ninja/critical,
+      SentinelOne/critical, LogMeIn/high), manual alias, candidate
+      open → accepted, 14 S1 + 9 LMI org observations attached, 8
+      device observations backfilled. **Track C is done.**
 - [ ] ScreenConnect fetch returns exactly 1,000 sessions — suspected
       GetSessionsByFilter page cap; verify against SC console count and
       page if needed.
