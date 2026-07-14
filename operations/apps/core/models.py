@@ -809,7 +809,7 @@ class RequirementProfileItem(UUIDTenantScopedModel):
         return f"{self.profile_id}:{self.entity_type}:{self.platform or '*'}"
 
 
-class CoverageRequirement(TenantScopedModel):
+class CoverageRequirement(VersionedTenantScopedModel):
     """Declarative policy: what platform/entity_type should exist per org/device scope."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
