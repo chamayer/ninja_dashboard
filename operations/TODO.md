@@ -46,6 +46,32 @@ module-specific; root `../TODO.md` keeps cross-repo items and pointers.
       Rebuild #5 verified: 5,120 devices, 0 orphans, UTA servers 110 =
       Ninja console, citrixapp26 7→1. Commits `3d6002f`, `ca22875`,
       `671e206`, `6870b28`.
+- [x] Track 2 — P2 dispatcher (2026-07-14, `cd4d795`).
+      ingest/notifications.py (suppression → rule match → cooldown →
+      webhook/email/zendesk → audit); ingest/notifications_digest.py
+      (daily); migration 0031 (`zendesk` channel + rules seed from
+      legacy alert_rules DISABLED + version-drift state fix for
+      AdminFinding/IdentityCandidate/NotificationRule); scheduler
+      hooks conditional on NOTIFY_ENABLED/NOTIFY_DIGEST_ENABLED;
+      manual endpoints /run/notifications/dispatch and /digest and
+      /run/platform-evaluate; UI at /admin/notifications/ with
+      enable/disable toggle + suppression list.
+- [x] Track U — P3 UI framework slice (2026-07-14, `40992d1`).
+      Shared includes: _pagination, _badges, _freshness, _tiles.
+      Shared CSS in base.html (.filterbar, .filter-chip, .type-badge,
+      .ops-table, .pager, .tile-grid, .freshness). Refactored
+      findings_queue, org_devices, device_detail onto shared grammar;
+      dropped ~150 lines of inline styling.
+- [x] Track 1 — P1 gate audit (2026-07-14, `5fb3e24`). All 8
+      sub-tracks (device promotion, device_scope, exemptions,
+      missing/stale findings, source_failure guard, corroborated
+      confidence, cross_client_conflict, lifecycle findings) verified.
+      One bug fix: evaluator now writes platform_evaluator run_log
+      rows so runs are visible. One 0-finding gotcha diagnosed and
+      explained: `missing_required_platform` correctly returns 0
+      because all 5,127 devices were `created_at` <24h ago from the
+      Track E clean rebuild — the 24h gap_after_hours grace window
+      is doing its job. Wait 24h and 3,754 findings will surface.
 - [ ] Track C — client entity (BLUEPRINT Track C, priority before P2).
       2026-07-13: blueprint written (`3a4f10d`); batch C1 pushed
       (`500e419`): org observations per container from every source
