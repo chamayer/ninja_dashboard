@@ -1,20 +1,31 @@
-"""Patch findings emitter — Track 5.
+"""Patch findings emitter — Track 5 + Track O batch O5.
 
-Reads ninja_patches.patch_facts and emits per-device (or per-client)
-findings per BLUEPRINT §5.1:
+Reads `ninja_patches.device_patch_signal` (canonical rollup, matches
+Metabase counts) for never_patched / patching_stalled, and
+`ninja_patches.patch_facts` for per-KB failure detail and approval
+backlog. Every emitter filters subjects on
+`operations.v_device.effective_patching_scope = 'Included'` — the
+per-domain scope layer built in Track O batch O4 replaces legacy
+`ninja_core.v_active_devices` as the population source.
 
-  * device_never_patched
-  * patching_stalled (>35d without a fresh patch state)
-  * patch_failing_repeatedly (same KB failing ≥3 times per device)
-  * patch_approval_backlog (subject=client)
+Five finding types (BLUEPRINT §5.1):
 
-`reboot_pending` from the blueprint isn't emitted here — patch_facts
-doesn't carry a distinct reboot-pending status yet; parked to backlog
-until the connector projects one.
+  * `device_never_patched` — device with a Ninja link is in scope but
+    device_patch_signal.ever_installed = FALSE (never observed an
+    INSTALLED row). Mutually exclusive with patching_stalled.
+  * `patching_stalled` — device_patch_signal.ever_installed = TRUE but
+    last_seen_at is >35 days old (or NULL — old installs with no
+    installedAt). Mutually exclusive with never_patched.
+  * `reboot_pending` — v_device.needs_reboot = TRUE AND last_boot_at
+    older than 3 days (last_boot_at from Ninja device_snapshots via
+    device_session_current).
+  * `patch_failing_repeatedly` — same KB has failed >=3 times on a
+    device that is in scope.
+  * `patch_approval_backlog` — subject = client; >=25 APPROVED
+    uninstalled patches across the client's in-scope devices.
 
-All emitted findings map ninja_core.devices.id → operations.devices
-via device_links (source=Ninja). Devices we can't map are silently
-skipped (they're not in the ops universe yet).
+Multi-Ninja-link ops devices are collapsed via aggregation before
+emission (BOOL_OR / MAX / SUM) — same E.3 gotcha handled in O1/O3/O4.
 """
 
 from __future__ import annotations
@@ -30,7 +41,9 @@ log = logging.getLogger(__name__)
 
 _TENANT_ID = 1
 _STALLED_DAYS = 35
+_REBOOT_PENDING_DAYS = 3
 _FAILING_RUN_COUNT = 3
+_APPROVAL_BACKLOG_THRESHOLD = 25
 
 
 def classify(tenant_id: int = _TENANT_ID) -> int:
@@ -46,6 +59,7 @@ def classify(tenant_id: int = _TENANT_ID) -> int:
 
             affected += _emit_never_patched(cur, tenant_id, ft_ids, now, emitted_keys)
             affected += _emit_patching_stalled(cur, tenant_id, ft_ids, now, emitted_keys)
+            affected += _emit_reboot_pending(cur, tenant_id, ft_ids, now, emitted_keys)
             affected += _emit_failing_repeatedly(cur, tenant_id, ft_ids, now, emitted_keys)
             affected += _emit_approval_backlog(cur, tenant_id, ft_ids, now, emitted_keys)
 
@@ -78,7 +92,7 @@ def _finding_type_ids(cur) -> dict[str, int]:
         """
         SELECT name, id FROM operations.finding_types
         WHERE name IN (
-            'device_never_patched', 'patching_stalled',
+            'device_never_patched', 'patching_stalled', 'reboot_pending',
             'patch_failing_repeatedly', 'patch_approval_backlog'
         )
         """
@@ -86,30 +100,48 @@ def _finding_type_ids(cur) -> dict[str, int]:
     return {n: i for n, i in cur.fetchall()}
 
 
+# ─────────────────────────────────────────────────────────────────────
+# Per-device patch signal rollup, filtered to in-scope devices.
+# Aggregates across multi-Ninja-link ops devices (BOOL_OR / MAX).
+# ─────────────────────────────────────────────────────────────────────
+
+
+_INSCOPE_SIGNAL_CTE = """
+    WITH per_device AS (
+        SELECT
+            dl.tenant_id,
+            dl.device_id AS ops_device_id,
+            BOOL_OR(COALESCE(dps.ever_installed, FALSE))       AS any_ever_installed,
+            MAX(dps.last_seen_at)                              AS max_last_seen_at,
+            COUNT(*) FILTER (WHERE dps.device_id IS NOT NULL)  AS signal_rows
+        FROM operations.device_links dl
+        JOIN operations.sources s
+          ON s.id = dl.source_id AND s.name = 'Ninja'
+        LEFT JOIN ninja_patches.device_patch_signal dps
+          ON dps.device_id = dl.external_id::int
+        WHERE dl.tenant_id = %s
+        GROUP BY dl.tenant_id, dl.device_id
+    )
+"""
+
+
 def _emit_never_patched(cur, tenant_id, ft_ids, now, keys) -> int:
     ft_id = ft_ids.get("device_never_patched")
     if not ft_id:
         return 0
     cur.execute(
-        """
-        WITH linked AS (
-            SELECT d.id AS device_id, d.client_id, d.canonical_hostname,
-                   dl.external_id::int AS ninja_id
-            FROM operations.devices d
-            JOIN operations.device_links dl
-              ON dl.device_id = d.id AND dl.tenant_id = d.tenant_id
-            JOIN operations.sources s ON s.id = dl.source_id AND s.name='Ninja'
-            WHERE d.tenant_id = %s AND d.deleted_at IS NULL
-              AND d.lifecycle_status <> 'retired'
-        )
-        SELECT l.device_id, l.client_id, l.canonical_hostname
-        FROM linked l
-        WHERE NOT EXISTS(
-            SELECT 1 FROM ninja_patches.patch_facts pf
-            WHERE pf.device_id = l.ninja_id AND pf.status = 'INSTALLED'
-        )
+        _INSCOPE_SIGNAL_CTE
+        + """
+        SELECT v.device_id, v.client_id, v.canonical_hostname
+        FROM operations.v_device v
+        JOIN per_device pd
+          ON pd.ops_device_id = v.device_id AND pd.tenant_id = v.tenant_id
+        WHERE v.tenant_id = %s
+          AND v.effective_patching_scope = 'Included'
+          AND v.lifecycle_status <> 'retired'
+          AND pd.any_ever_installed = FALSE
         """,
-        (tenant_id,),
+        (tenant_id, tenant_id),
     )
     count = 0
     for dev_id, client_id, hostname in cur.fetchall():
@@ -127,23 +159,21 @@ def _emit_patching_stalled(cur, tenant_id, ft_ids, now, keys) -> int:
     if not ft_id:
         return 0
     cur.execute(
-        f"""
-        WITH latest AS (
-            SELECT pf.device_id, MAX(pf.last_observed_at) AS last_seen
-            FROM ninja_patches.patch_facts pf
-            GROUP BY pf.device_id
-        )
-        SELECT d.id, d.client_id, d.canonical_hostname, l.last_seen
-        FROM latest l
-        JOIN operations.device_links dl
-          ON dl.external_id::int = l.device_id AND dl.tenant_id = %s
-        JOIN operations.sources s ON s.id = dl.source_id AND s.name='Ninja'
-        JOIN operations.devices d
-          ON d.id = dl.device_id AND d.deleted_at IS NULL
-             AND d.lifecycle_status <> 'retired'
-        WHERE l.last_seen < NOW() - INTERVAL '{_STALLED_DAYS} days'
+        _INSCOPE_SIGNAL_CTE
+        + f"""
+        SELECT v.device_id, v.client_id, v.canonical_hostname,
+               pd.max_last_seen_at
+        FROM operations.v_device v
+        JOIN per_device pd
+          ON pd.ops_device_id = v.device_id AND pd.tenant_id = v.tenant_id
+        WHERE v.tenant_id = %s
+          AND v.effective_patching_scope = 'Included'
+          AND v.lifecycle_status <> 'retired'
+          AND pd.any_ever_installed = TRUE
+          AND (pd.max_last_seen_at IS NULL
+               OR pd.max_last_seen_at < NOW() - INTERVAL '{_STALLED_DAYS} days')
         """,
-        (tenant_id,),
+        (tenant_id, tenant_id),
     )
     count = 0
     for dev_id, client_id, hostname, last_seen in cur.fetchall():
@@ -160,85 +190,132 @@ def _emit_patching_stalled(cur, tenant_id, ft_ids, now, keys) -> int:
     return count
 
 
-def _emit_failing_repeatedly(cur, tenant_id, ft_ids, now, keys) -> int:
-    ft_id = ft_ids.get("patch_failing_repeatedly")
+def _emit_reboot_pending(cur, tenant_id, ft_ids, now, keys) -> int:
+    """5th finding type per BLUEPRINT §5.1 — device needs reboot AND
+    hasn't rebooted in >3 days. Reads v_device (needs_reboot +
+    last_boot_at from device_session_current).
+    """
+    ft_id = ft_ids.get("reboot_pending")
     if not ft_id:
         return 0
     cur.execute(
         f"""
-        SELECT pf.device_id, pf.kb_number, COUNT(*) AS fails
-        FROM ninja_patches.patch_facts pf
-        WHERE pf.status = 'FAILED' AND pf.kb_number IS NOT NULL
-        GROUP BY pf.device_id, pf.kb_number
-        HAVING COUNT(*) >= {_FAILING_RUN_COUNT}
-        """
-    )
-    grouped: dict[int, list[tuple[str, int]]] = {}
-    for nid, kb, fails in cur.fetchall():
-        grouped.setdefault(nid, []).append((kb, fails))
-    if not grouped:
-        return 0
-    cur.execute(
-        """
-        SELECT dl.external_id::int, d.id, d.client_id, d.canonical_hostname
-        FROM operations.device_links dl
-        JOIN operations.sources s ON s.id = dl.source_id AND s.name='Ninja'
-        JOIN operations.devices d
-          ON d.id = dl.device_id AND d.deleted_at IS NULL
-             AND d.lifecycle_status <> 'retired'
-        WHERE dl.tenant_id = %s
+        SELECT v.device_id, v.client_id, v.canonical_hostname,
+               v.last_boot_at
+        FROM operations.v_device v
+        WHERE v.tenant_id = %s
+          AND v.effective_patching_scope = 'Included'
+          AND v.lifecycle_status <> 'retired'
+          AND v.needs_reboot = TRUE
+          AND (v.last_boot_at IS NULL
+               OR v.last_boot_at < NOW() - INTERVAL '{_REBOOT_PENDING_DAYS} days')
         """,
         (tenant_id,),
     )
-    id_map = {nid: (dev, client, host) for nid, dev, client, host in cur.fetchall()}
     count = 0
-    for nid, kb_list in grouped.items():
-        mapped = id_map.get(nid)
-        if not mapped:
-            continue
-        dev_id, client_id, hostname = mapped
-        # Emit ONE finding per device (details lists all failing KBs).
+    for dev_id, client_id, hostname, last_boot in cur.fetchall():
         count += _upsert(
             cur, tenant_id, ft_id, client_id, dev_id, "device",
-            "patch_failing_repeatedly", "", "high", now,
+            "reboot_pending", "", "medium", now,
             {
                 "hostname": hostname,
-                "failing_patches": [
-                    {"kb": kb, "fail_count": fails}
-                    for kb, fails in sorted(kb_list, key=lambda x: -x[1])
-                ][:20],
+                "last_boot_at": last_boot.isoformat() if last_boot else None,
+                "threshold_days": _REBOOT_PENDING_DAYS,
             },
             keys,
         )
     return count
 
 
+def _emit_failing_repeatedly(cur, tenant_id, ft_ids, now, keys) -> int:
+    """Per-KB failure count on in-scope devices. Emits ONE finding per
+    device (details list all failing KBs).
+    """
+    ft_id = ft_ids.get("patch_failing_repeatedly")
+    if not ft_id:
+        return 0
+    cur.execute(
+        f"""
+        WITH included AS (
+            SELECT dl.tenant_id, dl.device_id AS ops_device_id,
+                   dl.external_id::int AS ninja_id,
+                   v.client_id, v.canonical_hostname
+            FROM operations.v_device v
+            JOIN operations.device_links dl
+              ON dl.device_id = v.device_id AND dl.tenant_id = v.tenant_id
+            JOIN operations.sources s
+              ON s.id = dl.source_id AND s.name = 'Ninja'
+            WHERE v.tenant_id = %s
+              AND v.effective_patching_scope = 'Included'
+              AND v.lifecycle_status <> 'retired'
+        ),
+        failing AS (
+            SELECT i.ops_device_id, i.client_id, i.canonical_hostname,
+                   pf.kb_number, COUNT(*) AS fails
+            FROM ninja_patches.patch_facts pf
+            JOIN included i ON i.ninja_id = pf.device_id
+            WHERE pf.status = 'FAILED' AND pf.kb_number IS NOT NULL
+            GROUP BY i.ops_device_id, i.client_id, i.canonical_hostname, pf.kb_number
+            HAVING COUNT(*) >= {_FAILING_RUN_COUNT}
+        )
+        SELECT ops_device_id, client_id, canonical_hostname,
+               jsonb_agg(jsonb_build_object('kb', kb_number, 'fail_count', fails)
+                         ORDER BY fails DESC) AS failing_patches
+        FROM failing
+        GROUP BY ops_device_id, client_id, canonical_hostname
+        """,
+        (tenant_id,),
+    )
+    count = 0
+    for dev_id, client_id, hostname, failing_patches in cur.fetchall():
+        # Cap at 20 KBs in the finding details.
+        top_kbs = (failing_patches or [])[:20]
+        count += _upsert(
+            cur, tenant_id, ft_id, client_id, dev_id, "device",
+            "patch_failing_repeatedly", "", "high", now,
+            {"hostname": hostname, "failing_patches": top_kbs},
+            keys,
+        )
+    return count
+
+
 def _emit_approval_backlog(cur, tenant_id, ft_ids, now, keys) -> int:
-    """Per-client: how many APPROVED patches are not yet installed anywhere?"""
+    """Per-client: how many APPROVED patches are not yet installed
+    across the client's IN-SCOPE devices?
+    """
     ft_id = ft_ids.get("patch_approval_backlog")
     if not ft_id:
         return 0
     cur.execute(
-        """
-        WITH approved_latest AS (
+        f"""
+        WITH included AS (
+            SELECT dl.tenant_id, dl.device_id AS ops_device_id,
+                   dl.external_id::int AS ninja_id,
+                   v.client_id
+            FROM operations.v_device v
+            JOIN operations.device_links dl
+              ON dl.device_id = v.device_id AND dl.tenant_id = v.tenant_id
+            JOIN operations.sources s
+              ON s.id = dl.source_id AND s.name = 'Ninja'
+            WHERE v.tenant_id = %s
+              AND v.effective_patching_scope = 'Included'
+              AND v.lifecycle_status <> 'retired'
+        ),
+        approved_latest AS (
             SELECT DISTINCT ON (pf.device_id, pf.patch_uid)
-                   pf.device_id, pf.patch_uid, pf.status
+                pf.device_id, pf.patch_uid, pf.status
             FROM ninja_patches.patch_facts pf
+            JOIN included i ON i.ninja_id = pf.device_id
             ORDER BY pf.device_id, pf.patch_uid, pf.last_observed_at DESC
         )
-        SELECT d.client_id, c.display_name,
-               COUNT(*) AS backlog
+        SELECT i.client_id, c.display_name, COUNT(*) AS backlog
         FROM approved_latest a
-        JOIN operations.device_links dl
-          ON dl.external_id::int = a.device_id AND dl.tenant_id = %s
-        JOIN operations.sources s ON s.id = dl.source_id AND s.name='Ninja'
-        JOIN operations.devices d
-          ON d.id = dl.device_id AND d.deleted_at IS NULL
-             AND d.lifecycle_status <> 'retired'
-        JOIN operations.clients c ON c.id = d.client_id AND c.deleted_at IS NULL
+        JOIN included i ON i.ninja_id = a.device_id
+        JOIN operations.clients c
+          ON c.id = i.client_id AND c.deleted_at IS NULL
         WHERE a.status = 'APPROVED'
-        GROUP BY d.client_id, c.display_name
-        HAVING COUNT(*) >= 25
+        GROUP BY i.client_id, c.display_name
+        HAVING COUNT(*) >= {_APPROVAL_BACKLOG_THRESHOLD}
         """,
         (tenant_id,),
     )

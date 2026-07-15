@@ -2,6 +2,51 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.44.7] — 2026-07-15
+
+### Added
+- Migration 0044: `reboot_pending` finding type (5th patching finding
+  per BLUEPRINT §5.1, previously parked pending v_device.needs_reboot).
+  Category `patching`, source_module `platform.patch_findings`,
+  auto_resolvable.
+- `operations.refresh_derived()` coordinator function — refreshes all
+  three ops derived matviews in dependency order
+  (agent_presence_current → device_session_current →
+  device_patching_scope_current). Grants to operations_app + ninja_ingest.
+- `ingest/patch_findings.py`: new `_emit_reboot_pending()`. Reads
+  `v_device.needs_reboot` + `last_boot_at`; fires on in-scope devices
+  where needs_reboot=TRUE AND last_boot_at older than 3 days
+  (`_REBOOT_PENDING_DAYS`).
+
+### Changed
+- `ingest/patch_findings.py` rewritten for Track O batch O5:
+  * All emitters filter subjects on
+    `v_device.effective_patching_scope = 'Included'` — the per-domain
+    scope layer replaces legacy `ninja_core.v_active_devices`.
+  * `_emit_never_patched` + `_emit_patching_stalled` now read
+    `ninja_patches.device_patch_signal` (canonical rollup that matches
+    Metabase counts) via a shared per-device aggregation CTE. Multi-
+    Ninja-link ops devices are collapsed with BOOL_OR/MAX before
+    emission — same E.3 gotcha handled in O1/O3/O4.
+  * `_emit_failing_repeatedly` gains scope filter via v_device JOIN;
+    aggregates per-device failing KBs into one finding.
+  * `_emit_approval_backlog` gains scope filter via v_device JOIN;
+    only counts patches on IN-SCOPE devices.
+  * Constants promoted: `_STALLED_DAYS=35`, `_REBOOT_PENDING_DAYS=3`,
+    `_FAILING_RUN_COUNT=3`, `_APPROVAL_BACKLOG_THRESHOLD=25`.
+
+### Deferred (documented, not blocking)
+- RLS retrofit on `agent_presence_current`: Postgres does not support
+  RLS on materialized views. Effective scoping already flows through
+  joins to `operations.devices`; direct SELECT by trusted roles
+  (metabase_ro, operations_readonly) remains an accepted risk.
+  Security-barrier view wrappers filed for a future batch if the
+  boundary needs tightening.
+- Metabase question audit: run out-of-band against Metabase's SQLite/
+  MySQL metadata to grep for `d.exemptions` / `.exemptions` — none
+  expected today (exemptions only had 69 rows and no Metabase card
+  surfaced it), but confirm before P7 cutover.
+
 ## [0.44.6] — 2026-07-15
 
 ### Added
