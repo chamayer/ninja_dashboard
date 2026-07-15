@@ -22,6 +22,41 @@ module-specific; root `../TODO.md` keeps cross-repo items and pointers.
 
 ## Backlog
 
+### Storage separation pass (BLUEPRINT.md Track O — Batch PO)
+
+- [ ] **O1** — `device_session_current` matview (per-device rollup
+      across `agent_presence_current` + `ninja_core.device_snapshots`);
+      refresh function; RLS; unique index for CONCURRENTLY; switch
+      findings-queue online-source map to read it. No column
+      retirement.
+- [ ] **O2** — `operator_decision_dimensions` registry +
+      `device_operator_decisions` polymorphic table; trigger validates
+      `value` against `allowed_values`; RLS. Migrate
+      `Device.exemptions` JSONB → rows under `dimension='exemptions'`.
+      Retire `Device.exemptions` column via SeparateDatabaseAndState
+      after evaluator + any admin writes swap to the new source.
+- [ ] **O3** — `operations.v_device` effective view (canonical +
+      session + operator_decisions); `DeviceView(managed=False)` Django
+      proxy model. Sweep read paths in `operations/apps/core/views.py`
+      and templates from `Device.objects` → `DeviceView.objects` where
+      the read needs any derived / operator field.
+- [ ] **O4** — Patching_scope layer (per-domain):
+      `patching_scope_signal` / `patching_scope_default` /
+      `patching_scope_policy_allowlist` seeded from
+      `ninja_core.v_active_devices` behavior;
+      `device_patching_scope_current` matview + refresh (called from
+      `_sync_operations_device_roles`); `device_patching_override`
+      typed table; `v_device` gains
+      `effective_patching_scope`.
+- [ ] **O5** — Rewrite `ingest/patch_findings.py` to filter on
+      `v_device.effective_patching_scope='Included'` and read
+      `ninja_patches.device_patch_signal` for never/stalled; add
+      `reboot_pending` emitter (5th finding type) reading
+      `v_device.needs_reboot`. Refresh manifest + `refresh_derived()`
+      coordinator. RLS retrofit on `agent_presence_current`. Audit
+      Metabase questions referencing retired columns and update in
+      the same wave.
+
 ### Parity blueprint (BLUEPRINT.md — Batches P1–P7)
 
 - [x] Track E — entity model correction before P2. 2026-07-12: complete

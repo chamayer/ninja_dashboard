@@ -34,6 +34,15 @@ explicitly — never let them drift silently.
    wrong and how certain we are. A notification rule decides what to do
    about it. These concerns are strictly separated.
 
+7. **Four-layer storage separation, per-domain top-to-bottom, shared
+   reads via effective views.** Every ops entity handles data in four
+   layers: canonical (identity + resolver decisions), derived (matview
+   refreshed from raw source + config), operator decisions (typed
+   per-domain OR polymorphic for simple standalone values), and an
+   effective view (`v_<entity>`) that joins the three. Consumers read
+   only the effective view. Per-domain storage top-to-bottom; sharing
+   only where the output shape is genuinely uniform. See §3.8.
+
 ---
 
 ## 2. Service and schema naming
@@ -172,6 +181,131 @@ missing_since  TIMESTAMPTZ   -- set when absent from full pull; cleared on reapp
 
 When `missing_since` is set: create `device_missing_from_source` finding.
 When device reappears: clear `missing_since`, auto-resolve finding.
+
+### 3.8 Storage separation — four-layer per-domain design (2026-07-15)
+
+Extends §3.3 by splitting observation-derived state into three distinct
+concerns and giving each its own storage. Consumers read one view;
+storage semantics stay unambiguous.
+
+**Why this exists:** columns on a canonical entity table used to mix
+(1) identity, (2) values recomputed every ingest cycle, (3) permanent
+operator decisions, and (4) high-frequency session state. Rule changes
+silently invalidated stored values; sync could clobber operator
+decisions; readers couldn't tell "current" from "cached." The four
+layers give every field one writer and one meaning.
+
+**The four layers per entity:**
+
+1. **Canonical** — `operations.<entity>` (e.g. `operations.devices`).
+   Identity, resolver decisions, lifecycle, audit stamps. One writer:
+   the resolver. Slow-changing derived attributes MAY stay here when
+   they rarely change and share the resolver's writer (e.g. `os_name`,
+   `device_role`, `device_type` on `operations.devices` — sync-refreshed
+   during identity work, low churn, no dedicated matview needed).
+2. **Derived** — per-domain matviews (`operations.<entity>_<domain>_current`
+   or aggregate rollups like `device_session_current`). Refreshed from
+   raw source + per-domain config. Every matview carries `computed_at`
+   so staleness is visible. One writer: the domain's refresh function.
+3. **Operator decisions** — either **per-domain typed table**
+   (`operations.<entity>_<domain>_override`) when the decision partners
+   with a derived value that has domain constraints, OR the
+   **polymorphic table** (`operations.<entity>_operator_decisions(
+   dimension, value, reason, set_by, set_at)`) when the decision stands
+   alone (exemptions, notes, suppress-finding). Never touched by sync.
+   One writer: operator via UI.
+4. **Effective view** — `operations.v_<entity>`. Joins canonical +
+   derived + operator decisions. Exposes `<domain>_derived`,
+   `<domain>_override`, and `effective_<domain>_<attr>` (COALESCE of
+   override over derived). Consumers read only this — never the
+   underlying storage.
+
+**Per-domain top-to-bottom template (per domain `<D>`):**
+
+```
+operations.<D>_scope_signal              -- rules (priority-ordered)
+operations.<D>_scope_default             -- per-device_role fallback
+operations.<D>_scope_policy_allowlist    -- optional domain-specific quirks
+operations.device_<D>_scope_current      -- derived matview
+operations.device_<D>_override           -- operator override (typed)
+
+operations.refresh_<D>_scope()           -- refresh function
+```
+
+`v_device` gains `<D>_scope_derived`, `<D>_scope_reason`,
+`<D>_scope_override`, and `effective_<D>_scope`.
+
+**Where sharing is right (uniform output shape, cheap):**
+
+- Effective-view pattern — one `v_<entity>` per entity.
+- Polymorphic `<entity>_operator_decisions` — for simple standalone
+  decisions with enum / boolean / text values.
+- Derived matview shape convention (`computed_at`, `_reason` columns
+  when the derivation is non-trivial).
+
+**Where separation is right (input semantics differ, avoid
+lowest-common-denominator flattening):**
+
+- Per-domain config tables (rules, defaults, quirks). Input semantics
+  differ per domain — patching reads Ninja custom fields with a
+  device→org→location cascade; a backup domain would read a different
+  source entirely. Forcing a shared "signal" table flattens meaning.
+- Per-domain derived matviews with typed columns.
+- Per-domain refresh functions.
+- Per-domain typed override tables when the override has domain
+  constraints (e.g. `device_patching_override.scope CHECK (scope IN
+  ('Included','Excluded'))`).
+
+**Refresh coordination:**
+
+Per-domain refresh functions declare their inputs (raw source tables +
+config tables). A refresh manifest lists dependency order. Ingest calls
+`operations.refresh_derived()` at appropriate points; the manifest
+resolves order and refreshes CONCURRENTLY per matview. Each matview
+has a unique index so concurrent refresh is possible.
+
+**Tenant scoping on matviews:**
+
+Postgres matviews do NOT inherit RLS from their base tables. Every
+derived matview keeps `tenant_id` on the row and enables RLS with the
+standard policy (`tenant_id = current_setting('operations.tenant_id',
+true)::bigint`). Same rule for shared operator-decisions tables.
+
+**Adding a new scope domain:**
+
+1. Add row to `operations.scope_dimensions` (registry — listing only,
+   not FK-referenced).
+2. Create the six per-domain artifacts (three config tables, one
+   matview, one override table, one refresh function).
+3. Add corresponding LEFT JOINs to `v_device` for the new columns.
+4. Consumers read `v_device.effective_<D>_scope`.
+
+Every step is mechanical. No shared-table redesign to accommodate a
+new domain.
+
+**Consequence for canonical `operations.devices`:**
+
+- `exemptions` JSONB moves to `device_operator_decisions` (polymorphic,
+  standalone decision).
+- `lifecycle_status` stays on canonical but is documented as
+  operator-preferring: sync only downgrades to `offline_aging`
+  automatically; other transitions are operator-only.
+- `os_name`, `os_family`, `os_group`, `device_role`, `device_type` stay
+  on canonical. Refreshed by the resolver / role sync; rare-change,
+  single-writer.
+- No session-state columns on canonical (`last_observed_at` /
+  `last_contact_at` already live in `agent_presence_current`; new
+  device-grain rollup lives in `device_session_current`).
+
+**Legacy shapes to reconcile (backlog, non-blocking):**
+
+- `agent_presence_current` (per-source matview) — naming predates this
+  section; per new convention it would be `device_source_presence_current`.
+  Rename filed as follow-up; not blocking.
+- `software_decisions` (typed columns) — deliberate exception to the
+  polymorphic operator-decisions table. Domain-typed decision with
+  specific action structure; keeping typed storage is correct.
+  Documented here as the intended exception, not a violation.
 
 ---
 

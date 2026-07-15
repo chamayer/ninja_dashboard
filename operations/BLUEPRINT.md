@@ -835,6 +835,258 @@ same instant.
 
 ---
 
+## Track O — Storage separation pass (2026-07-15)
+
+Implements DESIGN.md §3.8 (four-layer storage separation, per-domain
+top-to-bottom, shared reads via effective views). Triggered by the
+patching_scope design work — but the pattern applies ops-wide and this
+pass lands it consistently before more emitters are written on the
+old smoothie shape. Done once, done right.
+
+**User-set principles (2026-07-15):**
+
+1. **Don't mix static-config data with values that can change and
+   invalidate it.** Every field has one writer and one meaning; storage
+   location tells the story (canonical / derived matview / operator
+   decision).
+2. **Per-domain top-to-bottom, share only where output shape is
+   genuinely uniform.** Input semantics differ per domain — don't
+   flatten them into a shared table that forces JSONB / NULL sprawl.
+3. **Consumers read the effective view.** Never the storage. Adding a
+   new scope or operator dimension does not touch consumer code —
+   it adds a view column.
+4. **Do it once, not as patchwork.** A partial pass leaves fresh debt
+   the moment another domain is added. All five batches ship before
+   this pass is closed.
+
+### O.1 Session-state rollup (`device_session_current`)
+
+New per-device matview aggregating what today's callers assemble
+ad-hoc across `agent_presence_current` and `ninja_core.device_snapshots`.
+
+Columns (per device):
+- `tenant_id`, `client_id`, `device_id`
+- `last_contact_at` — MAX across sources
+- `last_observed_at` — MAX across sources
+- `is_online_any` — TRUE if any source contacted in 24h
+- `online_sources` — array of platforms currently online (24h window)
+- `source_count_active` — count of platforms online in 24h
+- `needs_reboot` — from Ninja `device_snapshots` via `device_links`
+- `last_boot_at` — same source
+- `last_power_state` — from `vm.guest` observation (only meaningful
+  for VM form factor; NULL otherwise)
+- `computed_at`
+
+RLS enabled (matviews do not inherit); unique index on `device_id`
+for CONCURRENTLY refresh. Refresh function
+`operations.refresh_device_session_current()`.
+
+Consumers to switch (find + update):
+- `operations/apps/core/views.py` findings queue — online-source map
+  currently computed inline from `agent_presence_current` +
+  `vm.guest` power state; replace with a read from
+  `device_session_current`.
+- Any device-page rendering that reads `agent_presence_current` for a
+  cross-source rollup.
+
+No column retirement in this batch (session-state fields don't live
+on `operations.devices` today).
+
+### O.2 Operator decisions layer (`device_operator_decisions`)
+
+New polymorphic table for standalone operator decisions:
+
+```
+operations.operator_decision_dimensions
+  name              text PK
+  entity_type       text                         -- 'device' | 'client'
+  value_type        text                         -- 'enum'|'boolean'|'text'|'json'
+  allowed_values    jsonb                        -- for enum/boolean; NULL else
+  description       text
+  enabled           boolean
+
+operations.device_operator_decisions
+  id            uuid PK
+  tenant_id     bigint
+  device_id     uuid FK devices(id)
+  dimension     text FK operator_decision_dimensions(name)
+  value         jsonb                            -- validated per dimension
+  reason        text
+  set_by        text
+  set_at        timestamptz
+  UNIQUE (tenant_id, device_id, dimension)
+```
+
+Trigger validates `value` against `allowed_values` for enum / boolean
+dimensions. RLS enabled.
+
+Migration:
+- Seed `operator_decision_dimensions` with `exemptions` (json) +
+  registered dimensions for known coming overrides.
+- Migrate `operations.devices.exemptions` JSONB → rows in
+  `device_operator_decisions` with `dimension='exemptions'`. One row
+  per device that has non-empty exemptions today.
+- Retire `operations.devices.exemptions` column via
+  SeparateDatabaseAndState after consumer sweep.
+
+Consumer sweep:
+- Evaluator reads `exemptions` today from `Device.exemptions`; switch
+  to read from `v_device.exemptions`.
+- Admin surface (if any exists today for editing exemptions) writes
+  to `device_operator_decisions` UPSERT.
+
+Symmetric `client_operator_decisions` table + registry entries added
+opportunistically when the first client-scoped operator decision needs
+storage. Not built speculatively.
+
+### O.3 Effective view (`v_device`)
+
+Regular view (not matview) joining canonical + session +
+operator_decisions + (in O.4) patching_scope.
+
+Shape covered in DESIGN §3.8. Fields:
+- Canonical passthrough
+- `last_contact_at`, `last_observed_at`, `is_online_any`,
+  `online_sources`, `needs_reboot`, `last_boot_at`, `last_power_state`
+  from `device_session_current`
+- `exemptions` (JSONB pivoted from operator decisions)
+- `WHERE d.deleted_at IS NULL` (identity-review pages that need
+  deleted read `operations.devices` directly)
+
+Django integration: new proxy model `DeviceView(managed=False,
+db_table='v_device')` mirroring the view. All read paths in
+`operations/apps/core/views.py` switch from `Device.objects` to
+`DeviceView.objects`. Write paths keep using `Device` (canonical
+only) or the operator-decisions UPSERT.
+
+### O.4 Patching_scope layer (per-domain, top-to-bottom)
+
+Per DESIGN §3.8 template.
+
+Config tables (patching-domain):
+
+```
+operations.patching_scope_signal
+  id, field_name, entity_type, device_role_filter,
+  effect, priority, enabled, description
+
+operations.patching_scope_default
+  device_role PK, effect, enabled, description
+
+operations.patching_scope_policy_allowlist
+  id, policy_name UNIQUE, enabled, notes
+```
+
+Seeded from current `ninja_core.v_active_devices` behavior:
+- Signals: 10 rows for patchingDisabled / patchingEnabled /
+  workstationPatchingDisabled / serverPatchingDisabled across
+  device / org / location entities, priority-ordered.
+- Defaults: WINDOWS_SERVER → Excluded, WINDOWS_WORKSTATION →
+  Included, MAC_WORKSTATION → Unmanaged, LINUX_SERVER → Unmanaged,
+  unknown → Unmanaged.
+- Allowlist: seeded from the current
+  `ninja_core.patching_enabled_policies` values.
+
+Derived matview:
+
+```
+operations.device_patching_scope_current
+  device_id PK, tenant_id, device_role,
+  scope_derived,                -- 'Included'|'Excluded'|'Unmanaged'|'Unknown'
+  matched_signal_id NULL,
+  matched_signal_reason,         -- human-readable
+  computed_at
+```
+
+Includes ALL devices in ops. Non-Ninja-linked → `scope_derived='Unmanaged'`
+explicit row. Refresh function
+`operations.refresh_patching_scope_current()`. RLS enabled.
+
+Override table:
+
+```
+operations.device_patching_override
+  id PK, tenant_id, device_id FK,
+  scope TEXT CHECK (scope IN ('Included','Excluded')),
+  reason, set_by, set_at
+  UNIQUE (tenant_id, device_id)
+```
+
+Typed columns (not polymorphic) — the value has domain constraints.
+
+`v_device` gains:
+- `patching_scope_derived`
+- `patching_scope_reason`
+- `patching_scope_override`
+- `patching_scope_override_reason`
+- `effective_patching_scope` = `COALESCE(override.scope,
+  derived.scope_derived, 'Unmanaged')`
+
+Refresh triggered from `_sync_operations_device_roles` after Ninja
+custom-field sync. No dependency on `ninja_core.v_active_devices` —
+patching_scope layer reads `ninja_core.custom_field_values` +
+`ninja_core.policies` directly.
+
+Retire dependency: `ninja_core.patching_enabled_policies` (currently
+ENV-loaded) stops being written to. Kept as historical table until
+P7 schema drop. Ops uses `patching_scope_policy_allowlist`.
+
+### O.5 patch_findings.py refactor + `reboot_pending`
+
+Rewrite `ingest/patch_findings.py`:
+
+- All four existing emitters filter subjects on
+  `v_device.effective_patching_scope = 'Included'` — no more inflated
+  numbers from unmanaged devices.
+- Never-patched and stalled read `ninja_patches.device_patch_signal`
+  (matview rollup) instead of `patch_facts` directly — matches
+  Metabase canonical `Fully patched %` denominators 1:1.
+- Failing-repeatedly reads `patch_facts` (unchanged — per-KB detail
+  not captured in device_patch_signal).
+- Approval-backlog reads `patch_facts` for `APPROVED` uninstalled
+  (unchanged, but joins on `v_device` for scope).
+- Fifth emitter `reboot_pending`: `v_device.needs_reboot = TRUE AND
+  last_boot_at < NOW() - INTERVAL '3 days'`. Filed as backlog in
+  0039; unblocked by O.1 + O.4.
+- Auto-resolve unchanged shape.
+
+Seed the `reboot_pending` finding type (category=patching,
+source_module=`platform.patch_findings`, medium severity).
+
+### Refresh coordination + RLS + Metabase audit
+
+Cross-cutting for the pass:
+
+- **Refresh manifest** (small — 3 matviews today: `agent_presence_current`,
+  `device_session_current`, `device_patching_scope_current`).
+  `operations.refresh_derived()` function refreshes in dependency
+  order CONCURRENTLY; called from ingest per source-appropriate
+  triggers (Ninja custom-field sync → patching_scope refresh; any
+  presence-emitting source → session refresh).
+- **RLS on every new matview**: `tenant_id` column + `ENABLE ROW
+  LEVEL SECURITY` + standard policy. Retro-apply to
+  `agent_presence_current` in the same batch (currently unscoped).
+- **Metabase audit**: grep saved question SQL under
+  `/amr-ch-01_data/metabase/` (or via Metabase API) for references to
+  columns being retired. Update questions in the same wave as the
+  Django code sweep. Any that reference `operations.devices.exemptions`
+  switch to `operations.v_device.exemptions`.
+
+### Batches
+
+| Batch | Content | Gate |
+|---|---|---|
+| O1 | O.1 session-state matview + refresh + consumer switch | findings queue online-source map matches pre-change; matview refreshes < 1s |
+| O2 | O.2 operator-decisions table + registry + exemptions migration | Device.exemptions removed from ORM; evaluator reads exemptions via `v_device`; zero exemptions data loss |
+| O3 | O.3 `v_device` view + `DeviceView` proxy model + read-site sweep | all read paths pass; grep for `Device.objects` shows only write callers |
+| O4 | O.4 patching_scope layer (config + matview + override table + view integration) | `device_patching_scope_current` count matches `ninja_core.v_active_devices` count within tolerance; explanations sample-check |
+| O5 | O.5 patch_findings refactor + `reboot_pending` + refresh coordination + RLS retrofit + Metabase audit | inflated `device_never_patched` count drops to scope-filtered value matching Metabase; new `reboot_pending` findings appear only for Included+needs_reboot+aged devices |
+
+O1 → O5 ship sequentially. Each is one push + Portainer redeploy +
+lightweight validation. Full pass = ~5 push waves.
+
+---
+
 ## Track U — UI framework (build first, surfaces land per-track)
 
 Per DESIGN §11. One slice, before Tracks 1-5 surfaces:
@@ -886,6 +1138,7 @@ batch is a single commit series; batches are sequential.
 | P4 | Track 3 (software findings) + migration 0021 + review UI | Classifier counts sane; decision round-trip works |
 | P5 | Track 4 (identity fidelity + review UI) | Candidate confirm cascade verified |
 | P6 | Track 5 (patching) + migration 0022 + surfaces | Counts match Metabase scalars |
+| PO | Track O (storage separation pass) — 5 sequential push waves O1–O5 | Ops fully self-standing on `v_device`; patching_scope layer replaces `ninja_core.v_active_devices`; scope-filtered patch findings match Metabase |
 | P7 | Track 6 (cutover) — multi-step, each step separately approved | Parity clean 1 week → schema drop |
 
 ---
