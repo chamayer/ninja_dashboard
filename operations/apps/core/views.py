@@ -613,38 +613,27 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
 
     # Per-device map of platforms currently in contact:
     #   device_id → sorted list of platform names (empty = offline).
-    # "In contact" = platform last_contact within 24h; fall back to
-    # last_observed_at when the source doesn't distinguish (LMI/SC).
+    # Read from device_session_current (Track O batch O1) — the matview
+    # pre-aggregates per-source "in contact within 24h" and the vm.guest
+    # power_state='poweredon' signal, refreshed on every ingest cycle
+    # (~hourly). Consumer used to compute this inline off
+    # agent_presence_current.
     subject_ids = [f.subject_id for f in findings if f.subject_id]
     online_map: dict[str, list[str]] = {}
     if subject_ids:
         with transaction.atomic(), connection.cursor() as cur:
             cur.execute("SET LOCAL operations.tenant_id = 1")
-            # Online per source, computed off the presence matview.
-            # Agent streams: fresh last_contact / last_observed.
-            # vm.guest / vm.host streams: last_power_state = 'poweredon'
-            #   (hypervisor's own signal — the VM is running even if
-            #   no agent is installed). Source name for those rows is
-            #   the observing source (e.g. Ninja for Hyper-V/VMware).
             cur.execute(
                 """
-                SELECT device_id::text, platform
-                FROM operations.agent_presence_current
+                SELECT device_id::text, online_sources
+                FROM operations.device_session_current
                 WHERE device_id = ANY(%s::uuid[])
-                  AND (
-                    (entity_type LIKE 'agent.%%'
-                     AND COALESCE(last_contact_at, last_observed_at) > NOW() - INTERVAL '24 hours')
-                    OR
-                    (entity_type IN ('vm.guest', 'vm.host')
-                     AND last_power_state = 'poweredon')
-                  )
+                  AND array_length(online_sources, 1) > 0
                 """,
                 ([str(sid) for sid in subject_ids],),
             )
-            for did, platform in cur.fetchall():
-                online_map.setdefault(did, []).append(platform)
-    for did in online_map:
-        online_map[did] = sorted(set(online_map[did]))
+            for did, sources in cur.fetchall():
+                online_map[did] = list(sources or [])
 
     # Coalesce noise: for a device with no source in contact, suppress
     # missing/stale_required_platform findings from the queue — they

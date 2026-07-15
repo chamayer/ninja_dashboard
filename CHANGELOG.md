@@ -2,6 +2,39 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.44.1] — 2026-07-15
+
+### Added
+- Migration 0040: `operations.device_session_current` matview (Track O
+  batch O1). Per-device rollup across `agent_presence_current` +
+  latest Ninja `device_snapshots` — carries `last_contact_at`,
+  `last_observed_at`, `is_online_any`, `online_sources[]`,
+  `source_count_active`, `needs_reboot`, `last_boot_at`,
+  `last_power_state`, `computed_at`. Powers the findings-queue
+  online-source map today and the `reboot_pending` finding coming
+  in batch O5. Concurrent-refresh unique index; refresh function
+  `operations.refresh_device_session_current()`; grants match
+  `agent_presence_current` (operations_app, ninja_ingest,
+  operations_readonly, metabase_ro SELECT).
+
+### Changed
+- `ingest/core/devices.py` `_refresh_agent_presence_current()`: now
+  refreshes both `agent_presence_current` and
+  `device_session_current` in dependency order. Same in
+  `ingest/identity/resolver.py`. Formalized as a refresh manifest
+  in O5.
+- `operations/apps/core/views.py` `findings_queue`: online-source map
+  now reads pre-aggregated `online_sources[]` from
+  `device_session_current` instead of computing it inline per request
+  off `agent_presence_current`. Same behavior, one fewer aggregation.
+
+### Fixed
+- `operations/DESIGN.md` §3.8: corrected the tenant-scoping-on-matviews
+  claim. Postgres does not support RLS on materialized views; effective
+  scoping comes through joins to RLS-enabled canonical tables. Trusted-
+  role direct SELECT is documented as accepted risk. Tightening via
+  security-barrier view wrappers filed for O5.
+
 ## [0.44.0] — 2026-07-15
 
 ### Added

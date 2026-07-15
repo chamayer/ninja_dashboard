@@ -55,6 +55,42 @@ findings-queue online-source map onto it. No column retirement in
 O1 (session-state doesn't live on `operations.devices` today);
 O1 is the additive step that unblocks `reboot_pending` in O5.
 
+### 2026-07-15 (same session) — Track O batch O1: device_session_current
+
+**What shipped:**
+
+- Migration 0040 — `operations.device_session_current` matview
+  (per-device rollup: presence across all sources + latest Ninja
+  snapshot for `needs_reboot` / `last_boot`). Columns per DESIGN
+  §3.8: `last_contact_at`, `last_observed_at`, `is_online_any`,
+  `online_sources[]`, `source_count_active`, `needs_reboot`,
+  `last_boot_at`, `last_power_state`, `computed_at`. Concurrent-
+  refresh unique index; refresh function; grants match
+  `agent_presence_current`.
+- `ingest/core/devices.py` + `ingest/identity/resolver.py`: after
+  refreshing `agent_presence_current` also refresh
+  `device_session_current` (dependency order). Same wrapper function
+  so no caller has to remember.
+- `operations/apps/core/views.py` findings queue: online-source map
+  reads pre-aggregated `online_sources[]` from
+  `device_session_current` instead of the inline aggregation off
+  `agent_presence_current`. Same behavior, simpler consumer code.
+
+**Design correction (folded in):**
+
+- DESIGN.md §3.8 previously claimed matviews get RLS enabled directly.
+  Postgres doesn't support RLS on materialized views. Corrected:
+  effective tenant scoping comes through joins to RLS-enabled
+  canonical tables; trusted-role direct SELECT is accepted risk;
+  security-barrier view wrappers filed for O5.
+
+**Commit:** (pending — batched with VERSION 0.44.1 + CHANGELOG)
+
+**Next:** O2 — `operator_decision_dimensions` registry +
+`device_operator_decisions` polymorphic table + migrate
+`Device.exemptions` JSONB → rows; retire `Device.exemptions` column
+via SeparateDatabaseAndState after evaluator swap.
+
 ---
 
 ## 2026-07-13 — Track C batch C3: evidence panel + acceptance UI + requirement profiles

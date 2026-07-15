@@ -266,10 +266,20 @@ has a unique index so concurrent refresh is possible.
 
 **Tenant scoping on matviews:**
 
-Postgres matviews do NOT inherit RLS from their base tables. Every
-derived matview keeps `tenant_id` on the row and enables RLS with the
-standard policy (`tenant_id = current_setting('operations.tenant_id',
-true)::bigint`). Same rule for shared operator-decisions tables.
+Postgres does NOT support RLS on materialized views (only on tables,
+views, and foreign tables). Every derived matview keeps `tenant_id`
+on the row, but effective tenant scoping comes through the join to
+RLS-enabled canonical tables (e.g. `v_device` joins to
+`operations.devices` which has RLS). Consumers reading through the
+effective view are safely scoped; a direct SELECT on a matview by a
+trusted role (`metabase_ro`, `operations_readonly`) bypasses this and
+is an accepted risk for those roles — same pattern as
+`agent_presence_current` today. Shared operator-decisions tables ARE
+regular tables and DO get RLS with the standard policy
+(`tenant_id = current_setting('operations.tenant_id', true)::bigint`).
+
+Tightening the matview access boundary via security-barrier view
+wrappers is filed in Track O batch O5.
 
 **Adding a new scope domain:**
 

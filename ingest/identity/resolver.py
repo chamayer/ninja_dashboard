@@ -139,12 +139,23 @@ def drain_resolution(batch_size: int = 200) -> int:
         log.exception("resolver: device attribute sync failed — continuing")
 
     if resolved_count or promoted_count:
+        # Refresh derived presence matviews in dependency order:
+        # agent_presence_current first (per-source × device), then
+        # device_session_current (per-device rollup). Formalized as a
+        # refresh manifest in Track O batch O5.
         try:
             with db.transaction() as cur:
                 cur.execute("SELECT operations.refresh_agent_presence_current()")
             log.info("resolver: refreshed agent_presence_current after %d resolutions", resolved_count)
         except Exception:
             log.exception("resolver: agent_presence_current refresh failed — continuing")
+        else:
+            try:
+                with db.transaction() as cur:
+                    cur.execute("SELECT operations.refresh_device_session_current()")
+                log.info("resolver: refreshed device_session_current")
+            except Exception:
+                log.exception("resolver: device_session_current refresh failed — continuing")
 
     return resolved_count
 

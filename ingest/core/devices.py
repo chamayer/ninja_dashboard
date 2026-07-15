@@ -490,13 +490,28 @@ def _write_ninja_observations(
 
 
 def _refresh_agent_presence_current() -> None:
-    """Refresh agent_presence_current after Ninja device observations land."""
+    """Refresh presence matviews after Ninja device observations land.
+
+    Refreshes in dependency order: agent_presence_current first
+    (per-source × device), then device_session_current (per-device
+    rollup that reads from agent_presence_current). Kept in one
+    function so every ingest / resolver caller gets both without
+    remembering to invoke each — will be formalized into a refresh
+    manifest in Track O batch O5.
+    """
     try:
         with db.transaction() as cur:
             cur.execute("SELECT operations.refresh_agent_presence_current()")
         log.info("Refreshed materialized view operations.agent_presence_current")
     except Exception:
         log.exception("Failed to refresh agent_presence_current — continuing")
+        return
+    try:
+        with db.transaction() as cur:
+            cur.execute("SELECT operations.refresh_device_session_current()")
+        log.info("Refreshed materialized view operations.device_session_current")
+    except Exception:
+        log.exception("Failed to refresh device_session_current — continuing")
 
 
 def _refresh_active_devices_view() -> None:
