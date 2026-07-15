@@ -73,6 +73,8 @@ from ingest.ninja_client import NinjaClient
 from ingest.evaluator import evaluate as platform_evaluate
 from ingest.notifications import dispatch as notify_dispatch
 from ingest.notifications_digest import send_digest as notify_send_digest
+from ingest.patch_findings import classify as patch_classify
+from ingest.parity_check import run as parity_check_run
 from ingest.software_findings import classify as software_classify
 from ingest.identity.client_resolver import drain_client_resolution as _drain_client_resolution
 from ingest.identity.resolver import drain_resolution as _drain_resolution
@@ -303,6 +305,22 @@ def run_software_classify_once() -> None:
         log.info("Software classifier complete: affected=%d", affected)
     except Exception:
         log.exception("Software classifier failed")
+
+
+def run_patch_classify_once() -> None:
+    try:
+        affected = patch_classify(tenant_id=1)
+        log.info("Patch classifier complete: affected=%d", affected)
+    except Exception:
+        log.exception("Patch classifier failed")
+
+
+def run_parity_check_once() -> None:
+    try:
+        rows = parity_check_run(tenant_id=1)
+        log.info("Parity check complete: rows=%d", rows)
+    except Exception:
+        log.exception("Parity check failed")
 
 
 def run_review_digest_once() -> None:
@@ -540,6 +558,18 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 return
             threading.Thread(target=run_software_classify_once, daemon=True).start()
             self._respond(202, b"software classify scheduled\n")
+        elif self.path == "/run/patch-classify":
+            if not _READY.is_set():
+                self._respond(503, b"still starting - try again shortly\n")
+                return
+            threading.Thread(target=run_patch_classify_once, daemon=True).start()
+            self._respond(202, b"patch classify scheduled\n")
+        elif self.path == "/run/parity-check":
+            if not _READY.is_set():
+                self._respond(503, b"still starting - try again shortly\n")
+                return
+            threading.Thread(target=run_parity_check_once, daemon=True).start()
+            self._respond(202, b"parity check scheduled\n")
         elif self.path == "/run/notifications/digest":
             if not _READY.is_set():
                 self._respond(503, b"still starting - try again shortly\n")

@@ -27,6 +27,7 @@ from .models import (
     Finding,
     FindingCategory,
     FindingType,
+    IdentityCandidate,
     MergeCandidate,
     NotificationEvent,
     NotificationRoute,
@@ -1976,6 +1977,218 @@ def software_decision_create(request: HttpRequest) -> HttpResponse:
         + (" Created." if created else " Updated."),
     )
     return redirect("software_decisions_queue")
+
+
+# ── Identity fidelity (Track 4) ─────────────────────────────────────────
+
+
+@login_required
+def identity_candidates_list(request: HttpRequest) -> HttpResponse:
+    """Pending identity_candidates — ambiguous same-client hostname
+    resolutions awaiting operator decision. Actions: confirm (merge) or
+    reject. Full BLUEPRINT §4.2 workflow."""
+    status_filter = request.GET.get("status", "pending")
+    qs = IdentityCandidate.objects.filter(tenant_id=1).select_related(
+        "device_a", "device_a__client", "device_b", "device_b__client",
+    )
+    if status_filter != "all":
+        qs = qs.filter(status=status_filter)
+    candidates = list(qs.order_by("-created_at")[:200])
+
+    # Serial quality signal: devices minted with a placeholder serial —
+    # per BLUEPRINT §4.1, these should be flagged.
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        cur.execute(
+            """
+            SELECT d.id, d.canonical_hostname, d.canonical_serial,
+                   c.display_name, c.slug,
+                   (SELECT COUNT(*) FROM operations.devices d2
+                    WHERE d2.canonical_serial = d.canonical_serial
+                      AND d2.deleted_at IS NULL) AS serial_share_count
+            FROM operations.devices d
+            JOIN operations.clients c ON c.id = d.client_id
+            WHERE d.tenant_id = 1 AND d.deleted_at IS NULL
+              AND d.canonical_serial <> ''
+              AND (
+                LOWER(d.canonical_serial) IN (
+                  'none','null','default string','system serial number',
+                  'chassis serial number','n/a','na','unknown','invalid',
+                  'not specified','not applicable','0','00000000','0123456789'
+                )
+                OR EXISTS(
+                  SELECT 1 FROM operations.devices d3
+                  WHERE d3.canonical_serial = d.canonical_serial
+                    AND d3.id <> d.id AND d3.deleted_at IS NULL
+                )
+              )
+            ORDER BY serial_share_count DESC, c.display_name, d.canonical_hostname
+            LIMIT 50
+            """,
+        )
+        serial_warnings = cur.fetchall()
+
+        # Unmatched source groups — count only, for the summary card.
+        cur.execute(
+            "SELECT COUNT(*) FROM operations.unmatched_source_groups WHERE tenant_id=1"
+        )
+        (unmatched_groups_count,) = cur.fetchone()
+
+    return render(request, "identity_review.html", {
+        "candidates": candidates,
+        "active_status": status_filter,
+        "status_choices": [("pending", "Pending"), ("confirmed", "Confirmed"),
+                          ("rejected", "Rejected"), ("all", "All")],
+        "serial_warnings": serial_warnings,
+        "unmatched_groups_count": unmatched_groups_count,
+    })
+
+
+def _merge_devices(cur, survivor_id, loser_id: str, reason: str) -> dict:
+    """Cascade merge: re-point every reference from loser → survivor,
+    tombstone loser. Returns a summary dict of what was moved."""
+    counts = {}
+    # 1. device_links — repoint if the survivor doesn't already have a
+    #    link with the same (source, external_id). If it does, tombstone
+    #    the loser's link.
+    cur.execute(
+        """
+        UPDATE operations.device_links dl
+        SET device_id = %s
+        WHERE dl.tenant_id = 1
+          AND dl.device_id = %s
+          AND NOT EXISTS(
+              SELECT 1 FROM operations.device_links dl2
+              WHERE dl2.tenant_id = dl.tenant_id
+                AND dl2.source_id = dl.source_id
+                AND dl2.external_id = dl.external_id
+                AND dl2.device_id = %s
+          )
+        """,
+        (survivor_id, loser_id, survivor_id),
+    )
+    counts["device_links_moved"] = cur.rowcount
+    cur.execute(
+        "DELETE FROM operations.device_links WHERE tenant_id=1 AND device_id=%s",
+        (loser_id,),
+    )
+    counts["device_links_deleted_dupes"] = cur.rowcount
+
+    # 2. entity_observations
+    cur.execute(
+        "UPDATE operations.entity_observations SET device_id=%s WHERE tenant_id=1 AND device_id=%s",
+        (survivor_id, loser_id),
+    )
+    counts["observations_moved"] = cur.rowcount
+
+    # 3. findings — subject_id (only device-subject findings)
+    cur.execute(
+        """
+        UPDATE operations.findings SET subject_id=%s
+        WHERE tenant_id=1 AND subject_id=%s AND subject_type='device'
+        """,
+        (survivor_id, loser_id),
+    )
+    counts["findings_moved"] = cur.rowcount
+
+    # 4. software_installations_current (composite PK includes device_id)
+    cur.execute(
+        """
+        DELETE FROM operations.software_installations_current
+        WHERE tenant_id=1 AND device_id=%s
+        """,
+        (loser_id,),
+    )
+    counts["software_rows_deleted"] = cur.rowcount
+
+    # 5. Tombstone loser
+    cur.execute(
+        """
+        UPDATE operations.devices
+        SET deleted_at=NOW(), deleted_reason=%s
+        WHERE tenant_id=1 AND id=%s
+        """,
+        (reason[:120], loser_id),
+    )
+    return counts
+
+
+@login_required
+@require_POST
+@transaction.atomic
+def identity_candidate_confirm(request: HttpRequest, candidate_id) -> HttpResponse:
+    """Confirm = merge. Survivor = the device with a Ninja link, else
+    the older by created_at."""
+    cand = get_object_or_404(
+        IdentityCandidate, id=candidate_id, tenant_id=1, status="pending",
+    )
+    dev_a, dev_b = cand.device_a, cand.device_b
+
+    # Survivor rule
+    with connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        cur.execute(
+            """
+            SELECT dl.device_id FROM operations.device_links dl
+            JOIN operations.sources s ON s.id = dl.source_id AND s.name='Ninja'
+            WHERE dl.tenant_id=1 AND dl.device_id IN (%s, %s)
+            """,
+            (dev_a.id, dev_b.id),
+        )
+        ninja_owners = {row[0] for row in cur.fetchall()}
+    if dev_a.id in ninja_owners and dev_b.id not in ninja_owners:
+        survivor, loser = dev_a, dev_b
+    elif dev_b.id in ninja_owners and dev_a.id not in ninja_owners:
+        survivor, loser = dev_b, dev_a
+    else:
+        # Same Ninja status → older wins
+        survivor, loser = (dev_a, dev_b) if dev_a.created_at <= dev_b.created_at else (dev_b, dev_a)
+
+    with connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        counts = _merge_devices(cur, survivor.id, loser.id, "operator.merged")
+
+    cand.status = "confirmed"
+    cand.resolved_at = timezone.now()
+    cand.resolved_by = request.user.get_username()
+    cand.save(update_fields=["status", "resolved_at", "resolved_by"])
+
+    _audit(
+        request, "identity_candidate.confirm", cand.id,
+        {"status": "pending", "device_a": str(dev_a.id), "device_b": str(dev_b.id)},
+        {
+            "status": "confirmed", "survivor_id": str(survivor.id),
+            "loser_id": str(loser.id), "counts": counts,
+        },
+    )
+    messages.success(
+        request,
+        f"Merged {loser.canonical_hostname} into {survivor.canonical_hostname}. "
+        f"Moved {counts.get('device_links_moved',0)} links, "
+        f"{counts.get('observations_moved',0)} observations, "
+        f"{counts.get('findings_moved',0)} findings.",
+    )
+    return redirect("identity_candidates_list")
+
+
+@login_required
+@require_POST
+@transaction.atomic
+def identity_candidate_reject(request: HttpRequest, candidate_id) -> HttpResponse:
+    cand = get_object_or_404(
+        IdentityCandidate, id=candidate_id, tenant_id=1, status="pending",
+    )
+    cand.status = "rejected"
+    cand.resolved_at = timezone.now()
+    cand.resolved_by = request.user.get_username()
+    cand.save(update_fields=["status", "resolved_at", "resolved_by"])
+    _audit(
+        request, "identity_candidate.reject", cand.id,
+        {"status": "pending"},
+        {"status": "rejected"},
+    )
+    messages.success(request, "Candidate rejected — pair excluded from future creation.")
+    return redirect("identity_candidates_list")
 
 
 # ── Requirement profiles (Track C.6 admin knob) ─────────────────────────────
