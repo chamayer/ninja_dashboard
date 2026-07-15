@@ -464,9 +464,9 @@ class Device(UUIDTenantScopedModel):
     # Derived from os_family via OsGroupMapping; agent applicability
     # gates on this rather than the granular os_family value.
     os_group = models.CharField(max_length=16, blank=True, default="Unknown")
-    # {entity_type: reason} — evaluator skips requirements whose
-    # entity_type is present, e.g. {"agent.edr": "no_av_exempt"}.
-    exemptions = models.JSONField(default=dict, blank=True)
+    # Exemptions retired from this table in Track O batch O3 (migration
+    # 0042). Live in operations.device_operator_decisions under
+    # dimension='exemptions'; exposed via v_device.exemptions.
     created_at = models.DateTimeField(auto_now_add=True)
     created_reason = models.CharField(max_length=120, blank=True, default="")
     updated_at = models.DateTimeField(auto_now=True)

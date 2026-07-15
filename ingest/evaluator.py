@@ -593,15 +593,22 @@ def _evaluate_coverage(
         log.warning("evaluator: finding_type 'missing_required_platform' not found")
         return 0
 
-    # Pull every device + agent-universe flag once.
+    # Pull every device + agent-universe flag once. Exemptions come from
+    # device_operator_decisions (Track O batch O3 — polymorphic operator
+    # decisions storage). Empty {} if no row.
     cur.execute(
         """
         SELECT d.id, d.client_id, d.canonical_hostname, d.device_role,
-               d.exemptions, d.os_group,
+               COALESCE(op.value, '{}'::jsonb) AS exemptions,
+               d.os_group,
                EXISTS(SELECT 1 FROM operations.agent_presence_current apc
                       WHERE apc.tenant_id = d.tenant_id AND apc.device_id = d.id
                         AND apc.entity_type LIKE 'agent.%%') AS in_agent_universe
         FROM operations.devices d
+        LEFT JOIN operations.device_operator_decisions op
+          ON op.tenant_id = d.tenant_id
+         AND op.device_id = d.id
+         AND op.dimension = 'exemptions'
         WHERE d.tenant_id = %s
           AND d.deleted_at IS NULL
           AND d.lifecycle_status != 'retired'

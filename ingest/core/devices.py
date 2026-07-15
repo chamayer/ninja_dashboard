@@ -146,6 +146,7 @@ def _run(client: NinjaClient, snapshot_at: datetime) -> tuple[int, int]:
             missing_count = _mark_missing_devices(cur, current_ids, snapshot_at)
             _sync_operations_device_links(cur, current_ids, snapshot_at)
             _sync_operations_device_roles(cur)
+            _sync_operations_device_exemptions(cur)
 
         _refresh_active_devices_view()
         obs_count = _write_ninja_observations(
@@ -222,14 +223,16 @@ def _sync_operations_device_links(cur: object, current_ids: list[int], snapshot_
 
 
 def _sync_operations_device_roles(cur: object) -> None:
-    """Refresh device_role, os_name/os_family, and the NO-AV exemption
-    from the Ninja pull.
+    """Refresh device_role, os_name/os_family, os_group from the Ninja pull.
 
     device_role is set from explicit signals only (node_class, server OS,
     client OS) — devices with no signal keep their current role, never a
-    guessed default. The NO-AV marker ('no av' in tags or policy names)
-    sets exemptions['agent.edr']; when the marker is gone the ingest-set
-    exemption is removed, but operator-set values are left alone.
+    guessed default.
+
+    The NO-AV exemption from the Ninja marker is synced separately by
+    `_sync_operations_device_exemptions()` — Track O batch O3 moved
+    exemptions off `devices.exemptions` into the polymorphic
+    `device_operator_decisions` table (dimension='exemptions').
     """
     cur.execute(
         """
@@ -255,23 +258,127 @@ def _sync_operations_device_roles(cur: object) -> None:
                              ELSE operations.os_family(nd.os_name) END) LIKE m.pattern
                  ORDER BY m.priority ASC LIMIT 1),
                 'Unknown'
-            ),
-            exemptions = CASE
-                WHEN (nd.data -> 'tags')::text ILIKE '%%no av%%'
-                  OR COALESCE(p.name, '') ILIKE '%%no av%%'
-                  OR COALESCE(rp.name, '') ILIKE '%%no av%%'
-                THEN d.exemptions || '{"agent.edr": "no_av_exempt"}'::jsonb
-                WHEN d.exemptions ->> 'agent.edr' = 'no_av_exempt'
-                THEN d.exemptions - 'agent.edr'
-                ELSE d.exemptions
-            END
+            )
         FROM operations.device_links dl
         JOIN operations.sources s ON s.id = dl.source_id AND s.name = 'Ninja'
         JOIN ninja_core.devices nd ON nd.id::text = dl.external_id
-        LEFT JOIN ninja_core.policies p  ON p.id  = nd.policy_id
-        LEFT JOIN ninja_core.policies rp ON rp.id = nd.role_policy_id
         WHERE dl.device_id = d.id
           AND dl.tenant_id = d.tenant_id
+        """
+    )
+
+
+def _sync_operations_device_exemptions(cur: object) -> None:
+    """Sync the Ninja 'no av' marker into device_operator_decisions.
+
+    Track O batch O3 moved exemptions from `devices.exemptions` into
+    the polymorphic `device_operator_decisions` table (dimension=
+    'exemptions'). Preserves the original semantics:
+      * marker present → merge {'agent.edr': 'no_av_exempt'} into value
+      * marker absent AND stored value['agent.edr']='no_av_exempt'
+        → remove the 'agent.edr' key (was ingest-set, cleanup)
+      * marker absent AND value['agent.edr'] set to some OTHER reason
+        → leave alone (operator-set)
+    Then remove now-empty rows so v_device.exemptions collapses to {}.
+    """
+    cur.execute(
+        """
+        WITH ninja_state AS (
+            -- One row per OPS device — collapse across multiple Ninja
+            -- device_links per device (legal per BLUEPRINT E.3). If ANY
+            -- Ninja link on the device carries the marker, treat it as
+            -- present.
+            SELECT dl.tenant_id, dl.device_id AS ops_device_id,
+                   BOOL_OR(
+                     (nd.data -> 'tags')::text ILIKE '%%no av%%'
+                     OR COALESCE(p.name, '')  ILIKE '%%no av%%'
+                     OR COALESCE(rp.name, '') ILIKE '%%no av%%'
+                   ) AS marker_present
+            FROM operations.device_links dl
+            JOIN operations.sources s ON s.id = dl.source_id AND s.name = 'Ninja'
+            JOIN ninja_core.devices nd ON nd.id::text = dl.external_id
+            LEFT JOIN ninja_core.policies p  ON p.id  = nd.policy_id
+            LEFT JOIN ninja_core.policies rp ON rp.id = nd.role_policy_id
+            GROUP BY dl.tenant_id, dl.device_id
+        ),
+        computed AS (
+            SELECT ns.tenant_id, ns.ops_device_id,
+                   CASE
+                     WHEN ns.marker_present THEN
+                         COALESCE(od.value, '{}'::jsonb)
+                             || '{"agent.edr": "no_av_exempt"}'::jsonb
+                     WHEN COALESCE(od.value, '{}'::jsonb) ->> 'agent.edr'
+                          = 'no_av_exempt' THEN
+                         COALESCE(od.value, '{}'::jsonb) - 'agent.edr'
+                     ELSE COALESCE(od.value, '{}'::jsonb)
+                   END AS new_value
+            FROM ninja_state ns
+            LEFT JOIN operations.device_operator_decisions od
+                ON od.tenant_id = ns.tenant_id
+               AND od.device_id = ns.ops_device_id
+               AND od.dimension = 'exemptions'
+        )
+        INSERT INTO operations.device_operator_decisions
+            (id, version, tenant_id, device_id, dimension,
+             value, reason, set_by, set_at)
+        SELECT gen_random_uuid(), 1, c.tenant_id, c.ops_device_id,
+               'exemptions', c.new_value,
+               'ninja.no_av_exempt sync', 'ninja.ingest', NOW()
+        FROM computed c
+        WHERE c.new_value <> '{}'::jsonb
+        ON CONFLICT ON CONSTRAINT uq_device_operator_decisions_tenant_device_dim
+        DO UPDATE SET value = EXCLUDED.value,
+                      reason = EXCLUDED.reason,
+                      set_by = EXCLUDED.set_by,
+                      set_at = NOW()
+        """
+    )
+    # Clean up rows that computed to empty (marker was removed and no
+    # operator-set keys remain). Duplicates the CTE from the upsert
+    # so the DELETE can join on the same computed new_value.
+    cur.execute(
+        """
+        WITH ninja_state AS (
+            -- One row per OPS device — collapse across multiple Ninja
+            -- device_links per device (legal per BLUEPRINT E.3). If ANY
+            -- Ninja link on the device carries the marker, treat it as
+            -- present.
+            SELECT dl.tenant_id, dl.device_id AS ops_device_id,
+                   BOOL_OR(
+                     (nd.data -> 'tags')::text ILIKE '%%no av%%'
+                     OR COALESCE(p.name, '')  ILIKE '%%no av%%'
+                     OR COALESCE(rp.name, '') ILIKE '%%no av%%'
+                   ) AS marker_present
+            FROM operations.device_links dl
+            JOIN operations.sources s ON s.id = dl.source_id AND s.name = 'Ninja'
+            JOIN ninja_core.devices nd ON nd.id::text = dl.external_id
+            LEFT JOIN ninja_core.policies p  ON p.id  = nd.policy_id
+            LEFT JOIN ninja_core.policies rp ON rp.id = nd.role_policy_id
+            GROUP BY dl.tenant_id, dl.device_id
+        ),
+        computed AS (
+            SELECT ns.tenant_id, ns.ops_device_id,
+                   CASE
+                     WHEN ns.marker_present THEN
+                         COALESCE(od.value, '{}'::jsonb)
+                             || '{"agent.edr": "no_av_exempt"}'::jsonb
+                     WHEN COALESCE(od.value, '{}'::jsonb) ->> 'agent.edr'
+                          = 'no_av_exempt' THEN
+                         COALESCE(od.value, '{}'::jsonb) - 'agent.edr'
+                     ELSE COALESCE(od.value, '{}'::jsonb)
+                   END AS new_value
+            FROM ninja_state ns
+            LEFT JOIN operations.device_operator_decisions od
+                ON od.tenant_id = ns.tenant_id
+               AND od.device_id = ns.ops_device_id
+               AND od.dimension = 'exemptions'
+        )
+        DELETE FROM operations.device_operator_decisions od
+        USING computed c
+        WHERE od.tenant_id = c.tenant_id
+          AND od.device_id = c.ops_device_id
+          AND od.dimension = 'exemptions'
+          AND c.new_value = '{}'::jsonb
         """
     )
 

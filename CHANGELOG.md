@@ -2,6 +2,43 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.44.5] — 2026-07-15
+
+### Added
+- Migration 0042: `operations.v_device` effective view (Track O batch O3).
+  Joins canonical `operations.devices` + `device_session_current` (O1) +
+  `device_operator_decisions` pivoted for `dimension='exemptions'` (O2).
+  `WITH (security_invoker = true)` so RLS on the base table applies to
+  view queries. Grants match the base tables. Consumers wanting derived +
+  operator + canonical in one flat read use this — never the storage.
+
+### Changed
+- `ingest/evaluator.py` `_evaluate_coverage`: reads exemptions via
+  `LEFT JOIN operations.device_operator_decisions` instead of
+  `d.exemptions`. Same semantics, sourced from the new storage.
+- `ingest/identity/resolver.py`: two `INSERT INTO operations.devices`
+  statements (promotion, individual-record fallback) drop the
+  `exemptions` column from the column list (both previously inserted
+  literal `'{}'::jsonb`, which is now the DB-side default absence).
+- `ingest/core/devices.py`:
+  - `_sync_operations_device_roles` drops the exemptions clause from
+    its `UPDATE`.
+  - New `_sync_operations_device_exemptions` upserts to
+    `device_operator_decisions` from the Ninja "no av" marker with the
+    same semantics as before (merge on marker present, remove
+    `agent.edr` key when marker gone, preserve operator-set values).
+    Called after `_sync_operations_device_roles` on each Ninja cycle.
+    `ninja_state` CTE aggregates via `BOOL_OR` across multi-link ops
+    devices to keep exactly one row per `(tenant, device)` before
+    upsert (same E.3 gotcha that hit O1).
+
+### Removed
+- `operations.devices.exemptions` column (SeparateDatabaseAndState —
+  DB `ALTER TABLE ... DROP COLUMN`, Django state `RemoveField`). Data
+  already migrated to `device_operator_decisions` in 0041. Read via
+  `v_device.exemptions` going forward.
+- `Device.exemptions` field on the ORM model.
+
 ## [0.44.4] — 2026-07-15
 
 ### Added
