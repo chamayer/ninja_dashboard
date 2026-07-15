@@ -55,6 +55,76 @@ findings-queue online-source map onto it. No column retirement in
 O1 (session-state doesn't live on `operations.devices` today);
 O1 is the additive step that unblocks `reboot_pending` in O5.
 
+### 2026-07-15 (same session) — Track O batches O2, O3, O4 landed
+
+**O2 `d5a355e` (0.44.4):** operator_decision_dimensions registry +
+device_operator_decisions polymorphic table + BEFORE trigger for
+value-shape validation + RLS + grants. Seeded `exemptions` dimension.
+Migrated 69 non-empty Device.exemptions rows into
+device_operator_decisions. Clean first push (device_id uniqueness
+came free from Device PK).
+
+**O3 `0567387` (0.44.5):** operations.v_device view (WITH
+security_invoker) joining canonical + session + exemptions.
+Consumer sweep — evaluator LEFT JOINs device_operator_decisions
+for exemptions; resolver INSERTs drop exemptions from column list;
+Ninja no_av_exempt sync rewritten as _sync_operations_device_exemptions
+against device_operator_decisions (with BOOL_OR aggregation across
+multi-Ninja-link devices — caught pre-push by applying the O1 E.3
+lesson). Device.exemptions column dropped via SeparateDatabaseAndState.
+Verified: v_device 5,131 rows, 69 with exemptions (matches O2 count).
+Clean first push.
+
+**O4 `3af861d` (0.44.6):** first per-domain scope stack — signal /
+default / policy_allowlist config, device_patching_scope_current
+matview (multi-link collapse, non-Ninja/non-Windows → 'Unmanaged',
+paired scope_reason column for triage), typed
+device_patching_override (CHECK Included/Excluded), v_device
+extended with patching_scope_derived / patching_scope_override /
+effective_patching_scope. Ingest scheduler calls
+refresh_patching_scope_current AFTER custom_fields ingest (matview
+depends on ninja_core.custom_field_values). Parity target:
+1,663 Excluded + 2,420 Included Windows devices from legacy
+v_active_devices.
+
+**O5 `897f656` (0.44.7):** patch_findings.py rewritten. All emitters
+filter on `v_device.effective_patching_scope='Included'` (per-domain
+scope replaces `ninja_core.v_active_devices`). Never-patched + stalled
+switch to `ninja_patches.device_patch_signal` (canonical Metabase-
+matching rollup); shared per-device aggregation CTE collapses multi-
+Ninja-link ops devices via BOOL_OR/MAX. New `_emit_reboot_pending`
+reads `v_device.needs_reboot` + `last_boot_at`. `_emit_failing_repeatedly`
+and `_emit_approval_backlog` gain scope filter. Migration 0044 seeds
+`reboot_pending` finding type + `operations.refresh_derived()` coordinator
+(agent_presence_current → device_session_current →
+device_patching_scope_current in dependency order). Clean first push.
+All 5 patching finding types present post-deploy.
+
+**Deferred (documented):**
+- RLS retrofit on `agent_presence_current` — Postgres does not
+  support RLS on matviews. Effective scoping via joins to
+  RLS-enabled canonical tables remains the pattern; direct-SELECT
+  by trusted roles (metabase_ro, operations_readonly) is accepted
+  risk. Security-barrier view wrappers filed for a future batch.
+- Metabase question audit for retired columns — none expected today
+  (exemptions column had 69 rows and no known Metabase card
+  surfaced it), but confirm before P7 cutover.
+
+**Track O closed.** Commits: `90c1abc` docs · `b9bb589` release
+housekeeping · `a41fbcb` → `6aaacb3` → `2cbd2f9` O1 (two fix
+commits after slow-plan + duplicate-key bugs; caught by
+pg_cancel_backend and corrected pre-push once the pattern was
+understood) · `d5a355e` O2 · `0567387` O3 · `3af861d` O4 ·
+`897f656` O5.
+
+Standing principle (DESIGN §1.7 + §3.8) now applied consistently
+across ops storage — future scope domains (backup, monitoring,
+etc.) drop into the same template with zero shared-table redesign.
+`ninja_core.v_active_devices` is no longer read by any ops code
+(next legacy dependency to retire in P7).
+
+---
+
 ### 2026-07-15 (same session) — Track O batch O1: device_session_current
 
 **What shipped:**
