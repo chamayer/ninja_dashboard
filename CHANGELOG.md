@@ -2,6 +2,25 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.44.4] — 2026-07-15
+
+### Added
+- Migration 0041: operator decisions layer (Track O batch O2).
+  - `operations.operator_decision_dimensions` registry (global
+    reference table) — pins the set of valid dimensions for the
+    polymorphic operator-decision tables, with per-dimension
+    `value_type` (enum/boolean/text/json) + `allowed_values`.
+  - `operations.device_operator_decisions` polymorphic table
+    (per-device standalone operator decisions) with unique
+    `(tenant, device, dimension)`. RLS + grants.
+  - BEFORE trigger `validate_operator_decision()` — validates the
+    dimension exists and is enabled, and enforces the value shape
+    against the registered `value_type` + `allowed_values`.
+  - Seeds `exemptions` dimension (value_type=json).
+  - Migrates every non-empty `Device.exemptions` into
+    `device_operator_decisions` rows under dimension='exemptions'.
+    Device.exemptions column retained until O3 (v_device wire-up).
+
 ## [0.44.3] — 2026-07-15
 
 ### Fixed

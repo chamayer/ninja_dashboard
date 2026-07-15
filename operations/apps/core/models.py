@@ -347,6 +347,76 @@ class ClientPolicy(UUIDTenantScopedModel):
         return f"{self.client_id}:{self.category}"
 
 
+class OperatorDecisionDimension(models.Model):
+    """Registry of dimensions valid for the polymorphic operator-decision
+    tables (`device_operator_decisions`, `client_operator_decisions`).
+
+    Per DESIGN.md §3.8. Global reference table (not tenant-scoped).
+    Domain-typed decisions with per-domain constraints (e.g. patching
+    scope override) use their own tables, not this polymorphic path.
+    """
+
+    class EntityType(models.TextChoices):
+        DEVICE = "device", "Device"
+        CLIENT = "client", "Client"
+
+    class ValueType(models.TextChoices):
+        ENUM = "enum", "Enum (JSON string in allowed_values)"
+        BOOLEAN = "boolean", "Boolean (JSON true/false)"
+        TEXT = "text", "Text (JSON string)"
+        JSON = "json", "JSON (any shape)"
+
+    name = models.CharField(max_length=80, primary_key=True)
+    entity_type = models.CharField(max_length=16, choices=EntityType.choices)
+    value_type = models.CharField(max_length=16, choices=ValueType.choices)
+    # For enum/boolean: JSON array of allowed literal values.
+    # Ignored for text/json.
+    allowed_values = models.JSONField(null=True, blank=True)
+    description = models.TextField(blank=True, default="")
+    enabled = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = "operator_decision_dimensions"
+        ordering = ("name",)
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class DeviceOperatorDecision(UUIDTenantScopedModel):
+    """Polymorphic per-device operator decisions.
+
+    Persistent, human-writer-only. Never touched by sync. See
+    DESIGN.md §3.8. Dimension names are validated against
+    `operator_decision_dimensions` by a BEFORE trigger; the `value`
+    JSONB is shape-checked against the dimension's `value_type` +
+    `allowed_values` on the same trigger.
+    """
+
+    device = models.ForeignKey(
+        "Device",  # forward reference — Device defined below
+        on_delete=models.CASCADE,
+        related_name="operator_decisions",
+    )
+    dimension = models.CharField(max_length=80)
+    value = models.JSONField()
+    reason = models.TextField(blank=True, default="")
+    set_by = models.CharField(max_length=120, blank=True, default="")
+    set_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "device_operator_decisions"
+        constraints = (
+            models.UniqueConstraint(
+                fields=("tenant", "device", "dimension"),
+                name="uq_device_operator_decisions_tenant_device_dim",
+            ),
+        )
+
+    def __str__(self) -> str:
+        return f"{self.device_id}:{self.dimension}"
+
+
 class Device(UUIDTenantScopedModel):
     class DeviceType(models.TextChoices):
         # Pure form factor. Agent presence is an observation-derived fact
