@@ -22,6 +22,19 @@ module-specific; root `../TODO.md` keeps cross-repo items and pointers.
 
 ## Backlog
 
+### P7 cutover — cleanups
+
+- [ ] Remove parity_check machinery (retired 2026-07-15 — 7-day gate
+      dropped as unneeded): delete `ingest/parity_check.py`, drop
+      `operations.parity_report` table, remove `run_parity_check_once`
+      + `/run/parity-check` endpoint from `ingest/main.py`, remove
+      Track 6 parity references from BLUEPRINT / DESIGN.
+- [ ] After ops-native cutover complete: delete
+      `ingest/agent_compliance/`, remove legacy scheduler + manual
+      endpoints in `main.py`, `DROP SCHEMA ninja_agent_compliance
+      CASCADE` (destructive — needs explicit approval + Metabase
+      question audit for legacy schema references first).
+
 ### Storage separation pass (BLUEPRINT.md Track O — Batch PO)
 
 - [ ] **O1** — `device_session_current` matview (per-device rollup
