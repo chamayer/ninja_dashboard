@@ -5,7 +5,59 @@ only project-level pointers.
 
 ---
 
-## 2026-07-13 (latest) — Track C batch C3: evidence panel + acceptance UI + requirement profiles
+## 2026-07-15 (latest) — Track O foundation: standing storage separation principle
+
+**Why:** patching_scope design work exposed a systemic issue on
+`operations.devices` and adjacent tables — columns mixed identity,
+derived-from-source values, session state, and operator decisions
+on one row. Rule changes silently invalidated stored values; sync
+overwrote operator decisions; no signal to a reader which columns
+were which. Rather than patch patching_scope in isolation, land a
+project-wide standing principle for storage separation so the
+patching_scope layer (and every future scope: backup, monitoring,
+etc.) can drop into a template instead of forcing per-scope
+redesign.
+
+**Design conversation (this session):**
+
+- Ten drafts of the pattern, with the user repeatedly pushing back
+  on over-consolidation ("scope config is a domain thing — why share
+  a home?") and on incomplete corrections ("what other mistakes did
+  you miss?"). Landed on: per-domain top-to-bottom for input plane,
+  shared reads via `v_<entity>` for output plane, polymorphic
+  operator-decisions ONLY for simple standalone values (typed tables
+  when the value has domain constraints).
+- Verified parity against legacy: this design incorporates all
+  legacy compliance/patching functions ops already ported, replaces
+  the two remaining source-side dependencies (`v_active_devices`
+  and any column reads on `operations.devices`), and adds net-new
+  capability (`reboot_pending`, per-domain operator overrides, data-
+  driven scope rules).
+
+**Commits:**
+
+- `90c1abc` — Track O foundation. `operations/DESIGN.md` §1 gains
+  principle #7 (four-layer storage separation, per-domain top-to-
+  bottom, shared reads via effective views). New §3.8 spells out
+  the pattern: canonical / derived matview / operator decisions /
+  effective view; per-domain template (config + matview + override +
+  refresh function); where sharing vs separation is right; refresh
+  coordination; RLS on matviews; consequences for `operations.devices`
+  (retire `exemptions` JSONB; keep OS/role/type as low-churn columns).
+  `operations/BLUEPRINT.md` gains Track O with five batches O1–O5
+  and their gates; deployment batch table adds `PO` between P6 and
+  P7. `operations/TODO.md` Backlog lists the five batches.
+- (this session, follow-up) — VERSION 0.43.0 → 0.44.0; CHANGELOG
+  entry for the standing principle addition; this SESSIONS entry.
+
+**Next:** O1 — `device_session_current` matview + refresh + swap
+findings-queue online-source map onto it. No column retirement in
+O1 (session-state doesn't live on `operations.devices` today);
+O1 is the additive step that unblocks `reboot_pending` in O5.
+
+---
+
+## 2026-07-13 — Track C batch C3: evidence panel + acceptance UI + requirement profiles
 
 **Why:** C1 emitted org observations, C2 resolved id-link + exact-name
 + recorded the residual as candidates + findings. C3 turns those

@@ -2,6 +2,32 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.44.0] — 2026-07-15
+
+### Added
+- `operations/DESIGN.md` §1 principle #7 + new §3.8: standing four-layer
+  storage separation architecture — canonical, derived matview, operator
+  decisions (per-domain typed OR polymorphic for simple), effective view
+  (`v_<entity>`). Per-domain top-to-bottom; shared reads via effective
+  views; sharing only where the output shape is genuinely uniform.
+  Applies to every ops entity going forward.
+- `operations/BLUEPRINT.md` Track O: five-batch storage separation pass
+  (O1 session-state rollup, O2 operator-decisions layer, O3 `v_device`
+  effective view, O4 patching_scope layer per-domain, O5 patch_findings
+  refactor + `reboot_pending` + refresh coordination + RLS retrofit +
+  Metabase audit). Deployment batch table gains `PO` between P6 and P7.
+- `operations/TODO.md` Backlog: five O1–O5 tasks with acceptance gates.
+
+### Rationale
+- Columns on `operations.devices` had been mixing (1) identity, (2)
+  values recomputed every ingest cycle, (3) permanent operator
+  decisions, and (4) session state — no signal to a reader which was
+  which. Rule changes silently invalidated stored values; sync could
+  clobber operator decisions.
+- The four-layer split gives every field one writer and one meaning,
+  and adding a new scope domain becomes a mechanical template
+  application (no schema redesign).
+
 ## [0.43.0] — 2026-07-08
 
 ### Added
