@@ -125,9 +125,9 @@
             <th style="padding: 0.5rem 0.6rem;">Version(s)</th>
             <th style="padding: 0.5rem 0.6rem;">First installed</th>
             <th style="padding: 0.5rem 0.6rem;">Last seen</th>
-            <th style="padding: 0.5rem 0.6rem;">Location</th>
             <th style="padding: 0.5rem 0.6rem;">Findings</th>
             <th style="padding: 0.5rem 0.6rem;">Decision</th>
+            <th style="padding: 0.5rem 0.6rem;">Location</th>
         </tr>
     </thead>
     <tbody id="sw-tbody">
@@ -141,7 +141,6 @@
             <td class="version-list">{{ versions|default:"—" }}</td>
             <td class="muted" style="white-space: nowrap; font-size: 0.8rem;">{{ first_installed|date:"Y-m-d"|default:"—" }}</td>
             <td class="muted" style="white-space: nowrap; font-size: 0.8rem;">{{ last_seen|date:"Y-m-d"|default:"—" }}</td>
-            <td class="loc-list">{{ locations|default:"—" }}</td>
             <td>
                 {% if findings_count %}
                     <a href="{% url 'findings_queue' %}?category=software&amp;client={{ client.slug }}&amp;q={{ name|urlencode }}">
@@ -170,6 +169,7 @@
                   </div>
                 </details>
             </td>
+            <td class="loc-list">{{ locations|default:"—" }}</td>
         </tr>
         {% endfor %}
     </tbody>
