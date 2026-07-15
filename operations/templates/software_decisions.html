@@ -44,9 +44,17 @@
         <tbody>
             {% for r in rows %}
             <tr>
-                <td><code>{{ r.canonical }}</code></td>
+                <td>
+                    <a href="{% url 'findings_queue' %}?category=software&amp;q={{ r.canonical|urlencode }}">
+                        <code>{{ r.canonical }}</code>
+                    </a>
+                </td>
                 <td class="muted">{{ r.category|default:"—" }}</td>
-                <td class="num">{{ r.device_count }}</td>
+                <td class="num">
+                    <a href="{% url 'findings_queue' %}?category=software&amp;q={{ r.canonical|urlencode }}">
+                        {{ r.device_count }}
+                    </a>
+                </td>
                 <td class="muted num">{{ r.latest|date:"Y-m-d H:i" }}</td>
                 <td>
                     {% if r.global_decision %}

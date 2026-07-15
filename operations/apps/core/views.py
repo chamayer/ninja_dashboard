@@ -570,6 +570,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     client_filter = request.GET.get("client", "")
     platform_filter = request.GET.get("platform", "")
     online_filter = request.GET.get("online", "")
+    q_filter = (request.GET.get("q") or "").strip()
 
     # Source names come from operations.sources (admin-editable
     # reference data) — never hardcoded in code.
@@ -599,6 +600,12 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
         qs = qs.filter(client__slug=client_filter)
     if platform_filter:
         qs = qs.filter(finding_details__platform=platform_filter)
+    if q_filter:
+        # Free-text match against canonical_name OR hostname in details
+        qs = qs.filter(
+            Q(finding_details__canonical_name__icontains=q_filter)
+            | Q(finding_details__hostname__icontains=q_filter)
+        )
 
     _SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
     findings = sorted(qs[:500], key=lambda f: (_SEVERITY_ORDER.get(f.severity, 9), -(f.last_detected_at or f.last_seen_at).timestamp()))
@@ -734,6 +741,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             "active_category": category_filter,
             "active_platform": platform_filter,
             "active_online": online_filter,
+            "active_q": q_filter,
             "active_confidence": confidence_filter,
             "active_client": client_filter,
             "page_query": page_query.urlencode(),
@@ -971,12 +979,37 @@ def org_software(request: HttpRequest, org_slug: str) -> HttpResponse:
             )
             rows = cur.fetchall()
 
-    # Attach decision to each row so templates don't need dict-key lookup
+    # Attach decision + finding count to each row so templates don't
+    # need dict-key lookups.
     decisions_map = {
         d.canonical_name: d.decision
         for d in SoftwareDecision.objects.filter(tenant_id=1, client=client)
     }
-    rows = [row + (decisions_map.get(row[0], ""),) for row in rows]
+    # Per-canonical-name open finding counts scoped to THIS client's devices.
+    findings_map: dict[str, int] = {}
+    if rows:
+        canonical_names = [row[0] for row in rows]
+        with transaction.atomic(), connection.cursor() as cur2:
+            cur2.execute("SET LOCAL operations.tenant_id = 1")
+            cur2.execute(
+                """
+                SELECT f.finding_details->>'canonical_name', COUNT(DISTINCT f.subject_id)
+                FROM operations.findings f
+                JOIN operations.finding_types ft ON ft.id = f.finding_type_id
+                WHERE f.tenant_id = 1
+                  AND f.client_id = %s
+                  AND f.status IN ('open', 'acknowledged')
+                  AND ft.source_module = 'platform.software_findings'
+                  AND f.finding_details->>'canonical_name' = ANY(%s::text[])
+                GROUP BY 1
+                """,
+                (client.id, canonical_names),
+            )
+            findings_map = {name: count for name, count in cur2.fetchall()}
+    rows = [
+        row + (decisions_map.get(row[0], ""), findings_map.get(row[0], 0))
+        for row in rows
+    ]
 
     num_pages = max(1, (total + _SW_PAGE_SIZE - 1) // _SW_PAGE_SIZE)
 
