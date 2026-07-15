@@ -2,6 +2,19 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.44.8] — 2026-07-15
+
+### Fixed
+- `ingest/identity/resolver.py`: two `INSERT INTO operations.devices`
+  statements (promotion, individual-record fallback) now include
+  `os_group='Unknown'` in the column list + VALUES. os_group is a
+  NOT NULL column added in migration 0033 without a DB-side default;
+  omitting it caused `NotNullViolation` on device promotion (silently
+  logged as "resolver: device promotion failed — continuing"). Both
+  INSERT paths were missing os_group since 0033 landed — surfaced
+  while verifying O5. Sync will overwrite 'Unknown' on the next
+  Ninja cycle via `_sync_operations_device_roles`.
+
 ## [0.44.7] — 2026-07-15
 
 ### Added

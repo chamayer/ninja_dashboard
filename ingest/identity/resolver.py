@@ -659,11 +659,11 @@ def _promote_unmatched_clusters(cur) -> int:
             INSERT INTO operations.devices
                 (id, version, tenant_id, client_id, canonical_hostname,
                  canonical_serial, canonical_vm_uuid, device_type, device_role,
-                 lifecycle_status, os_name, os_family,
+                 lifecycle_status, os_name, os_family, os_group,
                  created_at, created_reason, updated_at, updated_reason,
                  stale_reason, deleted_reason)
             VALUES (%s, 1, %s, %s, %s, %s, %s, %s, %s,
-                    'active', %s, %s,
+                    'active', %s, %s, 'Unknown',
                     NOW(), %s, NOW(), '', '', '')
             """,
             (
@@ -750,11 +750,11 @@ def _promote_entry_groups(
             INSERT INTO operations.devices
                 (id, version, tenant_id, client_id, canonical_hostname,
                  canonical_serial, canonical_vm_uuid, device_type, device_role,
-                 lifecycle_status, os_name, os_family,
+                 lifecycle_status, os_name, os_family, os_group,
                  created_at, created_reason, updated_at, updated_reason,
                  stale_reason, deleted_reason)
             VALUES (%s, 1, %s, %s, %s, %s, %s, %s, %s,
-                    'active', %s, %s,
+                    'active', %s, %s, 'Unknown',
                     NOW(), %s, NOW(), '', '', '')
             """,
             (
