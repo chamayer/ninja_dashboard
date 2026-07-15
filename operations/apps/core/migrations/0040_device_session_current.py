@@ -66,18 +66,29 @@ per_device_presence AS (
     FROM source_online so
     GROUP BY so.device_id
 ),
+-- Latest snapshot per ninja device — DISTINCT ON works directly with
+-- the (device_id, snapshot_at DESC) index on ninja_core.device_snapshots
+-- (index-only skip scan). Join to device_links after, one row per Ninja
+-- device, so the outer plan doesn't have to sort millions of snapshot
+-- rows.
 latest_ninja_snapshot AS (
-    SELECT DISTINCT ON (dl.device_id)
-        dl.device_id       AS ops_device_id,
+    SELECT DISTINCT ON (ns.device_id)
+        ns.device_id AS ninja_device_id,
         ns.needs_reboot,
-        ns.last_boot,
-        ns.snapshot_at
+        ns.last_boot
+    FROM ninja_core.device_snapshots ns
+    ORDER BY ns.device_id, ns.snapshot_at DESC
+),
+device_reboot AS (
+    SELECT
+        dl.device_id AS ops_device_id,
+        lns.needs_reboot,
+        lns.last_boot
     FROM operations.device_links dl
     JOIN operations.sources s
       ON s.id = dl.source_id AND s.name = 'Ninja'
-    JOIN ninja_core.device_snapshots ns
-      ON ns.device_id = dl.external_id::int
-    ORDER BY dl.device_id, ns.snapshot_at DESC
+    JOIN latest_ninja_snapshot lns
+      ON lns.ninja_device_id = dl.external_id::int
 )
 SELECT
     d.tenant_id,
@@ -93,8 +104,8 @@ SELECT
     p.last_power_state,
     NOW()                                           AS computed_at
 FROM operations.devices d
-LEFT JOIN per_device_presence   p  ON p.device_id     = d.id
-LEFT JOIN latest_ninja_snapshot ls ON ls.ops_device_id = d.id
+LEFT JOIN per_device_presence p  ON p.device_id     = d.id
+LEFT JOIN device_reboot        ls ON ls.ops_device_id = d.id
 WHERE d.deleted_at IS NULL
 WITH DATA;
 """

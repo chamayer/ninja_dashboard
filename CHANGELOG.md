@@ -2,6 +2,22 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.44.2] — 2026-07-15
+
+### Fixed
+- Migration 0040 `device_session_current` matview creation hung on
+  `DataFileRead` — the `DISTINCT ON (dl.device_id) ORDER BY dl.device_id,
+  ns.snapshot_at DESC` couldn't use the `(device_id, snapshot_at DESC)`
+  index on `ninja_core.device_snapshots` because the ORDER BY was
+  across the join to `device_links`. Postgres fell back to a full
+  HashJoin + Sort on millions of snapshot rows. Fix: compute latest
+  snapshot per Ninja device with `DISTINCT ON (ns.device_id)` in a
+  standalone CTE first (uses the primary index directly, index-only
+  skip scan), then join to `device_links` on the small aggregated
+  result. Query drops from indefinite to milliseconds. First deploy
+  of 0040 (a41fbcb) was killed via `pg_cancel_backend()` before it
+  completed; the transaction rolled back so no artifacts remained.
+
 ## [0.44.1] — 2026-07-15
 
 ### Added

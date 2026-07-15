@@ -84,7 +84,20 @@ O1 is the additive step that unblocks `reboot_pending` in O5.
   canonical tables; trusted-role direct SELECT is accepted risk;
   security-barrier view wrappers filed for O5.
 
-**Commit:** (pending — batched with VERSION 0.44.1 + CHANGELOG)
+**Commits:** `a41fbcb` initial; `<pending>` (0.44.2) fixes the
+matview-creation slow-plan bug caught in verification.
+
+**Verification incident (fixed in 0.44.2):** first deploy of 0040
+(a41fbcb) hung on `CREATE MATERIALIZED VIEW ... DataFileRead` for
+15+ min because the `DISTINCT ON (dl.device_id) ORDER BY dl.device_id,
+ns.snapshot_at DESC` in the `latest_ninja_snapshot` CTE couldn't use
+the `(device_id, snapshot_at DESC)` index on
+`ninja_core.device_snapshots` — ORDER BY crossed the join to
+`device_links`, forcing a HashJoin + Sort on millions of snapshot
+rows. `pg_cancel_backend()` rolled back the transaction; migration
+was rewritten to compute latest snapshot per Ninja device in a
+standalone CTE first (index-only skip scan), then join to
+`device_links` on the small aggregated result. Milliseconds now.
 
 **Next:** O2 — `operator_decision_dimensions` registry +
 `device_operator_decisions` polymorphic table + migrate
