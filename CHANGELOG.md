@@ -2,6 +2,17 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.44.3] — 2026-07-15
+
+### Fixed
+- Migration 0040 `device_session_current`: unique index creation on
+  `(tenant_id, device_id)` failed with a duplicate key because ops
+  devices with multiple Ninja `device_links` (legal per BLUEPRINT
+  E.3 — multi-link per source) produced multiple rows in the
+  `device_reboot` CTE. Added `DISTINCT ON (dl.device_id) ORDER BY
+  dl.device_id, lns.snapshot_at DESC` so each ops device gets one
+  reboot row (freshest snapshot among linked Ninja devices).
+
 ## [0.44.2] — 2026-07-15
 
 ### Fixed

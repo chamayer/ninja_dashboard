@@ -75,12 +75,18 @@ latest_ninja_snapshot AS (
     SELECT DISTINCT ON (ns.device_id)
         ns.device_id AS ninja_device_id,
         ns.needs_reboot,
-        ns.last_boot
+        ns.last_boot,
+        ns.snapshot_at
     FROM ninja_core.device_snapshots ns
     ORDER BY ns.device_id, ns.snapshot_at DESC
 ),
+-- One row per OPS device — an ops device may carry multiple Ninja
+-- device_links (multi-link is legal per BLUEPRINT E.3), which would
+-- otherwise duplicate device_session_current rows and break the
+-- (tenant_id, device_id) unique index. Prefer the freshest snapshot
+-- among the linked Ninja devices.
 device_reboot AS (
-    SELECT
+    SELECT DISTINCT ON (dl.device_id)
         dl.device_id AS ops_device_id,
         lns.needs_reboot,
         lns.last_boot
@@ -89,6 +95,7 @@ device_reboot AS (
       ON s.id = dl.source_id AND s.name = 'Ninja'
     JOIN latest_ninja_snapshot lns
       ON lns.ninja_device_id = dl.external_id::int
+    ORDER BY dl.device_id, lns.snapshot_at DESC
 )
 SELECT
     d.tenant_id,
