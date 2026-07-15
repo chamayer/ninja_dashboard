@@ -521,6 +521,111 @@ class DeviceLink(UUIDTenantScopedModel):
         return f"{self.source_id}:{self.external_id}"
 
 
+class PatchingScopeSignal(models.Model):
+    """Field-based rule that maps a Ninja custom field to a patching-scope
+    effect. Priority-ordered; first match wins.
+
+    Documentation of the resolution rules encoded in the
+    `device_patching_scope_current` matview. Track O batch O4 seeds the
+    legacy behavior; changing rules today requires updating both this
+    table AND the matview definition (schema migration). Runtime dynamic
+    rule evaluation is a follow-up.
+    """
+
+    class Effect(models.TextChoices):
+        INCLUDED = "Included", "Included"
+        EXCLUDED = "Excluded", "Excluded"
+
+    class EntityType(models.TextChoices):
+        DEVICE = "device", "Device"
+        ORGANIZATION = "organization", "Organization"
+        LOCATION = "location", "Location"
+
+    id = models.SmallAutoField(primary_key=True)
+    field_name = models.CharField(max_length=80)
+    entity_type = models.CharField(max_length=16, choices=EntityType.choices)
+    # NULL = applies to all device_roles; else 'server' / 'workstation'.
+    device_role_filter = models.CharField(max_length=32, blank=True, default="")
+    effect = models.CharField(max_length=16, choices=Effect.choices)
+    priority = models.PositiveIntegerField(default=100)
+    enabled = models.BooleanField(default=True)
+    description = models.TextField(blank=True, default="")
+
+    class Meta:
+        db_table = "patching_scope_signal"
+        ordering = ("priority", "id")
+
+    def __str__(self) -> str:
+        return f"{self.priority}:{self.entity_type}.{self.field_name} → {self.effect}"
+
+
+class PatchingScopeDefault(models.Model):
+    """Fallback effect per device_role when no signal fires."""
+
+    class Effect(models.TextChoices):
+        INCLUDED = "Included", "Included"
+        EXCLUDED = "Excluded", "Excluded"
+        UNMANAGED = "Unmanaged", "Unmanaged"
+
+    device_role = models.CharField(max_length=32, primary_key=True)
+    effect = models.CharField(max_length=16, choices=Effect.choices)
+    enabled = models.BooleanField(default=True)
+    description = models.TextField(blank=True, default="")
+
+    class Meta:
+        db_table = "patching_scope_default"
+        ordering = ("device_role",)
+
+    def __str__(self) -> str:
+        return f"{self.device_role} → {self.effect}"
+
+
+class PatchingScopePolicyAllowlist(models.Model):
+    """Ninja policy names that flip the WINDOWS_SERVER default from
+    Excluded to Included. Migrated from
+    `ninja_core.patching_enabled_policies`.
+    """
+
+    id = models.SmallAutoField(primary_key=True)
+    policy_name = models.CharField(max_length=240, unique=True)
+    enabled = models.BooleanField(default=True)
+    notes = models.TextField(blank=True, default="")
+
+    class Meta:
+        db_table = "patching_scope_policy_allowlist"
+        ordering = ("policy_name",)
+
+    def __str__(self) -> str:
+        return self.policy_name
+
+
+class DevicePatchingOverride(UUIDTenantScopedModel):
+    """Operator override of derived patching scope. Typed (per-domain)
+    per DESIGN.md §3.8 — Included/Excluded only, CHECK-constrained at
+    the DB level.
+    """
+
+    class Scope(models.TextChoices):
+        INCLUDED = "Included", "Included"
+        EXCLUDED = "Excluded", "Excluded"
+
+    device = models.OneToOneField(
+        "Device",
+        on_delete=models.CASCADE,
+        related_name="patching_override",
+    )
+    scope = models.CharField(max_length=16, choices=Scope.choices)
+    reason = models.TextField(blank=True, default="")
+    set_by = models.CharField(max_length=120, blank=True, default="")
+    set_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "device_patching_override"
+
+    def __str__(self) -> str:
+        return f"{self.device_id}:{self.scope}"
+
+
 class ClientUser(UUIDTenantScopedModel):
     client = models.ForeignKey(Client, on_delete=models.PROTECT, null=True, blank=True, related_name="client_users")
     canonical_email = models.EmailField(blank=True)

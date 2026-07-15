@@ -621,6 +621,24 @@ def _refresh_agent_presence_current() -> None:
         log.exception("Failed to refresh device_session_current — continuing")
 
 
+def refresh_patching_scope_current() -> None:
+    """Refresh operations.device_patching_scope_current.
+
+    Called from main.py after custom_fields ingest so the matview
+    sees fresh Ninja custom_field_values + policies. Depends on
+    operations.devices.os_group/device_role too — those are set by
+    `_sync_operations_device_roles` (already run earlier in the
+    devices pipeline). Public (no leading underscore) so main.py can
+    schedule it directly. Track O batch O4.
+    """
+    try:
+        with db.transaction() as cur:
+            cur.execute("SELECT operations.refresh_patching_scope_current()")
+        log.info("Refreshed materialized view operations.device_patching_scope_current")
+    except Exception:
+        log.exception("Failed to refresh device_patching_scope_current — continuing")
+
+
 def _refresh_active_devices_view() -> None:
     """Refresh materialized active-device inventory after current flags change."""
     try:

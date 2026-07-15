@@ -2,6 +2,49 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.44.6] — 2026-07-15
+
+### Added
+- Migration 0043: patching scope layer (Track O batch O4).
+  - Config: `patching_scope_signal` (10 seeded rules, documentation of
+    the resolution), `patching_scope_default` (workstation→Included,
+    server→Excluded, unknown→Unmanaged), `patching_scope_policy_allowlist`
+    (imported from `ninja_core.patching_enabled_policies`).
+  - Derived: `operations.device_patching_scope_current` matview. Per
+    ops device; multi-Ninja-link collapse via `DISTINCT ON (d.id)`;
+    latest custom_field values via `DISTINCT ON (entity_id,field_name)`
+    with the existing (entity_type, entity_id, field_name,
+    last_observed_at DESC) index. Non-Ninja-linked or non-Windows
+    devices → 'Unmanaged'. Includes `scope_reason` (`device.patchingDisabled`,
+    `policy-allowlist:<name>`, `default:server`, etc.) for operator
+    triage.
+  - Operator override: `operations.device_patching_override` typed
+    table (`scope CHECK IN Included/Excluded`, one row per device,
+    RLS on, grants match other tenant tables).
+  - Refresh function `operations.refresh_patching_scope_current()`
+    with CONCURRENTLY unique index.
+  - `v_device` extended (CREATE OR REPLACE — additive columns):
+    `patching_scope_derived`, `patching_scope_reason`,
+    `patching_scope_computed_at`, `patching_scope_override`,
+    `patching_scope_override_reason`, `effective_patching_scope`
+    (COALESCE override → derived → 'Unmanaged').
+
+### Changed
+- `ingest/core/devices.py`: new `refresh_patching_scope_current()`
+  wrapper calling the Postgres refresh function.
+- `ingest/main.py` `run_once()`: calls `patching_scope_refresh` after
+  `custom_fields` ingest — matview depends on both
+  `ninja_core.custom_field_values` (from custom_fields) and
+  `operations.devices.os_group`/`device_role` (already set by
+  `_sync_operations_device_roles` inside `devices.run`).
+
+### Parity target
+- `ninja_core.v_active_devices`: 4,083 Windows-only devices (1,663
+  Excluded / 2,420 Included).
+- Ops target for `device_patching_scope_current`: same Included /
+  Excluded breakdown for Ninja-linked Windows devices; all other
+  devices → 'Unmanaged'. Verified post-deploy.
+
 ## [0.44.5] — 2026-07-15
 
 ### Added

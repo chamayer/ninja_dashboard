@@ -112,6 +112,10 @@ def run_patching_once() -> None:
         _safe("devices",        devices.run, client, snapshot_at)
         _safe("device_health",  device_health.run, client, snapshot_at)
         _safe("custom_fields",  custom_fields.run, client, snapshot_at)
+        # Patching-scope matview reads ninja_core.custom_field_values +
+        # ninja_core.policies + ops.devices; must refresh AFTER
+        # custom_fields ingest lands. Track O batch O4.
+        _safe("patching_scope_refresh", devices.refresh_patching_scope_current)
         _safe("patches",        patches_ingest.run, client, snapshot_at)
         _safe("activities",     activities_ingest.run, client)
         _safe("troubleshooting_signal", refresh_device_troubleshooting_signal)
