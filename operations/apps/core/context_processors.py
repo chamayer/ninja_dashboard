@@ -5,7 +5,7 @@ from __future__ import annotations
 from django.conf import settings
 from django.http import HttpRequest
 
-from .models import Client, ClientCandidate, Finding, MergeCandidate
+from .models import Client, ClientCandidate, Finding, IdentityCandidate, MergeCandidate
 
 _FINDING_ACTIVE_STATUSES = (
     Finding.Status.OPEN,
@@ -29,6 +29,8 @@ def brand(request: HttpRequest) -> dict:
         "nav_findings_count": 0,
         "nav_pending_merges": 0,
         "nav_pending_client_candidates": 0,
+        "nav_pending_identity_candidates": 0,
+        "nav_pending_review_total": 0,
         "nav_patching_open": 0,
     }
 
@@ -52,6 +54,15 @@ def brand(request: HttpRequest) -> dict:
             tenant_id=tenant_id,
             status=ClientCandidate.Status.OPEN,
         ).count()
+        ctx["nav_pending_identity_candidates"] = IdentityCandidate.objects.filter(
+            tenant_id=tenant_id,
+            status="pending",
+        ).count()
+        ctx["nav_pending_review_total"] = (
+            ctx["nav_pending_merges"]
+            + ctx["nav_pending_client_candidates"]
+            + ctx["nav_pending_identity_candidates"]
+        )
         ctx["nav_patching_open"] = Finding.objects.filter(
             tenant_id=tenant_id,
             finding_type__category__name="patching",

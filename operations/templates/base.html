@@ -241,54 +241,54 @@
     {% if user.is_authenticated %}
     <nav class="primary-nav">
         <div class="primary-nav-inner">
-            {# ── Operational domains ─────────────────────────────── #}
+            {# Operator workflow domains #}
             <a class="nav-link {% if request.resolver_match.url_name == 'home' %}active{% endif %}"
                href="{% url 'home' %}">Dashboard</a>
 
             <a class="nav-link {% if request.resolver_match and 'org' in request.resolver_match.url_name %}active{% endif %}"
-               href="{% url 'org_index' org_slug='all' %}">Inventory</a>
-
-            <a class="nav-link {% if request.resolver_match and 'finding' in request.resolver_match.url_name %}active{% endif %}"
-               href="{% url 'findings_queue' %}">Security{% if nav_findings_count %} <span class="nav-badge">{{ nav_findings_count }}</span>{% endif %}</a>
-
-            <a class="nav-link {% if request.resolver_match.url_name == 'fleet_coverage' %}active{% endif %}"
-               href="{% url 'fleet_coverage' %}">Compliance</a>
+               href="{% url 'org_index' org_slug='all' %}">Clients</a>
 
             <a class="nav-link {% if request.resolver_match.url_name == 'patching_queue' %}active{% endif %}"
                href="{% url 'patching_queue' %}">Patching{% if nav_patching_open %} <span class="nav-badge">{{ nav_patching_open }}</span>{% endif %}</a>
 
-            {# ── Client context sub-nav ───────────────────────────── #}
+            <a class="nav-link {% if request.resolver_match and 'software_decision' in request.resolver_match.url_name %}active{% endif %}"
+               href="{% url 'findings_queue' %}?category=software">Software</a>
+
+            <a class="nav-link {% if request.resolver_match and 'finding' in request.resolver_match.url_name %}active{% endif %}"
+               href="{% url 'findings_queue' %}">Issues{% if nav_findings_count %} <span class="nav-badge">{{ nav_findings_count }}</span>{% endif %}</a>
+
+            {# Client context sub-nav #}
             {% if current_client %}
             <div class="nav-sep"></div>
             <span class="nav-client-crumb">{{ current_client.display_name }} ›</span>
             <a class="nav-link nav-sub {% if request.resolver_match and 'device' in request.resolver_match.url_name %}active{% endif %}"
                href="{% url 'org_devices' org_slug=current_client.slug %}">Devices</a>
-            <a class="nav-link nav-sub {% if request.resolver_match and 'software' in request.resolver_match.url_name %}active{% endif %}"
+            <a class="nav-link nav-sub {% if request.resolver_match and 'software' in request.resolver_match.url_name and 'decision' not in request.resolver_match.url_name %}active{% endif %}"
                href="{% url 'org_software' org_slug=current_client.slug %}">Software</a>
             <a class="nav-link nav-sub {% if request.resolver_match and 'polic' in request.resolver_match.url_name %}active{% endif %}"
                href="{% url 'org_policies' org_slug=current_client.slug %}">Policies</a>
             {% endif %}
 
-            {# ── Admin (right-aligned) ────────────────────────────── #}
+            {# Admin — right-aligned, consolidated. Wave D turns each
+               of these into a tabbed page; today each links to the
+               primary member of its group. #}
             <div class="nav-fill"></div>
             <div class="nav-sep"></div>
-            <a class="nav-link nav-admin {% if request.resolver_match.url_name == 'sources_status' %}active{% endif %}"
-               href="{% url 'sources_status' %}">Sources</a>
-            <a class="nav-link nav-admin {% if request.resolver_match.url_name == 'findings_admin_health' %}active{% endif %}"
-               href="{% url 'findings_admin_health' %}">Health</a>
-            <a class="nav-link nav-admin {% if request.resolver_match.url_name == 'merge_candidates_queue' %}active{% endif %}"
-               href="{% url 'merge_candidates_queue' %}">Merges{% if nav_pending_merges %} <span class="nav-badge nav-badge-muted">{{ nav_pending_merges }}</span>{% endif %}</a>
-            <a class="nav-link nav-admin {% if request.resolver_match and 'client_candidate' in request.resolver_match.url_name %}active{% endif %}"
-               href="{% url 'client_candidates_queue' %}">Clients{% if nav_pending_client_candidates %} <span class="nav-badge">{{ nav_pending_client_candidates }}</span>{% endif %}</a>
-            <a class="nav-link nav-admin {% if request.resolver_match and 'notification' in request.resolver_match.url_name %}active{% endif %}"
-               href="{% url 'notification_rules_list' %}">Notifications</a>
-            <a class="nav-link nav-admin {% if request.resolver_match and 'requirement_profile' in request.resolver_match.url_name %}active{% endif %}"
-               href="{% url 'requirement_profiles_list' %}">Profiles</a>
-            <a class="nav-link nav-admin {% if request.resolver_match and 'software_decision' in request.resolver_match.url_name %}active{% endif %}"
-               href="{% url 'software_decisions_queue' %}">Software</a>
-            <a class="nav-link nav-admin {% if request.resolver_match and 'identity' in request.resolver_match.url_name %}active{% endif %}"
-               href="{% url 'identity_candidates_list' %}">Identity</a>
-            <a class="nav-link nav-admin" href="{% url 'admin:index' %}">⚙</a>
+
+            {# Review = human-in-the-loop lifecycle queues
+               (client candidates, identity candidates, merge candidates). #}
+            <a class="nav-link nav-admin {% if request.resolver_match and 'client_candidate' in request.resolver_match.url_name or 'identity' in request.resolver_match.url_name or 'merge' in request.resolver_match.url_name %}active{% endif %}"
+               href="{% url 'client_candidates_queue' %}">Review{% if nav_pending_review_total %} <span class="nav-badge">{{ nav_pending_review_total }}</span>{% endif %}</a>
+
+            {# Config = admin-editable rules & profiles (notifications, requirement profiles, software decisions). #}
+            <a class="nav-link nav-admin {% if request.resolver_match and 'notification' in request.resolver_match.url_name or 'requirement_profile' in request.resolver_match.url_name %}active{% endif %}"
+               href="{% url 'notification_rules_list' %}">Config</a>
+
+            {# System = ingest + platform health (sources, admin findings). #}
+            <a class="nav-link nav-admin {% if request.resolver_match.url_name == 'sources_status' or request.resolver_match.url_name == 'findings_admin_health' %}active{% endif %}"
+               href="{% url 'sources_status' %}">System</a>
+
+            <a class="nav-link nav-admin" href="{% url 'admin:index' %}" title="Django admin">⚙</a>
         </div>
     </nav>
     {% endif %}

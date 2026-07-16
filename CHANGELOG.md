@@ -2,6 +2,39 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.49.0] — 2026-07-16 — Wave C: nav restructure
+
+### Changed
+- **Primary nav collapsed to 5 workflow domains:**
+  Dashboard · Clients · Patching · Software · Issues
+  - "Inventory" → "Clients" (rename — the page IS the client list)
+  - "Security" → "Issues" (rename — clearer for MSP operators)
+  - "Software" → new primary link, filters Issues to
+    `?category=software` (fleet-wide software page is a follow-up)
+  - "Compliance" — retired from primary nav. Coverage findings are
+    still in Issues (category filter); the fleet_coverage matrix
+    is retired in favor of Dashboard cards.
+- **Admin cluster collapsed from 9 items to 3 grouped pages:**
+  - **Review** [total badge] — merges client candidates, identity
+    candidates, merge candidates under one label. Badge = sum
+    across all three queues. Today links to
+    `client_candidates_queue`; Wave D turns it into a tabbed page.
+  - **Config** — merges notification rules, requirement profiles,
+    software decisions. Links to `notification_rules_list` today;
+    tabbed in Wave D.
+  - **System** — merges sources, admin findings health. Links to
+    `sources_status` today; tabbed in Wave D.
+  - `⚙` Django admin escape hatch retained.
+- Active-page detection expanded so the group highlights when
+  visiting any member page.
+- New context vars: `nav_pending_identity_candidates`,
+  `nav_pending_review_total` (sum for the Review badge).
+
+### Not changed (yet)
+- The 9 individual admin pages still exist and are still
+  reachable via their old URLs; only the nav labels have
+  collapsed. Wave D creates the tabbed consolidation pages.
+
 ## [0.48.3] — 2026-07-16
 
 ### Fixed
