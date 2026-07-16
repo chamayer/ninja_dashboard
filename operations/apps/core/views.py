@@ -167,21 +167,23 @@ def home(request: HttpRequest) -> HttpResponse:
     client_health_paginator = Paginator(client_health_all, 25)
     client_health_page = client_health_paginator.get_page(request.GET.get("client_page"))
 
-    # Source health: last successful run per source.
+    # Source health: fresh if the source has produced at least one
+    # entity_observations row in the last 8 hours. Reads live data
+    # (not the retired source_run_queue, whose completed_at is
+    # frozen at legacy-retirement time).
     stale_sources: list[str] = []
     source_health = []
     eight_hours_ago = timezone.now() - timedelta(hours=8)
     with connection.cursor() as cur:
         cur.execute("""
-            SELECT DISTINCT ON (df)
-                df, status, completed_at
-            FROM operations.source_run_queue
-            WHERE status = 'done'
-            ORDER BY df, completed_at DESC
+            SELECT platform, MAX(observed_at) AS latest
+            FROM operations.entity_observations
+            WHERE tenant_id = 1
+            GROUP BY platform
         """)
-        last_success = {r[0]: r[2] for r in cur.fetchall()}
+        latest_obs = {r[0]: r[1] for r in cur.fetchall()}
     for src in _SOURCES:
-        ts = last_success.get(src)
+        ts = latest_obs.get(src)
         is_stale = ts is None or ts < eight_hours_ago
         source_health.append({"name": src, "last_success": ts, "stale": is_stale})
         if is_stale:

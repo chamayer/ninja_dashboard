@@ -2,6 +2,19 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.48.3] — 2026-07-16
+
+### Fixed
+- Dashboard "stale ingest" banner was reading from
+  `source_run_queue.completed_at`, which is the retired legacy
+  per-org queue mechanism — its timestamps are frozen at
+  retirement time (3+ days ago). Even though ingest is running
+  fine (fresh observations landing every few minutes), the banner
+  screamed "all 4 sources stale." Switched to
+  `MAX(entity_observations.observed_at) per platform` which is
+  the actual live-data pipeline. Both the top banner AND the
+  new Ingest hero tile now reflect real freshness.
+
 ## [0.48.2] — 2026-07-16
 
 ### Changed
