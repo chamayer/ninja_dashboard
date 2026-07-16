@@ -2,6 +2,18 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.50.4] — 2026-07-16 — Restore overview cards
+
+### Changed
+- Replaced the muted single-line fleet strip with 6 compact
+  overview cards: Fleet · Patching · Software · Coverage · Review
+  · Ingest. Each is clickthrough to its dedicated page.
+- Cards are visually restrained (0.75rem padding, 1.6rem value)
+  so they don't dominate over the client portfolio grid below.
+- Cards highlight amber when they have open items (`has-open`
+  class) or red when a source is stale (`alert` class) — quick
+  scan tells you where to look.
+
 ## [0.50.3] — 2026-07-16 — "Needs immediate attention" panel — tighten signal
 
 ### Fixed

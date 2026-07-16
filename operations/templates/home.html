@@ -5,14 +5,35 @@
 
 {% block content %}
 <style>
-  /* Fleet reference strip — muted, informational */
-  .fleet-strip {
-    display: flex; flex-wrap: wrap; gap: 1.5rem;
-    padding: 0.6rem 1rem; margin-bottom: 1rem;
-    background: #eef2f7; border: 1px solid #dfe1e5;
-    border-radius: 4px; font-size: 0.85rem; color: #4b5563;
+  /* Domain overview cards — compact, above the portfolio */
+  .overview-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 0.65rem; margin-bottom: 1rem;
   }
-  .fleet-strip strong { color: #1a1a2e; font-weight: 600; }
+  .overview-card {
+    display: block;
+    padding: 0.75rem 1rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    text-decoration: none; color: inherit;
+    transition: box-shadow 0.15s, border-color 0.15s;
+  }
+  .overview-card:hover { box-shadow: 0 2px 6px rgba(0,0,0,0.06); border-color: var(--accent); }
+  .overview-card .ov-label {
+    font-size: 0.72rem; font-weight: 700; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.2rem;
+  }
+  .overview-card .ov-value {
+    font-size: 1.6rem; font-weight: 700; line-height: 1.1; color: #1a1a2e;
+  }
+  .overview-card .ov-sub {
+    font-size: 0.75rem; color: var(--muted); margin-top: 0.2rem;
+  }
+  .overview-card.has-open .ov-value { color: #b45309; }
+  .overview-card.alert { border-color: #fca5a5; background: #fff5f5; }
+  .overview-card.alert .ov-value { color: #dc2626; }
 
   /* Attention filter chips (above scoreboard) */
   .view-chips { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.75rem; }
@@ -82,13 +103,44 @@
 </div>
 {% endif %}
 
-{# ── Fleet snapshot strip (muted context) ─────────────────── #}
-<div class="fleet-strip">
-  <span><strong>{{ total_clients }}</strong> clients</span>
-  <span><strong>{{ total_devices }}</strong> devices</span>
-  <span><strong>{{ patching_pop.in_scope }}</strong> in patching scope</span>
-  <span><strong>{{ sources_ok }}/{{ sources_total }}</strong> sources fresh</span>
-  <span><strong>{{ total_active_findings }}</strong> open issues</span>
+{# ── Overview cards — 6 domain summaries ─────────────────── #}
+<div class="overview-grid">
+  <a class="overview-card" href="{% url 'org_index' org_slug='all' %}">
+    <div class="ov-label">Fleet</div>
+    <div class="ov-value">{{ total_devices }}</div>
+    <div class="ov-sub">{{ total_clients }} clients</div>
+  </a>
+  <a class="overview-card" href="{% url 'patching_queue' %}">
+    <div class="ov-label">Patching</div>
+    <div class="ov-value">{{ patching_pop.in_scope }}</div>
+    <div class="ov-sub">of {{ patching_pop.total }} devices in scope</div>
+  </a>
+  <a class="overview-card {% if category_counts.software %}has-open{% endif %}"
+     href="{% url 'findings_queue' %}?category=software">
+    <div class="ov-label">Software</div>
+    <div class="ov-value">{{ category_counts.software|default:0 }}</div>
+    <div class="ov-sub">flagged installations</div>
+  </a>
+  <a class="overview-card {% if category_counts.coverage %}has-open{% endif %}"
+     href="{% url 'findings_queue' %}?category=coverage">
+    <div class="ov-label">Coverage</div>
+    <div class="ov-value">{{ category_counts.coverage|default:0 }}</div>
+    <div class="ov-sub">gaps across the fleet</div>
+  </a>
+  <a class="overview-card {% if reviews_pending.total %}has-open{% endif %}"
+     href="{% url 'client_candidates_queue' %}">
+    <div class="ov-label">Review</div>
+    <div class="ov-value">{{ reviews_pending.total }}</div>
+    <div class="ov-sub">decisions pending</div>
+  </a>
+  <a class="overview-card {% if stale_sources %}alert{% endif %}"
+     href="{% url 'sources_status' %}">
+    <div class="ov-label">Ingest</div>
+    <div class="ov-value">{{ sources_ok }}/{{ sources_total }}</div>
+    <div class="ov-sub">
+      {% if stale_sources %}stale: {{ stale_sources|join:", " }}{% else %}sources fresh{% endif %}
+    </div>
+  </a>
 </div>
 
 {# Clients with severe (critical+high) issues in ≥2 domains — top 5 #}
