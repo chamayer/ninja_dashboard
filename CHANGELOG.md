@@ -2,6 +2,27 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.53.0] — 2026-07-16 — Devices fleet page (Wave UI-2.D)
+
+### Added
+- New `/devices/` fleet page — entity-first browse across every
+  client:
+  - **Overview cards**: Total · Online · Offline · Servers ·
+    Workstations · In patch scope. Each clickthrough pre-applies
+    the relevant filter.
+  - **OS chip strip**: All / Windows / macOS / Linux / Other,
+    counts sourced from `v_device.os_group`.
+  - **Filter bar**: hostname/serial search · client dropdown ·
+    role · online/offline.
+  - **Table**: 500-row cap, sortable columns, per-row Health
+    traffic light (red = severe issues, amber = offline, green =
+    healthy), hostname clickthrough to device detail, severe-issue
+    count with clickthrough to filtered Issues.
+  - Reads `v_device` for combined canonical + session +
+    patching-scope in one query.
+- Primary nav gains **Devices** link (between Clients and
+  Patching), giving 6 workflow domains total.
+
 ## [0.52.1] — 2026-07-16 — Docs: Track UI-2 formalized
 
 Backfills a proper track entry for the UI redesign work that was

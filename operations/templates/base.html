@@ -248,6 +248,9 @@
             <a class="nav-link {% if request.resolver_match and 'org' in request.resolver_match.url_name %}active{% endif %}"
                href="{% url 'org_index' org_slug='all' %}">Clients</a>
 
+            <a class="nav-link {% if request.resolver_match.url_name == 'devices_page' %}active{% endif %}"
+               href="{% url 'devices_page' %}">Devices</a>
+
             <a class="nav-link {% if request.resolver_match.url_name == 'patching_queue' %}active{% endif %}"
                href="{% url 'patching_queue' %}">Patching{% if nav_patching_open %} <span class="nav-badge">{{ nav_patching_open }}</span>{% endif %}</a>
 

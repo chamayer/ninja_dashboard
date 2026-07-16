@@ -1280,6 +1280,145 @@ def software_page(request: HttpRequest) -> HttpResponse:
 
 
 # ─────────────────────────────────────────────────────────────────────
+# Devices fleet page — entity-first browse across every client.
+# Parallels /software/ and /patching/ — overview cards + filter chips
+# + main table. Per-client /orgs/<slug>/devices/ stays as-is for the
+# scoped view.
+# ─────────────────────────────────────────────────────────────────────
+
+@login_required
+def devices_page(request: HttpRequest) -> HttpResponse:
+    q_filter = (request.GET.get("q") or "").strip()
+    os_filter = request.GET.get("os", "")           # Windows | macOS | Linux | Other
+    role_filter = request.GET.get("role", "")       # server | workstation | unknown
+    online_filter = request.GET.get("online", "")   # online | offline
+    client_filter = request.GET.get("client", "")   # slug
+
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+
+        # Overview — reads v_device to get session state + scope in one query
+        cur.execute(
+            """
+            SELECT COUNT(*) AS total,
+                   COUNT(*) FILTER (WHERE is_online_any) AS online,
+                   COUNT(*) FILTER (WHERE NOT is_online_any) AS offline,
+                   COUNT(*) FILTER (WHERE device_role = 'server') AS servers,
+                   COUNT(*) FILTER (WHERE device_role = 'workstation') AS workstations,
+                   COUNT(*) FILTER (WHERE effective_patching_scope = 'Included') AS in_patch_scope,
+                   COUNT(*) FILTER (WHERE last_contact_at IS NULL
+                                    OR last_contact_at < NOW() - INTERVAL '7 days') AS stale
+            FROM operations.v_device
+            WHERE tenant_id = 1
+            """
+        )
+        row = cur.fetchone()
+        overview = {
+            "total": row[0], "online": row[1], "offline": row[2],
+            "servers": row[3], "workstations": row[4],
+            "in_patch_scope": row[5], "stale": row[6],
+        }
+
+        # OS group breakdown for chip strip
+        cur.execute(
+            """
+            SELECT os_group, COUNT(*) FROM operations.v_device
+            WHERE tenant_id = 1 GROUP BY os_group ORDER BY COUNT(*) DESC
+            """
+        )
+        os_rows = cur.fetchall()
+
+        # Device table — v_device + client name. Apply filters.
+        where = ["v.tenant_id = 1"]
+        params: list = []
+        if q_filter:
+            where.append(
+                "(v.canonical_hostname ILIKE %s OR v.canonical_serial ILIKE %s)"
+            )
+            params.extend([f"%{q_filter}%", f"%{q_filter}%"])
+        if os_filter:
+            where.append("v.os_group = %s")
+            params.append(os_filter)
+        if role_filter:
+            where.append("v.device_role = %s")
+            params.append(role_filter)
+        if online_filter == "online":
+            where.append("v.is_online_any")
+        elif online_filter == "offline":
+            where.append("NOT v.is_online_any")
+        if client_filter:
+            where.append("v.client_id = (SELECT id FROM operations.clients WHERE slug = %s AND tenant_id = 1)")
+            params.append(client_filter)
+
+        where_sql = " AND ".join(where)
+        cur.execute(
+            f"""
+            SELECT v.device_id, v.canonical_hostname, v.canonical_serial,
+                   v.device_role, v.os_group, v.os_name,
+                   v.is_online_any, v.online_sources, v.last_contact_at,
+                   v.effective_patching_scope,
+                   c.display_name AS client_name, c.slug AS client_slug,
+                   (SELECT COUNT(*) FROM operations.findings f
+                    WHERE f.tenant_id = 1
+                      AND f.subject_type = 'device'
+                      AND f.subject_id = v.device_id
+                      AND f.status IN ('open','acknowledged','investigating')
+                      AND f.severity IN ('critical','high')
+                   ) AS severe_issues
+            FROM operations.v_device v
+            LEFT JOIN operations.clients c ON c.id = v.client_id
+            WHERE {where_sql}
+            ORDER BY v.canonical_hostname
+            LIMIT 500
+            """,
+            params,
+        )
+        device_rows = cur.fetchall()
+
+    devices = []
+    for row in device_rows:
+        (did, hostname, serial, role, os_group, os_name, is_online,
+         online_sources, last_contact, scope, client_name, client_slug,
+         severe) = row
+        # Traffic-light health per row
+        if severe and severe > 0:
+            health = "red"
+        elif not is_online:
+            health = "amber"
+        else:
+            health = "green"
+        devices.append({
+            "id": did, "hostname": hostname, "serial": serial or "",
+            "role": role, "os_group": os_group, "os_name": os_name,
+            "is_online": is_online, "online_sources": online_sources or [],
+            "last_contact": last_contact,
+            "scope": scope, "client_name": client_name,
+            "client_slug": client_slug, "severe": severe or 0,
+            "health": health,
+        })
+
+    clients = Client.objects.filter(
+        tenant_id=1, deleted_at__isnull=True,
+    ).order_by("display_name")
+
+    return render(
+        request,
+        "devices_page.html",
+        {
+            "overview": overview,
+            "os_rows": os_rows,
+            "devices": devices,
+            "clients": clients,
+            "active_q": q_filter,
+            "active_os": os_filter,
+            "active_role": role_filter,
+            "active_online": online_filter,
+            "active_client": client_filter,
+        },
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────
 # Patching queue — dedicated surface for the 5 patching finding types
 # emitted by ingest/patch_findings.py. Complements the general findings
 # queue with per-type tiles + scope filter (only in-scope devices fire

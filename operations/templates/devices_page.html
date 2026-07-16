@@ -1,0 +1,194 @@
+{% extends "base.html" %}
+{% load human_labels %}
+
+{% block title %}Devices{% endblock %}
+
+{% block content %}
+<style>
+  .dv-overview {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 0.65rem; margin-bottom: 1rem;
+  }
+  .dv-tile {
+    display: block; padding: 0.75rem 1rem;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 6px; text-decoration: none; color: inherit;
+  }
+  .dv-tile:hover { border-color: var(--accent); }
+  .dv-tile.active { background: #eef4fb; border-color: var(--accent); }
+  .dv-tile .dv-label { font-size: 0.72rem; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.06em; color: var(--muted); margin-bottom: 0.2rem; }
+  .dv-tile .dv-value { font-size: 1.6rem; font-weight: 700; line-height: 1.1; color: #1a1a2e; }
+  .dv-tile .dv-sub { font-size: 0.72rem; color: var(--muted); margin-top: 0.2rem; }
+  .dv-tile.alert { border-left: 3px solid #dc2626; }
+  .dv-tile.alert .dv-value { color: #dc2626; }
+  .dv-tile.online { border-left: 3px solid #16a34a; }
+  .dv-tile.online .dv-value { color: #16a34a; }
+
+  .dv-chips { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.5rem; }
+  .dv-chip {
+    display: inline-flex; align-items: center; gap: 0.35rem;
+    padding: 0.3rem 0.7rem; border: 1px solid var(--border); border-radius: 999px;
+    background: #fff; text-decoration: none; color: #374151; font-size: 0.82rem;
+  }
+  .dv-chip:hover { border-color: var(--accent); }
+  .dv-chip.active { background: #1e40af; border-color: #1e40af; color: #fff; }
+  .dv-chip .chip-count { font-weight: 600; color: var(--muted); }
+  .dv-chip.active .chip-count { color: #fecaca; }
+
+  .dv-table th, .dv-table td { padding: 0.5rem 0.75rem; vertical-align: middle; }
+  .dv-table tbody tr { border-bottom: 1px solid var(--border); }
+  .health-light {
+    display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+    vertical-align: middle;
+  }
+  .health-light.red { background: #dc2626; box-shadow: 0 0 0 2px #fee2e2; }
+  .health-light.amber { background: #ea580c; box-shadow: 0 0 0 2px #ffedd5; }
+  .health-light.green { background: #16a34a; box-shadow: 0 0 0 2px #dcfce7; }
+</style>
+
+<div class="card">
+    <h1>Devices
+      <span class="muted" style="font-weight:400; font-size:0.9rem;">
+        {{ overview.total }} across all clients
+      </span>
+    </h1>
+    <p class="muted">Every device across every client — filter, search, drill in.</p>
+</div>
+
+<div class="dv-overview">
+    <div class="dv-tile">
+        <div class="dv-label">Total</div>
+        <div class="dv-value">{{ overview.total }}</div>
+    </div>
+    <a class="dv-tile online" href="?online=online">
+        <div class="dv-label">Online</div>
+        <div class="dv-value">{{ overview.online }}</div>
+        <div class="dv-sub">any source in last 24h</div>
+    </a>
+    <a class="dv-tile alert" href="?online=offline">
+        <div class="dv-label">Offline</div>
+        <div class="dv-value">{{ overview.offline }}</div>
+        <div class="dv-sub">no source checking in</div>
+    </a>
+    <a class="dv-tile" href="?role=server">
+        <div class="dv-label">Servers</div>
+        <div class="dv-value">{{ overview.servers }}</div>
+    </a>
+    <a class="dv-tile" href="?role=workstation">
+        <div class="dv-label">Workstations</div>
+        <div class="dv-value">{{ overview.workstations }}</div>
+    </a>
+    <div class="dv-tile">
+        <div class="dv-label">In patch scope</div>
+        <div class="dv-value">{{ overview.in_patch_scope }}</div>
+    </div>
+</div>
+
+<div class="card">
+    <h2 style="font-size:0.95rem; margin:0 0 0.5rem 0; color:#9ca3af;">Filter by OS</h2>
+    <div class="dv-chips">
+        <a class="dv-chip {% if not active_os %}active{% endif %}" href="{% url 'devices_page' %}">
+            All <span class="chip-count">{{ overview.total }}</span>
+        </a>
+        {% for os_group, cnt in os_rows %}
+            <a class="dv-chip {% if active_os == os_group %}active{% endif %}" href="?os={{ os_group }}">
+                {{ os_group|humanize_label|default:os_group }} <span class="chip-count">{{ cnt }}</span>
+            </a>
+        {% endfor %}
+    </div>
+
+    <form method="get" style="display:flex; gap:0.5rem; align-items:center; margin-top:0.75rem; flex-wrap:wrap;">
+        <input type="search" name="q" placeholder="Hostname or serial…"
+               value="{{ active_q|default:'' }}"
+               style="padding:0.4rem 0.7rem; border:1px solid var(--border); border-radius:4px; font-size:0.85rem; min-width:220px;">
+        <select name="client" style="padding:0.4rem 0.7rem; border:1px solid var(--border); border-radius:4px;">
+            <option value="">Any client</option>
+            {% for c in clients %}
+                <option value="{{ c.slug }}" {% if active_client == c.slug %}selected{% endif %}>{{ c.display_name }}</option>
+            {% endfor %}
+        </select>
+        <select name="role" style="padding:0.4rem 0.7rem; border:1px solid var(--border); border-radius:4px;">
+            <option value="">Any role</option>
+            <option value="server" {% if active_role == 'server' %}selected{% endif %}>Server</option>
+            <option value="workstation" {% if active_role == 'workstation' %}selected{% endif %}>Workstation</option>
+            <option value="unknown" {% if active_role == 'unknown' %}selected{% endif %}>Not determined</option>
+        </select>
+        <select name="online" style="padding:0.4rem 0.7rem; border:1px solid var(--border); border-radius:4px;">
+            <option value="">Online or offline</option>
+            <option value="online" {% if active_online == 'online' %}selected{% endif %}>Online only</option>
+            <option value="offline" {% if active_online == 'offline' %}selected{% endif %}>Offline only</option>
+        </select>
+        {% if active_os %}<input type="hidden" name="os" value="{{ active_os }}">{% endif %}
+        <button type="submit">Apply</button>
+        {% if active_q or active_client or active_role or active_online %}
+            <a href="?{% if active_os %}os={{ active_os }}{% endif %}" style="font-size:0.85rem;">Clear</a>
+        {% endif %}
+    </form>
+</div>
+
+<div class="card">
+    <h2>Devices
+      <span class="muted" style="font-weight:400; font-size:0.85rem;">
+        ({{ devices|length }}{% if devices|length == 500 %}+{% endif %})
+      </span>
+    </h2>
+    {% if devices %}
+    <table class="dv-table" data-sortable>
+        <thead>
+            <tr>
+                <th style="width:30px;"></th>
+                <th>Hostname</th>
+                <th>Client</th>
+                <th>Role</th>
+                <th>OS</th>
+                <th>Online sources</th>
+                <th class="num">Last contact</th>
+                <th class="num">Severe issues</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for d in devices %}
+            <tr>
+                <td><span class="health-light {{ d.health }}" title="{{ d.health|humanize_label }}"></span></td>
+                <td>
+                    {% if d.client_slug %}
+                        <a href="{% url 'device_detail' org_slug=d.client_slug device_id=d.id %}"><code>{{ d.hostname }}</code></a>
+                    {% else %}
+                        <code>{{ d.hostname }}</code>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if d.client_slug %}
+                        <a href="{% url 'org_index' org_slug=d.client_slug %}">{{ d.client_name }}</a>
+                    {% else %}
+                        <span class="muted">—</span>
+                    {% endif %}
+                </td>
+                <td class="muted">{{ d.role|humanize_label|default:"—" }}</td>
+                <td class="muted">{{ d.os_group|humanize_label|default:"—" }}</td>
+                <td class="muted">
+                    {% if d.online_sources %}
+                        {{ d.online_sources|join:", " }}
+                    {% else %}
+                        <span style="color:#dc2626;">none</span>
+                    {% endif %}
+                </td>
+                <td class="muted num">{{ d.last_contact|date:"Y-m-d H:i"|default:"—" }}</td>
+                <td class="num">
+                    {% if d.severe %}
+                        <a href="{% url 'findings_queue' %}?client={{ d.client_slug }}&severity=high" style="color:#dc2626; font-weight:600;">{{ d.severe }}</a>
+                    {% else %}
+                        <span class="muted">—</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="muted">No devices match the current filter.</p>
+    {% endif %}
+</div>
+{% endblock %}
