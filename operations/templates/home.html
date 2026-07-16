@@ -81,7 +81,7 @@
 {% if severity_counts.critical %}
 <div style="background:#fef2f2; border:1px solid #fca5a5; border-radius:6px; padding:0.85rem 1.25rem; margin-bottom:1rem; display:flex; align-items:center; gap:0.75rem;">
   <span style="width:10px; height:10px; border-radius:50%; background:#dc2626; display:inline-block; flex-shrink:0;"></span>
-  <span style="font-weight:600; color:#dc2626;">{{ severity_counts.critical }} critical finding{{ severity_counts.critical|pluralize }} across the fleet</span>
+  <span style="font-weight:600; color:#dc2626;">{{ severity_counts.critical }} critical issue{{ severity_counts.critical|pluralize }} across the fleet</span>
   <a href="{% url 'findings_queue' %}?severity=critical" style="margin-left:auto; font-size:0.85rem; color:#dc2626;">View all →</a>
 </div>
 {% endif %}
@@ -92,7 +92,7 @@
   <span><strong>{{ total_devices }}</strong> devices</span>
   <span><strong>{{ patching_pop.in_scope }}</strong> in patching scope</span>
   <span><strong>{{ sources_ok }}/{{ sources_total }}</strong> sources fresh</span>
-  <span><strong>{{ total_active_findings }}</strong> open findings</span>
+  <span><strong>{{ total_active_findings }}</strong> open issues</span>
 </div>
 
 {# ── Exception panel: clients with issues in ≥2 domains ───── #}
@@ -107,7 +107,7 @@
   <div class="fire-item">
     <a href="{% url 'org_index' org_slug=row.client.slug %}">{{ row.client.display_name }}</a>
     <span class="fire-domain-badge">{{ row.domain_count }} domains</span>
-    <span class="muted">{{ row.finding_count }} finding{{ row.finding_count|pluralize }} open</span>
+    <span class="muted">{{ row.finding_count }} issue{{ row.finding_count|pluralize }} open</span>
     <a href="{% url 'findings_queue' %}?client={{ row.client.slug }}" style="margin-left:auto; font-size:0.82rem;">View →</a>
   </div>
   {% endfor %}
@@ -153,7 +153,7 @@
         <th style="width: 40px;"></th>
         <th>Client</th>
         <th style="text-align:right;">Devices</th>
-        <th>Findings</th>
+        <th>Issues</th>
         <th style="text-align:right;">Coverage gaps</th>
       </tr>
     </thead>

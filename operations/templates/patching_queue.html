@@ -7,9 +7,9 @@
 <div class="card">
     <h1>Patching</h1>
     <p class="muted">
-        Only devices that are in patching scope fire these findings.
+        Only devices that are in patching scope produce these items.
         Excluded and Not-managed devices are intentionally quiet in
-        the findings table — browse them via the Device population
+        the table below — browse them via the Device population
         section.
     </p>
 </div>
@@ -79,7 +79,7 @@
 {# Per-type finding tiles — reflect all filters. Click → filter table by that type. #}
 <div class="card">
     <h2 style="font-size: 0.95rem; margin: 0 0 0.5rem 0; color: #9ca3af;">
-        Open findings by type
+        Open items by type
         <span class="muted">({{ total_active }} total matching filters)</span>
     </h2>
     {% include "_tiles.html" with tiles=tiles %}
@@ -133,7 +133,7 @@
 {% endif %}
 
 <div class="card">
-    <h2>Findings</h2>
+    <h2>Items</h2>
     {% if rows %}
     <table>
         <thead>
@@ -180,7 +180,7 @@
     </table>
     {% include "_pagination.html" with page_obj=page_obj paginator=page_obj.paginator page_query=page_query %}
     {% else %}
-    <p class="muted">No patching findings match the current filters.</p>
+    <p class="muted">No patching items match the current filters.</p>
     {% endif %}
 </div>
 {% endblock %}

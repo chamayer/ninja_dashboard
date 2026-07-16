@@ -2,6 +2,19 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.50.2] — 2026-07-16 — Kill "Findings" from UI copy
+
+### Changed
+- Every user-visible "Findings" / "findings" / "Finding" replaced
+  with "Issues" / "issues" / "Issue" (or "Items" in low-key
+  contexts). Applies to home, findings_queue, findings_admin_health,
+  device_detail, coverage, patching_queue, notification_rules,
+  notification_suppressions.
+- Backend model + variable names untouched (Finding, findings_queue
+  URL). Change is display-layer only.
+- Saved permanent memory rule: "Ban the word 'findings' from UI
+  copy — compliance jargon, not operator language."
+
 ## [0.50.1] — 2026-07-16 — Dashboard: fleet-operator research pass
 
 ### Changed

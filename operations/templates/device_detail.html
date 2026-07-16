@@ -20,7 +20,7 @@
 
 {% if patching %}
 <div class="card">
-    <h2>Patching <span class="muted" style="font-weight:400;font-size:0.85rem;">— scope drives whether this device fires patch findings</span></h2>
+    <h2>Patching <span class="muted" style="font-weight:400;font-size:0.85rem;">— scope drives whether this device produces patch alerts</span></h2>
     <table class="ops-table" style="width:auto;">
         <tbody>
             <tr>
@@ -98,12 +98,12 @@
 
 {% if active_findings %}
 <div class="card">
-    <h2>Active Findings</h2>
+    <h2>Active issues</h2>
     <table data-sortable class="ops-table">
         <thead>
             <tr>
                 <th>Severity</th>
-                <th>Finding</th>
+                <th>Issue</th>
                 <th>Status</th>
                 <th>First seen</th>
                 <th>Last seen</th>

@@ -5,7 +5,7 @@
 {% block content %}
 <div class="card">
     <h1>Admin / Platform Health</h1>
-    <p class="muted">Platform-level findings: queue health, identity resolution backlogs, and other operational issues.</p>
+    <p class="muted">Platform-level items: queue health, identity resolution backlogs, and other operational issues.</p>
 </div>
 
 <div class="card">
@@ -81,11 +81,11 @@
         </tbody>
     </table>
     {% else %}
-    <p class="muted">No admin findings match the current filters.</p>
+    <p class="muted">No admin items match the current filters.</p>
     {% endif %}
 </div>
 
 <div style="margin-top: 1rem;">
-    <a href="{% url 'findings_queue' %}" style="font-size: 0.85rem;">&larr; Entity findings</a>
+    <a href="{% url 'findings_queue' %}" style="font-size: 0.85rem;">&larr; Back to issues</a>
 </div>
 {% endblock %}

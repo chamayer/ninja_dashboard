@@ -6,9 +6,9 @@
 <div class="card">
     <h1>Notification rules</h1>
     <p class="muted">
-        Every finding is matched against these rules (most-specific first),
-        routed via `notification_routes`, and cooldown-tracked. Rules
-        seeded from legacy alert_rules start <strong>disabled</strong>;
+        Every item is matched against these rules (most-specific first),
+        routed to a notification channel, and cooldown-tracked. Rules
+        seeded from the legacy engine start <strong>disabled</strong>;
         enable each after reviewing the target route.
         {{ enabled_count }} enabled · {{ disabled_count }} disabled.
     </p>
@@ -20,7 +20,7 @@
     <table data-sortable class="ops-table">
         <thead>
             <tr>
-                <th>Finding type</th>
+                <th>Issue type</th>
                 <th>Class</th>
                 <th>Client</th>
                 <th>Match</th>
@@ -72,7 +72,7 @@
                 <th>Mode</th>
                 <th>Severity min</th>
                 <th>Client</th>
-                <th>Finding type</th>
+                <th>Issue type</th>
             </tr>
         </thead>
         <tbody>

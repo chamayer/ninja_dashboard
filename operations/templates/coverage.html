@@ -29,7 +29,7 @@
 <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:1rem;">
     <div>
         <h1 style="margin:0;">Compliance</h1>
-        <p class="muted" style="margin:0.25rem 0 0;">Devices missing required agents — active findings</p>
+        <p class="muted" style="margin:0.25rem 0 0;">Devices missing required agents — active issues</p>
     </div>
     {% if critical_count %}
     <span class="badge badge-critical">{{ critical_count }} critical gap{{ critical_count|pluralize }}</span>
@@ -54,7 +54,7 @@
     <div class="cov-tile">
         <div class="tl">Clients affected</div>
         <div class="tv">{{ clients_affected|default:"0" }}</div>
-        <div class="ts">With open findings</div>
+        <div class="ts">With open issues</div>
     </div>
     {% if missing_devices %}
     <div class="cov-tile">
@@ -151,7 +151,7 @@
 <div class="card">
     <p class="muted">
         No active compliance gaps detected.
-        {% if not gap_rows %}Run an agent compliance ingest from <a href="{% url 'sources_status' %}">Sources</a> to populate findings.{% endif %}
+        {% if not gap_rows %}Run an agent compliance ingest from <a href="{% url 'sources_status' %}">Sources</a> to populate items.{% endif %}
     </p>
 </div>
 {% endif %}

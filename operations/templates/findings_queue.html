@@ -1,11 +1,11 @@
 {% extends "base.html" %}
 
-{% block title %}Findings{% endblock %}
+{% block title %}Issues{% endblock %}
 
 {% block content %}
 <div class="card">
-    <h1>Findings</h1>
-    <p class="muted">Entity findings — gaps and lifecycle events on canonical devices and clients.</p>
+    <h1>Issues</h1>
+    <p class="muted">Everything that needs your attention across devices and clients — gaps, alerts, and incidents.</p>
 </div>
 
 <div class="card">
@@ -156,11 +156,11 @@
     </table>
     {% include "_pagination.html" with page_obj=page_obj paginator=page_obj.paginator page_query=page_query %}
     {% else %}
-    <p class="muted">No findings match the current filters.</p>
+    <p class="muted">No items match the current filters.</p>
     {% endif %}
 </div>
 
 <div style="margin-top: 1rem;">
-    <a href="{% url 'findings_admin_health' %}" style="font-size: 0.85rem;">Admin / platform health findings &rarr;</a>
+    <a href="{% url 'findings_admin_health' %}" style="font-size: 0.85rem;">Admin / platform health items &rarr;</a>
 </div>
 {% endblock %}
