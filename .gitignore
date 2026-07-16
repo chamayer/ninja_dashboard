@@ -47,3 +47,7 @@ operations/.python-version
 operations/htmlcov/
 operations/.coverage
 operations/coverage.xml
+
+# Claude Code local session state
+.claude/
+operations/.claude/
