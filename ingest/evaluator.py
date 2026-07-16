@@ -593,6 +593,28 @@ def _evaluate_coverage(
         log.warning("evaluator: finding_type 'missing_required_platform' not found")
         return 0
 
+    # Pre-compute devices that are fully offline (last contact across
+    # ALL agents older than the device_offline threshold). Per
+    # BLUEPRINT §1.8, `stale_required_platform` should NOT fire on
+    # such devices — the device-level `device_offline` finding covers
+    # them, and per-agent stale is redundant noise when the whole
+    # device is silent. `missing_required_platform` STILL fires on
+    # offline devices (the agent was never installed, that's a real
+    # gap regardless of current online state).
+    cur.execute(
+        f"""
+        SELECT apc.device_id
+        FROM operations.agent_presence_current apc
+        WHERE apc.tenant_id = %s
+          AND apc.entity_type LIKE 'agent.%%'
+        GROUP BY apc.device_id
+        HAVING MAX(COALESCE(apc.last_contact_at, apc.last_observed_at))
+             < NOW() - INTERVAL '{_LONG_OFFLINE_DAYS} days'
+        """,
+        (tenant_id,),
+    )
+    fully_offline_devices = {r[0] for r in cur.fetchall()}
+
     # Pull every device + agent-universe flag once. Exemptions come from
     # device_operator_decisions (Track O batch O3 — polymorphic operator
     # decisions storage). Empty {} if no row.
@@ -676,6 +698,13 @@ def _evaluate_coverage(
                     last_observed = last_observed.replace(tzinfo=timezone.utc)
                 gap_age_hours = (now - last_observed).total_seconds() / 3600
                 if gap_age_hours < gap_hours:
+                    continue
+                # BLUEPRINT §1.8: if the whole device is offline
+                # (all agents silent past the device_offline
+                # threshold), the device-level `device_offline`
+                # finding covers it. Per-agent stale would be
+                # redundant noise for a device nobody can reach.
+                if dev_id in fully_offline_devices:
                     continue
                 if gap_age_hours >= conf_hours:
                     confidence = "confirmed"
@@ -1017,6 +1046,37 @@ def _auto_resolve(
               )
             """,
             (now, tenant_id, ft_id, device_id, device_id),
+        )
+        count += cur.rowcount or 0
+
+    # Resolve stale_required_platform on devices that are now fully
+    # offline (BLUEPRINT §1.8): device_offline covers the whole
+    # device, per-agent stale becomes noise. Reciprocal of the
+    # suppression in _evaluate_coverage — closes legacy rows so they
+    # don't linger after the emission gate kicks in.
+    stale_ft_id = _get_finding_type_id(cur, "stale_required_platform")
+    if stale_ft_id:
+        # Non-correlated subquery — Postgres computes the
+        # offline-device set once. Tenant is always the same for
+        # the outer scope so it's safe to bind directly.
+        cur.execute(
+            f"""
+            UPDATE operations.findings f
+            SET status = 'resolved', last_seen_at = %s
+            WHERE f.tenant_id = %s AND f.finding_type_id = %s
+              AND f.status IN ('open', 'acknowledged')
+              AND (%s::uuid IS NULL OR f.subject_id = %s)
+              AND f.subject_id IN (
+                  SELECT apc.device_id
+                  FROM operations.agent_presence_current apc
+                  WHERE apc.tenant_id = %s
+                    AND apc.entity_type LIKE 'agent.%%'
+                  GROUP BY apc.device_id
+                  HAVING MAX(COALESCE(apc.last_contact_at, apc.last_observed_at))
+                       < NOW() - INTERVAL '{_LONG_OFFLINE_DAYS} days'
+              )
+            """,
+            (now, tenant_id, stale_ft_id, device_id, device_id, tenant_id),
         )
         count += cur.rowcount or 0
 

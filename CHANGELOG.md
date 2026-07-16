@@ -2,6 +2,35 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.50.7] — 2026-07-16 — Evaluator: stop stale on offline devices
+
+### Fixed
+- `ingest/evaluator.py` `_evaluate_coverage` now suppresses
+  `stale_required_platform` on devices that are entirely offline
+  (last contact across ALL agents older than `_LONG_OFFLINE_DAYS`
+  = 7 days). The device-level `device_offline` finding already
+  covers those; per-agent stale is redundant noise when the
+  whole device is silent.
+  - Aligns implementation with BLUEPRINT §1.8, which already
+    described this behavior — code just wasn't enforcing it.
+- `_auto_resolve` gained a new pass that closes existing
+  `stale_required_platform` findings whose devices have since
+  become fully offline. Prevents the current ~1,100 open stale
+  rows from lingering after the new suppression takes effect.
+
+### Kept firing on offline devices
+- `missing_required_platform` — agent was never installed. Real
+  gap regardless of current online state.
+- `device_offline` — that's the whole point of it.
+
+### Expected impact
+- The Dashboard "Not reporting" card should drop substantially
+  on the next evaluator cycle (many currently-open stale rows
+  are on devices that have been offline > 7 days).
+- Number won't go to zero — devices with SOME agents online +
+  ONE agent silent will still legitimately fire stale on that
+  specific agent (the real actionable case).
+
 ## [0.50.6] — 2026-07-16 — Split Missing vs Not reporting
 
 ### Fixed
