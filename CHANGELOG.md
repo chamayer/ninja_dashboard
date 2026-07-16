@@ -2,6 +2,25 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.50.3] — 2026-07-16 — "Needs immediate attention" panel — tighten signal
+
+### Fixed
+- Old "Clients on fire" panel flagged 10 rows all saying "3 domains"
+  because low-severity software noise (~11k `rare_recent`) hits
+  every client across patching + software + coverage trivially.
+  Result: no signal, dominated the page visually.
+- Retightened:
+  - Restrict to `severity IN (critical, high)` — drops medium
+    software noise entirely, so "on fire" means real severe issues.
+  - Cap to top 5 rows (was 10).
+  - Renamed "Clients on fire" → "Needs immediate attention" — the
+    fire metaphor was a monitoring cliché; this is what the panel
+    actually IS.
+  - Compact styling: smaller heading, tighter row padding, no more
+    domain badge (which was meaningless when everyone was 3),
+    single-line row per client.
+  - Panel hidden entirely if zero clients qualify.
+
 ## [0.50.2] — 2026-07-16 — Kill "Findings" from UI copy
 
 ### Changed

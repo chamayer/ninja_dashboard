@@ -45,15 +45,11 @@
   .finding-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
   .dot-critical { background: #dc2626; } .dot-high { background: #ea580c; } .dot-medium { background: #ca8a04; }
 
-  /* On-fire exception panel */
-  .fire-panel { border-left: 4px solid #dc2626; }
+  /* Attention exception panel — compact */
+  .fire-panel { border-left: 3px solid #dc2626; padding: 0.9rem 1.25rem !important; }
   .fire-item { display: flex; align-items: center; gap: 0.5rem;
-    padding: 0.4rem 0; font-size: 0.88rem; border-bottom: 1px solid var(--border); }
-  .fire-item:last-child { border-bottom: none; }
-  .fire-domain-badge {
-    display: inline-block; padding: 1px 0.5rem; border-radius: 12px;
-    background: #fee2e2; color: #991b1b; font-size: 0.72rem; font-weight: 600;
-  }
+    padding: 0.3rem 0; font-size: 0.85rem; border-bottom: 1px solid var(--border); }
+  .fire-item:last-child { border-bottom: none; padding-bottom: 0; }
 
   /* Sidebar bottom section */
   .sidebar-grid {
@@ -95,20 +91,21 @@
   <span><strong>{{ total_active_findings }}</strong> open issues</span>
 </div>
 
-{# ── Exception panel: clients with issues in ≥2 domains ───── #}
+{# Clients with severe (critical+high) issues in ≥2 domains — top 5 #}
 {% if on_fire %}
 <div class="card fire-panel">
-  <h2>Clients on fire
-    <span class="muted" style="font-weight:400; font-size:0.85rem;">
-      — issues in ≥2 domains ({{ on_fire|length }})
+  <h2 style="font-size:1rem; margin:0 0 0.5rem 0;">
+    Needs immediate attention
+    <span class="muted" style="font-weight:400; font-size:0.82rem;">
+      — severe issues in multiple areas
     </span>
   </h2>
   {% for row in on_fire %}
   <div class="fire-item">
-    <a href="{% url 'org_index' org_slug=row.client.slug %}">{{ row.client.display_name }}</a>
-    <span class="fire-domain-badge">{{ row.domain_count }} domains</span>
-    <span class="muted">{{ row.finding_count }} issue{{ row.finding_count|pluralize }} open</span>
-    <a href="{% url 'findings_queue' %}?client={{ row.client.slug }}" style="margin-left:auto; font-size:0.82rem;">View →</a>
+    <a href="{% url 'org_index' org_slug=row.client.slug %}"><strong>{{ row.client.display_name }}</strong></a>
+    <span class="muted">·</span>
+    <span class="muted">{{ row.severe_count }} severe · spanning {{ row.domain_count }} areas</span>
+    <a href="{% url 'findings_queue' %}?client={{ row.client.slug }}&severity=high" style="margin-left:auto; font-size:0.82rem;">Open →</a>
   </div>
   {% endfor %}
 </div>

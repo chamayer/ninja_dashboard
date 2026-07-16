@@ -131,30 +131,30 @@ def home(request: HttpRequest) -> HttpResponse:
         .annotate(n=Count("id"))
     }
 
-    # ── Clients on fire — issues in ≥2 domains today ────────────
-    # Portfolio-attention exception panel per MSP-dashboard
-    # research: not "who has the most alerts" but "who has
-    # problems spanning multiple domains." Filter to
-    # operator-facing categories (patching, software, coverage);
-    # skip infra categories (platform, resolver).
+    # ── Clients on fire — SEVERE issues in ≥2 domains ───────────
+    # Genuine signal only: critical OR high severity in ≥2 of
+    # patching / software / coverage. Medium-severity software
+    # noise (~11k rare_recent) would otherwise flag every client
+    # trivially — "on fire" needs to mean something.
     on_fire = []
     with connection.cursor() as cur:
         cur.execute(
             """
             SELECT f.client_id,
                    COUNT(DISTINCT ft.category_id) AS domain_count,
-                   COUNT(*) AS finding_count
+                   COUNT(*) AS severe_count
             FROM operations.findings f
             JOIN operations.finding_types ft ON ft.id = f.finding_type_id
             JOIN operations.finding_categories fc ON fc.id = ft.category_id
             WHERE f.tenant_id = 1
               AND f.status IN ('open', 'acknowledged', 'investigating')
+              AND f.severity IN ('critical', 'high')
               AND fc.name IN ('patching', 'software', 'coverage')
               AND f.client_id IS NOT NULL
             GROUP BY f.client_id
             HAVING COUNT(DISTINCT ft.category_id) >= 2
-            ORDER BY domain_count DESC, finding_count DESC
-            LIMIT 10
+            ORDER BY domain_count DESC, severe_count DESC
+            LIMIT 5
             """
         )
         on_fire_rows = cur.fetchall()
@@ -165,13 +165,13 @@ def home(request: HttpRequest) -> HttpResponse:
                 id__in=[r[0] for r in on_fire_rows],
             )
         }
-        for cid, domain_count, finding_count in on_fire_rows:
+        for cid, domain_count, severe_count in on_fire_rows:
             c = client_lookup.get(cid)
             if c:
                 on_fire.append({
                     "client": c,
                     "domain_count": domain_count,
-                    "finding_count": finding_count,
+                    "severe_count": severe_count,
                 })
 
     # ── Client portfolio with health traffic light ──────────────
