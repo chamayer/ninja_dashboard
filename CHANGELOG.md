@@ -2,6 +2,23 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.47.0] — 2026-07-16
+
+### Removed
+- **Header client picker** — was vestigial. Redundant with the
+  Dashboard Client Health table (click to enter a client) and with
+  the per-page Client filter on every queue. Removed the whole
+  `<div class="selector">` block from `base.html`, its `<style>`
+  rules, and the `.ts-header` dark-theme block (all dead code now).
+- The `client_switch` view + `/switch/` URL still exist for now;
+  they'll get cleaned up when Wave B lands (fleet-wide search
+  replaces the header space).
+
+### Changed
+- Header layout: brand on left, spacer div in the middle (Wave B
+  fleet-wide search placeholder), user info on right. Cleaner
+  header, no dropdown to style.
+
 ## [0.46.6] — 2026-07-16
 
 ### Changed
