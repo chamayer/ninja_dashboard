@@ -1,11 +1,55 @@
 {% extends "base.html" %}
+{% load human_labels %}
 
-{% block title %}Issues{% endblock %}
+{% block title %}{% if active_category %}{{ active_category|humanize_label }} issues{% else %}Issues{% endif %}{% endblock %}
 
 {% block content %}
+<style>
+  .tile-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 0.6rem; margin-bottom: 1rem;
+  }
+  .sev-tile {
+    display: block; padding: 0.75rem 1rem;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 6px; text-decoration: none; color: inherit;
+    transition: box-shadow 0.15s, border-color 0.15s;
+  }
+  .sev-tile:hover { box-shadow: 0 2px 6px rgba(0,0,0,0.06); border-color: var(--accent); }
+  .sev-tile.active { border-color: var(--accent); background: #eef4fb; }
+  .sev-tile .sev-label {
+    font-size: 0.72rem; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.06em; color: var(--muted); margin-bottom: 0.2rem;
+  }
+  .sev-tile .sev-count { font-size: 1.6rem; font-weight: 700; line-height: 1.1; color: #1a1a2e; }
+  .sev-tile.critical { border-left: 3px solid #dc2626; }
+  .sev-tile.critical .sev-count { color: #dc2626; }
+  .sev-tile.high { border-left: 3px solid #ea580c; }
+  .sev-tile.high .sev-count { color: #ea580c; }
+  .sev-tile.medium { border-left: 3px solid #ca8a04; }
+  .sev-tile.low { border-left: 3px solid #6b7280; }
+  .sev-tile.total { border-left: 3px solid var(--accent); }
+</style>
+
 <div class="card">
-    <h1>Issues</h1>
-    <p class="muted">Everything that needs your attention across devices and clients — gaps, alerts, and incidents.</p>
+    <h1>{% if active_category %}{{ active_category|humanize_label }} issues{% else %}Issues{% endif %}
+      <span class="muted" style="font-weight:400; font-size:0.9rem;">({{ total_matching }})</span>
+    </h1>
+    <p class="muted">Everything that needs your attention — filtered slice shown below.</p>
+</div>
+
+<div class="tile-row">
+    <div class="sev-tile total">
+        <div class="sev-label">Matching</div>
+        <div class="sev-count">{{ total_matching }}</div>
+    </div>
+    {% for t in severity_tiles %}
+        <a class="sev-tile {{ t.value }} {% if t.active %}active{% endif %}" href="{{ t.href }}">
+            <div class="sev-label">{{ t.label }}</div>
+            <div class="sev-count">{{ t.count }}</div>
+        </a>
+    {% endfor %}
 </div>
 
 <div class="card">

@@ -2,6 +2,21 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.51.0] — 2026-07-16 — Issues page: severity tiles + dynamic title
+
+### Added
+- Severity tile row on the Issues page (`findings_queue`):
+  - Total matching + one tile per severity (critical / high /
+    medium / low / info)
+  - Counts respect the ACTIVE filter set — narrowing filters
+    narrows tiles
+  - Click a tile to toggle that severity filter on/off (adds if
+    off, clears if on)
+  - Color-coded left border matches severity badge color
+- Dynamic page title: `/findings/?category=software` now shows
+  "Software issues (N)" instead of just "Issues"; same pattern
+  for any category filter.
+
 ## [0.50.7] — 2026-07-16 — Evaluator: stop stale on offline devices
 
 ### Fixed

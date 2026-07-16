@@ -902,6 +902,38 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             | Q(finding_details__hostname__icontains=q_filter)
         )
 
+    # Tile counts — computed BEFORE the [:500] slice so tiles show
+    # true matching totals across all filters (severity, category,
+    # client, etc.). Counts respect ALL current filters — including
+    # severity itself, so if severity is set the tiles reflect only
+    # that severity's slice (works as expected — you filter down,
+    # tiles narrow).
+    severity_tile_counts = {
+        row["severity"]: row["n"]
+        for row in qs.values("severity").annotate(n=Count("id"))
+    }
+    total_matching = sum(severity_tile_counts.values())
+
+    # Prebuild severity tiles — each is a dict the template renders
+    # directly (avoids needing a custom dict-lookup template filter).
+    # Clicking a tile TOGGLES that severity in the filter set.
+    severity_tiles = []
+    for sev, label in Finding.Severity.choices:
+        params = request.GET.copy()
+        params.pop("page", None)
+        is_active = severity_filter == sev
+        if is_active:
+            params.pop("severity", None)  # click again to clear
+        else:
+            params["severity"] = sev
+        severity_tiles.append({
+            "value": sev,
+            "label": label,
+            "count": severity_tile_counts.get(sev, 0),
+            "href": "?" + params.urlencode() if params else "?",
+            "active": is_active,
+        })
+
     _SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
     findings = sorted(qs[:500], key=lambda f: (_SEVERITY_ORDER.get(f.severity, 9), -(f.last_detected_at or f.last_seen_at).timestamp()))
 
@@ -1028,6 +1060,8 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             "active_q": q_filter,
             "active_confidence": confidence_filter,
             "active_client": client_filter,
+            "severity_tiles": severity_tiles,
+            "total_matching": total_matching,
             "page_query": page_query.urlencode(),
         },
     )
