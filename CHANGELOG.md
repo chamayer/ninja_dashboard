@@ -2,6 +2,28 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.46.1] — 2026-07-16
+
+### Fixed
+- **Filter dropdowns rendered as inline listboxes** when the
+  jsdelivr CDN was unreachable from the operator's browser
+  (corporate proxy / ad-blocker / DNS filter). Tom Select JS
+  never loaded, so `<select multiple class="ts">` fell back to
+  native multi-select which renders every option inline instead
+  of as a dropdown. Vendored `tom-select@2.3.1` under
+  `operations/apps/core/static/vendor/tom-select/` — served by
+  whitenoise, no CDN dependency. Script tag gains `defer` so it
+  never blocks HTML parsing.
+- **Header client selector** (76 clients) is now
+  `<select class="ts">` — searchable dropdown with type-ahead
+  instead of a 76-row native picker.
+
+### Changed
+- Tom Select CSS overrides reworked for the light theme (the app
+  is light-palette, not dark as the earlier override assumed).
+  Only layout tweaks + selected-item chip color remain; Tom
+  Select's own default light styling handles the rest.
+
 ## [0.46.0] — 2026-07-16
 
 Wave A of the UI redesign: human labels + searchable/multi-select

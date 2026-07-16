@@ -1,3 +1,4 @@
+{% load static %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -211,32 +212,30 @@
     })();
     </script>
 
-    {# Tom Select — searchable, multi-select filter dropdowns.
+    {# Tom Select 2.3.1 — searchable, multi-select filter dropdowns.
        Auto-attaches to any <select> with class="ts". Multi-select
-       enabled via the standard HTML `multiple` attribute. #}
-    <link rel="stylesheet"
-          href="https://cdn.jsdelivr.net/npm/tom-select@2.3.1/dist/css/tom-select.min.css">
-    <script src="https://cdn.jsdelivr.net/npm/tom-select@2.3.1/dist/js/tom-select.complete.min.js"></script>
+       via the standard HTML `multiple` attribute.
+       Vendored locally under core/static/vendor/tom-select so ops
+       does not depend on a reachable CDN (corporate proxies /
+       ad-blockers / DNS filters break CDN loads). #}
+    <link rel="stylesheet" href="{% static 'vendor/tom-select/tom-select.min.css' %}">
+    <script defer src="{% static 'vendor/tom-select/tom-select.complete.min.js' %}"></script>
     <style>
-        /* Match the app's dark palette (Tom Select defaults are light). */
-        .ts-wrapper { min-width: 180px; }
-        .ts-control {
-            background: #0f172a !important;
-            border: 1px solid #334155 !important;
-            color: #e5e7eb !important;
-        }
-        .ts-control input, .ts-control > .item { color: #e5e7eb !important; }
-        .ts-dropdown {
-            background: #1e293b !important;
-            border: 1px solid #334155 !important;
-            color: #e5e7eb !important;
-        }
-        .ts-dropdown .active { background: #334155 !important; color: #f1f5f9 !important; }
+        /* Layout-only tweaks; Tom Select's default light theme
+           matches the page (light --surface). Header's own dark
+           select background wins via .selector select specificity
+           until the header container-color is separately tuned. */
+        .ts-wrapper { min-width: 200px; }
+        .filterbar .ts-wrapper { min-width: 220px; }
         .ts-dropdown .option { padding: 0.35rem 0.6rem; }
+        /* Chip color for selected items in multi-select — subtle
+           accent instead of the browser default. */
         .ts-control > .item {
-            background: #1e40af !important;
+            background: #dbeafe;
+            border: 1px solid #93c5fd;
             border-radius: 3px;
-            padding: 0 0.4rem;
+            padding: 1px 0.4rem;
+            color: #1e40af;
         }
     </style>
     <script>
@@ -262,7 +261,7 @@
         <div class="selector">
             <form action="{% url 'client_switch' %}" method="get">
                 <label for="client-select">Client:</label>
-                <select id="client-select" name="slug" onchange="this.form.submit()">
+                <select id="client-select" name="slug" class="ts" onchange="this.form.submit()">
                     <option value="all"{% if org_mode == 'all' %} selected{% endif %}>— All clients —</option>
                     {% for c in clients %}
                         <option value="{{ c.slug }}"{% if current_client and current_client.id == c.id %} selected{% endif %}>{{ c.display_name }}</option>
