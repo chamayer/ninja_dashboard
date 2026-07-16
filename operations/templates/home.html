@@ -14,49 +14,48 @@
   }
   .fleet-strip strong { color: #1a1a2e; font-weight: 600; }
 
-  /* Portfolio bucket tiles — main "at a glance" */
-  .bucket-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-    gap: 0.75rem; margin-bottom: 1rem;
+  /* Attention filter chips (above scoreboard) */
+  .view-chips { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.75rem; }
+  .view-chip {
+    display: inline-flex; align-items: center; gap: 0.4rem;
+    padding: 0.35rem 0.8rem; border: 1px solid var(--border);
+    border-radius: 999px; background: #fff; text-decoration: none;
+    color: #374151; font-size: 0.85rem;
   }
-  .bucket-tile {
-    display: block;
-    padding: 1rem 1.25rem; border: 1px solid var(--border);
-    border-radius: 6px; background: var(--surface);
-    text-decoration: none; color: inherit;
-    transition: box-shadow 0.15s, border-color 0.15s;
-  }
-  .bucket-tile:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.08); border-color: var(--accent); }
-  .bucket-tile.active { border-color: var(--accent); background: #eef4fb; }
-  .bucket-tile .bucket-count { font-size: 1.8rem; font-weight: 700; line-height: 1.1; }
-  .bucket-tile .bucket-label { font-size: 0.78rem; font-weight: 600; color: var(--muted);
-    text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.25rem; }
-  .bucket-tile .bucket-sub { font-size: 0.78rem; color: var(--muted); margin-top: 0.3rem; }
-  .bucket-tile.critical { border-left: 4px solid #dc2626; }
-  .bucket-tile.critical .bucket-count { color: #dc2626; }
-  .bucket-tile.degrading { border-left: 4px solid #ea580c; }
-  .bucket-tile.degrading .bucket-count { color: #ea580c; }
-  .bucket-tile.healthy { border-left: 4px solid #16a34a; }
-  .bucket-tile.no_data { border-left: 4px solid #9ca3af; }
-  .bucket-tile.no_data .bucket-count { color: #6b7280; }
+  .view-chip:hover { border-color: var(--accent); }
+  .view-chip.active { background: #1e40af; border-color: #1e40af; color: #fff; }
+  .view-chip .chip-count { font-weight: 600; }
+  .view-chip .chip-count.attention { color: #dc2626; }
+  .view-chip.active .chip-count.attention { color: #fecaca; }
 
-  /* Client scoreboard table */
+  /* Health traffic light in the scoreboard */
+  .health-light {
+    display: inline-block; width: 12px; height: 12px; border-radius: 50%;
+    vertical-align: middle;
+  }
+  .health-light.red    { background: #dc2626; box-shadow: 0 0 0 2px #fee2e2; }
+  .health-light.amber  { background: #ea580c; box-shadow: 0 0 0 2px #ffedd5; }
+  .health-light.green  { background: #16a34a; box-shadow: 0 0 0 2px #dcfce7; }
+  .health-light.no_data{ background: #9ca3af; box-shadow: 0 0 0 2px #f3f4f6; }
+
+  /* Client scoreboard */
   .scoreboard th, .scoreboard td { padding: 0.5rem 0.75rem; vertical-align: middle; }
   .scoreboard tbody tr { border-bottom: 1px solid var(--border); }
-  .state-pill {
-    display: inline-block; padding: 1px 0.5rem; border-radius: 20px;
-    font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;
-  }
-  .state-pill.critical { background: #fee2e2; color: #991b1b; }
-  .state-pill.degrading { background: #ffedd5; color: #9a3412; }
-  .state-pill.healthy { background: #dcfce7; color: #166534; }
-  .state-pill.no_data { background: #f3f4f6; color: #4b5563; }
   .finding-bar { display: flex; gap: 0.5rem; align-items: center; font-size: 0.82rem; }
   .finding-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
   .dot-critical { background: #dc2626; } .dot-high { background: #ea580c; } .dot-medium { background: #ca8a04; }
 
-  /* Sidebar (two-column below scoreboard) */
+  /* On-fire exception panel */
+  .fire-panel { border-left: 4px solid #dc2626; }
+  .fire-item { display: flex; align-items: center; gap: 0.5rem;
+    padding: 0.4rem 0; font-size: 0.88rem; border-bottom: 1px solid var(--border); }
+  .fire-item:last-child { border-bottom: none; }
+  .fire-domain-badge {
+    display: inline-block; padding: 1px 0.5rem; border-radius: 12px;
+    background: #fee2e2; color: #991b1b; font-size: 0.72rem; font-weight: 600;
+  }
+
+  /* Sidebar bottom section */
   .sidebar-grid {
     display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 1rem;
   }
@@ -87,7 +86,7 @@
 </div>
 {% endif %}
 
-{# ── Fleet reference strip (muted, non-actionable) ─────────── #}
+{# ── Fleet snapshot strip (muted context) ─────────────────── #}
 <div class="fleet-strip">
   <span><strong>{{ total_clients }}</strong> clients</span>
   <span><strong>{{ total_devices }}</strong> devices</span>
@@ -96,69 +95,78 @@
   <span><strong>{{ total_active_findings }}</strong> open findings</span>
 </div>
 
-{# ── Portfolio at a glance (bucket tiles) ──────────────────── #}
-<div class="bucket-grid">
-  <a class="bucket-tile critical {% if active_bucket == 'critical' %}active{% endif %}"
-     href="?bucket=critical">
-    <div class="bucket-label">Critical</div>
-    <div class="bucket-count">{{ bucket_counts.critical }}</div>
-    <div class="bucket-sub">client{{ bucket_counts.critical|pluralize }} with a critical finding</div>
-  </a>
-  <a class="bucket-tile degrading {% if active_bucket == 'degrading' %}active{% endif %}"
-     href="?bucket=degrading">
-    <div class="bucket-label">Degrading</div>
-    <div class="bucket-count">{{ bucket_counts.degrading }}</div>
-    <div class="bucket-sub">high-severity or many open findings</div>
-  </a>
-  <a class="bucket-tile healthy {% if active_bucket == 'healthy' %}active{% endif %}"
-     href="?bucket=healthy">
-    <div class="bucket-label">Healthy</div>
-    <div class="bucket-count">{{ bucket_counts.healthy }}</div>
-    <div class="bucket-sub">no critical or high findings</div>
-  </a>
-  <a class="bucket-tile no_data {% if active_bucket == 'no_data' %}active{% endif %}"
-     href="?bucket=no_data">
-    <div class="bucket-label">No data</div>
-    <div class="bucket-count">{{ bucket_counts.no_data }}</div>
-    <div class="bucket-sub">zero devices reporting</div>
-  </a>
-</div>
-
-{# ── Client scoreboard (the star) ──────────────────────────── #}
-<div class="card">
-  <h2>Client scoreboard
+{# ── Exception panel: clients with issues in ≥2 domains ───── #}
+{% if on_fire %}
+<div class="card fire-panel">
+  <h2>Clients on fire
     <span class="muted" style="font-weight:400; font-size:0.85rem;">
-      ({{ client_health_total }}{% if active_bucket %} in <em>{{ active_bucket }}</em>{% endif %})
+      — issues in ≥2 domains ({{ on_fire|length }})
     </span>
   </h2>
+  {% for row in on_fire %}
+  <div class="fire-item">
+    <a href="{% url 'org_index' org_slug=row.client.slug %}">{{ row.client.display_name }}</a>
+    <span class="fire-domain-badge">{{ row.domain_count }} domains</span>
+    <span class="muted">{{ row.finding_count }} finding{{ row.finding_count|pluralize }} open</span>
+    <a href="{% url 'findings_queue' %}?client={{ row.client.slug }}" style="margin-left:auto; font-size:0.82rem;">View →</a>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+{# ── Client portfolio (star of the show) ──────────────────── #}
+<div class="card">
+  <h2>Client portfolio
+    <span class="muted" style="font-weight:400; font-size:0.85rem;">
+      ({{ client_health_total }})
+    </span>
+  </h2>
+
+  <div class="view-chips">
+    <a class="view-chip {% if not active_view or active_view == 'all' %}active{% endif %}" href="{% url 'home' %}">
+      All <span class="chip-count">{{ total_clients }}</span>
+    </a>
+    <a class="view-chip {% if active_view == 'attention' %}active{% endif %}" href="?view=attention">
+      Needs attention <span class="chip-count attention">{{ attention_count }}</span>
+    </a>
+    <a class="view-chip {% if active_view == 'healthy' %}active{% endif %}" href="?view=healthy">
+      Healthy <span class="chip-count">{{ health_counts.green }}</span>
+    </a>
+    <a class="view-chip {% if active_view == 'no_data' %}active{% endif %}" href="?view=no_data">
+      No data <span class="chip-count">{{ health_counts.no_data }}</span>
+    </a>
+  </div>
+
   <form method="get" style="margin-bottom: 0.75rem; display: flex; gap: 0.5rem; align-items: center;">
-    <input type="search" name="client_q" placeholder="Filter clients by name…"
+    <input type="search" name="client_q" placeholder="Search clients by name…"
            value="{{ client_q|default:'' }}"
            style="padding: 0.4rem 0.7rem; border: 1px solid var(--border); border-radius: 4px; font-size: 0.85rem; min-width: 260px;">
-    {% if active_bucket %}<input type="hidden" name="bucket" value="{{ active_bucket }}">{% endif %}
-    <button type="submit">Filter</button>
-    {% if client_q or active_bucket %}
-      <a href="{% url 'home' %}" style="font-size: 0.85rem;">Clear</a>
-    {% endif %}
+    {% if active_view and active_view != 'all' %}<input type="hidden" name="view" value="{{ active_view }}">{% endif %}
+    <button type="submit">Search</button>
+    {% if client_q %}<a href="?{% if active_view and active_view != 'all' %}view={{ active_view }}{% endif %}" style="font-size: 0.85rem;">Clear</a>{% endif %}
   </form>
 
   {% if client_health %}
   <table class="scoreboard" data-sortable>
     <thead>
       <tr>
+        <th style="width: 40px;"></th>
         <th>Client</th>
-        <th>State</th>
         <th style="text-align:right;">Devices</th>
         <th>Findings</th>
+        <th style="text-align:right;">Coverage gaps</th>
       </tr>
     </thead>
     <tbody>
       {% for row in client_health %}
       <tr>
         <td>
+          <span class="health-light {{ row.health }}"
+                title="{{ row.health|humanize_label|default:row.health }}"></span>
+        </td>
+        <td>
           <a href="{% url 'org_index' org_slug=row.client.slug %}">{{ row.client.display_name }}</a>
         </td>
-        <td><span class="state-pill {{ row.bucket }}">{{ row.bucket|humanize_label|default:row.bucket }}</span></td>
         <td style="text-align:right;">
           <a href="{% url 'org_devices' org_slug=row.client.slug %}" style="color:inherit; text-decoration:none;">{{ row.devices }}</a>
         </td>
@@ -170,8 +178,15 @@
             {% if row.critical %}<span class="finding-dot dot-critical"></span><span>{{ row.critical }}</span>{% endif %}
             {% if row.high %}<span class="finding-dot dot-high"></span><span>{{ row.high }}</span>{% endif %}
             {% if row.medium %}<span class="finding-dot dot-medium"></span><span>{{ row.medium }}</span>{% endif %}
-            <a href="{% url 'findings_queue' %}?client={{ row.client.slug }}" style="margin-left:auto; font-size:0.78rem;">{{ row.total }} total →</a>
+            <a href="{% url 'findings_queue' %}?client={{ row.client.slug }}" style="margin-left:auto; font-size:0.78rem;">{{ row.total }} →</a>
           </div>
+          {% endif %}
+        </td>
+        <td style="text-align:right;">
+          {% if row.coverage_gaps %}
+            <a href="{% url 'findings_queue' %}?client={{ row.client.slug }}&category=coverage" style="color:#dc2626; font-weight:600;">{{ row.coverage_gaps }}</a>
+          {% else %}
+            <span class="muted">—</span>
           {% endif %}
         </td>
       </tr>
@@ -181,16 +196,16 @@
   {% if client_health_page.paginator.num_pages > 1 %}
   <div style="margin-top: 0.75rem; display: flex; gap: 0.5rem; align-items: center; font-size: 0.85rem;">
     <span class="muted">Page {{ client_health_page.number }} of {{ client_health_page.paginator.num_pages }}</span>
-    {% if client_health_page.has_previous %}<a href="?client_page={{ client_health_page.previous_page_number }}{% if client_q %}&client_q={{ client_q }}{% endif %}{% if active_bucket %}&bucket={{ active_bucket }}{% endif %}">← Previous</a>{% endif %}
-    {% if client_health_page.has_next %}<a href="?client_page={{ client_health_page.next_page_number }}{% if client_q %}&client_q={{ client_q }}{% endif %}{% if active_bucket %}&bucket={{ active_bucket }}{% endif %}">Next →</a>{% endif %}
+    {% if client_health_page.has_previous %}<a href="?client_page={{ client_health_page.previous_page_number }}{% if client_q %}&client_q={{ client_q }}{% endif %}{% if active_view and active_view != 'all' %}&view={{ active_view }}{% endif %}">← Previous</a>{% endif %}
+    {% if client_health_page.has_next %}<a href="?client_page={{ client_health_page.next_page_number }}{% if client_q %}&client_q={{ client_q }}{% endif %}{% if active_view and active_view != 'all' %}&view={{ active_view }}{% endif %}">Next →</a>{% endif %}
   </div>
   {% endif %}
   {% else %}
-  <p class="muted">{% if client_q or active_bucket %}No clients match the current filter.{% else %}No clients yet.{% endif %}</p>
+  <p class="muted">{% if client_q or active_view %}No clients match the current filter.{% else %}No clients yet.{% endif %}</p>
   {% endif %}
 </div>
 
-{# ── Sidebar: what's changing / what's blocking ──────────── #}
+{# ── Sidebar: blocking work + recent activity ─────────────── #}
 <div class="sidebar-grid">
   <div class="card">
     <h2>Awaiting review

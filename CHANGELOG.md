@@ -2,6 +2,44 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.50.1] — 2026-07-16 — Dashboard: fleet-operator research pass
+
+### Changed
+Applied MSP / fleet-operator research (industry lit + tooling
+patterns from ConnectWise, NinjaOne, Datto, Autotask, Kaseya).
+Replaced monitoring-tool language (Critical/Degrading/Healthy/
+No-data as hero tiles) with what fleet operators actually scan:
+
+- **Removed** the 4 bucket hero tiles. Their content moved into
+  filter chips above the portfolio grid.
+- **Added** a "Clients on fire" exception panel — clients with
+  active findings in ≥2 domains (patching + software +
+  coverage). Research consensus: "concurrent-domain issues"
+  is a stronger signal than "highest alert count."
+- **Added** a Health traffic-light column on the client
+  portfolio grid (🔴 critical open · 🟠 high open · 🟢 clean ·
+  ⚫ no devices). One-per-row instead of dedicated hero cards.
+- **Added** filter chips above the portfolio grid: All / Needs
+  attention (red+amber) / Healthy / No data. Same segmentation
+  the old buckets provided, but as compact filters rather than
+  dominant cards.
+- **Added** Coverage-gaps column on the grid, clickthrough to
+  filtered findings queue.
+
+### Rationale from research
+- Raw alert counts are considered anti-KPIs by industry sources
+  (alert fatigue over action).
+- Clients on fire in multiple domains is the "morning triage
+  first look" question across ConnectWise, NinjaOne, Datto.
+- Portfolio grid as the primary object, aggregate KPIs as a
+  reference strip — matches every incumbent tool's layout.
+
+### Deferred (need data we don't have yet)
+- Trending worse (needs snapshot history)
+- Renewals / QBRs due (needs contract dates)
+- MRR / tier / assignment columns (needs those fields on Client)
+- SLA / MTTR (needs ticket data)
+
 ## [0.50.0] — 2026-07-16 — Dashboard: client-portfolio framing
 
 ### Changed

@@ -116,6 +116,10 @@ _LABELS: dict[str, str] = {
     "degrading": "Degrading",
     "healthy": "Healthy",
     "no_data": "No data",
+    # ── Client health traffic light (Dashboard) ──────────────
+    "red": "Attention needed — critical finding open",
+    "amber": "Watching — high-severity finding open",
+    "green": "Healthy",
 }
 
 

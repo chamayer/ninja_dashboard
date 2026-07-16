@@ -131,9 +131,52 @@ def home(request: HttpRequest) -> HttpResponse:
         .annotate(n=Count("id"))
     }
 
-    # Client Health with name filter + bucket filter + pagination.
+    # ── Clients on fire — issues in ≥2 domains today ────────────
+    # Portfolio-attention exception panel per MSP-dashboard
+    # research: not "who has the most alerts" but "who has
+    # problems spanning multiple domains." Filter to
+    # operator-facing categories (patching, software, coverage);
+    # skip infra categories (platform, resolver).
+    on_fire = []
+    with connection.cursor() as cur:
+        cur.execute(
+            """
+            SELECT f.client_id,
+                   COUNT(DISTINCT ft.category_id) AS domain_count,
+                   COUNT(*) AS finding_count
+            FROM operations.findings f
+            JOIN operations.finding_types ft ON ft.id = f.finding_type_id
+            JOIN operations.finding_categories fc ON fc.id = ft.category_id
+            WHERE f.tenant_id = 1
+              AND f.status IN ('open', 'acknowledged', 'investigating')
+              AND fc.name IN ('patching', 'software', 'coverage')
+              AND f.client_id IS NOT NULL
+            GROUP BY f.client_id
+            HAVING COUNT(DISTINCT ft.category_id) >= 2
+            ORDER BY domain_count DESC, finding_count DESC
+            LIMIT 10
+            """
+        )
+        on_fire_rows = cur.fetchall()
+    if on_fire_rows:
+        client_lookup = {
+            c.id: c for c in Client.objects.filter(
+                tenant_id=1,
+                id__in=[r[0] for r in on_fire_rows],
+            )
+        }
+        for cid, domain_count, finding_count in on_fire_rows:
+            c = client_lookup.get(cid)
+            if c:
+                on_fire.append({
+                    "client": c,
+                    "domain_count": domain_count,
+                    "finding_count": finding_count,
+                })
+
+    # ── Client portfolio with health traffic light ──────────────
     client_q = (request.GET.get("client_q") or "").strip()
-    bucket_filter = request.GET.get("bucket", "")
+    view_filter = request.GET.get("view", "all")  # all | attention | healthy | no_data
     clients_qs = (
         Client.objects.filter(tenant_id=1, deleted_at__isnull=True)
         .annotate(
@@ -153,52 +196,60 @@ def home(request: HttpRequest) -> HttpResponse:
                 "findings",
                 filter=Q(findings__status__in=_FINDING_ACTIVE_STATUSES),
             ),
+            coverage_gaps=Count(
+                "findings",
+                filter=Q(
+                    findings__status__in=_FINDING_ACTIVE_STATUSES,
+                    findings__finding_type__category__name="coverage",
+                ),
+            ),
         )
         .order_by("-critical_findings", "-high_findings", "display_name")
     )
     if client_q:
         clients_qs = clients_qs.filter(display_name__icontains=client_q)
 
-    def _bucket(devices: int, crit: int, high: int, total: int) -> str:
-        """Portfolio state bucket per client."""
+    def _health(devices: int, crit: int, high: int) -> str:
+        """Traffic-light health per client — operational rollup."""
         if devices == 0:
             return "no_data"
         if crit > 0:
-            return "critical"
-        if high > 0 or total > 5:
-            return "degrading"
-        if total == 0:
-            return "healthy"
-        return "healthy"  # low-only counts as healthy
+            return "red"
+        if high > 0:
+            return "amber"
+        return "green"
 
-    client_health_all = []
+    client_portfolio_all = []
     for c in clients_qs:
         devs = device_counts.get(c.id, 0)
-        bucket = _bucket(devs, c.critical_findings, c.high_findings, c.total_findings)
-        client_health_all.append({
+        health = _health(devs, c.critical_findings, c.high_findings)
+        client_portfolio_all.append({
             "client": c,
             "devices": devs,
             "critical": c.critical_findings,
             "high": c.high_findings,
             "medium": c.medium_findings,
             "total": c.total_findings,
-            "bucket": bucket,
+            "coverage_gaps": c.coverage_gaps,
+            "health": health,
         })
 
-    # Portfolio bucket counts (before bucket filter is applied to the
-    # visible table).
-    bucket_counts = {
-        "critical": 0, "degrading": 0, "healthy": 0, "no_data": 0,
-    }
-    for row in client_health_all:
-        bucket_counts[row["bucket"]] += 1
+    # Counts for the filter chips (before view filter is applied).
+    health_counts = {"red": 0, "amber": 0, "green": 0, "no_data": 0}
+    for row in client_portfolio_all:
+        health_counts[row["health"]] += 1
+    attention_count = health_counts["red"] + health_counts["amber"]
 
-    if bucket_filter in bucket_counts:
-        client_health_all = [
-            r for r in client_health_all if r["bucket"] == bucket_filter
+    if view_filter == "attention":
+        client_portfolio_all = [
+            r for r in client_portfolio_all if r["health"] in ("red", "amber")
         ]
+    elif view_filter == "healthy":
+        client_portfolio_all = [r for r in client_portfolio_all if r["health"] == "green"]
+    elif view_filter == "no_data":
+        client_portfolio_all = [r for r in client_portfolio_all if r["health"] == "no_data"]
 
-    client_health_paginator = Paginator(client_health_all, 25)
+    client_health_paginator = Paginator(client_portfolio_all, 25)
     client_health_page = client_health_paginator.get_page(request.GET.get("client_page"))
 
     # Source health: fresh if the source has produced at least one
@@ -241,10 +292,12 @@ def home(request: HttpRequest) -> HttpResponse:
             "recent_findings": recent_findings,
             "client_health": client_health_page.object_list,
             "client_health_page": client_health_page,
-            "client_health_total": len(client_health_all),
+            "client_health_total": len(client_portfolio_all),
             "client_q": client_q,
-            "bucket_counts": bucket_counts,
-            "active_bucket": bucket_filter,
+            "health_counts": health_counts,
+            "attention_count": attention_count,
+            "active_view": view_filter,
+            "on_fire": on_fire,
             "stale_sources": stale_sources,
         },
     )
