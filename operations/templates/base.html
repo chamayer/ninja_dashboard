@@ -261,7 +261,7 @@
         <div class="selector">
             <form action="{% url 'client_switch' %}" method="get">
                 <label for="client-select">Client:</label>
-                <select id="client-select" name="slug" class="ts" onchange="this.form.submit()">
+                <select id="client-select" name="slug" onchange="this.form.submit()">
                     <option value="all"{% if org_mode == 'all' %} selected{% endif %}>— All clients —</option>
                     {% for c in clients %}
                         <option value="{{ c.slug }}"{% if current_client and current_client.id == c.id %} selected{% endif %}>{{ c.display_name }}</option>

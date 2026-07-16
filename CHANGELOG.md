@@ -2,6 +2,18 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.46.5] — 2026-07-16
+
+### Fixed
+- Header client selector — reverted `class="ts"`. Native `<select>`
+  was already styled dark to match the primary-nav header
+  background; Tom Select's light theme fought that and looked
+  wrong. Native dropdown is fine for a single-value picker even
+  with 76 options (browsers give type-to-jump).
+- Tom Select remains active for content-area filters on the
+  Patching page (light backgrounds where the default light theme
+  fits).
+
 ## [0.46.4] — 2026-07-16
 
 ### Fixed
