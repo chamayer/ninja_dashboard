@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load human_labels %}
 
 {% block title %}Dashboard{% endblock %}
 
@@ -140,7 +141,7 @@
   {% for f in recent_findings %}
   <div class="recent-item">
     <span class="badge badge-{{ f.severity }}">{{ f.severity }}</span>
-    <span>{{ f.finding_type.name }}</span>
+    <span>{{ f.finding_type.name|humanize_label }}</span>
     {% if f.client %}<span class="muted">— {{ f.client.display_name }}</span>{% endif %}
     <span class="recent-time" style="margin-left:auto;">{{ f.first_seen_at|date:"H:i" }}</span>
   </div>

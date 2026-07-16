@@ -2,6 +2,20 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.46.2] — 2026-07-16
+
+### Changed
+- Dashboard (home) recent-findings list now renders finding type
+  names through `humanize_label` — no more raw
+  `stale_required_platform` / `device_offline` /
+  `device_missing_from_source` in the operator's face.
+- `humanize_label` filter map: added 9 missing finding types
+  (device_missing_from_source, device_role_conflict,
+  device_long_offline, cross_client_conflict, unmapped_node_class,
+  identity_resolution_pending, software_queue_stalled,
+  stale_collector_binding, unlinked_external_identity) — all
+  finding types on prod now have human labels.
+
 ## [0.46.1] — 2026-07-16
 
 ### Fixed

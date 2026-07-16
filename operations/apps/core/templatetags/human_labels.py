@@ -46,6 +46,16 @@ _LABELS: dict[str, str] = {
     "device_unenrolled": "No agent installed",
     "duplicate_platform_record": "Duplicate source record",
     "source_failure": "Source not reporting",
+    "device_missing_from_source": "Device missing from source",
+    "device_role_conflict": "Device role changed",
+    "device_long_offline": "Device offline (long)",
+    "cross_client_conflict": "Cross-client name conflict",
+    "unmapped_node_class": "Unknown device class from source",
+    # ── Finding types — platform / identity health ───────────
+    "identity_resolution_pending": "Awaiting identity resolution",
+    "software_queue_stalled": "Software queue stalled",
+    "stale_collector_binding": "Collector binding stale",
+    "unlinked_external_identity": "External ID not linked to a device",
     # ── Finding types — client resolver ──────────────────────
     "client_name_conflict": "Client name changed at source",
     "client_link_collision": "Client name collision",
