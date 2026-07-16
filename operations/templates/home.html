@@ -5,47 +5,72 @@
 
 {% block content %}
 <style>
-  .hero-tiles {
+  /* Fleet reference strip — muted, informational */
+  .fleet-strip {
+    display: flex; flex-wrap: wrap; gap: 1.5rem;
+    padding: 0.6rem 1rem; margin-bottom: 1rem;
+    background: #eef2f7; border: 1px solid #dfe1e5;
+    border-radius: 4px; font-size: 0.85rem; color: #4b5563;
+  }
+  .fleet-strip strong { color: #1a1a2e; font-weight: 600; }
+
+  /* Portfolio bucket tiles — main "at a glance" */
+  .bucket-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-    gap: 1rem;
-    margin-bottom: 1rem;
+    gap: 0.75rem; margin-bottom: 1rem;
   }
-  .hero-tile {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 1.25rem 1.5rem;
-    text-decoration: none;
-    color: inherit;
+  .bucket-tile {
+    display: block;
+    padding: 1rem 1.25rem; border: 1px solid var(--border);
+    border-radius: 6px; background: var(--surface);
+    text-decoration: none; color: inherit;
     transition: box-shadow 0.15s, border-color 0.15s;
   }
-  a.hero-tile:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.08); border-color: var(--accent); }
-  .hero-tile .tile-label { font-size: 0.78rem; font-weight: 700; color: var(--muted);
-    text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.4rem; }
-  .hero-tile .tile-value { font-size: 2.2rem; font-weight: 700; line-height: 1.1; color: #1a1a2e; }
-  .hero-tile .tile-sub { font-size: 0.82rem; color: var(--muted); margin-top: 0.3rem; }
-  .hero-tile.alert { border-color: #fca5a5; background: #fff5f5; }
-  .hero-tile.alert .tile-value { color: #dc2626; }
+  .bucket-tile:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.08); border-color: var(--accent); }
+  .bucket-tile.active { border-color: var(--accent); background: #eef4fb; }
+  .bucket-tile .bucket-count { font-size: 1.8rem; font-weight: 700; line-height: 1.1; }
+  .bucket-tile .bucket-label { font-size: 0.78rem; font-weight: 600; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.25rem; }
+  .bucket-tile .bucket-sub { font-size: 0.78rem; color: var(--muted); margin-top: 0.3rem; }
+  .bucket-tile.critical { border-left: 4px solid #dc2626; }
+  .bucket-tile.critical .bucket-count { color: #dc2626; }
+  .bucket-tile.degrading { border-left: 4px solid #ea580c; }
+  .bucket-tile.degrading .bucket-count { color: #ea580c; }
+  .bucket-tile.healthy { border-left: 4px solid #16a34a; }
+  .bucket-tile.no_data { border-left: 4px solid #9ca3af; }
+  .bucket-tile.no_data .bucket-count { color: #6b7280; }
 
-  .sev-bar { display: flex; gap: 0.5rem; flex-wrap: wrap; }
-  .sev-pill { display: inline-flex; align-items: center; gap: 0.35rem;
-    padding: 0.25rem 0.7rem; border-radius: 20px; font-size: 0.82rem; font-weight: 600; }
-
-  .client-table th, .client-table td { padding: 0.5rem 0.75rem; vertical-align: middle; }
-  .client-table tbody tr { border-bottom: 1px solid var(--border); }
-  .finding-bar { display: flex; gap: 0.25rem; align-items: center; font-size: 0.82rem; }
+  /* Client scoreboard table */
+  .scoreboard th, .scoreboard td { padding: 0.5rem 0.75rem; vertical-align: middle; }
+  .scoreboard tbody tr { border-bottom: 1px solid var(--border); }
+  .state-pill {
+    display: inline-block; padding: 1px 0.5rem; border-radius: 20px;
+    font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  .state-pill.critical { background: #fee2e2; color: #991b1b; }
+  .state-pill.degrading { background: #ffedd5; color: #9a3412; }
+  .state-pill.healthy { background: #dcfce7; color: #166534; }
+  .state-pill.no_data { background: #f3f4f6; color: #4b5563; }
+  .finding-bar { display: flex; gap: 0.5rem; align-items: center; font-size: 0.82rem; }
   .finding-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
-  .dot-critical { background: #dc2626; }
-  .dot-high     { background: #ea580c; }
-  .dot-medium   { background: #ca8a04; }
+  .dot-critical { background: #dc2626; } .dot-high { background: #ea580c; } .dot-medium { background: #ca8a04; }
 
-  .recent-item { display: flex; align-items: baseline; gap: 0.6rem;
-    padding: 0.5rem 0; border-bottom: 1px solid var(--border); font-size: 0.88rem; }
-  .recent-item:last-child { border-bottom: none; }
-  .recent-time { color: var(--muted); font-size: 0.78rem; white-space: nowrap; }
+  /* Sidebar (two-column below scoreboard) */
+  .sidebar-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 1rem;
+  }
+  @media (max-width: 900px) { .sidebar-grid { grid-template-columns: 1fr; } }
+  .sidebar-list { list-style: none; padding: 0; margin: 0; }
+  .sidebar-list li {
+    padding: 0.55rem 0; border-bottom: 1px solid var(--border);
+    font-size: 0.88rem; display: flex; align-items: baseline; gap: 0.6rem;
+  }
+  .sidebar-list li:last-child { border-bottom: none; }
+  .sidebar-list .side-time { color: var(--muted); font-size: 0.78rem; white-space: nowrap; margin-left: auto; }
 </style>
 
+{# ── Alerts (only when actionable) ────────────────────────── #}
 {% if stale_sources %}
 <div style="background:#fffbeb; border:1px solid #fcd34d; border-radius:6px; padding:0.85rem 1.25rem; margin-bottom:0.75rem; display:flex; align-items:center; gap:0.75rem;">
   <span style="width:10px; height:10px; border-radius:50%; background:#d97706; display:inline-block; flex-shrink:0;"></span>
@@ -54,87 +79,86 @@
 </div>
 {% endif %}
 
-{% if client_health %}
-{% with has_critical=severity_counts.critical %}
-{% if has_critical %}
+{% if severity_counts.critical %}
 <div style="background:#fef2f2; border:1px solid #fca5a5; border-radius:6px; padding:0.85rem 1.25rem; margin-bottom:1rem; display:flex; align-items:center; gap:0.75rem;">
   <span style="width:10px; height:10px; border-radius:50%; background:#dc2626; display:inline-block; flex-shrink:0;"></span>
-  <span style="font-weight:600; color:#dc2626;">{{ has_critical }} critical finding{{ has_critical|pluralize }} need attention</span>
+  <span style="font-weight:600; color:#dc2626;">{{ severity_counts.critical }} critical finding{{ severity_counts.critical|pluralize }} across the fleet</span>
   <a href="{% url 'findings_queue' %}?severity=critical" style="margin-left:auto; font-size:0.85rem; color:#dc2626;">View all →</a>
 </div>
 {% endif %}
-{% endwith %}
-{% endif %}
 
-<div class="hero-tiles">
-  <a class="hero-tile" href="{% url 'patching_queue' %}">
-    <div class="tile-label">Patching</div>
-    <div class="tile-value">{{ category_counts.patching|default:0 }}</div>
-    <div class="tile-sub">
-      open · {{ patching_pop.in_scope }} of {{ patching_pop.total }} devices in scope
-    </div>
+{# ── Fleet reference strip (muted, non-actionable) ─────────── #}
+<div class="fleet-strip">
+  <span><strong>{{ total_clients }}</strong> clients</span>
+  <span><strong>{{ total_devices }}</strong> devices</span>
+  <span><strong>{{ patching_pop.in_scope }}</strong> in patching scope</span>
+  <span><strong>{{ sources_ok }}/{{ sources_total }}</strong> sources fresh</span>
+  <span><strong>{{ total_active_findings }}</strong> open findings</span>
+</div>
+
+{# ── Portfolio at a glance (bucket tiles) ──────────────────── #}
+<div class="bucket-grid">
+  <a class="bucket-tile critical {% if active_bucket == 'critical' %}active{% endif %}"
+     href="?bucket=critical">
+    <div class="bucket-label">Critical</div>
+    <div class="bucket-count">{{ bucket_counts.critical }}</div>
+    <div class="bucket-sub">client{{ bucket_counts.critical|pluralize }} with a critical finding</div>
   </a>
-  <a class="hero-tile" href="{% url 'findings_queue' %}?category=software">
-    <div class="tile-label">Software</div>
-    <div class="tile-value">{{ category_counts.software|default:0 }}</div>
-    <div class="tile-sub">flagged installations</div>
+  <a class="bucket-tile degrading {% if active_bucket == 'degrading' %}active{% endif %}"
+     href="?bucket=degrading">
+    <div class="bucket-label">Degrading</div>
+    <div class="bucket-count">{{ bucket_counts.degrading }}</div>
+    <div class="bucket-sub">high-severity or many open findings</div>
   </a>
-  <a class="hero-tile {% if severity_counts.critical %}alert{% endif %}" href="{% url 'findings_queue' %}">
-    <div class="tile-label">Issues</div>
-    <div class="tile-value">{{ total_active_findings }}</div>
-    <div class="tile-sub">
-      {% if severity_counts.critical %}{{ severity_counts.critical }} critical{% endif %}{% if severity_counts.critical and severity_counts.high %} · {% endif %}{% if severity_counts.high %}{{ severity_counts.high }} high{% endif %}
-      {% if not severity_counts.critical and not severity_counts.high %}All medium / low{% endif %}
-    </div>
+  <a class="bucket-tile healthy {% if active_bucket == 'healthy' %}active{% endif %}"
+     href="?bucket=healthy">
+    <div class="bucket-label">Healthy</div>
+    <div class="bucket-count">{{ bucket_counts.healthy }}</div>
+    <div class="bucket-sub">no critical or high findings</div>
   </a>
-  <a class="hero-tile {% if reviews_pending.total %}alert{% endif %}" href="{% url 'client_candidates_queue' %}">
-    <div class="tile-label">Awaiting Review</div>
-    <div class="tile-value">{{ reviews_pending.total }}</div>
-    <div class="tile-sub">
-      {% if reviews_pending.client_candidates %}{{ reviews_pending.client_candidates }} client{{ reviews_pending.client_candidates|pluralize }}{% endif %}
-      {% if reviews_pending.identity_candidates %}{% if reviews_pending.client_candidates %} · {% endif %}{{ reviews_pending.identity_candidates }} identit{{ reviews_pending.identity_candidates|pluralize:"y,ies" }}{% endif %}
-      {% if reviews_pending.merge_candidates %}{% if reviews_pending.client_candidates or reviews_pending.identity_candidates %} · {% endif %}{{ reviews_pending.merge_candidates }} merge{{ reviews_pending.merge_candidates|pluralize }}{% endif %}
-      {% if not reviews_pending.total %}Nothing pending{% endif %}
-    </div>
-  </a>
-  <a class="hero-tile {% if stale_sources %}alert{% endif %}" href="{% url 'sources_status' %}">
-    <div class="tile-label">Ingest</div>
-    <div class="tile-value">{{ sources_ok }}/{{ sources_total }}</div>
-    <div class="tile-sub">
-      {% if stale_sources %}stale: {{ stale_sources|join:", " }}{% else %}all sources fresh{% endif %}
-    </div>
-  </a>
-  <a class="hero-tile" href="{% url 'org_index' org_slug='all' %}">
-    <div class="tile-label">Fleet</div>
-    <div class="tile-value">{{ total_devices }}</div>
-    <div class="tile-sub">devices · {{ total_clients }} clients</div>
+  <a class="bucket-tile no_data {% if active_bucket == 'no_data' %}active{% endif %}"
+     href="?bucket=no_data">
+    <div class="bucket-label">No data</div>
+    <div class="bucket-count">{{ bucket_counts.no_data }}</div>
+    <div class="bucket-sub">zero devices reporting</div>
   </a>
 </div>
 
+{# ── Client scoreboard (the star) ──────────────────────────── #}
 <div class="card">
-  <h2>Client Health <span class="muted" style="font-weight:400; font-size:0.85rem;">({{ client_health_total }})</span></h2>
+  <h2>Client scoreboard
+    <span class="muted" style="font-weight:400; font-size:0.85rem;">
+      ({{ client_health_total }}{% if active_bucket %} in <em>{{ active_bucket }}</em>{% endif %})
+    </span>
+  </h2>
   <form method="get" style="margin-bottom: 0.75rem; display: flex; gap: 0.5rem; align-items: center;">
     <input type="search" name="client_q" placeholder="Filter clients by name…"
            value="{{ client_q|default:'' }}"
            style="padding: 0.4rem 0.7rem; border: 1px solid var(--border); border-radius: 4px; font-size: 0.85rem; min-width: 260px;">
+    {% if active_bucket %}<input type="hidden" name="bucket" value="{{ active_bucket }}">{% endif %}
     <button type="submit">Filter</button>
-    {% if client_q %}
+    {% if client_q or active_bucket %}
       <a href="{% url 'home' %}" style="font-size: 0.85rem;">Clear</a>
     {% endif %}
   </form>
+
   {% if client_health %}
-  <table class="client-table" data-sortable>
+  <table class="scoreboard" data-sortable>
     <thead>
       <tr>
         <th>Client</th>
+        <th>State</th>
         <th style="text-align:right;">Devices</th>
-        <th>Active Findings</th>
+        <th>Findings</th>
       </tr>
     </thead>
     <tbody>
       {% for row in client_health %}
       <tr>
-        <td><a href="{% url 'org_index' org_slug=row.client.slug %}">{{ row.client.display_name }}</a></td>
+        <td>
+          <a href="{% url 'org_index' org_slug=row.client.slug %}">{{ row.client.display_name }}</a>
+        </td>
+        <td><span class="state-pill {{ row.bucket }}">{{ row.bucket|humanize_label|default:row.bucket }}</span></td>
         <td style="text-align:right;">
           <a href="{% url 'org_devices' org_slug=row.client.slug %}" style="color:inherit; text-decoration:none;">{{ row.devices }}</a>
         </td>
@@ -143,8 +167,9 @@
             <span class="muted" style="font-size:0.82rem;">None</span>
           {% else %}
           <div class="finding-bar">
-            {% if row.critical %}<span class="finding-dot dot-critical"></span><span>{{ row.critical }} critical</span>{% endif %}
-            {% if row.high %}<span class="finding-dot dot-high"></span><span>{{ row.high }} high</span>{% endif %}
+            {% if row.critical %}<span class="finding-dot dot-critical"></span><span>{{ row.critical }}</span>{% endif %}
+            {% if row.high %}<span class="finding-dot dot-high"></span><span>{{ row.high }}</span>{% endif %}
+            {% if row.medium %}<span class="finding-dot dot-medium"></span><span>{{ row.medium }}</span>{% endif %}
             <a href="{% url 'findings_queue' %}?client={{ row.client.slug }}" style="margin-left:auto; font-size:0.78rem;">{{ row.total }} total →</a>
           </div>
           {% endif %}
@@ -156,31 +181,65 @@
   {% if client_health_page.paginator.num_pages > 1 %}
   <div style="margin-top: 0.75rem; display: flex; gap: 0.5rem; align-items: center; font-size: 0.85rem;">
     <span class="muted">Page {{ client_health_page.number }} of {{ client_health_page.paginator.num_pages }}</span>
-    {% if client_health_page.has_previous %}
-      <a href="?client_page={{ client_health_page.previous_page_number }}{% if client_q %}&client_q={{ client_q }}{% endif %}">← Previous</a>
-    {% endif %}
-    {% if client_health_page.has_next %}
-      <a href="?client_page={{ client_health_page.next_page_number }}{% if client_q %}&client_q={{ client_q }}{% endif %}">Next →</a>
-    {% endif %}
+    {% if client_health_page.has_previous %}<a href="?client_page={{ client_health_page.previous_page_number }}{% if client_q %}&client_q={{ client_q }}{% endif %}{% if active_bucket %}&bucket={{ active_bucket }}{% endif %}">← Previous</a>{% endif %}
+    {% if client_health_page.has_next %}<a href="?client_page={{ client_health_page.next_page_number }}{% if client_q %}&client_q={{ client_q }}{% endif %}{% if active_bucket %}&bucket={{ active_bucket }}{% endif %}">Next →</a>{% endif %}
   </div>
   {% endif %}
   {% else %}
-  <p class="muted">{% if client_q %}No clients match <code>{{ client_q }}</code>.{% else %}No clients yet.{% endif %}</p>
+  <p class="muted">{% if client_q or active_bucket %}No clients match the current filter.{% else %}No clients yet.{% endif %}</p>
   {% endif %}
 </div>
 
-{% if recent_findings %}
-<div class="card">
-  <h2>New in Last 24 Hours</h2>
-  {% for f in recent_findings %}
-  <div class="recent-item">
-    <span class="badge badge-{{ f.severity }}">{{ f.severity }}</span>
-    <span>{{ f.finding_type.name|humanize_label }}</span>
-    {% if f.client %}<span class="muted">— {{ f.client.display_name }}</span>{% endif %}
-    <span class="recent-time" style="margin-left:auto;">{{ f.first_seen_at|date:"H:i" }}</span>
+{# ── Sidebar: what's changing / what's blocking ──────────── #}
+<div class="sidebar-grid">
+  <div class="card">
+    <h2>Awaiting review
+      <span class="muted" style="font-weight:400; font-size:0.85rem;">({{ reviews_pending.total }})</span>
+    </h2>
+    {% if reviews_pending.total %}
+    <ul class="sidebar-list">
+      {% if reviews_pending.client_candidates %}
+      <li>
+        <a href="{% url 'client_candidates_queue' %}">Client candidates</a>
+        <span class="side-time">{{ reviews_pending.client_candidates }} pending</span>
+      </li>
+      {% endif %}
+      {% if reviews_pending.identity_candidates %}
+      <li>
+        <a href="{% url 'identity_candidates_list' %}">Identity matches</a>
+        <span class="side-time">{{ reviews_pending.identity_candidates }} pending</span>
+      </li>
+      {% endif %}
+      {% if reviews_pending.merge_candidates %}
+      <li>
+        <a href="{% url 'merge_candidates_queue' %}">Device merges</a>
+        <span class="side-time">{{ reviews_pending.merge_candidates }} pending</span>
+      </li>
+      {% endif %}
+    </ul>
+    {% else %}
+    <p class="muted">Nothing pending.</p>
+    {% endif %}
   </div>
-  {% endfor %}
-</div>
-{% endif %}
 
+  <div class="card">
+    <h2>New in last 24 hours
+      <span class="muted" style="font-weight:400; font-size:0.85rem;">({{ recent_findings|length }})</span>
+    </h2>
+    {% if recent_findings %}
+    <ul class="sidebar-list">
+      {% for f in recent_findings %}
+      <li>
+        <span class="badge badge-{{ f.severity }}">{{ f.severity }}</span>
+        <span>{{ f.finding_type.name|humanize_label }}</span>
+        {% if f.client %}<span class="muted">— {{ f.client.display_name }}</span>{% endif %}
+        <span class="side-time">{{ f.first_seen_at|date:"H:i" }}</span>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="muted">Nothing new.</p>
+    {% endif %}
+  </div>
+</div>
 {% endblock %}

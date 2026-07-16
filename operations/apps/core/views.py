@@ -131,8 +131,9 @@ def home(request: HttpRequest) -> HttpResponse:
         .annotate(n=Count("id"))
     }
 
-    # Client Health with name filter + pagination.
+    # Client Health with name filter + bucket filter + pagination.
     client_q = (request.GET.get("client_q") or "").strip()
+    bucket_filter = request.GET.get("bucket", "")
     clients_qs = (
         Client.objects.filter(tenant_id=1, deleted_at__isnull=True)
         .annotate(
@@ -144,6 +145,10 @@ def home(request: HttpRequest) -> HttpResponse:
                 "findings",
                 filter=Q(findings__status__in=_FINDING_ACTIVE_STATUSES, findings__severity="high"),
             ),
+            medium_findings=Count(
+                "findings",
+                filter=Q(findings__status__in=_FINDING_ACTIVE_STATUSES, findings__severity="medium"),
+            ),
             total_findings=Count(
                 "findings",
                 filter=Q(findings__status__in=_FINDING_ACTIVE_STATUSES),
@@ -154,16 +159,45 @@ def home(request: HttpRequest) -> HttpResponse:
     if client_q:
         clients_qs = clients_qs.filter(display_name__icontains=client_q)
 
-    client_health_all = [
-        {
+    def _bucket(devices: int, crit: int, high: int, total: int) -> str:
+        """Portfolio state bucket per client."""
+        if devices == 0:
+            return "no_data"
+        if crit > 0:
+            return "critical"
+        if high > 0 or total > 5:
+            return "degrading"
+        if total == 0:
+            return "healthy"
+        return "healthy"  # low-only counts as healthy
+
+    client_health_all = []
+    for c in clients_qs:
+        devs = device_counts.get(c.id, 0)
+        bucket = _bucket(devs, c.critical_findings, c.high_findings, c.total_findings)
+        client_health_all.append({
             "client": c,
-            "devices": device_counts.get(c.id, 0),
+            "devices": devs,
             "critical": c.critical_findings,
             "high": c.high_findings,
+            "medium": c.medium_findings,
             "total": c.total_findings,
-        }
-        for c in clients_qs
-    ]
+            "bucket": bucket,
+        })
+
+    # Portfolio bucket counts (before bucket filter is applied to the
+    # visible table).
+    bucket_counts = {
+        "critical": 0, "degrading": 0, "healthy": 0, "no_data": 0,
+    }
+    for row in client_health_all:
+        bucket_counts[row["bucket"]] += 1
+
+    if bucket_filter in bucket_counts:
+        client_health_all = [
+            r for r in client_health_all if r["bucket"] == bucket_filter
+        ]
+
     client_health_paginator = Paginator(client_health_all, 25)
     client_health_page = client_health_paginator.get_page(request.GET.get("client_page"))
 
@@ -209,6 +243,8 @@ def home(request: HttpRequest) -> HttpResponse:
             "client_health_page": client_health_page,
             "client_health_total": len(client_health_all),
             "client_q": client_q,
+            "bucket_counts": bucket_counts,
+            "active_bucket": bucket_filter,
             "stale_sources": stale_sources,
         },
     )

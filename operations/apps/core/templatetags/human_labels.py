@@ -111,6 +111,11 @@ _LABELS: dict[str, str] = {
     "identity": "Identity",
     "platform": "Platform health",
     "resolver": "Client resolver",
+    # ── Portfolio state buckets (Dashboard) ──────────────────
+    "critical": "Critical",
+    "degrading": "Degrading",
+    "healthy": "Healthy",
+    "no_data": "No data",
 }
 
 

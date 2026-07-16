@@ -2,6 +2,49 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.50.0] — 2026-07-16 — Dashboard: client-portfolio framing
+
+### Changed
+- **Dashboard reframed as a client-portfolio scoreboard**, not a
+  findings dashboard. Aligns with the reality that an MSP operator
+  manages clients — findings, patching, software are facets of a
+  client's state, not standalone domains that dominate the view.
+  - Domain-specific hero tiles (Patching / Software / Issues /
+    Awaiting Review / Ingest / Fleet) dropped. Those pages remain
+    reachable via the nav.
+  - New top-of-page layout:
+    1. **Alerts banner** (critical findings + stale ingest) —
+       only when actionable.
+    2. **Fleet reference strip** — muted single line: total
+       clients / devices / in-scope / sources fresh / open
+       findings. Non-actionable context.
+    3. **Portfolio buckets** — 4 tiles classifying clients into
+       Critical / Degrading / Healthy / No data. Click to filter
+       the scoreboard below.
+    4. **Client scoreboard** — the primary content. Every client
+       with State pill (matches bucket colors), device count,
+       finding breakdown (critical/high/medium dots). Filter by
+       name + bucket + paginate 25/page.
+    5. **Sidebar** — two columns: "Awaiting review" (per-queue
+       counts with clickthrough) and "New in last 24 hours".
+
+### Added
+- Per-client state bucket classification: `critical` (has
+  critical), `degrading` (high or 5+ open), `healthy` (only low
+  or none), `no_data` (0 devices reporting).
+- Bucket-filter on the scoreboard (`?bucket=<name>`).
+- Medium-finding count column (was hidden before) — visible in
+  the scoreboard finding dots.
+- Bucket labels added to `humanize_label` map so the State pill
+  renders human names.
+
+### Removed
+- The "Total findings 13,557" tile — double-counted with domain
+  cards and made the Dashboard feel like a bug tracker. Reference
+  count still available in the fleet strip.
+- The "Fleet: 5150 devices" hero tile — reference-only, demoted
+  to the fleet strip.
+
 ## [0.49.0] — 2026-07-16 — Wave C: nav restructure
 
 ### Changed
