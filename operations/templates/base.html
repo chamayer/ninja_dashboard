@@ -34,6 +34,17 @@
         header a { color: var(--header-fg); text-decoration: none; }
         .brand { font-weight: 600; font-size: 1.15rem; letter-spacing: 0.02em; }
         .brand small { display: block; font-size: 0.72rem; color: #b3b6c1; font-weight: 400; margin-top: 2px; }
+        .selector form { display: flex; align-items: center; gap: 0.5rem; margin: 0; }
+        .selector label { font-size: 0.85rem; color: #b3b6c1; }
+        .selector select {
+            padding: 0.4rem 0.6rem;
+            background: #16213e;
+            color: var(--header-fg);
+            border: 1px solid #333;
+            border-radius: 4px;
+            font-size: 0.9rem;
+            min-width: 220px;
+        }
         .user-info { font-size: 0.85rem; color: #b3b6c1; }
         .user-info a { text-decoration: underline; }
         main {
@@ -222,6 +233,28 @@
             color: #1e40af;
         }
 
+        /* Tom Select — header variant (dark theme, matches
+           primary-nav dark background). Scoped to .ts-header. */
+        .ts-header.ts-wrapper { min-width: 240px; }
+        .ts-header .ts-control {
+            background: #16213e;
+            border-color: #333;
+            color: #f5f5f5;
+            padding: 0.35rem 0.55rem;
+        }
+        .ts-header .ts-control input,
+        .ts-header .ts-control .item { color: #f5f5f5; }
+        .ts-header .ts-control input::placeholder { color: #9ca3af; }
+        .ts-header .ts-dropdown {
+            background: #1a1a2e;
+            border-color: #333;
+            color: #f5f5f5;
+        }
+        .ts-header .ts-dropdown .option { color: #f5f5f5; }
+        .ts-header .ts-dropdown .active {
+            background: #2a2a4e;
+            color: #ffffff;
+        }
     </style>
     <script>
     document.addEventListener('DOMContentLoaded', function() {
@@ -242,10 +275,18 @@
             {% if brand.tagline %}<small>{{ brand.tagline }}</small>{% endif %}
         </div>
 
-        {# Fleet-wide device/client search placeholder — Wave B will
-           replace this spacer with a real search input. #}
-        <div class="header-spacer" style="flex: 1;"></div>
         {% if user.is_authenticated %}
+        <div class="selector">
+            <form action="{% url 'client_switch' %}" method="get">
+                <label for="client-select">Client:</label>
+                <select id="client-select" name="slug" class="ts ts-header" onchange="this.form.submit()">
+                    <option value="all"{% if org_mode == 'all' %} selected{% endif %}>— All clients —</option>
+                    {% for c in clients %}
+                        <option value="{{ c.slug }}"{% if current_client and current_client.id == c.id %} selected{% endif %}>{{ c.display_name }}</option>
+                    {% endfor %}
+                </select>
+            </form>
+        </div>
         <div class="user-info">
             {{ user.username }} ·
             <a href="{% url 'admin:logout' %}">logout</a>
