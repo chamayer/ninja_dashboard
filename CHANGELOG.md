@@ -2,6 +2,22 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.50.5] — 2026-07-16 — Dashboard polish
+
+### Changed
+- "Needs immediate attention" panel now scrolls (max-height 300px,
+  overflow-y auto) and pulls up to 30 clients instead of 5. Row
+  count shown in the header.
+- "Fleet" overview card renamed to "Devices" — user preference.
+- Saved memory rule banning "fleet" from user-visible UI copy.
+
+### Confirmed real
+- Coverage: 1,935 open items is genuine. Breakdown:
+  - missing_required_platform: 1,918 (1,498 critical + 420 high)
+  - stale_required_platform: mostly resolved
+  Translation: ~1,900 devices are missing a required agent per
+  the coverage rules. Actionable, not a bug.
+
 ## [0.50.4] — 2026-07-16 — Restore overview cards
 
 ### Changed

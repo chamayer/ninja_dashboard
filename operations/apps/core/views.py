@@ -154,7 +154,7 @@ def home(request: HttpRequest) -> HttpResponse:
             GROUP BY f.client_id
             HAVING COUNT(DISTINCT ft.category_id) >= 2
             ORDER BY domain_count DESC, severe_count DESC
-            LIMIT 5
+            LIMIT 30
             """
         )
         on_fire_rows = cur.fetchall()
