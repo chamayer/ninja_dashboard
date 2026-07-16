@@ -2,6 +2,19 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.46.6] — 2026-07-16
+
+### Changed
+- Header client picker becomes a properly-styled searchable
+  Tom Select — with 74+ clients, native `<select>` is bad UX even
+  when it renders correctly. Type-to-search dropdown replaces
+  scroll-through-74-options.
+- New `.ts-header` CSS variant scoped to the header only:
+  dark background (`#16213e`) matching the primary-nav palette,
+  light text, focused active-option `#2a2a4e`. Content-area
+  Tom Select (Patching filters) keeps the default light styling
+  unchanged.
+
 ## [0.46.5] — 2026-07-16
 
 ### Fixed
