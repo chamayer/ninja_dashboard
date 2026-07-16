@@ -82,6 +82,25 @@ def home(request: HttpRequest) -> HttpResponse:
         .annotate(n=Count("id"))
     }
 
+    # Coverage split: Missing (agent never installed — actionable
+    # gap) vs Stale (agent installed but not checking in — mixed
+    # bag, includes offline devices which are unactionable).
+    coverage_split = {
+        row["finding_type__name"]: row["n"]
+        for row in Finding.objects.filter(
+            tenant_id=1,
+            status__in=_FINDING_ACTIVE_STATUSES,
+            finding_type__name__in=[
+                "missing_required_platform",
+                "stale_required_platform",
+            ],
+        )
+        .values("finding_type__name")
+        .annotate(n=Count("id"))
+    }
+    coverage_missing = coverage_split.get("missing_required_platform", 0)
+    coverage_stale = coverage_split.get("stale_required_platform", 0)
+
     # Patching population from v_device (Track O).
     patching_pop = {"total": 0, "in_scope": 0}
     with transaction.atomic(), connection.cursor() as cur:
@@ -196,11 +215,11 @@ def home(request: HttpRequest) -> HttpResponse:
                 "findings",
                 filter=Q(findings__status__in=_FINDING_ACTIVE_STATUSES),
             ),
-            coverage_gaps=Count(
+            missing_agents=Count(
                 "findings",
                 filter=Q(
                     findings__status__in=_FINDING_ACTIVE_STATUSES,
-                    findings__finding_type__category__name="coverage",
+                    findings__finding_type__name="missing_required_platform",
                 ),
             ),
         )
@@ -230,7 +249,7 @@ def home(request: HttpRequest) -> HttpResponse:
             "high": c.high_findings,
             "medium": c.medium_findings,
             "total": c.total_findings,
-            "coverage_gaps": c.coverage_gaps,
+            "missing_agents": c.missing_agents,
             "health": health,
         })
 
@@ -284,6 +303,8 @@ def home(request: HttpRequest) -> HttpResponse:
             "total_active_findings": total_active_findings,
             "severity_counts": severity_counts,
             "category_counts": category_counts,
+            "coverage_missing": coverage_missing,
+            "coverage_stale": coverage_stale,
             "patching_pop": patching_pop,
             "reviews_pending": reviews_pending,
             "source_health": source_health,

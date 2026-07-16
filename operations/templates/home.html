@@ -122,11 +122,17 @@
     <div class="ov-value">{{ category_counts.software|default:0 }}</div>
     <div class="ov-sub">flagged installations</div>
   </a>
-  <a class="overview-card {% if category_counts.coverage %}has-open{% endif %}"
-     href="{% url 'findings_queue' %}?category=coverage">
-    <div class="ov-label">Coverage</div>
-    <div class="ov-value">{{ category_counts.coverage|default:0 }}</div>
-    <div class="ov-sub">gaps across the fleet</div>
+  <a class="overview-card {% if coverage_missing %}has-open{% endif %}"
+     href="{% url 'findings_queue' %}?type=missing_required_platform">
+    <div class="ov-label">Missing agents</div>
+    <div class="ov-value">{{ coverage_missing }}</div>
+    <div class="ov-sub">agent never installed</div>
+  </a>
+  <a class="overview-card"
+     href="{% url 'findings_queue' %}?type=stale_required_platform">
+    <div class="ov-label">Not reporting</div>
+    <div class="ov-value">{{ coverage_stale }}</div>
+    <div class="ov-sub">may include offline devices</div>
   </a>
   <a class="overview-card {% if reviews_pending.total %}has-open{% endif %}"
      href="{% url 'client_candidates_queue' %}">
@@ -206,7 +212,7 @@
         <th>Client</th>
         <th style="text-align:right;">Devices</th>
         <th>Issues</th>
-        <th style="text-align:right;">Coverage gaps</th>
+        <th style="text-align:right;">Missing agents</th>
       </tr>
     </thead>
     <tbody>
@@ -235,8 +241,8 @@
           {% endif %}
         </td>
         <td style="text-align:right;">
-          {% if row.coverage_gaps %}
-            <a href="{% url 'findings_queue' %}?client={{ row.client.slug }}&category=coverage" style="color:#dc2626; font-weight:600;">{{ row.coverage_gaps }}</a>
+          {% if row.missing_agents %}
+            <a href="{% url 'findings_queue' %}?client={{ row.client.slug }}&type=missing_required_platform" style="color:#dc2626; font-weight:600;">{{ row.missing_agents }}</a>
           {% else %}
             <span class="muted">—</span>
           {% endif %}

@@ -2,6 +2,32 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.50.6] — 2026-07-16 — Split Missing vs Not reporting
+
+### Fixed
+- Old "Coverage" overview card conflated two different problems:
+  - **Missing** (agent never installed — actionable gap, needs
+    install)
+  - **Stale** (agent installed but not reporting — mixed bag,
+    includes offline devices where nothing can be done)
+- Split into two separate overview cards:
+  - **Missing agents** — count of `missing_required_platform`
+    (833 across fleet). Highlighted when > 0.
+  - **Not reporting** — count of `stale_required_platform`
+    (1,103). Not highlighted — labeled "may include offline
+    devices" so operators don't chase noise.
+- Client scoreboard "Coverage gaps" column renamed to
+  "Missing agents" and counts only the missing type. Clickthrough
+  filters to `type=missing_required_platform`.
+
+### Filed for follow-up
+- Evaluator noise reduction: don't fire
+  `stale_required_platform` when the device is entirely offline
+  (already covered by `device_offline`). Every agent naturally
+  stales when the device is off — per-agent stale is noise. Only
+  fire when at least one other agent still reports (i.e., "device
+  is up but this specific agent is silent").
+
 ## [0.50.5] — 2026-07-16 — Dashboard polish
 
 ### Changed

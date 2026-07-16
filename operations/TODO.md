@@ -22,6 +22,19 @@ module-specific; root `../TODO.md` keeps cross-repo items and pointers.
 
 ## Backlog
 
+### Coverage evaluator — `stale_required_platform` noise reduction
+
+- [ ] Evaluator should NOT fire `stale_required_platform` on
+      devices that are entirely offline (already covered by
+      `device_offline`). When a device is offline, EVERY agent on
+      it will naturally stale — per-agent stale is noise. Only
+      fire per-agent stale when the device has at least one other
+      agent still checking in (i.e., "the device is up but this
+      specific agent is silent" — actionable). Would drop
+      thousands of noise findings; makes the coverage number
+      genuinely actionable. Related to Dashboard split of
+      "Missing agents" vs "Not reporting" (0.50.6).
+
 ### P7 cutover — cleanups
 
 - [ ] Remove parity_check machinery (retired 2026-07-15 — 7-day gate
