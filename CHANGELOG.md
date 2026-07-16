@@ -2,6 +2,28 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.46.3] — 2026-07-16
+
+### Changed
+- humanize_label rewrites — first pass was still leaking techspeak
+  (e.g. "Device missing from source" — "source" is internal
+  jargon). Rewrites:
+  - `device_missing_from_source` → "Device removed from inventory"
+  - `duplicate_platform_record` → "Duplicate device record"
+  - `source_failure` → "Data source not responding"
+  - `missing_required_platform` → "Required agent not installed"
+  - `stale_required_platform` → "Required agent not checking in"
+  - `device_unenrolled` → "No management agent installed"
+  - `device_long_offline` → "Offline for an extended period"
+  - `cross_client_conflict` → "Same hostname on two clients"
+  - `unmapped_node_class` → "Unrecognised device type"
+  - `identity_resolution_pending` → "Awaiting device identity match"
+  - `software_queue_stalled` → "Software scan queue stalled"
+  - `stale_collector_binding` → "Ingest connector stopped"
+  - `unlinked_external_identity` → "Unresolved device from source"
+  - `client_name_conflict` → "Client renamed at source"
+  - `client_link_collision` → "Multiple clients claim this name"
+
 ## [0.46.2] — 2026-07-16
 
 ### Changed
