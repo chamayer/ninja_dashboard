@@ -6,21 +6,16 @@
 <div class="card">
     <h1>Patching</h1>
     <p class="muted">
-        Per-device patching health. Only devices with
-        <code>effective_patching_scope='Included'</code> fire these
-        findings (Track O batch O4/O5). Non-Ninja-linked and
-        non-Windows devices sit in <code>Unmanaged</code> and are
-        intentionally silent here.
+        Findings fire only for devices with
+        <code>effective_patching_scope='Included'</code> (Track O
+        batch O4/O5). Excluded / Unmanaged devices are intentionally
+        silent in the findings table but visible via the population
+        summary below.
     </p>
 </div>
 
-<div class="card">
-    <h2 style="font-size: 0.95rem; margin: 0 0 0.5rem 0; color: #9ca3af;">
-        Open by type <span class="muted">({{ total_active }} total)</span>
-    </h2>
-    {% include "_tiles.html" with tiles=tiles %}
-</div>
-
+{# Filter bar — placed BEFORE tiles so tile counts visibly reflect
+   the active filter selection. #}
 <div class="card">
     <form action="" method="get" class="filterbar">
         <div>
@@ -58,7 +53,82 @@
     </form>
 </div>
 
+{# Device population summary — scope breakdown. Clickthrough to
+   device list below. #}
 <div class="card">
+    <h2 style="font-size: 0.95rem; margin: 0 0 0.5rem 0; color: #9ca3af;">
+        Device population
+        {% if active_client %}<span class="muted">({{ active_client }} only)</span>{% endif %}
+    </h2>
+    {% include "_tiles.html" with tiles=population_tiles %}
+    <p class="muted" style="margin-top: 0.6rem; font-size: 0.85rem;">
+        <strong>{{ population.in_scope }}</strong> of {{ population.total }}
+        devices in patching scope
+        {% if population.total %}(<strong>{{ population.in_scope_pct }}%</strong>){% endif %}.
+        Excluded = operator-set exclusion; Unmanaged = non-Windows or
+        no Ninja link; Unknown = no scope decision yet.
+    </p>
+</div>
+
+{# Per-type finding tiles — reflect status+client filter. Click →
+   filter table by that type. #}
+<div class="card">
+    <h2 style="font-size: 0.95rem; margin: 0 0 0.5rem 0; color: #9ca3af;">
+        Open findings by type
+        <span class="muted">({{ total_active }} total in filter)</span>
+    </h2>
+    {% include "_tiles.html" with tiles=tiles %}
+</div>
+
+{% if device_rows %}
+<div class="card">
+    <h2>
+        Devices — scope: <code>{{ active_scope }}</code>
+        <span class="muted" style="font-weight: 400; font-size: 0.85rem;">
+            ({{ device_rows|length }}{% if device_rows|length == 500 %}+{% endif %})
+        </span>
+    </h2>
+    <table class="ops-table">
+        <thead>
+            <tr>
+                <th>Hostname</th>
+                <th>Role</th>
+                <th>OS group</th>
+                <th>Scope reason</th>
+                <th>Override?</th>
+                <th class="num">Last contact</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for d in device_rows %}
+            <tr>
+                <td>
+                    {% if d.url %}
+                        <a href="{{ d.url }}"><code>{{ d.hostname }}</code></a>
+                    {% else %}
+                        <code>{{ d.hostname }}</code>
+                    {% endif %}
+                </td>
+                <td class="muted">{{ d.role|default:"unknown" }}</td>
+                <td class="muted">{{ d.os_group|default:"—" }}</td>
+                <td class="muted"><code>{{ d.reason|default:"—" }}</code></td>
+                <td>
+                    {% if d.override %}
+                        <span class="badge badge-medium">{{ d.override }}</span>
+                    {% else %}
+                        <span class="muted">—</span>
+                    {% endif %}
+                </td>
+                <td class="muted num">{{ d.last_contact|date:"Y-m-d H:i"|default:"—" }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+<div class="card">
+    <h2>Findings</h2>
     {% if rows %}
     <table>
         <thead>

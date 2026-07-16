@@ -834,49 +834,165 @@ _PATCHING_TYPES = (
 
 @login_required
 def patching_queue(request: HttpRequest) -> HttpResponse:
-    """Patching triage queue — 5 finding-type tiles + filterable table."""
+    """Patching triage queue — filter bar, device-population summary,
+    5 finding-type tiles reflecting the current filter, filterable
+    table.
+    """
     type_filter = request.GET.get("type", "")
     status_filter = request.GET.get("status", "active")
     client_filter = request.GET.get("client", "")
 
-    # Per-type tile counts (active only). Query once, index into dict.
+    # Resolve client filter → id for downstream population query
+    # (v_device is raw SQL — Client slug → id lookup).
+    filtered_client_id = None
+    if client_filter:
+        filtered_client_id = (
+            Client.objects.filter(
+                tenant_id=1, slug=client_filter, deleted_at__isnull=True
+            )
+            .values_list("id", flat=True)
+            .first()
+        )
+
+    # Base Finding queryset for tiles and main table — everything
+    # inherits status + client filters. Type filter applied only to
+    # the main table (tiles remain per-type navigators).
+    base_qs = Finding.objects.filter(
+        tenant_id=1,
+        finding_type__category__name="patching",
+    )
+    if status_filter == "active":
+        base_qs = base_qs.filter(status__in=_FINDING_ACTIVE_STATUSES)
+    elif status_filter and status_filter != "all":
+        base_qs = base_qs.filter(status=status_filter)
+    if filtered_client_id is not None:
+        base_qs = base_qs.filter(client_id=filtered_client_id)
+    elif client_filter:
+        # Client slug given but no match — return no rows to avoid
+        # showing global counts under a mistyped slug.
+        base_qs = base_qs.none()
+
+    # Per-type tile counts (respects status + client filters).
     tile_counts = {
         row["finding_type__name"]: row["cnt"]
         for row in (
-            Finding.objects.filter(
-                tenant_id=1,
-                finding_type__name__in=_PATCHING_TYPES,
-                status__in=_FINDING_ACTIVE_STATUSES,
-            )
-            .values("finding_type__name")
-            .annotate(cnt=Count("id"))
+            base_qs.values("finding_type__name").annotate(cnt=Count("id"))
         )
     }
     tiles = [
         {
             "label": ftname.replace("_", " "),
             "value": tile_counts.get(ftname, 0),
-            "href": f"?type={ftname}",
+            "href": f"?type={ftname}" + (
+                f"&client={client_filter}" if client_filter else ""
+            ) + (
+                f"&status={status_filter}" if status_filter != "active" else ""
+            ),
         }
         for ftname in _PATCHING_TYPES
     ]
 
-    # Main findings query — always scoped to patching category so
-    # nothing else leaks in even if the type filter is cleared.
-    qs = Finding.objects.filter(
-        tenant_id=1,
-        finding_type__category__name="patching",
-    ).select_related("finding_type", "client")
+    # Device-population summary — how many devices exist in the
+    # filtered slice, how many are in scope (Included). Reads
+    # v_device (Track O). Scoped to client if filtered.
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        if filtered_client_id is not None:
+            cur.execute(
+                """
+                SELECT COUNT(*) AS total,
+                       COUNT(*) FILTER (WHERE effective_patching_scope = 'Included') AS in_scope,
+                       COUNT(*) FILTER (WHERE effective_patching_scope = 'Excluded') AS excluded,
+                       COUNT(*) FILTER (WHERE effective_patching_scope = 'Unmanaged') AS unmanaged
+                FROM operations.v_device
+                WHERE tenant_id = %s AND client_id = %s
+                """,
+                [1, str(filtered_client_id)],
+            )
+        else:
+            cur.execute(
+                """
+                SELECT COUNT(*) AS total,
+                       COUNT(*) FILTER (WHERE effective_patching_scope = 'Included') AS in_scope,
+                       COUNT(*) FILTER (WHERE effective_patching_scope = 'Excluded') AS excluded,
+                       COUNT(*) FILTER (WHERE effective_patching_scope = 'Unmanaged') AS unmanaged
+                FROM operations.v_device
+                WHERE tenant_id = %s
+                """,
+                [1],
+            )
+        pop_row = cur.fetchone() or (0, 0, 0, 0)
+    population = {
+        "total": pop_row[0],
+        "in_scope": pop_row[1],
+        "excluded": pop_row[2],
+        "unmanaged": pop_row[3],
+        "in_scope_pct": (
+            round(100.0 * pop_row[1] / pop_row[0], 1) if pop_row[0] else 0.0
+        ),
+    }
 
-    if status_filter == "active":
-        qs = qs.filter(status__in=_FINDING_ACTIVE_STATUSES)
-    elif status_filter and status_filter != "all":
-        qs = qs.filter(status=status_filter)
+    # Device population by scope (drilldown from the summary tiles).
+    # Optional "scope" query param drills into a specific bucket.
+    scope_filter = request.GET.get("scope", "")
+    device_rows: list = []
+    if scope_filter in ("Included", "Excluded", "Unmanaged", "Unknown"):
+        with transaction.atomic(), connection.cursor() as cur:
+            cur.execute("SET LOCAL operations.tenant_id = 1")
+            base_where = "tenant_id = %s AND effective_patching_scope = %s"
+            params: list = [1, scope_filter]
+            if filtered_client_id is not None:
+                base_where += " AND client_id = %s"
+                params.append(str(filtered_client_id))
+            cur.execute(
+                f"""
+                SELECT device_id, canonical_hostname, client_id,
+                       device_role, os_group,
+                       patching_scope_reason,
+                       patching_scope_override,
+                       last_contact_at
+                FROM operations.v_device
+                WHERE {base_where}
+                ORDER BY canonical_hostname
+                LIMIT 500
+                """,
+                params,
+            )
+            device_rows = cur.fetchall()
 
+    # Client-id → slug lookup, pre-compute clickthrough URL per device
+    # row (template-side lookup would iterate all clients per row —
+    # bad).
+    if device_rows:
+        client_slug_by_id = dict(
+            Client.objects.filter(tenant_id=1).values_list("id", "slug")
+        )
+        from django.urls import reverse
+        device_rows = [
+            {
+                "device_id": did,
+                "hostname": hostname,
+                "role": role,
+                "os_group": os_group,
+                "reason": reason,
+                "override": override,
+                "last_contact": last_contact,
+                "url": (
+                    reverse("device_detail", kwargs={
+                        "org_slug": client_slug_by_id[cid],
+                        "device_id": did,
+                    })
+                    if cid in client_slug_by_id else None
+                ),
+            }
+            for (did, hostname, cid, role, os_group, reason, override,
+                 last_contact) in device_rows
+        ]
+
+    # Main table query = base_qs + type filter
+    qs = base_qs.select_related("finding_type", "client")
     if type_filter:
         qs = qs.filter(finding_type__name=type_filter)
-    if client_filter:
-        qs = qs.filter(client__slug=client_filter)
 
     _SEV_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
     findings = sorted(
@@ -929,11 +1045,38 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
     page_query = request.GET.copy()
     page_query.pop("page", None)
 
+    # Preserve current filters as query-string fragment for scope
+    # drilldown links.
+    filter_qs_parts = []
+    if client_filter:
+        filter_qs_parts.append(f"client={client_filter}")
+    if status_filter and status_filter != "active":
+        filter_qs_parts.append(f"status={status_filter}")
+    filter_qs = "&".join(filter_qs_parts)
+
+    # Population summary tiles (clickthrough drills into scope bucket).
+    def _scope_href(bucket: str) -> str:
+        parts = [f"scope={bucket}"]
+        if filter_qs:
+            parts.append(filter_qs)
+        return "?" + "&".join(parts)
+
+    population_tiles = [
+        {"label": "Total devices",  "value": population["total"]},
+        {"label": "In scope (Included)", "value": population["in_scope"],
+         "href": _scope_href("Included")},
+        {"label": "Excluded",       "value": population["excluded"],
+         "href": _scope_href("Excluded")},
+        {"label": "Unmanaged",      "value": population["unmanaged"],
+         "href": _scope_href("Unmanaged")},
+    ]
+
     return render(
         request,
         "patching_queue.html",
         {
             "tiles": tiles,
+            "population_tiles": population_tiles,
             "page_obj": page,
             "rows": page.object_list,
             "patching_types": _PATCHING_TYPES,
@@ -942,7 +1085,11 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
             "active_type": type_filter,
             "active_status": status_filter,
             "active_client": client_filter,
+            "active_scope": scope_filter,
             "total_active": sum(tile_counts.values()),
+            "population": population,
+            "filter_qs": filter_qs,
+            "device_rows": device_rows,
             "page_query": page_query.urlencode(),
         },
     )

@@ -2,6 +2,26 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.45.2] — 2026-07-16
+
+### Changed
+- Patching page reorganised (feedback):
+  - Filter bar moved to the top (above tiles) so tile counts
+    visibly reflect the current filter selection.
+  - Per-type finding tiles now honor the status + client filters
+    (were global before).
+  - New "Device population" section with 4 scope tiles: Total,
+    In scope (Included), Excluded, Unmanaged. In-scope % shown
+    inline. Excluded / Unmanaged / Included tiles clickthrough
+    to a filtered device list at the bottom of the page — this
+    is where Unmanaged / Excluded devices are surfaced (they
+    intentionally don't fire findings, but are now browsable).
+  - New device-scope drilldown: clicking a scope tile renders
+    a table of devices in that bucket with hostname
+    clickthrough to device_detail, scope_reason (`no-ninja-link`,
+    `os-group-not-windows`, `default:server`, `device.patchingDisabled`,
+    etc.), override marker, last_contact.
+
 ## [0.45.1] — 2026-07-16
 
 ### Added
