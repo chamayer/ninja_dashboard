@@ -1,0 +1,229 @@
+{% extends "base.html" %}
+{% load human_labels %}
+
+{% block title %}Software{% endblock %}
+
+{% block content %}
+<style>
+  .sw-overview {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 0.65rem; margin-bottom: 1rem;
+  }
+  .sw-tile {
+    display: block; padding: 0.75rem 1rem;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 6px; text-decoration: none; color: inherit;
+    transition: box-shadow 0.15s, border-color 0.15s;
+  }
+  .sw-tile:hover { box-shadow: 0 2px 6px rgba(0,0,0,0.06); border-color: var(--accent); }
+  .sw-tile .sw-label { font-size: 0.72rem; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.06em; color: var(--muted); margin-bottom: 0.2rem; }
+  .sw-tile .sw-value { font-size: 1.6rem; font-weight: 700; line-height: 1.1; color: #1a1a2e; }
+  .sw-tile .sw-sub { font-size: 0.75rem; color: var(--muted); margin-top: 0.2rem; }
+  .sw-tile.has-open .sw-value { color: #b45309; }
+
+  .cat-chips { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.75rem; }
+  .cat-chip {
+    display: inline-flex; align-items: center; gap: 0.4rem;
+    padding: 0.3rem 0.7rem; border: 1px solid var(--border);
+    border-radius: 999px; background: #fff; text-decoration: none;
+    color: #374151; font-size: 0.82rem;
+  }
+  .cat-chip:hover { border-color: var(--accent); }
+  .cat-chip.active { background: #1e40af; border-color: #1e40af; color: #fff; }
+  .cat-chip .chip-count { font-weight: 600; color: var(--muted); }
+  .cat-chip.active .chip-count { color: #fecaca; }
+
+  .sw-table th, .sw-table td { padding: 0.5rem 0.75rem; vertical-align: middle; }
+  .sw-table tbody tr { border-bottom: 1px solid var(--border); }
+  .decision-pill {
+    display: inline-block; padding: 1px 0.55rem; border-radius: 12px;
+    font-size: 0.72rem; font-weight: 600;
+  }
+  .decision-pill.approve, .decision-pill.approve_publisher {
+    background: #dcfce7; color: #166534;
+  }
+  .decision-pill.reject { background: #fee2e2; color: #991b1b; }
+  .decision-pill.investigate { background: #fef3c7; color: #92400e; }
+  .decision-pill.none { background: #f3f4f6; color: #6b7280; }
+
+  .sidebar-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 1rem;
+  }
+  @media (max-width: 900px) { .sidebar-grid { grid-template-columns: 1fr; } }
+  .side-list { list-style: none; padding: 0; margin: 0; }
+  .side-list li { padding: 0.5rem 0; border-bottom: 1px solid var(--border);
+    font-size: 0.85rem; display: flex; align-items: baseline; gap: 0.5rem; }
+  .side-list li:last-child { border-bottom: none; }
+  .side-time { color: var(--muted); font-size: 0.75rem; white-space: nowrap; margin-left: auto; }
+</style>
+
+<div class="card">
+    <h1>Software
+      <span class="muted" style="font-weight:400; font-size:0.9rem;">
+        {{ installations }} installations across the fleet
+      </span>
+    </h1>
+    <p class="muted">Every product installed across your clients — inventory, classification, decisions, and open items.</p>
+</div>
+
+{# ── Overview cards ─────────────────────────────────────── #}
+<div class="sw-overview">
+    <div class="sw-tile">
+        <div class="sw-label">Titles</div>
+        <div class="sw-value">{{ unique_titles }}</div>
+        <div class="sw-sub">unique products</div>
+    </div>
+    <div class="sw-tile">
+        <div class="sw-label">Installations</div>
+        <div class="sw-value">{{ installations }}</div>
+        <div class="sw-sub">device × title pairs</div>
+    </div>
+    <div class="sw-tile">
+        <div class="sw-label">Categorized</div>
+        <div class="sw-value">{{ categorized_titles }}</div>
+        <div class="sw-sub">titles in catalog</div>
+    </div>
+    <a class="sw-tile {% if uncategorized_titles %}has-open{% endif %}" href="?category=uncategorized">
+        <div class="sw-label">Uncategorized</div>
+        <div class="sw-value">{{ uncategorized_titles }}</div>
+        <div class="sw-sub">titles not yet classified</div>
+    </a>
+    <a class="sw-tile" href="{% url 'software_decisions_queue' %}">
+        <div class="sw-label">Decisions</div>
+        <div class="sw-value">{{ approved_titles }}</div>
+        <div class="sw-sub">approved · {{ rejected_titles }} rejected</div>
+    </a>
+    <a class="sw-tile {% if software_issues %}has-open{% endif %}" href="{% url 'findings_queue' %}?category=software">
+        <div class="sw-label">Open items</div>
+        <div class="sw-value">{{ software_issues }}</div>
+        <div class="sw-sub">flagged installations</div>
+    </a>
+</div>
+
+{# ── Category chip strip ────────────────────────────────── #}
+<div class="card">
+    <h2 style="font-size:0.95rem; margin:0 0 0.5rem 0; color:#9ca3af;">Categories</h2>
+    <div class="cat-chips">
+        <a class="cat-chip {% if not active_category %}active{% endif %}" href="{% url 'software_page' %}">
+            All <span class="chip-count">{{ unique_titles }}</span>
+        </a>
+        {% for cat_name, cat_titles in category_rows %}
+            <a class="cat-chip {% if active_category == cat_name %}active{% endif %}"
+               href="?category={{ cat_name }}">
+                {{ cat_name|humanize_label|default:cat_name }}
+                <span class="chip-count">{{ cat_titles }}</span>
+            </a>
+        {% endfor %}
+        <a class="cat-chip {% if active_category == 'uncategorized' %}active{% endif %}"
+           href="?category=uncategorized">
+            Uncategorized <span class="chip-count">{{ uncategorized_titles }}</span>
+        </a>
+    </div>
+
+    <form method="get" style="display:flex; gap:0.5rem; align-items:center; margin-top:0.5rem;">
+        <input type="search" name="q" placeholder="Search titles or publishers…"
+               value="{{ active_q|default:'' }}"
+               style="padding:0.4rem 0.7rem; border:1px solid var(--border); border-radius:4px; font-size:0.85rem; min-width:260px;">
+        {% if active_category %}<input type="hidden" name="category" value="{{ active_category }}">{% endif %}
+        <select name="decision" style="padding:0.4rem 0.7rem; border:1px solid var(--border); border-radius:4px;">
+            <option value="">Any decision</option>
+            <option value="approved" {% if active_decision == 'approved' %}selected{% endif %}>Approved</option>
+            <option value="rejected" {% if active_decision == 'rejected' %}selected{% endif %}>Rejected</option>
+            <option value="pending" {% if active_decision == 'pending' %}selected{% endif %}>No decision yet</option>
+        </select>
+        <button type="submit">Apply</button>
+        {% if active_q or active_decision %}
+          <a href="?{% if active_category %}category={{ active_category }}{% endif %}" style="font-size:0.85rem;">Clear</a>
+        {% endif %}
+    </form>
+</div>
+
+{# ── Titles table ───────────────────────────────────────── #}
+<div class="card">
+    <h2>Titles
+      <span class="muted" style="font-weight:400; font-size:0.85rem;">
+        ({{ titles|length }}{% if titles|length == 500 %}+{% endif %})
+      </span>
+    </h2>
+    {% if titles %}
+    <table class="sw-table" data-sortable>
+        <thead>
+            <tr>
+                <th>Title</th>
+                <th>Publisher</th>
+                <th style="text-align:right;">Devices</th>
+                <th style="text-align:right;">Clients</th>
+                <th>Category</th>
+                <th>Decision</th>
+                <th class="num">Latest install</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for t in titles %}
+            <tr>
+                <td><strong>{{ t.canonical_name }}</strong></td>
+                <td class="muted">{{ t.publisher|default:"—" }}</td>
+                <td style="text-align:right;">{{ t.device_count }}</td>
+                <td style="text-align:right;">{{ t.client_count }}</td>
+                <td class="muted">
+                    {% if t.categories %}
+                        {% for cat in t.categories %}
+                            {{ cat|humanize_label|default:cat }}{% if not forloop.last %}, {% endif %}
+                        {% endfor %}
+                    {% else %}
+                        <span class="muted">—</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if t.decision %}
+                        <span class="decision-pill {{ t.decision }}">{{ t.decision|humanize_label|default:t.decision }}</span>
+                    {% else %}
+                        <span class="decision-pill none">no decision</span>
+                    {% endif %}
+                </td>
+                <td class="muted num">{{ t.last_install|date:"Y-m-d"|default:"—" }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="muted">No titles match the current filter.</p>
+    {% endif %}
+</div>
+
+{# ── Sidebar: recent + pending ──────────────────────────── #}
+<div class="sidebar-grid">
+    <div class="card">
+        <h2>New in last 24 hours
+          <span class="muted" style="font-weight:400; font-size:0.85rem;">({{ recent_installs|length }})</span>
+        </h2>
+        {% if recent_installs %}
+        <ul class="side-list">
+            {% for name, publisher, client, first_seen in recent_installs %}
+            <li>
+                <strong>{{ name }}</strong>
+                {% if publisher %}<span class="muted">— {{ publisher }}</span>{% endif %}
+                <span class="muted">· {{ client }}</span>
+                <span class="side-time">{{ first_seen|date:"H:i" }}</span>
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <p class="muted">Nothing new.</p>
+        {% endif %}
+    </div>
+
+    <div class="card">
+        <h2>Decisions
+          <span class="muted" style="font-weight:400; font-size:0.85rem;">({{ pending_decisions }} pending)</span>
+        </h2>
+        <p class="muted" style="font-size:0.85rem;">
+            {{ approved_titles }} approved · {{ rejected_titles }} rejected ·
+            {{ pending_decisions }} awaiting review
+        </p>
+        <a href="{% url 'software_decisions_queue' %}" style="font-size:0.85rem;">Open decisions queue →</a>
+    </div>
+</div>
+{% endblock %}

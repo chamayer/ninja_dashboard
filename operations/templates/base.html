@@ -251,8 +251,8 @@
             <a class="nav-link {% if request.resolver_match.url_name == 'patching_queue' %}active{% endif %}"
                href="{% url 'patching_queue' %}">Patching{% if nav_patching_open %} <span class="nav-badge">{{ nav_patching_open }}</span>{% endif %}</a>
 
-            <a class="nav-link {% if request.resolver_match and 'software_decision' in request.resolver_match.url_name %}active{% endif %}"
-               href="{% url 'findings_queue' %}?category=software">Software</a>
+            <a class="nav-link {% if request.resolver_match.url_name == 'software_page' %}active{% endif %}"
+               href="{% url 'software_page' %}">Software</a>
 
             <a class="nav-link {% if request.resolver_match and 'finding' in request.resolver_match.url_name %}active{% endif %}"
                href="{% url 'findings_queue' %}">Issues{% if nav_findings_count %} <span class="nav-badge">{{ nav_findings_count }}</span>{% endif %}</a>

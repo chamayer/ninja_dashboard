@@ -2,6 +2,32 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.52.0] — 2026-07-16 — Software fleet page (entity-first)
+
+### Added
+- New `/software/` page — Software is an entity ecosystem, not an
+  issue category. The whole software domain gets its own page:
+  - **Overview cards**: Titles · Installations · Categorized ·
+    Uncategorized · Decisions · Open items
+  - **Category chip strip**: All · AV · EDR · RMM · Remote access ·
+    Browser · Runtime · EOL · … · Uncategorized. Sourced from
+    `software_catalog.categories` JSONB arrays.
+  - **Titles table**: one row per canonical product with device
+    count, client count, category, decision status, latest install.
+    Filter by name, category, decision status. Cap 500 rows.
+  - **Sidebar**: Recent installs (last 24h) + Decisions summary
+    with link to the decisions queue.
+- Software nav link now points to `/software/` (was
+  `/findings/?category=software`). The Issues-filtered view still
+  works — the "Open items" card on the Software page clicks
+  through to it.
+
+### humanize_label additions
+- Software categories (av / edr / rmm / remote_access / browser /
+  runtime / eol / etc.) get proper labels.
+- Decision values (approve / reject / investigate) get labels
+  too.
+
 ## [0.51.1] — 2026-07-16 — Drop redundant "Matching" tile
 
 ### Fixed

@@ -111,6 +111,22 @@ _LABELS: dict[str, str] = {
     "identity": "Identity",
     "platform": "Platform health",
     "resolver": "Client resolver",
+    # ── Software catalog categories ──────────────────────────
+    "av": "Antivirus",
+    "edr": "EDR",
+    "rmm": "RMM",
+    "remote_access": "Remote access",
+    "browser": "Web browser",
+    "runtime": "Runtime",
+    "eol": "End-of-life",
+    "system": "System tool",
+    "productivity": "Productivity",
+    "developer": "Developer tool",
+    # ── Software decision values ─────────────────────────────
+    "approve": "Approved",
+    "approve_publisher": "Publisher approved",
+    "reject": "Rejected",
+    "investigate": "Investigating",
     # ── Portfolio state buckets (Dashboard) ──────────────────
     "critical": "Critical",
     "degrading": "Degrading",

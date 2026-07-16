@@ -1079,6 +1079,207 @@ def finding_acknowledge(request: HttpRequest, finding_id: str) -> HttpResponse:
 
 
 # ─────────────────────────────────────────────────────────────────────
+# Software fleet page — the whole software ecosystem across the fleet:
+# inventory, catalog classification, decisions, and issues as ONE
+# facet (not the whole story).
+# ─────────────────────────────────────────────────────────────────────
+
+@login_required
+def software_page(request: HttpRequest) -> HttpResponse:
+    q_filter = (request.GET.get("q") or "").strip()
+    decision_filter = request.GET.get("decision", "")  # approved|rejected|pending|any
+    category_filter = request.GET.get("category", "")  # av|rmm|remote_access|...|uncategorized
+
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+
+        # Overview aggregates
+        cur.execute(
+            """
+            SELECT COUNT(*) AS installations,
+                   COUNT(DISTINCT canonical_name) AS unique_titles
+            FROM operations.software_installations_current
+            WHERE tenant_id = 1 AND deleted_at IS NULL AND stale_since IS NULL
+            """
+        )
+        installations, unique_titles = cur.fetchone()
+
+        cur.execute(
+            """
+            SELECT COUNT(*) FROM operations.software_catalog
+            WHERE tenant_id = 1 OR tenant_id IS NULL
+            """
+        )
+        (categorized_titles,) = cur.fetchone()
+
+        # Decisions rollup
+        cur.execute(
+            """
+            SELECT decision, COUNT(*) FROM operations.software_decisions
+            WHERE tenant_id = 1 GROUP BY decision
+            """
+        )
+        decision_counts = {row[0]: row[1] for row in cur.fetchall()}
+
+        # Category breakdown (from catalog rows)
+        cur.execute(
+            """
+            SELECT jsonb_array_elements_text(categories) AS category,
+                   COUNT(DISTINCT canonical_name) AS titles
+            FROM operations.software_catalog
+            WHERE tenant_id = 1 OR tenant_id IS NULL
+            GROUP BY category
+            ORDER BY titles DESC
+            """
+        )
+        category_rows = cur.fetchall()
+
+        # Titles-across-the-fleet aggregate. One row per canonical
+        # product with rollup counts. Filter by name, category,
+        # decision.
+        where_clauses = [
+            "sic.tenant_id = 1",
+            "sic.deleted_at IS NULL",
+            "sic.stale_since IS NULL",
+        ]
+        params: list = []
+        if q_filter:
+            where_clauses.append(
+                "(sic.canonical_name ILIKE %s OR sic.publisher ILIKE %s)"
+            )
+            params.extend([f"%{q_filter}%", f"%{q_filter}%"])
+        if category_filter == "uncategorized":
+            where_clauses.append(
+                "NOT EXISTS (SELECT 1 FROM operations.software_catalog cat "
+                " WHERE cat.canonical_name = sic.canonical_name "
+                "   AND (cat.tenant_id = sic.tenant_id OR cat.tenant_id IS NULL))"
+            )
+        elif category_filter:
+            where_clauses.append(
+                "EXISTS (SELECT 1 FROM operations.software_catalog cat "
+                " WHERE cat.canonical_name = sic.canonical_name "
+                "   AND (cat.tenant_id = sic.tenant_id OR cat.tenant_id IS NULL) "
+                "   AND cat.categories ? %s)"
+            )
+            params.append(category_filter)
+        if decision_filter == "approved":
+            where_clauses.append(
+                "EXISTS (SELECT 1 FROM operations.software_decisions sd "
+                " WHERE sd.tenant_id = sic.tenant_id "
+                "   AND sd.canonical_name = sic.canonical_name "
+                "   AND sd.decision IN ('approve','approve_publisher'))"
+            )
+        elif decision_filter == "rejected":
+            where_clauses.append(
+                "EXISTS (SELECT 1 FROM operations.software_decisions sd "
+                " WHERE sd.tenant_id = sic.tenant_id "
+                "   AND sd.canonical_name = sic.canonical_name "
+                "   AND sd.decision = 'reject')"
+            )
+        elif decision_filter == "pending":
+            where_clauses.append(
+                "NOT EXISTS (SELECT 1 FROM operations.software_decisions sd "
+                " WHERE sd.tenant_id = sic.tenant_id "
+                "   AND sd.canonical_name = sic.canonical_name)"
+            )
+
+        where_sql = " AND ".join(where_clauses)
+        cur.execute(
+            f"""
+            SELECT sic.canonical_name,
+                   MAX(sic.publisher) AS publisher,
+                   COUNT(DISTINCT sic.device_id) AS device_count,
+                   COUNT(DISTINCT sic.client_id) AS client_count,
+                   MAX(sic.first_observed_at) AS last_install,
+                   (SELECT array_agg(DISTINCT cat_name)
+                    FROM operations.software_catalog cat,
+                         jsonb_array_elements_text(cat.categories) AS cat_name
+                    WHERE cat.canonical_name = sic.canonical_name
+                      AND (cat.tenant_id = sic.tenant_id OR cat.tenant_id IS NULL)
+                   ) AS categories,
+                   (SELECT MIN(sd.decision)
+                    FROM operations.software_decisions sd
+                    WHERE sd.tenant_id = sic.tenant_id
+                      AND sd.canonical_name = sic.canonical_name
+                   ) AS decision
+            FROM operations.software_installations_current sic
+            WHERE {where_sql}
+            GROUP BY sic.canonical_name
+            ORDER BY device_count DESC, sic.canonical_name
+            LIMIT 500
+            """,
+            params,
+        )
+        title_rows = cur.fetchall()
+
+        # Recent installations — last 24h, first-seen
+        cur.execute(
+            """
+            SELECT sic.canonical_name, sic.publisher, c.display_name AS client,
+                   sic.first_observed_at
+            FROM operations.software_installations_current sic
+            JOIN operations.clients c ON c.id = sic.client_id
+            WHERE sic.tenant_id = 1 AND sic.deleted_at IS NULL
+              AND sic.first_observed_at >= NOW() - INTERVAL '24 hours'
+            ORDER BY sic.first_observed_at DESC
+            LIMIT 10
+            """
+        )
+        recent_installs = cur.fetchall()
+
+    # Software issues count (Finding table)
+    software_issues = Finding.objects.filter(
+        tenant_id=1,
+        status__in=_FINDING_ACTIVE_STATUSES,
+        finding_type__category__name="software",
+    ).count()
+
+    approved_titles = (
+        decision_counts.get("approve", 0)
+        + decision_counts.get("approve_publisher", 0)
+    )
+    rejected_titles = decision_counts.get("reject", 0)
+    investigate_titles = decision_counts.get("investigate", 0)
+    pending_decisions = unique_titles - approved_titles - rejected_titles - investigate_titles
+    if pending_decisions < 0:
+        pending_decisions = 0
+
+    titles = [
+        {
+            "canonical_name": row[0],
+            "publisher": row[1] or "",
+            "device_count": row[2],
+            "client_count": row[3],
+            "last_install": row[4],
+            "categories": row[5] or [],
+            "decision": row[6],
+        }
+        for row in title_rows
+    ]
+
+    return render(
+        request,
+        "software_page.html",
+        {
+            "installations": installations,
+            "unique_titles": unique_titles,
+            "categorized_titles": categorized_titles,
+            "uncategorized_titles": unique_titles - categorized_titles if unique_titles > categorized_titles else 0,
+            "approved_titles": approved_titles,
+            "rejected_titles": rejected_titles,
+            "pending_decisions": pending_decisions,
+            "software_issues": software_issues,
+            "category_rows": category_rows,  # [(category_name, titles), ...]
+            "titles": titles,
+            "recent_installs": recent_installs,
+            "active_q": q_filter,
+            "active_category": category_filter,
+            "active_decision": decision_filter,
+        },
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────
 # Patching queue — dedicated surface for the 5 patching finding types
 # emitted by ingest/patch_findings.py. Complements the general findings
 # queue with per-type tiles + scope filter (only in-scope devices fire
