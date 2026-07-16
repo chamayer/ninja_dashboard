@@ -627,6 +627,60 @@ def client_switch(request: HttpRequest) -> HttpResponse:
 
 
 @login_required
+def search(request: HttpRequest) -> HttpResponse:
+    """Fleet-wide search — hostname / serial / client name / slug.
+
+    - Unique device match → redirect straight to device_detail.
+    - Unique client match → redirect to client's org_index page.
+    - Ambiguous or empty → render a results page.
+    """
+    q = (request.GET.get("q") or "").strip()
+    if not q:
+        return render(request, "search_results.html",
+                      {"q": "", "devices": [], "clients": []})
+
+    devices = list(
+        Device.objects.filter(
+            tenant_id=1,
+            deleted_at__isnull=True,
+        )
+        .filter(
+            Q(canonical_hostname__icontains=q)
+            | Q(canonical_serial__icontains=q)
+        )
+        .select_related("client")
+        .order_by("canonical_hostname")[:100]
+    )
+
+    clients = list(
+        Client.objects.filter(
+            tenant_id=1,
+            deleted_at__isnull=True,
+        )
+        .filter(
+            Q(display_name__icontains=q)
+            | Q(slug__icontains=q)
+        )
+        .order_by("display_name")[:100]
+    )
+
+    # Unambiguous matches → redirect straight there.
+    if len(devices) == 1 and not clients:
+        d = devices[0]
+        if d.client:
+            return redirect("device_detail",
+                            org_slug=d.client.slug, device_id=d.id)
+    if len(clients) == 1 and not devices:
+        return redirect("org_index", org_slug=clients[0].slug)
+
+    return render(request, "search_results.html", {
+        "q": q,
+        "devices": devices,
+        "clients": clients,
+    })
+
+
+@login_required
 def findings_queue(request: HttpRequest) -> HttpResponse:
     """Entity findings review page."""
     status_filter = request.GET.get("status", "active")

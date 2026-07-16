@@ -2,6 +2,18 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.48.1] — 2026-07-16
+
+### Added
+- **Fleet-wide search** in the header — input field replaces the
+  empty spacer left after the client-picker removal. Searches
+  device hostname + serial + client name + slug (icontains). A
+  unique device match redirects to device_detail; a unique client
+  match redirects to that client's page; otherwise the results
+  render on a `/search/` page grouped by Devices / Clients.
+- `search` view + `/search/` URL + `search_results.html` template.
+- Dark header input styling to match the primary-nav palette.
+
 ## [0.48.0] — 2026-07-16
 
 ### Removed

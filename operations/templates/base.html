@@ -33,6 +33,22 @@
         header a { color: var(--header-fg); text-decoration: none; }
         .brand { font-weight: 600; font-size: 1.15rem; letter-spacing: 0.02em; }
         .brand small { display: block; font-size: 0.72rem; color: #b3b6c1; font-weight: 400; margin-top: 2px; }
+        .header-search { flex: 1; max-width: 480px; margin: 0 1rem; }
+        .header-search input {
+            width: 100%;
+            padding: 0.45rem 0.75rem;
+            background: #16213e;
+            color: var(--header-fg);
+            border: 1px solid #333;
+            border-radius: 4px;
+            font-size: 0.9rem;
+        }
+        .header-search input::placeholder { color: #7a83a0; }
+        .header-search input:focus {
+            outline: none;
+            border-color: var(--accent);
+            background: #1a2645;
+        }
         .user-info { font-size: 0.85rem; color: #b3b6c1; }
         .user-info a { text-decoration: underline; }
         main {
@@ -208,8 +224,11 @@
             {% if brand.tagline %}<small>{{ brand.tagline }}</small>{% endif %}
         </div>
 
-        <div style="flex: 1;"></div>
         {% if user.is_authenticated %}
+        <form action="{% url 'search' %}" method="get" class="header-search">
+            <input type="search" name="q" placeholder="Search hostname, serial, or client…"
+                   value="{{ request.GET.q|default:'' }}" autocomplete="off">
+        </form>
         <div class="user-info">
             {{ user.username }} ·
             <a href="{% url 'admin:logout' %}">logout</a>

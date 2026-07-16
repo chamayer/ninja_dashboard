@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+
+{% block title %}Search{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h1>Search</h1>
+    {% if q %}
+        <p class="muted">Results for <code>{{ q }}</code></p>
+    {% else %}
+        <p class="muted">Enter a hostname, serial number, client name, or slug in the search box above.</p>
+    {% endif %}
+</div>
+
+{% if q %}
+    {% if not devices and not clients %}
+    <div class="card">
+        <p class="muted">No matches found.</p>
+    </div>
+    {% endif %}
+
+    {% if clients %}
+    <div class="card">
+        <h2>Clients ({{ clients|length }})</h2>
+        <table class="ops-table">
+            <thead>
+                <tr>
+                    <th>Client</th>
+                    <th>Slug</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for c in clients %}
+                <tr>
+                    <td><a href="{% url 'org_index' org_slug=c.slug %}">{{ c.display_name }}</a></td>
+                    <td class="muted"><code>{{ c.slug }}</code></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
+    {% if devices %}
+    <div class="card">
+        <h2>Devices ({{ devices|length }}{% if devices|length == 100 %}+{% endif %})</h2>
+        <table class="ops-table">
+            <thead>
+                <tr>
+                    <th>Hostname</th>
+                    <th>Serial</th>
+                    <th>Client</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for d in devices %}
+                <tr>
+                    <td>
+                        {% if d.client %}
+                            <a href="{% url 'device_detail' org_slug=d.client.slug device_id=d.id %}"><code>{{ d.canonical_hostname }}</code></a>
+                        {% else %}
+                            <code>{{ d.canonical_hostname }}</code>
+                        {% endif %}
+                    </td>
+                    <td class="muted"><code>{{ d.canonical_serial|default:"—" }}</code></td>
+                    <td>
+                        {% if d.client %}
+                            <a href="{% url 'org_index' org_slug=d.client.slug %}">{{ d.client.display_name }}</a>
+                        {% else %}
+                            <span class="muted">—</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+{% endif %}
+{% endblock %}
