@@ -2,6 +2,52 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.46.0] — 2026-07-16
+
+Wave A of the UI redesign: human labels + searchable/multi-select
+filters, proven out on the Patching page before rolling site-wide.
+
+### Added
+- `operations.apps.core.templatetags.human_labels` — `humanize_label`
+  Django template filter. Maps internal identifiers (finding type
+  names, scope reasons, entity types, match methods, device roles,
+  OS groups, statuses) to operator-friendly labels via a central
+  dict, plus small prefix parser for values like
+  `policy-allowlist:<name>` and `default:<role>`. Unknown values
+  pass through unchanged — never raises. Backend DB / SQL /
+  condition_key strings are untouched; display-only.
+- Tom Select 2.3.1 (CDN via jsdelivr) — searchable, multi-select
+  dropdowns. Any `<select class="ts">` auto-upgrades on
+  `DOMContentLoaded`. Dark-palette overrides in `base.html` match
+  the app theme. Degrades gracefully to native `<select multiple>`
+  if the CDN is unreachable.
+
+### Changed
+- Patching page filters:
+  - **Type** and **Client** are now multi-select (chip-style, type
+    to search). Status and Role remain single-select for now.
+  - Backend accepts both `?type=X&type=Y` (native repeated params)
+    and `?type=X,Y` (comma-separated for bookmarking). Client slug
+    → id via `slug__in` / `client_id = ANY(...::uuid[])` in raw
+    SQL queries; unknown slug → empty result set.
+  - All finding type names, scope values, scope reasons, roles, and
+    OS groups render via `humanize_label`. "Ack" button → full
+    "Acknowledge".
+
+### Rollout
+- Wave B (next): Dashboard rework (rich cards for compliance,
+  patching, software, reviews, ingest health) + fleet-wide device
+  search box in the header.
+- Wave C: Nav restructure (5 primary + 3 admin), rename
+  findings_queue → Issues, retire fleet_coverage page, Client
+  detail rework.
+- Wave D: Review + Config + System tab consolidations.
+- Wave D+: Device detail rewrite (5 tabs, primary-source-in-data,
+  activities surface).
+- Wave E: Bulk actions on Issues + Review tabs; Resolve/Snooze on
+  findings; device patching-scope override + exemption toggles;
+  suppress-from-row.
+
 ## [0.45.3] — 2026-07-16
 
 ### Added

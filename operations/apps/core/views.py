@@ -838,25 +838,37 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
     5 finding-type tiles reflecting the current filter, filterable
     table.
     """
-    type_filter = request.GET.get("type", "")
+    # Multi-value filters accept BOTH native repeated params
+    # (`?type=X&type=Y` — how HTML multi-select submits) AND
+    # comma-separated values (`?type=X,Y` — convenient for
+    # bookmarks). Empty segments dropped so `?type=` is unset.
+    def _multi(key: str) -> list[str]:
+        result: list[str] = []
+        for raw in request.GET.getlist(key):
+            for v in raw.split(","):
+                if v:
+                    result.append(v)
+        return result
+
+    type_filter = _multi("type")
     status_filter = request.GET.get("status", "active")
-    client_filter = request.GET.get("client", "")
+    client_filter = _multi("client")
     role_filter = request.GET.get("role", "")
     _ROLE_CHOICES = ("server", "workstation", "unknown")
     if role_filter and role_filter not in _ROLE_CHOICES:
         role_filter = ""
 
-    # Resolve client filter → id for downstream population query
-    # (v_device is raw SQL — Client slug → id lookup).
-    filtered_client_id = None
+    # Resolve client slugs → ids for downstream population + drilldown
+    # SQL. Multi-select supported (comma-separated).
+    filtered_client_ids: list[str] = []
     if client_filter:
-        filtered_client_id = (
-            Client.objects.filter(
-                tenant_id=1, slug=client_filter, deleted_at__isnull=True
-            )
-            .values_list("id", flat=True)
-            .first()
-        )
+        filtered_client_ids = [
+            str(cid) for cid in Client.objects.filter(
+                tenant_id=1,
+                slug__in=client_filter,
+                deleted_at__isnull=True,
+            ).values_list("id", flat=True)
+        ]
 
     # Base Finding queryset for tiles and main table — everything
     # inherits status + client filters. Type filter applied only to
@@ -869,8 +881,8 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
         base_qs = base_qs.filter(status__in=_FINDING_ACTIVE_STATUSES)
     elif status_filter and status_filter != "all":
         base_qs = base_qs.filter(status=status_filter)
-    if filtered_client_id is not None:
-        base_qs = base_qs.filter(client_id=filtered_client_id)
+    if filtered_client_ids:
+        base_qs = base_qs.filter(client_id__in=filtered_client_ids)
     elif client_filter:
         # Client slug given but no match — return no rows to avoid
         # showing global counts under a mistyped slug.
@@ -902,7 +914,7 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
     def _type_tile_href(ftname: str) -> str:
         parts = [f"type={ftname}"]
         if client_filter:
-            parts.append(f"client={client_filter}")
+            parts.append(f"client={','.join(client_filter)}")
         if status_filter != "active":
             parts.append(f"status={status_filter}")
         if role_filter:
@@ -923,9 +935,12 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
     # v_device (Track O). Scoped to client + role if filtered.
     pop_where = ["tenant_id = %s"]
     pop_params: list = [1]
-    if filtered_client_id is not None:
-        pop_where.append("client_id = %s")
-        pop_params.append(str(filtered_client_id))
+    if filtered_client_ids:
+        pop_where.append("client_id = ANY(%s::uuid[])")
+        pop_params.append(filtered_client_ids)
+    elif client_filter:
+        # slug given but zero matches → force empty result
+        pop_where.append("FALSE")
     if role_filter:
         pop_where.append("device_role = %s")
         pop_params.append(role_filter)
@@ -959,9 +974,11 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
             cur.execute("SET LOCAL operations.tenant_id = 1")
             base_where = "tenant_id = %s AND effective_patching_scope = %s"
             params: list = [1, scope_filter]
-            if filtered_client_id is not None:
-                base_where += " AND client_id = %s"
-                params.append(str(filtered_client_id))
+            if filtered_client_ids:
+                base_where += " AND client_id = ANY(%s::uuid[])"
+                params.append(filtered_client_ids)
+            elif client_filter:
+                base_where += " AND FALSE"
             if role_filter:
                 base_where += " AND device_role = %s"
                 params.append(role_filter)
@@ -1013,7 +1030,7 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
     # Main table query = base_qs + type filter
     qs = base_qs.select_related("finding_type", "client")
     if type_filter:
-        qs = qs.filter(finding_type__name=type_filter)
+        qs = qs.filter(finding_type__name__in=type_filter)
 
     _SEV_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
     findings = sorted(
@@ -1070,7 +1087,7 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
     # drilldown links.
     filter_qs_parts = []
     if client_filter:
-        filter_qs_parts.append(f"client={client_filter}")
+        filter_qs_parts.append(f"client={','.join(client_filter)}")
     if status_filter and status_filter != "active":
         filter_qs_parts.append(f"status={status_filter}")
     if role_filter:

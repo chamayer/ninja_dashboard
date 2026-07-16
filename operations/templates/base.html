@@ -210,6 +210,46 @@
       });
     })();
     </script>
+
+    {# Tom Select — searchable, multi-select filter dropdowns.
+       Auto-attaches to any <select> with class="ts". Multi-select
+       enabled via the standard HTML `multiple` attribute. #}
+    <link rel="stylesheet"
+          href="https://cdn.jsdelivr.net/npm/tom-select@2.3.1/dist/css/tom-select.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/tom-select@2.3.1/dist/js/tom-select.complete.min.js"></script>
+    <style>
+        /* Match the app's dark palette (Tom Select defaults are light). */
+        .ts-wrapper { min-width: 180px; }
+        .ts-control {
+            background: #0f172a !important;
+            border: 1px solid #334155 !important;
+            color: #e5e7eb !important;
+        }
+        .ts-control input, .ts-control > .item { color: #e5e7eb !important; }
+        .ts-dropdown {
+            background: #1e293b !important;
+            border: 1px solid #334155 !important;
+            color: #e5e7eb !important;
+        }
+        .ts-dropdown .active { background: #334155 !important; color: #f1f5f9 !important; }
+        .ts-dropdown .option { padding: 0.35rem 0.6rem; }
+        .ts-control > .item {
+            background: #1e40af !important;
+            border-radius: 3px;
+            padding: 0 0.4rem;
+        }
+    </style>
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+        document.querySelectorAll('select.ts').forEach(function(el) {
+            new TomSelect(el, {
+                plugins: el.multiple ? ['remove_button', 'clear_button'] : ['clear_button'],
+                maxOptions: 500,
+                allowEmptyOption: true,
+            });
+        });
+    });
+    </script>
 </head>
 <body>
     <header>

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load human_labels %}
 
 {% block title %}Patching{% endblock %}
 
@@ -6,21 +7,19 @@
 <div class="card">
     <h1>Patching</h1>
     <p class="muted">
-        Findings fire only for devices with
-        <code>effective_patching_scope='Included'</code> (Track O
-        batch O4/O5). Excluded / Unmanaged devices are intentionally
-        silent in the findings table but visible via the population
-        summary below.
+        Only devices that are in patching scope fire these findings.
+        Excluded and Not-managed devices are intentionally quiet in
+        the findings table — browse them via the Device population
+        section.
     </p>
 </div>
 
-{# Filter bar — placed BEFORE tiles so tile counts visibly reflect
-   the active filter selection. #}
+{# Filter bar — top so tile counts visibly reflect the active selection. #}
 <div class="card">
     <form action="" method="get" class="filterbar">
         <div>
             <label>Status</label>
-            <select name="status">
+            <select name="status" class="ts">
                 <option value="active"{% if active_status == "active" %} selected{% endif %}>Active</option>
                 <option value="all"{% if active_status == "all" %} selected{% endif %}>All</option>
                 {% for value, label in status_choices %}
@@ -30,28 +29,26 @@
         </div>
         <div>
             <label>Type</label>
-            <select name="type">
-                <option value="">Any</option>
+            <select name="type" class="ts" multiple>
                 {% for ftname in patching_types %}
-                    <option value="{{ ftname }}"{% if active_type == ftname %} selected{% endif %}>{{ ftname }}</option>
+                    <option value="{{ ftname }}"{% if ftname in active_type %} selected{% endif %}>{{ ftname|humanize_label }}</option>
                 {% endfor %}
             </select>
         </div>
         <div>
             <label>Client</label>
-            <select name="client">
-                <option value="">Any</option>
+            <select name="client" class="ts" multiple>
                 {% for c in clients %}
-                    <option value="{{ c.slug }}"{% if active_client == c.slug %} selected{% endif %}>{{ c.display_name }}</option>
+                    <option value="{{ c.slug }}"{% if c.slug in active_client %} selected{% endif %}>{{ c.display_name }}</option>
                 {% endfor %}
             </select>
         </div>
         <div>
             <label>Role</label>
-            <select name="role">
+            <select name="role" class="ts">
                 <option value="">Any</option>
                 {% for r in role_choices %}
-                    <option value="{{ r }}"{% if active_role == r %} selected{% endif %}>{{ r }}</option>
+                    <option value="{{ r }}"{% if active_role == r %} selected{% endif %}>{{ r|humanize_label }}</option>
                 {% endfor %}
             </select>
         </div>
@@ -60,31 +57,33 @@
             <a href="{% url 'patching_queue' %}" style="margin-left: 0.5rem; font-size: 0.85rem;">Reset</a>
         </div>
     </form>
+    <p class="muted" style="margin: 0.5rem 0 0; font-size: 0.8rem;">
+        Multi-select filters use comma-separated values. Type ahead to search.
+    </p>
 </div>
 
-{# Device population summary — scope breakdown. Clickthrough to
-   device list below. #}
+{# Device population summary — scope breakdown. Click a card to drill in. #}
 <div class="card">
     <h2 style="font-size: 0.95rem; margin: 0 0 0.5rem 0; color: #9ca3af;">
         Device population
-        {% if active_client %}<span class="muted">({{ active_client }} only)</span>{% endif %}
+        {% if active_client %}<span class="muted">({{ active_client|join:", " }})</span>{% endif %}
+        {% if active_role %}<span class="muted">— {{ active_role|humanize_label|lower }} only</span>{% endif %}
     </h2>
     {% include "_tiles.html" with tiles=population_tiles %}
     <p class="muted" style="margin-top: 0.6rem; font-size: 0.85rem;">
         <strong>{{ population.in_scope }}</strong> of {{ population.total }}
         devices in patching scope
         {% if population.total %}(<strong>{{ population.in_scope_pct }}%</strong>){% endif %}.
-        Excluded = operator-set exclusion; Unmanaged = non-Windows or
-        no Ninja link; Unknown = no scope decision yet.
+        Excluded = operator-set exclusion; Not managed = non-Windows or
+        no Ninja link; Not determined = no scope decision yet.
     </p>
 </div>
 
-{# Per-type finding tiles — reflect status+client filter. Click →
-   filter table by that type. #}
+{# Per-type finding tiles — reflect all filters. Click → filter table by that type. #}
 <div class="card">
     <h2 style="font-size: 0.95rem; margin: 0 0 0.5rem 0; color: #9ca3af;">
         Open findings by type
-        <span class="muted">({{ total_active }} total in filter)</span>
+        <span class="muted">({{ total_active }} total matching filters)</span>
     </h2>
     {% include "_tiles.html" with tiles=tiles %}
 </div>
@@ -92,7 +91,7 @@
 {% if device_rows %}
 <div class="card">
     <h2>
-        Devices — scope: <code>{{ active_scope }}</code>
+        Devices — {{ active_scope|humanize_label }}
         <span class="muted" style="font-weight: 400; font-size: 0.85rem;">
             ({{ device_rows|length }}{% if device_rows|length == 500 %}+{% endif %})
         </span>
@@ -103,7 +102,7 @@
                 <th>Hostname</th>
                 <th>Role</th>
                 <th>OS group</th>
-                <th>Scope reason</th>
+                <th>Why this scope</th>
                 <th>Override?</th>
                 <th class="num">Last contact</th>
             </tr>
@@ -118,12 +117,12 @@
                         <code>{{ d.hostname }}</code>
                     {% endif %}
                 </td>
-                <td class="muted">{{ d.role|default:"unknown" }}</td>
-                <td class="muted">{{ d.os_group|default:"—" }}</td>
-                <td class="muted"><code>{{ d.reason|default:"—" }}</code></td>
+                <td class="muted">{{ d.role|humanize_label|default:"—" }}</td>
+                <td class="muted">{{ d.os_group|humanize_label|default:"—" }}</td>
+                <td class="muted">{{ d.reason|humanize_label|default:"—" }}</td>
                 <td>
                     {% if d.override %}
-                        <span class="badge badge-medium">{{ d.override }}</span>
+                        <span class="badge badge-medium">{{ d.override|humanize_label }}</span>
                     {% else %}
                         <span class="muted">—</span>
                     {% endif %}
@@ -142,7 +141,7 @@
     <table>
         <thead>
             <tr>
-                <th>Type</th>
+                <th>Issue</th>
                 <th>Severity</th>
                 <th>Subject</th>
                 <th>Client</th>
@@ -156,7 +155,7 @@
             {% for row in rows %}
             {% with f=row.f %}
             <tr>
-                <td><code>{{ f.finding_type.name }}</code></td>
+                <td>{{ f.finding_type.name|humanize_label }}</td>
                 <td><span class="badge badge-{{ f.severity }}">{{ f.severity }}</span></td>
                 <td>
                     {% if f.subject_type == "device" and f.client %}
@@ -173,7 +172,7 @@
                     {% if f.status == "open" %}
                     <form method="post" action="{% url 'finding_acknowledge' f.id %}" style="display: inline;">
                         {% csrf_token %}
-                        <button type="submit" style="padding: 0.25rem 0.6rem; font-size: 0.8rem;">Ack</button>
+                        <button type="submit" style="padding: 0.25rem 0.6rem; font-size: 0.8rem;">Acknowledge</button>
                     </form>
                     {% endif %}
                 </td>
