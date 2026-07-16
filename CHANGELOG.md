@@ -2,6 +2,23 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.45.1] — 2026-07-16
+
+### Added
+- Device detail page gains a **Patching** section (card between the
+  header and Active Findings). Shows effective scope + reason,
+  operator override (if any), needs_reboot + last_boot, patch signal
+  (ever_installed / last install date / attempts from
+  `ninja_patches.device_patch_signal`), and current-online status
+  from `v_device`. Bottom link to the client's patch queue. Only
+  rendered when the device row exists in `v_device` (guarded).
+
+### Changed
+- `device_detail` view reads a `patching` context dict from
+  `operations.v_device` + `ninja_patches.device_patch_signal` in the
+  existing atomic cursor block. Single-device query, indexed lookups
+  only.
+
 ## [0.45.0] — 2026-07-16
 
 ### Added

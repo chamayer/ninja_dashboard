@@ -511,6 +511,7 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
 
     agent_presence = []
     software_rows = []
+    patching = None
     with transaction.atomic():
         with connection.cursor() as cur:
             cur.execute("SET LOCAL operations.tenant_id = 1")
@@ -541,6 +542,70 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
             )
             software_rows = cur.fetchall()
 
+            # Patching context: effective scope + session state from
+            # v_device (Track O), plus per-device patch signal from
+            # ninja_patches.device_patch_signal joined via device_links.
+            cur.execute(
+                """
+                SELECT effective_patching_scope,
+                       patching_scope_derived,
+                       patching_scope_reason,
+                       patching_scope_override,
+                       patching_scope_override_reason,
+                       needs_reboot,
+                       last_boot_at,
+                       is_online_any,
+                       online_sources,
+                       last_contact_at
+                FROM operations.v_device
+                WHERE tenant_id = %s AND device_id = %s
+                """,
+                [1, str(device.id)],
+            )
+            row = cur.fetchone()
+            if row:
+                patching = {
+                    "effective_scope": row[0],
+                    "derived_scope": row[1],
+                    "scope_reason": row[2],
+                    "override_scope": row[3],
+                    "override_reason": row[4],
+                    "needs_reboot": row[5],
+                    "last_boot_at": row[6],
+                    "is_online_any": row[7],
+                    "online_sources": row[8] or [],
+                    "last_contact_at": row[9],
+                }
+
+                # Patch signal from ninja_patches — one row per Ninja
+                # device_id. Ops device may have >1 Ninja link; pick
+                # the freshest signal.
+                cur.execute(
+                    """
+                    SELECT dps.ever_installed,
+                           dps.last_seen_at,
+                           dps.install_attempts
+                    FROM operations.device_links dl
+                    JOIN operations.sources s
+                      ON s.id = dl.source_id AND s.name = 'Ninja'
+                    JOIN ninja_patches.device_patch_signal dps
+                      ON dps.device_id = dl.external_id::int
+                    WHERE dl.device_id = %s AND dl.tenant_id = %s
+                    ORDER BY dps.last_seen_at DESC NULLS LAST
+                    LIMIT 1
+                    """,
+                    [str(device.id), 1],
+                )
+                sig = cur.fetchone()
+                if sig:
+                    patching["ever_installed"] = sig[0]
+                    patching["last_patch_installed_at"] = sig[1]
+                    patching["install_attempts"] = sig[2]
+                else:
+                    patching["ever_installed"] = None
+                    patching["last_patch_installed_at"] = None
+                    patching["install_attempts"] = 0
+
     return render(
         request,
         "device_detail.html",
@@ -550,6 +615,7 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
             "active_findings": active_findings,
             "agent_presence": agent_presence,
             "software_rows": software_rows,
+            "patching": patching,
         },
     )
 

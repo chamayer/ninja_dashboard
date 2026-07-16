@@ -18,6 +18,84 @@
     </p>
 </div>
 
+{% if patching %}
+<div class="card">
+    <h2>Patching <span class="muted" style="font-weight:400;font-size:0.85rem;">— scope drives whether this device fires patch findings</span></h2>
+    <table class="ops-table" style="width:auto;">
+        <tbody>
+            <tr>
+                <th style="text-align:left;padding-right:1rem;">Effective scope</th>
+                <td>
+                    <strong>{{ patching.effective_scope|default:"Unknown" }}</strong>
+                    {% if patching.override_scope %}
+                        <span class="muted">(operator override)</span>
+                    {% elif patching.derived_scope %}
+                        <span class="muted">(derived: <code>{{ patching.scope_reason|default:"—" }}</code>)</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% if patching.override_scope %}
+            <tr>
+                <th style="text-align:left;padding-right:1rem;">Override reason</th>
+                <td class="muted">{{ patching.override_reason|default:"—" }}</td>
+            </tr>
+            {% endif %}
+            <tr>
+                <th style="text-align:left;padding-right:1rem;">Needs reboot</th>
+                <td>
+                    {% if patching.needs_reboot %}
+                        <span class="badge badge-medium">yes</span>
+                    {% else %}
+                        <span class="muted">no</span>
+                    {% endif %}
+                </td>
+            </tr>
+            <tr>
+                <th style="text-align:left;padding-right:1rem;">Last boot</th>
+                <td class="muted num">{{ patching.last_boot_at|date:"Y-m-d H:i"|default:"—" }}</td>
+            </tr>
+            <tr>
+                <th style="text-align:left;padding-right:1rem;">Patch signal</th>
+                <td>
+                    {% if patching.ever_installed == None %}
+                        <span class="muted">no signal (no Ninja link)</span>
+                    {% elif patching.ever_installed %}
+                        ever installed
+                        {% if patching.last_patch_installed_at %}
+                            · last install <span class="num">{{ patching.last_patch_installed_at|date:"Y-m-d" }}</span>
+                        {% else %}
+                            <span class="muted">· no install dates recorded</span>
+                        {% endif %}
+                        <span class="muted">· {{ patching.install_attempts }} attempts</span>
+                    {% else %}
+                        <strong>never installed</strong>
+                    {% endif %}
+                </td>
+            </tr>
+            <tr>
+                <th style="text-align:left;padding-right:1rem;">Currently online</th>
+                <td>
+                    {% if patching.is_online_any %}
+                        yes
+                        {% if patching.online_sources %}
+                            <span class="muted">— {{ patching.online_sources|join:", " }}</span>
+                        {% endif %}
+                    {% else %}
+                        <span class="muted">no source has contact within 24h</span>
+                    {% endif %}
+                    {% if patching.last_contact_at %}
+                        <span class="muted num">(last contact {{ patching.last_contact_at|date:"Y-m-d H:i" }})</span>
+                    {% endif %}
+                </td>
+            </tr>
+        </tbody>
+    </table>
+    <p style="margin-top:0.75rem;font-size:0.85rem;">
+        <a href="{% url 'patching_queue' %}?client={{ device.client.slug }}">Client patch queue &rarr;</a>
+    </p>
+</div>
+{% endif %}
+
 {% if active_findings %}
 <div class="card">
     <h2>Active Findings</h2>
