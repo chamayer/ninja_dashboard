@@ -40,10 +40,6 @@
 </div>
 
 <div class="tile-row">
-    <div class="sev-tile total">
-        <div class="sev-label">Matching</div>
-        <div class="sev-count">{{ total_matching }}</div>
-    </div>
     {% for t in severity_tiles %}
         <a class="sev-tile {{ t.value }} {% if t.active %}active{% endif %}" href="{{ t.href }}">
             <div class="sev-label">{{ t.label }}</div>

@@ -2,6 +2,14 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.51.1] — 2026-07-16 — Drop redundant "Matching" tile
+
+### Fixed
+- Issues page had a "Matching (N)" tile that duplicated the count
+  already shown in the header ("Issues (N)"). Dropped the tile;
+  the header carries the total, the severity tiles carry the
+  breakdown.
+
 ## [0.51.0] — 2026-07-16 — Issues page: severity tiles + dynamic title
 
 ### Added
