@@ -2,6 +2,19 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.45.3] — 2026-07-16
+
+### Added
+- Patching page: **Role filter** (server / workstation / unknown) in
+  the filter bar. Applies to:
+  - Device-subject finding queries (client-subject findings like
+    `patch_approval_backlog` are hidden when role is set — they
+    aggregate across the whole fleet and would mix roles).
+  - Per-type tile counts (tiles reflect the role filter).
+  - Population summary (Total / Included / Excluded / Unmanaged
+    scoped to the chosen role).
+  - Scope drilldown device table (only devices of the chosen role).
+
 ## [0.45.2] — 2026-07-16
 
 ### Changed

@@ -46,6 +46,15 @@
                 {% endfor %}
             </select>
         </div>
+        <div>
+            <label>Role</label>
+            <select name="role">
+                <option value="">Any</option>
+                {% for r in role_choices %}
+                    <option value="{{ r }}"{% if active_role == r %} selected{% endif %}>{{ r }}</option>
+                {% endfor %}
+            </select>
+        </div>
         <div style="align-self: end;">
             <button type="submit">Apply</button>
             <a href="{% url 'patching_queue' %}" style="margin-left: 0.5rem; font-size: 0.85rem;">Reset</a>

@@ -841,6 +841,10 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
     type_filter = request.GET.get("type", "")
     status_filter = request.GET.get("status", "active")
     client_filter = request.GET.get("client", "")
+    role_filter = request.GET.get("role", "")
+    _ROLE_CHOICES = ("server", "workstation", "unknown")
+    if role_filter and role_filter not in _ROLE_CHOICES:
+        role_filter = ""
 
     # Resolve client filter → id for downstream population query
     # (v_device is raw SQL — Client slug → id lookup).
@@ -872,6 +876,22 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
         # showing global counts under a mistyped slug.
         base_qs = base_qs.none()
 
+    # Role filter: constrains device-subject findings to devices with
+    # the chosen device_role. Client-subject findings (e.g.
+    # patch_approval_backlog) are hidden when a role filter is set
+    # since they aggregate across the client's whole fleet — mixing
+    # them into a role view is misleading.
+    if role_filter:
+        role_device_ids = Device.objects.filter(
+            tenant_id=1,
+            device_role=role_filter,
+            deleted_at__isnull=True,
+        ).values("id")
+        base_qs = base_qs.filter(
+            subject_type=Finding.SubjectType.DEVICE,
+            subject_id__in=role_device_ids,
+        )
+
     # Per-type tile counts (respects status + client filters).
     tile_counts = {
         row["finding_type__name"]: row["cnt"]
@@ -879,48 +899,46 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
             base_qs.values("finding_type__name").annotate(cnt=Count("id"))
         )
     }
+    def _type_tile_href(ftname: str) -> str:
+        parts = [f"type={ftname}"]
+        if client_filter:
+            parts.append(f"client={client_filter}")
+        if status_filter != "active":
+            parts.append(f"status={status_filter}")
+        if role_filter:
+            parts.append(f"role={role_filter}")
+        return "?" + "&".join(parts)
+
     tiles = [
         {
             "label": ftname.replace("_", " "),
             "value": tile_counts.get(ftname, 0),
-            "href": f"?type={ftname}" + (
-                f"&client={client_filter}" if client_filter else ""
-            ) + (
-                f"&status={status_filter}" if status_filter != "active" else ""
-            ),
+            "href": _type_tile_href(ftname),
         }
         for ftname in _PATCHING_TYPES
     ]
 
     # Device-population summary — how many devices exist in the
     # filtered slice, how many are in scope (Included). Reads
-    # v_device (Track O). Scoped to client if filtered.
+    # v_device (Track O). Scoped to client + role if filtered.
+    pop_where = ["tenant_id = %s"]
+    pop_params: list = [1]
+    if filtered_client_id is not None:
+        pop_where.append("client_id = %s")
+        pop_params.append(str(filtered_client_id))
+    if role_filter:
+        pop_where.append("device_role = %s")
+        pop_params.append(role_filter)
+    pop_sql = (
+        "SELECT COUNT(*) AS total,\n"
+        "       COUNT(*) FILTER (WHERE effective_patching_scope = 'Included') AS in_scope,\n"
+        "       COUNT(*) FILTER (WHERE effective_patching_scope = 'Excluded') AS excluded,\n"
+        "       COUNT(*) FILTER (WHERE effective_patching_scope = 'Unmanaged') AS unmanaged\n"
+        f"FROM operations.v_device WHERE {' AND '.join(pop_where)}"
+    )
     with transaction.atomic(), connection.cursor() as cur:
         cur.execute("SET LOCAL operations.tenant_id = 1")
-        if filtered_client_id is not None:
-            cur.execute(
-                """
-                SELECT COUNT(*) AS total,
-                       COUNT(*) FILTER (WHERE effective_patching_scope = 'Included') AS in_scope,
-                       COUNT(*) FILTER (WHERE effective_patching_scope = 'Excluded') AS excluded,
-                       COUNT(*) FILTER (WHERE effective_patching_scope = 'Unmanaged') AS unmanaged
-                FROM operations.v_device
-                WHERE tenant_id = %s AND client_id = %s
-                """,
-                [1, str(filtered_client_id)],
-            )
-        else:
-            cur.execute(
-                """
-                SELECT COUNT(*) AS total,
-                       COUNT(*) FILTER (WHERE effective_patching_scope = 'Included') AS in_scope,
-                       COUNT(*) FILTER (WHERE effective_patching_scope = 'Excluded') AS excluded,
-                       COUNT(*) FILTER (WHERE effective_patching_scope = 'Unmanaged') AS unmanaged
-                FROM operations.v_device
-                WHERE tenant_id = %s
-                """,
-                [1],
-            )
+        cur.execute(pop_sql, pop_params)
         pop_row = cur.fetchone() or (0, 0, 0, 0)
     population = {
         "total": pop_row[0],
@@ -944,6 +962,9 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
             if filtered_client_id is not None:
                 base_where += " AND client_id = %s"
                 params.append(str(filtered_client_id))
+            if role_filter:
+                base_where += " AND device_role = %s"
+                params.append(role_filter)
             cur.execute(
                 f"""
                 SELECT device_id, canonical_hostname, client_id,
@@ -1052,6 +1073,8 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
         filter_qs_parts.append(f"client={client_filter}")
     if status_filter and status_filter != "active":
         filter_qs_parts.append(f"status={status_filter}")
+    if role_filter:
+        filter_qs_parts.append(f"role={role_filter}")
     filter_qs = "&".join(filter_qs_parts)
 
     # Population summary tiles (clickthrough drills into scope bucket).
@@ -1085,6 +1108,8 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
             "active_type": type_filter,
             "active_status": status_filter,
             "active_client": client_filter,
+            "active_role": role_filter,
+            "role_choices": _ROLE_CHOICES,
             "active_scope": scope_filter,
             "total_active": sum(tile_counts.values()),
             "population": population,
