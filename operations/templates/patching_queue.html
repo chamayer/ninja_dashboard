@@ -19,7 +19,7 @@
     <form action="" method="get" class="filterbar">
         <div>
             <label>Status</label>
-            <select name="status" class="ts">
+            <select name="status">
                 <option value="active"{% if active_status == "active" %} selected{% endif %}>Active</option>
                 <option value="all"{% if active_status == "all" %} selected{% endif %}>All</option>
                 {% for value, label in status_choices %}
@@ -29,7 +29,7 @@
         </div>
         <div>
             <label>Type</label>
-            <select name="type" class="ts" multiple>
+            <select name="type"><option value="">Any</option>
                 {% for ftname in patching_types %}
                     <option value="{{ ftname }}"{% if ftname in active_type %} selected{% endif %}>{{ ftname|humanize_label }}</option>
                 {% endfor %}
@@ -37,7 +37,7 @@
         </div>
         <div>
             <label>Client</label>
-            <select name="client" class="ts" multiple>
+            <select name="client"><option value="">Any</option>
                 {% for c in clients %}
                     <option value="{{ c.slug }}"{% if c.slug in active_client %} selected{% endif %}>{{ c.display_name }}</option>
                 {% endfor %}
@@ -45,7 +45,7 @@
         </div>
         <div>
             <label>Role</label>
-            <select name="role" class="ts">
+            <select name="role">
                 <option value="">Any</option>
                 {% for r in role_choices %}
                     <option value="{{ r }}"{% if active_role == r %} selected{% endif %}>{{ r|humanize_label }}</option>
@@ -57,9 +57,6 @@
             <a href="{% url 'patching_queue' %}" style="margin-left: 0.5rem; font-size: 0.85rem;">Reset</a>
         </div>
     </form>
-    <p class="muted" style="margin: 0.5rem 0 0; font-size: 0.8rem;">
-        Multi-select filters use comma-separated values. Type ahead to search.
-    </p>
 </div>
 
 {# Device population summary — scope breakdown. Click a card to drill in. #}

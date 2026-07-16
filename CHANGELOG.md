@@ -2,6 +2,36 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.48.0] — 2026-07-16
+
+### Removed
+- **Tom Select ripped out entirely.** Added Wave A complexity for
+  marginal gain; kept breaking (CDN load, multi-line comment
+  breaking the head parse, dark/light theme fights). Native
+  `<select>` works fine.
+  - Removed vendored assets under `operations/apps/core/static/`.
+  - Removed Tom Select `<link>`, `<script>`, CSS overrides, and
+    init script from `base.html`.
+  - `{% load static %}` removed (no `{% static %}` tags left).
+- **Header client picker removed** — vestigial. Reachable via
+  Dashboard's Client Health table + per-page Client filter.
+  `client_switch` view + `/switch/` URL kept for now, unreachable
+  from UI (cleanup follow-up).
+
+### Changed
+- Patching page filters — `class="ts" multiple` removed. Type,
+  Client, Status, Role are all native single-select dropdowns
+  with an "Any" option. Backend view still parses multi-value URL
+  params (bookmarks preserved), but the UI is one-value-at-a-time.
+- Header layout: brand · spacer · user-info. Wave B (fleet-wide
+  search) will drop a search input into the spacer.
+
+### Fixed (in the churn)
+- Multi-line `{# ... #}` Django comment in `base.html` was
+  rendering as raw text (Django `{# #}` is single-line only). The
+  stray `<select>` in the comment body was breaking `<head>` and
+  the page came up empty. Fixed and rule saved to memory.
+
 ## [0.46.6] — 2026-07-16
 
 ### Changed
