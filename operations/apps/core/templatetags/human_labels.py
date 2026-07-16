@@ -50,7 +50,7 @@ _LABELS: dict[str, str] = {
     "device_role_conflict": "Device role changed",
     "device_long_offline": "Offline for an extended period",
     "cross_client_conflict": "Same hostname on two clients",
-    "unmapped_node_class": "Unrecognised device type",
+    "unmapped_node_class": "Unrecognized device type",
     # ── Finding types — platform / identity health ───────────
     "identity_resolution_pending": "Awaiting device identity match",
     "software_queue_stalled": "Software scan queue stalled",

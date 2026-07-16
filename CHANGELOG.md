@@ -2,6 +2,16 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.46.4] — 2026-07-16
+
+### Fixed
+- US English throughout UI copy — dropped British spellings that
+  slipped in:
+  - "Unrecognised device type" → "Unrecognized device type"
+  - "Active organisations" → "Active organizations"
+- UI principles memory updated with a "US English only in UI copy"
+  rule to prevent recurrence.
+
 ## [0.46.3] — 2026-07-16
 
 ### Changed
