@@ -62,6 +62,7 @@ def home(request: HttpRequest) -> HttpResponse:
     total_devices = Device.objects.filter(tenant_id=1, deleted_at__isnull=True).count()
     total_clients = Client.objects.filter(tenant_id=1, deleted_at__isnull=True).count()
 
+    # Overall severity breakdown (retained for the critical banner).
     severity_counts = {
         row["severity"]: row["n"]
         for row in Finding.objects.filter(tenant_id=1, status__in=_FINDING_ACTIVE_STATUSES)
@@ -69,6 +70,48 @@ def home(request: HttpRequest) -> HttpResponse:
         .annotate(n=Count("id"))
     }
     total_active_findings = sum(severity_counts.values())
+
+    # Per-category open finding counts. Powers the domain summary
+    # cards (Patching / Software / Coverage / Health).
+    category_counts = {
+        row["finding_type__category__name"]: row["n"]
+        for row in Finding.objects.filter(
+            tenant_id=1, status__in=_FINDING_ACTIVE_STATUSES,
+        )
+        .values("finding_type__category__name")
+        .annotate(n=Count("id"))
+    }
+
+    # Patching population from v_device (Track O).
+    patching_pop = {"total": 0, "in_scope": 0}
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        cur.execute(
+            """
+            SELECT COUNT(*) AS total,
+                   COUNT(*) FILTER (WHERE effective_patching_scope = 'Included') AS in_scope
+            FROM operations.v_device
+            WHERE tenant_id = 1
+            """
+        )
+        row = cur.fetchone()
+        if row:
+            patching_pop["total"] = row[0]
+            patching_pop["in_scope"] = row[1]
+
+    # Reviews pending across all three queues.
+    reviews_pending = {
+        "client_candidates": ClientCandidate.objects.filter(
+            tenant_id=1, status=ClientCandidate.Status.OPEN,
+        ).count(),
+        "identity_candidates": IdentityCandidate.objects.filter(
+            tenant_id=1, status="pending",
+        ).count(),
+        "merge_candidates": MergeCandidate.objects.filter(
+            tenant_id=1, status="pending",
+        ).count(),
+    }
+    reviews_pending["total"] = sum(reviews_pending.values())
 
     yesterday = timezone.now() - timedelta(hours=24)
     recent_findings = list(
@@ -88,7 +131,9 @@ def home(request: HttpRequest) -> HttpResponse:
         .annotate(n=Count("id"))
     }
 
-    clients = list(
+    # Client Health with name filter + pagination.
+    client_q = (request.GET.get("client_q") or "").strip()
+    clients_qs = (
         Client.objects.filter(tenant_id=1, deleted_at__isnull=True)
         .annotate(
             critical_findings=Count(
@@ -106,8 +151,10 @@ def home(request: HttpRequest) -> HttpResponse:
         )
         .order_by("-critical_findings", "-high_findings", "display_name")
     )
+    if client_q:
+        clients_qs = clients_qs.filter(display_name__icontains=client_q)
 
-    client_health = [
+    client_health_all = [
         {
             "client": c,
             "devices": device_counts.get(c.id, 0),
@@ -115,11 +162,14 @@ def home(request: HttpRequest) -> HttpResponse:
             "high": c.high_findings,
             "total": c.total_findings,
         }
-        for c in clients
+        for c in clients_qs
     ]
+    client_health_paginator = Paginator(client_health_all, 25)
+    client_health_page = client_health_paginator.get_page(request.GET.get("client_page"))
 
-    # Source health: warn if any source has no successful run in 8 hours.
+    # Source health: last successful run per source.
     stale_sources: list[str] = []
+    source_health = []
     eight_hours_ago = timezone.now() - timedelta(hours=8)
     with connection.cursor() as cur:
         cur.execute("""
@@ -132,8 +182,11 @@ def home(request: HttpRequest) -> HttpResponse:
         last_success = {r[0]: r[2] for r in cur.fetchall()}
     for src in _SOURCES:
         ts = last_success.get(src)
-        if ts is None or ts < eight_hours_ago:
+        is_stale = ts is None or ts < eight_hours_ago
+        source_health.append({"name": src, "last_success": ts, "stale": is_stale})
+        if is_stale:
             stale_sources.append(src)
+    sources_ok = sum(1 for s in source_health if not s["stale"])
 
     return render(
         request,
@@ -143,8 +196,17 @@ def home(request: HttpRequest) -> HttpResponse:
             "total_clients": total_clients,
             "total_active_findings": total_active_findings,
             "severity_counts": severity_counts,
+            "category_counts": category_counts,
+            "patching_pop": patching_pop,
+            "reviews_pending": reviews_pending,
+            "source_health": source_health,
+            "sources_ok": sources_ok,
+            "sources_total": len(_SOURCES),
             "recent_findings": recent_findings,
-            "client_health": client_health,
+            "client_health": client_health_page.object_list,
+            "client_health_page": client_health_page,
+            "client_health_total": len(client_health_all),
+            "client_q": client_q,
             "stale_sources": stale_sources,
         },
     )

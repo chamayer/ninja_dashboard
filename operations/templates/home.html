@@ -67,38 +67,61 @@
 {% endif %}
 
 <div class="hero-tiles">
-  <div class="hero-tile">
-    <div class="tile-label">Managed Clients</div>
-    <div class="tile-value">{{ total_clients }}</div>
-    <div class="tile-sub">Active organizations</div>
-  </div>
-  <a class="hero-tile" href="{% url 'org_index' org_slug='all' %}">
-    <div class="tile-label">Total Devices</div>
-    <div class="tile-value">{{ total_devices }}</div>
-    <div class="tile-sub">Across all clients</div>
+  <a class="hero-tile" href="{% url 'patching_queue' %}">
+    <div class="tile-label">Patching</div>
+    <div class="tile-value">{{ category_counts.patching|default:0 }}</div>
+    <div class="tile-sub">
+      open · {{ patching_pop.in_scope }} of {{ patching_pop.total }} devices in scope
+    </div>
+  </a>
+  <a class="hero-tile" href="{% url 'findings_queue' %}?category=software">
+    <div class="tile-label">Software</div>
+    <div class="tile-value">{{ category_counts.software|default:0 }}</div>
+    <div class="tile-sub">flagged installations</div>
   </a>
   <a class="hero-tile {% if severity_counts.critical %}alert{% endif %}" href="{% url 'findings_queue' %}">
-    <div class="tile-label">Active Findings</div>
+    <div class="tile-label">Issues</div>
     <div class="tile-value">{{ total_active_findings }}</div>
     <div class="tile-sub">
-      {% if severity_counts.critical %}{{ severity_counts.critical }} critical · {% endif %}{% if severity_counts.high %}{{ severity_counts.high }} high{% endif %}
-      {% if not severity_counts.critical and not severity_counts.high %}All low / medium{% endif %}
+      {% if severity_counts.critical %}{{ severity_counts.critical }} critical{% endif %}{% if severity_counts.critical and severity_counts.high %} · {% endif %}{% if severity_counts.high %}{{ severity_counts.high }} high{% endif %}
+      {% if not severity_counts.critical and not severity_counts.high %}All medium / low{% endif %}
     </div>
   </a>
-  <div class="hero-tile">
-    <div class="tile-label">Findings by Severity</div>
-    <div class="sev-bar" style="margin-top:0.5rem;">
-      {% if severity_counts.critical %}<span class="sev-pill badge badge-critical">{{ severity_counts.critical }} critical</span>{% endif %}
-      {% if severity_counts.high %}<span class="sev-pill badge badge-high">{{ severity_counts.high }} high</span>{% endif %}
-      {% if severity_counts.medium %}<span class="sev-pill badge badge-medium">{{ severity_counts.medium }} medium</span>{% endif %}
-      {% if severity_counts.low %}<span class="sev-pill badge badge-low">{{ severity_counts.low }} low</span>{% endif %}
-      {% if not total_active_findings %}<span class="muted" style="font-size:0.85rem;">No active findings</span>{% endif %}
+  <a class="hero-tile {% if reviews_pending.total %}alert{% endif %}" href="{% url 'client_candidates_queue' %}">
+    <div class="tile-label">Awaiting Review</div>
+    <div class="tile-value">{{ reviews_pending.total }}</div>
+    <div class="tile-sub">
+      {% if reviews_pending.client_candidates %}{{ reviews_pending.client_candidates }} client{{ reviews_pending.client_candidates|pluralize }}{% endif %}
+      {% if reviews_pending.identity_candidates %}{% if reviews_pending.client_candidates %} · {% endif %}{{ reviews_pending.identity_candidates }} identit{{ reviews_pending.identity_candidates|pluralize:"y,ies" }}{% endif %}
+      {% if reviews_pending.merge_candidates %}{% if reviews_pending.client_candidates or reviews_pending.identity_candidates %} · {% endif %}{{ reviews_pending.merge_candidates }} merge{{ reviews_pending.merge_candidates|pluralize }}{% endif %}
+      {% if not reviews_pending.total %}Nothing pending{% endif %}
     </div>
-  </div>
+  </a>
+  <a class="hero-tile {% if stale_sources %}alert{% endif %}" href="{% url 'sources_status' %}">
+    <div class="tile-label">Ingest</div>
+    <div class="tile-value">{{ sources_ok }}/{{ sources_total }}</div>
+    <div class="tile-sub">
+      {% if stale_sources %}stale: {{ stale_sources|join:", " }}{% else %}all sources fresh{% endif %}
+    </div>
+  </a>
+  <a class="hero-tile" href="{% url 'org_index' org_slug='all' %}">
+    <div class="tile-label">Fleet</div>
+    <div class="tile-value">{{ total_devices }}</div>
+    <div class="tile-sub">devices · {{ total_clients }} clients</div>
+  </a>
 </div>
 
 <div class="card">
-  <h2>Client Health</h2>
+  <h2>Client Health <span class="muted" style="font-weight:400; font-size:0.85rem;">({{ client_health_total }})</span></h2>
+  <form method="get" style="margin-bottom: 0.75rem; display: flex; gap: 0.5rem; align-items: center;">
+    <input type="search" name="client_q" placeholder="Filter clients by name…"
+           value="{{ client_q|default:'' }}"
+           style="padding: 0.4rem 0.7rem; border: 1px solid var(--border); border-radius: 4px; font-size: 0.85rem; min-width: 260px;">
+    <button type="submit">Filter</button>
+    {% if client_q %}
+      <a href="{% url 'home' %}" style="font-size: 0.85rem;">Clear</a>
+    {% endif %}
+  </form>
   {% if client_health %}
   <table class="client-table" data-sortable>
     <thead>
@@ -122,7 +145,7 @@
           <div class="finding-bar">
             {% if row.critical %}<span class="finding-dot dot-critical"></span><span>{{ row.critical }} critical</span>{% endif %}
             {% if row.high %}<span class="finding-dot dot-high"></span><span>{{ row.high }} high</span>{% endif %}
-            {% if row.total %}<a href="{% url 'findings_queue' %}?client={{ row.client.slug }}" style="margin-left:auto; font-size:0.78rem;">{{ row.total }} total →</a>{% endif %}
+            <a href="{% url 'findings_queue' %}?client={{ row.client.slug }}" style="margin-left:auto; font-size:0.78rem;">{{ row.total }} total →</a>
           </div>
           {% endif %}
         </td>
@@ -130,8 +153,19 @@
       {% endfor %}
     </tbody>
   </table>
+  {% if client_health_page.paginator.num_pages > 1 %}
+  <div style="margin-top: 0.75rem; display: flex; gap: 0.5rem; align-items: center; font-size: 0.85rem;">
+    <span class="muted">Page {{ client_health_page.number }} of {{ client_health_page.paginator.num_pages }}</span>
+    {% if client_health_page.has_previous %}
+      <a href="?client_page={{ client_health_page.previous_page_number }}{% if client_q %}&client_q={{ client_q }}{% endif %}">← Previous</a>
+    {% endif %}
+    {% if client_health_page.has_next %}
+      <a href="?client_page={{ client_health_page.next_page_number }}{% if client_q %}&client_q={{ client_q }}{% endif %}">Next →</a>
+    {% endif %}
+  </div>
+  {% endif %}
   {% else %}
-  <p class="muted">No clients yet.</p>
+  <p class="muted">{% if client_q %}No clients match <code>{{ client_q }}</code>.{% else %}No clients yet.{% endif %}</p>
   {% endif %}
 </div>
 

@@ -2,6 +2,26 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.48.2] — 2026-07-16
+
+### Changed
+- **Dashboard hero tiles reworked around operational domains**
+  instead of raw fleet numbers:
+  - **Patching** — open findings + in-scope device population
+    (X of Y in scope)
+  - **Software** — open software finding count
+  - **Issues** — total active findings + critical / high callout
+  - **Awaiting Review** — sum of pending across client candidates,
+    identity candidates, and merge candidates
+  - **Ingest** — X/Y sources fresh (alert-styled if any stale)
+  - **Fleet** — total devices + client count (reference tile)
+- Client Health card:
+  - Search box: filter clients by name (`icontains`)
+  - Pagination: 25 clients per page
+  - Row-count in the header ("Client Health (76)")
+- Home view computes: category_counts, patching_pop from v_device,
+  reviews_pending across the 3 queues, source_health per source.
+
 ## [0.48.1] — 2026-07-16
 
 ### Added
