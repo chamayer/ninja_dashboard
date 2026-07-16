@@ -2,11 +2,10 @@
 
 Write-side companion to Metabase in the ninja-dashboard stack.
 
-Read `BLUEPRINT.md` in this directory before making changes. It carries
-the settled architecture (Django + DRF + HTMX, tenant-scoped Postgres
-with RLS from day one, canonical-entity model, source/collector
-separation, finding lifecycle) and the review history behind each
-decision.
+Read `AGENTS.md` before making changes. Use `docs/architecture.md` as the
+concise guide and `DESIGN.md` as the detailed architecture authority during
+the documentation transition. `BLUEPRINT.md` contains mixed implemented and
+pending planning material; active work belongs in `.work/plan.md`.
 
 ## Development
 
@@ -31,7 +30,11 @@ Settings modules:
 
 ```
 operations/
-├── BLUEPRINT.md          canonical design doc
+├── AGENTS.md             standing development instructions
+├── DESIGN.md             detailed architecture authority during transition
+├── docs/                 concise references, decisions, and runbooks
+├── .work/plan.md         active implementation checkpoint
+├── BLUEPRINT.md          mixed historical and pending planning source
 ├── pyproject.toml        deps + tool config
 ├── manage.py             Django entry point
 ├── config/               Django project package
