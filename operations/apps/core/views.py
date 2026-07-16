@@ -750,6 +750,138 @@ def finding_acknowledge(request: HttpRequest, finding_id: str) -> HttpResponse:
     return redirect("findings_queue")
 
 
+# ─────────────────────────────────────────────────────────────────────
+# Patching queue — dedicated surface for the 5 patching finding types
+# emitted by ingest/patch_findings.py. Complements the general findings
+# queue with per-type tiles + scope filter (only in-scope devices fire
+# these findings, per Track O batch O5).
+# ─────────────────────────────────────────────────────────────────────
+
+_PATCHING_TYPES = (
+    "device_never_patched",
+    "patching_stalled",
+    "reboot_pending",
+    "patch_failing_repeatedly",
+    "patch_approval_backlog",
+)
+
+
+@login_required
+def patching_queue(request: HttpRequest) -> HttpResponse:
+    """Patching triage queue — 5 finding-type tiles + filterable table."""
+    type_filter = request.GET.get("type", "")
+    status_filter = request.GET.get("status", "active")
+    client_filter = request.GET.get("client", "")
+
+    # Per-type tile counts (active only). Query once, index into dict.
+    tile_counts = {
+        row["finding_type__name"]: row["cnt"]
+        for row in (
+            Finding.objects.filter(
+                tenant_id=1,
+                finding_type__name__in=_PATCHING_TYPES,
+                status__in=_FINDING_ACTIVE_STATUSES,
+            )
+            .values("finding_type__name")
+            .annotate(cnt=Count("id"))
+        )
+    }
+    tiles = [
+        {
+            "label": ftname.replace("_", " "),
+            "value": tile_counts.get(ftname, 0),
+            "href": f"?type={ftname}",
+        }
+        for ftname in _PATCHING_TYPES
+    ]
+
+    # Main findings query — always scoped to patching category so
+    # nothing else leaks in even if the type filter is cleared.
+    qs = Finding.objects.filter(
+        tenant_id=1,
+        finding_type__category__name="patching",
+    ).select_related("finding_type", "client")
+
+    if status_filter == "active":
+        qs = qs.filter(status__in=_FINDING_ACTIVE_STATUSES)
+    elif status_filter and status_filter != "all":
+        qs = qs.filter(status=status_filter)
+
+    if type_filter:
+        qs = qs.filter(finding_type__name=type_filter)
+    if client_filter:
+        qs = qs.filter(client__slug=client_filter)
+
+    _SEV_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
+    findings = sorted(
+        qs[:500],
+        key=lambda f: (
+            _SEV_ORDER.get(f.severity, 9),
+            -(f.last_detected_at or f.last_seen_at).timestamp(),
+        ),
+    )
+
+    def _detail(finding: Finding) -> str:
+        d = finding.finding_details or {}
+        name = finding.finding_type.name
+        if name == "device_never_patched":
+            return "no INSTALLED patches on record"
+        if name == "patching_stalled":
+            ls = d.get("last_patch_seen_at")
+            return f"last install {ls[:10]}" if ls else "no fresh scan (>35d)"
+        if name == "reboot_pending":
+            lb = d.get("last_boot_at")
+            return f"last boot {lb[:10]}" if lb else "no boot recorded"
+        if name == "patch_failing_repeatedly":
+            kbs = d.get("failing_patches") or []
+            return f"{len(kbs)} KB(s) failing"
+        if name == "patch_approval_backlog":
+            return f"{d.get('backlog_count', '?')} APPROVED uninstalled"
+        return ""
+
+    rows = [
+        {
+            "f": f,
+            "detail": _detail(f),
+            "subject_label": (
+                (f.finding_details or {}).get("hostname")
+                or (f.finding_details or {}).get("client_name")
+                or str(f.subject_id)
+            ),
+        }
+        for f in findings
+    ]
+
+    paginator = Paginator(rows, 50)
+    page = paginator.get_page(request.GET.get("page"))
+
+    clients = (
+        Client.objects.filter(tenant_id=1, deleted_at__isnull=True)
+        .order_by("display_name")
+    )
+
+    page_query = request.GET.copy()
+    page_query.pop("page", None)
+
+    return render(
+        request,
+        "patching_queue.html",
+        {
+            "tiles": tiles,
+            "page_obj": page,
+            "rows": page.object_list,
+            "patching_types": _PATCHING_TYPES,
+            "clients": clients,
+            "status_choices": Finding.Status.choices,
+            "active_type": type_filter,
+            "active_status": status_filter,
+            "active_client": client_filter,
+            "total_active": sum(tile_counts.values()),
+            "page_query": page_query.urlencode(),
+        },
+    )
+
+
 @login_required
 def findings_admin_health(request: HttpRequest) -> HttpResponse:
     """Admin/platform-health findings page."""

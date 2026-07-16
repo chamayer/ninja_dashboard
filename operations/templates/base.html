@@ -255,6 +255,9 @@
             <a class="nav-link {% if request.resolver_match.url_name == 'fleet_coverage' %}active{% endif %}"
                href="{% url 'fleet_coverage' %}">Compliance</a>
 
+            <a class="nav-link {% if request.resolver_match.url_name == 'patching_queue' %}active{% endif %}"
+               href="{% url 'patching_queue' %}">Patching{% if nav_patching_open %} <span class="nav-badge">{{ nav_patching_open }}</span>{% endif %}</a>
+
             {# ── Client context sub-nav ───────────────────────────── #}
             {% if current_client %}
             <div class="nav-sep"></div>

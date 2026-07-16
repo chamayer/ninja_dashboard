@@ -46,6 +46,7 @@ from apps.core.views import (
     org_software,
     org_software_decide,
     org_software_devices,
+    patching_queue,
     sources_status,
 )
 
@@ -63,6 +64,7 @@ urlpatterns = [
     path("orgs/<slug:org_slug>/software/devices/", org_software_devices, name="org_software_devices"),
     path("orgs/<slug:org_slug>/software/decide/", org_software_decide, name="org_software_decide"),
     path("findings/", findings_queue, name="findings_queue"),
+    path("patching/", patching_queue, name="patching_queue"),
     path("findings/<uuid:finding_id>/ack/", finding_acknowledge, name="finding_acknowledge"),
     path("admin/findings/health/", findings_admin_health, name="findings_admin_health"),
     path("admin/findings/<uuid:finding_id>/ack/", admin_finding_acknowledge, name="admin_finding_acknowledge"),

@@ -2,6 +2,21 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.45.0] — 2026-07-16
+
+### Added
+- **Patching page** at `/patching/` — dedicated triage surface for the
+  5 patching finding types (Track O batch O5 engine now has a UI).
+  5 per-type tiles at top (device_never_patched, patching_stalled,
+  reboot_pending, patch_failing_repeatedly, patch_approval_backlog)
+  with click-to-filter. Filter bar: status / type / client.
+  Table shows severity, subject (hostname clickthrough to device
+  detail, client name for backlog), per-type detail line (last install,
+  last boot, KB count, backlog count), last-detected, Ack action.
+- Primary nav gains "Patching" link between Compliance and the
+  client sub-nav; badge count = open+acknowledged patching findings
+  (via new `nav_patching_open` context processor entry).
+
 ## [0.44.8] — 2026-07-15
 
 ### Fixed

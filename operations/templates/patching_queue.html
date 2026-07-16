@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+
+{% block title %}Patching{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h1>Patching</h1>
+    <p class="muted">
+        Per-device patching health. Only devices with
+        <code>effective_patching_scope='Included'</code> fire these
+        findings (Track O batch O4/O5). Non-Ninja-linked and
+        non-Windows devices sit in <code>Unmanaged</code> and are
+        intentionally silent here.
+    </p>
+</div>
+
+<div class="card">
+    <h2 style="font-size: 0.95rem; margin: 0 0 0.5rem 0; color: #9ca3af;">
+        Open by type <span class="muted">({{ total_active }} total)</span>
+    </h2>
+    {% include "_tiles.html" with tiles=tiles %}
+</div>
+
+<div class="card">
+    <form action="" method="get" class="filterbar">
+        <div>
+            <label>Status</label>
+            <select name="status">
+                <option value="active"{% if active_status == "active" %} selected{% endif %}>Active</option>
+                <option value="all"{% if active_status == "all" %} selected{% endif %}>All</option>
+                {% for value, label in status_choices %}
+                    <option value="{{ value }}"{% if active_status == value %} selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <label>Type</label>
+            <select name="type">
+                <option value="">Any</option>
+                {% for ftname in patching_types %}
+                    <option value="{{ ftname }}"{% if active_type == ftname %} selected{% endif %}>{{ ftname }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <label>Client</label>
+            <select name="client">
+                <option value="">Any</option>
+                {% for c in clients %}
+                    <option value="{{ c.slug }}"{% if active_client == c.slug %} selected{% endif %}>{{ c.display_name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div style="align-self: end;">
+            <button type="submit">Apply</button>
+            <a href="{% url 'patching_queue' %}" style="margin-left: 0.5rem; font-size: 0.85rem;">Reset</a>
+        </div>
+    </form>
+</div>
+
+<div class="card">
+    {% if rows %}
+    <table>
+        <thead>
+            <tr>
+                <th>Type</th>
+                <th>Severity</th>
+                <th>Subject</th>
+                <th>Client</th>
+                <th>Detail</th>
+                <th>Status</th>
+                <th class="num">Last detected</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in rows %}
+            {% with f=row.f %}
+            <tr>
+                <td><code>{{ f.finding_type.name }}</code></td>
+                <td><span class="badge badge-{{ f.severity }}">{{ f.severity }}</span></td>
+                <td>
+                    {% if f.subject_type == "device" and f.client %}
+                        <a href="{% url 'device_detail' org_slug=f.client.slug device_id=f.subject_id %}"><code>{{ row.subject_label }}</code></a>
+                    {% else %}
+                        <code>{{ row.subject_label }}</code>
+                    {% endif %}
+                </td>
+                <td>{{ f.client.display_name|default:"—" }}</td>
+                <td class="muted">{{ row.detail }}</td>
+                <td><span class="badge badge-{{ f.status }}">{{ f.get_status_display }}</span></td>
+                <td class="muted num">{{ f.last_detected_at|default:f.last_seen_at }}</td>
+                <td>
+                    {% if f.status == "open" %}
+                    <form method="post" action="{% url 'finding_acknowledge' f.id %}" style="display: inline;">
+                        {% csrf_token %}
+                        <button type="submit" style="padding: 0.25rem 0.6rem; font-size: 0.8rem;">Ack</button>
+                    </form>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endwith %}
+            {% endfor %}
+        </tbody>
+    </table>
+    {% include "_pagination.html" with page_obj=page_obj paginator=page_obj.paginator page_query=page_query %}
+    {% else %}
+    <p class="muted">No patching findings match the current filters.</p>
+    {% endif %}
+</div>
+{% endblock %}

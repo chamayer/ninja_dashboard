@@ -29,6 +29,7 @@ def brand(request: HttpRequest) -> dict:
         "nav_findings_count": 0,
         "nav_pending_merges": 0,
         "nav_pending_client_candidates": 0,
+        "nav_patching_open": 0,
     }
 
     if getattr(request, "user", None) and request.user.is_authenticated:
@@ -50,6 +51,11 @@ def brand(request: HttpRequest) -> dict:
         ctx["nav_pending_client_candidates"] = ClientCandidate.objects.filter(
             tenant_id=tenant_id,
             status=ClientCandidate.Status.OPEN,
+        ).count()
+        ctx["nav_patching_open"] = Finding.objects.filter(
+            tenant_id=tenant_id,
+            finding_type__category__name="patching",
+            status__in=_FINDING_ACTIVE_STATUSES,
         ).count()
     else:
         ctx["clients"] = []
