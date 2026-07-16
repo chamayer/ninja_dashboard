@@ -2,6 +2,29 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.52.1] — 2026-07-16 — Docs: Track UI-2 formalized
+
+Backfills a proper track entry for the UI redesign work that was
+accumulating ad-hoc in the git log. No code changes.
+
+### Added
+- `operations/DESIGN.md` §11.1 — updated Information Architecture
+  reflecting the current nav (5 primary + search + 3 admin
+  grouped).
+- `operations/DESIGN.md` §11.5 — Standing UI principles (entity-
+  first, human labels, admin separate, table sortable+filterable,
+  Missing≠Stale, signal over noise, action-per-pixel, native
+  components only).
+- `operations/BLUEPRINT.md` Track UI-2 — full user-set principles,
+  waves A–H with landed / in-progress / pending status, non-goals,
+  and deployment batch table entry (PU2).
+
+### Rationale
+Every other track (E, C, O, 1–5) has a proper blueprint entry.
+UI work didn't — commits told the story but the design context
+was scattered. Anchored now so future me / other agents pick up
+the plan not just the diffs.
+
 ## [0.52.0] — 2026-07-16 — Software fleet page (entity-first)
 
 ### Added

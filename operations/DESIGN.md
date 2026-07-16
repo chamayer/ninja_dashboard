@@ -867,16 +867,40 @@ direction, 2026-07-07). Metabase keeps exploratory BI and historical
 analytics. The dividing line: **if a page carries a decision or an
 action, it belongs in Operations.**
 
-### 11.1 Information architecture
+### 11.1 Information architecture (revised 2026-07-16)
+
+Operator-facing nav — 5 primary domains + fleet-wide search on
+the right, admin cluster grouped into 3 collapsed pages:
 
 ```
-Dashboard · Compliance · Software · Patching · Findings · Admin
-                    └── client context: ClientName › Devices | Software | Patches | Findings
+Dashboard · Clients · Patching · Software · Issues    [🔍 search]    Review · Config · System · ⚙
 ```
 
-Admin groups: Sources, Queues, Health (admin findings), Identity
-review, Configuration (requirements, notification rules/routes,
-suppressions).
+- **Dashboard** — client-portfolio-first scoreboard. Alerts +
+  overview cards + attention panel + client grid + sidebar. See
+  §11.5 principles.
+- **Clients** — fleet-wide client list; enter client context
+  from here.
+- **Patching** — per-domain triage: 5 finding types, scope
+  layer, population summary, device drilldown.
+- **Software** — per-domain ecosystem view: inventory,
+  categorization, decisions, issues (as a facet).
+- **Issues** — cross-domain triage queue (previously "Findings").
+  Everything actionable, filterable by category, severity, client,
+  online state.
+
+Client context sub-nav (when inside a client):
+```
+<Client> · Devices · Patching · Software · Policies
+```
+
+Admin cluster (right-aligned):
+- **Review** — Client candidates + Identity matches + Merge
+  candidates. Sum badge.
+- **Config** — Notification rules + Requirement profiles +
+  Software catalog + Patching-scope rules.
+- **System** — Sources + Ingest health + Queue status.
+- **⚙** — Django admin.
 
 ### 11.2 Page grammar
 
@@ -913,6 +937,51 @@ One page per entity; everything else links to it:
 **Engine-first rule:** no surface ships before its backing engine
 produces real data. A page rendering an empty table is a defect, not a
 milestone.
+
+### 11.5 Standing UI principles (2026-07-16)
+
+Distilled from the operator feedback captured in the UI redesign
+(Track UI-2). These are hard rules — every new page adheres.
+
+1. **Entity-first, not issue-first.** Every domain (Clients,
+   Devices, Software, Users, …) gets a page presenting the whole
+   ecosystem. Issues are ONE facet of that domain, not the
+   framing. The Dashboard is a client-portfolio scoreboard, not
+   an alerts inbox.
+2. **Portfolio-first Dashboard.** MSP / fleet operator lands
+   on a client-portfolio view. Overview cards + attention panel
+   + client grid + sidebar. Domain deep-dives happen via nav,
+   not via hero tiles.
+3. **Human-friendly copy.** No internal identifiers in visible
+   copy. Central `humanize_label` template filter translates
+   snake_case DB values to plain English. Banned words: **"findings"**
+   (use "issues" / "items"), **"fleet"** (use "devices" / "across
+   all clients"). British spellings banned — US English only.
+4. **Admin separate from operator.** Left nav = daily workflow
+   domains. Right-muted = configuration + platform health +
+   review queues.
+5. **Summary top, details below.** Every domain page: alerts →
+   overview cards → attention panel → primary grid → sidebar.
+6. **Every table sortable + filterable.** Column headers sort;
+   filter bar above; searchable + multi-select where meaningful.
+7. **Missing ≠ Stale.** Different problems, different actions,
+   different labels. Missing = actionable coverage gap; Stale
+   = mixed bag, may include offline devices where nothing can
+   be done. Never conflate.
+8. **Signal over noise.** Panels like "Needs immediate attention"
+   restrict to severe (critical + high) severity and hide when
+   empty. Aggregate counts across domains only when the sum is
+   itself actionable.
+9. **Action-per-pixel.** Every card / row / badge either
+   clickthroughs to a filtered view, offers an inline action,
+   or provides context. No decoration.
+10. **Native components only.** No third-party JS libraries.
+    Native HTML `<select>`, `<input type="search">`, existing
+    sort JS. Adds complexity + fragility (Tom Select incident
+    2026-07-16 — reverted).
+
+Full principles + WHY each exists is in
+`~/.claude/projects/.../memory/feedback_ui_principles.md`.
 
 ---
 

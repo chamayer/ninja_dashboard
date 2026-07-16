@@ -1104,6 +1104,151 @@ Per DESIGN §11. One slice, before Tracks 1-5 surfaces:
 
 ---
 
+## Track UI-2 — Operator UI rework (2026-07-16)
+
+Second UI pass. Track U (P3) delivered the initial nav grammar +
+shared includes + refactor of 3 list pages. Track UI-2 rebuilds
+around the standing principles in DESIGN §11.5 — entity-first,
+portfolio-first Dashboard, human labels, admin separation,
+signal over noise. Documents work that was accumulating ad-hoc
+in the git log; anchors it as a proper track.
+
+**User-set principles (2026-07-16):**
+
+1. **Human-friendly, workflow-oriented.** Nav labels + copy in
+   the operator's vocabulary, not the DB's.
+2. **Action-oriented.** Every card/row/tile clickthroughs to
+   the work.
+3. **Summary top, details below.** Fixed page grammar.
+4. **Admin separate from operator.** Right-muted cluster for
+   config / platform / review.
+5. **Not an eye-sore.** Consolidate. 5 primary + 3 admin.
+6. **No careless mistakes.** Test the specific failure mode
+   before pushing. See `feedback_no_careless_mistakes.md`.
+7. **No techspeak in UI copy.** Central `humanize_label` filter.
+   Banned words: "findings", "fleet". US English only.
+8. **Every table sortable + filterable.** Column headers sort;
+   filter bar above.
+9. **Entity-first, not issue-first.** Software / Devices / Users
+   are domains with their own pages. Issues are a facet.
+10. **Portfolio-first Dashboard.** Client scoreboard as the
+    star; not a bug tracker.
+
+### UI-2.A — Label filter + component polish (LANDED)
+
+`humanize_label` template filter. Full mapping of every enum,
+category, scope-reason, entity-type, match-method, and status
+value to plain English. Applied across every user-facing template.
+Search box replaces the retired header client picker. Native
+selects only — no third-party JS (Tom Select attempted then
+reverted; incident logged in memory).
+
+Commits: `1a9c7c7` (0.46.0) → `4aff0e7` (0.46.4) → `4afe38b` (0.48.0
+Tom Select rip).
+
+### UI-2.B — Nav restructure (LANDED)
+
+5 primary domains (Dashboard · Clients · Patching · Software ·
+Issues) + fleet-wide search input + right-muted admin cluster
+consolidated to 3 grouped links (Review · Config · System · ⚙).
+Individual admin pages still exist at their URLs; Wave D adds
+the tabbed consolidations.
+
+Commits: `9b32ff3` (0.49.0), `09080f0` → `f393cc3` (revert of
+header picker cleanup blocked by comment bug), `c791d44` (search).
+
+### UI-2.C — Dashboard rework (LANDED)
+
+Reframed from findings-count-hero-tile grid to client-portfolio
+scoreboard per fleet-operator research (ConnectWise, NinjaOne,
+Datto). Structure:
+- Alerts banner (critical + stale) — only when actionable
+- 6 overview cards (Devices · Patching · Software · Missing
+  agents · Not reporting · Ingest · Reviews)
+- "Needs immediate attention" panel — clients with severe
+  issues in ≥2 domains, top 30, scrollable, hidden when empty
+- Client scoreboard — traffic-light Health + filter chips +
+  search + pagination
+- Sidebar: Awaiting review + New in last 24h
+
+Commits: `7a5aa15` (0.50.0) → `b228e79` (0.50.6 Missing/Stale
+split) → `76a27ab` (0.50.7 evaluator noise fix).
+
+### UI-2.D — Domain pages (IN PROGRESS)
+
+- **Patching** page (LANDED — `fbc801a` 0.45.0): per-type tiles,
+  scope layer, population summary, device drilldown.
+- **Software** page (LANDED — `c35fc4a` 0.52.0): overview cards,
+  category chip strip, titles table with device/client counts +
+  decision status, sidebar with recent installs + decisions.
+- **Devices** page (PENDING): fleet-wide device browse — currently
+  the Clients nav goes to `/orgs/all/` which is a client list.
+  Devices deserve their own domain page with the same shape as
+  Software (overview + filter chips + titles table + sidebar).
+- **Client detail** (PENDING): today `org_index` is minimal.
+  Deserves a proper client-detail scoreboard-style view.
+- **Device detail** (PENDING): 5-tab rewrite (Overview / Sources
+  / Activity / Software / Identity). Activities are not yet
+  surfaced anywhere in ops. Primary-source-in-data model
+  (see DESIGN §3.8 extension).
+
+### UI-2.E — Admin consolidations (PENDING)
+
+- **Review** page: tabbed — Client candidates / Identity matches
+  / Merge candidates. Retire 3 separate pages.
+- **Config** page: tabbed — Notification rules / Requirement
+  profiles / Software catalog / Patching-scope rules. Retire
+  separate pages.
+- **System** page: tabbed — Sources / Ingest health / Queue
+  status. Retire separate pages.
+
+### UI-2.F — Actions (PENDING)
+
+- Bulk Acknowledge on Issues + Review tabs.
+- Resolve / Snooze / Suppress on individual issues.
+- Device patching-scope override UI (table exists — O4, no UI).
+- Exemption toggle UI (table exists — O2, no UI).
+- Manual scope override from Client / Device page.
+
+### UI-2.G — Business data capture (PENDING, unlocks UI-2.H)
+
+- Client fields: service tier, MRR, account manager, contract
+  renewal date, onboarding stage.
+- Trend snapshots (daily) so Dashboard can show week-over-week
+  deltas.
+
+### UI-2.H — Dashboard maturity (BLOCKED on UI-2.G)
+
+Once UI-2.G lands, client scoreboard adds columns: tier badge,
+renewal window, MRR band, trend arrow. Buckets become
+data-driven (Watch / Concern / Critical per NinjaOne canary
+model instead of monitoring severity).
+
+### Non-goals for Track UI-2
+
+- Multi-user roles / permissions (single-operator today).
+- Ticket / SLA layer (no ticket data model).
+- On-call / assignment / escalation (no assignment data).
+- Third-party JS frameworks — native components only.
+
+### Deployment batches
+
+Wave-by-wave push cadence. Each wave = one push + Portainer
+redeploy + lightweight browser eyeball.
+
+| Wave | Content | Status |
+|---|---|---|
+| UI-2.A | humanize_label + search | ✓ landed |
+| UI-2.B | Nav restructure | ✓ landed |
+| UI-2.C | Dashboard rework | ✓ landed |
+| UI-2.D | Domain pages (Devices + Client detail + Device detail remaining) | ⏳ in progress |
+| UI-2.E | Admin consolidations | pending |
+| UI-2.F | Actions | pending |
+| UI-2.G | Business data capture | pending |
+| UI-2.H | Dashboard maturity | blocked on UI-2.G |
+
+---
+
 ## Track 6 — Cutover
 
 1. **Side-by-side validation**: script `ingest/parity_check.py` — for N
@@ -1139,6 +1284,7 @@ batch is a single commit series; batches are sequential.
 | P5 | Track 4 (identity fidelity + review UI) | Candidate confirm cascade verified |
 | P6 | Track 5 (patching) + migration 0022 + surfaces | Counts match Metabase scalars |
 | PO | Track O (storage separation pass) — 5 sequential push waves O1–O5 | Ops fully self-standing on `v_device`; patching_scope layer replaces `ninja_core.v_active_devices`; scope-filtered patch findings match Metabase |
+| PU2 | Track UI-2 (operator UI rework) — 8 waves A–H, C already landed | Every domain reachable via entity-first page; admin consolidated to 3 tabbed pages; actions available inline |
 | P7 | Track 6 (cutover) — multi-step, each step separately approved | Parity clean 1 week → schema drop |
 
 ---
