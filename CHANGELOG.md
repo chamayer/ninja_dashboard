@@ -2,6 +2,61 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.62.0] — 2026-07-17 — Finding timestamps + Dashboard trend arrows
+
+Wave G2 landed in a single push — three tightly-coupled slices
+(model additions, matview, UI arrows). Closes real observability
+gaps beyond just enabling trends.
+
+### Added — schema
+- Migration 0048: `Finding.acknowledged_at` + `Finding.closed_at`
+  DateTimeField (null=True). Backfills `closed_at = resolved_at`
+  where the latter was set; pre-existing acks are unrecoverable
+  (rows keep NULL `acknowledged_at`). Adds
+  `idx_findings_closed_at`.
+- Migration 0049: `client_health_trend_current` matview — 4th
+  member of the `<subject>_<layer>_current` family. Columns:
+  severe_open_now / open_now / severe_open_7d_ago / open_7d_ago
+  / severe_open_30d_ago. Reads from `findings.first_seen_at` +
+  `closed_at` for accurate as-of counts. Refresh function
+  `refresh_client_health_trend_current` registered in the
+  `refresh_derived()` coordinator (now 4 steps).
+
+### Changed — evaluator hooks
+- `finding_acknowledge` sets `acknowledged_at = now()` on first
+  ack (re-ack after resolve/reopen preserves the original stamp
+  so MTTA stays honest).
+- `finding_resolve` sets both `resolved_at` and `closed_at`.
+- `finding_suppress` sets `closed_at`.
+- `findings_bulk_action` respects the same rules across ack /
+  resolve.
+
+### Changed — UI
+- Dashboard portfolio grid shows a trend arrow next to each
+  client's severity row:
+  - **▲ red** — more severe issues than 7 days ago (tooltip
+    shows delta)
+  - **▼ green** — fewer severe issues than 7 days ago
+  - **◆ grey** — no change (only shown when 7d history exists)
+- Arrow reads from the matview; if the matview is empty (fresh
+  deploy pre-refresh) the row falls through to no-arrow rather
+  than 500.
+
+### Why this is a data-model win, not just a trend-arrow win
+- `acknowledged_at` unlocks MTTA and ack-rate reporting on
+  everything downstream — the Dashboard trend arrow is only one
+  consumer.
+- `closed_at` makes "was this active on date D" unambiguous for
+  ALL closed statuses (resolved, suppressed, wontfix), not just
+  resolved. Any future as-of query benefits.
+
+### Known caveat
+- Severity historical drift: the matview counts a finding's
+  CURRENT severity for all as-of dates. In practice the
+  evaluator sets severity once at emission via
+  upsert-on-condition_key and rarely revisits it, so drift is
+  near-zero. Documented in DESIGN §11.
+
 ## [0.61.1] — 2026-07-17 — Fix /software 500
 
 ### Fixed

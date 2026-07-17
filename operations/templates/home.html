@@ -236,6 +236,16 @@
             {% if row.critical %}<span class="finding-dot dot-critical"></span><span>{{ row.critical }}</span>{% endif %}
             {% if row.high %}<span class="finding-dot dot-high"></span><span>{{ row.high }}</span>{% endif %}
             {% if row.medium %}<span class="finding-dot dot-medium"></span><span>{{ row.medium }}</span>{% endif %}
+            {% if row.trend == 'up' %}
+              <span title="{{ row.severe_delta_7d }} more severe issues than 7 days ago"
+                    style="color:#dc2626; font-weight:600; font-size:0.85rem;">▲</span>
+            {% elif row.trend == 'down' %}
+              <span title="{{ row.severe_delta_7d }} fewer severe issues than 7 days ago"
+                    style="color:#16a34a; font-weight:600; font-size:0.85rem;">▼</span>
+            {% elif row.severe_7d %}
+              <span title="No change vs 7 days ago"
+                    style="color:var(--muted); font-size:0.85rem;">◆</span>
+            {% endif %}
             <a href="{% url 'findings_queue' %}?client={{ row.client.slug }}" style="margin-left:auto; font-size:0.78rem;">{{ row.total }} →</a>
           </div>
           {% endif %}

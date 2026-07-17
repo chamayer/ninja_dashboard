@@ -992,6 +992,14 @@ class Finding(UUIDTenantScopedModel):
     last_detected_at = models.DateTimeField(null=True, blank=True)
     last_reviewed_at = models.DateTimeField(null=True, blank=True)
     snoozed_until = models.DateTimeField(null=True, blank=True)
+    # First time an operator acknowledged this issue. Set once; a
+    # re-ack after resolve/reopen would leave the original ack
+    # timestamp. Enables MTTA (mean time to acknowledge) metrics.
+    acknowledged_at = models.DateTimeField(null=True, blank=True)
+    # Set on any transition INTO a closed status (resolved,
+    # suppressed, wontfix). "Was this active on date D" is then:
+    # first_seen_at <= D AND (closed_at IS NULL OR closed_at > D).
+    closed_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         db_table = "findings"
@@ -999,6 +1007,7 @@ class Finding(UUIDTenantScopedModel):
             models.Index(fields=("tenant", "status", "severity"), name="idx_findings_status_severity"),
             models.Index(fields=("tenant", "subject_type", "subject_id"), name="idx_findings_subject"),
             models.Index(fields=("tenant", "snoozed_until"), name="idx_findings_snoozed_until"),
+            models.Index(fields=("tenant", "closed_at"), name="idx_findings_closed_at"),
         )
         constraints = (
             models.UniqueConstraint(

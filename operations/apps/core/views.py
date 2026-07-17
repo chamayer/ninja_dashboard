@@ -241,10 +241,47 @@ def home(request: HttpRequest) -> HttpResponse:
             return "amber"
         return "green"
 
+    # Trend data — read the client_health_trend_current matview once
+    # and enrich each row. Matview refresh happens in refresh_derived();
+    # if it's empty (fresh deploy before first refresh), rows default
+    # to trend='flat'.
+    trend_map: dict = {}
+    try:
+        with transaction.atomic(), connection.cursor() as cur:
+            cur.execute("SET LOCAL operations.tenant_id = 1")
+            cur.execute(
+                """
+                SELECT client_id, severe_open_now, severe_open_7d_ago,
+                       severe_open_30d_ago, open_now, open_7d_ago
+                FROM operations.client_health_trend_current
+                WHERE tenant_id = 1
+                """
+            )
+            for row in cur.fetchall():
+                trend_map[row[0]] = {
+                    "severe_now": row[1], "severe_7d": row[2],
+                    "severe_30d": row[3], "open_now": row[4],
+                    "open_7d": row[5],
+                }
+    except Exception:
+        # Matview hasn't been created yet (or refreshed empty). Fall
+        # through with an empty trend map — rows default to flat.
+        trend_map = {}
+
     client_portfolio_all = []
     for c in clients_qs:
         devs = device_counts.get(c.id, 0)
         health = _health(devs, c.critical_findings, c.high_findings)
+        t = trend_map.get(c.id, {})
+        severe_now = c.critical_findings + c.high_findings
+        severe_7d = t.get("severe_7d", severe_now)
+        severe_delta_7d = severe_now - severe_7d
+        if severe_delta_7d > 0:
+            trend = "up"       # more severe issues than 7d ago — bad
+        elif severe_delta_7d < 0:
+            trend = "down"     # fewer — good
+        else:
+            trend = "flat"
         client_portfolio_all.append({
             "client": c,
             "devices": devs,
@@ -254,6 +291,9 @@ def home(request: HttpRequest) -> HttpResponse:
             "total": c.total_findings,
             "missing_agents": c.missing_agents,
             "health": health,
+            "severe_7d": severe_7d,
+            "severe_delta_7d": severe_delta_7d,
+            "trend": trend,
         })
 
     # Counts for the filter chips (before view filter is applied).
@@ -1427,7 +1467,11 @@ def finding_acknowledge(request: HttpRequest, finding_id: str) -> HttpResponse:
     finding = get_object_or_404(Finding, id=finding_id, tenant_id=1)
     if finding.status == Finding.Status.OPEN:
         finding.status = Finding.Status.ACKNOWLEDGED
-        finding.save(update_fields=["status"])
+        fields = ["status"]
+        if finding.acknowledged_at is None:
+            finding.acknowledged_at = timezone.now()
+            fields.append("acknowledged_at")
+        finding.save(update_fields=fields)
     return redirect(request.POST.get("next") or "findings_queue")
 
 
@@ -1436,8 +1480,11 @@ def finding_acknowledge(request: HttpRequest, finding_id: str) -> HttpResponse:
 def finding_resolve(request: HttpRequest, finding_id: str) -> HttpResponse:
     finding = get_object_or_404(Finding, id=finding_id, tenant_id=1)
     if finding.status != Finding.Status.RESOLVED:
+        now = timezone.now()
         finding.status = Finding.Status.RESOLVED
-        finding.save(update_fields=["status"])
+        finding.resolved_at = finding.resolved_at or now
+        finding.closed_at = finding.closed_at or now
+        finding.save(update_fields=["status", "resolved_at", "closed_at"])
     return redirect(request.POST.get("next") or "findings_queue")
 
 
@@ -1485,8 +1532,10 @@ def finding_suppress(request: HttpRequest, finding_id: str) -> HttpResponse:
         expires_at=expires_at,
         created_by=request.user,
     )
+    now = timezone.now()
     finding.status = Finding.Status.SUPPRESSED
-    finding.save(update_fields=["status"])
+    finding.closed_at = finding.closed_at or now
+    finding.save(update_fields=["status", "closed_at"])
     messages.info(request, "Issue suppressed.")
     return redirect(request.POST.get("next") or "findings_queue")
 
@@ -1501,15 +1550,23 @@ def findings_bulk_action(request: HttpRequest) -> HttpResponse:
         messages.warning(request, "Pick an action and at least one issue.")
         return redirect(request.POST.get("next") or "findings_queue")
 
+    now = timezone.now()
     qs = Finding.objects.filter(tenant_id=1, id__in=ids)
     if action == "ack":
-        touched = qs.filter(status=Finding.Status.OPEN).update(
+        # First-time ack sets acknowledged_at; reack (rare) leaves the
+        # original stamp so MTTA stays honest.
+        touched = qs.filter(status=Finding.Status.OPEN, acknowledged_at__isnull=True).update(
+            status=Finding.Status.ACKNOWLEDGED, acknowledged_at=now,
+        )
+        touched += qs.filter(status=Finding.Status.OPEN, acknowledged_at__isnull=False).update(
             status=Finding.Status.ACKNOWLEDGED,
         )
         messages.info(request, f"Acknowledged {touched} issue{'s' if touched != 1 else ''}.")
     elif action == "resolve":
         touched = qs.exclude(status=Finding.Status.RESOLVED).update(
             status=Finding.Status.RESOLVED,
+            resolved_at=now,
+            closed_at=now,
         )
         messages.info(request, f"Resolved {touched} issue{'s' if touched != 1 else ''}.")
     elif action == "snooze":
