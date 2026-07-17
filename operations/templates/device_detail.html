@@ -1,168 +1,268 @@
 {% extends "base.html" %}
+{% load human_labels %}
 
 {% block title %}{{ device.canonical_hostname }}{% endblock %}
 
 {% block content %}
-<div class="card">
-    <p class="muted" style="margin:0 0 0.5rem;">
+<style>
+    .dd-header {
+        padding: 1rem 1.2rem; background: var(--surface);
+        border: 1px solid var(--border); border-radius: 6px;
+        margin-bottom: 0.6rem;
+    }
+    .dd-crumbs { font-size: 0.8rem; color: var(--muted); margin-bottom: 0.4rem; }
+    .dd-title { display: flex; align-items: center; gap: 0.7rem; }
+    .dd-health {
+        width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0;
+    }
+    .dd-health.red { background: #dc2626; box-shadow: 0 0 0 3px #fee2e2; }
+    .dd-health.amber { background: #ea580c; box-shadow: 0 0 0 3px #ffedd5; }
+    .dd-health.green { background: #16a34a; box-shadow: 0 0 0 3px #dcfce7; }
+    .dd-title h1 { margin: 0; font-size: 1.35rem; }
+    .dd-meta { color: var(--muted); font-size: 0.82rem; margin-top: 0.35rem; }
+    .dd-meta code { font-size: 0.82rem; }
+
+    .dd-tabs {
+        display: flex; gap: 0.25rem; margin-bottom: 0.9rem;
+        border-bottom: 1px solid var(--border);
+    }
+    .dd-tab {
+        padding: 0.55rem 1rem; text-decoration: none; color: var(--muted);
+        border-bottom: 2px solid transparent; font-size: 0.9rem;
+        font-weight: 500;
+    }
+    .dd-tab:hover { color: var(--fg); }
+    .dd-tab.active {
+        color: #1e40af; border-bottom-color: #1e40af; font-weight: 600;
+    }
+
+    .dd-cards {
+        display: grid; gap: 0.65rem;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        margin-bottom: 1rem;
+    }
+    .dd-card {
+        padding: 0.75rem 1rem; background: var(--surface);
+        border: 1px solid var(--border); border-radius: 6px;
+    }
+    .dd-card .lbl {
+        font-size: 0.72rem; font-weight: 700; text-transform: uppercase;
+        letter-spacing: 0.06em; color: var(--muted); margin-bottom: 0.2rem;
+    }
+    .dd-card .val { font-size: 1.35rem; font-weight: 700; color: #1a1a2e; }
+    .dd-card .sub { font-size: 0.75rem; color: var(--muted); margin-top: 0.15rem; }
+    .dd-card.alert { border-left: 3px solid #dc2626; }
+    .dd-card.alert .val { color: #dc2626; }
+    .dd-card.warn { border-left: 3px solid #ea580c; }
+    .dd-card.warn .val { color: #ea580c; }
+
+    .sev-mini { display: inline-flex; gap: 0.35rem; margin-top: 0.25rem; }
+    .sev-mini span {
+        font-size: 0.7rem; padding: 0.1rem 0.4rem; border-radius: 3px;
+        font-weight: 600;
+    }
+    .sev-mini .crit { background: #fee2e2; color: #991b1b; }
+    .sev-mini .high { background: #ffedd5; color: #9a3412; }
+    .sev-mini .med  { background: #fef3c7; color: #92400e; }
+    .sev-mini .low  { background: #e0e7ff; color: #3730a3; }
+
+    .badge-decision {
+        font-size: 0.7rem; padding: 0.1rem 0.4rem; border-radius: 3px;
+        font-weight: 600;
+    }
+    .badge-decision.approve { background: #dcfce7; color: #166534; }
+    .badge-decision.reject { background: #fee2e2; color: #991b1b; }
+    .badge-decision.investigate { background: #fef3c7; color: #92400e; }
+    .badge-decision.pending { background: #f3f4f6; color: #6b7280; }
+
+    .tl-row {
+        display: grid; grid-template-columns: 90px 12px 120px 1fr 130px;
+        gap: 0.7rem; align-items: center;
+        padding: 0.4rem 0.5rem; border-bottom: 1px solid var(--border);
+        font-size: 0.85rem;
+    }
+    .tl-row:last-child { border-bottom: 0; }
+    .tl-dot { width: 10px; height: 10px; border-radius: 50%; }
+    .tl-dot.crit { background: #dc2626; }
+    .tl-dot.high { background: #ea580c; }
+    .tl-dot.med  { background: #eab308; }
+    .tl-dot.low  { background: #6366f1; }
+    .tl-dot.info { background: #9ca3af; }
+    .tl-dot.reboot { background: #06b6d4; }
+    .tl-dot.patch { background: #16a34a; }
+</style>
+
+<div class="dd-header">
+    <div class="dd-crumbs">
         <a href="{% url 'org_index' org_slug=device.client.slug %}">{{ device.client.display_name }}</a>
-        &nbsp;›&nbsp; <a href="{% url 'org_devices' org_slug=device.client.slug %}">Devices</a>
+        &nbsp;›&nbsp; <a href="{% url 'devices_page' %}">Devices</a>
         &nbsp;›&nbsp; {{ device.canonical_hostname }}
-    </p>
-    <h1 style="margin: 0 0 0.25rem;">{{ device.canonical_hostname }}</h1>
-    <p class="muted" style="margin: 0;">
+    </div>
+    <div class="dd-title">
+        <div class="dd-health {{ device_health }}" title="{{ device_health|humanize_label }}"></div>
+        <h1>{{ device.canonical_hostname }}</h1>
         <span class="type-badge" data-type="{{ device.device_type }}">{{ device.get_device_type_display }}</span>
-        &nbsp;·&nbsp; role: <em>{{ device.device_role|default:"unknown" }}</em>
-        {% if device.canonical_serial %}&nbsp;·&nbsp; <code>{{ device.canonical_serial }}</code>{% endif %}
-        {% if device.canonical_vm_uuid %}&nbsp;·&nbsp; VM <code>{{ device.canonical_vm_uuid }}</code>{% endif %}
-    </p>
-</div>
-
-{% if patching %}
-<div class="card">
-    <h2>Patching <span class="muted" style="font-weight:400;font-size:0.85rem;">— scope drives whether this device produces patch alerts</span></h2>
-    <table class="ops-table" style="width:auto;">
-        <tbody>
-            <tr>
-                <th style="text-align:left;padding-right:1rem;">Effective scope</th>
-                <td>
-                    <strong>{{ patching.effective_scope|default:"Unknown" }}</strong>
-                    {% if patching.override_scope %}
-                        <span class="muted">(operator override)</span>
-                    {% elif patching.derived_scope %}
-                        <span class="muted">(derived: <code>{{ patching.scope_reason|default:"—" }}</code>)</span>
-                    {% endif %}
-                </td>
-            </tr>
-            {% if patching.override_scope %}
-            <tr>
-                <th style="text-align:left;padding-right:1rem;">Override reason</th>
-                <td class="muted">{{ patching.override_reason|default:"—" }}</td>
-            </tr>
+        <span class="muted" style="font-size:0.85rem;">{{ device.device_role|humanize_label|default:"role unknown" }}</span>
+    </div>
+    <div class="dd-meta">
+        {% if patching %}
+            {% if patching.is_online_any %}
+                <span style="color:#16a34a;">● online</span>
+                {% if patching.online_sources %}<span class="muted">({{ patching.online_sources|join:", " }})</span>{% endif %}
+            {% else %}
+                <span style="color:#dc2626;">● offline</span>
             {% endif %}
-            <tr>
-                <th style="text-align:left;padding-right:1rem;">Needs reboot</th>
-                <td>
-                    {% if patching.needs_reboot %}
-                        <span class="badge badge-medium">yes</span>
-                    {% else %}
-                        <span class="muted">no</span>
-                    {% endif %}
-                </td>
-            </tr>
-            <tr>
-                <th style="text-align:left;padding-right:1rem;">Last boot</th>
-                <td class="muted num">{{ patching.last_boot_at|date:"Y-m-d H:i"|default:"—" }}</td>
-            </tr>
-            <tr>
-                <th style="text-align:left;padding-right:1rem;">Patch signal</th>
-                <td>
-                    {% if patching.ever_installed == None %}
-                        <span class="muted">no signal (no Ninja link)</span>
-                    {% elif patching.ever_installed %}
-                        ever installed
-                        {% if patching.last_patch_installed_at %}
-                            · last install <span class="num">{{ patching.last_patch_installed_at|date:"Y-m-d" }}</span>
-                        {% else %}
-                            <span class="muted">· no install dates recorded</span>
-                        {% endif %}
-                        <span class="muted">· {{ patching.install_attempts }} attempts</span>
-                    {% else %}
-                        <strong>never installed</strong>
-                    {% endif %}
-                </td>
-            </tr>
-            <tr>
-                <th style="text-align:left;padding-right:1rem;">Currently online</th>
-                <td>
-                    {% if patching.is_online_any %}
-                        yes
-                        {% if patching.online_sources %}
-                            <span class="muted">— {{ patching.online_sources|join:", " }}</span>
-                        {% endif %}
-                    {% else %}
-                        <span class="muted">no source has contact within 24h</span>
-                    {% endif %}
-                    {% if patching.last_contact_at %}
-                        <span class="muted num">(last contact {{ patching.last_contact_at|date:"Y-m-d H:i" }})</span>
-                    {% endif %}
-                </td>
-            </tr>
-        </tbody>
-    </table>
-    <p style="margin-top:0.75rem;font-size:0.85rem;">
-        <a href="{% url 'patching_queue' %}?client={{ device.client.slug }}">Client patch queue &rarr;</a>
-    </p>
+            {% if patching.last_contact_at %}
+                &nbsp;·&nbsp; last contact <span class="num">{{ patching.last_contact_at|date:"Y-m-d H:i" }}</span>
+            {% endif %}
+        {% endif %}
+        &nbsp;·&nbsp;
+        <a href="{% url 'findings_queue' %}?device={{ device.id }}">
+            {{ active_findings|length }} open issue{{ active_findings|length|pluralize }}
+        </a>
+        {% if severe_open %}
+            <strong style="color:#dc2626;">({{ severe_open }} severe)</strong>
+        {% endif %}
+        {% if device.canonical_serial %}&nbsp;·&nbsp; <code>{{ device.canonical_serial }}</code>{% endif %}
+    </div>
 </div>
-{% endif %}
 
-{% if active_findings %}
+<div class="dd-tabs">
+    {% with base=device.get_absolute_url|default:"" %}
+    <a class="dd-tab {% if active_tab == 'overview' %}active{% endif %}"
+       href="?tab=overview">Overview</a>
+    <a class="dd-tab {% if active_tab == 'sources' %}active{% endif %}"
+       href="?tab=sources">Sources</a>
+    <a class="dd-tab {% if active_tab == 'activity' %}active{% endif %}"
+       href="?tab=activity">Activity</a>
+    <a class="dd-tab {% if active_tab == 'software' %}active{% endif %}"
+       href="?tab=software">Software</a>
+    <a class="dd-tab {% if active_tab == 'identity' %}active{% endif %}"
+       href="?tab=identity">Identity & raw</a>
+    {% endwith %}
+</div>
+
+{% if active_tab == 'overview' %}
+<div class="dd-cards">
+    <div class="dd-card">
+        <div class="lbl">Health</div>
+        <div class="val" style="text-transform:capitalize;">{{ device_health }}</div>
+        <div class="sub">{{ device_health|humanize_label }}</div>
+    </div>
+    <div class="dd-card {% if not patching.is_online_any %}alert{% endif %}">
+        <div class="lbl">Online now</div>
+        <div class="val">{% if patching.is_online_any %}Yes{% else %}No{% endif %}</div>
+        <div class="sub">
+            {% if patching.online_sources %}{{ patching.online_sources|join:", " }}{% else %}no source checked in{% endif %}
+        </div>
+    </div>
+    <div class="dd-card {% if sev_counts.critical %}alert{% elif sev_counts.high %}warn{% endif %}">
+        <div class="lbl">Open issues</div>
+        <div class="val">{{ active_findings|length }}</div>
+        <div class="sev-mini">
+            {% if sev_counts.critical %}<span class="crit">{{ sev_counts.critical }} crit</span>{% endif %}
+            {% if sev_counts.high %}<span class="high">{{ sev_counts.high }} high</span>{% endif %}
+            {% if sev_counts.medium %}<span class="med">{{ sev_counts.medium }} med</span>{% endif %}
+            {% if sev_counts.low %}<span class="low">{{ sev_counts.low }} low</span>{% endif %}
+        </div>
+    </div>
+    <div class="dd-card">
+        <div class="lbl">Patch scope</div>
+        <div class="val" style="font-size:1.05rem;">{{ patching.effective_scope|default:"—" }}</div>
+        <div class="sub">
+            {% if patching.override_scope %}operator override
+            {% elif patching.scope_reason %}{{ patching.scope_reason|humanize_label }}
+            {% else %}&nbsp;{% endif %}
+        </div>
+    </div>
+    <div class="dd-card {% if patching.needs_reboot %}warn{% endif %}">
+        <div class="lbl">Needs reboot</div>
+        <div class="val">{% if patching.needs_reboot %}Yes{% else %}No{% endif %}</div>
+        <div class="sub">last boot {{ patching.last_boot_at|date:"Y-m-d"|default:"—" }}</div>
+    </div>
+    <div class="dd-card">
+        <div class="lbl">Software titles</div>
+        <div class="val">{{ software_rows|length }}</div>
+        <div class="sub">installed on this device</div>
+    </div>
+</div>
+
 <div class="card">
-    <h2>Active issues</h2>
-    <table data-sortable class="ops-table">
+    <h2 style="margin-top:0;">Top issues on this device</h2>
+    {% if active_findings %}
+    <table data-sortable style="width:100%;">
         <thead>
             <tr>
                 <th>Severity</th>
                 <th>Issue</th>
                 <th>Status</th>
-                <th>First seen</th>
-                <th>Last seen</th>
+                <th class="num">First seen</th>
+                <th class="num">Last seen</th>
+                <th></th>
             </tr>
         </thead>
         <tbody>
             {% for f in active_findings %}
             <tr>
                 <td><span class="badge badge-{{ f.severity }}">{{ f.severity }}</span></td>
-                <td>{{ f.finding_type.name }}</td>
+                <td>{{ f.finding_type.name|humanize_label }}</td>
                 <td><span class="badge badge-{{ f.status }}">{{ f.get_status_display }}</span></td>
                 <td class="muted num">{{ f.first_seen_at|date:"Y-m-d" }}</td>
-                <td class="muted num">{{ f.last_seen_at|date:"Y-m-d" }}</td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-</div>
-{% endif %}
-
-<div class="card">
-    <h2>Agent Presence</h2>
-    {% if agent_presence %}
-    <table data-sortable class="ops-table">
-        <thead>
-            <tr>
-                <th>Platform</th>
-                <th>Agent type</th>
-                <th>Last observed</th>
-                <th>Last contact (platform)</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for platform, entity_type, last_seen, last_contact in agent_presence %}
-            <tr>
-                <td style="font-weight: 600;">{{ platform }}</td>
-                <td class="muted">{{ entity_type }}</td>
-                <td class="muted num">{{ last_seen|date:"Y-m-d H:i" }}</td>
-                <td class="muted num">{% if last_contact %}{{ last_contact|date:"Y-m-d H:i" }}{% else %}&mdash;{% endif %}</td>
+                <td class="muted num">{{ f.last_seen_at|date:"Y-m-d H:i" }}</td>
+                <td>
+                    {% if f.status == 'open' %}
+                    <a href="{% url 'finding_acknowledge' finding_id=f.id %}" style="font-size:0.8rem;">Ack</a>
+                    {% endif %}
+                </td>
             </tr>
             {% endfor %}
         </tbody>
     </table>
     {% else %}
-    <p class="muted">No agent observations recorded yet.</p>
+    <p class="muted">No open issues on this device.</p>
+    {% endif %}
+</div>
+
+{% elif active_tab == 'sources' %}
+<div class="card">
+    <h2 style="margin-top:0;">Where this device is known</h2>
+    {% if agent_presence %}
+    <table data-sortable style="width:100%;">
+        <thead>
+            <tr>
+                <th>Platform</th>
+                <th>Entity type</th>
+                <th class="num">Last observed</th>
+                <th class="num">Last contact</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for platform, entity_type, last_seen, last_contact in agent_presence %}
+            <tr>
+                <td style="font-weight:600;">{{ platform }}</td>
+                <td class="muted">{{ entity_type|humanize_label }}</td>
+                <td class="muted num">{{ last_seen|date:"Y-m-d H:i"|default:"—" }}</td>
+                <td class="muted num">{{ last_contact|date:"Y-m-d H:i"|default:"—" }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="muted">No agent observations recorded.</p>
     {% endif %}
 </div>
 
 <div class="card">
-    <h2>Source Identities</h2>
+    <h2 style="margin-top:0;">Source identities</h2>
     {% if links %}
-    <table data-sortable class="ops-table">
+    <table data-sortable style="width:100%;">
         <thead>
             <tr>
                 <th>Source</th>
                 <th>Name in that system</th>
                 <th>External ID</th>
                 <th>Matched by</th>
-                <th>Last seen</th>
+                <th class="num">Last seen</th>
             </tr>
         </thead>
         <tbody>
@@ -170,50 +270,99 @@
             <tr>
                 <td>{{ link.source.name }}</td>
                 <td>{{ link.external_name }}</td>
-                <td class="mono">{{ link.external_id }}</td>
+                <td><code>{{ link.external_id }}</code></td>
                 <td class="muted">{{ link.get_match_method_display }} ({{ link.match_confidence }})</td>
-                <td class="muted num">{{ link.last_seen_at|default:"—" }}</td>
+                <td class="muted num">{{ link.last_seen_at|date:"Y-m-d H:i"|default:"—" }}</td>
             </tr>
             {% endfor %}
         </tbody>
     </table>
     {% else %}
-    <p class="muted">No source identities linked yet.</p>
+    <p class="muted">No source identities linked.</p>
     {% endif %}
 </div>
 
-{% if software_rows %}
+{% elif active_tab == 'activity' %}
 <div class="card">
-    <h2>Installed Software <span class="muted" style="font-weight: 400; font-size: 0.9rem;">({{ software_rows|length }}{% if software_rows|length == 300 %}+{% endif %})</span></h2>
+    <h2 style="margin-top:0;">Recent activity</h2>
+    <p class="muted" style="font-size:0.82rem; margin-top:-0.4rem;">
+        Issue events + last boot + last patch install. Best-effort — no
+        full historical event stream yet.
+    </p>
+    {% if activity %}
+    {% for e in activity %}
+    <div class="tl-row">
+        <span class="muted num" style="font-size:0.78rem;">{{ e.at|date:"Y-m-d H:i" }}</span>
+        <span class="tl-dot {% if e.kind == 'reboot' %}reboot{% elif e.kind == 'patch' %}patch{% elif e.severity == 'critical' %}crit{% elif e.severity == 'high' %}high{% elif e.severity == 'medium' %}med{% elif e.severity == 'low' %}low{% else %}info{% endif %}"></span>
+        <span style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.05em; color:var(--muted); font-weight:600;">
+            {{ e.kind|humanize_label }}
+        </span>
+        <span>{{ e.label|humanize_label }}
+            {% if e.status %}<span class="muted" style="font-size:0.78rem;">({{ e.status }})</span>{% endif %}
+        </span>
+        <span style="text-align:right;">
+            {% if e.finding_id %}
+            <a href="{% url 'finding_acknowledge' finding_id=e.finding_id %}" style="font-size:0.78rem;">Ack</a>
+            {% endif %}
+        </span>
+    </div>
+    {% endfor %}
+    {% else %}
+    <p class="muted">No activity recorded.</p>
+    {% endif %}
+</div>
+
+{% elif active_tab == 'software' %}
+<div class="card">
+    <h2 style="margin-top:0;">Installed software
+      <span class="muted" style="font-weight:400; font-size:0.85rem;">
+        ({{ software_rows|length }}{% if software_rows|length == 300 %}+{% endif %})
+      </span>
+    </h2>
     <div style="margin-bottom: 0.5rem;">
         <input type="search" id="sw-filter" placeholder="Filter software…"
                oninput="swFilter(this.value)"
-               style="padding: 0.4rem 0.7rem; border: 1px solid var(--border); border-radius: 4px; font-size: 0.85rem; min-width: 240px;">
+               style="padding: 0.4rem 0.7rem; border: 1px solid var(--border); border-radius: 4px; font-size: 0.85rem; min-width: 260px;">
     </div>
-    <table data-sortable class="ops-table">
+    {% if software_rows %}
+    <table data-sortable style="width:100%;">
         <thead>
             <tr>
                 <th>Name</th>
                 <th>Publisher</th>
                 <th>Version</th>
-                <th>Installed</th>
-                <th>Last seen</th>
+                <th>Decision</th>
+                <th class="num">Installed</th>
+                <th class="num">Last seen</th>
                 <th>Location</th>
             </tr>
         </thead>
         <tbody id="sw-tbody">
-            {% for name, publisher, version, install_date, last_seen, location in software_rows %}
+            {% for s in software_rows %}
             <tr>
-                <td>{{ name }}</td>
-                <td class="muted">{{ publisher|default:"—" }}</td>
-                <td class="muted">{{ version|default:"—" }}</td>
-                <td class="muted num">{{ install_date|date:"Y-m-d"|default:"—" }}</td>
-                <td class="muted num">{{ last_seen|date:"Y-m-d"|default:"—" }}</td>
-                <td class="muted">{{ location|default:"—" }}</td>
+                <td>{{ s.name }}</td>
+                <td class="muted">{{ s.publisher|default:"—" }}</td>
+                <td class="muted">{{ s.version|default:"—" }}</td>
+                <td>
+                    {% if s.decision %}
+                        <span class="badge-decision {{ s.decision }}">{{ s.decision|humanize_label }}</span>
+                        {% if s.decision_scope == 'client' %}
+                            <span class="muted" style="font-size:0.7rem;">client</span>
+                        {% endif %}
+                    {% else %}
+                        <span class="badge-decision pending">pending</span>
+                    {% endif %}
+                </td>
+                <td class="muted num">{{ s.install_date|date:"Y-m-d"|default:"—" }}</td>
+                <td class="muted num">{{ s.last_observed_at|date:"Y-m-d"|default:"—" }}</td>
+                <td class="muted">{{ s.install_location|default:"—" }}</td>
             </tr>
             {% endfor %}
         </tbody>
     </table>
+    {% else %}
+    <p class="muted">No software installations recorded.</p>
+    {% endif %}
 </div>
 <script>
 function swFilter(q) {
@@ -223,5 +372,62 @@ function swFilter(q) {
   });
 }
 </script>
+
+{% elif active_tab == 'identity' %}
+<div class="card">
+    <h2 style="margin-top:0;">Canonical identity</h2>
+    <table style="width:auto;">
+        <tbody>
+            <tr><th style="text-align:left; padding-right:1rem;">Hostname</th><td><code>{{ device.canonical_hostname|default:"—" }}</code></td></tr>
+            <tr><th style="text-align:left; padding-right:1rem;">Serial</th><td><code>{{ device.canonical_serial|default:"—" }}</code></td></tr>
+            <tr><th style="text-align:left; padding-right:1rem;">VM UUID</th><td><code>{{ device.canonical_vm_uuid|default:"—" }}</code></td></tr>
+            <tr><th style="text-align:left; padding-right:1rem;">Role</th><td>{{ device.device_role|humanize_label|default:"—" }}</td></tr>
+            <tr><th style="text-align:left; padding-right:1rem;">Type</th><td>{{ device.get_device_type_display }}</td></tr>
+            <tr><th style="text-align:left; padding-right:1rem;">Lifecycle</th><td>{{ device.lifecycle_status|humanize_label|default:"—" }}</td></tr>
+            <tr><th style="text-align:left; padding-right:1rem;">First seen</th><td class="muted num">{{ device.first_seen_at|date:"Y-m-d H:i"|default:"—" }}</td></tr>
+            <tr><th style="text-align:left; padding-right:1rem;">Device UUID</th><td><code>{{ device.id }}</code></td></tr>
+        </tbody>
+    </table>
+</div>
+
+<div class="card">
+    <h2 style="margin-top:0;">Per-source identifiers</h2>
+    {% if links %}
+    <table style="width:100%;">
+        <thead>
+            <tr>
+                <th>Source</th>
+                <th>External ID</th>
+                <th>External name</th>
+                <th class="num">First seen</th>
+                <th class="num">Last seen</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for link in links %}
+            <tr>
+                <td>{{ link.source.name }}</td>
+                <td><code>{{ link.external_id }}</code></td>
+                <td class="muted">{{ link.external_name }}</td>
+                <td class="muted num">{{ link.first_seen_at|date:"Y-m-d"|default:"—" }}</td>
+                <td class="muted num">{{ link.last_seen_at|date:"Y-m-d"|default:"—" }}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="muted">No source identities.</p>
+    {% endif %}
+</div>
+
+<div class="card">
+    <p class="muted" style="font-size:0.85rem; margin:0;">
+        Raw per-source snapshot payloads are not yet surfaced here.
+        Deferred to a later batch — for now, use the source ID above to
+        look up the raw row in the source-specific schema (e.g.
+        <code>ninja_core.devices</code>).
+    </p>
+</div>
 {% endif %}
+
 {% endblock %}

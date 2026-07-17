@@ -2,6 +2,31 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.55.0] — 2026-07-16 — Device detail 5-tab (Wave UI-2.D)
+
+### Changed
+- `/orgs/<slug>/devices/<uuid>/` rebuilt as a 5-tab layout with a
+  persistent header and `?tab=…` navigation.
+  - **Header**: breadcrumb · hostname · health dot · type badge ·
+    role · online/offline state (with source list) · last contact
+    · open-issue count (with severe count).
+  - **Overview tab**: snapshot cards (Health · Online now · Open
+    issues + severity mini-bar · Patch scope · Needs reboot ·
+    Software titles) + top issues table with per-row Ack.
+  - **Sources tab**: agent presence table + source-identity table.
+    No source given preferential styling — Ninja is a row like
+    any other.
+  - **Activity tab**: unified reverse-chronological timeline of
+    issue opens/reviews + last boot + last patch install (best
+    effort; no historical session-transition stream yet).
+  - **Software tab**: installed titles + per-title decision status
+    (approve / reject / investigate / pending), with client-scope
+    override marker; filter box preserved.
+  - **Identity & raw tab**: canonical fields · per-source
+    identifiers · placeholder for raw payloads (deferred).
+- All "findings" copy → "issues"; all techspeak run through
+  `humanize_label`.
+
 ## [0.54.0] — 2026-07-16 — Client detail scoreboard (Wave UI-2.D)
 
 ### Changed

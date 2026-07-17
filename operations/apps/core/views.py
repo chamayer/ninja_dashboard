@@ -918,6 +918,96 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
                     patching["last_patch_installed_at"] = None
                     patching["install_attempts"] = 0
 
+    # ── Extras for 5-tab layout ──
+    active_tab = request.GET.get("tab") or "overview"
+    if active_tab not in ("overview", "sources", "activity", "software", "identity"):
+        active_tab = "overview"
+
+    # Software decisions map — key by canonical_name, prefer per-client
+    # over global.
+    software_titles = [row[0] for row in software_rows]
+    decisions_map: dict = {}
+    if software_titles:
+        with transaction.atomic(), connection.cursor() as cur:
+            cur.execute("SET LOCAL operations.tenant_id = 1")
+            cur.execute(
+                """
+                SELECT canonical_name, decision, client_id
+                FROM operations.software_decisions
+                WHERE tenant_id = 1
+                  AND canonical_name = ANY(%s)
+                  AND (client_id IS NULL OR client_id = %s)
+                """,
+                [software_titles, str(device.client_id)],
+            )
+            for name, decision, client_id in cur.fetchall():
+                existing = decisions_map.get(name)
+                if not existing or (existing["client_id"] is None and client_id is not None):
+                    decisions_map[name] = {"decision": decision, "client_id": client_id}
+
+    software_view = [
+        {
+            "name": r[0],
+            "publisher": r[1],
+            "version": r[2],
+            "install_date": r[3],
+            "last_observed_at": r[4],
+            "install_location": r[5],
+            "decision": (decisions_map.get(r[0]) or {}).get("decision"),
+            "decision_scope": (
+                "client" if (decisions_map.get(r[0]) or {}).get("client_id") is not None
+                else ("global" if r[0] in decisions_map else None)
+            ),
+        }
+        for r in software_rows
+    ]
+
+    # Aggregate open-issue counts (for header + Overview snapshot).
+    sev_counts = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
+    for f in active_findings:
+        sev_counts[f.severity] = sev_counts.get(f.severity, 0) + 1
+    severe_open = sev_counts["critical"] + sev_counts["high"]
+    if severe_open > 0:
+        device_health = "red"
+    elif patching and not patching.get("is_online_any"):
+        device_health = "amber"
+    else:
+        device_health = "green"
+
+    # Activity events (unified timeline).
+    activity: list = []
+    for f in active_findings:
+        activity.append({
+            "kind": "issue_open",
+            "at": f.first_seen_at,
+            "severity": f.severity,
+            "label": f.finding_type.name,
+            "status": f.get_status_display(),
+            "finding_id": f.id,
+        })
+        if f.last_reviewed_at:
+            activity.append({
+                "kind": "issue_reviewed",
+                "at": f.last_reviewed_at,
+                "severity": f.severity,
+                "label": f.finding_type.name,
+                "status": f.get_status_display(),
+                "finding_id": f.id,
+            })
+    if patching:
+        if patching.get("last_boot_at"):
+            activity.append({
+                "kind": "reboot", "at": patching["last_boot_at"],
+                "label": "Device booted", "severity": None,
+            })
+        if patching.get("last_patch_installed_at"):
+            activity.append({
+                "kind": "patch", "at": patching["last_patch_installed_at"],
+                "label": "Patch installed", "severity": None,
+            })
+    activity.sort(key=lambda e: (e["at"] or timezone.now()), reverse=True)
+    activity = activity[:100]
+
     return render(
         request,
         "device_detail.html",
@@ -926,8 +1016,13 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
             "links": links,
             "active_findings": active_findings,
             "agent_presence": agent_presence,
-            "software_rows": software_rows,
+            "software_rows": software_view,
             "patching": patching,
+            "active_tab": active_tab,
+            "sev_counts": sev_counts,
+            "severe_open": severe_open,
+            "device_health": device_health,
+            "activity": activity,
         },
     )
 
