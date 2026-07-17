@@ -2,6 +2,32 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.56.0] — 2026-07-17 — Admin consolidations (Wave UI-2.E)
+
+### Changed
+- Shared admin sub-nav strip (`_admin_tabs.html`) added at the
+  top of every admin page. Each admin page now advertises its
+  siblings so the operator never has to guess where a queue lives.
+- Groups + tabs (one-word labels throughout):
+  - **Review** — Clients · Devices · Merges · Software (per-tab
+    live counts of items awaiting decision).
+  - **Config** — Alerts · Suppressions · Requirements.
+  - **Integrations** (renamed from **System** — MSP-standard
+    word for "external systems we plug into") — Sources ·
+    Coverage · Ingest.
+- Software decisions moved into the Review group. It stays
+  reachable from the Software page.
+- Coverage matrix moved into the Integrations group as
+  "does reality match what we require" diagnostics.
+- Review total badge on the primary nav now includes pending
+  software decisions.
+
+### Added
+- `nav_pending_software_decisions` count in the context
+  processor (distinct installed titles with no decision at any
+  scope) — feeds both the primary Review badge and the Software
+  tab badge inside the strip.
+
 ## [0.55.0] — 2026-07-16 — Device detail 5-tab (Wave UI-2.D)
 
 ### Changed

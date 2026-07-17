@@ -1,0 +1,72 @@
+{# Shared admin sub-nav strip. Include at the top of every Review /
+   Config / Integrations page. Views must set:
+     admin_group = 'review' | 'config' | 'integrations'
+     admin_tab   = one of that group's tab keys
+#}
+<style>
+  .at-strip {
+    display: flex; align-items: center; gap: 0.6rem;
+    padding: 0.55rem 0.9rem; margin-bottom: 0.9rem;
+    background: #f8f9fb; border: 1px solid var(--border);
+    border-radius: 6px;
+  }
+  .at-group {
+    font-size: 0.72rem; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.08em; color: var(--muted); padding-right: 0.6rem;
+    border-right: 1px solid var(--border);
+  }
+  .at-tab {
+    padding: 0.35rem 0.75rem; text-decoration: none; color: #374151;
+    font-size: 0.85rem; border-radius: 4px; display: inline-flex;
+    align-items: center; gap: 0.35rem;
+  }
+  .at-tab:hover { background: #eef2f7; color: #1a1a2e; }
+  .at-tab.active { background: #1e40af; color: #fff; }
+  .at-badge {
+    background: #dc2626; color: #fff; font-size: 0.65rem; font-weight: 700;
+    padding: 1px 6px; border-radius: 10px; line-height: 1.4;
+  }
+  .at-tab.active .at-badge { background: #fecaca; color: #7f1d1d; }
+</style>
+
+<div class="at-strip">
+  {% if admin_group == 'review' %}
+    <span class="at-group">Review</span>
+    <a class="at-tab {% if admin_tab == 'clients' %}active{% endif %}"
+       href="{% url 'client_candidates_queue' %}">
+      Clients
+      {% if nav_pending_client_candidates %}<span class="at-badge">{{ nav_pending_client_candidates }}</span>{% endif %}
+    </a>
+    <a class="at-tab {% if admin_tab == 'devices' %}active{% endif %}"
+       href="{% url 'identity_candidates_list' %}">
+      Devices
+      {% if nav_pending_identity_candidates %}<span class="at-badge">{{ nav_pending_identity_candidates }}</span>{% endif %}
+    </a>
+    <a class="at-tab {% if admin_tab == 'merges' %}active{% endif %}"
+       href="{% url 'merge_candidates_queue' %}">
+      Merges
+      {% if nav_pending_merges %}<span class="at-badge">{{ nav_pending_merges }}</span>{% endif %}
+    </a>
+    <a class="at-tab {% if admin_tab == 'software' %}active{% endif %}"
+       href="{% url 'software_decisions_queue' %}">
+      Software
+      {% if nav_pending_software_decisions %}<span class="at-badge">{{ nav_pending_software_decisions }}</span>{% endif %}
+    </a>
+  {% elif admin_group == 'config' %}
+    <span class="at-group">Config</span>
+    <a class="at-tab {% if admin_tab == 'alerts' %}active{% endif %}"
+       href="{% url 'notification_rules_list' %}">Alerts</a>
+    <a class="at-tab {% if admin_tab == 'suppressions' %}active{% endif %}"
+       href="{% url 'notification_suppressions_list' %}">Suppressions</a>
+    <a class="at-tab {% if admin_tab == 'requirements' %}active{% endif %}"
+       href="{% url 'requirement_profiles_list' %}">Requirements</a>
+  {% elif admin_group == 'integrations' %}
+    <span class="at-group">Integrations</span>
+    <a class="at-tab {% if admin_tab == 'sources' %}active{% endif %}"
+       href="{% url 'sources_status' %}">Sources</a>
+    <a class="at-tab {% if admin_tab == 'coverage' %}active{% endif %}"
+       href="{% url 'fleet_coverage' %}">Coverage</a>
+    <a class="at-tab {% if admin_tab == 'ingest' %}active{% endif %}"
+       href="{% url 'findings_admin_health' %}">Ingest</a>
+  {% endif %}
+</div>

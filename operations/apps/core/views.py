@@ -1999,6 +1999,8 @@ def findings_admin_health(request: HttpRequest) -> HttpResponse:
         request,
         "findings_admin_health.html",
         {
+            "admin_group": "integrations",
+            "admin_tab": "ingest",
             "findings": qs,
             "finding_types": finding_types,
             "severity_choices": Finding.Severity.choices,
@@ -2106,6 +2108,8 @@ def merge_candidates_queue(request: HttpRequest) -> HttpResponse:
         request,
         "merge_candidates_queue.html",
         {
+            "admin_group": "review",
+            "admin_tab": "merges",
             "candidates": qs,
             "status_choices": MergeCandidate.Status.choices,
             "entity_types": sorted(set(entity_types)),
@@ -2426,6 +2430,8 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
     critical_count = sum(r["total"] for r in gap_rows if r["severity"] == "critical")
 
     return render(request, "coverage.html", {
+        "admin_group": "integrations",
+        "admin_tab": "coverage",
         "gap_rows": gap_rows,
         "missing_devices": missing_devices,
         "clients_affected": clients_affected,
@@ -2544,6 +2550,8 @@ def sources_status(request: HttpRequest) -> HttpResponse:
 
     stale_count = sum(1 for s in sources if s["is_stale"] and not s["is_processing"])
     return render(request, "sources.html", {
+        "admin_group": "integrations",
+        "admin_tab": "sources",
         "sources": sources,
         "recent_runs": recent_runs,
         "stale_count": stale_count,
@@ -2591,6 +2599,8 @@ def client_candidates_queue(request: HttpRequest) -> HttpResponse:
     }
 
     return render(request, "client_candidates_queue.html", {
+        "admin_group": "review",
+        "admin_tab": "clients",
         "rows": rows,
         "active_status": status_filter,
         "counts": counts,
@@ -2726,6 +2736,8 @@ def client_candidate_detail(request: HttpRequest, candidate_id) -> HttpResponse:
     default_profile = next((p for p in profiles if p.is_tenant_default), None)
 
     return render(request, "client_candidate_detail.html", {
+        "admin_group": "review",
+        "admin_tab": "clients",
         "candidate": candidate,
         "per_source": per_source,
         "sample_devices": sample_devices,
@@ -3126,6 +3138,8 @@ def software_decisions_queue(request: HttpRequest) -> HttpResponse:
     categories_seen = sorted({r["category"] for r in display_rows if r["category"]})
 
     return render(request, "software_decisions.html", {
+        "admin_group": "review",
+        "admin_tab": "software",
         "rows": display_rows,
         "categories": categories_seen,
         "active_category": category_filter,
@@ -3246,6 +3260,8 @@ def identity_candidates_list(request: HttpRequest) -> HttpResponse:
         (unmatched_groups_count,) = cur.fetchone()
 
     return render(request, "identity_review.html", {
+        "admin_group": "review",
+        "admin_tab": "devices",
         "candidates": candidates,
         "active_status": status_filter,
         "status_choices": [("pending", "Pending"), ("confirmed", "Confirmed"),
@@ -3422,7 +3438,11 @@ def requirement_profiles_list(request: HttpRequest) -> HttpResponse:
             "items": list(p.items.all().order_by("device_scope", "entity_type", "platform")),
             "client_count": client_count,
         })
-    return render(request, "requirement_profiles.html", {"rows": rows})
+    return render(request, "requirement_profiles.html", {
+        "admin_group": "config",
+        "admin_tab": "requirements",
+        "rows": rows,
+    })
 
 
 @login_required
@@ -3467,6 +3487,8 @@ def notification_rules_list(request: HttpRequest) -> HttpResponse:
     )
     routes = list(NotificationRoute.objects.filter(tenant_id=1))
     return render(request, "notification_rules.html", {
+        "admin_group": "config",
+        "admin_tab": "alerts",
         "rules": rules,
         "events": events,
         "routes": routes,
@@ -3502,4 +3524,8 @@ def notification_suppressions_list(request: HttpRequest) -> HttpResponse:
         .select_related("finding_type", "created_by")
         .order_by("-created_at")
     )
-    return render(request, "notification_suppressions.html", {"suppressions": rows})
+    return render(request, "notification_suppressions.html", {
+        "admin_group": "config",
+        "admin_tab": "suppressions",
+        "suppressions": rows,
+    })

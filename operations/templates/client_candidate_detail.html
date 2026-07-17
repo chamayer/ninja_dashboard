@@ -3,6 +3,7 @@
 {% block title %}Client candidate — {{ candidate.display_name }}{% endblock %}
 
 {% block content %}
+{% include "_admin_tabs.html" %}
 <div class="card">
     <p style="margin: 0 0 0.5rem 0; font-size: 0.85rem;">
         <a href="{% url 'client_candidates_queue' %}">← All candidates</a>

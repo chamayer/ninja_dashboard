@@ -287,9 +287,9 @@
             <a class="nav-link nav-admin {% if request.resolver_match and 'notification' in request.resolver_match.url_name or 'requirement_profile' in request.resolver_match.url_name %}active{% endif %}"
                href="{% url 'notification_rules_list' %}">Config</a>
 
-            {# System = ingest + platform health (sources, admin findings). #}
-            <a class="nav-link nav-admin {% if request.resolver_match.url_name == 'sources_status' or request.resolver_match.url_name == 'findings_admin_health' %}active{% endif %}"
-               href="{% url 'sources_status' %}">System</a>
+            {# Integrations = ingest + platform health (sources, coverage, ingest issues). #}
+            <a class="nav-link nav-admin {% if request.resolver_match.url_name == 'sources_status' or request.resolver_match.url_name == 'findings_admin_health' or request.resolver_match.url_name == 'fleet_coverage' %}active{% endif %}"
+               href="{% url 'sources_status' %}">Integrations</a>
 
             <a class="nav-link nav-admin" href="{% url 'admin:index' %}" title="Django admin">⚙</a>
         </div>
