@@ -74,6 +74,8 @@ Select checks based on the changed area:
 - Relevant project tests when present.
 - Operations-specific checks from `operations/AGENTS.md`.
 - `git diff --check` before proposing a commit.
+- For approved external or deployment validation, use the workspace helper at
+  `..\Scripts\Invoke-DevTool.ps1`; read `docs/operations.md` for safe usage.
 
 Report any check that cannot run locally.
 

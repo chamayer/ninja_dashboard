@@ -77,6 +77,9 @@ Use the relevant subset:
 - Targeted `pytest` tests
 - Template loading or focused request smoke checks
 - Migration-plan review for schema changes
+- For approved external or deployed-stack validation, use the workspace helper
+  at `..\..\Scripts\Invoke-DevTool.ps1`; read `docs/operations.md` and the root
+  `docs/operations.md` for safe usage.
 
 Run these in the documented project environment. Do not claim workstation
 validation when the required services or dependencies are unavailable.

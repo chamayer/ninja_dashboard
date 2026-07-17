@@ -66,3 +66,15 @@ approve each push target rather than assuming one remote is sufficient.
 Use the approved shared helper for repeatable external checks so credentials
 remain in private profiles. Documentation should show safe command shapes, not
 secret values.
+
+From the repository root, invoke it through Windows PowerShell 5.1:
+
+```powershell
+C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File ..\Scripts\Invoke-DevTool.ps1 <profile> <GET|POST|PUT|DELETE|ssh> <target>
+```
+
+Profiles are machine-local in `%USERPROFILE%\.config\amrose-dev\tools.json`;
+secret values remain in its referenced untracked environment files. Never
+print or copy those values. Helper availability is not authorization: use
+read-only checks only when relevant to the task, and obtain explicit approval
+for POST, PUT, DELETE, redeploy, migration, or any other state-changing action.

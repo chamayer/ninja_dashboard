@@ -39,6 +39,12 @@ After deployment:
 - Exercise the changed page or endpoint.
 - Confirm RLS-aware database results.
 
+For approved checks against the deployed stack, prefer the shared workstation
+helper at `..\..\Scripts\Invoke-DevTool.ps1`. It loads machine-local profiles
+without placing credentials in this repository. Use it only within the task's
+authorization boundary; state-changing HTTP, redeploy, migration, or
+destructive actions require explicit approval.
+
 ## Tenant-aware validation
 
 The runtime role is protected by RLS. An ORM query without tenant context may
