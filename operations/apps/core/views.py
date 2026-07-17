@@ -24,6 +24,7 @@ from .models import (
     ClientOrgExclude,
     ClientPolicy,
     Device,
+    DeviceOperatorDecision,
     DevicePatchingOverride,
     Finding,
     FindingCategory,
@@ -919,6 +920,29 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
                     patching["last_patch_installed_at"] = None
                     patching["install_attempts"] = 0
 
+            # Exemptions dict {entity_type: reason} from operator decisions.
+            cur.execute(
+                """
+                SELECT value FROM operations.device_operator_decisions
+                WHERE tenant_id = 1 AND device_id = %s AND dimension = 'exemptions'
+                """,
+                [str(device.id)],
+            )
+            row_ex = cur.fetchone()
+            exemptions = row_ex[0] if row_ex and isinstance(row_ex[0], dict) else {}
+
+            # Entity types the operator can pick from — distinct across
+            # any coverage requirement active for this tenant.
+            cur.execute(
+                """
+                SELECT DISTINCT entity_type
+                FROM operations.coverage_requirements
+                WHERE tenant_id = 1 AND enabled = TRUE
+                ORDER BY entity_type
+                """
+            )
+            entity_type_choices = [r[0] for r in cur.fetchall()]
+
     # ── Extras for 5-tab layout ──
     active_tab = request.GET.get("tab") or "overview"
     if active_tab not in ("overview", "sources", "activity", "software", "identity"):
@@ -1024,6 +1048,8 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
             "severe_open": severe_open,
             "device_health": device_health,
             "activity": activity,
+            "exemptions": exemptions,
+            "entity_type_choices": entity_type_choices,
         },
     )
 
@@ -1047,6 +1073,57 @@ def device_patch_scope_set(request: HttpRequest, org_slug: str, device_id: str) 
                   "set_by": request.user.username or ""},
     )
     messages.info(request, f"Patch scope override set to {scope}.")
+    return redirect("device_detail", org_slug=org_slug, device_id=device_id)
+
+
+@login_required
+@require_POST
+def device_exemption_add(request: HttpRequest, org_slug: str, device_id: str) -> HttpResponse:
+    """Add or update an exemption key on the device's exemptions dict."""
+    device = get_object_or_404(
+        Device, tenant_id=1, id=device_id,
+        client__slug=org_slug, deleted_at__isnull=True,
+    )
+    entity_type = (request.POST.get("entity_type") or "").strip()
+    reason = (request.POST.get("reason") or "").strip()
+    if not entity_type or not reason:
+        messages.warning(request, "Both entity type and reason are required.")
+        return redirect("device_detail", org_slug=org_slug, device_id=device_id)
+    row, _ = DeviceOperatorDecision.objects.get_or_create(
+        tenant_id=1, device=device, dimension="exemptions",
+        defaults={"value": {}, "reason": "", "set_by": request.user.username or ""},
+    )
+    current = row.value if isinstance(row.value, dict) else {}
+    current[entity_type] = reason
+    row.value = current
+    row.set_by = request.user.username or ""
+    row.save(update_fields=["value", "set_by", "set_at"])
+    messages.info(request, f"Exempted from {entity_type}.")
+    return redirect("device_detail", org_slug=org_slug, device_id=device_id)
+
+
+@login_required
+@require_POST
+def device_exemption_clear(request: HttpRequest, org_slug: str, device_id: str) -> HttpResponse:
+    device = get_object_or_404(
+        Device, tenant_id=1, id=device_id,
+        client__slug=org_slug, deleted_at__isnull=True,
+    )
+    entity_type = (request.POST.get("entity_type") or "").strip()
+    try:
+        row = DeviceOperatorDecision.objects.get(
+            tenant_id=1, device=device, dimension="exemptions",
+        )
+    except DeviceOperatorDecision.DoesNotExist:
+        return redirect("device_detail", org_slug=org_slug, device_id=device_id)
+    current = row.value if isinstance(row.value, dict) else {}
+    current.pop(entity_type, None)
+    if current:
+        row.value = current
+        row.save(update_fields=["value", "set_at"])
+    else:
+        row.delete()
+    messages.info(request, f"Exemption cleared for {entity_type}.")
     return redirect("device_detail", org_slug=org_slug, device_id=device_id)
 
 

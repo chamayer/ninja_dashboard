@@ -210,6 +210,50 @@
 </div>
 
 <div class="card">
+    <h2 style="margin-top:0;">Coverage exemptions
+        <span class="muted" style="font-weight:400; font-size:0.85rem;">
+            — this device is excused from these requirements
+        </span>
+    </h2>
+    {% if exemptions %}
+    <div style="display:flex; flex-wrap:wrap; gap:0.4rem; margin-bottom:0.7rem;">
+        {% for etype, reason in exemptions.items %}
+        <span style="display:inline-flex; align-items:center; gap:0.4rem;
+                     padding:0.3rem 0.6rem; background:#fef3c7; border:1px solid #fbbf24;
+                     border-radius:999px; font-size:0.8rem;">
+            <strong>{{ etype|humanize_label }}</strong>
+            <span class="muted" style="font-size:0.75rem;">— {{ reason }}</span>
+            <form method="post" action="{% url 'device_exemption_clear' org_slug=device.client.slug device_id=device.id %}"
+                  style="display:inline; margin-left:0.2rem;"
+                  onsubmit="return confirm('Remove exemption for {{ etype }}?');">
+                {% csrf_token %}
+                <input type="hidden" name="entity_type" value="{{ etype }}">
+                <button type="submit" style="border:0; background:transparent; cursor:pointer; padding:0; font-size:0.9rem; color:#9a3412;">×</button>
+            </form>
+        </span>
+        {% endfor %}
+    </div>
+    {% else %}
+    <p class="muted" style="font-size:0.85rem;">No exemptions on this device.</p>
+    {% endif %}
+    <details>
+        <summary style="cursor:pointer; font-size:0.85rem; color:var(--muted);">Add exemption</summary>
+        <form method="post" action="{% url 'device_exemption_add' org_slug=device.client.slug device_id=device.id %}"
+              style="display:flex; gap:0.4rem; margin-top:0.5rem; flex-wrap:wrap; align-items:center;">
+            {% csrf_token %}
+            <select name="entity_type" style="padding:0.35rem 0.6rem; font-size:0.85rem;">
+                {% for et in entity_type_choices %}
+                <option value="{{ et }}">{{ et|humanize_label }}</option>
+                {% endfor %}
+            </select>
+            <input type="text" name="reason" placeholder="Why is this device exempt?" required
+                   style="padding:0.35rem 0.6rem; font-size:0.85rem; min-width:260px;">
+            <button type="submit" style="padding:0.35rem 0.8rem; font-size:0.85rem;">Add</button>
+        </form>
+    </details>
+</div>
+
+<div class="card">
     <h2 style="margin-top:0;">Top issues on this device</h2>
     {% if active_findings %}
     <table data-sortable style="width:100%;">

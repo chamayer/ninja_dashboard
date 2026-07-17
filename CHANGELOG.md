@@ -2,6 +2,21 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.59.0] — 2026-07-17 — Coverage exemption UI (Wave UI-2.F slice 3)
+
+### Added
+- Endpoints `device_exemption_add` and `device_exemption_clear`
+  that merge / prune keys on the device's `exemptions` JSONB dict
+  (stored in `device_operator_decisions` under
+  dimension='exemptions' — the existing Track O2 layer).
+- Device detail Overview tab gains a **Coverage exemptions**
+  card: chips per active exemption (with × to remove, confirms
+  first) + collapsible **Add exemption** form (entity-type
+  dropdown sourced from active coverage requirements, reason
+  required).
+- Wave UI-2.F complete: Issues actions + bulk toolbar (slice 1),
+  patch scope override (slice 2), coverage exemptions (slice 3).
+
 ## [0.58.0] — 2026-07-17 — Patch scope override UI (Wave UI-2.F slice 2)
 
 ### Added
