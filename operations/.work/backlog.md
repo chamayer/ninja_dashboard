@@ -27,6 +27,27 @@ This is the proposed successor to the genuinely open portion of
   overrides, and exemptions.
 - Constraints: audit, tenant scope, validation, and clear distinction between
   suppressing a finding and changing policy.
+- Status: **Landed 0.57.0 / 0.58.0 / 0.59.0** — Wave UI-2.F.
+
+### Business data capture (Wave UI-2.G) — deferred
+
+- Candidate scope: add business fields to `Client` (tier via new
+  admin-editable `ClientTier` table, MRR, account manager,
+  renewal date, onboarding stage) to unblock Dashboard maturity
+  (Wave UI-2.H: trend arrows, tier badges, revenue-weighted
+  sort).
+- Constraint: 5 nullable columns + 1 small seeded table — no
+  backfill needed. Follows the "mappings live in data" rule
+  (tier list admin-editable, not hardcoded).
+- Blocks: Wave UI-2.H (Dashboard maturity). Both stay deferred
+  together until picked up.
+
+### Dashboard maturity (Wave UI-2.H) — blocked on G
+
+- Candidate scope: trend arrows on portfolio grid, tier badges,
+  revenue-weighted sort, renewal-risk heat, at-risk callouts
+  (high MRR + degrading health).
+- Blocker: Wave UI-2.G business data capture.
 
 ## Platform cleanup
 
