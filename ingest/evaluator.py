@@ -870,34 +870,53 @@ def _evaluate_device_offline(cur: Any, tenant_id: int, now: datetime) -> int:
     if ft_id is None:
         return 0
     threshold_interval = f"{_LONG_OFFLINE_DAYS} days"
+    # Per-platform last-seen is preserved as evidence on the finding
+    # so operators triaging a fully-offline device can see the exact
+    # timeline ("went dark on Ninja 7/10 → SentinelOne 7/12 →
+    # ScreenConnect 7/14 → fully offline since 7/14") without
+    # having to click through to the device detail Sources tab.
     cur.execute(
         """
-        SELECT apc.device_id, d.client_id, d.canonical_hostname,
-               MAX(COALESCE(apc.last_contact_at, apc.last_observed_at))
-        FROM operations.device_agent_presence_current apc
+        WITH per_platform AS (
+            SELECT tenant_id, device_id, platform,
+                   MAX(COALESCE(last_contact_at, last_observed_at)) AS last_seen
+            FROM operations.device_agent_presence_current
+            WHERE tenant_id = %s
+              AND entity_type LIKE 'agent.%%'
+            GROUP BY tenant_id, device_id, platform
+        )
+        SELECT pp.device_id, d.client_id, d.canonical_hostname,
+               MAX(pp.last_seen) AS overall_last,
+               jsonb_object_agg(pp.platform, pp.last_seen) AS per_source
+        FROM per_platform pp
         JOIN operations.devices d
-             ON d.id = apc.device_id AND d.tenant_id = apc.tenant_id
-        WHERE apc.tenant_id = %s
-          AND apc.entity_type LIKE 'agent.%%'
-          AND d.deleted_at IS NULL
+             ON d.id = pp.device_id AND d.tenant_id = pp.tenant_id
+        WHERE d.deleted_at IS NULL
           AND d.lifecycle_status <> 'retired'
-        GROUP BY apc.device_id, d.client_id, d.canonical_hostname
-        HAVING MAX(COALESCE(apc.last_contact_at, apc.last_observed_at))
-             < NOW() - %s::interval
+        GROUP BY pp.device_id, d.client_id, d.canonical_hostname
+        HAVING MAX(pp.last_seen) < NOW() - %s::interval
         """,
         (tenant_id, threshold_interval),
     )
     count = 0
     offenders: list[uuid.UUID] = []
-    for dev_id, client_id, hostname, last_contact in cur.fetchall():
+    for dev_id, client_id, hostname, overall_last, per_source in cur.fetchall():
         offenders.append(dev_id)
+        # per_source is a dict {platform: iso_ts_string}; identify the
+        # source that held on longest (== overall_last).
+        last_seen_source = None
+        if isinstance(per_source, dict) and per_source:
+            last_seen_source = max(per_source, key=lambda k: per_source[k] or "")
         ckey = _condition_key(tenant_id, client_id, dev_id, "device_offline", "")
         count += _upsert_finding(
             cur, tenant_id, ft_id, client_id, dev_id,
             ckey, "medium", "confirmed", now,
             {
                 "hostname": hostname,
-                "last_contact_at": last_contact.isoformat() if last_contact else None,
+                "last_contact_at": overall_last.isoformat() if overall_last else None,
+                "fully_offline_since": overall_last.isoformat() if overall_last else None,
+                "source_last_seen": per_source or {},
+                "last_seen_source": last_seen_source,
             },
         )
     _resolve_findings_absent(cur, tenant_id, ft_id, offenders, now)

@@ -620,6 +620,16 @@ implied device-level state while checking a single source. Revised
   the device has lost contact past the offline threshold
   (`_LONG_OFFLINE_DAYS`). Real "device is unreachable" signal.
   Operator action: "recover the device."
+  - `finding_details` carries per-source evidence:
+    - `fully_offline_since` — timestamp of the last source that had
+      contact
+    - `source_last_seen` — `{platform: last_seen_iso}` dict; a triage
+      timeline of when each source went dark
+    - `last_seen_source` — which platform held on longest
+  - Suppresses `stale_required_platform` on the same device (per-agent
+    stale on a fully-offline device is pure noise; the evidence lives
+    here instead). Existing per-agent findings on now-fully-offline
+    devices are auto-resolved on the next evaluator pass.
 - **`device_stale_data`** — unchanged concept: device where no source
   has produced any observation at all in the stale window. Distinct
   from `device_offline` (which fires when agents are still emitting

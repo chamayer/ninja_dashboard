@@ -2,6 +2,44 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.63.0] — 2026-07-17 — device_offline evidence enrichment
+
+### Why
+The `stale_required_platform` gate on fully-offline devices already
+landed in 0.50.7. It correctly suppressed the N-noise-per-offline-
+device problem, but it also dropped the underlying evidence — an
+operator triaging an offline device had to click through to the
+device detail Sources tab to reconstruct "when did each source
+go dark".
+
+### Changed
+- `ingest/evaluator.py::_evaluate_device_offline` now aggregates
+  per-platform last-seen timestamps into the `device_offline`
+  finding's `finding_details`:
+  - `source_last_seen` — `{platform: iso_timestamp}` per source
+  - `fully_offline_since` — the timestamp of the last source that
+    held on (== `MAX(source_last_seen)`)
+  - `last_seen_source` — which platform that was
+- Query rewritten as a two-stage CTE (per-platform aggregation then
+  per-device grouping) so `jsonb_object_agg` produces one entry per
+  platform even when there are multiple `agent.*` entity types per
+  platform.
+- Findings queue detail column renders
+  `fully offline since YYYY-MM-DD (last: <source>)` for
+  `device_offline` rows.
+
+### Docs
+- BLUEPRINT §1.8 updated to document the evidence shape and the
+  suppression relationship with `stale_required_platform`.
+
+### Not changed
+- Auto-resolve of `stale_required_platform` on now-fully-offline
+  devices was already correct — untouched.
+- No severity change on either finding type.
+- No new UI beyond the queue detail-string update — the device
+  detail Sources tab already shows the same per-source data as its
+  primary drill-in.
+
 ## [0.62.1] — 2026-07-17 — Fix 0.62.0 crash-loop (missing resolved_at column)
 
 ### Fixed

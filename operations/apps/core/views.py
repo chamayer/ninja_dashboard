@@ -1396,8 +1396,10 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             via = d.get("observed_via") or "tracked"
             return f"{ps}" + (f" · {days}d" if days is not None else "") + f" · via {via}"
         if name in ("device_offline", "device_long_offline"):
-            lc = d.get("last_contact_at") or d.get("last_seen_at")
-            return f"no source has contact since {lc[:10]}" if lc else "no source has contact"
+            since = d.get("fully_offline_since") or d.get("last_contact_at") or d.get("last_seen_at")
+            last_src = d.get("last_seen_source")
+            base = f"fully offline since {since[:10]}" if since else "no source has contact"
+            return f"{base} (last: {last_src})" if last_src else base
         if name == "device_role_conflict":
             return f"{d.get('previous_role', '?')} → {d.get('new_role', '?')}"
         # Fallback: platform if present, else empty
