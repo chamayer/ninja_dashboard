@@ -2,6 +2,16 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.61.1] — 2026-07-17 — Fix /software 500
+
+### Fixed
+- `software_page` correlated subquery referenced `sic.tenant_id`
+  from the outer query while the outer `GROUP BY` only listed
+  `sic.canonical_name`. Postgres raised
+  `subquery uses ungrouped column`. Added `sic.tenant_id` to the
+  GROUP BY (no cardinality change — the outer WHERE already
+  restricts to a single tenant).
+
 ## [0.61.0] — 2026-07-17 — Standardize derived matview naming
 
 ### Why

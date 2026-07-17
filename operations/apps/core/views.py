@@ -1650,7 +1650,7 @@ def software_page(request: HttpRequest) -> HttpResponse:
                    ) AS decision
             FROM operations.software_installations_current sic
             WHERE {where_sql}
-            GROUP BY sic.canonical_name
+            GROUP BY sic.tenant_id, sic.canonical_name
             ORDER BY device_count DESC, sic.canonical_name
             LIMIT 500
             """,
