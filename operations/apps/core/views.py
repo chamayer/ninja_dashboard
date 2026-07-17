@@ -494,6 +494,144 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
         ctx["active_finding_count"] = Finding.objects.filter(
             tenant_id=1, client=client, status__in=_FINDING_ACTIVE_STATUSES
         ).count()
+
+        # ── Client scoreboard extensions ──
+        with transaction.atomic(), connection.cursor() as cur:
+            cur.execute("SET LOCAL operations.tenant_id = 1")
+
+            # Devices online/offline + patch-scope for this client.
+            cur.execute(
+                """
+                SELECT COUNT(*) AS total,
+                       COUNT(*) FILTER (WHERE is_online_any) AS online,
+                       COUNT(*) FILTER (WHERE NOT is_online_any) AS offline,
+                       COUNT(*) FILTER (WHERE device_role = 'server') AS servers,
+                       COUNT(*) FILTER (WHERE device_role = 'workstation') AS workstations,
+                       COUNT(*) FILTER (WHERE effective_patching_scope = 'Included') AS in_patch_scope,
+                       COUNT(*) FILTER (WHERE last_contact_at IS NULL
+                                        OR last_contact_at < NOW() - INTERVAL '7 days') AS stale
+                FROM operations.v_device
+                WHERE tenant_id = 1 AND client_id = %s
+                """,
+                [str(client.id)],
+            )
+            r = cur.fetchone()
+            ctx["dev_overview"] = {
+                "total": r[0], "online": r[1], "offline": r[2],
+                "servers": r[3], "workstations": r[4],
+                "in_patch_scope": r[5], "stale": r[6],
+            }
+
+            # Severity breakdown of open findings for this client.
+            cur.execute(
+                """
+                SELECT severity, COUNT(*)::int
+                FROM operations.findings
+                WHERE tenant_id = 1 AND client_id = %s
+                  AND status IN ('open', 'acknowledged', 'investigating')
+                GROUP BY severity
+                """,
+                [str(client.id)],
+            )
+            sev = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
+            for s, c in cur.fetchall():
+                sev[s] = c
+            ctx["finding_severity"] = sev
+            ctx["severe_count"] = sev["critical"] + sev["high"]
+
+            # Top attention: severe/high open findings, most recent first.
+            cur.execute(
+                """
+                SELECT f.id, f.severity, ft.name AS ftype, f.title, f.last_detected_at,
+                       d.id AS device_id, d.canonical_hostname
+                FROM operations.findings f
+                JOIN operations.finding_types ft ON ft.id = f.finding_type_id
+                LEFT JOIN operations.devices d ON d.id = f.device_id
+                WHERE f.tenant_id = 1 AND f.client_id = %s
+                  AND f.status IN ('open', 'acknowledged', 'investigating')
+                  AND f.severity IN ('critical', 'high')
+                ORDER BY CASE f.severity WHEN 'critical' THEN 0 ELSE 1 END,
+                         f.last_detected_at DESC NULLS LAST
+                LIMIT 15
+                """,
+                [str(client.id)],
+            )
+            ctx["attention_findings"] = [
+                {"id": row[0], "severity": row[1], "ftype": row[2],
+                 "title": row[3], "last_detected_at": row[4],
+                 "device_id": row[5], "hostname": row[6]}
+                for row in cur.fetchall()
+            ]
+
+            # Offline offenders — top 10 most-severe or longest-offline.
+            cur.execute(
+                """
+                SELECT v.id, v.canonical_hostname, v.device_role, v.os_group,
+                       v.last_contact_at,
+                       COALESCE((
+                           SELECT COUNT(*)::int FROM operations.findings f
+                           WHERE f.tenant_id = 1 AND f.device_id = v.id
+                             AND f.status IN ('open', 'acknowledged', 'investigating')
+                             AND f.severity IN ('critical', 'high')
+                       ), 0) AS severe
+                FROM operations.v_device v
+                WHERE v.tenant_id = 1 AND v.client_id = %s
+                  AND NOT v.is_online_any
+                ORDER BY severe DESC, v.last_contact_at ASC NULLS FIRST
+                LIMIT 10
+                """,
+                [str(client.id)],
+            )
+            ctx["offender_devices"] = [
+                {"id": row[0], "hostname": row[1], "role": row[2],
+                 "os_group": row[3], "last_contact_at": row[4], "severe": row[5]}
+                for row in cur.fetchall()
+            ]
+
+            # Software pending decisions for titles this client actually runs.
+            # Pending = no global decision AND no client-specific decision.
+            cur.execute(
+                """
+                SELECT COUNT(DISTINCT si.canonical_name)::int
+                FROM operations.software_installations_current si
+                WHERE si.tenant_id = 1 AND si.client_id = %s
+                  AND si.deleted_at IS NULL
+                  AND NOT EXISTS (
+                      SELECT 1 FROM operations.software_decisions sd
+                      WHERE sd.tenant_id = si.tenant_id
+                        AND sd.canonical_name = si.canonical_name
+                        AND (sd.client_id IS NULL OR sd.client_id = si.client_id)
+                  )
+                """,
+                [str(client.id)],
+            )
+            ctx["software_pending"] = cur.fetchone()[0]
+
+            # Findings opened in the last 24h.
+            cur.execute(
+                """
+                SELECT COUNT(*)::int
+                FROM operations.findings
+                WHERE tenant_id = 1 AND client_id = %s
+                  AND first_detected_at > NOW() - INTERVAL '24 hours'
+                """,
+                [str(client.id)],
+            )
+            ctx["new_24h"] = cur.fetchone()[0]
+
+        # Traffic-light health for the client header.
+        if sev["critical"] > 0:
+            ctx["client_health"] = "red"
+            ctx["client_bucket"] = "critical"
+        elif sev["high"] > 0:
+            ctx["client_health"] = "amber"
+            ctx["client_bucket"] = "degrading"
+        elif ctx["dev_overview"]["total"] == 0:
+            ctx["client_health"] = "grey"
+            ctx["client_bucket"] = "no_data"
+        else:
+            ctx["client_health"] = "green"
+            ctx["client_bucket"] = "healthy"
     else:
         # All-clients fleet view.
         clients_with_counts = list(

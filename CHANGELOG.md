@@ -2,6 +2,31 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.54.0] — 2026-07-16 — Client detail scoreboard (Wave UI-2.D)
+
+### Changed
+- `/orgs/<slug>/` per-client page rebuilt as a client scoreboard
+  matching the operator model already in Dashboard + Devices:
+  - **Header**: client name · traffic-light health dot · bucket
+    badge (Critical / Degrading / Healthy / No data) · sub-nav to
+    Devices / Software / Policies.
+  - **Overview cards**: Devices (online/offline split) · Open
+    issues (with severity mini-bar) · Servers · Workstations ·
+    Software titles (pending count) · In patch scope.
+  - **Needs attention here**: top 15 severe/high open issues,
+    scrollable, each with device clickthrough + Ack link.
+  - **Offline devices to check**: top 10 offline devices ordered
+    by severe-issue count then longest-offline.
+  - **Coverage detail**: collapsed by default; existing agent
+    coverage matrix moved under a fold rather than dominating
+    the page.
+  - **Sidebar**: Profile (with change form) · Known in (sources)
+    · Policies summary.
+  - Health rule: red = any critical, amber = any high, green =
+    clean, grey = no devices.
+- Fleet-mode view (`/orgs/all/`) simplified to a 4-card overview
+  + client table using the shared card style.
+
 ## [0.53.0] — 2026-07-16 — Devices fleet page (Wave UI-2.D)
 
 ### Added

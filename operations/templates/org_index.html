@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load human_labels %}
 
 {% block title %}
     {% if current_client %}{{ current_client.display_name }}{% else %}All clients{% endif %}
@@ -6,242 +7,357 @@
 
 {% block content %}
 <style>
-    .summary-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-        gap: 1rem;
-        margin-bottom: 1rem;
+    .oc-header {
+        display: flex; align-items: center; gap: 0.9rem;
+        padding: 1rem 1.2rem;
+        background: var(--surface); border: 1px solid var(--border);
+        border-radius: 6px; margin-bottom: 1rem;
     }
-    .summary-tile {
-        display: block;
-        padding: 1.25rem;
-        background: var(--surface);
-        border: 1px solid var(--border);
-        border-radius: 6px;
-        text-decoration: none;
-        color: inherit;
-        transition: box-shadow 0.15s;
+    .oc-health {
+        width: 14px; height: 14px; border-radius: 50%;
+        flex-shrink: 0;
     }
-    .summary-tile:hover {
-        box-shadow: 0 2px 6px rgba(0,0,0,0.08);
-        border-color: var(--accent);
-    }
-    .summary-tile .tile-label {
-        font-size: 0.85rem;
-        color: var(--muted);
-        text-transform: uppercase;
+    .oc-health.red { background: #dc2626; box-shadow: 0 0 0 3px #fee2e2; }
+    .oc-health.amber { background: #ea580c; box-shadow: 0 0 0 3px #ffedd5; }
+    .oc-health.green { background: #16a34a; box-shadow: 0 0 0 3px #dcfce7; }
+    .oc-health.grey { background: #9ca3af; box-shadow: 0 0 0 3px #f3f4f6; }
+    .oc-title { flex: 1; }
+    .oc-title h1 { margin: 0 0 0.2rem 0; font-size: 1.4rem; }
+    .oc-title .sub { color: var(--muted); font-size: 0.85rem; }
+    .oc-bucket {
+        padding: 0.25rem 0.7rem; border-radius: 999px;
+        font-size: 0.75rem; font-weight: 600; text-transform: uppercase;
         letter-spacing: 0.05em;
     }
-    .summary-tile .tile-count {
-        font-size: 2rem;
+    .oc-bucket.red { background: #fee2e2; color: #991b1b; }
+    .oc-bucket.amber { background: #ffedd5; color: #9a3412; }
+    .oc-bucket.green { background: #dcfce7; color: #166534; }
+    .oc-bucket.grey { background: #f3f4f6; color: #6b7280; }
+
+    .oc-cards {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 0.65rem; margin-bottom: 1rem;
+    }
+    .oc-card {
+        display: block; padding: 0.8rem 1rem;
+        background: var(--surface); border: 1px solid var(--border);
+        border-radius: 6px; text-decoration: none; color: inherit;
+    }
+    .oc-card:hover { border-color: var(--accent); }
+    .oc-card .lbl {
+        font-size: 0.72rem; font-weight: 700; text-transform: uppercase;
+        letter-spacing: 0.06em; color: var(--muted); margin-bottom: 0.2rem;
+    }
+    .oc-card .val { font-size: 1.5rem; font-weight: 700; color: #1a1a2e; line-height: 1.1; }
+    .oc-card .sub { font-size: 0.72rem; color: var(--muted); margin-top: 0.2rem; }
+    .oc-card.alert { border-left: 3px solid #dc2626; }
+    .oc-card.alert .val { color: #dc2626; }
+    .oc-card.warn { border-left: 3px solid #ea580c; }
+    .oc-card.warn .val { color: #ea580c; }
+    .oc-card.ok { border-left: 3px solid #16a34a; }
+
+    .sev-mini { display: inline-flex; gap: 0.35rem; margin-top: 0.3rem; }
+    .sev-mini span {
+        font-size: 0.7rem; padding: 0.1rem 0.4rem; border-radius: 3px;
         font-weight: 600;
-        margin: 0.25rem 0;
     }
-    .summary-tile .tile-detail {
+    .sev-mini .crit { background: #fee2e2; color: #991b1b; }
+    .sev-mini .high { background: #ffedd5; color: #9a3412; }
+    .sev-mini .med  { background: #fef3c7; color: #92400e; }
+    .sev-mini .low  { background: #e0e7ff; color: #3730a3; }
+
+    .oc-two { display: grid; grid-template-columns: 2fr 1fr; gap: 1rem; }
+    @media (max-width: 900px) { .oc-two { grid-template-columns: 1fr; } }
+
+    .attn-row {
+        display: grid;
+        grid-template-columns: 10px 60px 1fr 160px 90px;
+        gap: 0.6rem; align-items: center;
+        padding: 0.45rem 0.5rem; border-bottom: 1px solid var(--border);
         font-size: 0.85rem;
-        color: var(--muted);
     }
+    .attn-row:last-child { border-bottom: 0; }
+    .attn-dot { width: 10px; height: 10px; border-radius: 50%; }
+    .attn-dot.crit { background: #dc2626; }
+    .attn-dot.high { background: #ea580c; }
+    .attn-sev {
+        font-size: 0.7rem; font-weight: 700; text-transform: uppercase;
+        padding: 0.1rem 0.4rem; border-radius: 3px;
+    }
+    .attn-sev.crit { background: #fee2e2; color: #991b1b; }
+    .attn-sev.high { background: #ffedd5; color: #9a3412; }
+    .attn-list { max-height: 380px; overflow-y: auto; }
+
+    details.oc-fold > summary {
+        cursor: pointer; padding: 0.4rem 0; font-weight: 600;
+        color: var(--muted); font-size: 0.85rem;
+    }
+    details.oc-fold[open] > summary { color: var(--fg); }
 </style>
 
 {% if current_client %}
-{# Per-client summary #}
-<div class="card">
-    <h1 style="margin: 0 0 0.25rem;">{{ current_client.display_name }}</h1>
-    <p class="muted" style="margin: 0;">
-        Slug: <code>{{ current_client.slug }}</code> &middot; timezone {{ current_client.timezone }}
-        &middot; requirement profile:
-        <strong>{{ current_client.requirement_profile.name|default:"— global fallback —" }}</strong>
-    </p>
-    {% if request.user.is_authenticated %}
-    <form method="post" action="{% url 'client_profile_assign' org_slug=current_client.slug %}" style="margin-top: 0.5rem; display: flex; gap: 0.4rem; align-items: center;">
-        {% csrf_token %}
-        <label style="font-size: 0.85rem; color: var(--muted);">Change profile:</label>
-        <select name="profile_id" style="padding: 0.3rem 0.5rem; font-size: 0.85rem;">
-            <option value="">— global fallback —</option>
-            {% for p in all_profiles %}
-            <option value="{{ p.id }}"{% if current_client.requirement_profile_id == p.id %} selected{% endif %}>
-                {{ p.name }}{% if p.is_tenant_default %} (default){% endif %}
-            </option>
-            {% endfor %}
-        </select>
-        <button type="submit" style="padding: 0.3rem 0.7rem; font-size: 0.85rem;">Apply</button>
-    </form>
-    {% endif %}
+<div class="oc-header">
+    <div class="oc-health {{ client_health }}" title="{{ client_health|humanize_label }}"></div>
+    <div class="oc-title">
+        <h1>{{ current_client.display_name }}</h1>
+        <div class="sub">
+            {{ dev_overview.total }} devices ·
+            {{ active_finding_count }} open issues
+            {% if severe_count %}({{ severe_count }} severe){% endif %}
+            {% if new_24h %} · {{ new_24h }} new in 24h{% endif %}
+        </div>
+    </div>
+    <span class="oc-bucket {{ client_health }}">{{ client_bucket|humanize_label }}</span>
+    <a href="{% url 'org_devices' org_slug=current_client.slug %}" class="nav-link">Devices</a>
+    <a href="{% url 'org_software' org_slug=current_client.slug %}" class="nav-link">Software</a>
+    <a href="{% url 'org_policies' org_slug=current_client.slug %}" class="nav-link">Policies</a>
 </div>
 
-<style>
-  .cov-bar-wrap { height: 6px; background: #e8edf2; border-radius: 3px; margin-top: 0.4rem; overflow: hidden; }
-  .cov-bar-fill { height: 100%; border-radius: 3px; transition: width 0.3s; }
-  .cov-critical { background: #c0392b; }
-  .cov-high     { background: #e67e22; }
-  .cov-medium   { background: #f1c40f; }
-  .cov-low      { background: #27ae60; }
-  .cov-ok       { background: #27ae60; }
-  .cov-row { display: flex; justify-content: space-between; align-items: center; font-size: 0.82rem; }
-  .cov-gap { font-weight: 600; }
-  .cov-gap.gap-crit { color: #c0392b; }
-  .cov-gap.gap-high { color: #e67e22; }
-  .cov-gap.gap-ok   { color: #27ae60; }
-</style>
+<div class="oc-cards">
+    <a class="oc-card" href="{% url 'org_devices' org_slug=current_client.slug %}">
+        <div class="lbl">Devices</div>
+        <div class="val">{{ dev_overview.total }}</div>
+        <div class="sub">{{ dev_overview.online }} online · {{ dev_overview.offline }} offline</div>
+    </a>
+    <a class="oc-card {% if finding_severity.critical %}alert{% elif finding_severity.high %}warn{% endif %}"
+       href="{% url 'findings_queue' %}?client={{ current_client.slug }}">
+        <div class="lbl">Open issues</div>
+        <div class="val">{{ active_finding_count }}</div>
+        <div class="sev-mini">
+            {% if finding_severity.critical %}<span class="crit">{{ finding_severity.critical }} crit</span>{% endif %}
+            {% if finding_severity.high %}<span class="high">{{ finding_severity.high }} high</span>{% endif %}
+            {% if finding_severity.medium %}<span class="med">{{ finding_severity.medium }} med</span>{% endif %}
+            {% if finding_severity.low %}<span class="low">{{ finding_severity.low }} low</span>{% endif %}
+        </div>
+    </a>
+    <a class="oc-card" href="{% url 'org_devices' org_slug=current_client.slug %}?role=server">
+        <div class="lbl">Servers</div>
+        <div class="val">{{ dev_overview.servers }}</div>
+    </a>
+    <a class="oc-card" href="{% url 'org_devices' org_slug=current_client.slug %}?role=workstation">
+        <div class="lbl">Workstations</div>
+        <div class="val">{{ dev_overview.workstations }}</div>
+    </a>
+    <a class="oc-card" href="{% url 'org_software' org_slug=current_client.slug %}">
+        <div class="lbl">Software titles</div>
+        <div class="val">{{ software_count }}</div>
+        <div class="sub">
+            {% if software_pending %}{{ software_pending }} pending decision{% else %}All decided{% endif %}
+        </div>
+    </a>
+    <div class="oc-card">
+        <div class="lbl">In patch scope</div>
+        <div class="val">{{ dev_overview.in_patch_scope }}</div>
+        <div class="sub">of {{ dev_overview.total }} devices</div>
+    </div>
+</div>
 
-<div class="summary-grid">
-    <a class="summary-tile" href="{% url 'org_devices' org_slug=current_client.slug %}">
-        <div class="tile-label">Devices</div>
-        <div class="tile-count">{{ device_count }}</div>
-        <div class="tile-detail">
-            {% if type_summary %}
-                {% for type_value, label, count in type_summary %}{{ count }} {{ label|lower }}{% if not forloop.last %} &middot; {% endif %}{% endfor %}
+<div class="oc-two">
+    <div>
+        <div class="card">
+            <h2 style="margin-top:0;">Needs attention here</h2>
+            {% if attention_findings %}
+            <div class="attn-list">
+                {% for f in attention_findings %}
+                <div class="attn-row">
+                    <div class="attn-dot {% if f.severity == 'critical' %}crit{% else %}high{% endif %}"></div>
+                    <span class="attn-sev {% if f.severity == 'critical' %}crit{% else %}high{% endif %}">{{ f.severity }}</span>
+                    <div>
+                        <div>{{ f.title|default:f.ftype|humanize_label }}</div>
+                        {% if f.hostname %}
+                            <div class="muted" style="font-size:0.75rem;">
+                                <a href="{% url 'device_detail' org_slug=current_client.slug device_id=f.device_id %}"><code>{{ f.hostname }}</code></a>
+                            </div>
+                        {% endif %}
+                    </div>
+                    <div class="muted" style="font-size:0.75rem;">{{ f.last_detected_at|date:"Y-m-d H:i" }}</div>
+                    <a href="{% url 'finding_acknowledge' finding_id=f.id %}" style="font-size:0.75rem;">Ack</a>
+                </div>
+                {% endfor %}
+            </div>
             {% else %}
-                No devices yet
+            <p class="muted">No severe or high open issues.</p>
             {% endif %}
         </div>
-    </a>
 
-    <a class="summary-tile" href="{% url 'findings_queue' %}?client={{ current_client.slug }}">
-        <div class="tile-label">Active Findings</div>
-        <div class="tile-count">{{ active_finding_count }}</div>
-        <div class="tile-detail">Open · acknowledged · investigating</div>
-    </a>
-
-    <a class="summary-tile" href="{% url 'org_software' org_slug=current_client.slug %}">
-        <div class="tile-label">Software</div>
-        <div class="tile-count">{{ software_count }}</div>
-        <div class="tile-detail">Distinct installed titles</div>
-    </a>
-
-    <a class="summary-tile" href="{% url 'org_policies' org_slug=current_client.slug %}">
-        <div class="tile-label">Policies</div>
-        <div class="tile-count">{{ policy_count }}</div>
-        <div class="tile-detail">
-            {% if policy_categories %}{{ policy_categories|join:" · " }}{% else %}None defined{% endif %}
-        </div>
-    </a>
-</div>
-
-{% if platform_coverage %}
-<div class="card">
-    <h2 style="margin-top: 0;">Agent Coverage</h2>
-    <div class="summary-grid">
-    {% for platform, cov in platform_coverage.items %}
-    <div class="summary-tile" style="cursor:default;">
-        <div class="tile-label" style="font-size:0.9rem; font-weight:600; color:var(--fg); text-transform:none; letter-spacing:0;">
-            {{ platform }}
-            <span class="muted" style="font-size:0.75rem; font-weight:400; margin-left:0.4rem;">{{ cov.severity }}</span>
-        </div>
-        {% for scope, counts in cov.scopes.items %}
-        <a href="{% url 'org_devices' org_slug=current_client.slug %}?missing={{ platform }}&amp;entity_type={{ counts.entity_type|urlencode }}{% if counts.role %}&amp;role={{ counts.role }}{% endif %}"
-           style="display:block; margin-top:0.6rem; text-decoration:none; color:inherit;"
-           title="Show {{ scope }} missing {{ platform }}">
-            <div class="cov-row">
-                <span class="muted" style="font-size:0.8rem; text-transform:capitalize;">{{ scope }}</span>
-                <span style="font-size:0.9rem; font-weight:600;">
-                    {{ counts.present }}<span class="muted" style="font-weight:400;"> / {{ counts.total }}</span>
-                </span>
-                <span class="cov-gap {% if counts.gap == 0 %}gap-ok{% elif cov.severity == 'critical' %}gap-crit{% else %}gap-high{% endif %}" style="font-size:0.8rem;">
-                    {% if counts.gap == 0 %}✓{% else %}-{{ counts.gap }}{% endif %}
-                </span>
-            </div>
-            {% if counts.total > 0 %}
-            <div class="cov-bar-wrap">
-                <div class="cov-bar-fill {% if counts.gap == 0 %}cov-ok{% elif cov.severity == 'critical' %}cov-critical{% elif cov.severity == 'high' %}cov-high{% else %}cov-medium{% endif %}"
-                     style="width: {% widthratio counts.present counts.total 100 %}%"></div>
-            </div>
+        <div class="card">
+            <h2 style="margin-top:0;">Offline devices to check</h2>
+            {% if offender_devices %}
+            <table data-sortable style="width:100%;">
+                <thead>
+                    <tr>
+                        <th>Hostname</th>
+                        <th>Role</th>
+                        <th>OS</th>
+                        <th class="num">Last contact</th>
+                        <th class="num">Severe issues</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for d in offender_devices %}
+                    <tr>
+                        <td>
+                            <a href="{% url 'device_detail' org_slug=current_client.slug device_id=d.id %}"><code>{{ d.hostname }}</code></a>
+                        </td>
+                        <td class="muted">{{ d.role|humanize_label|default:"—" }}</td>
+                        <td class="muted">{{ d.os_group|humanize_label|default:"—" }}</td>
+                        <td class="muted num">{{ d.last_contact_at|date:"Y-m-d"|default:"never" }}</td>
+                        <td class="num">
+                            {% if d.severe %}
+                                <span style="color:#dc2626; font-weight:600;">{{ d.severe }}</span>
+                            {% else %}
+                                <span class="muted">—</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p class="muted">All devices are currently reporting in.</p>
             {% endif %}
-        </a>
-        {% endfor %}
-    </div>
-    {% endfor %}
-    </div>
-</div>
-{% endif %}
+        </div>
 
-{% if client_links %}
-<div class="card">
-    <h2 style="margin-top: 0;">Known in</h2>
-    <table data-sortable style="width: 100%; border-collapse: collapse;">
-        <thead>
-            <tr style="text-align: left; border-bottom: 1px solid var(--border);">
-                <th style="padding: 0.5rem;">Source</th>
-                <th style="padding: 0.5rem;">Name in that system</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for link in client_links %}
-            <tr style="border-bottom: 1px solid var(--border);">
-                <td style="padding: 0.5rem;">{{ link.source.name }}</td>
-                <td style="padding: 0.5rem;">{{ link.external_name }}</td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+        {% if platform_coverage %}
+        <div class="card">
+            <details class="oc-fold">
+                <summary>Coverage detail — required agents by scope</summary>
+                <div style="margin-top: 0.5rem;">
+                    <style>
+                        .cov-mini { display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:0.7rem; }
+                        .cov-mini .cov-item { padding:0.7rem; border:1px solid var(--border); border-radius:6px; }
+                        .cov-bar-wrap { height: 6px; background:#e8edf2; border-radius:3px; margin-top:0.35rem; overflow:hidden; }
+                        .cov-bar-fill { height:100%; border-radius:3px; }
+                        .cov-critical { background:#c0392b; } .cov-high { background:#e67e22; }
+                        .cov-medium { background:#f1c40f; } .cov-ok { background:#27ae60; }
+                    </style>
+                    <div class="cov-mini">
+                    {% for platform, cov in platform_coverage.items %}
+                        <div class="cov-item">
+                            <div style="font-weight:600;">{{ platform }}
+                                <span class="muted" style="font-size:0.75rem; font-weight:400;">{{ cov.severity }}</span>
+                            </div>
+                            {% for scope, counts in cov.scopes.items %}
+                            <a href="{% url 'org_devices' org_slug=current_client.slug %}?missing={{ platform }}&amp;entity_type={{ counts.entity_type|urlencode }}{% if counts.role %}&amp;role={{ counts.role }}{% endif %}"
+                               style="display:block; margin-top:0.4rem; text-decoration:none; color:inherit;">
+                                <div style="display:flex; justify-content:space-between; font-size:0.82rem;">
+                                    <span class="muted" style="text-transform:capitalize;">{{ scope }}</span>
+                                    <span style="font-weight:600;">
+                                        {{ counts.present }}<span class="muted" style="font-weight:400;"> / {{ counts.total }}</span>
+                                        {% if counts.gap %}<span style="color:#c0392b; margin-left:0.3rem;">-{{ counts.gap }}</span>{% endif %}
+                                    </span>
+                                </div>
+                                {% if counts.total %}
+                                <div class="cov-bar-wrap">
+                                    <div class="cov-bar-fill {% if counts.gap == 0 %}cov-ok{% elif cov.severity == 'critical' %}cov-critical{% elif cov.severity == 'high' %}cov-high{% else %}cov-medium{% endif %}"
+                                         style="width: {% widthratio counts.present counts.total 100 %}%"></div>
+                                </div>
+                                {% endif %}
+                            </a>
+                            {% endfor %}
+                        </div>
+                    {% endfor %}
+                    </div>
+                </div>
+            </details>
+        </div>
+        {% endif %}
+    </div>
+
+    <div>
+        <div class="card">
+            <h2 style="margin-top:0; font-size:0.95rem;">Profile</h2>
+            <div style="font-size:0.85rem;">
+                <div><span class="muted">Slug:</span> <code>{{ current_client.slug }}</code></div>
+                <div><span class="muted">Timezone:</span> {{ current_client.timezone }}</div>
+                <div style="margin-top:0.4rem;">
+                    <span class="muted">Profile:</span>
+                    <strong>{{ current_client.requirement_profile.name|default:"— global fallback —" }}</strong>
+                </div>
+            </div>
+            {% if request.user.is_authenticated %}
+            <form method="post" action="{% url 'client_profile_assign' org_slug=current_client.slug %}"
+                  style="margin-top:0.5rem; display:flex; flex-direction:column; gap:0.3rem;">
+                {% csrf_token %}
+                <select name="profile_id" style="padding:0.3rem 0.5rem; font-size:0.85rem;">
+                    <option value="">— global fallback —</option>
+                    {% for p in all_profiles %}
+                    <option value="{{ p.id }}"{% if current_client.requirement_profile_id == p.id %} selected{% endif %}>
+                        {{ p.name }}{% if p.is_tenant_default %} (default){% endif %}
+                    </option>
+                    {% endfor %}
+                </select>
+                <button type="submit" style="padding:0.3rem 0.7rem; font-size:0.85rem;">Apply</button>
+            </form>
+            {% endif %}
+        </div>
+
+        {% if client_links %}
+        <div class="card">
+            <h2 style="margin-top:0; font-size:0.95rem;">Known in</h2>
+            <table style="width:100%; font-size:0.85rem;">
+                <tbody>
+                {% for link in client_links %}
+                    <tr>
+                        <td style="padding:0.25rem 0;">{{ link.source.name }}</td>
+                        <td style="padding:0.25rem 0; color:var(--muted);">{{ link.external_name }}</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+
+        {% if policy_count %}
+        <div class="card">
+            <h2 style="margin-top:0; font-size:0.95rem;">
+                <a href="{% url 'org_policies' org_slug=current_client.slug %}">Policies ({{ policy_count }})</a>
+            </h2>
+            <div class="muted" style="font-size:0.82rem;">
+                {% if policy_categories %}{{ policy_categories|join:" · " }}{% else %}None defined{% endif %}
+            </div>
+        </div>
+        {% endif %}
+    </div>
 </div>
-{% endif %}
 
 {% else %}
-{# Fleet overview #}
-<div class="summary-grid">
-    <div class="summary-tile" style="cursor: default;">
-        <div class="tile-label">Clients</div>
-        <div class="tile-count">{{ all_client_count }}</div>
-        <div class="tile-detail">Managed clients</div>
-    </div>
-
-    <div class="summary-tile" style="cursor: default;">
-        <div class="tile-label">Devices</div>
-        <div class="tile-count">{{ all_device_count }}</div>
-        <div class="tile-detail">
-            {% if fleet_type_summary %}
-                {% for type_value, label, count in fleet_type_summary %}{{ count }} {{ label|lower }}{% if not forloop.last %} &middot; {% endif %}{% endfor %}
-            {% else %}
-                No devices yet
-            {% endif %}
-        </div>
-    </div>
-
-    <div class="summary-tile" style="cursor: default;">
-        <div class="tile-label">Sources</div>
-        <div class="tile-count">{{ source_coverage|length }}</div>
-        <div class="tile-detail">
-            {% if source_coverage %}
-                {% for row in source_coverage %}{{ row.name }} ({{ row.client_count }}){% if not forloop.last %} &middot; {% endif %}{% endfor %}
-            {% else %}
-                No sources linked
-            {% endif %}
-        </div>
-    </div>
-
-    <a class="summary-tile" href="{% url 'findings_queue' %}">
-        <div class="tile-label">Findings</div>
-        <div class="tile-count">{{ open_finding_count }}</div>
-        <div class="tile-detail">Open across all clients</div>
+{# Fleet overview mode — /orgs/all/ #}
+<div class="oc-cards">
+    <div class="oc-card"><div class="lbl">Clients</div><div class="val">{{ all_client_count }}</div></div>
+    <div class="oc-card"><div class="lbl">Devices</div><div class="val">{{ all_device_count }}</div></div>
+    <div class="oc-card"><div class="lbl">Sources</div><div class="val">{{ source_coverage|length }}</div></div>
+    <a class="oc-card" href="{% url 'findings_queue' %}">
+        <div class="lbl">Open issues</div><div class="val">{{ open_finding_count }}</div>
     </a>
 </div>
 
 <div class="card">
-    <h2 style="margin-top: 0;">Clients</h2>
+    <h2 style="margin-top:0;">Clients</h2>
     {% if clients_with_counts %}
-    <table data-sortable style="width: 100%; border-collapse: collapse;">
+    <table data-sortable style="width:100%;">
         <thead>
-            <tr style="text-align: left; border-bottom: 1px solid var(--border);">
-                <th style="padding: 0.5rem;">Client</th>
-                <th style="padding: 0.5rem; text-align: right;">Devices</th>
-                <th style="padding: 0.5rem;">Sources</th>
+            <tr>
+                <th>Client</th>
+                <th class="num">Devices</th>
+                <th>Sources</th>
             </tr>
         </thead>
         <tbody>
-            {% for c in clients_with_counts %}
-            <tr style="border-bottom: 1px solid var(--border);">
-                <td style="padding: 0.5rem;"><a href="{% url 'org_index' org_slug=c.slug %}">{{ c.display_name }}</a></td>
-                <td style="padding: 0.5rem; text-align: right;">{{ c.device_count }}</td>
-                <td style="padding: 0.5rem; color: var(--muted); font-size: 0.9rem;">
-                    {% for name in c.source_names %}{{ name }}{% if not forloop.last %} &middot; {% endif %}{% empty %}—{% endfor %}
+        {% for c in clients_with_counts %}
+            <tr>
+                <td><a href="{% url 'org_index' org_slug=c.slug %}">{{ c.display_name }}</a></td>
+                <td class="num">{{ c.device_count }}</td>
+                <td class="muted">
+                    {% for name in c.source_names %}{{ name }}{% if not forloop.last %} · {% endif %}{% empty %}—{% endfor %}
                 </td>
             </tr>
-            {% endfor %}
+        {% endfor %}
         </tbody>
     </table>
     {% else %}
-    <p class="muted">No clients yet. Run the bootstrap or wait for the container to start.</p>
+    <p class="muted">No clients yet.</p>
     {% endif %}
 </div>
 {% endif %}
