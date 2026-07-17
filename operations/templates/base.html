@@ -297,6 +297,15 @@
     {% endif %}
 
     <main>
+        {% if messages %}
+        <div style="margin-bottom: 0.75rem;">
+            {% for m in messages %}
+            <div style="padding: 0.5rem 0.75rem; margin-bottom: 0.35rem;
+                        background: #eef4fb; border-left: 3px solid var(--accent);
+                        font-size: 0.85rem; border-radius: 0 4px 4px 0;">{{ m }}</div>
+            {% endfor %}
+        </div>
+        {% endif %}
         {% block content %}{% endblock %}
     </main>
 </body>

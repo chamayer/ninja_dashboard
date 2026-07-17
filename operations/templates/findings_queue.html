@@ -141,13 +141,6 @@
     </form>
 </div>
 
-{% if messages %}
-<div style="margin-bottom: 0.75rem;">
-    {% for m in messages %}
-    <div style="padding: 0.5rem 0.75rem; background: #eef4fb; border-left: 3px solid var(--accent); font-size: 0.85rem;">{{ m }}</div>
-    {% endfor %}
-</div>
-{% endif %}
 
 <div class="card">
     {% if findings %}

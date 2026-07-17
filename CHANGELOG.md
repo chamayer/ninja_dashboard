@@ -2,6 +2,20 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.58.0] — 2026-07-17 — Patch scope override UI (Wave UI-2.F slice 2)
+
+### Added
+- Endpoints `device_patch_scope_set` and `device_patch_scope_clear`
+  that write / delete rows in the existing `DevicePatchingOverride`
+  table (Track O2 layer).
+- Overview tab of device detail: **Patch scope** card gains a
+  collapsible **Override** form with scope select (Included /
+  Excluded), reason input, Save + Clear. Clearing prompts for
+  confirmation and reverts the device to derived scope.
+- Global flash-message strip in `base.html` — any view that calls
+  `messages.info(...)` etc. now shows a bar at the top of the
+  page. Removes the duplicate messages block from Issues.
+
 ## [0.57.0] — 2026-07-17 — Issue actions + bulk toolbar (Wave UI-2.F slice 1)
 
 ### Added

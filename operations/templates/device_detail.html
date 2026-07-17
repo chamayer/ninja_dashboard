@@ -174,6 +174,28 @@
             {% elif patching.scope_reason %}{{ patching.scope_reason|humanize_label }}
             {% else %}&nbsp;{% endif %}
         </div>
+        <details style="margin-top:0.4rem;">
+            <summary style="cursor:pointer; font-size:0.75rem; color:var(--muted);">Override</summary>
+            <form method="post" action="{% url 'device_patch_scope_set' org_slug=device.client.slug device_id=device.id %}"
+                  style="margin-top:0.4rem; display:flex; flex-direction:column; gap:0.25rem; font-size:0.8rem;">
+                {% csrf_token %}
+                <select name="scope" style="padding:0.25rem;">
+                    <option value="Included"{% if patching.override_scope == 'Included' %} selected{% endif %}>Included</option>
+                    <option value="Excluded"{% if patching.override_scope == 'Excluded' %} selected{% endif %}>Excluded</option>
+                </select>
+                <input type="text" name="reason" placeholder="reason (optional)"
+                       value="{{ patching.override_reason|default:'' }}"
+                       style="padding:0.25rem;">
+                <div style="display:flex; gap:0.3rem;">
+                    <button type="submit" style="padding:0.2rem 0.5rem; font-size:0.75rem;">Save</button>
+                    {% if patching.override_scope %}
+                    <button type="submit" formaction="{% url 'device_patch_scope_clear' org_slug=device.client.slug device_id=device.id %}"
+                            style="padding:0.2rem 0.5rem; font-size:0.75rem;"
+                            onclick="return confirm('Remove operator override and revert to derived scope?')">Clear</button>
+                    {% endif %}
+                </div>
+            </form>
+        </details>
     </div>
     <div class="dd-card {% if patching.needs_reboot %}warn{% endif %}">
         <div class="lbl">Needs reboot</div>

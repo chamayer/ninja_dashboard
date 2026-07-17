@@ -24,6 +24,7 @@ from .models import (
     ClientOrgExclude,
     ClientPolicy,
     Device,
+    DevicePatchingOverride,
     Finding,
     FindingCategory,
     FindingType,
@@ -1025,6 +1026,40 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
             "activity": activity,
         },
     )
+
+
+@login_required
+@require_POST
+def device_patch_scope_set(request: HttpRequest, org_slug: str, device_id: str) -> HttpResponse:
+    """Operator override of a device's patching scope."""
+    device = get_object_or_404(
+        Device, tenant_id=1, id=device_id,
+        client__slug=org_slug, deleted_at__isnull=True,
+    )
+    scope = (request.POST.get("scope") or "").strip()
+    if scope not in (DevicePatchingOverride.Scope.INCLUDED, DevicePatchingOverride.Scope.EXCLUDED):
+        messages.warning(request, "Pick a scope value.")
+        return redirect("device_detail", org_slug=org_slug, device_id=device_id)
+    reason = (request.POST.get("reason") or "").strip()
+    DevicePatchingOverride.objects.update_or_create(
+        tenant_id=1, device=device,
+        defaults={"scope": scope, "reason": reason,
+                  "set_by": request.user.username or ""},
+    )
+    messages.info(request, f"Patch scope override set to {scope}.")
+    return redirect("device_detail", org_slug=org_slug, device_id=device_id)
+
+
+@login_required
+@require_POST
+def device_patch_scope_clear(request: HttpRequest, org_slug: str, device_id: str) -> HttpResponse:
+    device = get_object_or_404(
+        Device, tenant_id=1, id=device_id,
+        client__slug=org_slug, deleted_at__isnull=True,
+    )
+    DevicePatchingOverride.objects.filter(tenant_id=1, device=device).delete()
+    messages.info(request, "Patch scope override removed — reverted to derived scope.")
+    return redirect("device_detail", org_slug=org_slug, device_id=device_id)
 
 
 @login_required
