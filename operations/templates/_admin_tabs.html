@@ -60,6 +60,8 @@
        href="{% url 'notification_suppressions_list' %}">Suppressions</a>
     <a class="at-tab {% if admin_tab == 'requirements' %}active{% endif %}"
        href="{% url 'requirement_profiles_list' %}">Requirements</a>
+    <a class="at-tab {% if admin_tab == 'classifier' %}active{% endif %}"
+       href="{% url 'classifier_config' %}">Classifier</a>
   {% elif admin_group == 'integrations' %}
     <span class="at-group">Integrations</span>
     <a class="at-tab {% if admin_tab == 'sources' %}active{% endif %}"

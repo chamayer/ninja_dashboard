@@ -26,6 +26,7 @@ from .models import (
     Device,
     DeviceOperatorDecision,
     DevicePatchingOverride,
+    EvaluatorConfig,
     Finding,
     FindingCategory,
     FindingType,
@@ -3681,6 +3682,80 @@ def client_profile_assign(request: HttpRequest, org_slug: str) -> HttpResponse:
         f"{client.requirement_profile.name if client.requirement_profile else '— global fallback —'}.",
     )
     return redirect("org_index", org_slug=client.slug)
+
+
+# ── Software classifier config (evaluator knobs, admin-editable) ────────
+
+_CLASSIFIER_DEFAULTS = {
+    "rare_recent_enabled": True,
+    "rare_recent_max_age_days": 7,
+    "rare_recent_max_devices": 2,
+    "rare_recent_severity": "medium",
+    "rare_recent_skip_categorized": True,
+    "rare_recent_skip_decided": True,
+}
+
+
+@login_required
+def classifier_config(request: HttpRequest) -> HttpResponse:
+    row, _ = EvaluatorConfig.objects.get_or_create(
+        tenant_id=1, evaluator_name="software_classifier",
+        defaults={"config": {}, "updated_by": request.user},
+    )
+    stored = row.config if isinstance(row.config, dict) else {}
+    effective = dict(_CLASSIFIER_DEFAULTS)
+    effective.update(stored)
+
+    if request.method == "POST":
+        new_cfg: dict = {}
+
+        def _bool(name: str) -> bool:
+            return request.POST.get(name) == "on"
+
+        def _int(name: str, lo: int, hi: int, fallback: int) -> int:
+            try:
+                v = int(request.POST.get(name) or fallback)
+            except ValueError:
+                v = fallback
+            return max(lo, min(v, hi))
+
+        new_cfg["rare_recent_enabled"] = _bool("rare_recent_enabled")
+        new_cfg["rare_recent_skip_categorized"] = _bool("rare_recent_skip_categorized")
+        new_cfg["rare_recent_skip_decided"] = _bool("rare_recent_skip_decided")
+        new_cfg["rare_recent_max_age_days"] = _int(
+            "rare_recent_max_age_days", 1, 90, 7,
+        )
+        new_cfg["rare_recent_max_devices"] = _int(
+            "rare_recent_max_devices", 1, 100, 2,
+        )
+        sev = (request.POST.get("rare_recent_severity") or "medium").strip()
+        if sev not in {"info", "low", "medium", "high", "critical"}:
+            sev = "medium"
+        new_cfg["rare_recent_severity"] = sev
+
+        row.config = new_cfg
+        row.updated_by = request.user
+        row.save(update_fields=["config", "updated_by", "updated_at"])
+        messages.info(request, "Classifier configuration saved.")
+        return redirect("classifier_config")
+
+    return render(
+        request,
+        "classifier_config.html",
+        {
+            "admin_group": "config",
+            "admin_tab": "classifier",
+            "effective": effective,
+            "stored": stored,
+            "defaults": _CLASSIFIER_DEFAULTS,
+            "updated_at": row.updated_at,
+            "updated_by": row.updated_by,
+            "severity_choices": [
+                ("info", "Info"), ("low", "Low"), ("medium", "Medium"),
+                ("high", "High"), ("critical", "Critical"),
+            ],
+        },
+    )
 
 
 # ── Notification dispatcher UI (Track 2.4) ──────────────────────────────

@@ -1331,6 +1331,37 @@ class NotificationEvent(TenantScopedModel):
         return f"{self.channel}:{self.status}:{self.fingerprint[:32]}"
 
 
+class EvaluatorConfig(TenantScopedModel):
+    """Admin-editable knobs for evaluators (software classifier, coverage,
+    patching, etc). One row per (tenant, evaluator_name). Config JSONB
+    stores the individual knobs; each evaluator reads what it needs and
+    falls back to code defaults for missing keys.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    evaluator_name = models.CharField(max_length=80)
+    config = models.JSONField(default=dict)
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="evaluator_configs",
+        null=True, blank=True,
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "evaluator_config"
+        constraints = (
+            models.UniqueConstraint(
+                fields=("tenant", "evaluator_name"),
+                name="uq_evaluator_config_tenant_name",
+            ),
+        )
+
+    def __str__(self) -> str:
+        return f"{self.evaluator_name}"
+
+
 class SuppressionRule(TenantScopedModel):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     finding_type = models.ForeignKey(FindingType, on_delete=models.PROTECT, related_name="suppression_rules")

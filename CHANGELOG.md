@@ -2,6 +2,44 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.60.0] — 2026-07-17 — rare_recent reframe + Classifier config UI
+
+### Approach
+`rare_recent` used to fire on every install younger than 30 days
+that lived on ≤2 devices. That produced a flood on any
+freshly-imaged endpoint. Reframed to answer the actual operator
+question: *"did someone install something we don't recognize on
+one endpoint, that we haven't already decided about?"*
+
+### Changed — evaluator
+- `ingest/software_findings.py` reads a per-tenant config row
+  from `operations.evaluator_config` and merges over code defaults.
+- New skip conditions:
+  - Skip if any prior decision exists (approve /
+    approve_publisher already skipped at loop head; reject /
+    investigate now also skip).
+  - Skip if the title is categorized (the classifier already
+    knows what class it is — `unauthorized_*`, `eol_runtime`,
+    or known-safe).
+- Tightened default `rare_recent_max_age_days` 30 → 7.
+
+### Added — schema
+- Migration 0046: `EvaluatorConfig` model with unique
+  (tenant, evaluator_name) and JSONB config.
+
+### Added — admin UI
+- New page **Config → Classifier** (`/admin/classifier/`).
+- Every rare_recent knob exposed with human hints and defaults:
+  - Enabled toggle
+  - Max age (1–90 days)
+  - Max devices across fleet (1–100)
+  - Severity (info / low / medium / high / critical)
+  - Skip if categorized toggle
+  - Skip if already decided toggle
+- POST validates + clamps and saves. Shows last-saved timestamp +
+  user.
+- Config tab strip gains a **Classifier** entry.
+
 ## [0.59.0] — 2026-07-17 — Coverage exemption UI (Wave UI-2.F slice 3)
 
 ### Added

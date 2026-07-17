@@ -28,8 +28,36 @@ from ingest import db
 log = logging.getLogger(__name__)
 
 _TENANT_ID = 1
-_RARE_RECENT_MAX_DEVICES = 2
-_RARE_RECENT_MAX_AGE_DAYS = 30
+
+# Fallback defaults for the software classifier. Every knob can be
+# overridden per-tenant via operations.evaluator_config rows keyed on
+# evaluator_name = 'software_classifier'. Kept as constants only so a
+# fresh tenant with no config row still runs cleanly.
+_DEFAULT_CONFIG: dict = {
+    "rare_recent_enabled": True,
+    "rare_recent_max_age_days": 7,
+    "rare_recent_max_devices": 2,
+    "rare_recent_severity": "medium",
+    "rare_recent_skip_categorized": True,
+    "rare_recent_skip_decided": True,
+}
+
+
+def _load_config(cur, tenant_id: int) -> dict:
+    """Merge the tenant's evaluator_config row over the code defaults."""
+    cur.execute(
+        """
+        SELECT config FROM operations.evaluator_config
+        WHERE tenant_id = %s AND evaluator_name = 'software_classifier'
+        LIMIT 1
+        """,
+        (tenant_id,),
+    )
+    row = cur.fetchone()
+    stored = row[0] if row and isinstance(row[0], dict) else {}
+    merged = dict(_DEFAULT_CONFIG)
+    merged.update(stored)
+    return merged
 
 
 def classify(tenant_id: int = _TENANT_ID) -> int:
@@ -47,6 +75,7 @@ def classify(tenant_id: int = _TENANT_ID) -> int:
             sanctioned = _load_sanctioned_per_client(cur, tenant_id)
             fleet_rarity = _load_fleet_rarity(cur, tenant_id)
             finding_type_ids = _finding_type_ids(cur)
+            cfg = _load_config(cur, tenant_id)
 
             cur.execute(
                 """
@@ -124,22 +153,43 @@ def classify(tenant_id: int = _TENANT_ID) -> int:
                         emitted_keys,
                     )
 
-                # 5. rare_recent
-                if first_seen:
-                    if first_seen.tzinfo is None:
-                        first_seen = first_seen.replace(tzinfo=timezone.utc)
-                    age_days = (now - first_seen).total_seconds() / 86400
-                    device_count = fleet_rarity.get(name.lower(), 0)
-                    if (
-                        age_days <= _RARE_RECENT_MAX_AGE_DAYS
-                        and device_count <= _RARE_RECENT_MAX_DEVICES
-                    ):
-                        affected += _emit(
-                            cur, tenant_id, finding_type_ids["rare_recent"],
-                            client_id, device_id, name, publisher, "medium", now,
-                            {"fleet_device_count": device_count, "first_seen_days": int(age_days)},
-                            emitted_keys,
-                        )
+                # 5. rare_recent — reframed per operator feedback:
+                #    fire only for uncategorized + undecided titles that
+                #    are recent AND rare across the fleet. Every gate is
+                #    admin-tunable via evaluator_config.
+                if cfg.get("rare_recent_enabled", True) and first_seen:
+                    skip = False
+                    # Any prior decision (approve, approve_publisher,
+                    # reject, investigate) means an operator already
+                    # looked. Approve/approve_publisher was caught by
+                    # the loop-head early-continue; reject/investigate
+                    # fall through to here — skip them.
+                    if cfg.get("rare_recent_skip_decided", True) and dec:
+                        skip = True
+                    # Categorized software is not "unknown" — either
+                    # another rule already fires (unauthorized_*,
+                    # eol_runtime) or the category is known-safe.
+                    if cfg.get("rare_recent_skip_categorized", True) and cat_list:
+                        skip = True
+
+                    if not skip:
+                        if first_seen.tzinfo is None:
+                            first_seen = first_seen.replace(tzinfo=timezone.utc)
+                        age_days = (now - first_seen).total_seconds() / 86400
+                        device_count = fleet_rarity.get(name.lower(), 0)
+                        max_age = int(cfg.get("rare_recent_max_age_days", 7))
+                        max_devices = int(cfg.get("rare_recent_max_devices", 2))
+                        if age_days <= max_age and device_count <= max_devices:
+                            severity = str(cfg.get("rare_recent_severity", "medium"))
+                            affected += _emit(
+                                cur, tenant_id, finding_type_ids["rare_recent"],
+                                client_id, device_id, name, publisher, severity, now,
+                                {
+                                    "fleet_device_count": device_count,
+                                    "first_seen_days": int(age_days),
+                                },
+                                emitted_keys,
+                            )
 
                 # 6. eol_runtime
                 if _matches_rules(name, rules.get("eol_runtime", [])):
