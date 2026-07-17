@@ -1174,50 +1174,72 @@ Datto). Structure:
 Commits: `7a5aa15` (0.50.0) → `b228e79` (0.50.6 Missing/Stale
 split) → `76a27ab` (0.50.7 evaluator noise fix).
 
-### UI-2.D — Domain pages (IN PROGRESS)
+### UI-2.D — Domain pages (LANDED)
 
-- **Patching** page (LANDED — `fbc801a` 0.45.0): per-type tiles,
-  scope layer, population summary, device drilldown.
-- **Software** page (LANDED — `c35fc4a` 0.52.0): overview cards,
-  category chip strip, titles table with device/client counts +
-  decision status, sidebar with recent installs + decisions.
-- **Devices** page (PENDING): fleet-wide device browse — currently
-  the Clients nav goes to `/orgs/all/` which is a client list.
-  Devices deserve their own domain page with the same shape as
-  Software (overview + filter chips + titles table + sidebar).
-- **Client detail** (PENDING): today `org_index` is minimal.
-  Deserves a proper client-detail scoreboard-style view.
-- **Device detail** (PENDING): 5-tab rewrite (Overview / Sources
-  / Activity / Software / Identity). Activities are not yet
-  surfaced anywhere in ops. Primary-source-in-data model
-  (see DESIGN §3.8 extension).
+- **Patching** page (`fbc801a` 0.45.0): per-type tiles, scope
+  layer, population summary, device drilldown.
+- **Software** page (`c35fc4a` 0.52.0): overview cards, category
+  chip strip, titles table with device/client counts + decision
+  status, sidebar with recent installs + decisions.
+- **Devices** page (`4d4eac6` 0.53.0): fleet-wide entity-first
+  device browse — overview cards, OS chip strip, filter bar,
+  sortable table with per-row health traffic light.
+- **Client detail** (`6191deb` 0.54.0): scoreboard rework of
+  `org_index` — header with traffic-light health + bucket badge,
+  overview cards, "Needs attention here" panel, offline offenders
+  table, coverage matrix folded away.
+- **Device detail** (`53d4f84` 0.55.0): 5-tab rewrite
+  (Overview / Sources / Activity / Software / Identity & raw)
+  with `?tab=…` navigation. No source given preferential styling.
 
-### UI-2.E — Admin consolidations (PENDING)
+### UI-2.E — Admin consolidations (LANDED)
 
-- **Review** page: tabbed — Client candidates / Identity matches
-  / Merge candidates. Retire 3 separate pages.
-- **Config** page: tabbed — Notification rules / Requirement
-  profiles / Software catalog / Patching-scope rules. Retire
-  separate pages.
-- **System** page: tabbed — Sources / Ingest health / Queue
-  status. Retire separate pages.
+Shared admin sub-nav strip (`_admin_tabs.html`) added at the top
+of every admin page. `d0f3002` 0.56.0.
 
-### UI-2.F — Actions (PENDING)
+- **Review** — Clients / Devices / Merges / Software (with per-tab
+  live counts).
+- **Config** — Alerts / Suppressions / Requirements / Classifier
+  (Classifier added `bf61c59` 0.60.0).
+- **Integrations** — Sources / Coverage / Ingest. Primary-nav
+  "System" renamed to "Integrations" (MSP-standard word for
+  external systems we plug into).
 
-- Bulk Acknowledge on Issues + Review tabs.
-- Resolve / Snooze / Suppress on individual issues.
-- Device patching-scope override UI (table exists — O4, no UI).
-- Exemption toggle UI (table exists — O2, no UI).
-- Manual scope override from Client / Device page.
+Software decisions moved into the Review group (decision queue,
+not entity browse). Coverage matrix moved into Integrations
+(diagnostics — does reality match what we require).
 
-### UI-2.G — Business data capture (PENDING, unlocks UI-2.H)
+### UI-2.F — Actions (LANDED)
+
+Every read-only surface built in Waves A–E made operable across
+three slices:
+
+- **Slice 1** (`3d2651d` 0.57.0): Issues page gains per-row
+  Ack / Resolve / Snooze / Suppress + bulk toolbar. Migration
+  0045 adds `Finding.snoozed_until`.
+- **Slice 2** (`a42f959` 0.58.0): Patch-scope override form on
+  device detail Overview. Writes to the existing
+  `DevicePatchingOverride` table (Track O2 layer). Global
+  flash-message bar added in `base.html`.
+- **Slice 3** (`785a340` 0.59.0): Coverage exemption chips +
+  add-exemption form on device detail. Writes merge / prune on
+  the `exemptions` JSONB dict in `device_operator_decisions`.
+
+Follow-up (`bf61c59` 0.60.0): rare_recent evaluator reframed
+(skip categorized + decided titles, tighten default age) with
+all knobs exposed under Config → Classifier. Migration 0046
+adds `EvaluatorConfig` (per-tenant JSONB knobs, admin-editable).
+
+### UI-2.G — Business data capture (DEFERRED)
 
 - Client fields: service tier, MRR, account manager, contract
   renewal date, onboarding stage.
 - Trend snapshots (daily) so Dashboard can show week-over-week
   deltas.
+- Status: **Deferred to backlog** (2026-07-17). Both G and H
+  live in `.work/backlog.md` until picked up together.
 
-### UI-2.H — Dashboard maturity (BLOCKED on UI-2.G)
+### UI-2.H — Dashboard maturity (BLOCKED on UI-2.G, DEFERRED)
 
 Once UI-2.G lands, client scoreboard adds columns: tier badge,
 renewal window, MRR band, trend arrow. Buckets become
@@ -1284,7 +1306,7 @@ batch is a single commit series; batches are sequential.
 | P5 | Track 4 (identity fidelity + review UI) | Candidate confirm cascade verified |
 | P6 | Track 5 (patching) + migration 0022 + surfaces | Counts match Metabase scalars |
 | PO | Track O (storage separation pass) — 5 sequential push waves O1–O5 | Ops fully self-standing on `v_device`; patching_scope layer replaces `ninja_core.v_active_devices`; scope-filtered patch findings match Metabase |
-| PU2 | Track UI-2 (operator UI rework) — 8 waves A–H, C already landed | Every domain reachable via entity-first page; admin consolidated to 3 tabbed pages; actions available inline |
+| PU2 | Track UI-2 (operator UI rework) — Waves A–F landed 0.46.0–0.60.0; G + H deferred to backlog | Every domain reachable via entity-first page (D); admin consolidated to Review/Config/Integrations with shared strip (E); actions inline + bulk on Issues, device patch-scope override, coverage exemptions (F) |
 | P7 | Track 6 (cutover) — multi-step, each step separately approved | Parity clean 1 week → schema drop |
 
 ---

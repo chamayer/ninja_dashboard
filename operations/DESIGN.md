@@ -867,40 +867,55 @@ direction, 2026-07-07). Metabase keeps exploratory BI and historical
 analytics. The dividing line: **if a page carries a decision or an
 action, it belongs in Operations.**
 
-### 11.1 Information architecture (revised 2026-07-16)
+### 11.1 Information architecture (revised 2026-07-17)
 
-Operator-facing nav — 5 primary domains + fleet-wide search on
-the right, admin cluster grouped into 3 collapsed pages:
+Operator-facing nav — 6 primary domains + fleet-wide search on
+the right, admin cluster grouped into 3 pages that each render a
+tabbed sub-nav strip (see `_admin_tabs.html`):
 
 ```
-Dashboard · Clients · Patching · Software · Issues    [🔍 search]    Review · Config · System · ⚙
+Dashboard · Clients · Devices · Patching · Software · Issues    [🔍 search]    Review · Config · Integrations · ⚙
 ```
 
 - **Dashboard** — client-portfolio-first scoreboard. Alerts +
   overview cards + attention panel + client grid + sidebar. See
   §11.5 principles.
 - **Clients** — fleet-wide client list; enter client context
-  from here.
+  from here. A client's detail page is a scoreboard (health dot,
+  bucket badge, overview cards, needs-attention panel, offline
+  offenders, coverage detail folded away).
+- **Devices** — entity-first browse across every client.
+  Overview cards, OS chip strip, filter bar, sortable table with
+  per-row health traffic light.
 - **Patching** — per-domain triage: 5 finding types, scope
   layer, population summary, device drilldown.
 - **Software** — per-domain ecosystem view: inventory,
   categorization, decisions, issues (as a facet).
-- **Issues** — cross-domain triage queue (previously "Findings").
-  Everything actionable, filterable by category, severity, client,
-  online state.
+- **Issues** — cross-domain triage queue. Every row has inline
+  Ack / Resolve / Snooze / Suppress; bulk toolbar operates on
+  multi-selects.
 
-Client context sub-nav (when inside a client):
-```
-<Client> · Devices · Patching · Software · Policies
-```
+Device detail is a 5-tab page (`?tab=…`): Overview / Sources /
+Activity / Software / Identity & raw. Persistent header shows
+breadcrumb, health dot, online state + source list, open-issue
+count with severe callout.
 
-Admin cluster (right-aligned):
-- **Review** — Client candidates + Identity matches + Merge
-  candidates. Sum badge.
-- **Config** — Notification rules + Requirement profiles +
-  Software catalog + Patching-scope rules.
-- **System** — Sources + Ingest health + Queue status.
+Admin cluster (right-aligned) — each landing page renders the
+shared strip and highlights the active tab:
+
+- **Review** — Clients · Devices · Merges · Software. Sum badge
+  counts across all four queues.
+- **Config** — Alerts · Suppressions · Requirements · Classifier
+  (evaluator knobs).
+- **Integrations** — Sources · Coverage · Ingest.
+  (MSP-standard word for "external systems we plug into"; replaces
+  the earlier "System" label.)
 - **⚙** — Django admin.
+
+Device-scoped operator actions on the device detail Overview:
+patch-scope override form (writes `DevicePatchingOverride`) and
+coverage exemption chips + add-exemption form (writes the
+`exemptions` JSONB dict in `device_operator_decisions`).
 
 ### 11.2 Page grammar
 
@@ -930,9 +945,10 @@ One page per entity; everything else links to it:
 
 | Workflow | Surfaces | Actions |
 |---|---|---|
-| **Triage** | Findings queue (entity), Health (admin) | acknowledge, suppress (time-bound, with restore), resolve |
-| **Review** | Identity candidates, software decisions, unmatched source groups | confirm/reject, approve/approve-publisher/reject/investigate |
-| **Configure** | Coverage requirements, notification rules + routes, suppressions, sources | CRUD with audit |
+| **Triage** | Issues queue (entity), Ingest issues (admin) | acknowledge, snooze (until date), suppress (creates rule), resolve — inline + bulk |
+| **Review** | Client candidates, Identity candidates, Merge candidates, Software decisions | confirm/reject, approve/approve-publisher/reject/investigate |
+| **Configure** | Coverage requirements, notification rules + routes, suppressions, classifier knobs (`evaluator_config`), sources | CRUD with audit |
+| **Device actions** | Device detail Overview | patch-scope override (Included/Excluded + reason), coverage exemption per entity type |
 
 **Engine-first rule:** no surface ships before its backing engine
 produces real data. A page rendering an empty table is a defect, not a

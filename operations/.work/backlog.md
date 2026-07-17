@@ -61,9 +61,25 @@ This is the proposed successor to the genuinely open portion of
 
 ### Rename presence materialized view
 
-- Candidate: rename the historically narrow agent-presence name now that the
-  structure represents broader entity presence.
-- Constraint: whole-repository and consumer audit; no behavioral change.
+- Status: **Landed 0.61.0** — renamed to `device_agent_presence_current`
+  in migration 0047. Follow-up (below) covers the Metabase side.
+
+### Metabase question audit
+
+- Candidate scope: grep saved question SQL under `/amr-ch-01_data/`
+  Metabase's Postgres backing store for references to retired /
+  renamed columns and matviews. Update questions in place.
+- Known targets:
+  - `operations.agent_presence_current` → `device_agent_presence_current`
+    (renamed 0.61.0)
+  - `operations.devices.exemptions` → `operations.v_device.exemptions`
+    (retired in Track O)
+- Access: Metabase's Postgres uses env `MB_DB_*` on the
+  `ninja-metabase` container (host `postgres`, port 5432, type
+  postgres). DB name / user / pass not in the visible env — look
+  in the docker-compose stack env-file or the mounted secret.
+- Constraint: do not run destructive updates without a preceding
+  read-only report of all affected question IDs + names.
 
 ### Form-factor fallback correction
 
