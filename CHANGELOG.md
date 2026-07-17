@@ -2,6 +2,46 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.61.0] — 2026-07-17 — Standardize derived matview naming
+
+### Why
+The three derived matviews were `agent_presence_current`,
+`device_session_current`, and `device_patching_scope_current`. The
+two newer ones follow the `device_<layer>_current` pattern; the
+oldest predates it. Rename brings all three onto one shape so
+future matviews follow the pattern by copy-paste and grep sweeps
+work uniformly.
+
+### Changed — schema
+- Migration 0047: `ALTER MATERIALIZED VIEW` renames on the
+  matview + its two indexes (dependents keep working via OID
+  references, so `device_session_current` and `v_device` do not
+  need to be rebuilt).
+- Refresh function rebuilt under the new name
+  (`refresh_device_agent_presence_current`) — plpgsql bodies are
+  literal SQL text; the old body would break at the first call
+  after rename.
+- Refresh coordinator (`refresh_derived`) swapped to call the
+  new function.
+
+### Changed — code
+- All in-repo callers swept to the new name across
+  `operations/apps/core/{views,models}.py`, `ingest/evaluator.py`,
+  `ingest/identity/resolver.py`, `ingest/main.py`,
+  `ingest/core/devices.py`, `ingest/agent_compliance/ingest.py`.
+- BLUEPRINT, DESIGN, TODO, SESSIONS updated to reflect the new
+  name.
+
+### Not touched
+- Historical migrations 0016–0044 continue to reference the old
+  name — they represent the DB state at those points in time.
+- CHANGELOG entries stay historical.
+
+### Follow-up
+- Metabase saved questions that reference `agent_presence_current`
+  will need updating. No compatibility alias was created — the
+  old name is fully gone from the DB after this migration.
+
 ## [0.60.0] — 2026-07-17 — rare_recent reframe + Classifier config UI
 
 ### Approach

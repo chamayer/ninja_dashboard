@@ -152,7 +152,7 @@ def _run(client: NinjaClient, snapshot_at: datetime) -> tuple[int, int]:
         obs_count = _write_ninja_observations(
             device_rows, snapshot_rows, snapshot_at, vm_tracking,
         )
-        _refresh_agent_presence_current()
+        _refresh_device_agent_presence_current()
         stats["rows_upserted"] = dev_count
         stats["rows_inserted"] = snap_count
         stats["devices_marked_missing"] = missing_count
@@ -596,22 +596,22 @@ def _write_ninja_observations(
         return 0
 
 
-def _refresh_agent_presence_current() -> None:
+def _refresh_device_agent_presence_current() -> None:
     """Refresh presence matviews after Ninja device observations land.
 
-    Refreshes in dependency order: agent_presence_current first
+    Refreshes in dependency order: device_agent_presence_current first
     (per-source × device), then device_session_current (per-device
-    rollup that reads from agent_presence_current). Kept in one
+    rollup that reads from device_agent_presence_current). Kept in one
     function so every ingest / resolver caller gets both without
     remembering to invoke each — will be formalized into a refresh
     manifest in Track O batch O5.
     """
     try:
         with db.transaction() as cur:
-            cur.execute("SELECT operations.refresh_agent_presence_current()")
-        log.info("Refreshed materialized view operations.agent_presence_current")
+            cur.execute("SELECT operations.refresh_device_agent_presence_current()")
+        log.info("Refreshed materialized view operations.device_agent_presence_current")
     except Exception:
-        log.exception("Failed to refresh agent_presence_current — continuing")
+        log.exception("Failed to refresh device_agent_presence_current — continuing")
         return
     try:
         with db.transaction() as cur:

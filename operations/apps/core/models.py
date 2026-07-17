@@ -420,7 +420,7 @@ class DeviceOperatorDecision(UUIDTenantScopedModel):
 class Device(UUIDTenantScopedModel):
     class DeviceType(models.TextChoices):
         # Pure form factor. Agent presence is an observation-derived fact
-        # (agent_presence_current), never encoded in the canonical device.
+        # (device_agent_presence_current), never encoded in the canonical device.
         PHYSICAL = "physical", "Physical"
         VM = "vm", "VM"
         HYPERVISOR_HOST = "hypervisor-host", "Hypervisor host"

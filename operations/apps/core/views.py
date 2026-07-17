@@ -399,7 +399,7 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
                     SELECT ap.platform, ap.entity_type, od.device_role AS scope,
                            COUNT(DISTINCT ap.device_id)::int AS present,
                            MAX(ap.last_observed_at) AS last_seen
-                    FROM operations.agent_presence_current ap
+                    FROM operations.device_agent_presence_current ap
                     JOIN operations.devices od
                          ON od.id = ap.device_id AND od.deleted_at IS NULL
                     WHERE ap.tenant_id = 1 AND ap.client_id = %s
@@ -669,7 +669,7 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
             cur.execute(
                 """
                 SELECT platform, COUNT(DISTINCT client_id)
-                FROM operations.agent_presence_current
+                FROM operations.device_agent_presence_current
                 WHERE client_id IS NOT NULL
                   AND entity_type LIKE 'agent.%'
                 GROUP BY platform
@@ -736,7 +736,7 @@ def org_devices(request: HttpRequest, org_slug: str) -> HttpResponse:
             cur.execute(
                 """
                 SELECT DISTINCT device_id
-                FROM operations.agent_presence_current
+                FROM operations.device_agent_presence_current
                 WHERE tenant_id = 1 AND client_id = %s AND platform = %s
                   AND entity_type = %s
                   AND last_observed_at > NOW() - INTERVAL '7 days'
@@ -835,7 +835,7 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
                 SELECT platform, entity_type,
                        MAX(last_observed_at) AS last_seen,
                        MAX(last_contact_at)  AS last_contact
-                FROM operations.agent_presence_current
+                FROM operations.device_agent_presence_current
                 WHERE tenant_id = %s AND device_id = %s
                 GROUP BY platform, entity_type
                 ORDER BY platform
@@ -1295,7 +1295,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     # pre-aggregates per-source "in contact within 24h" and the vm.guest
     # power_state='poweredon' signal, refreshed on every ingest cycle
     # (~hourly). Consumer used to compute this inline off
-    # agent_presence_current.
+    # device_agent_presence_current.
     subject_ids = [f.subject_id for f in findings if f.subject_id]
     online_map: dict[str, list[str]] = {}
     if subject_ids:
@@ -2713,7 +2713,7 @@ def sources_status(request: HttpRequest) -> HttpResponse:
             # Observed reach per platform
             cur.execute("""
                 SELECT platform, COUNT(DISTINCT client_id), COUNT(DISTINCT device_id)
-                FROM operations.agent_presence_current
+                FROM operations.device_agent_presence_current
                 GROUP BY platform
             """)
             reach = {r[0]: (int(r[1]), int(r[2])) for r in cur.fetchall()}

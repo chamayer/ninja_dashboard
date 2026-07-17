@@ -116,7 +116,7 @@ multi-source observation table. It will be retired once:
 | Class | Examples | Auto-delete? |
 |---|---|---|
 | Canonical entity | `devices`, `clients`, `users` | Never |
-| Observation-derived current state | `software_installations_current`, `agent_presence_current` | Yes, three-state model |
+| Observation-derived current state | `software_installations_current`, `device_agent_presence_current` | Yes, three-state model |
 
 Canonical entities represent real-world things that existed. Staleness
 on a canonical entity triggers a finding — it never triggers deletion.
@@ -274,7 +274,7 @@ RLS-enabled canonical tables (e.g. `v_device` joins to
 effective view are safely scoped; a direct SELECT on a matview by a
 trusted role (`metabase_ro`, `operations_readonly`) bypasses this and
 is an accepted risk for those roles — same pattern as
-`agent_presence_current` today. Shared operator-decisions tables ARE
+`device_agent_presence_current` today. Shared operator-decisions tables ARE
 regular tables and DO get RLS with the standard policy
 (`tenant_id = current_setting('operations.tenant_id', true)::bigint`).
 
@@ -304,12 +304,12 @@ new domain.
   on canonical. Refreshed by the resolver / role sync; rare-change,
   single-writer.
 - No session-state columns on canonical (`last_observed_at` /
-  `last_contact_at` already live in `agent_presence_current`; new
+  `last_contact_at` already live in `device_agent_presence_current`; new
   device-grain rollup lives in `device_session_current`).
 
 **Legacy shapes to reconcile (backlog, non-blocking):**
 
-- `agent_presence_current` (per-source matview) — naming predates this
+- `device_agent_presence_current` (per-source matview) — naming predates this
   section; per new convention it would be `device_source_presence_current`.
   Rename filed as follow-up; not blocking.
 - `software_decisions` (typed columns) — deliberate exception to the

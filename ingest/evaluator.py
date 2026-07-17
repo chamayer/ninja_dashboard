@@ -294,7 +294,7 @@ def _sync_device_roles(cur: Any, tenant_id: int, now: datetime) -> int:
 
 
 # --------------------------------------------------------------------------
-# 2b. Lifecycle status sync (platform truth from agent_presence_current)
+# 2b. Lifecycle status sync (platform truth from device_agent_presence_current)
 # --------------------------------------------------------------------------
 
 def _sync_lifecycle_status(cur: Any, tenant_id: int) -> None:
@@ -310,7 +310,7 @@ def _sync_lifecycle_status(cur: Any, tenant_id: int) -> None:
         WITH contact AS (
             SELECT device_id,
                    MAX(COALESCE(last_contact_at, last_observed_at)) AS last_contact
-            FROM operations.agent_presence_current
+            FROM operations.device_agent_presence_current
             WHERE tenant_id = %s
             GROUP BY device_id
         ), target AS (
@@ -604,7 +604,7 @@ def _evaluate_coverage(
     cur.execute(
         f"""
         SELECT apc.device_id
-        FROM operations.agent_presence_current apc
+        FROM operations.device_agent_presence_current apc
         WHERE apc.tenant_id = %s
           AND apc.entity_type LIKE 'agent.%%'
         GROUP BY apc.device_id
@@ -623,7 +623,7 @@ def _evaluate_coverage(
         SELECT d.id, d.client_id, d.canonical_hostname, d.device_role,
                COALESCE(op.value, '{}'::jsonb) AS exemptions,
                d.os_group,
-               EXISTS(SELECT 1 FROM operations.agent_presence_current apc
+               EXISTS(SELECT 1 FROM operations.device_agent_presence_current apc
                       WHERE apc.tenant_id = d.tenant_id AND apc.device_id = d.id
                         AND apc.entity_type LIKE 'agent.%%') AS in_agent_universe
         FROM operations.devices d
@@ -678,7 +678,7 @@ def _evaluate_coverage(
             cur.execute(
                 """
                 SELECT MAX(COALESCE(apc.last_contact_at, apc.last_observed_at))
-                FROM operations.agent_presence_current apc
+                FROM operations.device_agent_presence_current apc
                 WHERE apc.tenant_id = %s AND apc.device_id = %s
                   AND apc.entity_type = %s
                   AND (%s = 'any' OR apc.platform = %s)
@@ -773,7 +773,7 @@ def _evaluate_unenrolled(
           AND d.lifecycle_status != 'retired'
           AND (%s::uuid IS NULL OR d.id = %s)
           AND NOT EXISTS(
-              SELECT 1 FROM operations.agent_presence_current apc
+              SELECT 1 FROM operations.device_agent_presence_current apc
               WHERE apc.tenant_id = d.tenant_id AND apc.device_id = d.id
                 AND apc.entity_type LIKE 'agent.%%'
           )
@@ -874,7 +874,7 @@ def _evaluate_device_offline(cur: Any, tenant_id: int, now: datetime) -> int:
         """
         SELECT apc.device_id, d.client_id, d.canonical_hostname,
                MAX(COALESCE(apc.last_contact_at, apc.last_observed_at))
-        FROM operations.agent_presence_current apc
+        FROM operations.device_agent_presence_current apc
         JOIN operations.devices d
              ON d.id = apc.device_id AND d.tenant_id = apc.tenant_id
         WHERE apc.tenant_id = %s
@@ -913,7 +913,7 @@ def _evaluate_stale_data(cur: Any, tenant_id: int, now: datetime) -> int:
         """
         SELECT apc.device_id, d.client_id, d.canonical_hostname,
                MAX(apc.last_observed_at)
-        FROM operations.agent_presence_current apc
+        FROM operations.device_agent_presence_current apc
         JOIN operations.devices d
              ON d.id = apc.device_id AND d.tenant_id = apc.tenant_id
         WHERE apc.tenant_id = %s AND d.deleted_at IS NULL
@@ -1037,7 +1037,7 @@ def _auto_resolve(
               AND f.status IN ('open', 'acknowledged')
               AND (%s::uuid IS NULL OR f.subject_id = %s)
               AND EXISTS (
-                  SELECT 1 FROM operations.agent_presence_current apc
+                  SELECT 1 FROM operations.device_agent_presence_current apc
                   WHERE apc.tenant_id = f.tenant_id
                     AND apc.device_id = f.subject_id
                     AND apc.entity_type = (f.finding_details->>'entity_type')
@@ -1068,7 +1068,7 @@ def _auto_resolve(
               AND (%s::uuid IS NULL OR f.subject_id = %s)
               AND f.subject_id IN (
                   SELECT apc.device_id
-                  FROM operations.agent_presence_current apc
+                  FROM operations.device_agent_presence_current apc
                   WHERE apc.tenant_id = %s
                     AND apc.entity_type LIKE 'agent.%%'
                   GROUP BY apc.device_id
@@ -1096,7 +1096,7 @@ def _auto_resolve(
               AND f.status IN ('open', 'acknowledged')
               AND (%s::uuid IS NULL OR f.subject_id = %s)
               AND NOT EXISTS (
-                  SELECT 1 FROM operations.agent_presence_current apc
+                  SELECT 1 FROM operations.device_agent_presence_current apc
                   WHERE apc.tenant_id = f.tenant_id
                     AND apc.device_id = f.subject_id
                     AND apc.entity_type LIKE 'agent.%%'
@@ -1118,7 +1118,7 @@ def _auto_resolve(
               AND f.status IN ('open', 'acknowledged')
               AND (%s::uuid IS NULL OR f.subject_id = %s)
               AND EXISTS (
-                  SELECT 1 FROM operations.agent_presence_current apc
+                  SELECT 1 FROM operations.device_agent_presence_current apc
                   WHERE apc.tenant_id = f.tenant_id
                     AND apc.device_id = f.subject_id
                     AND apc.entity_type LIKE 'agent.%%'

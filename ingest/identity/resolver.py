@@ -41,7 +41,7 @@ def drain_resolution(batch_size: int = 200) -> int:
     """Resolve up to batch_size unresolved entity_observations.
 
     Returns the count of observations that were resolved (device_id set).
-    Refreshes agent_presence_current if any observations were resolved.
+    Refreshes device_agent_presence_current if any observations were resolved.
     """
     resolved_count = 0
     with db.transaction() as cur:
@@ -140,15 +140,15 @@ def drain_resolution(batch_size: int = 200) -> int:
 
     if resolved_count or promoted_count:
         # Refresh derived presence matviews in dependency order:
-        # agent_presence_current first (per-source × device), then
+        # device_agent_presence_current first (per-source × device), then
         # device_session_current (per-device rollup). Formalized as a
         # refresh manifest in Track O batch O5.
         try:
             with db.transaction() as cur:
-                cur.execute("SELECT operations.refresh_agent_presence_current()")
-            log.info("resolver: refreshed agent_presence_current after %d resolutions", resolved_count)
+                cur.execute("SELECT operations.refresh_device_agent_presence_current()")
+            log.info("resolver: refreshed device_agent_presence_current after %d resolutions", resolved_count)
         except Exception:
-            log.exception("resolver: agent_presence_current refresh failed — continuing")
+            log.exception("resolver: device_agent_presence_current refresh failed — continuing")
         else:
             try:
                 with db.transaction() as cur:

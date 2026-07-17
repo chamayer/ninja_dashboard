@@ -51,7 +51,7 @@ module-specific; root `../TODO.md` keeps cross-repo items and pointers.
 ### Storage separation pass (BLUEPRINT.md Track O — Batch PO)
 
 - [ ] **O1** — `device_session_current` matview (per-device rollup
-      across `agent_presence_current` + `ninja_core.device_snapshots`);
+      across `device_agent_presence_current` + `ninja_core.device_snapshots`);
       refresh function; RLS; unique index for CONCURRENTLY; switch
       findings-queue online-source map to read it. No column
       retirement.
@@ -79,7 +79,7 @@ module-specific; root `../TODO.md` keeps cross-repo items and pointers.
       `ninja_patches.device_patch_signal` for never/stalled; add
       `reboot_pending` emitter (5th finding type) reading
       `v_device.needs_reboot`. Refresh manifest + `refresh_derived()`
-      coordinator. RLS retrofit on `agent_presence_current`. Audit
+      coordinator. RLS retrofit on `device_agent_presence_current`. Audit
       Metabase questions referencing retired columns and update in
       the same wave.
 
@@ -189,7 +189,7 @@ module-specific; root `../TODO.md` keeps cross-repo items and pointers.
 - [ ] `_infer_form_factor` guesses 'physical' from agent presence
       (parked 2026-07-14, ingest/identity/resolver.py:912). Contradicts
       BLUEPRINT E.7 ("device_type = form factor only; agent presence
-      via agent_presence_current only"). When the only signal is
+      via device_agent_presence_current only"). When the only signal is
       `agent.*` (S1-only / LMI-only / SC-only device with no Ninja
       is_vm signal and no vm.guest observation), the resolver mints
       the device as `physical` instead of `unknown`. Zero impact
@@ -223,7 +223,7 @@ module-specific; root `../TODO.md` keeps cross-repo items and pointers.
       `client_candidate_detail.html` (sample_devices list),
       `merge_candidates_queue.html`, any hostname mention in
       dashboard/coverage pages. One template pass.
-- [ ] Rename `agent_presence_current` → `device_presence_current`
+- [ ] Rename `device_agent_presence_current` → `device_presence_current`
       (parked 2026-07-14). Matview has covered all non-software entity
       streams (agent.*, vm.guest, vm.host, network.device, monitor.target)
       since migration 0025, and now carries `last_power_state`. Name is
@@ -275,7 +275,7 @@ module-specific; root `../TODO.md` keeps cross-repo items and pointers.
       devices age past gap thresholds (none on first run — created_at too
       young).
 - [ ] gunicorn worker timeout (ninja-operations, one-off during matview
-      refresh): if recurring, switch `refresh_agent_presence_current()`
+      refresh): if recurring, switch `refresh_device_agent_presence_current()`
       to REFRESH MATERIALIZED VIEW CONCURRENTLY (needs unique index).
 
 ### Platform implementation (BLUEPRINT.md — Batches A–E)
@@ -301,7 +301,7 @@ Batch B — data sync + connectors (Phases 5–7, ship together):
 Batch C — evaluator + compliance rebuild (Phases 8–10, ship together):
 - [x] Phase 8: ingest/evaluator.py — platform evaluator + schedule in main.py
 - [x] Phase 9: ingest/agent_compliance/ingest.py — calls platform_evaluate() after AC run
-- [x] Phase 10: Django migration 0016 — agent_presence_current materialized view
+- [x] Phase 10: Django migration 0016 — device_agent_presence_current materialized view
 
 Batch D — web pages (Phase 11):
 - [x] Phase 11: findings review page (/findings/) + admin health page (/admin/findings/health/)
@@ -360,7 +360,7 @@ Architecture options when we get here:
       severity, coverage gap summary (platforms missing), recent software
       decisions. Currently home.html is a stub.
 - [ ] **Client page — agent presence / entity type cards:** show per-platform
-      coverage counts (Ninja/S1/SC/LMI) from agent_presence_current with
+      coverage counts (Ninja/S1/SC/LMI) from device_agent_presence_current with
       clickthrough to filtered device list. No representation of new entity
       types on the client landing page today.
 - [ ] **Software review workflow:** decision summary tab on client page

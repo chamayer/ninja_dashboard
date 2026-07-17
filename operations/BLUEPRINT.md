@@ -109,7 +109,7 @@ Derived data is nuked and re-ingested; operator-authored data is kept.
 
 - **Truncate:** devices, device_links, entity_observations,
   findings, admin_findings, identity_candidates, notification_state,
-  notification_events; refresh `agent_presence_current` (empty).
+  notification_events; refresh `device_agent_presence_current` (empty).
 - **Keep:** clients, client_links, coverage_requirements,
   notification rules/routes, suppression_rules, software decisions,
   audit logs, users/sessions.
@@ -136,7 +136,7 @@ Derived data is nuked and re-ingested; operator-authored data is kept.
 canonical attribute, and bootstrap's `_classify` guesses it ("treat as
 agented VM"). Repair: device_type becomes pure form factor
 (physical / vm / hypervisor-host / network-device / unknown); agent
-presence comes ONLY from `agent_presence_current`. Migration remaps
+presence comes ONLY from `device_agent_presence_current`. Migration remaps
 existing values; grep-audit every `device_type` consumer (evaluator,
 views, templates).
 
@@ -567,7 +567,7 @@ set (ingest.py:476-528, `_is_stale` :849-854). Seed the finding type
 
 `confirmed` requires: thresholds crossed AND device seen online by ≥1
 platform within that platform's staleness window — check
-`agent_presence_current` joined to latest observation
+`device_agent_presence_current` joined to latest observation
 `canonical_data->>'is_online' = 'true'`. Otherwise cap at `probable`.
 Port of legacy `confirmed_gap` (ingest.py:887-908).
 
@@ -862,7 +862,7 @@ old smoothie shape. Done once, done right.
 ### O.1 Session-state rollup (`device_session_current`)
 
 New per-device matview aggregating what today's callers assemble
-ad-hoc across `agent_presence_current` and `ninja_core.device_snapshots`.
+ad-hoc across `device_agent_presence_current` and `ninja_core.device_snapshots`.
 
 Columns (per device):
 - `tenant_id`, `client_id`, `device_id`
@@ -883,10 +883,10 @@ for CONCURRENTLY refresh. Refresh function
 
 Consumers to switch (find + update):
 - `operations/apps/core/views.py` findings queue — online-source map
-  currently computed inline from `agent_presence_current` +
+  currently computed inline from `device_agent_presence_current` +
   `vm.guest` power state; replace with a read from
   `device_session_current`.
-- Any device-page rendering that reads `agent_presence_current` for a
+- Any device-page rendering that reads `device_agent_presence_current` for a
   cross-source rollup.
 
 No column retirement in this batch (session-state fields don't live
@@ -1057,7 +1057,7 @@ source_module=`platform.patch_findings`, medium severity).
 
 Cross-cutting for the pass:
 
-- **Refresh manifest** (small — 3 matviews today: `agent_presence_current`,
+- **Refresh manifest** (small — 3 matviews today: `device_agent_presence_current`,
   `device_session_current`, `device_patching_scope_current`).
   `operations.refresh_derived()` function refreshes in dependency
   order CONCURRENTLY; called from ingest per source-appropriate
@@ -1065,7 +1065,7 @@ Cross-cutting for the pass:
   presence-emitting source → session refresh).
 - **RLS on every new matview**: `tenant_id` column + `ENABLE ROW
   LEVEL SECURITY` + standard policy. Retro-apply to
-  `agent_presence_current` in the same batch (currently unscoped).
+  `device_agent_presence_current` in the same batch (currently unscoped).
 - **Metabase audit**: grep saved question SQL under
   `/amr-ch-01_data/metabase/` (or via Metabase API) for references to
   columns being retired. Update questions in the same wave as the
@@ -1097,7 +1097,7 @@ Per DESIGN §11. One slice, before Tracks 1-5 surfaces:
   `_pagination.html`, `_badges.html` (severity/status/confidence),
   `_freshness.html` (run_log lookup by domain).
 - Canonical device page consolidating: identity links, agent presence
-  (from `agent_presence_current`), software, patches (Track 5), open
+  (from `device_agent_presence_current`), software, patches (Track 5), open
   findings. Client page gains the same sections in rollup form.
 - Refactor the three existing list pages (devices, software, findings)
   onto the shared components — proves the grammar before new pages.

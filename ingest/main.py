@@ -134,7 +134,7 @@ def _refresh_inventory_current(reason: str) -> None:
 
 
 def run_identity_resolver_once() -> None:
-    """Drain unresolved entity_observations and refresh agent_presence_current."""
+    """Drain unresolved entity_observations and refresh device_agent_presence_current."""
     try:
         attached = _drain_client_resolution()
         log.info("Client resolver complete: attached=%d", attached)
@@ -152,7 +152,7 @@ def run_ninja_observations_once() -> None:
 
     Runs org/location/device sync only — populates operations.devices,
     device_links, and entity_observations (agent.rmm), then refreshes
-    agent_presence_current. Skips device-health, patches, activities,
+    device_agent_presence_current. Skips device-health, patches, activities,
     and custom fields, so it completes in seconds instead of minutes.
     Used by the source run queue demand trigger.
     """

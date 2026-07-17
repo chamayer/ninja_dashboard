@@ -113,9 +113,9 @@ def run() -> tuple[int, int]:
             log.info("Agent compliance detected %d device renames", renames_detected)
         try:
             with db.transaction() as cur:
-                cur.execute("SELECT operations.refresh_agent_presence_current()")
+                cur.execute("SELECT operations.refresh_device_agent_presence_current()")
         except Exception:
-            log.exception("agent_presence_current refresh failed — continuing")
+            log.exception("device_agent_presence_current refresh failed — continuing")
         alerts_sent = alerts.process_alerts(run_id, observed_at)
         try:
             platform_evaluate(tenant_id=1)

@@ -96,12 +96,12 @@ Ninja-link ops devices via BOOL_OR/MAX. New `_emit_reboot_pending`
 reads `v_device.needs_reboot` + `last_boot_at`. `_emit_failing_repeatedly`
 and `_emit_approval_backlog` gain scope filter. Migration 0044 seeds
 `reboot_pending` finding type + `operations.refresh_derived()` coordinator
-(agent_presence_current → device_session_current →
+(device_agent_presence_current → device_session_current →
 device_patching_scope_current in dependency order). Clean first push.
 All 5 patching finding types present post-deploy.
 
 **Deferred (documented):**
-- RLS retrofit on `agent_presence_current` — Postgres does not
+- RLS retrofit on `device_agent_presence_current` — Postgres does not
   support RLS on matviews. Effective scoping via joins to
   RLS-enabled canonical tables remains the pattern; direct-SELECT
   by trusted roles (metabase_ro, operations_readonly) is accepted
@@ -136,15 +136,15 @@ etc.) drop into the same template with zero shared-table redesign.
   `online_sources[]`, `source_count_active`, `needs_reboot`,
   `last_boot_at`, `last_power_state`, `computed_at`. Concurrent-
   refresh unique index; refresh function; grants match
-  `agent_presence_current`.
+  `device_agent_presence_current`.
 - `ingest/core/devices.py` + `ingest/identity/resolver.py`: after
-  refreshing `agent_presence_current` also refresh
+  refreshing `device_agent_presence_current` also refresh
   `device_session_current` (dependency order). Same wrapper function
   so no caller has to remember.
 - `operations/apps/core/views.py` findings queue: online-source map
   reads pre-aggregated `online_sources[]` from
   `device_session_current` instead of the inline aggregation off
-  `agent_presence_current`. Same behavior, simpler consumer code.
+  `device_agent_presence_current`. Same behavior, simpler consumer code.
 
 **Design correction (folded in):**
 
@@ -193,7 +193,7 @@ requirement profile as a data row).
   global coverage_requirements (3 items: agent.rmm/Ninja,
   agent.edr/SentinelOne, agent.remote_access/LogMeIn, all severity
   matched original rows). Evaluator (`_evaluate_coverage`) rewritten:
-  LATERAL subquery aggregates `agent_presence_current` per device so
+  LATERAL subquery aggregates `device_agent_presence_current` per device so
   `platform='any'` correctly means "some platform of this entity_type
   present"; client-scoped requirement rows for (entity_type,
   device_scope) now REPLACE global rows for that client's devices
@@ -455,7 +455,7 @@ that work, closed its gaps, and ran the approved clean rebuild.
 
 **Work completed (commits `8b7c986`, `d50ad4d`):**
 
-- Migration 0025: `agent_presence_current` covers every non-software entity
+- Migration 0025: `device_agent_presence_current` covers every non-software entity
   stream (drops the `agent.%` filter) and adds `last_contact_at` from
   platform truth (`canonical_data->>'last_seen_at'`). Seeds the
   `unmapped_node_class` admin finding type.
@@ -643,7 +643,7 @@ platform evaluator output.
 
 ## 2026-07-08 — Batch C (Phases 8–10)
 
-**Why:** Platform evaluator, compliance engine rebuild, agent_presence_current
+**Why:** Platform evaluator, compliance engine rebuild, device_agent_presence_current
 materialized view.
 
 **Work completed:**
@@ -652,8 +652,8 @@ materialized view.
   device lifecycle findings (missing_from_source, long_offline), and
   auto-resolve. Wired into main.py APScheduler (every 4h).
 - Phase 9: ingest/agent_compliance/ingest.py — calls platform_evaluate() after
-  each full AC run. Also refreshes agent_presence_current.
-- Phase 10: migration 0016 — creates operations.agent_presence_current
+  each full AC run. Also refreshes device_agent_presence_current.
+- Phase 10: migration 0016 — creates operations.device_agent_presence_current
   materialized view aggregating agent.* entity_observations per device per
   platform. CONCURRENT refresh function. Grants to all reader roles.
 
