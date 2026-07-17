@@ -2,6 +2,26 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.62.1] — 2026-07-17 — Fix 0.62.0 crash-loop (missing resolved_at column)
+
+### Fixed
+- Migration 0048 assumed `Finding.resolved_at` existed for the
+  `UPDATE ... SET closed_at = resolved_at` backfill. That column
+  belongs to `AdminFinding`, not `Finding`. The wrong assumption
+  raised `psycopg.errors.UndefinedColumn` during the redeploy,
+  crash-looping ninja-operations after 0.62.0 pushed.
+  - Dropped the backfill RunSQL. `closed_at` starts NULL for
+    every pre-existing row; new transitions populate it going
+    forward.
+  - Dropped `resolved_at=` from `finding_resolve` and
+    `findings_bulk_action` (also referenced the phantom column).
+- Migration 0049 (matview) was blocked behind 0048 and lands with
+  this fix in the same redeploy.
+
+Careless mistake — top rule failure. Grep for the exact column
+on the exact model before writing UPDATE/SELECT SQL against a
+Django ORM model, not a same-named field on a different model.
+
 ## [0.62.0] — 2026-07-17 — Finding timestamps + Dashboard trend arrows
 
 Wave G2 landed in a single push — three tightly-coupled slices

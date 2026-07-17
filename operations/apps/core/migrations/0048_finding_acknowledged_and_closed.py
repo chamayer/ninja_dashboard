@@ -10,9 +10,14 @@ trend arrows on their own merit:
   queries ("was this active on date D") unambiguous instead of
   the fuzzy `resolved_at`-only view.
 
-Backfill: `closed_at = resolved_at` where resolved_at was set on
-existing rows. Pre-existing acks are unrecoverable — those rows
-keep NULL acknowledged_at.
+Backfill: none possible. `Finding` has never carried a
+`resolved_at` column (that field belongs to sibling models like
+`AdminFinding` — my earlier "backfill from resolved_at" plan
+crash-looped Portainer's redeploy of 0.62.0 until this fix
+landed). Pre-existing resolved / suppressed / acknowledged rows
+therefore keep NULL `closed_at` and NULL `acknowledged_at` —
+history from before 0.62.0 is unrecoverable, but new transitions
+populate both fields going forward.
 
 Wave UI-2 follow-up (G2.1) — trend matview (G2.2) reads these.
 """
@@ -38,17 +43,6 @@ class Migration(migrations.Migration):
             model_name="finding",
             name="closed_at",
             field=models.DateTimeField(null=True, blank=True),
-        ),
-        migrations.RunSQL(
-            # Backfill closed_at for any row that already has
-            # resolved_at — best signal we have for historical
-            # close time. Non-destructive.
-            sql=(
-                "UPDATE operations.findings "
-                "SET closed_at = resolved_at "
-                "WHERE resolved_at IS NOT NULL AND closed_at IS NULL;"
-            ),
-            reverse_sql=migrations.RunSQL.noop,
         ),
         migrations.AddIndex(
             model_name="finding",

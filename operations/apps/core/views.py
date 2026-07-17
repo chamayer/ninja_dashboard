@@ -1480,11 +1480,9 @@ def finding_acknowledge(request: HttpRequest, finding_id: str) -> HttpResponse:
 def finding_resolve(request: HttpRequest, finding_id: str) -> HttpResponse:
     finding = get_object_or_404(Finding, id=finding_id, tenant_id=1)
     if finding.status != Finding.Status.RESOLVED:
-        now = timezone.now()
         finding.status = Finding.Status.RESOLVED
-        finding.resolved_at = finding.resolved_at or now
-        finding.closed_at = finding.closed_at or now
-        finding.save(update_fields=["status", "resolved_at", "closed_at"])
+        finding.closed_at = finding.closed_at or timezone.now()
+        finding.save(update_fields=["status", "closed_at"])
     return redirect(request.POST.get("next") or "findings_queue")
 
 
@@ -1565,7 +1563,6 @@ def findings_bulk_action(request: HttpRequest) -> HttpResponse:
     elif action == "resolve":
         touched = qs.exclude(status=Finding.Status.RESOLVED).update(
             status=Finding.Status.RESOLVED,
-            resolved_at=now,
             closed_at=now,
         )
         messages.info(request, f"Resolved {touched} issue{'s' if touched != 1 else ''}.")
