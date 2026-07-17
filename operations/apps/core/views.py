@@ -1111,10 +1111,16 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
         "finding_type", "finding_type__category", "client", "owner",
     )
 
+    show_snoozed = request.GET.get("snoozed") == "1"
     if status_filter == "active":
         qs = qs.filter(status__in=_FINDING_ACTIVE_STATUSES)
     elif status_filter and status_filter != "all":
         qs = qs.filter(status=status_filter)
+    # Hide snoozed issues by default; user can toggle to see them.
+    if not show_snoozed and status_filter not in ("all",):
+        qs = qs.filter(
+            Q(snoozed_until__isnull=True) | Q(snoozed_until__lt=timezone.now())
+        )
 
     if severity_filter:
         qs = qs.filter(severity=severity_filter)
@@ -1293,6 +1299,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             "active_q": q_filter,
             "active_confidence": confidence_filter,
             "active_client": client_filter,
+            "show_snoozed": show_snoozed,
             "severity_tiles": severity_tiles,
             "total_matching": total_matching,
             "page_query": page_query.urlencode(),
@@ -1308,7 +1315,100 @@ def finding_acknowledge(request: HttpRequest, finding_id: str) -> HttpResponse:
     if finding.status == Finding.Status.OPEN:
         finding.status = Finding.Status.ACKNOWLEDGED
         finding.save(update_fields=["status"])
-    return redirect("findings_queue")
+    return redirect(request.POST.get("next") or "findings_queue")
+
+
+@login_required
+@require_POST
+def finding_resolve(request: HttpRequest, finding_id: str) -> HttpResponse:
+    finding = get_object_or_404(Finding, id=finding_id, tenant_id=1)
+    if finding.status != Finding.Status.RESOLVED:
+        finding.status = Finding.Status.RESOLVED
+        finding.save(update_fields=["status"])
+    return redirect(request.POST.get("next") or "findings_queue")
+
+
+@login_required
+@require_POST
+def finding_snooze(request: HttpRequest, finding_id: str) -> HttpResponse:
+    """Snooze an issue for N days (default 7)."""
+    finding = get_object_or_404(Finding, id=finding_id, tenant_id=1)
+    try:
+        days = int(request.POST.get("days") or 7)
+    except ValueError:
+        days = 7
+    days = max(1, min(days, 90))
+    finding.snoozed_until = timezone.now() + timedelta(days=days)
+    finding.save(update_fields=["snoozed_until"])
+    messages.info(request, f"Snoozed for {days} day{'s' if days != 1 else ''}.")
+    return redirect(request.POST.get("next") or "findings_queue")
+
+
+@login_required
+@require_POST
+def finding_suppress(request: HttpRequest, finding_id: str) -> HttpResponse:
+    """Create a SuppressionRule matching this finding's subject."""
+    finding = get_object_or_404(
+        Finding.objects.select_related("finding_type"),
+        id=finding_id, tenant_id=1,
+    )
+    reason = (request.POST.get("reason") or "").strip() or "Suppressed from Issues"
+    expires_days = request.POST.get("expires_days")
+    expires_at = None
+    if expires_days:
+        try:
+            expires_at = timezone.now() + timedelta(days=max(1, min(int(expires_days), 365)))
+        except ValueError:
+            expires_at = None
+
+    SuppressionRule.objects.create(
+        tenant_id=1,
+        finding_type=finding.finding_type,
+        subject_match={
+            "subject_type": finding.subject_type,
+            "subject_id": str(finding.subject_id),
+        },
+        reason=reason,
+        expires_at=expires_at,
+        created_by=request.user,
+    )
+    finding.status = Finding.Status.SUPPRESSED
+    finding.save(update_fields=["status"])
+    messages.info(request, "Issue suppressed.")
+    return redirect(request.POST.get("next") or "findings_queue")
+
+
+@login_required
+@require_POST
+def findings_bulk_action(request: HttpRequest) -> HttpResponse:
+    """Apply one action across multiple selected findings."""
+    ids = request.POST.getlist("ids")
+    action = (request.POST.get("action") or "").strip()
+    if not ids or action not in ("ack", "resolve", "snooze"):
+        messages.warning(request, "Pick an action and at least one issue.")
+        return redirect(request.POST.get("next") or "findings_queue")
+
+    qs = Finding.objects.filter(tenant_id=1, id__in=ids)
+    if action == "ack":
+        touched = qs.filter(status=Finding.Status.OPEN).update(
+            status=Finding.Status.ACKNOWLEDGED,
+        )
+        messages.info(request, f"Acknowledged {touched} issue{'s' if touched != 1 else ''}.")
+    elif action == "resolve":
+        touched = qs.exclude(status=Finding.Status.RESOLVED).update(
+            status=Finding.Status.RESOLVED,
+        )
+        messages.info(request, f"Resolved {touched} issue{'s' if touched != 1 else ''}.")
+    elif action == "snooze":
+        try:
+            days = int(request.POST.get("days") or 7)
+        except ValueError:
+            days = 7
+        days = max(1, min(days, 90))
+        until = timezone.now() + timedelta(days=days)
+        touched = qs.update(snoozed_until=until)
+        messages.info(request, f"Snoozed {touched} for {days} day{'s' if days != 1 else ''}.")
+    return redirect(request.POST.get("next") or "findings_queue")
 
 
 # ─────────────────────────────────────────────────────────────────────

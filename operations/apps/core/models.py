@@ -991,12 +991,14 @@ class Finding(UUIDTenantScopedModel):
     last_seen_at = models.DateTimeField()
     last_detected_at = models.DateTimeField(null=True, blank=True)
     last_reviewed_at = models.DateTimeField(null=True, blank=True)
+    snoozed_until = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         db_table = "findings"
         indexes = (
             models.Index(fields=("tenant", "status", "severity"), name="idx_findings_status_severity"),
             models.Index(fields=("tenant", "subject_type", "subject_id"), name="idx_findings_subject"),
+            models.Index(fields=("tenant", "snoozed_until"), name="idx_findings_snoozed_until"),
         )
         constraints = (
             models.UniqueConstraint(

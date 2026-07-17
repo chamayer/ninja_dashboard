@@ -128,77 +128,127 @@
             <input type="search" name="q" value="{{ active_q }}" placeholder="canonical / hostname" style="min-width: 180px;">
         </div>
         <div>
+            <label>Snoozed</label>
+            <select name="snoozed">
+                <option value="">Hide</option>
+                <option value="1"{% if show_snoozed %} selected{% endif %}>Show</option>
+            </select>
+        </div>
+        <div>
             <button type="submit">Apply</button>
             <a class="reset" href="?">Reset</a>
         </div>
     </form>
 </div>
 
+{% if messages %}
+<div style="margin-bottom: 0.75rem;">
+    {% for m in messages %}
+    <div style="padding: 0.5rem 0.75rem; background: #eef4fb; border-left: 3px solid var(--accent); font-size: 0.85rem;">{{ m }}</div>
+    {% endfor %}
+</div>
+{% endif %}
+
 <div class="card">
     {% if findings %}
-    <table data-sortable class="ops-table">
-        <thead>
-            <tr>
-                <th>Severity</th>
-                <th>Confidence</th>
-                <th>Type</th>
-                <th>Detail</th>
-                <th>Online</th>
-                <th>Client</th>
-                <th>Subject</th>
-                <th>Status</th>
-                <th>Last detected</th>
-                <th></th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for row in findings %}
-            {% with f=row.f %}
-            <tr>
-                <td><span class="badge badge-{{ f.severity }}">{{ f.get_severity_display }}</span></td>
-                <td class="muted">{{ f.confidence|default:"—" }}</td>
-                <td>{{ f.finding_type.name }}</td>
-                <td>{{ row.detail|default:"—" }}</td>
-                <td>
-                    {% if row.online_sources %}
-                        {% for src in row.online_sources %}<span class="badge badge-low">{{ src }}</span> {% endfor %}
-                    {% elif row.online_sources is not None %}
-                        <span class="badge badge-suppressed">offline</span>
-                    {% else %}
-                        <span class="muted">—</span>
-                    {% endif %}
-                </td>
-                <td>{{ f.client.display_name|default:"—" }}</td>
-                <td>
-                    <span class="muted">{{ f.get_subject_type_display }}</span>
-                    {% if f.finding_details.hostname %}<br>
-                        {% if f.subject_type == "device" and f.client %}
-                            <a href="{% url 'device_detail' org_slug=f.client.slug device_id=f.subject_id %}"><code>{{ f.finding_details.hostname }}</code></a>
+    <form method="post" action="{% url 'findings_bulk_action' %}" id="bulk-form">
+        {% csrf_token %}
+        <input type="hidden" name="next" value="{{ request.get_full_path }}">
+        <div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.6rem; font-size:0.85rem;">
+            <span id="bulk-selected" style="color:var(--muted);">0 selected</span>
+            <button type="submit" name="action" value="ack" style="padding:0.3rem 0.7rem;">Ack</button>
+            <button type="submit" name="action" value="resolve" style="padding:0.3rem 0.7rem;">Resolve</button>
+            <input type="number" name="days" value="7" min="1" max="90" style="width:60px; padding:0.3rem 0.5rem;">
+            <button type="submit" name="action" value="snooze" style="padding:0.3rem 0.7rem;">Snooze days</button>
+        </div>
+        <table data-sortable class="ops-table">
+            <thead>
+                <tr>
+                    <th style="width:28px;"><input type="checkbox" id="bulk-toggle-all"></th>
+                    <th>Severity</th>
+                    <th>Type</th>
+                    <th>Detail</th>
+                    <th>Online</th>
+                    <th>Client</th>
+                    <th>Subject</th>
+                    <th>Status</th>
+                    <th class="num">Last detected</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in findings %}
+                {% with f=row.f %}
+                <tr {% if f.snoozed_until %}style="opacity:0.6;"{% endif %}>
+                    <td><input type="checkbox" name="ids" value="{{ f.id }}" class="bulk-cb"></td>
+                    <td><span class="badge badge-{{ f.severity }}">{{ f.get_severity_display }}</span></td>
+                    <td>{{ f.finding_type.name|humanize_label }}</td>
+                    <td>{{ row.detail|default:"—" }}</td>
+                    <td>
+                        {% if row.online_sources %}
+                            {% for src in row.online_sources %}<span class="badge badge-low">{{ src }}</span> {% endfor %}
+                        {% elif row.online_sources is not None %}
+                            <span class="badge badge-suppressed">offline</span>
                         {% else %}
-                            <code>{{ f.finding_details.hostname }}</code>
+                            <span class="muted">—</span>
                         {% endif %}
-                    {% endif %}
-                </td>
-                <td><span class="badge badge-{{ f.status }}">{{ f.get_status_display }}</span></td>
-                <td class="muted num">{{ f.last_detected_at|default:f.last_seen_at }}</td>
-                <td>
-                    {% if f.status == "open" %}
-                    <form method="post" action="{% url 'finding_acknowledge' f.id %}" style="display: inline;">
-                        {% csrf_token %}
-                        <button type="submit" style="padding: 0.25rem 0.6rem; font-size: 0.8rem;">Ack</button>
-                    </form>
-                    {% endif %}
-                </td>
-            </tr>
-            {% endwith %}
-            {% endfor %}
-        </tbody>
-    </table>
+                    </td>
+                    <td>{{ f.client.display_name|default:"—" }}</td>
+                    <td>
+                        <span class="muted">{{ f.get_subject_type_display }}</span>
+                        {% if f.finding_details.hostname %}<br>
+                            {% if f.subject_type == "device" and f.client %}
+                                <a href="{% url 'device_detail' org_slug=f.client.slug device_id=f.subject_id %}"><code>{{ f.finding_details.hostname }}</code></a>
+                            {% else %}
+                                <code>{{ f.finding_details.hostname }}</code>
+                            {% endif %}
+                        {% endif %}
+                    </td>
+                    <td>
+                        <span class="badge badge-{{ f.status }}">{{ f.get_status_display }}</span>
+                        {% if f.snoozed_until %}<br><span class="muted" style="font-size:0.7rem;">snoozed → {{ f.snoozed_until|date:"Y-m-d" }}</span>{% endif %}
+                    </td>
+                    <td class="muted num">{{ f.last_detected_at|default:f.last_seen_at|date:"Y-m-d H:i" }}</td>
+                    <td style="white-space:nowrap;">
+                        {% if f.status == "open" %}
+                            <button type="submit" formaction="{% url 'finding_acknowledge' f.id %}" style="padding:0.15rem 0.5rem; font-size:0.75rem;">Ack</button>
+                        {% endif %}
+                        {% if f.status != "resolved" %}
+                            <button type="submit" formaction="{% url 'finding_resolve' f.id %}" style="padding:0.15rem 0.5rem; font-size:0.75rem;">Resolve</button>
+                        {% endif %}
+                        <button type="submit" formaction="{% url 'finding_snooze' f.id %}" style="padding:0.15rem 0.5rem; font-size:0.75rem;">Snooze</button>
+                        <button type="submit" formaction="{% url 'finding_suppress' f.id %}" style="padding:0.15rem 0.5rem; font-size:0.75rem;"
+                                onclick="return confirm('Suppress this issue permanently (until manually cleared)? A suppression rule will be created.')">Suppress</button>
+                    </td>
+                </tr>
+                {% endwith %}
+                {% endfor %}
+            </tbody>
+        </table>
+    </form>
     {% include "_pagination.html" with page_obj=page_obj paginator=page_obj.paginator page_query=page_query %}
     {% else %}
     <p class="muted">No items match the current filters.</p>
     {% endif %}
 </div>
+
+<script>
+(function() {
+    var toggle = document.getElementById('bulk-toggle-all');
+    var cbs = document.querySelectorAll('.bulk-cb');
+    var counter = document.getElementById('bulk-selected');
+    function refresh() {
+        var n = 0;
+        cbs.forEach(function(c) { if (c.checked) n++; });
+        if (counter) counter.textContent = n + ' selected';
+    }
+    if (toggle) toggle.addEventListener('change', function() {
+        cbs.forEach(function(c) { c.checked = toggle.checked; });
+        refresh();
+    });
+    cbs.forEach(function(c) { c.addEventListener('change', refresh); });
+})();
+</script>
 
 <div style="margin-top: 1rem;">
     <a href="{% url 'findings_admin_health' %}" style="font-size: 0.85rem;">Admin / platform health items &rarr;</a>

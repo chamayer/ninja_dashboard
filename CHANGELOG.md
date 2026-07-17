@@ -2,6 +2,29 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.57.0] — 2026-07-17 — Issue actions + bulk toolbar (Wave UI-2.F slice 1)
+
+### Added
+- Migration 0045: `Finding.snoozed_until` DateTimeField (null=True)
+  + partial index. Snoozed issues hide from the queue until the
+  timestamp passes.
+- Endpoints on individual issues: `finding_resolve`,
+  `finding_snooze` (default 7d, clamped 1–90), `finding_suppress`
+  (creates a `SuppressionRule` matching the issue's subject and
+  moves the issue to Suppressed).
+- Bulk endpoint `findings_bulk_action` — POST ids[] + action in
+  {ack, resolve, snooze}. Toolbar reports "N selected" and posts
+  through a single form.
+
+### Changed
+- Issues page: table wrapped in one form; per-row Ack / Resolve /
+  Snooze / Suppress buttons (Suppress prompts for confirmation).
+  Bulk toolbar at top of table. Snoozed rows shown faded when
+  toggled visible via the new "Snoozed" filter (default: Hide).
+- `finding_acknowledge` now honours `next=` redirect so device
+  detail and client detail Ack buttons return the operator to
+  their calling page.
+
 ## [0.56.0] — 2026-07-17 — Admin consolidations (Wave UI-2.E)
 
 ### Changed
