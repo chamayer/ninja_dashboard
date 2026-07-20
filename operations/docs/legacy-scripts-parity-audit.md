@@ -66,42 +66,30 @@ Single-org variant of the above (predates the multi-org rewrite).
 
 **Classification: COVERED.** Same rationale. Subset of Multi-org.
 
-### `migrated/Delete_All_Dup_Offline.ps1`, `Delete_MCS_Dup_Offline.ps1`, `Device_Cleanup.ps1`, `Ninja_S1_LMI_Cleanup_dups_offline_grp_by_client.ps1`, `_grp_by_tech.ps1`, `Remove_Ephemeral_Duplicates semi final.ps1`, `Report MCS Offline Devices.ps1`
+### `migrated/Delete_All_Dup_Offline.ps1`, `Delete_MCS_Dup_Offline.ps1`, `Device_Cleanup.ps1`, `Ninja_S1_LMI_Cleanup_dups_offline_grp_by_client.ps1`, `_grp_by_tech.ps1`, `Remove_Ephemeral_Duplicates semi final.ps1`, `Report MCS Offline Devices.ps1`, `migrated/Ninja_set_offboard_tag_API.ps1`, `_2.ps1`, `offboard.ps1`, `Offboard_Computer.ps1`, `Offboard_Computer_UTA.ps1`, `S1_Decommission.ps1`
 
-Related dedup / offline cleanup automation. What they do:
+Related dedup + platform-side offboarding automation:
 
 - Query platform APIs for offline devices past a threshold.
-- Cross-reference to find duplicates (same hostname across
-  platforms, or same device offline in multiple).
-- Delete or offboard the stale record via platform API.
+- Cross-reference to find duplicates.
+- Delete / offboard the stale record via the source platform's API
+  (set a Ninja offboard tag, decommission an agent in SentinelOne,
+  etc.).
 
-**Classification: PARTIAL.**
+**Classification: OUT OF SCOPE for Operations parity.**
 
-- Operations *tracks* everything: `lifecycle_status` (active /
-  offline_aging / pending_cleanup / retired), duplicate detection
-  via the `duplicate_platform_record` Finding, generic device merge
-  (0.67.0), and the operator-visible identity_conflict Finding
-  (0.66.0).
-- Operations *does not yet* trigger platform-side offboarding /
-  deletion actions when an operator retires or merges a Device.
-  Merges and lifecycle transitions are Operations-scoped and don't
-  reach out to Ninja / S1 / LMI APIs to clean their side.
-- Gap: **operator-triggered platform-side offboarding**. When an
-  operator retires a Device in Operations, the loser side should
-  be scheduled for platform-side cleanup (tag as offboarded in
-  Ninja, decommission in S1, unassign in LMI). Currently the
-  platform-side action requires re-running one of these scripts.
-
-### `migrated/Ninja_set_offboard_tag_API.ps1`, `_2.ps1`, `offboard.ps1`, `Offboard_Computer.ps1`, `Offboard_Computer_UTA.ps1`, `S1_Decommission.ps1`
-
-Platform-side offboarding actions:
-
-- Set a Ninja offboard tag on a device via API.
-- Decommission an agent in SentinelOne via API.
-
-**Classification: GAP** (same as above). No Operations equivalent
-today. The operator-triggered platform-side offboarding sits at the
-end of the retirement/merge workflow.
+- The *detection / tracking* side is COVERED in Operations —
+  `lifecycle_status` (active / offline_aging / pending_cleanup /
+  retired), the `duplicate_platform_record` Finding, the generic
+  `device_merge` action (0.67.0), and the `identity_conflict`
+  Finding (0.66.0). Operations knows which devices are candidates
+  for cleanup.
+- The *platform-side action* — reaching back into Ninja / S1 / LMI
+  APIs to actually delete / decommission / untag — is deliberately
+  outside Operations' scope. Operations is a monitoring +
+  operator-decision surface; it does not orchestrate writes into
+  the source platforms. These scripts remain the tooling for that.
+- No parity requirement. Scripts stay.
 
 ---
 
@@ -350,44 +338,59 @@ Empty or effectively empty at audit time.
 
 ---
 
-## Aggregate gap summary
+## Aggregate summary
 
-**Fully COVERED (retire the script — Operations does it end-to-end):**
+Scripts are operational tools; none are slated for retirement.
+Operations' role is monitoring + operator decisions on top of the
+data. Where a script's function has moved into Operations, the
+script becomes optional (nobody has to run it), but it stays
+available.
+
+**Fully COVERED — Operations replaces the monitoring / reporting
+function of the script (the script itself stays as tooling):**
 
 - All AC checkers (multi-org + single-org).
 - Both Ninja software pullers.
-- Ninja auth utilities.
+- Ninja auth utilities (every ingest connector auths itself).
 
-**PARTIAL — Operations tracks state or has close analogs; specific
-ancillary function or presentation is the gap:**
+**PARTIAL — Operations tracks the state or has close analogs; a
+specific presentation or capability is still only in the script:**
 
-- Bulk cleanup / dedup scripts — Operations tracks lifecycle and
-  duplicates natively; the platform-side offboarding action is the
-  gap.
-- Per-client offboarding scripts (`clients/UTA/offboard-computer.ps1`,
-  etc.) — same as above.
-- `analyze_inventory.py` — Operations covers data + decisions;
-  CVE / user-risk / publisher rollups / Whitelist Suggestions
-  surface / Excel-based UX / PDQ integration are gaps.
-- `Ninja-Patching-report.ps1` — every column is populated in the
-  Operations pipeline; the wide "one row per (device, patch)"
-  composite view + CSV export is the gap. Also overlaps with the
-  three Ninja patching Metabase-dashboard GAPs (Patch Evidence,
-  Patch Trends, Activity Search).
+- `analyze_inventory.py` — Operations covers software data +
+  decisions + rare_recent + classifier rules. Still only in the
+  script: CVE / vulnerability enrichment, user-risk analysis (user
+  ↔ installation join), publisher rollups + publisher-level
+  decision surface, Whitelist Suggestions surface with
+  threshold-based auto-suggest, Tech Checklist, PDQ Inventory as
+  a distinct signal source, Excel/VBA output pipeline.
+- `Ninja-Patching-report.ps1` — every column it produces exists in
+  the Operations pipeline. What's still only in the script: the
+  wide "one row per (device, patch)" composite table + CSV export.
+  Overlaps with the three Ninja patching Metabase-dashboard GAPs
+  (Patch Evidence, Patch Trends, Activity Search).
 
-**GAP — no Operations equivalent, script is the only surface:**
+**Data-quality operator-visible surfaces (may or may not be gaps —
+please confirm):**
 
-- **Platform-side offboarding actions** (Ninja tag, S1 decommission,
-  LMI unassign) triggered from Operations lifecycle transitions.
-- **CVE / vulnerability enrichment** on the software catalog.
-- **User-risk analysis** (user ↔ software installation join).
-- **PDQ Inventory** as a distinct software signal source.
-- **Fleet-wide Patch Evidence table** with (device × patch)
-  composite rows.
+- **Placeholder / shared-serial devices list.** The resolver
+  already handles the correctness case (`is_usable_serial` prevents
+  placeholders from driving identity matches). The retired
+  `identity_candidates_list` page had a separate operator-visible
+  list of *which devices currently have placeholder or shared
+  serials* — a data-quality report. That surface does not exist in
+  current Operations. **Confirm whether this needs an equivalent
+  or the correctness gate alone is sufficient.**
+- **Unmatched source records** — same shape: the retired page had
+  a summary count of unmatched source groups. Currently only
+  visible from ingest logs.
 
-**OUT OF SCOPE — different domain, not on the current Operations
-roadmap:**
+**OUT OF SCOPE — Operations was never intended to cover these:**
 
+- **Platform-side actions** (offboard tag in Ninja, decommission
+  in S1, unassign in LMI, delete a duplicate). The cleanup and
+  offboarding scripts remain the tooling for platform-side writes.
+  Operations is monitoring + operator decisions, not a write-back
+  orchestrator into the source platforms.
 - AD / Entra user-account management (`ad/*`, `migrated/ADH-User*`).
 - AD ↔ Entra hybrid-identity reconciliation
   (`clients/CP/Compare-HybridIdentities.ps1` + friends).
@@ -401,30 +404,24 @@ roadmap:**
   devices, software, patches). Currently browser-only. Small
   addition, probably worth doing per operator ergonomic feedback.
 - Ad-hoc `Untitled*.ps1` experimentation files were not audited —
-  no stable identity, no operational role.
+  no stable identity.
 
 ---
 
-## Recommended sequencing
+## Recommended sequencing (Operations build work only)
 
-1. **Immediate retirement candidates** (scripts have no operational
-   necessity today): AC scripts, Ninja software pullers, Ninja auth
-   utilities. Operations already replaced them.
-2. **Small operational gap fixes** (bounded slices):
+1. **Small operational fixes** (bounded slices):
    - CSV export buttons on Operations fleet + findings + patch
      pages.
-   - Operator-triggered platform-side offboarding for Ninja / S1 /
-     LMI (a small `retire_device` workflow that queues the platform
-     actions after an operator retires or merges a Device).
-3. **Patching visibility track** (Metabase-parity + this script's
-   intent overlap):
+   - Confirm and (if needed) build the data-quality list surfaces
+     (placeholder/shared serials, unmatched source groups).
+2. **Patching visibility track** — closes the Metabase-parity gaps
+   and subsumes `Ninja-Patching-report.ps1`'s intent:
    - Fleet Patch Evidence view — wide (device × patch) composite
-     rendered as an Operations page. Subsumes
-     `Ninja-Patching-report.ps1` and Metabase's Patch Evidence
-     dashboard.
+     rendered as an Operations page.
    - Patch Trends views (per-day install/failure/reboot volumes).
    - Activity Search (patch-activity free-text search).
-4. **Software-analyzer gap track** (larger, its own decision
+3. **Software-analyzer gap track** (larger, its own decision
    record):
    - Publisher rollups + publisher-level decision surface.
    - Whitelist Suggestions surface (threshold-based auto-suggest of
@@ -436,9 +433,9 @@ roadmap:**
    - PDQ ingestion if that source's granularity is needed.
    - **Explicitly not planned:** Excel / VBA output. Operations is
      web-only.
-5. **Explicitly not planned:** AD / Entra user management, hybrid
-   identity reconciliation, OS-deployment orchestration. These live
-   in `script-dev/` as standalone tooling.
+4. **Explicitly not planned:** Platform-side write actions, AD /
+   Entra user management, hybrid identity reconciliation,
+   OS-deployment orchestration. Scripts stay for these.
 
 ---
 
@@ -451,7 +448,8 @@ roadmap:**
 - Classifications reflect Operations state as of version 0.69.0.
 - Operator ergonomic parity (Excel-vs-web UX, downloadable exports)
   is called out as a category of gap even where the data +
-  decisions are functionally COVERED — worth naming for the
-  retirement conversation.
+  decisions are functionally COVERED. Scripts stay; the gap-
+  naming is about whether Operations should grow the equivalent
+  UX, not about turning any script off.
 - The audit is read-only: no scripts touched, no Operations
   behavior changed.
