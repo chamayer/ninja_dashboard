@@ -2,6 +2,26 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.74.1] — 2026-07-20 — Fix: patch page 500s + sortable rollout
+
+### Fixed
+- **500 on device_detail + patching pages** — Operations app roles
+  had no SELECT on the `ninja_patches` schema, which multiple views
+  join (device_detail's patch-signal, the 0.73/0.74 Patch Evidence
+  / Trends / Activity Search pages). Migration 0059 grants
+  USAGE + SELECT on the schema to `operations_app`,
+  `operations_readonly`, and `metabase_ro`, plus default privileges
+  so future tables auto-inherit.
+- **Every table now has `data-sortable`** — per the UI/UX ground
+  rule "every table sortable+filterable". 8 templates had `<table>`
+  elements without the attribute (missed on initial creation or in
+  the CSV rollout when I was already in the file):
+  client_candidate_detail, findings_admin_health,
+  merge_candidates_queue, notification_suppressions, org_policies,
+  patching_queue (2 tables), requirement_profiles, search_results.
+  Every list-view table across the app is now sortable via the
+  existing `table[data-sortable]` header-click JS in `base.html`.
+
 ## [0.74.0] — 2026-07-20 — Patch Trends + Activity Search
 
 ### Why

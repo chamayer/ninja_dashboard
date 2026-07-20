@@ -22,7 +22,7 @@
     {% if clients %}
     <div class="card">
         <h2>Clients ({{ clients|length }})</h2>
-        <table class="ops-table">
+        <table data-sortable class="ops-table">
             <thead>
                 <tr>
                     <th>Client</th>
@@ -44,7 +44,7 @@
     {% if devices %}
     <div class="card">
         <h2>Devices ({{ devices|length }}{% if devices|length == 100 %}+{% endif %})</h2>
-        <table class="ops-table">
+        <table data-sortable class="ops-table">
             <thead>
                 <tr>
                     <th>Hostname</th>

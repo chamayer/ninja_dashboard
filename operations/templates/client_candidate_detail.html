@@ -19,7 +19,7 @@
 <div class="card">
     <h2>Source groups feeding this candidate</h2>
     {% if per_source %}
-    <table style="width: 100%; border-collapse: collapse;">
+    <table data-sortable style="width: 100%; border-collapse: collapse;">
         <thead>
             <tr style="text-align: left; border-bottom: 1px solid var(--border);">
                 <th style="padding: 0.4rem;">Source</th>
@@ -57,7 +57,7 @@
         existing client's devices — the strongest map-to-existing signal.
     </p>
     {% if device_overlap %}
-    <table style="width: 100%; border-collapse: collapse;">
+    <table data-sortable style="width: 100%; border-collapse: collapse;">
         <thead>
             <tr style="text-align: left; border-bottom: 1px solid var(--border);">
                 <th style="padding: 0.4rem;">Existing client</th>
@@ -99,7 +99,7 @@
 <div class="card">
     <h2>Sample devices in this group</h2>
     {% if sample_devices %}
-    <table style="width: 100%; border-collapse: collapse;">
+    <table data-sortable style="width: 100%; border-collapse: collapse;">
         <thead>
             <tr style="text-align: left; border-bottom: 1px solid var(--border);">
                 <th style="padding: 0.4rem;">Platform</th>
