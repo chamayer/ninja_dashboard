@@ -62,6 +62,7 @@ def drain_resolution(batch_size: int = 200) -> int:
         rows = cur.fetchall()
 
         source_ids = _load_source_ids(cur)
+        identity_conflict_ft_id = _load_finding_type_id(cur, "identity_conflict")
 
         for obs_id, entity_type, entity_key, platform, client_id, observed_at, canonical_data in rows:
             cd = canonical_data or {}
@@ -119,7 +120,10 @@ def drain_resolution(batch_size: int = 200) -> int:
                 resolved_count += 1
                 log.debug("resolver: hostname match %s → device %s", entity_key, device_id)
             elif device_id is None:
-                _maybe_create_candidate(cur, obs_id, entity_key, norm, client_id)
+                _maybe_create_candidate(
+                    cur, obs_id, entity_key, norm, client_id,
+                    identity_conflict_ft_id=identity_conflict_ft_id,
+                )
 
     log.info("resolver: resolved %d / %d observations", resolved_count, len(rows) if rows else 0)
 
@@ -163,6 +167,27 @@ def drain_resolution(batch_size: int = 200) -> int:
 def _load_source_ids(cur) -> dict[str, int]:
     cur.execute("SELECT name, id FROM operations.sources")
     return {row[0]: row[1] for row in cur.fetchall()}
+
+
+def _load_agent_ids(cur) -> dict[str, int]:
+    """Map canonical Agent-product name → operations.agents.id.
+
+    Ninja / SentinelOne / LogMeIn / ScreenConnect are the seeded Agent
+    products (migration 0033). Observation `platform` values are
+    already normalized to these names via `canonical_platform()` in
+    `ingest/normalize.py`, so a direct name lookup is sufficient.
+    """
+    cur.execute("SELECT name, id FROM operations.agents")
+    return {row[0]: row[1] for row in cur.fetchall()}
+
+
+def _load_finding_type_id(cur, name: str) -> int | None:
+    cur.execute(
+        "SELECT id FROM operations.finding_types WHERE name = %s",
+        (name,),
+    )
+    row = cur.fetchone()
+    return row[0] if row else None
 
 
 def _resolve_by_serial(cur, serial: str, client_id: uuid.UUID | None) -> uuid.UUID | None:
@@ -360,23 +385,39 @@ def _attach_observation(
 
 
 def _maybe_create_candidate(
-    cur, obs_id: uuid.UUID, entity_key: str, norm: str, client_id: uuid.UUID | None
+    cur,
+    obs_id: uuid.UUID,
+    entity_key: str,
+    norm: str,
+    client_id: uuid.UUID | None,
+    identity_conflict_ft_id: int | None = None,
 ) -> None:
-    """If multiple devices match the hostname, record an identity_candidate for review."""
+    """If multiple devices match the hostname, record the conflict.
+
+    ADR-0005 slice 3: the operator-visible surface is a standard
+    `identity_conflict` Finding in `operations.findings`. The legacy
+    `operations.identity_candidates` row is written during the
+    transition (its admin UI has live consumers); retirement of the
+    side table is a separate destructive track — see
+    `operations/.work/backlog.md`.
+    """
     cur.execute(
         """
         SELECT id FROM operations.devices
         WHERE tenant_id = %s AND canonical_hostname = %s AND deleted_at IS NULL
           AND (%s::uuid IS NULL OR client_id = %s)
-        LIMIT 3
+        LIMIT 5
         """,
         (TENANT_ID, norm, client_id, client_id),
     )
     rows = cur.fetchall()
     if len(rows) < _MIN_IDENTITY_CANDIDATES:
         return
-    device_id_a = rows[0][0]
-    device_id_b = rows[1][0]
+    candidate_ids = [row[0] for row in rows]
+    device_id_a = candidate_ids[0]
+    device_id_b = candidate_ids[1]
+
+    # Legacy side table (dual-write during transition — see backlog).
     cur.execute(
         """
         INSERT INTO operations.identity_candidates
@@ -396,6 +437,46 @@ def _maybe_create_candidate(
         log.info(
             "resolver: identity_candidate created obs=%s hostname=%s device_count=%d",
             obs_id, norm, len(rows),
+        )
+
+    # Standard operator-visible surface — the ADR's mandated path.
+    # condition_key deduplicates repeat observations of the same
+    # hostname collision within a tenant.
+    if identity_conflict_ft_id is not None:
+        cur.execute(
+            """
+            INSERT INTO operations.findings (
+                id, version, tenant_id, finding_type_id, client_id,
+                subject_type, subject_id, subject_layer,
+                subject_layer_entity_id, finding_details, condition_key,
+                severity, confidence, status, first_seen_at, last_seen_at,
+                last_detected_at
+            )
+            VALUES (
+                gen_random_uuid(), 1, %s, %s, %s,
+                'device', %s, '', NULL, %s, %s,
+                'high', 'confirmed', 'open', NOW(), NOW(), NOW()
+            )
+            ON CONFLICT (tenant_id, condition_key)
+            WHERE condition_key <> '' AND status IN ('open', 'acknowledged')
+            DO UPDATE SET
+                last_seen_at = NOW(),
+                last_detected_at = NOW(),
+                finding_details = EXCLUDED.finding_details
+            """,
+            (
+                TENANT_ID,
+                identity_conflict_ft_id,
+                client_id,
+                device_id_a,
+                Json({
+                    "hostname": norm,
+                    "candidate_count": len(rows),
+                    "candidate_device_ids": [str(x) for x in candidate_ids],
+                    "trigger_observation_id": str(obs_id),
+                }),
+                f"identity_conflict:{norm}",
+            ),
         )
 
 
@@ -512,6 +593,7 @@ def _promote_unmatched_clusters(cur) -> int:
         "SELECT pg_advisory_xact_lock(hashtext('operations.resolver_promotion'))"
     )
     source_ids = _load_source_ids(cur)
+    agent_ids = _load_agent_ids(cur)
 
     cur.execute(
         """
@@ -636,7 +718,7 @@ def _promote_unmatched_clusters(cur) -> int:
                         (existing_device_id, TENANT_ID, platform, entity_key),
                     )
             promoted += _promote_entry_groups(
-                cur, source_ids, client_id, norm, extra_groups
+                cur, source_ids, agent_ids, client_id, norm, extra_groups
             )
             continue
 
@@ -672,6 +754,22 @@ def _promote_unmatched_clusters(cur) -> int:
                 os_family(os_name) if os_name else "",
                 f"auto-promoted from {', '.join(platforms)}"[:120],
             ),
+        )
+        _first_seen = min((e[3] for e in primary if e[3]), default=None)
+        _last_seen = max((e[4] for e in primary if e[4]), default=None)
+        _write_layer_entities_for_new_device(
+            cur,
+            device_id=device_id,
+            form_factor=device_type,
+            serial=serial or "",
+            vm_uuid=latest_cd.get("vm_uuid") or "",
+            os_name=os_name or "",
+            os_fam=os_family(os_name) if os_name else "",
+            os_group="Unknown",
+            first_seen=_first_seen,
+            last_seen=_last_seen,
+            entries=primary,
+            agent_ids=agent_ids,
         )
         for group in primary_groups:
             head = group[0]
@@ -712,7 +810,7 @@ def _promote_unmatched_clusters(cur) -> int:
             device_id, norm, client_id, platforms,
         )
         promoted += _promote_entry_groups(
-            cur, source_ids, client_id, norm, extra_groups
+            cur, source_ids, agent_ids, client_id, norm, extra_groups
         )
 
     if promoted:
@@ -721,7 +819,12 @@ def _promote_unmatched_clusters(cur) -> int:
 
 
 def _promote_entry_groups(
-    cur, source_ids: dict[str, int], client_id, norm: str, groups: list[list[tuple]]
+    cur,
+    source_ids: dict[str, int],
+    agent_ids: dict[str, int],
+    client_id,
+    norm: str,
+    groups: list[list[tuple]],
 ) -> int:
     """One device per machine group.
 
@@ -765,6 +868,22 @@ def _promote_entry_groups(
                 os_name or "", os_family(os_name) if os_name else "",
                 reason[:120],
             ),
+        )
+        _group_first = min((e[3] for e in group if e[3]), default=None)
+        _group_last = max((e[4] for e in group if e[4]), default=None)
+        _write_layer_entities_for_new_device(
+            cur,
+            device_id=device_id,
+            form_factor=_infer_form_factor(group),
+            serial=serial or "",
+            vm_uuid=cd.get("vm_uuid") or "",
+            os_name=os_name or "",
+            os_fam=os_family(os_name) if os_name else "",
+            os_group="Unknown",
+            first_seen=_group_first,
+            last_seen=_group_last,
+            entries=group,
+            agent_ids=agent_ids,
         )
         for i, entry in enumerate(group):
             platform, entity_type, entity_key, first_seen, last_seen, e_cd = entry
@@ -862,10 +981,12 @@ def _sync_device_attributes(cur) -> None:
             updated_reason = 'attribute sync from observations'
         FROM (
             SELECT device_id,
+                   -- ADR-0005: agent presence is not evidence of form
+                   -- factor. Only asset-nature signals upgrade away
+                   -- from 'unknown'.
                    CASE WHEN is_net THEN 'network-device'
                         WHEN is_host THEN 'hypervisor-host'
                         WHEN is_vm THEN 'vm'
-                        WHEN is_agent THEN 'physical'
                         ELSE 'unknown' END AS target
             FROM ft
         ) t
@@ -903,8 +1024,172 @@ def _sync_device_attributes(cur) -> None:
     if os_rows:
         log.info("resolver: attribute sync set os_name on %d devices", len(os_rows))
 
+    # ── Layer-entity propagation (ADR-0005 slice 2) ───────────────────
+    # Keep the open-window Asset.form_factor in sync with the flat
+    # Device.device_type cache. Same criterion — an evaluator-visible
+    # form-factor change is a first-class layer event.
+    cur.execute(
+        """
+        UPDATE operations.assets a
+        SET form_factor = d.device_type,
+            last_seen_at = GREATEST(a.last_seen_at, d.updated_at),
+            updated_at = NOW()
+        FROM operations.devices d
+        WHERE a.tenant_id = %s
+          AND a.tenant_id = d.tenant_id
+          AND a.device_id = d.id
+          AND a.effective_to IS NULL
+          AND a.asset_type = 'endpoint_hardware'
+          AND a.form_factor IS DISTINCT FROM d.device_type
+        """,
+        (TENANT_ID,),
+    )
+    if cur.rowcount:
+        log.info(
+            "resolver: layer sync set assets.form_factor on %d rows",
+            cur.rowcount,
+        )
+
+    # Open OSInstance for devices that now have an os_name but never
+    # got one at promotion time (typical for LMI-first promotions where
+    # Ninja arrives with the OS later). Idempotent.
+    cur.execute(
+        """
+        INSERT INTO operations.os_instances (
+            id, tenant_id, version, device_id, os_name, os_family,
+            os_group, os_version, install_identifier, patch_state,
+            config_state, effective_from, effective_to,
+            first_seen_at, last_seen_at,
+            first_observed_source_id, last_observed_source_id,
+            created_at, updated_at
+        )
+        SELECT
+            gen_random_uuid(), d.tenant_id, 1, d.id,
+            COALESCE(d.os_name, ''), COALESCE(d.os_family, ''),
+            COALESCE(d.os_group, 'Unknown'),
+            '', '', '{}'::jsonb, '{}'::jsonb,
+            COALESCE(d.updated_at, NOW()), NULL,
+            COALESCE(d.updated_at, NOW()), COALESCE(d.updated_at, NOW()),
+            NULL, NULL, NOW(), NOW()
+        FROM operations.devices d
+        WHERE d.tenant_id = %s
+          AND d.deleted_at IS NULL
+          AND (
+              COALESCE(d.os_name, '') <> ''
+              OR d.device_type IN ('physical', 'vm')
+          )
+          AND NOT EXISTS (
+              SELECT 1 FROM operations.os_instances o
+              WHERE o.tenant_id = d.tenant_id
+                AND o.device_id = d.id
+                AND o.effective_to IS NULL
+          )
+        ON CONFLICT (tenant_id, device_id)
+        WHERE effective_to IS NULL
+        DO NOTHING
+        """,
+        (TENANT_ID,),
+    )
+    if cur.rowcount:
+        log.info(
+            "resolver: layer sync opened %d os_instances rows",
+            cur.rowcount,
+        )
+
+    # Propagate os_name / os_family / os_group updates on the current
+    # OSInstance window when the Device cache changed.
+    cur.execute(
+        """
+        UPDATE operations.os_instances o
+        SET os_name = d.os_name,
+            os_family = d.os_family,
+            os_group = COALESCE(d.os_group, 'Unknown'),
+            last_seen_at = GREATEST(o.last_seen_at, d.updated_at),
+            updated_at = NOW()
+        FROM operations.devices d
+        WHERE o.tenant_id = %s
+          AND o.tenant_id = d.tenant_id
+          AND o.device_id = d.id
+          AND o.effective_to IS NULL
+          AND (
+              o.os_name IS DISTINCT FROM d.os_name
+              OR o.os_family IS DISTINCT FROM d.os_family
+              OR o.os_group IS DISTINCT FROM COALESCE(d.os_group, 'Unknown')
+          )
+        """,
+        (TENANT_ID,),
+    )
+    if cur.rowcount:
+        log.info(
+            "resolver: layer sync updated %d os_instances rows",
+            cur.rowcount,
+        )
+
+    # AgentInstance: open one row per (Device, Agent product) for any
+    # agent-nature observation attached to a Device that doesn't yet
+    # have an open window for that product. Non-agent observations
+    # (vm.guest, vm.host, network.device) never open AgentInstance —
+    # `entity_type LIKE 'agent.%'` gates the write. `platform` values
+    # are canonicalized upstream to match `operations.agents.name`.
+    cur.execute(
+        """
+        INSERT INTO operations.agent_instances (
+            id, tenant_id, version, device_id, agent_id,
+            install_token, agent_version, coverage_state,
+            effective_from, effective_to,
+            first_seen_at, last_seen_at,
+            first_observed_source_id, last_observed_source_id,
+            created_at, updated_at
+        )
+        SELECT
+            gen_random_uuid(), sub.tenant_id, 1,
+            sub.device_id, sub.agent_id,
+            '', '', '{}'::jsonb,
+            sub.first_at, NULL,
+            sub.first_at, sub.last_at,
+            NULL, NULL, NOW(), NOW()
+        FROM (
+            SELECT eo.tenant_id, eo.device_id, ag.id AS agent_id,
+                   MIN(eo.observed_at) AS first_at,
+                   MAX(eo.observed_at) AS last_at
+            FROM operations.entity_observations eo
+            JOIN operations.agents ag ON ag.name = eo.platform
+            WHERE eo.tenant_id = %s
+              AND eo.device_id IS NOT NULL
+              AND eo.entity_type LIKE 'agent.%%'
+            GROUP BY eo.tenant_id, eo.device_id, ag.id
+        ) sub
+        WHERE NOT EXISTS (
+            SELECT 1 FROM operations.agent_instances ai
+            WHERE ai.tenant_id = sub.tenant_id
+              AND ai.device_id = sub.device_id
+              AND ai.agent_id = sub.agent_id
+              AND ai.effective_to IS NULL
+        )
+        ON CONFLICT (tenant_id, device_id, agent_id)
+        WHERE effective_to IS NULL
+        DO NOTHING
+        """,
+        (TENANT_ID,),
+    )
+    if cur.rowcount:
+        log.info(
+            "resolver: layer sync opened %d agent_instances rows",
+            cur.rowcount,
+        )
+
 
 def _infer_form_factor(entries: list[tuple]) -> str:
+    """Infer Asset form factor from a group of source observations.
+
+    Per ADR-0005: `form_factor='unknown'` is a legitimate value; positive
+    evidence is required to leave it. Agent presence is *not* evidence
+    of form factor — an `agent.*` observation says "an OS is being
+    managed," not "the hardware is physical." Only explicit
+    asset-nature signals (network.device / vm.host / vm.guest entity
+    types, or matching node_class markers, or an is_vm flag) upgrade
+    form factor away from unknown.
+    """
     values = [e[5] or {} for e in entries]
     node_classes = {(cd.get("node_class") or "").upper() for cd in values}
     entity_types = {e[1] for e in entries}
@@ -920,6 +1205,139 @@ def _infer_form_factor(entries: list[tuple]) -> str:
         bool(cd.get("is_vm")) for cd in values
     ):
         return "vm"
-    if any(et and et.startswith("agent.") for et in entity_types):
-        return "physical"
+    # No asset-nature evidence — form factor stays unknown regardless of
+    # any agent.* observations. See ADR-0005.
     return "unknown"
+
+
+def _write_layer_entities_for_new_device(
+    cur,
+    device_id: uuid.UUID,
+    form_factor: str,
+    serial: str,
+    vm_uuid: str,
+    os_name: str,
+    os_fam: str,
+    os_group: str,
+    first_seen,
+    last_seen,
+    entries: list[tuple] | None = None,
+    agent_ids: dict[str, int] | None = None,
+) -> None:
+    """Open the initial Asset, OSInstance, and AgentInstance rows for
+    a freshly-promoted Device.
+
+    Per ADR-0005 slice 2. Kept as a single helper so both Device
+    creation sites (`_promote_unmatched_clusters` primary path and
+    `_promote_entry_groups` duplicate-group path) stay in sync.
+
+    - `assets` row is always opened (asset_type='endpoint_hardware',
+      effective_to=NULL). form_factor may be 'unknown' — that's a
+      legitimate state per the rule.
+    - `os_instances` row is opened only when os_name is present or
+      form factor is physical / vm (same criterion as the 0051
+      backfill). Pure network-device / hypervisor-host devices don't
+      get an OSInstance row.
+    - `agent_instances` rows are opened one per (Device, Agent
+      product) observed in `entries` with `entity_type LIKE 'agent.%'`.
+      Non-agent observations (vm.guest, vm.host, network.device)
+      never open an AgentInstance. `agent_ids` maps platform name to
+      Agent PK; when None the AgentInstance step is skipped.
+
+    Uses `ON CONFLICT DO NOTHING` on the partial unique indexes so
+    concurrent resolver drains never duplicate open windows.
+    """
+    cur.execute(
+        """
+        INSERT INTO operations.assets (
+            id, tenant_id, version, asset_type, device_id, form_factor,
+            serial, vm_uuid, chassis, virtualization, effective_from,
+            effective_to, first_seen_at, last_seen_at,
+            first_observed_source_id, last_observed_source_id,
+            created_at, updated_at
+        )
+        VALUES (
+            gen_random_uuid(), %s, 1, 'endpoint_hardware', %s, %s,
+            %s, %s, '', '{}'::jsonb, COALESCE(%s, NOW()), NULL,
+            COALESCE(%s, NOW()), COALESCE(%s, NOW()),
+            NULL, NULL, NOW(), NOW()
+        )
+        ON CONFLICT (tenant_id, device_id)
+        WHERE effective_to IS NULL
+          AND device_id IS NOT NULL
+          AND asset_type = 'endpoint_hardware'
+        DO NOTHING
+        """,
+        (
+            TENANT_ID, device_id, form_factor,
+            serial or "", vm_uuid or "",
+            first_seen, first_seen, last_seen,
+        ),
+    )
+    if os_name or form_factor in ("physical", "vm"):
+        cur.execute(
+            """
+            INSERT INTO operations.os_instances (
+                id, tenant_id, version, device_id, os_name, os_family,
+                os_group, os_version, install_identifier, patch_state,
+                config_state, effective_from, effective_to,
+                first_seen_at, last_seen_at,
+                first_observed_source_id, last_observed_source_id,
+                created_at, updated_at
+            )
+            VALUES (
+                gen_random_uuid(), %s, 1, %s, %s, %s,
+                %s, '', '', '{}'::jsonb,
+                '{}'::jsonb, COALESCE(%s, NOW()), NULL,
+                COALESCE(%s, NOW()), COALESCE(%s, NOW()),
+                NULL, NULL, NOW(), NOW()
+            )
+            ON CONFLICT (tenant_id, device_id)
+            WHERE effective_to IS NULL
+            DO NOTHING
+            """,
+            (
+                TENANT_ID, device_id, os_name or "", os_fam or "",
+                os_group or "Unknown", first_seen, first_seen, last_seen,
+            ),
+        )
+    if entries and agent_ids:
+        seen_agents: set[int] = set()
+        for entry in entries:
+            platform, entity_type, _entity_key, e_first, e_last, e_cd = entry
+            if not entity_type or not entity_type.startswith("agent."):
+                continue
+            agent_id = agent_ids.get(platform)
+            if agent_id is None or agent_id in seen_agents:
+                continue
+            seen_agents.add(agent_id)
+            cd = e_cd or {}
+            install_token = str(cd.get("install_token") or "")[:240]
+            agent_ver = str(cd.get("agent_version") or cd.get("version") or "")[:80]
+            cur.execute(
+                """
+                INSERT INTO operations.agent_instances (
+                    id, tenant_id, version, device_id, agent_id,
+                    install_token, agent_version, coverage_state,
+                    effective_from, effective_to,
+                    first_seen_at, last_seen_at,
+                    first_observed_source_id, last_observed_source_id,
+                    created_at, updated_at
+                )
+                VALUES (
+                    gen_random_uuid(), %s, 1, %s, %s,
+                    %s, %s, '{}'::jsonb,
+                    COALESCE(%s, NOW()), NULL,
+                    COALESCE(%s, NOW()), COALESCE(%s, NOW()),
+                    NULL, NULL, NOW(), NOW()
+                )
+                ON CONFLICT (tenant_id, device_id, agent_id)
+                WHERE effective_to IS NULL
+                DO NOTHING
+                """,
+                (
+                    TENANT_ID, device_id, agent_id,
+                    install_token, agent_ver,
+                    e_first, e_first, e_last,
+                ),
+            )

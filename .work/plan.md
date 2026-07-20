@@ -1,73 +1,66 @@
 # Active root work plan
 
-This file is intentionally a template until root and Operations state are
-reconciled.
+Router only. Current work is Operations-scoped; see
+`operations/.work/plan.md`.
 
 ## Status
 
-- Planning — no active root-level code change found.
+- Planning — no active root-level code change. Awaiting selection of the next
+  slice.
 
 ## Goal
 
 - Coordinate the next repository-wide slice only if work crosses the root
-  ingest/reporting boundary. Current documented work is Operations-scoped.
+  ingest/reporting boundary.
 
 ## Scope
 
 - In:
   - Root coordination, release state, and cross-service changes when needed.
 - Out:
-  - Duplicating Operations implementation details.
+  - Operations-only implementation details.
 
 ## Files involved
 
-- `operations/.work/plan.md` — current candidate implementation direction.
-- Root VERSION and CHANGELOG — stack release authorities.
+- `operations/.work/plan.md` — module-scoped detail authority.
+- Root `VERSION`, `CHANGELOG.md` — stack release authorities.
 
 ## Steps
 
-- [x] Reconcile root BLUEPRINT with the current release.
-- [x] Confirm root BLUEPRINT is stale and describes completed M0-era work.
 - [ ] Keep this plan as a short router while work remains Operations-only.
 - [ ] Expand it only when an approved task changes ingest, root SQL, Metabase,
   Compose, or other cross-service behavior.
 
 ## Decisions
 
-- Context: Operations is a module-sized product inside a shared stack.
-- Options considered:
-  - Mirror all Operations details at root.
-  - Keep one Operations plan and a root router only for cross-service work.
-- Decision: Use the module plan as the detailed authority for Operations-only
-  work.
-- Rationale: Avoids duplicated, conflicting plan state.
-- Consequences: Root work must explicitly identify cross-service dependencies.
-- Root planning should route to the Operations plan when the active task is
-  entirely module-scoped.
+- Use the module plan as the detailed authority for Operations-only work.
+- Rationale: avoids duplicated, conflicting plan state.
 - Promote durable decisions to `docs/decisions/`.
-
-## Validation
-
-- [x] Root VERSION and recent CHANGELOG reviewed.
-- [x] Root Git status reviewed.
 
 ## Current checkpoint
 
-- Version 0.50.5 is current.
-- The latest Operations-only UI work is complete; see
-  `operations/.work/plan.md`.
+- Stack version **0.63.0** is current.
+- Recent releases: 0.60.0 rare_recent reframe + classifier config; 0.61.0
+  presence matview rename; 0.61.1 `/software` 500 fix; 0.62.0 Finding
+  timestamps + dashboard trend arrows; 0.62.1 hotfix for missing
+  `resolved_at`; 0.63.0 `device_offline` evidence enrichment.
+- Track UI-2 waves **D / E / F** all landed. **G (business data capture)** and
+  **H (dashboard maturity)** are deferred together in the backlog.
+- Root-level candidates outstanding: ingest domain separation; legacy
+  agent-compliance cutover; Metabase card parity audit (informs Operations
+  build-out ahead of Metabase deprecation).
 
 ## Remaining blockers
 
-- Human approval of the next Operations UI slice.
+- Human approval of the next slice.
 
 ## Next action
 
 - Follow `operations/.work/plan.md` unless a cross-service requirement emerges.
+- Untracked reference material at repo root:
+  `Ninja+RMM+Public+API+v2.0.5+Device+Filter+Syntax.pdf` — likely input for a
+  future ingest filter change; not currently scoped.
 
 ## Completion
 
-- Mark complete only after actual validation and already known commit hashes are
-  recorded.
-- Do not create an extra commit solely to add that commit's own hash here.
-- Keep this completed plan until the next nontrivial root task replaces it.
+- Keep this plan until the next nontrivial root task replaces it.

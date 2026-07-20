@@ -64,29 +64,27 @@ This is the proposed successor to the genuinely open portion of
 - Status: **Landed 0.61.0** — renamed to `device_agent_presence_current`
   in migration 0047. Follow-up (below) covers the Metabase side.
 
-### Metabase question audit
+### Device identity + layered entities (Track)
 
-- Candidate scope: grep saved question SQL under `/amr-ch-01_data/`
-  Metabase's Postgres backing store for references to retired /
-  renamed columns and matviews. Update questions in place.
-- Known targets:
-  - `operations.agent_presence_current` → `device_agent_presence_current`
-    (renamed 0.61.0)
-  - `operations.devices.exemptions` → `operations.v_device.exemptions`
-    (retired in Track O)
-- Access: Metabase's Postgres uses env `MB_DB_*` on the
-  `ninja-metabase` container (host `postgres`, port 5432, type
-  postgres). DB name / user / pass not in the visible env — look
-  in the docker-compose stack env-file or the mounted secret.
-- Constraint: do not run destructive updates without a preceding
-  read-only report of all affected question IDs + names.
-
-### Form-factor fallback correction
-
-- Concern: source-agent presence alone can cause unknown form factor to be
-  labeled physical.
-- Trigger: next identity-resolver correction or onboarding of source-only
-  clients.
+- Candidate scope: implement the model in decision record
+  `operations/docs/decisions/0005-device-identity-and-layered-entities.md`.
+- Introduces `Asset`, `OSInstance`, and `AgentInstance` as canonical layer
+  entities with effective_from / effective_to windows. `Device` becomes a
+  thin, learned identity anchor. Findings gain `source_layer` +
+  `source_layer_entity_id` back-references. `v_device_current` flattening
+  view supplies operator surfaces.
+- Absorbs the previous "form-factor fallback correction" backlog item —
+  under this model, agent presence cannot infer asset form factor by
+  construction. "Unknown" becomes a legitimate value at every layer.
+- Absorbs the identity-conflict rule: hostname-only observations do not
+  merge; contested corroboration surfaces an identity-conflict finding.
+- Track-sized. Migration path splits current `Device` columns into layer
+  entity tables with backfilled effective windows; evaluators re-point to
+  layer entities; composite evaluators declare layer dependencies.
+- Constraint: preserve tenant/RLS behavior across four canonical tables;
+  keep operator context (labels, notes, exemptions) on Device.
+- Trigger: explicit approval to open the track. Cheaper before any further
+  UI or evaluator work accrues on the flat Device model.
 
 ## Policy and workflow enhancements
 
@@ -99,6 +97,57 @@ This is the proposed successor to the genuinely open portion of
 - ScreenConnect session pagination/cap verification
 
 Each item needs a focused active plan before implementation.
+
+## Consolidate side tables into the standard Findings surface
+
+Principle: operator-visible findings live in `operations.findings` with a
+`FindingType` row. Per-type side tables fragment the operator UX and
+duplicate lifecycle plumbing. See
+`memory/feedback_findings_single_surface.md` (2026-07-20).
+
+### Retire `identity_candidates`
+
+- Reason deferred: the table has live UI consumers today
+  (`apps/core/views.py`, `templates/home.html`, `_admin_tabs.html`,
+  `config/urls.py`, `context_processors.py`). Retirement requires
+  migrating the admin surface to the standard findings queue filtered
+  on `finding_type='identity_conflict'`, then dropping the table + URL
+  + view.
+- Status: `identity_conflict` FindingType emission landed in slice 3 of
+  ADR-0005. Dual-write continues during the transition.
+- Trigger: explicit approval for the destructive retirement.
+
+### Audit other finding-like side tables
+
+- Candidate scope: `merge_candidates` and any other tables that
+  materialize operator-review workflows outside `operations.findings`.
+- Trigger: consumer audit + per-table retirement plan.
+
+## Metabase deprecation
+
+### Metabase card parity audit (informs Operations build-out)
+
+- Purpose: Metabase is planned for deprecation. Before turning it off,
+  inventory every card in active use to learn what analytical surfaces
+  operators actually rely on, so equivalent views can be built natively
+  in Operations.
+- Candidate scope:
+  - Full read-only export of Metabase questions + dashboards from the
+    `ninja-metabase` backing Postgres (question IDs, names, collection
+    paths, dashboard placement, SQL, last-viewed / last-run signals if
+    available).
+  - Classify each card: (a) already covered by an Operations view,
+    (b) needs an Operations equivalent, (c) obsolete / retire.
+  - Produce a parity gap list feeding future Operations UI slices.
+- Out of scope: fixing individual broken Metabase questions caused by
+  Operations schema changes (renamed presence matview, retired
+  `exemptions` column, etc.). These will be resolved by the Operations
+  equivalent, not by patching Metabase SQL.
+- Access: Metabase's Postgres uses env `MB_DB_*` on the `ninja-metabase`
+  container (host `postgres`, port 5432, type postgres). Credentials in
+  the compose env-file or mounted secret.
+- Constraint: read-only. No writes to the Metabase backing store.
+- Trigger: approved decision to begin Metabase sunset planning.
 
 ## Backlog rules
 

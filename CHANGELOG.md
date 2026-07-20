@@ -2,6 +2,87 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.66.0] — 2026-07-20 — identity_conflict Finding on hostname-only conflicts
+
+### Why
+ADR-0005 slice 3. When the resolver finds two or more Devices sharing a
+hostname in the same client with no strong corroborating identifier
+(serial / vm_uuid / MAC / install token), hostname alone never merges.
+Previously the conflict was recorded only in the
+`operations.identity_candidates` side table and its dedicated admin UI;
+operators triaging via the standard findings queue never saw it.
+
+Per the "findings live in the standard table — no side tables per type"
+rule, ambiguous identity conflicts now emit a standard
+`identity_conflict` Finding into `operations.findings` with severity
+`high`, deduplicated by `condition_key='identity_conflict:{hostname}'`.
+The Finding's evidence panel carries the candidate device IDs, hostname,
+and trigger observation.
+
+### Added
+- `operations.finding_types` seed: `identity_conflict` (severity `high`,
+  class `entity`, category `identity`, not auto-resolvable).
+- `_maybe_create_candidate` now emits an `identity_conflict` Finding
+  alongside the legacy `identity_candidates` write (dual-write during
+  transition — the legacy admin UI has live consumers). Uses
+  `ON CONFLICT ... DO UPDATE` on the partial unique index over
+  `(tenant, condition_key)` for active statuses so repeat observations
+  refresh the same open Finding rather than piling up duplicates.
+- Migration 0052.
+
+### Deferred
+- Retirement of `operations.identity_candidates` — the table has live
+  UI consumers (admin page, home dashboard, URL route). Migrating them
+  to the standard findings queue filtered on
+  `finding_type='identity_conflict'` is a bounded destructive track,
+  tracked in `operations/.work/backlog.md`.
+- Audit of other finding-like side tables (`merge_candidates`, etc.)
+  for the same consolidation.
+
+## [0.65.0] — 2026-07-20 — Layered entity writes at resolution + form-factor rule fix
+
+### Why
+ADR-0005 slice 2. With the layer entity tables and open-window backfill
+in place (0.64.0), the ingest identity resolver now writes to them
+directly: every promoted Device gets an open-window `Asset` row and,
+for OS-carrying kinds, an open-window `OSInstance` row. The attribute
+sync step propagates further changes to those layer rows so they stay
+consistent with the flat `Device` cache columns. Slice 2 also fixes
+the form-factor inference bug the ADR named: agent presence is no
+longer evidence of physical hardware.
+
+### Changed
+- `ingest/identity/resolver.py::_infer_form_factor` — dropped the
+  `agent → physical` fallback. Form factor now stays `unknown` in the
+  absence of asset-nature evidence (network.device / vm.host /
+  vm.guest / is_vm flag). Same rule reflected in the
+  `_sync_device_attributes` SQL.
+- `_promote_unmatched_clusters` and `_promote_entry_groups` now open
+  `assets` (asset_type='endpoint_hardware') and, conditionally,
+  `os_instances` rows alongside every new `devices` insert. Uses the
+  partial unique indexes' `ON CONFLICT DO NOTHING` to stay idempotent
+  under concurrent drains.
+- `_sync_device_attributes` gained layer-propagation SQL: updates
+  `assets.form_factor` when the flat Device cache changes, opens
+  missing `os_instances` for Devices that now carry an `os_name`,
+  syncs OS fields on the current OSInstance window, and opens missing
+  `agent_instances` rows for any (Device, Agent product) with
+  agent-nature observations that don't yet have an open window.
+- `_write_layer_entities_for_new_device` extended to also emit
+  `agent_instances` rows for `entity_type LIKE 'agent.%'` entries at
+  Device promotion, mapping observation `platform` to the seeded
+  `operations.agents` product (Ninja / SentinelOne / LogMeIn /
+  ScreenConnect). `install_token` / `agent_version` fields are
+  populated when present in the observation's canonical_data.
+- `_promote_entry_groups` signature gained an `agent_ids` parameter;
+  callers in `_promote_unmatched_clusters` pass it through.
+- `_load_agent_ids` helper added alongside `_load_source_ids`.
+
+### Not yet
+- Identity-conflict finding on hostname-only matches remains deferred
+  pending a decision on how it coexists with the existing
+  `identity_candidates` operator-review table (see plan).
+
 ## [0.64.0] — 2026-07-20 — Device layered entities (schema + backfill)
 
 ### Why
