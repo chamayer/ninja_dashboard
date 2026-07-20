@@ -1155,6 +1155,167 @@ def _sync_device_attributes(cur) -> None:
             cur.rowcount,
         )
 
+    # ── Data-quality Findings (nothing hidden or silently ignored) ─────
+    # Emit standard operations.findings rows for the three silent
+    # filters that used to be visible only on the retired identity
+    # admin page or (worse) only in logs. Idempotent via condition_key.
+
+    ft_placeholder = _load_finding_type_id(cur, "placeholder_serial")
+    ft_shared      = _load_finding_type_id(cur, "shared_serial")
+    ft_unmatched   = _load_finding_type_id(cur, "unmatched_source_group")
+
+    # placeholder_serial — devices whose canonical_serial is filler.
+    # Match the ingest.normalize.is_usable_serial() filter set at the
+    # SQL level. Devices with an empty serial are excluded (nothing to
+    # flag as bad — the source just didn't publish one).
+    if ft_placeholder is not None:
+        cur.execute(
+            """
+            INSERT INTO operations.findings (
+                id, version, tenant_id, finding_type_id, client_id,
+                subject_type, subject_id, subject_layer,
+                subject_layer_entity_id, finding_details, condition_key,
+                severity, confidence, status, first_seen_at, last_seen_at,
+                last_detected_at
+            )
+            SELECT
+                gen_random_uuid(), 1, d.tenant_id, %s, d.client_id,
+                'device', d.id, '', NULL,
+                jsonb_build_object(
+                    'hostname', d.canonical_hostname,
+                    'serial',   d.canonical_serial
+                ),
+                'placeholder_serial:' || d.id,
+                'high', 'confirmed', 'open',
+                NOW(), NOW(), NOW()
+            FROM operations.devices d
+            WHERE d.tenant_id = %s
+              AND d.deleted_at IS NULL
+              AND COALESCE(d.canonical_serial, '') <> ''
+              AND (
+                  LOWER(TRIM(d.canonical_serial)) IN (
+                      'none','null','default string','to be filled by o.e.m.',
+                      'to be filled by o.e.m','system serial number',
+                      'chassis serial number','123-1234-123','invalid',
+                      'not specified','not applicable','n/a','na','unknown'
+                  )
+                  OR LENGTH(TRIM(d.canonical_serial)) < 4
+              )
+            ON CONFLICT (tenant_id, condition_key)
+            WHERE condition_key > '' AND status IN ('open', 'acknowledged')
+            DO UPDATE SET
+                last_seen_at = NOW(),
+                last_detected_at = NOW(),
+                finding_details = EXCLUDED.finding_details
+            """,
+            (ft_placeholder, TENANT_ID),
+        )
+        if cur.rowcount:
+            log.info(
+                "resolver: data-quality upserted %d placeholder_serial findings",
+                cur.rowcount,
+            )
+
+    # shared_serial — one finding per (client, serial) where 2+ devices
+    # share the value. subject_id points to the alphabetically-first
+    # device_id; finding_details lists all sharers.
+    if ft_shared is not None:
+        cur.execute(
+            """
+            INSERT INTO operations.findings (
+                id, version, tenant_id, finding_type_id, client_id,
+                subject_type, subject_id, subject_layer,
+                subject_layer_entity_id, finding_details, condition_key,
+                severity, confidence, status, first_seen_at, last_seen_at,
+                last_detected_at
+            )
+            SELECT
+                gen_random_uuid(), 1, sub.tenant_id, %s, sub.client_id,
+                'device', sub.first_device_id, '', NULL,
+                jsonb_build_object(
+                    'serial',       sub.serial,
+                    'device_count', sub.device_count,
+                    'device_ids',   sub.device_ids,
+                    'hostnames',    sub.hostnames
+                ),
+                'shared_serial:' || sub.client_id || ':' || sub.serial,
+                'high', 'confirmed', 'open',
+                NOW(), NOW(), NOW()
+            FROM (
+                SELECT
+                    d.tenant_id, d.client_id,
+                    d.canonical_serial AS serial,
+                    COUNT(*) AS device_count,
+                    (ARRAY_AGG(d.id::text ORDER BY d.id::text))[1] AS first_device_id,
+                    ARRAY_AGG(d.id::text ORDER BY d.id::text) AS device_ids,
+                    ARRAY_AGG(d.canonical_hostname ORDER BY d.id::text) AS hostnames
+                FROM operations.devices d
+                WHERE d.tenant_id = %s
+                  AND d.deleted_at IS NULL
+                  AND COALESCE(d.canonical_serial, '') <> ''
+                GROUP BY d.tenant_id, d.client_id, d.canonical_serial
+                HAVING COUNT(*) > 1
+            ) sub
+            ON CONFLICT (tenant_id, condition_key)
+            WHERE condition_key > '' AND status IN ('open', 'acknowledged')
+            DO UPDATE SET
+                last_seen_at = NOW(),
+                last_detected_at = NOW(),
+                finding_details = EXCLUDED.finding_details
+            """,
+            (ft_shared, TENANT_ID),
+        )
+        if cur.rowcount:
+            log.info(
+                "resolver: data-quality upserted %d shared_serial findings",
+                cur.rowcount,
+            )
+
+    # unmatched_source_group — one finding per pending row in
+    # operations.unmatched_source_groups. finding_class is 'admin'
+    # (subject_type='source_binding' would be closest but the
+    # unmatched group isn't a binding; use 'source_binding' subject
+    # with source_id in details).
+    if ft_unmatched is not None:
+        cur.execute(
+            """
+            INSERT INTO operations.findings (
+                id, version, tenant_id, finding_type_id, client_id,
+                subject_type, subject_id, subject_layer,
+                subject_layer_entity_id, finding_details, condition_key,
+                severity, confidence, status, first_seen_at, last_seen_at,
+                last_detected_at
+            )
+            SELECT
+                gen_random_uuid(), 1, u.tenant_id, %s, NULL,
+                'source_binding', u.id, '', NULL,
+                jsonb_build_object(
+                    'source_id',     u.source_id,
+                    'external_id',   u.external_id,
+                    'external_name', u.external_name,
+                    'device_count',  u.device_count,
+                    'first_seen_at', u.first_seen_at
+                ),
+                'unmatched_source_group:' || u.source_id || ':' || u.external_id,
+                'medium', 'confirmed', 'open',
+                u.first_seen_at, u.last_seen_at, NOW()
+            FROM operations.unmatched_source_groups u
+            WHERE u.tenant_id = %s AND u.status = 'pending'
+            ON CONFLICT (tenant_id, condition_key)
+            WHERE condition_key > '' AND status IN ('open', 'acknowledged')
+            DO UPDATE SET
+                last_seen_at = NOW(),
+                last_detected_at = NOW(),
+                finding_details = EXCLUDED.finding_details
+            """,
+            (ft_unmatched, TENANT_ID),
+        )
+        if cur.rowcount:
+            log.info(
+                "resolver: data-quality upserted %d unmatched_source_group findings",
+                cur.rowcount,
+            )
+
 
 def _infer_form_factor(entries: list[tuple]) -> str:
     """Infer Asset form factor from a group of source observations.

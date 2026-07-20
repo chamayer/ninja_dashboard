@@ -2,6 +2,50 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.70.0] — 2026-07-20 — Surface silent data-quality filters as Findings
+
+### Why
+Per the "nothing hidden or silently ignored" rule
+(`memory/feedback_nothing_hidden.md`, 2026-07-20). Three ingest-side
+silent filters used to hide their inputs from the operator:
+
+- `is_usable_serial()` correctly skips placeholder serials for
+  identity matching — but the affected devices were invisible.
+- Devices sharing a canonical_serial were only surfaced on the
+  retired identity_candidates_list page.
+- Rows in `operations.unmatched_source_groups` were visible only in
+  ingest logs (or as an aggregate count on the retired page).
+
+All three now emit standard `operations.findings` rows through the
+resolver's attribute-sync sweep — same table, same lifecycle, same
+queue as every other finding (per the "findings live in one table"
+rule).
+
+### Added
+- FindingType seeds (migration 0056):
+  - `placeholder_serial` — severity high, category identity,
+    auto_resolvable. Subject: the affected device.
+  - `shared_serial` — severity high, category identity,
+    auto_resolvable. One finding per (client, serial) with all
+    sharing device IDs + hostnames in `finding_details`.
+  - `unmatched_source_group` — severity medium, class admin,
+    category identity, auto_resolvable. One finding per pending row
+    in `operations.unmatched_source_groups`.
+- Three SQL emit blocks appended to
+  `_sync_device_attributes` in `ingest/identity/resolver.py`. Each
+  is idempotent via `ON CONFLICT (tenant, condition_key) DO UPDATE`
+  on the standard partial unique index; repeat drains refresh
+  `last_seen_at`/`last_detected_at` without duplicating.
+
+### Notes
+- All three are `auto_resolvable=True` — once the underlying
+  condition disappears (serial corrected, duplicate merged, source
+  group resolved) the next sweep leaves the Finding stale and the
+  finding-close pass closes it.
+- The resolver's `is_usable_serial()` correctness behavior is
+  unchanged — placeholder serials still don't drive identity
+  matches. This release only surfaces the previously-invisible set.
+
 ## [0.69.0] — 2026-07-20 — Layer-entity field-history audit triggers
 
 ### Why
