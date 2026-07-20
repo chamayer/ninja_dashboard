@@ -1,4 +1,4 @@
-# Legacy scripts parity audit — Agent Compliance + Software
+# Legacy scripts parity audit
 
 **Purpose:** Inventory the pre-Operations PowerShell + Python scripts
 in `..\..\script-dev\` that this stack was built to replace, and
@@ -12,12 +12,16 @@ enabled), then compare against Operations state as of 0.69.0.
 
 **Sources reviewed:**
 
-- `script-dev/migrated/` — retired PowerShell scripts, mostly AC +
-  cleanup + offboarding.
+- `script-dev/migrated/` — retired PowerShell scripts (AC, cleanup,
+  offboarding, software pullers, ad-hoc experiments).
 - `script-dev/ninja/` — active Ninja-side scripts (patching report,
   Windows deploy, SW Inventory tool).
 - `script-dev/ninja/SW Inventory/analyze_inventory.py` — the
   PDQ-based software analyzer (3041 lines).
+- `script-dev/ad/`, `script-dev/clients/{ADH,CP,UTA}/` — AD / Entra
+  user-management scripts and per-client data.
+- `script-dev/sentinelone/`, `script-dev/windows/` — small utility
+  scripts.
 
 **Classification key:** same as `metabase-parity-audit.md`.
 
@@ -204,49 +208,223 @@ workflow. What it does:
 
 ---
 
+## Patching
+
+### `ninja/Ninja-Patching-report.ps1` (559 lines)
+
+Generates a full patch-management CSV with one row per (device,
+patch). What it does:
+
+- Auths against Ninja.
+- Pulls organizations, locations, policies (for lookup).
+- Pulls `/queries/os-patch-installs` (INSTALLED + FAILED patches
+  via cursor pagination).
+- Pulls `/queries/os-patches` (PENDING / APPROVED / REJECTED via
+  cursor pagination).
+- Pulls `/devices-detailed` (device metadata).
+- Joins the four into a wide row: Organization, Location,
+  DeviceName, NodeClass, OS, OSMajorVersion, IPAddress, LastUser,
+  OnlineStatus, LastContact, LastContactDaysAgo, LastBoot,
+  LastBootDaysAgo, NeedsReboot, PolicyName, PatchName, KBNumber,
+  Status, Severity, Type, InstalledAt, DaysSinceInstall.
+- Outputs a timestamped CSV in the script directory.
+- Filters: `$FilterOrgs`, `$WorkstationsOnly`, `$ServersOnly`.
+
+**Classification: PARTIAL.**
+
+- **Data COVERED.** Every column above is populated in the
+  Operations pipeline: `ninja_core.device_snapshots`,
+  `ninja_core.patch_state_current` (or equivalent patching
+  matviews), `operations.devices`, `operations.device_links`,
+  `device_session_current`. Nothing new needs to be ingested.
+- **Composite view COVERED partially.** The Ninja patching
+  dashboards in Metabase render subsets of this composite (per
+  `metabase-parity-audit.md`). Operations natively has the
+  Findings queue with `category=patching`, Device detail's
+  Patching tab, and the Devices fleet page — but no single
+  "wide row per (device, patch)" table with all the columns
+  above.
+- **CSV output GAP.** Same downloadable-CSV cross-cutting gap
+  named in the AC + Software section. If operators still expect a
+  bulk CSV extract per patch cycle, Operations needs an export
+  route.
+- The 3 Ninja patching dashboards flagged as GAP in
+  `metabase-parity-audit.md` (Patch Evidence, Patch Trends,
+  Activity Search) are the surfaces closest to this script's
+  intent. A single "Patch Evidence" fleet-wide table view in
+  Operations would subsume the script's use case.
+
+### `ninja/Deploy-Win11-InPlace.ps1`
+
+In-place Windows 11 deployment tool.
+
+**Classification: OUT OF SCOPE.** This is a device-side automation
+utility, not a monitoring/compliance function. Operations does not
+plan to orchestrate OS-deployment actions from its surface. Leave
+it in `script-dev/` as an operational tool.
+
+### `ninja/Get S1 Server URL.ps1`
+
+Small helper to resolve the SentinelOne management server URL for
+a given device.
+
+**Classification: OUT OF SCOPE.** Ad-hoc utility, not a
+monitoring function.
+
+---
+
+## Directory management (AD / Entra)
+
+### `ad/ADH-User-Management-current.ps1`, `migrated/ADH-User managhement- current.ps1`, `ad/AD-Test-Creds-Prompt.ps1`, `ad/AD-Unlock.ps1`
+
+Active Directory user-management scripts:
+
+- Create / update / unlock AD user accounts.
+- Test credentials against a domain controller.
+
+**Classification: OUT OF SCOPE.** Operations is device / agent /
+software focused. User-account lifecycle in AD or Entra is a
+different domain and not on the current MSP-platform roadmap for
+Operations. Leave these scripts as their own tooling.
+
+### `clients/CP/*` — AD ↔ Entra hybrid-identity reconciliation
+
+`Compare-HybridIdentities.ps1` + `Get-AdUserDump.ps1` +
+`Get-EntraUserDump.ps1` plus periodic CSV snapshots and an Excel
+reconciliation workbook (`cp-reconciled.xlsx`).
+
+**Classification: OUT OF SCOPE.** Same domain concern as AD user
+management. Per-client one-off tooling. If hybrid-identity
+reconciliation becomes an MSP-platform requirement, it'd be its
+own track with its own decision record.
+
+### `clients/UTA/offboard-computer.ps1`
+
+Per-client offboarding script.
+
+**Classification: PARTIAL** (same as the `migrated/` offboarding
+scripts). Rolls up under the "operator-triggered platform-side
+offboarding" gap.
+
+---
+
+## Small utilities
+
+### `sentinelone/Get defender status.ps1`
+
+Small S1 API helper to check Windows Defender status per device.
+
+**Classification: OUT OF SCOPE.** Ad-hoc utility. If Defender
+status becomes an operational signal Operations should track,
+it'd flow through the SentinelOne ingest module, not this script.
+
+### `windows/Windows-Check_User_logged_in.ps1`
+
+Local Windows utility to check the current logged-in user.
+
+**Classification: OUT OF SCOPE.** Device-side utility, not a
+monitoring function.
+
+### `migrated/Ninja_auth.ps1`, `Ninja_auth_Accessrt.ps1`
+
+OAuth token-fetcher utilities for the Ninja API.
+
+**Classification: COVERED.** Every Operations / ingest connector
+handles its own auth. These are historical helpers, no parity
+required.
+
+### `migrated/Untitled*.ps1` (numerous)
+
+Ad-hoc experimentation files — Untitled1.ps1 through Untitled42.ps1
+etc. No stable identity, no operational role.
+
+**Classification: N/A.** Skipped from the audit. If any specific
+`Untitled*` script encodes a workflow the operator still relies
+on, name it explicitly and it'll get its own row.
+
+### `clients/ADH/`, `general/`, `logmein/`, `screenconnect/`, `utility/`
+
+Empty or effectively empty at audit time.
+
+**Classification: N/A.**
+
+---
+
 ## Aggregate gap summary
 
 **Fully COVERED (retire the script — Operations does it end-to-end):**
 
 - All AC checkers (multi-org + single-org).
 - Both Ninja software pullers.
+- Ninja auth utilities.
 
-**PARTIAL — Operations tracks state, script's ancillary function is
-the gap:**
+**PARTIAL — Operations tracks state or has close analogs; specific
+ancillary function or presentation is the gap:**
 
 - Bulk cleanup / dedup scripts — Operations tracks lifecycle and
-  duplicates; the platform-side offboarding action is the gap.
+  duplicates natively; the platform-side offboarding action is the
+  gap.
+- Per-client offboarding scripts (`clients/UTA/offboard-computer.ps1`,
+  etc.) — same as above.
 - `analyze_inventory.py` — Operations covers data + decisions;
   CVE / user-risk / publisher rollups / Whitelist Suggestions
   surface / Excel-based UX / PDQ integration are gaps.
+- `Ninja-Patching-report.ps1` — every column is populated in the
+  Operations pipeline; the wide "one row per (device, patch)"
+  composite view + CSV export is the gap. Also overlaps with the
+  three Ninja patching Metabase-dashboard GAPs (Patch Evidence,
+  Patch Trends, Activity Search).
 
-**GAP — no Operations equivalent:**
+**GAP — no Operations equivalent, script is the only surface:**
 
-- Platform-side offboarding actions (Ninja tag, S1 decommission,
+- **Platform-side offboarding actions** (Ninja tag, S1 decommission,
   LMI unassign) triggered from Operations lifecycle transitions.
-- CVE / vulnerability enrichment on the software catalog.
-- User-risk analysis (user ↔ software installation join).
-- PDQ Inventory as a software signal source.
+- **CVE / vulnerability enrichment** on the software catalog.
+- **User-risk analysis** (user ↔ software installation join).
+- **PDQ Inventory** as a distinct software signal source.
+- **Fleet-wide Patch Evidence table** with (device × patch)
+  composite rows.
+
+**OUT OF SCOPE — different domain, not on the current Operations
+roadmap:**
+
+- AD / Entra user-account management (`ad/*`, `migrated/ADH-User*`).
+- AD ↔ Entra hybrid-identity reconciliation
+  (`clients/CP/Compare-HybridIdentities.ps1` + friends).
+- OS-deployment automation (`Deploy-Win11-InPlace.ps1`).
+- Small device-side utilities (`Get defender status.ps1`,
+  `Windows-Check_User_logged_in.ps1`, etc.).
 
 **Minor cross-cutting:**
 
 - Downloadable CSV export on Operations fleet pages (findings,
-  devices, software). Currently browser-only. Small addition,
-  probably worth doing per operator ergonomic feedback.
+  devices, software, patches). Currently browser-only. Small
+  addition, probably worth doing per operator ergonomic feedback.
+- Ad-hoc `Untitled*.ps1` experimentation files were not audited —
+  no stable identity, no operational role.
 
 ---
 
 ## Recommended sequencing
 
 1. **Immediate retirement candidates** (scripts have no operational
-   necessity today): AC scripts, Ninja software pullers. Operations
-   already replaced them.
+   necessity today): AC scripts, Ninja software pullers, Ninja auth
+   utilities. Operations already replaced them.
 2. **Small operational gap fixes** (bounded slices):
-   - CSV export buttons on Operations fleet + findings pages.
+   - CSV export buttons on Operations fleet + findings + patch
+     pages.
    - Operator-triggered platform-side offboarding for Ninja / S1 /
      LMI (a small `retire_device` workflow that queues the platform
-     actions).
-3. **Software-analyzer gap track** (larger, its own decision
+     actions after an operator retires or merges a Device).
+3. **Patching visibility track** (Metabase-parity + this script's
+   intent overlap):
+   - Fleet Patch Evidence view — wide (device × patch) composite
+     rendered as an Operations page. Subsumes
+     `Ninja-Patching-report.ps1` and Metabase's Patch Evidence
+     dashboard.
+   - Patch Trends views (per-day install/failure/reboot volumes).
+   - Activity Search (patch-activity free-text search).
+4. **Software-analyzer gap track** (larger, its own decision
    record):
    - Publisher rollups + publisher-level decision surface.
    - Whitelist Suggestions surface (threshold-based auto-suggest of
@@ -258,6 +436,9 @@ the gap:**
    - PDQ ingestion if that source's granularity is needed.
    - **Explicitly not planned:** Excel / VBA output. Operations is
      web-only.
+5. **Explicitly not planned:** AD / Entra user management, hybrid
+   identity reconciliation, OS-deployment orchestration. These live
+   in `script-dev/` as standalone tooling.
 
 ---
 
