@@ -196,6 +196,10 @@
                                 <code>{{ f.finding_details.hostname }}</code>
                             {% endif %}
                         {% endif %}
+                        {% if f.finding_type.name == "identity_conflict" and f.finding_details.candidate_count == 2 and f.client %}
+                            <br><a href="{% url 'device_merge' org_slug=f.client.slug device_id=f.finding_details.candidate_device_ids.0 target_id=f.finding_details.candidate_device_ids.1 %}"
+                                   style="font-size:0.75rem;">Merge candidates →</a>
+                        {% endif %}
                     </td>
                     <td>
                         <span class="badge badge-{{ f.status }}">{{ f.get_status_display }}</span>

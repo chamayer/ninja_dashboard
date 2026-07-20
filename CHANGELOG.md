@@ -2,6 +2,44 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.67.0] — 2026-07-20 — Generic device-merge action
+
+### Why
+Merging two Devices was previously only reachable through the
+`identity_candidates_list` admin page — a per-finding-type ecosystem
+that violated the "findings live in the standard table, no side tables
+per type" rule. The merge is a **generic entity operation** that
+belongs on the Devices surface and is invokable from any context that
+has two Device IDs (including future device-detail actions and any
+Finding evidence with candidate references).
+
+This ships the merge as a first-class device operation. Retirement of
+the legacy `identity_candidates` page + table follows in the next
+slice, which is why the legacy page still works alongside this
+release.
+
+### Added
+- `POST/GET /orgs/<org_slug>/devices/<uuid:device_id>/merge/<uuid:target_id>/`
+  — `device_merge` view (`operations/apps/core/views.py`). GET renders
+  a side-by-side confirmation page with a survivor radio selector
+  (default suggests Ninja-linked device, else older by created_at).
+  POST executes the merge via the existing `_merge_devices` helper,
+  audits the action, flashes a summary, and redirects to the
+  survivor's detail page. Cross-client merges rejected.
+- `operations/templates/device_merge.html` — the confirmation
+  template. Side-by-side card layout, survivor radio, source badges,
+  destructive-but-reversible warning, cancel link.
+- Findings-queue row enrichment for `identity_conflict` findings:
+  when `candidate_count == 2`, a "Merge candidates →" link is shown
+  under the hostname, wired to the `device_merge` URL with the two
+  candidate IDs.
+
+### Not yet
+- Device-detail entry point ("Merge with…") requires a target-picker
+  UI — deferred.
+- `identity_candidates` page + table retirement follows in the next
+  release.
+
 ## [0.66.1] — 2026-07-20 — identity_conflict correctness bundle
 
 ### Fixed

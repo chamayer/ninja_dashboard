@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+
+{% block title %}Merge devices — {{ device_a.client.display_name }}{% endblock %}
+
+{% block content %}
+<style>
+    .dm-wrap { max-width: 900px; margin: 0 auto; }
+    .dm-crumbs { font-size: 0.8rem; color: var(--muted); margin-bottom: 0.5rem; }
+    .dm-title { margin: 0 0 0.3rem; font-size: 1.35rem; }
+    .dm-lede { color: var(--muted); margin-bottom: 1rem; }
+    .dm-cards {
+        display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;
+        margin: 1rem 0;
+    }
+    .dm-card {
+        padding: 1rem; background: var(--surface);
+        border: 1px solid var(--border); border-radius: 6px;
+    }
+    .dm-card.selected { border-color: #1e40af; box-shadow: 0 0 0 2px #dbeafe; }
+    .dm-card label { display: flex; align-items: center; gap: 0.5rem; cursor: pointer; }
+    .dm-card label strong { color: #1e40af; }
+    .dm-card h3 { margin: 0.5rem 0 0.6rem; font-size: 1rem; }
+    .dm-attr { font-size: 0.85rem; margin: 0.2rem 0; display: flex; gap: 0.5rem; }
+    .dm-attr .lbl {
+        color: var(--muted); min-width: 5.5rem; font-size: 0.78rem;
+        text-transform: uppercase; letter-spacing: 0.04em;
+    }
+    .dm-attr .val { flex: 1; word-break: break-all; }
+    .dm-src-badges { display: inline-flex; flex-wrap: wrap; gap: 0.25rem; }
+    .dm-src-badge {
+        font-size: 0.7rem; padding: 0.1rem 0.4rem; border-radius: 3px;
+        background: var(--border-subtle, #e5e7eb); color: var(--fg);
+    }
+    .dm-actions { margin-top: 1rem; display: flex; gap: 0.75rem; align-items: center; }
+    .dm-btn-primary {
+        padding: 0.5rem 1rem; background: #1e40af; color: white;
+        border: 0; border-radius: 4px; font-weight: 600; cursor: pointer;
+    }
+    .dm-btn-primary:hover { background: #1e3a8a; }
+    .dm-btn-cancel { color: var(--muted); text-decoration: none; }
+    .dm-warn {
+        padding: 0.7rem 1rem; background: #fef3c7; border: 1px solid #fde68a;
+        border-radius: 4px; color: #78350f; font-size: 0.88rem;
+        margin: 1rem 0;
+    }
+</style>
+
+<div class="dm-wrap">
+    <div class="dm-crumbs">
+        <a href="{% url 'client_detail' client_slug=device_a.client.slug %}">{{ device_a.client.display_name }}</a>
+        &rsaquo; Merge devices
+    </div>
+    <h1 class="dm-title">Merge devices</h1>
+    <p class="dm-lede">
+        Pick the survivor. All device_links, entity_observations, and
+        findings from the loser transfer to the survivor. The loser is
+        tombstoned (soft-deleted, still queryable).
+    </p>
+
+    <form method="post" id="dm-form">
+        {% csrf_token %}
+        <div class="dm-cards">
+            {% for dev in devices %}
+            <div class="dm-card{% if dev.id == default_survivor.id %} selected{% endif %}"
+                 data-device-id="{{ dev.id }}">
+                <label>
+                    <input type="radio" name="survivor" value="{{ dev.id }}"
+                           {% if dev.id == default_survivor.id %}checked{% endif %}>
+                    <strong>Keep this device</strong>
+                </label>
+                <h3><code>{{ dev.canonical_hostname }}</code></h3>
+                <div class="dm-attr"><span class="lbl">Serial</span><span class="val"><code>{{ dev.canonical_serial|default:"—" }}</code></span></div>
+                <div class="dm-attr"><span class="lbl">VM UUID</span><span class="val"><code>{{ dev.canonical_vm_uuid|default:"—" }}</code></span></div>
+                <div class="dm-attr"><span class="lbl">Type</span><span class="val">{{ dev.get_device_type_display }}</span></div>
+                <div class="dm-attr"><span class="lbl">Role</span><span class="val">{{ dev.device_role }}</span></div>
+                <div class="dm-attr"><span class="lbl">OS</span><span class="val">{{ dev.os_name|default:"—" }}</span></div>
+                <div class="dm-attr"><span class="lbl">Lifecycle</span><span class="val">{{ dev.get_lifecycle_status_display }}</span></div>
+                <div class="dm-attr"><span class="lbl">Created</span><span class="val">{{ dev.created_at|date:"Y-m-d H:i" }}</span></div>
+                <div class="dm-attr"><span class="lbl">Sources</span><span class="val dm-src-badges">
+                    {% for link in dev.links.all %}<span class="dm-src-badge">{{ link.source.name }}</span>{% empty %}<span class="lbl">—</span>{% endfor %}
+                </span></div>
+                <div class="dm-attr" style="margin-top:0.5rem;">
+                    <a href="{% url 'device_detail' org_slug=dev.client.slug device_id=dev.id %}" style="font-size:0.8rem;">Open device detail →</a>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+
+        <div class="dm-warn">
+            <strong>This action is destructive but not irreversible</strong> —
+            the loser is soft-deleted (deleted_at set) and remains queryable.
+            Findings, links, and observations are cascaded to the survivor;
+            software rows on the loser are dropped.
+        </div>
+
+        <div class="dm-actions">
+            <button type="submit" class="dm-btn-primary"
+                    onclick="return confirm('Merge devices? The loser will be tombstoned.');">
+                Confirm merge
+            </button>
+            <a href="{% url 'device_detail' org_slug=device_a.client.slug device_id=device_a.id %}"
+               class="dm-btn-cancel">Cancel</a>
+        </div>
+    </form>
+</div>
+
+<script>
+document.querySelectorAll('input[name="survivor"]').forEach(function(input) {
+    input.addEventListener('change', function() {
+        document.querySelectorAll('.dm-card').forEach(function(card) {
+            card.classList.toggle('selected', card.dataset.deviceId === input.value);
+        });
+    });
+});
+</script>
+{% endblock %}

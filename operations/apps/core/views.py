@@ -3687,6 +3687,107 @@ def identity_candidate_reject(request: HttpRequest, candidate_id) -> HttpRespons
     return redirect("identity_candidates_list")
 
 
+# ── Device merge (generic entity operation) ─────────────────────────────────
+
+
+@login_required
+def device_merge(
+    request: HttpRequest, org_slug: str, device_id: str, target_id: str
+) -> HttpResponse:
+    """Merge two Devices in the same client. Generic device operation —
+    not tied to any Finding type. Invokable from anywhere with two
+    Device IDs (identity_conflict Finding evidence, admin manual link,
+    future device-detail action, etc.).
+
+    GET renders a side-by-side confirmation with a radio-button
+    survivor selector (default suggests the Ninja-linked device, else
+    the older by created_at). POST performs the merge and redirects to
+    the survivor's detail page.
+    """
+    device_a = get_object_or_404(
+        Device.objects.select_related("client"),
+        tenant_id=1, id=device_id,
+        client__slug=org_slug, deleted_at__isnull=True,
+    )
+    device_b = get_object_or_404(
+        Device.objects.select_related("client"),
+        tenant_id=1, id=target_id, deleted_at__isnull=True,
+    )
+    if device_a.client_id != device_b.client_id:
+        messages.error(
+            request,
+            "Cross-client merges are not permitted — the two devices "
+            "belong to different clients.",
+        )
+        return redirect("device_detail", org_slug=org_slug, device_id=device_id)
+    if device_a.id == device_b.id:
+        messages.error(request, "Cannot merge a device with itself.")
+        return redirect("device_detail", org_slug=org_slug, device_id=device_id)
+
+    if request.method == "POST":
+        survivor_id = request.POST.get("survivor") or ""
+        if survivor_id not in (str(device_a.id), str(device_b.id)):
+            messages.error(request, "Pick a survivor.")
+            return redirect(
+                "device_merge", org_slug=org_slug,
+                device_id=device_id, target_id=target_id,
+            )
+        if survivor_id == str(device_a.id):
+            survivor, loser = device_a, device_b
+        else:
+            survivor, loser = device_b, device_a
+        with transaction.atomic(), connection.cursor() as cur:
+            cur.execute("SET LOCAL operations.tenant_id = 1")
+            counts = _merge_devices(cur, survivor.id, loser.id, "operator.merged")
+        _audit(
+            request, "device.merge", survivor.id,
+            {"survivor_id": str(survivor.id), "loser_id": str(loser.id)},
+            {"counts": counts},
+        )
+        messages.success(
+            request,
+            f"Merged {loser.canonical_hostname} into "
+            f"{survivor.canonical_hostname}. "
+            f"Moved {counts.get('device_links_moved', 0)} links, "
+            f"{counts.get('observations_moved', 0)} observations, "
+            f"{counts.get('findings_moved', 0)} findings.",
+        )
+        return redirect(
+            "device_detail", org_slug=survivor.client.slug, device_id=survivor.id,
+        )
+
+    # GET — default-survivor rule mirrors legacy identity_candidate_confirm:
+    # Ninja-linked device wins, else older by created_at.
+    with connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        cur.execute(
+            """
+            SELECT dl.device_id FROM operations.device_links dl
+            JOIN operations.sources s ON s.id = dl.source_id AND s.name = 'Ninja'
+            WHERE dl.tenant_id = 1 AND dl.device_id IN (%s, %s)
+            """,
+            (device_a.id, device_b.id),
+        )
+        ninja_owners = {row[0] for row in cur.fetchall()}
+    if device_a.id in ninja_owners and device_b.id not in ninja_owners:
+        default_survivor = device_a
+    elif device_b.id in ninja_owners and device_a.id not in ninja_owners:
+        default_survivor = device_b
+    else:
+        default_survivor = (
+            device_a if device_a.created_at <= device_b.created_at else device_b
+        )
+    return render(
+        request, "device_merge.html",
+        {
+            "device_a": device_a,
+            "device_b": device_b,
+            "devices": [device_a, device_b],
+            "default_survivor": default_survivor,
+        },
+    )
+
+
 # ── Requirement profiles (Track C.6 admin knob) ─────────────────────────────
 
 
