@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from django.conf import settings
-from django.db import connection, transaction
 from django.http import HttpRequest
 
 from .models import Client, ClientCandidate, Finding, MergeCandidate
@@ -16,7 +15,7 @@ _FINDING_ACTIVE_STATUSES = (
 
 
 def brand(request: HttpRequest) -> dict:
-    """Expose OPERATIONS_BRAND_* settings + org scope + client list + nav badges."""
+    """Expose brand, scope, and lightweight navigation context."""
     ctx = {
         "brand": {
             "name": settings.OPERATIONS_BRAND_NAME,
@@ -30,8 +29,11 @@ def brand(request: HttpRequest) -> dict:
         "nav_findings_count": 0,
         "nav_pending_merges": 0,
         "nav_pending_client_candidates": 0,
+        # Software-decision counts are intentionally not calculated here.
+        # The former fleet-wide anti-join took several seconds on production
+        # data and ran for every authenticated page render. Reintroduce this
+        # badge only from a derived, refreshable summary surface.
         "nav_pending_software_decisions": 0,
-        "nav_pending_review_total": 0,
         "nav_patching_open": 0,
     }
 
@@ -47,38 +49,17 @@ def brand(request: HttpRequest) -> dict:
             tenant_id=tenant_id,
             status__in=_FINDING_ACTIVE_STATUSES,
         ).count()
-        ctx["nav_pending_merges"] = MergeCandidate.objects.filter(
-            tenant_id=tenant_id,
-            status="pending",
-        ).count()
-        ctx["nav_pending_client_candidates"] = ClientCandidate.objects.filter(
-            tenant_id=tenant_id,
-            status=ClientCandidate.Status.OPEN,
-        ).count()
-        # Software titles installed somewhere with no decision at any scope.
-        with transaction.atomic(), connection.cursor() as cur:
-            cur.execute("SET LOCAL operations.tenant_id = %s", [tenant_id])
-            cur.execute(
-                """
-                SELECT COUNT(DISTINCT si.canonical_name)::int
-                FROM operations.software_installations_current si
-                WHERE si.tenant_id = %s AND si.deleted_at IS NULL
-                  AND NOT EXISTS (
-                      SELECT 1 FROM operations.software_decisions sd
-                      WHERE sd.tenant_id = si.tenant_id
-                        AND sd.canonical_name = si.canonical_name
-                        AND (sd.client_id IS NULL OR sd.client_id = si.client_id)
-                  )
-                """,
-                [tenant_id],
-            )
-            ctx["nav_pending_software_decisions"] = cur.fetchone()[0]
-
-        ctx["nav_pending_review_total"] = (
-            ctx["nav_pending_merges"]
-            + ctx["nav_pending_client_candidates"]
-            + ctx["nav_pending_software_decisions"]
-        )
+        # These badges are rendered only in the application admin tabs, so
+        # avoid even their small count queries on ordinary operator pages.
+        if request.path_info.startswith("/admin/"):
+            ctx["nav_pending_merges"] = MergeCandidate.objects.filter(
+                tenant_id=tenant_id,
+                status="pending",
+            ).count()
+            ctx["nav_pending_client_candidates"] = ClientCandidate.objects.filter(
+                tenant_id=tenant_id,
+                status=ClientCandidate.Status.OPEN,
+            ).count()
         ctx["nav_patching_open"] = Finding.objects.filter(
             tenant_id=tenant_id,
             finding_type__category__name="patching",

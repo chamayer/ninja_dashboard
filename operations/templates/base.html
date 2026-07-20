@@ -288,7 +288,7 @@
             {# Review = human-in-the-loop lifecycle queues
                (client candidates, identity candidates, merge candidates). #}
             <a class="nav-link nav-admin {% if request.resolver_match and 'client_candidate' in request.resolver_match.url_name or 'identity' in request.resolver_match.url_name or 'merge' in request.resolver_match.url_name %}active{% endif %}"
-               href="{% url 'client_candidates_queue' %}">Review{% if nav_pending_review_total %} <span class="nav-badge">{{ nav_pending_review_total }}</span>{% endif %}</a>
+               href="{% url 'client_candidates_queue' %}">Review</a>
 
             {# Config = admin-editable rules & profiles (notifications, requirement profiles, software decisions). #}
             <a class="nav-link nav-admin {% if request.resolver_match and 'notification' in request.resolver_match.url_name or 'requirement_profile' in request.resolver_match.url_name %}active{% endif %}"
