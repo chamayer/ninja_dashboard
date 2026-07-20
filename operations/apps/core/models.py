@@ -521,6 +521,246 @@ class DeviceLink(UUIDTenantScopedModel):
         return f"{self.source_id}:{self.external_id}"
 
 
+class Asset(UUIDTenantScopedModel):
+    """Tracked asset entity. See ADR-0005.
+
+    Broad-scoped to accommodate the full MSP inventory concept: not only
+    endpoint-hosting hardware but eventually peripherals, network gear,
+    licenses, and services. `asset_type` distinguishes the category.
+
+    For `asset_type='endpoint_hardware'` (the v1 populated case), Asset
+    is the "hardware/virtual thing" layer of a Device: form factor,
+    serial, vm_uuid, chassis, virtualization. Agent presence is not
+    evidence of form factor. `form_factor='unknown'` is a legitimate
+    state — positive evidence is required to leave it.
+
+    Effective windows: one open row per Device when
+    `asset_type='endpoint_hardware'` (partial unique index). Other
+    asset types are not Device-scoped and may exist with device=NULL.
+    """
+
+    class AssetType(models.TextChoices):
+        ENDPOINT_HARDWARE = "endpoint_hardware", "Endpoint hardware"
+        PERIPHERAL = "peripheral", "Peripheral"
+        NETWORK_APPLIANCE = "network_appliance", "Network appliance"
+        LICENSE = "license", "License"
+        SERVICE = "service", "Service"
+        OTHER = "other", "Other"
+
+    class FormFactor(models.TextChoices):
+        PHYSICAL = "physical", "Physical"
+        VM = "vm", "VM"
+        HYPERVISOR_HOST = "hypervisor-host", "Hypervisor host"
+        NETWORK_DEVICE = "network-device", "Network device"
+        UNKNOWN = "unknown", "Unknown"
+
+    asset_type = models.CharField(
+        max_length=32,
+        choices=AssetType.choices,
+        default=AssetType.ENDPOINT_HARDWARE,
+    )
+    device = models.ForeignKey(
+        Device, on_delete=models.CASCADE, null=True, blank=True,
+        related_name="assets",
+    )
+    form_factor = models.CharField(
+        max_length=32,
+        choices=FormFactor.choices,
+        default=FormFactor.UNKNOWN,
+    )
+    serial = models.CharField(max_length=255, blank=True, default="")
+    vm_uuid = models.CharField(max_length=64, blank=True, default="")
+    chassis = models.CharField(max_length=120, blank=True, default="")
+    virtualization = models.JSONField(default=dict, blank=True)
+    effective_from = models.DateTimeField()
+    effective_to = models.DateTimeField(null=True, blank=True)
+    first_seen_at = models.DateTimeField()
+    last_seen_at = models.DateTimeField()
+    first_observed_source = models.ForeignKey(
+        Source, on_delete=models.PROTECT, null=True, blank=True,
+        related_name="first_observed_assets",
+    )
+    last_observed_source = models.ForeignKey(
+        Source, on_delete=models.PROTECT, null=True, blank=True,
+        related_name="last_observed_assets",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "assets"
+        indexes = (
+            models.Index(fields=("tenant", "device"), name="idx_assets_tenant_device"),
+            models.Index(fields=("tenant", "asset_type"), name="idx_assets_tenant_type"),
+            models.Index(fields=("tenant", "effective_to"), name="idx_assets_effective_to"),
+        )
+        constraints = (
+            models.UniqueConstraint(
+                fields=("tenant", "device"),
+                condition=Q(effective_to__isnull=True)
+                & Q(device__isnull=False)
+                & Q(asset_type="endpoint_hardware"),
+                name="uq_assets_one_open_endpoint_per_device",
+            ),
+        )
+
+    def __str__(self) -> str:
+        return f"{self.asset_type}:{self.device_id or 'unbound'}"
+
+
+class OSInstance(UUIDTenantScopedModel):
+    """OS-install layer entity — the operating system currently installed
+    on the Device. See ADR-0005.
+
+    Owns os_name, os_family, os_group, os_version, patch state, config
+    state. OS reinstall closes the open window and opens a new OSInstance
+    row (conservative continuity — same OSInstance until clear evidence
+    forces a new one; missed reinstalls under-count rather than break).
+    """
+
+    device = models.ForeignKey(Device, on_delete=models.CASCADE, related_name="os_instances")
+    os_name = models.CharField(max_length=200, blank=True, default="")
+    os_family = models.CharField(max_length=40, blank=True, default="")
+    os_group = models.CharField(max_length=16, blank=True, default="Unknown")
+    os_version = models.CharField(max_length=80, blank=True, default="")
+    install_identifier = models.CharField(max_length=120, blank=True, default="")
+    patch_state = models.JSONField(default=dict, blank=True)
+    config_state = models.JSONField(default=dict, blank=True)
+    effective_from = models.DateTimeField()
+    effective_to = models.DateTimeField(null=True, blank=True)
+    first_seen_at = models.DateTimeField()
+    last_seen_at = models.DateTimeField()
+    first_observed_source = models.ForeignKey(
+        Source, on_delete=models.PROTECT, null=True, blank=True,
+        related_name="first_observed_os_instances",
+    )
+    last_observed_source = models.ForeignKey(
+        Source, on_delete=models.PROTECT, null=True, blank=True,
+        related_name="last_observed_os_instances",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "os_instances"
+        indexes = (
+            models.Index(fields=("tenant", "device"), name="idx_os_inst_tenant_device"),
+            models.Index(fields=("tenant", "effective_to"), name="idx_os_inst_effective_to"),
+        )
+        constraints = (
+            models.UniqueConstraint(
+                fields=("tenant", "device"),
+                condition=Q(effective_to__isnull=True),
+                name="uq_os_inst_one_open_per_device",
+            ),
+        )
+
+    def __str__(self) -> str:
+        return f"{self.device_id}:{self.os_name or 'unknown-os'}"
+
+
+class AgentInstance(UUIDTenantScopedModel):
+    """Per-(Device, Agent product) install-lifetime entity. See ADR-0005.
+
+    One row per install lifetime — a reinstall with a new install token
+    closes the previous window and opens a new one; an upgrade with the
+    same install token extends the current window (agent_version audit
+    captures the change). Multiple AgentInstances can be open concurrently
+    on a Device (one per Agent product).
+    """
+
+    device = models.ForeignKey(Device, on_delete=models.CASCADE, related_name="agent_instances")
+    agent = models.ForeignKey("Agent", on_delete=models.PROTECT, related_name="instances")
+    install_token = models.CharField(max_length=240, blank=True, default="")
+    agent_version = models.CharField(max_length=80, blank=True, default="")
+    coverage_state = models.JSONField(default=dict, blank=True)
+    effective_from = models.DateTimeField()
+    effective_to = models.DateTimeField(null=True, blank=True)
+    first_seen_at = models.DateTimeField()
+    last_seen_at = models.DateTimeField()
+    first_observed_source = models.ForeignKey(
+        Source, on_delete=models.PROTECT, null=True, blank=True,
+        related_name="first_observed_agent_instances",
+    )
+    last_observed_source = models.ForeignKey(
+        Source, on_delete=models.PROTECT, null=True, blank=True,
+        related_name="last_observed_agent_instances",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "agent_instances"
+        indexes = (
+            models.Index(fields=("tenant", "device"), name="idx_agent_inst_tenant_device"),
+            models.Index(fields=("tenant", "agent"), name="idx_agent_inst_tenant_agent"),
+            models.Index(fields=("tenant", "effective_to"), name="idx_agent_inst_effective_to"),
+        )
+        constraints = (
+            models.UniqueConstraint(
+                fields=("tenant", "device", "agent"),
+                condition=Q(effective_to__isnull=True),
+                name="uq_agent_inst_one_open_per_device_agent",
+            ),
+        )
+
+    def __str__(self) -> str:
+        return f"{self.device_id}:{self.agent_id}"
+
+
+class LayerFieldHistory(UUIDTenantScopedModel):
+    """Abstract base — per-layer significant-field audit trail. See ADR-0005.
+
+    Captures within-window field changes on a layer entity. Only fields
+    the ADR designates as significant (form_factor, serial, vm_uuid,
+    os_name, os_version, agent_version, install_token) are recorded;
+    heartbeat/last-seen churn is not audited.
+    """
+
+    layer_entity_id = models.UUIDField()
+    field_name = models.CharField(max_length=80)
+    old_value = models.JSONField(null=True, blank=True)
+    new_value = models.JSONField(null=True, blank=True)
+    changed_at = models.DateTimeField(auto_now_add=True)
+    change_source = models.ForeignKey(
+        Source, on_delete=models.PROTECT, null=True, blank=True,
+    )
+    change_reason = models.CharField(max_length=120, blank=True, default="")
+
+    class Meta:
+        abstract = True
+
+    def __str__(self) -> str:
+        return f"{self.layer_entity_id}:{self.field_name}"
+
+
+class AssetFieldHistory(LayerFieldHistory):
+    class Meta:
+        db_table = "asset_field_history"
+        indexes = (
+            models.Index(fields=("tenant", "layer_entity_id"), name="idx_asset_fh_entity"),
+            models.Index(fields=("tenant", "changed_at"), name="idx_asset_fh_changed_at"),
+        )
+
+
+class OSInstanceFieldHistory(LayerFieldHistory):
+    class Meta:
+        db_table = "os_instance_field_history"
+        indexes = (
+            models.Index(fields=("tenant", "layer_entity_id"), name="idx_os_inst_fh_entity"),
+            models.Index(fields=("tenant", "changed_at"), name="idx_os_inst_fh_changed_at"),
+        )
+
+
+class AgentInstanceFieldHistory(LayerFieldHistory):
+    class Meta:
+        db_table = "agent_instance_field_history"
+        indexes = (
+            models.Index(fields=("tenant", "layer_entity_id"), name="idx_agent_inst_fh_entity"),
+            models.Index(fields=("tenant", "changed_at"), name="idx_agent_inst_fh_changed_at"),
+        )
+
+
 class PatchingScopeSignal(models.Model):
     """Field-based rule that maps a Ninja custom field to a patching-scope
     effect. Priority-ordered; first match wins.
@@ -970,10 +1210,26 @@ class Finding(UUIDTenantScopedModel):
         PROBABLE = "probable", "Probable"
         CONFIRMED = "confirmed", "Confirmed"
 
+    class SubjectLayer(models.TextChoices):
+        """Layer-entity back-reference. See ADR-0005. Blank when the finding
+        is not layer-scoped (e.g., subject_type='client'), or when the
+        finding predates the layered model."""
+        ASSET = "asset", "Asset"
+        OS = "os", "OS instance"
+        AGENT = "agent", "Agent instance"
+
     finding_type = models.ForeignKey(FindingType, on_delete=models.PROTECT, related_name="findings")
     client = models.ForeignKey("Client", on_delete=models.PROTECT, null=True, blank=True, related_name="findings")
     subject_type = models.CharField(max_length=32, choices=SubjectType.choices)
     subject_id = models.UUIDField()
+    # Layer-entity back-reference (ADR-0005). Populated when the finding
+    # was derived from a specific layer entity (Asset / OSInstance /
+    # AgentInstance). Enables retroactive per-layer-entity queries such
+    # as "was OSInstance A patched during its active window."
+    subject_layer = models.CharField(
+        max_length=16, choices=SubjectLayer.choices, blank=True, default="",
+    )
+    subject_layer_entity_id = models.UUIDField(null=True, blank=True)
     finding_details = models.JSONField(default=dict, blank=True)
     condition_key = models.CharField(max_length=255, blank=True, default="", db_index=True)
     severity = models.CharField(max_length=16, choices=Severity.choices, default=Severity.MEDIUM)
@@ -1008,6 +1264,11 @@ class Finding(UUIDTenantScopedModel):
             models.Index(fields=("tenant", "subject_type", "subject_id"), name="idx_findings_subject"),
             models.Index(fields=("tenant", "snoozed_until"), name="idx_findings_snoozed_until"),
             models.Index(fields=("tenant", "closed_at"), name="idx_findings_closed_at"),
+            models.Index(
+                fields=("tenant", "subject_layer", "subject_layer_entity_id"),
+                name="idx_findings_layer_entity",
+                condition=Q(subject_layer_entity_id__isnull=False),
+            ),
         )
         constraints = (
             models.UniqueConstraint(

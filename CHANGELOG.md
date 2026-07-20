@@ -2,6 +2,53 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.64.0] — 2026-07-20 — Device layered entities (schema + backfill)
+
+### Why
+ADR-0005 (`operations/docs/decisions/0005-device-identity-and-layered-entities.md`)
+splits the current chimeric `Device` model into an identity anchor plus
+first-class layer entities (`Asset`, `OSInstance`, `AgentInstance`) with
+their own effective windows and lifecycles. Slice 1 lands the schema
+and backfills current state as open-window rows. The existing collapsed
+`v_device` surface is unchanged; flat `Device` attribute columns stay
+as a denormalized cache. `Asset` is scoped broadly (asset_type field)
+to accommodate the MSP-platform vision (peripherals, licenses, network
+appliances) without paying that cost in v1 — only endpoint_hardware is
+populated by the backfill.
+
+### Added
+- `operations.assets` — tenant-scoped, effective-windowed. Fields:
+  `asset_type` (endpoint_hardware / peripheral / network_appliance /
+  license / service / other), `form_factor`, `serial`, `vm_uuid`,
+  `chassis`, `virtualization`. Nullable `device` FK (accessories and
+  standalone-inventory assets don't require a Device). Partial unique
+  index enforces at-most-one open endpoint_hardware asset per Device.
+- `operations.os_instances` — one open row per Device (partial unique
+  index). Fields: `os_name`, `os_family`, `os_group`, `os_version`,
+  `install_identifier`, `patch_state`, `config_state`.
+- `operations.agent_instances` — one open row per (Device, Agent
+  product). Fields: `install_token`, `agent_version`, `coverage_state`.
+- Per-layer significant-field audit tables:
+  `operations.asset_field_history`,
+  `operations.os_instance_field_history`,
+  `operations.agent_instance_field_history`.
+- `operations.findings.subject_layer` +
+  `operations.findings.subject_layer_entity_id` — back-reference to the
+  layer entity a finding was evaluated against.
+- Migrations 0050 (schema, RLS, effective-window CHECKs) and 0051
+  (idempotent backfill of open-window Asset + OSInstance rows from
+  current `Device` state).
+
+### Notes
+- Additive-only slice. No consumers switch to layer entities in this
+  release; `v_device` and existing matviews unchanged.
+- `AgentInstance` is intentionally not backfilled — the ingest resolver
+  rewrite (slice 2, 0.65.0) is the authoritative writer for install
+  lifetimes.
+- Flat `Device` attribute columns (`device_type`, `os_name`, `os_family`,
+  `os_group`, `canonical_serial`, `canonical_vm_uuid`) remain as
+  denormalized cache in v1. Retirement is deferred.
+
 ## [0.63.0] — 2026-07-17 — device_offline evidence enrichment
 
 ### Why
