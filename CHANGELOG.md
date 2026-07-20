@@ -2,6 +2,34 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.74.0] — 2026-07-20 — Patch Trends + Activity Search
+
+### Why
+Slice B and C of the patching-visibility track. Closes the two
+remaining Metabase patching-dashboard GAPs (Patch Trends, Activity
+Search). All data was already in `ninja_patches.patch_facts`
+(`fact_type='install_outcome'`); no ingest changes needed.
+
+### Added
+- `GET /patching/trends/` — `patch_trends_page` view. Per-day
+  install / failure counts + failure percentage + devices touched
+  over a configurable window (7/14/30/60/90/180 days, default 30).
+  Optional client filter. Overview tiles + a stacked-bar column
+  showing install vs failure volume per row. CSV export.
+- `GET /patching/activity/` — `patch_activity_search_page` view.
+  Free-text search across recent patch install outcomes with
+  filters for patch name / KB, status, client, and time window.
+  Newest-first, capped at 500 events per query. CSV export.
+- Nav links between all three patching pages
+  (queue ↔ evidence ↔ trends ↔ activity).
+
+### Follow-up
+- The patching-visibility track (per the legacy-scripts audit and
+  the Metabase parity audit) is now closed at Operations parity for
+  the three named GAPs (Patch Evidence, Trends, Activity Search).
+  The corresponding Metabase dashboards can be retired when
+  operators have moved over.
+
 ## [0.73.0] — 2026-07-20 — Fleet Patch Evidence
 
 ### Why

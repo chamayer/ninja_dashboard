@@ -8,7 +8,9 @@
     <div style="display:flex; align-items:center; justify-content:space-between; gap:1rem;">
         <h1 style="margin:0;">Patching</h1>
         <div style="display:flex; align-items:center; gap:0.75rem;">
-            <a href="{% url 'patch_evidence_page' %}" style="font-size:0.85rem;">Patch Evidence →</a>
+            <a href="{% url 'patch_evidence_page' %}" style="font-size:0.85rem;">Evidence →</a>
+            <a href="{% url 'patch_trends_page' %}" style="font-size:0.85rem;">Trends →</a>
+            <a href="{% url 'patch_activity_search_page' %}" style="font-size:0.85rem;">Activity →</a>
             {% include "_csv_download.html" %}
         </div>
     </div>

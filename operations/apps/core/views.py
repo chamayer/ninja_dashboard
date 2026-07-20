@@ -2553,6 +2553,228 @@ def patch_evidence_page(request: HttpRequest) -> HttpResponse:
     )
 
 
+@login_required
+def patch_trends_page(request: HttpRequest) -> HttpResponse:
+    """Per-day install / failure trend view over `ninja_patches.patch_facts`.
+
+    Closes the Metabase "Patch Trends" dashboard GAP. Optional client
+    filter narrows to one org.
+
+    Range is `?days=` (default 30, capped at 180). Each row =
+    (day, client_scope) with install + failure counts. CSV export via
+    the standard `?format=csv`.
+    """
+    try:
+        days = int(request.GET.get("days") or 30)
+    except ValueError:
+        days = 30
+    days = max(1, min(180, days))
+
+    client_filter = (request.GET.get("client") or "").strip()
+
+    where = ["pf.fact_type = 'install_outcome'",
+             "pf.installed_at > NOW() - (%s::text || ' days')::interval"]
+    params: list = [str(days)]
+    if client_filter:
+        # Constrain by the client this Ninja device_id resolves to.
+        where.append(
+            "EXISTS (SELECT 1 FROM operations.device_links dl "
+            "JOIN operations.devices d ON d.id = dl.device_id "
+            "JOIN operations.clients c ON c.id = d.client_id "
+            "WHERE dl.tenant_id = 1 "
+            "  AND dl.source_id = (SELECT id FROM operations.sources WHERE name='Ninja' LIMIT 1) "
+            "  AND dl.external_id = pf.device_id::text "
+            "  AND c.slug = %s)"
+        )
+        params.append(client_filter)
+
+    where_sql = " AND ".join(where)
+
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        cur.execute(
+            f"""
+            SELECT
+                date_trunc('day', pf.installed_at)::date AS day,
+                COUNT(*) FILTER (WHERE pf.status = 'Installed')::int AS installs,
+                COUNT(*) FILTER (WHERE pf.status = 'Failed')::int    AS failures,
+                COUNT(*)::int                                        AS total,
+                COUNT(DISTINCT pf.device_id)::int                    AS devices_touched
+            FROM ninja_patches.patch_facts pf
+            WHERE {where_sql}
+            GROUP BY 1
+            ORDER BY 1 DESC
+            """,
+            params,
+        )
+        rows = cur.fetchall()
+
+    trend_rows = [
+        {
+            "day":              day,
+            "installs":         installs,
+            "failures":         failures,
+            "total":            total,
+            "devices_touched":  devices_touched,
+            "fail_pct":         round(100.0 * failures / total, 1) if total else 0.0,
+        }
+        for day, installs, failures, total, devices_touched in rows
+    ]
+
+    totals = {
+        "installs":        sum(r["installs"] for r in trend_rows),
+        "failures":        sum(r["failures"] for r in trend_rows),
+        "total":           sum(r["total"] for r in trend_rows),
+        "devices_touched": sum(r["devices_touched"] for r in trend_rows),
+    }
+    totals["fail_pct"] = (
+        round(100.0 * totals["failures"] / totals["total"], 1)
+        if totals["total"] else 0.0
+    )
+
+    if wants_csv(request):
+        return csv_response(
+            trend_rows,
+            columns=[
+                ("Day",              "day"),
+                ("Installs",         "installs"),
+                ("Failures",         "failures"),
+                ("Total attempts",   "total"),
+                ("Devices touched",  "devices_touched"),
+                ("Failure %",        "fail_pct"),
+            ],
+            filename_stem="patch_trends",
+        )
+
+    clients = list(
+        Client.objects.filter(tenant_id=1, deleted_at__isnull=True)
+        .order_by("display_name")
+        .values("slug", "display_name")
+    )
+
+    # Max value in the range — drives inline bar widths in the template.
+    max_total = max((r["total"] for r in trend_rows), default=0) or 1
+
+    return render(
+        request,
+        "patch_trends.html",
+        {
+            "rows": trend_rows,
+            "totals": totals,
+            "days": days,
+            "active_client": client_filter,
+            "clients": clients,
+            "max_total": max_total,
+        },
+    )
+
+
+@login_required
+def patch_activity_search_page(request: HttpRequest) -> HttpResponse:
+    """Free-text search across recent patch activity events (install
+    outcomes). Closes the Metabase "Activity Search" dashboard GAP.
+
+    Query params: `q` (patch name or KB), `days` (default 30, capped
+    180), `status` (Installed/Failed/...), `client` (slug). CSV export
+    via the standard `?format=csv`.
+    """
+    q_filter = (request.GET.get("q") or "").strip()
+    try:
+        days = int(request.GET.get("days") or 30)
+    except ValueError:
+        days = 30
+    days = max(1, min(180, days))
+    status_filter = (request.GET.get("status") or "").strip()
+    client_filter = (request.GET.get("client") or "").strip()
+
+    where = [
+        "pf.fact_type = 'install_outcome'",
+        "pf.installed_at > NOW() - (%s::text || ' days')::interval",
+    ]
+    params: list = [str(days)]
+    if q_filter:
+        where.append("(pf.name ILIKE %s OR pf.kb_number ILIKE %s)")
+        params.extend([f"%{q_filter}%", f"%{q_filter}%"])
+    if status_filter:
+        where.append("pf.status = %s")
+        params.append(status_filter)
+    if client_filter:
+        where.append("c.slug = %s")
+        params.append(client_filter)
+    where_sql = " AND ".join(where)
+
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        cur.execute(
+            f"""
+            SELECT
+                pf.installed_at,
+                pf.status,
+                pf.severity,
+                pf.kb_number,
+                pf.name,
+                d.id                     AS device_id,
+                d.canonical_hostname     AS hostname,
+                c.slug                   AS client_slug,
+                c.display_name           AS client_name
+            FROM ninja_patches.patch_facts pf
+            JOIN operations.device_links dl
+              ON dl.external_id = pf.device_id::text
+             AND dl.source_id = (SELECT id FROM operations.sources WHERE name='Ninja' LIMIT 1)
+             AND dl.tenant_id = 1
+            JOIN operations.devices d
+              ON d.id = dl.device_id AND d.deleted_at IS NULL
+            JOIN operations.clients c
+              ON c.id = d.client_id AND c.deleted_at IS NULL
+            WHERE {where_sql}
+            ORDER BY pf.installed_at DESC NULLS LAST
+            LIMIT 500
+            """,
+            params,
+        )
+        rows = cur.fetchall()
+
+    cols = ["installed_at", "status", "severity", "kb_number", "name",
+            "device_id", "hostname", "client_slug", "client_name"]
+    activity = [dict(zip(cols, r, strict=True)) for r in rows]
+
+    if wants_csv(request):
+        return csv_response(
+            activity,
+            columns=[
+                ("Installed at", "installed_at"),
+                ("Status",       "status"),
+                ("Severity",     "severity"),
+                ("KB",           "kb_number"),
+                ("Patch",        "name"),
+                ("Client",       "client_name"),
+                ("Hostname",     "hostname"),
+            ],
+            filename_stem="patch_activity",
+        )
+
+    clients = list(
+        Client.objects.filter(tenant_id=1, deleted_at__isnull=True)
+        .order_by("display_name")
+        .values("slug", "display_name")
+    )
+
+    return render(
+        request,
+        "patch_activity.html",
+        {
+            "rows": activity,
+            "row_count": len(activity),
+            "days": days,
+            "clients": clients,
+            "status_choices": _PATCH_STATUS_CHOICES,
+            "active_q": q_filter,
+            "active_status": status_filter,
+            "active_client": client_filter,
+        },
+    )
+
+
 def _get_client_by_slug(slug: str) -> Client:
     return get_object_or_404(
         Client, tenant_id=1, slug=slug, deleted_at__isnull=True

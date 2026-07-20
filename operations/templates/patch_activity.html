@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+
+{% block title %}Patch Activity Search{% endblock %}
+
+{% block content %}
+<style>
+    .pa-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+    .pa-table th {
+        text-align: left; padding: 0.4rem 0.6rem; border-bottom: 2px solid var(--border);
+        font-size: 0.75rem; color: var(--muted); text-transform: uppercase;
+        letter-spacing: 0.04em; font-weight: 700;
+    }
+    .pa-table td { padding: 0.35rem 0.6rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+    .pa-kb { font-family: monospace; font-size: 0.8rem; color: #1e40af; }
+    .pa-status-Installed { color: #16a34a; font-weight: 600; }
+    .pa-status-Failed { color: #dc2626; font-weight: 600; }
+    .pa-status-Manual { color: #7c3aed; }
+    .pa-status-Delayed { color: #ea580c; }
+    .pa-status-Pending { color: #ca8a04; }
+    .pa-sev-Critical { color: #dc2626; font-weight: 600; }
+    .pa-sev-Important { color: #ea580c; font-weight: 600; }
+    .pa-sev-Moderate { color: #ca8a04; }
+</style>
+
+<div class="card">
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:1rem;">
+        <h1 style="margin:0;">Patch Activity Search
+            <span class="muted" style="font-weight:400; font-size:0.9rem;">
+                {{ row_count }} event{{ row_count|pluralize }}{% if row_count == 500 %} (limited){% endif %} · last {{ days }} day{{ days|pluralize }}
+            </span>
+        </h1>
+        <div style="display:flex; align-items:center; gap:0.75rem;">
+            <a href="{% url 'patching_queue' %}" style="font-size:0.85rem;">← Patching queue</a>
+            <a href="{% url 'patch_trends_page' %}" style="font-size:0.85rem;">Trends →</a>
+            {% include "_csv_download.html" %}
+        </div>
+    </div>
+    <p class="muted" style="margin-top:0.5rem;">
+        Free-text search over recent patch install outcomes
+        (<code>ninja_patches.patch_facts</code>, fact_type='install_outcome').
+        Newest first, capped at 500 rows per query.
+    </p>
+</div>
+
+<div class="card">
+    <form action="" method="get" class="filterbar">
+        <div style="flex:1; min-width:180px;">
+            <label>Search (patch or KB)</label>
+            <input type="text" name="q" value="{{ active_q }}" placeholder="KB5040442, Chrome, ...">
+        </div>
+        <div>
+            <label>Status</label>
+            <select name="status">
+                <option value="">Any</option>
+                {% for value, label in status_choices %}
+                    <option value="{{ value }}"{% if active_status == value %} selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <label>Client</label>
+            <select name="client">
+                <option value="">Any</option>
+                {% for c in clients %}
+                    <option value="{{ c.slug }}"{% if active_client == c.slug %} selected{% endif %}>{{ c.display_name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <label>Days</label>
+            <select name="days">
+                <option value="7"{% if days == 7 %} selected{% endif %}>7</option>
+                <option value="14"{% if days == 14 %} selected{% endif %}>14</option>
+                <option value="30"{% if days == 30 %} selected{% endif %}>30</option>
+                <option value="60"{% if days == 60 %} selected{% endif %}>60</option>
+                <option value="90"{% if days == 90 %} selected{% endif %}>90</option>
+                <option value="180"{% if days == 180 %} selected{% endif %}>180</option>
+            </select>
+        </div>
+        <div style="align-self:end;">
+            <button type="submit">Search</button>
+            {% if active_q or active_status or active_client %}
+                <a href="?" style="margin-left:0.5rem;">Clear</a>
+            {% endif %}
+        </div>
+    </form>
+</div>
+
+<div class="card">
+{% if rows %}
+    <table class="pa-table" data-sortable>
+        <thead>
+            <tr>
+                <th>Installed at</th>
+                <th>Status</th>
+                <th>Severity</th>
+                <th>KB</th>
+                <th>Patch</th>
+                <th>Client</th>
+                <th>Device</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for r in rows %}
+            <tr>
+                <td class="muted">{{ r.installed_at|date:"Y-m-d H:i" }}</td>
+                <td><span class="pa-status-{{ r.status }}">{{ r.status }}</span></td>
+                <td><span class="pa-sev-{{ r.severity }}">{{ r.severity|default:"—" }}</span></td>
+                <td class="pa-kb">{{ r.kb_number|default:"—" }}</td>
+                <td style="max-width:400px; word-wrap:break-word;">{{ r.name }}</td>
+                <td>{{ r.client_name }}</td>
+                <td>
+                    <a href="{% url 'device_detail' org_slug=r.client_slug device_id=r.device_id %}">
+                        <code>{{ r.hostname }}</code>
+                    </a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+{% else %}
+    <p class="muted">No matching activity in the selected window.</p>
+{% endif %}
+</div>
+{% endblock %}

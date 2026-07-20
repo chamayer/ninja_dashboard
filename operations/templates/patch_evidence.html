@@ -48,7 +48,12 @@
                 {{ row_count }} rows{% if row_count == 1000 %} (limited){% endif %}
             </span>
         </h1>
-        {% include "_csv_download.html" %}
+        <div style="display:flex; align-items:center; gap:0.75rem;">
+            <a href="{% url 'patching_queue' %}" style="font-size:0.85rem;">← Patching queue</a>
+            <a href="{% url 'patch_trends_page' %}" style="font-size:0.85rem;">Trends →</a>
+            <a href="{% url 'patch_activity_search_page' %}" style="font-size:0.85rem;">Activity →</a>
+            {% include "_csv_download.html" %}
+        </div>
     </div>
     <p class="muted" style="margin-top:0.5rem;">
         Every known (device, patch) pair with current state — filter, search,

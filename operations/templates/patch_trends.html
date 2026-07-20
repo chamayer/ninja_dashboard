@@ -1,0 +1,161 @@
+{% extends "base.html" %}
+
+{% block title %}Patch Trends{% endblock %}
+
+{% block content %}
+<style>
+    .pt-tiles {
+        display: grid; gap: 0.5rem;
+        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+        margin-bottom: 1rem;
+    }
+    .pt-tile {
+        padding: 0.75rem 0.9rem; background: var(--surface);
+        border: 1px solid var(--border); border-radius: 6px;
+    }
+    .pt-tile .lbl {
+        font-size: 0.7rem; font-weight: 700; text-transform: uppercase;
+        letter-spacing: 0.04em; color: var(--muted);
+    }
+    .pt-tile .cnt { font-size: 1.4rem; font-weight: 700; margin-top: 0.15rem; }
+    .pt-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+    .pt-table th {
+        text-align: left; padding: 0.4rem 0.6rem; border-bottom: 2px solid var(--border);
+        font-size: 0.75rem; color: var(--muted); text-transform: uppercase;
+        letter-spacing: 0.04em; font-weight: 700;
+    }
+    .pt-table td { padding: 0.35rem 0.6rem; border-bottom: 1px solid var(--border); }
+    .pt-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+    .pt-bar-wrap {
+        display: block; height: 12px; background: #eef4fb; border-radius: 3px;
+        position: relative; overflow: hidden; min-width: 120px;
+    }
+    .pt-bar-installs {
+        position: absolute; left: 0; top: 0; bottom: 0; background: #16a34a;
+    }
+    .pt-bar-failures {
+        position: absolute; top: 0; bottom: 0; background: #dc2626;
+    }
+    .pt-fail-hi { color: #dc2626; font-weight: 600; }
+    .pt-fail-md { color: #ea580c; }
+</style>
+
+<div class="card">
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:1rem;">
+        <h1 style="margin:0;">Patch Trends
+            <span class="muted" style="font-weight:400; font-size:0.9rem;">
+                last {{ days }} day{{ days|pluralize }}
+            </span>
+        </h1>
+        <div style="display:flex; align-items:center; gap:0.75rem;">
+            <a href="{% url 'patching_queue' %}" style="font-size:0.85rem;">← Patching queue</a>
+            <a href="{% url 'patch_evidence_page' %}" style="font-size:0.85rem;">Patch Evidence →</a>
+            {% include "_csv_download.html" %}
+        </div>
+    </div>
+    <p class="muted" style="margin-top:0.5rem;">
+        Per-day install / failure volumes from
+        <code>ninja_patches.patch_facts</code>. Optional client filter
+        narrows to one org.
+    </p>
+</div>
+
+<div class="pt-tiles">
+    <div class="pt-tile">
+        <div class="lbl">Installs</div>
+        <div class="cnt" style="color:#16a34a;">{{ totals.installs }}</div>
+    </div>
+    <div class="pt-tile">
+        <div class="lbl">Failures</div>
+        <div class="cnt" style="color:#dc2626;">{{ totals.failures }}</div>
+    </div>
+    <div class="pt-tile">
+        <div class="lbl">Failure %</div>
+        <div class="cnt">{{ totals.fail_pct }}%</div>
+    </div>
+    <div class="pt-tile">
+        <div class="lbl">Total attempts</div>
+        <div class="cnt">{{ totals.total }}</div>
+    </div>
+    <div class="pt-tile">
+        <div class="lbl">Devices touched</div>
+        <div class="cnt">{{ totals.devices_touched }}</div>
+    </div>
+</div>
+
+<div class="card">
+    <form action="" method="get" class="filterbar">
+        <div>
+            <label>Days</label>
+            <select name="days">
+                {% for d in "7,14,30,60,90,180"|slice:":" %}{% endfor %}
+                <option value="7"{% if days == 7 %} selected{% endif %}>7</option>
+                <option value="14"{% if days == 14 %} selected{% endif %}>14</option>
+                <option value="30"{% if days == 30 %} selected{% endif %}>30</option>
+                <option value="60"{% if days == 60 %} selected{% endif %}>60</option>
+                <option value="90"{% if days == 90 %} selected{% endif %}>90</option>
+                <option value="180"{% if days == 180 %} selected{% endif %}>180</option>
+            </select>
+        </div>
+        <div>
+            <label>Client</label>
+            <select name="client">
+                <option value="">Any</option>
+                {% for c in clients %}
+                    <option value="{{ c.slug }}"{% if active_client == c.slug %} selected{% endif %}>{{ c.display_name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div style="align-self:end;">
+            <button type="submit">Apply</button>
+            {% if active_client or days != 30 %}
+                <a href="?" style="margin-left:0.5rem;">Reset</a>
+            {% endif %}
+        </div>
+    </form>
+</div>
+
+<div class="card">
+{% if rows %}
+    <table class="pt-table" data-sortable>
+        <thead>
+            <tr>
+                <th>Day</th>
+                <th class="num">Installs</th>
+                <th class="num">Failures</th>
+                <th class="num">Total</th>
+                <th class="num">Fail %</th>
+                <th class="num">Devices</th>
+                <th style="width:35%;">Volume</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for r in rows %}
+            <tr>
+                <td>{{ r.day|date:"Y-m-d (D)" }}</td>
+                <td class="num" style="color:#16a34a;">{{ r.installs }}</td>
+                <td class="num" style="color:#dc2626;">{{ r.failures }}</td>
+                <td class="num">{{ r.total }}</td>
+                <td class="num
+                    {% if r.fail_pct > 20 %}pt-fail-hi
+                    {% elif r.fail_pct > 5 %}pt-fail-md
+                    {% endif %}">{{ r.fail_pct }}%</td>
+                <td class="num muted">{{ r.devices_touched }}</td>
+                <td>
+                    <span class="pt-bar-wrap">
+                        <span class="pt-bar-installs"
+                              style="width:{% widthratio r.installs max_total 100 %}%;"></span>
+                        <span class="pt-bar-failures"
+                              style="left:{% widthratio r.installs max_total 100 %}%;
+                                     width:{% widthratio r.failures max_total 100 %}%;"></span>
+                    </span>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+{% else %}
+    <p class="muted">No install activity in the selected window.</p>
+{% endif %}
+</div>
+{% endblock %}
