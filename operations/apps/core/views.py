@@ -2378,6 +2378,181 @@ def admin_finding_acknowledge(request: HttpRequest, finding_id: str) -> HttpResp
     return redirect("findings_admin_health")
 
 
+# ── Patching visibility — Fleet Patch Evidence ─────────────────────────────
+
+
+_PATCH_STATUS_CHOICES = [
+    ("Installed",  "Installed"),
+    ("Failed",     "Failed"),
+    ("Pending",    "Pending"),
+    ("Approved",   "Approved"),
+    ("Rejected",   "Rejected"),
+    ("Manual",     "Manual"),
+    ("Delayed",    "Delayed"),
+]
+
+_PATCH_SEVERITY_CHOICES = [
+    ("Critical",     "Critical"),
+    ("Important",    "Important"),
+    ("Moderate",     "Moderate"),
+    ("Low",          "Low"),
+    ("Optional",     "Optional"),
+    ("Unspecified",  "Unspecified"),
+]
+
+
+@login_required
+def patch_evidence_page(request: HttpRequest) -> HttpResponse:
+    """Fleet-wide Patch Evidence — one row per (device, patch) with
+    the current patch state joined to device / client metadata.
+
+    Replaces the legacy `script-dev/ninja/Ninja-Patching-report.ps1`
+    CSV report + Metabase's "Patch Evidence" dashboard. All data is
+    already in the pipeline; this is the native operator surface.
+
+    Filters:
+      - status         Installed / Failed / Pending / Approved / …
+      - severity       Critical / Important / Moderate / …
+      - client         org slug
+      - q              free-text against patch name or KB number
+    """
+    status_filter = request.GET.get("status", "").strip()
+    severity_filter = request.GET.get("severity", "").strip()
+    client_filter = request.GET.get("client", "").strip()
+    q_filter = (request.GET.get("q") or "").strip()
+
+    where = ["1=1"]
+    params: list = []
+    if status_filter:
+        where.append("cps.status = %s")
+        params.append(status_filter)
+    if severity_filter:
+        where.append("cps.severity = %s")
+        params.append(severity_filter)
+    if client_filter:
+        where.append("c.slug = %s")
+        params.append(client_filter)
+    if q_filter:
+        where.append("(cps.patch_name ILIKE %s OR cps.kb_number ILIKE %s)")
+        params.extend([f"%{q_filter}%", f"%{q_filter}%"])
+    where_sql = " AND ".join(where)
+
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        # Overview counts by status (fleet-wide, ignoring filters).
+        cur.execute(
+            """
+            SELECT status, COUNT(*)::int
+            FROM ninja_patches.current_patch_state
+            GROUP BY status
+            ORDER BY 1
+            """
+        )
+        status_counts = dict(cur.fetchall())
+
+        cur.execute(
+            f"""
+            SELECT
+                d.id                       AS device_id,
+                d.canonical_hostname       AS hostname,
+                c.slug                     AS client_slug,
+                c.display_name             AS client_name,
+                d.device_role,
+                d.os_group,
+                d.os_name,
+                cps.patch_name,
+                cps.kb_number,
+                cps.status,
+                cps.severity,
+                cps.installed_at,
+                cps.last_observed_at,
+                lio.status                 AS last_install_status,
+                lio.installed_at           AS last_install_at
+            FROM ninja_patches.current_patch_state cps
+            JOIN operations.device_links dl
+              ON dl.external_id = cps.device_id::text
+             AND dl.source_id = (SELECT id FROM operations.sources WHERE name = 'Ninja' LIMIT 1)
+             AND dl.tenant_id = 1
+            JOIN operations.devices d
+              ON d.id = dl.device_id AND d.deleted_at IS NULL
+            JOIN operations.clients c
+              ON c.id = d.client_id AND c.deleted_at IS NULL
+            LEFT JOIN ninja_patches.latest_install_outcome lio
+              ON lio.device_id = cps.device_id AND lio.patch_uid = cps.patch_uid
+            WHERE {where_sql}
+            ORDER BY
+                CASE cps.severity
+                    WHEN 'Critical'    THEN 0
+                    WHEN 'Important'   THEN 1
+                    WHEN 'Moderate'    THEN 2
+                    WHEN 'Low'         THEN 3
+                    WHEN 'Optional'    THEN 4
+                    ELSE 5
+                END,
+                cps.last_observed_at DESC NULLS LAST,
+                c.display_name,
+                d.canonical_hostname,
+                cps.patch_name
+            LIMIT 1000
+            """,
+            params,
+        )
+        rows = cur.fetchall()
+
+    columns = [
+        "device_id", "hostname", "client_slug", "client_name",
+        "device_role", "os_group", "os_name",
+        "patch_name", "kb_number", "status", "severity",
+        "installed_at", "last_observed_at",
+        "last_install_status", "last_install_at",
+    ]
+    patch_rows = [dict(zip(columns, r, strict=True)) for r in rows]
+
+    if wants_csv(request):
+        return csv_response(
+            patch_rows,
+            columns=[
+                ("Client",            "client_name"),
+                ("Hostname",          "hostname"),
+                ("Role",              "device_role"),
+                ("OS group",          "os_group"),
+                ("OS name",           "os_name"),
+                ("KB",                "kb_number"),
+                ("Patch",             "patch_name"),
+                ("Status",            "status"),
+                ("Severity",          "severity"),
+                ("Installed at",      "installed_at"),
+                ("Last observed",     "last_observed_at"),
+                ("Last install status", "last_install_status"),
+                ("Last install at",   "last_install_at"),
+            ],
+            filename_stem="patch_evidence",
+        )
+
+    clients = list(
+        Client.objects.filter(tenant_id=1, deleted_at__isnull=True)
+        .order_by("display_name")
+        .values("slug", "display_name")
+    )
+
+    return render(
+        request,
+        "patch_evidence.html",
+        {
+            "rows": patch_rows,
+            "row_count": len(patch_rows),
+            "status_counts": status_counts,
+            "clients": clients,
+            "status_choices": _PATCH_STATUS_CHOICES,
+            "severity_choices": _PATCH_SEVERITY_CHOICES,
+            "active_status": status_filter,
+            "active_severity": severity_filter,
+            "active_client": client_filter,
+            "active_q": q_filter,
+        },
+    )
+
+
 def _get_client_by_slug(slug: str) -> Client:
     return get_object_or_404(
         Client, tenant_id=1, slug=slug, deleted_at__isnull=True

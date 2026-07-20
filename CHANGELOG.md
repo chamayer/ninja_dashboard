@@ -2,6 +2,38 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.73.0] — 2026-07-20 — Fleet Patch Evidence
+
+### Why
+First slice of the patching-visibility track. Closes both a
+Metabase-dashboard GAP (Patch Evidence) and the legacy
+`Ninja-Patching-report.ps1` script's intent in one Operations
+surface. All patch data was already in the pipeline
+(`ninja_patches.current_patch_state` +
+`ninja_patches.latest_install_outcome`); no ingest changes needed.
+
+### Added
+- `GET /patching/evidence/` — `patch_evidence_page` view. Renders
+  one row per (device, patch) with current state, joined to
+  device / client metadata and the latest install outcome.
+- Server-side filters: status (Installed / Failed / Pending /
+  Approved / Rejected / Manual / Delayed), severity (Critical /
+  Important / Moderate / Low / Optional / Unspecified), client,
+  free-text search over patch name and KB number.
+- Fleet-wide status tiles (counts per status across the whole
+  fleet, ignoring active filters).
+- CSV export via the standard `?format=csv` — 13 columns
+  including install-outcome status/date for each row.
+- Row cap 1000 for the table view (CSV export capped at the same
+  underlying query for now — bumping is trivial when needed).
+- "Patch Evidence →" link added to the patching-queue header for
+  operator discovery.
+
+### Not in this slice
+- Patch Trends (per-day install/failure/reboot volumes).
+- Activity Search (free-text search over patch activity events).
+Both follow in subsequent versions.
+
 ## [0.72.1] — 2026-07-20 — Reclassify data-quality findings as entity
 
 ### Fixed

@@ -1,0 +1,156 @@
+{% extends "base.html" %}
+
+{% block title %}Patch Evidence{% endblock %}
+
+{% block content %}
+<style>
+    .pe-status-tiles {
+        display: grid; gap: 0.5rem;
+        grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+        margin-bottom: 1rem;
+    }
+    .pe-tile {
+        padding: 0.7rem 0.9rem; background: var(--surface);
+        border: 1px solid var(--border); border-radius: 6px;
+    }
+    .pe-tile .lbl {
+        font-size: 0.7rem; font-weight: 700; text-transform: uppercase;
+        letter-spacing: 0.04em; color: var(--muted);
+    }
+    .pe-tile .cnt { font-size: 1.4rem; font-weight: 700; margin-top: 0.15rem; }
+    .pe-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+    .pe-table th {
+        text-align: left; padding: 0.4rem 0.6rem; border-bottom: 2px solid var(--border);
+        font-size: 0.75rem; color: var(--muted); text-transform: uppercase;
+        letter-spacing: 0.04em; font-weight: 700;
+    }
+    .pe-table td { padding: 0.35rem 0.6rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+    .pe-sev-critical { color: #dc2626; font-weight: 600; }
+    .pe-sev-important { color: #ea580c; font-weight: 600; }
+    .pe-sev-moderate { color: #ca8a04; }
+    .pe-status-Installed { color: #16a34a; font-weight: 600; }
+    .pe-status-Failed { color: #dc2626; font-weight: 600; }
+    .pe-status-Pending { color: #ca8a04; }
+    .pe-status-Manual { color: #7c3aed; }
+    .pe-status-Delayed { color: #ea580c; }
+    .pe-status-Rejected { color: var(--muted); }
+    .pe-status-Approved { color: #2563eb; }
+    .pe-kb {
+        font-family: monospace; font-size: 0.8rem; color: #1e40af;
+    }
+    .pe-hostname a { text-decoration: none; }
+</style>
+
+<div class="card">
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:1rem;">
+        <h1 style="margin:0;">Patch Evidence
+            <span class="muted" style="font-weight:400; font-size:0.9rem;">
+                {{ row_count }} rows{% if row_count == 1000 %} (limited){% endif %}
+            </span>
+        </h1>
+        {% include "_csv_download.html" %}
+    </div>
+    <p class="muted" style="margin-top:0.5rem;">
+        Every known (device, patch) pair with current state — filter, search,
+        export. Replaces the legacy patching CSV report and the Metabase
+        Patch Evidence dashboard.
+    </p>
+</div>
+
+<div class="pe-status-tiles">
+    {% for status, count in status_counts.items %}
+    <div class="pe-tile">
+        <div class="lbl pe-status-{{ status }}">{{ status }}</div>
+        <div class="cnt">{{ count }}</div>
+    </div>
+    {% endfor %}
+</div>
+
+<div class="card">
+    <form action="" method="get" class="filterbar">
+        <div>
+            <label>Status</label>
+            <select name="status">
+                <option value="">Any</option>
+                {% for value, label in status_choices %}
+                    <option value="{{ value }}"{% if active_status == value %} selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <label>Severity</label>
+            <select name="severity">
+                <option value="">Any</option>
+                {% for value, label in severity_choices %}
+                    <option value="{{ value }}"{% if active_severity == value %} selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <label>Client</label>
+            <select name="client">
+                <option value="">Any</option>
+                {% for c in clients %}
+                    <option value="{{ c.slug }}"{% if active_client == c.slug %} selected{% endif %}>{{ c.display_name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div style="flex:1; min-width:180px;">
+            <label>Search (patch or KB)</label>
+            <input type="text" name="q" value="{{ active_q }}" placeholder="KB5040442, Chrome, ...">
+        </div>
+        <div style="align-self:end;">
+            <button type="submit">Filter</button>
+            {% if active_status or active_severity or active_client or active_q %}
+                <a href="?" style="margin-left:0.5rem;">Clear</a>
+            {% endif %}
+        </div>
+    </form>
+</div>
+
+<div class="card">
+{% if rows %}
+    <table class="pe-table" data-sortable>
+        <thead>
+            <tr>
+                <th>Client</th>
+                <th>Device</th>
+                <th>KB</th>
+                <th>Patch</th>
+                <th>Status</th>
+                <th>Severity</th>
+                <th>Installed at</th>
+                <th>Last observed</th>
+                <th>Last install</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for r in rows %}
+            <tr>
+                <td>{{ r.client_name }}</td>
+                <td class="pe-hostname">
+                    <a href="{% url 'device_detail' org_slug=r.client_slug device_id=r.device_id %}">
+                        <code>{{ r.hostname }}</code>
+                    </a>
+                </td>
+                <td class="pe-kb">{{ r.kb_number|default:"—" }}</td>
+                <td style="max-width:400px; word-wrap:break-word;">{{ r.patch_name }}</td>
+                <td><span class="pe-status-{{ r.status }}">{{ r.status }}</span></td>
+                <td><span class="pe-sev-{{ r.severity|lower }}">{{ r.severity|default:"—" }}</span></td>
+                <td class="muted">{{ r.installed_at|date:"Y-m-d"|default:"—" }}</td>
+                <td class="muted">{{ r.last_observed_at|date:"Y-m-d H:i"|default:"—" }}</td>
+                <td class="muted">
+                    {% if r.last_install_status %}
+                        <span class="pe-status-{{ r.last_install_status }}">{{ r.last_install_status }}</span>
+                        {% if r.last_install_at %}<br>{{ r.last_install_at|date:"Y-m-d" }}{% endif %}
+                    {% else %}—{% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+{% else %}
+    <p class="muted">No patch rows match the current filter.</p>
+{% endif %}
+</div>
+{% endblock %}

@@ -7,7 +7,10 @@
 <div class="card">
     <div style="display:flex; align-items:center; justify-content:space-between; gap:1rem;">
         <h1 style="margin:0;">Patching</h1>
-        {% include "_csv_download.html" %}
+        <div style="display:flex; align-items:center; gap:0.75rem;">
+            <a href="{% url 'patch_evidence_page' %}" style="font-size:0.85rem;">Patch Evidence →</a>
+            {% include "_csv_download.html" %}
+        </div>
     </div>
     <p class="muted">
         Only devices that are in patching scope produce these items.
