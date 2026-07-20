@@ -2,6 +2,20 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.72.1] — 2026-07-20 — Reclassify data-quality findings as entity
+
+### Fixed
+`unmatched_source_group` (0.70.0) and `unnamed_source_group` (0.72.0)
+were seeded with `finding_class='admin'`, but per DESIGN §6.1 the
+admin class is reserved for findings about the Operations tool's
+own health (connector down, queue stalled, matview stale, etc.).
+
+Both are actually about data quality on source records — operations
+findings, not admin. The emitter already writes them to
+`operations.findings` (correct for entity class). Migration 0058
+just aligns the `finding_class` in the registry with where the rows
+already live. No data migration; no emitter change.
+
 ## [0.72.0] — 2026-07-20 — Close nothing-hidden audit gaps
 
 ### Why
