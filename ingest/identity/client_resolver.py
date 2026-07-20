@@ -103,6 +103,13 @@ def drain_client_resolution() -> int:
 
             if not group_name or not normalized:
                 # e.g. LMI "-1" placeholder with empty name.
+                # Surface as a standard Finding (nothing hidden rule)
+                # so operators can decide whether to fix at source,
+                # add to placeholder_org_names, or ignore. dedup keyed
+                # on (source_binding, entity_key).
+                _emit_unnamed_source_group_finding(
+                    cur, binding_id, entity_key, source_id, platform,
+                )
                 continue
 
             if normalized in placeholders or cd.get("is_placeholder"):
@@ -369,6 +376,56 @@ def _finding_type_id(cur, name: str) -> int | None:
     )
     row = cur.fetchone()
     return row[0] if row else None
+
+
+def _emit_unnamed_source_group_finding(
+    cur, binding_id, entity_key: str, source_id: int | None, platform: str,
+) -> None:
+    """Emit an `unnamed_source_group` Finding at the empty-name skip
+    site. Per the "nothing hidden" rule — these groups used to be
+    silently dropped before reaching the unmatched_source_group path.
+    Dedup keyed on (source_binding, entity_key). Writes directly to
+    operations.findings (standard table) rather than admin_findings.
+    """
+    ft_id = _finding_type_id(cur, "unnamed_source_group")
+    if ft_id is None:
+        return
+    now = datetime.now(timezone.utc)
+    cond = _cond_group(binding_id, entity_key)
+    cur.execute(
+        """
+        INSERT INTO operations.findings (
+            id, version, tenant_id, finding_type_id, client_id,
+            subject_type, subject_id, subject_layer,
+            subject_layer_entity_id, finding_details, condition_key,
+            severity, confidence, status,
+            first_seen_at, last_seen_at, last_detected_at
+        ) VALUES (
+            gen_random_uuid(), 1, %s, %s, NULL,
+            'source_binding', %s, '', NULL,
+            %s::jsonb, %s,
+            'low', 'confirmed', 'open',
+            %s, %s, %s
+        )
+        ON CONFLICT (tenant_id, condition_key)
+        WHERE condition_key > '' AND status IN ('open', 'acknowledged')
+        DO UPDATE SET
+            last_seen_at = NOW(),
+            last_detected_at = NOW(),
+            finding_details = EXCLUDED.finding_details
+        """,
+        (
+            _TENANT_ID, ft_id, binding_id,
+            json.dumps({
+                "source_binding_id": str(binding_id),
+                "entity_key": entity_key,
+                "platform": platform,
+                "source_id": source_id,
+            }),
+            cond,
+            now, now, now,
+        ),
+    )
 
 
 def _emit_finding(

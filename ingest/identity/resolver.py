@@ -1163,6 +1163,7 @@ def _sync_device_attributes(cur) -> None:
     ft_placeholder = _load_finding_type_id(cur, "placeholder_serial")
     ft_shared      = _load_finding_type_id(cur, "shared_serial")
     ft_unmatched   = _load_finding_type_id(cur, "unmatched_source_group")
+    ft_placeholder_mac = _load_finding_type_id(cur, "placeholder_mac")
 
     # placeholder_serial — devices whose canonical_serial is filler.
     # Match the ingest.normalize.is_usable_serial() filter set at the
@@ -1313,6 +1314,69 @@ def _sync_device_attributes(cur) -> None:
         if cur.rowcount:
             log.info(
                 "resolver: data-quality upserted %d unmatched_source_group findings",
+                cur.rowcount,
+            )
+
+    # placeholder_mac — devices whose observations contain any junk
+    # MAC (all-zero, all-FF, VirtualBox default NAT). Correctness gate
+    # in normalize._JUNK_MACS silently ignores them for identity
+    # correlation; here we surface the affected devices. Bounded to
+    # the last 30 days of observations to keep the CROSS JOIN LATERAL
+    # scan cheap.
+    if ft_placeholder_mac is not None:
+        cur.execute(
+            """
+            INSERT INTO operations.findings (
+                id, version, tenant_id, finding_type_id, client_id,
+                subject_type, subject_id, subject_layer,
+                subject_layer_entity_id, finding_details, condition_key,
+                severity, confidence, status, first_seen_at, last_seen_at,
+                last_detected_at
+            )
+            SELECT
+                gen_random_uuid(), 1, sub.tenant_id, %s, d.client_id,
+                'device', sub.device_id, '', NULL,
+                jsonb_build_object(
+                    'hostname',  d.canonical_hostname,
+                    'junk_macs', sub.junk_macs
+                ),
+                'placeholder_mac:' || sub.device_id,
+                'medium', 'confirmed', 'open',
+                NOW(), NOW(), NOW()
+            FROM (
+                SELECT
+                    eo.tenant_id,
+                    eo.device_id,
+                    ARRAY_AGG(DISTINCT LOWER(mac_val)) AS junk_macs
+                FROM operations.entity_observations eo
+                CROSS JOIN LATERAL jsonb_array_elements_text(
+                    COALESCE(eo.canonical_data->'macs', '[]'::jsonb)
+                ) AS mac_val
+                WHERE eo.tenant_id = %s
+                  AND eo.device_id IS NOT NULL
+                  AND eo.observed_at > NOW() - INTERVAL '30 days'
+                  AND LOWER(mac_val) IN (
+                      '00:00:00:00:00:00',
+                      'ff:ff:ff:ff:ff:ff',
+                      '02:00:4c:4f:4f:50'
+                  )
+                GROUP BY eo.tenant_id, eo.device_id
+            ) sub
+            JOIN operations.devices d
+              ON d.id = sub.device_id AND d.tenant_id = sub.tenant_id
+            WHERE d.deleted_at IS NULL
+            ON CONFLICT (tenant_id, condition_key)
+            WHERE condition_key > '' AND status IN ('open', 'acknowledged')
+            DO UPDATE SET
+                last_seen_at = NOW(),
+                last_detected_at = NOW(),
+                finding_details = EXCLUDED.finding_details
+            """,
+            (ft_placeholder_mac, TENANT_ID),
+        )
+        if cur.rowcount:
+            log.info(
+                "resolver: data-quality upserted %d placeholder_mac findings",
                 cur.rowcount,
             )
 

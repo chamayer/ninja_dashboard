@@ -2,6 +2,49 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.72.0] — 2026-07-20 — Close nothing-hidden audit gaps
+
+### Why
+Follow-through on `operations/docs/nothing-hidden-audit.md`. Two
+remaining silent filters that 0.70.0 didn't cover:
+
+- `ingest/normalize.py::_JUNK_MACS` — junk MACs (all-zero, all-FF,
+  VirtualBox default NAT) silently disregarded from identity
+  correlation.
+- `ingest/identity/client_resolver.py:104` — empty-name source
+  groups (e.g. LMI "-1" placeholders) silently skipped before
+  reaching the `unmatched_source_group` path.
+
+Both now surface as standard `operations.findings` rows.
+
+### Added
+- FindingType seeds (migration 0057):
+  - `placeholder_mac` — severity medium, category identity,
+    auto_resolvable. Subject: the affected device. `finding_details`
+    lists the junk MACs found.
+  - `unnamed_source_group` — severity low, class admin, category
+    identity, auto_resolvable. Subject: source_binding.
+    `finding_details` includes source_binding_id + entity_key +
+    platform + source_id.
+- `_sync_device_attributes` in `ingest/identity/resolver.py` sweeps
+  observations from the last 30 days for any junk MAC and upserts
+  one `placeholder_mac` finding per affected device. Idempotent via
+  ON CONFLICT.
+- `_emit_unnamed_source_group_finding` in
+  `ingest/identity/client_resolver.py` wired at the empty-name skip
+  site. Writes directly to `operations.findings` (standard table),
+  not the legacy `admin_findings` side table.
+
+### Notes
+- Both new findings are `auto_resolvable=True` — auto-close when the
+  underlying condition disappears.
+- Correctness gates unchanged; only visibility added.
+- Audit doc remains authoritative. One deferred concern
+  (per-exclude-entry drop counts on `placeholder_org_names` /
+  `org_excludes`) plus a newly-observed sibling issue
+  (`admin_findings` is another per-type side table that should be
+  consolidated into `operations.findings`) are backlogged.
+
 ## [0.71.1] — 2026-07-20 — Complete CSV export rollout
 
 ### Added
