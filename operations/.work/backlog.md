@@ -123,29 +123,30 @@ duplicate lifecycle plumbing. See
   materialize operator-review workflows outside `operations.findings`.
 - Trigger: consumer audit + per-table retirement plan.
 
-## AgentInstance install-lifetime detection
+## Activate layer-entity field-history audit trails
 
-- Candidate scope: detect agent reinstalls per source and close/open
-  AgentInstance effective windows so per-install history is preserved.
-- Current state (post-0.65.0): AgentInstance carries `install_token`
-  and `agent_version` but no source in the pipeline populates
-  `install_token` in observation `canonical_data` — the field is
-  effectively unused. 0/N rows have a value in prod.
-- Design refinement: install identity is per-source-per-install, which
-  is what `operations.device_links.external_id` already captures. Use
-  that as the AgentInstance identity signal. When a Device gains a new
-  DeviceLink for the same agent product with a different external_id
-  (agent reinstall generating a new agent-side ID), close the current
-  AgentInstance window and open a new one.
-- Requires: (a) schema tweak on AgentInstance to store the driving
-  DeviceLink identifier so the resolver can compare; (b) resolver
-  extension to detect the transition; (c) decide close-out semantics
-  when the old DeviceLink goes stale (missing_since) — is the
-  AgentInstance closed at missing_since, or at the moment the new
-  install token first appears?
-- Constraint: preserve tenant/RLS; existing AgentInstance rows must
-  migrate cleanly (backfill DeviceLink association).
+- Candidate scope: wire the significant-field audit tables (already
+  scaffolded in ADR-0005 slice 1 — `asset_field_history`,
+  `os_instance_field_history`, `agent_instance_field_history`) to
+  fire when the resolver's attribute-sync detects a change on a
+  significant field. Tables currently exist and are empty.
+- Significant fields (per ADR-0005): `form_factor`, `serial`,
+  `vm_uuid` on Asset; `os_name`, `os_version` on OSInstance;
+  `agent_version` on AgentInstance. Heartbeat / last_seen churn is
+  excluded.
+- Design: BEFORE UPDATE trigger on each layer table, or explicit
+  INSERT-audit at the resolver's UPDATE site. Trigger is bulletproof;
+  explicit-write ties audit to the resolver's transactional scope
+  and skips heartbeat noise more easily.
+- Payoff: trends (e.g. "how often does the OS version change on
+  Windows devices?") and forensics ("what agent_version was on
+  device X on date D?") become native queries against the audit
+  timeline.
 - Trigger: explicit approval to open the track.
+- **Not to be confused with** the abandoned "install-lifetime
+  detection" idea — per ADR-0006, layer entities are attribute
+  buckets, not lifecycle-window entities. Field history is the
+  history mechanism.
 
 ## Metabase deprecation
 
