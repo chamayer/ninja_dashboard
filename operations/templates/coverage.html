@@ -32,13 +32,16 @@
         <h1 style="margin:0;">Compliance</h1>
         <p class="muted" style="margin:0.25rem 0 0;">Devices missing required agents — active issues</p>
     </div>
-    {% if critical_count %}
-    <span class="badge badge-critical">{{ critical_count }} critical gap{{ critical_count|pluralize }}</span>
-    {% elif total_gaps %}
-    <span class="badge badge-high">{{ total_gaps }} gap{{ total_gaps|pluralize }}</span>
-    {% else %}
-    <span class="badge badge-low">All compliant</span>
-    {% endif %}
+    <div style="display:flex; align-items:center; gap:0.75rem;">
+      {% if critical_count %}
+      <span class="badge badge-critical">{{ critical_count }} critical gap{{ critical_count|pluralize }}</span>
+      {% elif total_gaps %}
+      <span class="badge badge-high">{{ total_gaps }} gap{{ total_gaps|pluralize }}</span>
+      {% else %}
+      <span class="badge badge-low">All compliant</span>
+      {% endif %}
+      {% include "_csv_download.html" %}
+    </div>
 </div>
 
 <div class="cov-tiles">

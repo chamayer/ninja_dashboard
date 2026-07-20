@@ -8,10 +8,13 @@
         <a href="{% url 'org_index' org_slug=client.slug %}">{{ client.display_name }}</a>
         &nbsp;›&nbsp; Software
     </p>
-    <h1 style="margin: 0;">
-        Software
-        <span class="muted" style="font-weight: 400;">({{ total }})</span>
-    </h1>
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:1rem;">
+        <h1 style="margin: 0;">
+            Software
+            <span class="muted" style="font-weight: 400;">({{ total }})</span>
+        </h1>
+        {% include "_csv_download.html" %}
+    </div>
 </div>
 
 <div class="card">

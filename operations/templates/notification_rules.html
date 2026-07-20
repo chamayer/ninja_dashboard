@@ -5,7 +5,10 @@
 {% block content %}
 {% include "_admin_tabs.html" %}
 <div class="card">
-    <h1>Notification rules</h1>
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:1rem;">
+        <h1 style="margin:0;">Notification rules</h1>
+        {% include "_csv_download.html" %}
+    </div>
     <p class="muted">
         Every item is matched against these rules (most-specific first),
         routed to a notification channel, and cooldown-tracked. Rules

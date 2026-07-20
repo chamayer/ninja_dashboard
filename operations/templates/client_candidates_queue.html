@@ -5,7 +5,10 @@
 {% block content %}
 {% include "_admin_tabs.html" %}
 <div class="card">
-    <h1>Client candidates</h1>
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:1rem;">
+        <h1 style="margin:0;">Client candidates</h1>
+        {% include "_csv_download.html" %}
+    </div>
     <p class="muted">
         Source groups that don't map to any known client. Each row is
         awaiting an operator decision — accept (create a new client),

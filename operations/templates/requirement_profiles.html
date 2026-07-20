@@ -5,7 +5,10 @@
 {% block content %}
 {% include "_admin_tabs.html" %}
 <div class="card">
-    <h1>Requirement profiles</h1>
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:1rem;">
+        <h1 style="margin:0;">Requirement profiles</h1>
+        {% include "_csv_download.html" %}
+    </div>
     <p class="muted">
         Each profile is a client's complete declared policy — the required
         (entity_type, platform, device_scope) rows evaluated per device.

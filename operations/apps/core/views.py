@@ -796,6 +796,18 @@ def org_devices(request: HttpRequest, org_slug: str) -> HttpResponse:
         "device_type",
         "device_role",
     )
+    if wants_csv(request):
+        return csv_response(
+            devices_qs,
+            columns=[
+                ("Hostname",     "canonical_hostname"),
+                ("Serial",       "canonical_serial"),
+                ("Type",         "device_type"),
+                ("Role",         "device_role"),
+                ("Device ID",    lambda d: str(d.id)),
+            ],
+            filename_stem=f"{org_slug}_devices",
+        )
     paginator = Paginator(devices_qs, DEVICE_PAGE_SIZE)
     page_obj = paginator.get_page(request.GET.get("page"))
 
@@ -2234,6 +2246,23 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
         for f in findings
     ]
 
+    if wants_csv(request):
+        return csv_response(
+            rows,
+            columns=[
+                ("Severity",      lambda r: r["f"].severity),
+                ("Type",          lambda r: r["f"].finding_type.name),
+                ("Client",        lambda r: (r["f"].client.display_name if r["f"].client else "")),
+                ("Subject",       "subject_label"),
+                ("Detail",        "detail"),
+                ("Status",        lambda r: r["f"].status),
+                ("Confidence",    lambda r: r["f"].confidence),
+                ("First seen",    lambda r: r["f"].first_seen_at),
+                ("Last detected", lambda r: r["f"].last_detected_at),
+            ],
+            filename_stem="patching",
+        )
+
     paginator = Paginator(rows, 50)
     page = paginator.get_page(request.GET.get("page"))
 
@@ -2431,6 +2460,22 @@ def merge_candidates_queue(request: HttpRequest) -> HttpResponse:
         .distinct()
     )
 
+    if wants_csv(request):
+        return csv_response(
+            list(qs),
+            columns=[
+                ("Entity type",   "entity_type"),
+                ("Canonical key", "canonical_key"),
+                ("Client",        lambda r: (r.client.display_name if r.client else "")),
+                ("Confidence",    "confidence"),
+                ("Status",        "status"),
+                ("Created",       "created_at"),
+                ("Resolved",      "resolved_at"),
+                ("Resolved by",   "resolved_by"),
+            ],
+            filename_stem="merge_candidates",
+        )
+
     return render(
         request,
         "merge_candidates_queue.html",
@@ -2561,6 +2606,22 @@ def org_software(request: HttpRequest, org_slug: str) -> HttpResponse:
         page_query_parts.append(f"q={search}")
     page_query = "&".join(page_query_parts)
 
+    if wants_csv(request):
+        return csv_response(
+            rows,
+            columns=[
+                ("Canonical name",  lambda r: r[0]),
+                ("Publisher",       lambda r: r[1] or ""),
+                ("Device count",    lambda r: r[2]),
+                ("First installed", lambda r: r[3]),
+                ("Last seen",       lambda r: r[4]),
+                ("Locations",       lambda r: r[5] or ""),
+                ("Decision",        lambda r: r[6]),
+                ("Open findings",   lambda r: r[7]),
+            ],
+            filename_stem=f"{org_slug}_software",
+        )
+
     return render(
         request,
         "org_software.html",
@@ -2617,6 +2678,22 @@ def org_software_devices(request: HttpRequest, org_slug: str) -> HttpResponse:
                 params,
             )
             device_rows = cur.fetchall()
+
+    if wants_csv(request):
+        return csv_response(
+            device_rows,
+            columns=[
+                ("Device ID",     lambda r: str(r[0])),
+                ("Hostname",      lambda r: r[1]),
+                ("Serial",        lambda r: r[2] or ""),
+                ("Device type",   lambda r: r[3]),
+                ("Version",       lambda r: r[4] or ""),
+                ("Install date",  lambda r: r[5]),
+                ("Install path",  lambda r: r[6] or ""),
+                ("Last observed", lambda r: r[7]),
+            ],
+            filename_stem=f"{org_slug}_{sw_name}_devices",
+        )
 
     return render(
         request,
@@ -2756,6 +2833,21 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
     total_gaps = sum(r["total"] for r in gap_rows)
     critical_count = sum(r["total"] for r in gap_rows if r["severity"] == "critical")
 
+    if wants_csv(request):
+        return csv_response(
+            gap_rows,
+            columns=[
+                ("Client",    "client_name"),
+                ("Platform",  "platform"),
+                ("Severity",  "severity"),
+                ("Total",     "total"),
+                ("Confirmed", "confirmed"),
+                ("Probable",  "probable"),
+                ("Oldest at", "oldest_at"),
+            ],
+            filename_stem="fleet_coverage_gaps",
+        )
+
     return render(request, "coverage.html", {
         "admin_group": "integrations",
         "admin_tab": "coverage",
@@ -2876,6 +2968,24 @@ def sources_status(request: HttpRequest) -> HttpResponse:
         })
 
     stale_count = sum(1 for s in sources if s["is_stale"] and not s["is_processing"])
+    if wants_csv(request):
+        return csv_response(
+            sources,
+            columns=[
+                ("Source",         "name"),
+                ("Processing",     lambda r: "yes" if r["is_processing"] else "no"),
+                ("Pending",        lambda r: "yes" if r["has_pending"] else "no"),
+                ("Stale",          lambda r: "yes" if r["is_stale"] else "no"),
+                ("Last success",   "last_success"),
+                ("Last failure",   "last_failure"),
+                ("Last rows",      "last_rows"),
+                ("Last error",     "last_error"),
+                ("Last observed",  "last_observed"),
+                ("Clients",        "client_count"),
+                ("Devices",        "device_count"),
+            ],
+            filename_stem="sources_status",
+        )
     return render(request, "sources.html", {
         "admin_group": "integrations",
         "admin_tab": "sources",
@@ -2924,6 +3034,21 @@ def client_candidates_queue(request: HttpRequest) -> HttpResponse:
         for row in ClientCandidate.objects.filter(tenant_id=1)
         .values("status").annotate(n=Count("id"))
     }
+
+    if wants_csv(request):
+        return csv_response(
+            rows,
+            columns=[
+                ("Display name",   lambda r: r["candidate"].display_name),
+                ("Status",         lambda r: r["candidate"].status),
+                ("Seen count",     lambda r: r["candidate"].seen_count),
+                ("Source count",   "source_count"),
+                ("Sources",        "sources"),
+                ("Latest seen",    "latest_seen"),
+                ("Candidate ID",   lambda r: str(r["candidate"].id)),
+            ],
+            filename_stem="client_candidates",
+        )
 
     return render(request, "client_candidates_queue.html", {
         "admin_group": "review",
@@ -3464,6 +3589,19 @@ def software_decisions_queue(request: HttpRequest) -> HttpResponse:
 
     categories_seen = sorted({r["category"] for r in display_rows if r["category"]})
 
+    if wants_csv(request):
+        return csv_response(
+            display_rows,
+            columns=[
+                ("Canonical name",  "canonical"),
+                ("Category",        "category"),
+                ("Device count",    "device_count"),
+                ("Latest seen",     "latest"),
+                ("Global decision", "global_decision"),
+            ],
+            filename_stem="software_decisions",
+        )
+
     return render(request, "software_decisions.html", {
         "admin_group": "review",
         "admin_tab": "software",
@@ -3724,6 +3862,21 @@ def requirement_profiles_list(request: HttpRequest) -> HttpResponse:
             "items": list(p.items.all().order_by("device_scope", "entity_type", "platform")),
             "client_count": client_count,
         })
+    if wants_csv(request):
+        return csv_response(
+            rows,
+            columns=[
+                ("Name",              lambda r: r["profile"].name),
+                ("Is tenant default", lambda r: "yes" if r["profile"].is_tenant_default else "no"),
+                ("Client count",      "client_count"),
+                ("Item count",        lambda r: len(r["items"])),
+                ("Items",             lambda r: "; ".join(
+                    f"{i.platform or ''}:{i.entity_type or ''}:{i.device_scope or ''}"
+                    for i in r["items"]
+                )),
+            ],
+            filename_stem="requirement_profiles",
+        )
     return render(request, "requirement_profiles.html", {
         "admin_group": "config",
         "admin_tab": "requirements",
@@ -3846,6 +3999,19 @@ def notification_rules_list(request: HttpRequest) -> HttpResponse:
         .order_by("-sent_at")[:50]
     )
     routes = list(NotificationRoute.objects.filter(tenant_id=1))
+    if wants_csv(request):
+        return csv_response(
+            rules,
+            columns=[
+                ("Finding type",     lambda r: r.finding_type.name),
+                ("Client",           lambda r: (r.client.display_name if r.client else "(any)")),
+                ("Route",            lambda r: (r.route.name if r.route else "")),
+                ("Enabled",          lambda r: "yes" if r.enabled else "no"),
+                ("Min severity",     "min_severity"),
+                ("Created",          "created_at"),
+            ],
+            filename_stem="notification_rules",
+        )
     return render(request, "notification_rules.html", {
         "admin_group": "config",
         "admin_tab": "alerts",
@@ -3884,6 +4050,20 @@ def notification_suppressions_list(request: HttpRequest) -> HttpResponse:
         .select_related("finding_type", "created_by")
         .order_by("-created_at")
     )
+    if wants_csv(request):
+        return csv_response(
+            rows,
+            columns=[
+                ("Finding type", lambda r: r.finding_type.name),
+                ("Subject type", "subject_type"),
+                ("Subject key",  "subject_key"),
+                ("Reason",       "reason"),
+                ("Created",      "created_at"),
+                ("Created by",   lambda r: (r.created_by.username if r.created_by else "")),
+                ("Expires",      "expires_at"),
+            ],
+            filename_stem="suppressions",
+        )
     return render(request, "notification_suppressions.html", {
         "admin_group": "config",
         "admin_tab": "suppressions",

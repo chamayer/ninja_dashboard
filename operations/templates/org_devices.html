@@ -8,7 +8,10 @@
         <a href="{% url 'org_index' org_slug=client.slug %}">{{ client.display_name }}</a>
         &nbsp;›&nbsp; Devices
     </p>
-    <h1 style="margin: 0;">Devices <span class="muted" style="font-weight: 400;">({{ device_count }})</span></h1>
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:1rem;">
+        <h1 style="margin: 0;">Devices <span class="muted" style="font-weight: 400;">({{ device_count }})</span></h1>
+        {% include "_csv_download.html" %}
+    </div>
     {% if search_query or active_type or active_role or missing_platform %}
         <p class="muted" style="margin-bottom: 0;">
             Showing {{ filtered_count }} matching device{{ filtered_count|pluralize }}{% if active_role %} · role: {{ active_role }}{% endif %}{% if missing_platform %} · missing {{ missing_platform }}{% endif %}.

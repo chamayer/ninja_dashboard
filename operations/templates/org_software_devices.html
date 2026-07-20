@@ -9,12 +9,15 @@
         &nbsp;›&nbsp; <a href="{% url 'org_software' org_slug=client.slug %}">Software</a>
         &nbsp;›&nbsp; {{ sw_name }}
     </p>
-    <h1 style="margin: 0;">
-        {{ sw_name }}
-        <span class="muted" style="font-weight: 400; font-size: 1.1rem;">
-            {% if sw_publisher %}· {{ sw_publisher }}{% endif %}
-        </span>
-    </h1>
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:1rem;">
+        <h1 style="margin: 0;">
+            {{ sw_name }}
+            <span class="muted" style="font-weight: 400; font-size: 1.1rem;">
+                {% if sw_publisher %}· {{ sw_publisher }}{% endif %}
+            </span>
+        </h1>
+        {% include "_csv_download.html" %}
+    </div>
     <p class="muted" style="margin-top: 0.25rem;">{{ device_rows|length }} device{{ device_rows|length|pluralize }}</p>
 </div>
 

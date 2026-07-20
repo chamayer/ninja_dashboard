@@ -28,11 +28,14 @@
         <h1 style="margin:0;">Sources</h1>
         <p class="muted" style="margin:0.25rem 0 0;">Ingest status per source platform</p>
     </div>
-    {% if stale_count %}
-    <span class="badge badge-high">{{ stale_count }} stale source{{ stale_count|pluralize }}</span>
-    {% else %}
-    <span class="badge badge-low">All current</span>
-    {% endif %}
+    <div style="display:flex; align-items:center; gap:0.75rem;">
+      {% if stale_count %}
+      <span class="badge badge-high">{{ stale_count }} stale source{{ stale_count|pluralize }}</span>
+      {% else %}
+      <span class="badge badge-low">All current</span>
+      {% endif %}
+      {% include "_csv_download.html" %}
+    </div>
 </div>
 
 <div class="source-grid">

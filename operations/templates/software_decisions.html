@@ -5,7 +5,10 @@
 {% block content %}
 {% include "_admin_tabs.html" %}
 <div class="card">
-    <h1>Software review</h1>
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:1rem;">
+        <h1 style="margin:0;">Software review</h1>
+        {% include "_csv_download.html" %}
+    </div>
     <p class="muted">
         Software installations that generated a classifier finding and haven't
         been decided yet. Ranked by fleet spread (device_count) — biggest

@@ -2,6 +2,23 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.71.1] — 2026-07-20 — Complete CSV export rollout
+
+### Added
+CSV export on every remaining list-view table, using the same
+`csv_response` helper + `_csv_download.html` include shipped in
+0.71.0:
+
+- **Admin queues:** Merge candidates, Client candidates, Software
+  decisions, Requirement profiles, Notification rules,
+  Notification suppressions.
+- **Operational surfaces:** Patching queue, Fleet coverage
+  compliance gaps, Sources status.
+- **Per-client:** org_devices, org_software, org_software_devices.
+
+Each view accepts `?format=csv` on its existing filtered URL and
+returns a timestamped attachment matching the current view.
+
 ## [0.71.0] — 2026-07-20 — CSV export helper + first three tables
 
 ### Why

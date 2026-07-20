@@ -5,7 +5,10 @@
 {% block content %}
 {% include "_admin_tabs.html" %}
 <div class="card">
-    <h1>Merge candidates</h1>
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:1rem;">
+        <h1 style="margin:0;">Merge candidates</h1>
+        {% include "_csv_download.html" %}
+    </div>
     <p class="muted">
         Cross-source matches proposed by the merge detector. Approve / reject / split
         (workflow lands with M2+ once multi-source ingest exists).
