@@ -2,6 +2,24 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.66.1] — 2026-07-20 — identity_conflict correctness bundle
+
+### Fixed
+- `_maybe_create_candidate` — ON CONFLICT WHERE clause now matches the
+  Finding partial unique index predicate verbatim (`condition_key > ''`
+  instead of `<> ''`). Postgres matches ON CONFLICT to partial indexes
+  by expression AST, not semantic equivalence; without this fix the
+  first `identity_conflict` emit would have raised "no unique or
+  exclusion constraint matching the ON CONFLICT specification." Bug was
+  latent — no `identity_conflict` findings had fired against prod yet.
+
+### Changed
+- `identity_conflict` FindingType flipped to `auto_resolvable=True`
+  (migration 0053). Resolution acts on the underlying Devices (merge,
+  retire, rename) as an entity operation; once the hostname collision
+  disappears, the finding auto-closes on the next resolver drain.
+  Matches the entity-action + auto-close pattern used elsewhere.
+
 ## [0.66.0] — 2026-07-20 — identity_conflict Finding on hostname-only conflicts
 
 ### Why

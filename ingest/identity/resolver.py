@@ -458,7 +458,7 @@ def _maybe_create_candidate(
                 'high', 'confirmed', 'open', NOW(), NOW(), NOW()
             )
             ON CONFLICT (tenant_id, condition_key)
-            WHERE condition_key <> '' AND status IN ('open', 'acknowledged')
+            WHERE condition_key > '' AND status IN ('open', 'acknowledged')
             DO UPDATE SET
                 last_seen_at = NOW(),
                 last_detected_at = NOW(),
