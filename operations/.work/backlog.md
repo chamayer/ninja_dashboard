@@ -123,6 +123,30 @@ duplicate lifecycle plumbing. See
   materialize operator-review workflows outside `operations.findings`.
 - Trigger: consumer audit + per-table retirement plan.
 
+## AgentInstance install-lifetime detection
+
+- Candidate scope: detect agent reinstalls per source and close/open
+  AgentInstance effective windows so per-install history is preserved.
+- Current state (post-0.65.0): AgentInstance carries `install_token`
+  and `agent_version` but no source in the pipeline populates
+  `install_token` in observation `canonical_data` — the field is
+  effectively unused. 0/N rows have a value in prod.
+- Design refinement: install identity is per-source-per-install, which
+  is what `operations.device_links.external_id` already captures. Use
+  that as the AgentInstance identity signal. When a Device gains a new
+  DeviceLink for the same agent product with a different external_id
+  (agent reinstall generating a new agent-side ID), close the current
+  AgentInstance window and open a new one.
+- Requires: (a) schema tweak on AgentInstance to store the driving
+  DeviceLink identifier so the resolver can compare; (b) resolver
+  extension to detect the transition; (c) decide close-out semantics
+  when the old DeviceLink goes stale (missing_since) — is the
+  AgentInstance closed at missing_since, or at the moment the new
+  install token first appears?
+- Constraint: preserve tenant/RLS; existing AgentInstance rows must
+  migrate cleanly (backfill DeviceLink association).
+- Trigger: explicit approval to open the track.
+
 ## Metabase deprecation
 
 ### Metabase card parity audit (informs Operations build-out)
