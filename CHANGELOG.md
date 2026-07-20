@@ -2,6 +2,46 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.68.0] — 2026-07-20 — Retire identity_candidates (side-table consolidation)
+
+### Why
+`operations.identity_candidates` was the last remaining per-finding-type
+side table with its own admin surface and workflow. Per the "findings
+live in the standard table — no side tables per type" rule, the
+identity-conflict operator surface is the standard findings queue
+filtered on `identity_conflict`, and the merge action is the generic
+`device_merge` view on the Devices surface (both landed in 0.66.x /
+0.67.0). This release removes the legacy surface and drops the table.
+
+### Removed
+- `identity_candidates_list` view + `identity_candidate_confirm` +
+  `identity_candidate_reject` handlers in `operations/apps/core/views.py`.
+- URL routes `admin/identity/`, `admin/identity/<uuid>/confirm`,
+  `admin/identity/<uuid>/reject` in `operations/config/urls.py`.
+- Nav tile "Identity matches" from `home.html`.
+- `Devices` tab from the Review admin strip in `_admin_tabs.html`
+  (formerly linked to the retired page). The Devices layer of Review
+  now surfaces via the standard findings queue with a
+  `finding_type=identity_conflict` filter.
+- `nav_pending_identity_candidates` from the base context processor.
+- `reviews_pending['identity_candidates']` from the home view.
+- `IdentityCandidate` Django model.
+- `INSERT INTO operations.identity_candidates` block in
+  `ingest/identity/resolver.py::_maybe_create_candidate` — the resolver
+  now only emits standard `identity_conflict` Findings.
+- `operations/templates/identity_review.html`.
+
+### Database
+- Migration 0054 drops `operations.identity_candidates` (RLS policy +
+  table, via `SeparateDatabaseAndState` so Django model state
+  synchronizes). 12 pending rows existed at retirement time; any live
+  hostname conflict they represented will be re-detected on the next
+  resolver drain and re-emitted as an `identity_conflict` Finding.
+  Historic confirm/reject decisions from the retired admin page remain
+  in `operations.audit_log`.
+- `_merge_devices` helper stays as the shared merge cascade — now
+  called only by the new `device_merge` view (0.67.0).
+
 ## [0.67.0] — 2026-07-20 — Generic device-merge action
 
 ### Why

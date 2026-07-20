@@ -37,11 +37,6 @@
       Clients
       {% if nav_pending_client_candidates %}<span class="at-badge">{{ nav_pending_client_candidates }}</span>{% endif %}
     </a>
-    <a class="at-tab {% if admin_tab == 'devices' %}active{% endif %}"
-       href="{% url 'identity_candidates_list' %}">
-      Devices
-      {% if nav_pending_identity_candidates %}<span class="at-badge">{{ nav_pending_identity_candidates }}</span>{% endif %}
-    </a>
     <a class="at-tab {% if admin_tab == 'merges' %}active{% endif %}"
        href="{% url 'merge_candidates_queue' %}">
       Merges

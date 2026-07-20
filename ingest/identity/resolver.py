@@ -415,29 +415,6 @@ def _maybe_create_candidate(
         return
     candidate_ids = [row[0] for row in rows]
     device_id_a = candidate_ids[0]
-    device_id_b = candidate_ids[1]
-
-    # Legacy side table (dual-write during transition — see backlog).
-    cur.execute(
-        """
-        INSERT INTO operations.identity_candidates
-            (id, version, tenant_id, observation_id, device_id_a, device_id_b,
-             device_a_id, device_b_id, confidence, signals, status, created_at,
-             resolved_by)
-        VALUES (gen_random_uuid(), 1, %s, %s, %s, %s, %s, %s, 'low', %s,
-                'pending', NOW(), '')
-        ON CONFLICT DO NOTHING
-        """,
-        (
-            TENANT_ID, obs_id, device_id_a, device_id_b, device_id_a, device_id_b,
-            Json({"hostname": norm, "candidate_count": len(rows)}),
-        ),
-    )
-    if cur.rowcount:
-        log.info(
-            "resolver: identity_candidate created obs=%s hostname=%s device_count=%d",
-            obs_id, norm, len(rows),
-        )
 
     # Standard operator-visible surface — the ADR's mandated path.
     # condition_key deduplicates repeat observations of the same

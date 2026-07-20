@@ -287,12 +287,6 @@
         <span class="side-time">{{ reviews_pending.client_candidates }} pending</span>
       </li>
       {% endif %}
-      {% if reviews_pending.identity_candidates %}
-      <li>
-        <a href="{% url 'identity_candidates_list' %}">Identity matches</a>
-        <span class="side-time">{{ reviews_pending.identity_candidates }} pending</span>
-      </li>
-      {% endif %}
       {% if reviews_pending.merge_candidates %}
       <li>
         <a href="{% url 'merge_candidates_queue' %}">Device merges</a>

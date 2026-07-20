@@ -1493,37 +1493,6 @@ class QueueRegistry(models.Model):
         return self.queue_key
 
 
-class IdentityCandidate(VersionedTenantScopedModel):
-    """Uncertain cross-source device matches awaiting operator review."""
-
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    device_a = models.ForeignKey(
-        "Device", on_delete=models.PROTECT, related_name="identity_candidates_a"
-    )
-    device_b = models.ForeignKey(
-        "Device", on_delete=models.PROTECT, related_name="identity_candidates_b"
-    )
-    confidence = models.CharField(max_length=16)
-    signals = models.JSONField(default=dict)
-    status = models.CharField(max_length=16, default="pending")
-    created_at = models.DateTimeField(auto_now_add=True)
-    resolved_at = models.DateTimeField(null=True, blank=True)
-    resolved_by = models.CharField(max_length=120, blank=True)
-
-    class Meta:
-        db_table = "identity_candidates"
-        constraints = (
-            models.UniqueConstraint(
-                fields=("tenant", "device_a", "device_b"),
-                condition=Q(status="pending"),
-                name="uq_identity_candidates_pending_pair",
-            ),
-        )
-
-    def __str__(self) -> str:
-        return f"{self.device_a_id}↔{self.device_b_id}:{self.confidence}"
-
-
 class NotificationRule(VersionedTenantScopedModel):
     """Rule engine: maps finding types to delivery routes with filters."""
 
