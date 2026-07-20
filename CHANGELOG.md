@@ -2,6 +2,43 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.69.0] — 2026-07-20 — Layer-entity field-history audit triggers
+
+### Why
+The `asset_field_history`, `os_instance_field_history`, and
+`agent_instance_field_history` audit tables were scaffolded in
+ADR-0005 slice 1 (migration 0050) but never wired. Under ADR-0006's
+attribute-bucket model, these audit trails *are* the history mechanism
+— per-layer trends and forensics query them, not any lifecycle
+window. This release activates them.
+
+### Added
+- `operations.audit_asset_significant_fields()` +
+  `audit_asset_fields` trigger — AFTER UPDATE on `operations.assets`,
+  fires only when a significant field changed
+  (form_factor, serial, vm_uuid, chassis). Emits one audit row per
+  changed field.
+- `operations.audit_os_instance_significant_fields()` +
+  `audit_os_instance_fields` trigger — AFTER UPDATE on
+  `operations.os_instances`. Fields: os_name, os_family, os_group,
+  os_version.
+- `operations.audit_agent_instance_significant_fields()` +
+  `audit_agent_instance_fields` trigger — AFTER UPDATE on
+  `operations.agent_instances`. Field: agent_version.
+- Migration 0055.
+
+### Notes
+- Heartbeat / last_seen / timestamp columns are explicitly excluded
+  from audit — WHEN clause on each trigger filters to significant
+  fields only.
+- JSON state blobs (virtualization, patch_state, config_state,
+  coverage_state) are not audited in v1 — diff semantics too noisy.
+  Can be added later at operator-visible granularity.
+- Change context is `change_reason='trigger.audit'` and
+  `change_source_id=NULL`. Richer context (per-writer source binding,
+  transaction reason) would require SET LOCAL plumbing from every
+  writer; deferred.
+
 ## [0.68.0] — 2026-07-20 — Retire identity_candidates (side-table consolidation)
 
 ### Why
