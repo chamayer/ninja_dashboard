@@ -60,12 +60,15 @@
 </style>
 
 <div class="card">
-    <h1>Software
-      <span class="muted" style="font-weight:400; font-size:0.9rem;">
-        {{ installations }} installations across the fleet
-      </span>
-    </h1>
-    <p class="muted">Every product installed across your clients — inventory, classification, decisions, and open items.</p>
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:1rem;">
+        <h1 style="margin:0;">Software
+          <span class="muted" style="font-weight:400; font-size:0.9rem;">
+            {{ installations }} installations across the fleet
+          </span>
+        </h1>
+        {% include "_csv_download.html" %}
+    </div>
+    <p class="muted" style="margin-top:0.5rem;">Every product installed across your clients — inventory, classification, decisions, and open items.</p>
 </div>
 
 {# ── Overview cards ─────────────────────────────────────── #}

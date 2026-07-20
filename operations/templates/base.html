@@ -77,6 +77,13 @@
         table[data-sortable] thead th:hover { color: var(--accent); }
         table[data-sortable] thead th[data-sort="asc"]::after  { content: ' ↑'; }
         table[data-sortable] thead th[data-sort="desc"]::after { content: ' ↓'; }
+        a.csv-download {
+            display: inline-block; padding: 0.3rem 0.7rem; font-size: 0.78rem;
+            font-weight: 600; color: var(--muted); text-decoration: none;
+            border: 1px solid var(--border); border-radius: 4px;
+            background: var(--surface); transition: color .15s, border-color .15s;
+        }
+        a.csv-download:hover { color: var(--accent); border-color: var(--accent); }
         .badge { display: inline-block; font-size: 0.72rem; font-weight: 700;
             padding: 2px 7px; border-radius: 20px; text-transform: uppercase; letter-spacing: 0.04em; }
         .badge-critical { background: #fee2e2; color: #991b1b; }

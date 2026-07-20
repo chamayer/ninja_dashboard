@@ -1,0 +1,11 @@
+{% comment %}
+Reusable "Download CSV" link. Preserves the current query string so
+the exported CSV matches the table the operator is currently viewing.
+Include with:
+    {% include "_csv_download.html" %}
+{% endcomment %}
+<a class="csv-download"
+   href="{% if request.META.QUERY_STRING %}?{{ request.META.QUERY_STRING }}&format=csv{% else %}?format=csv{% endif %}"
+   title="Download the current view as CSV">
+    ⤓ CSV
+</a>

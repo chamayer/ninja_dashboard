@@ -14,6 +14,7 @@ from django.utils.text import slugify
 from django.views.decorators.http import require_GET, require_POST
 
 from .forms import ClientPolicyForm
+from .csv_export import csv_response, wants_csv
 from .models import (
     AdminFinding,
     AuditLog,
@@ -1412,6 +1413,30 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
         for f in findings
     ]
 
+    if wants_csv(request):
+        return csv_response(
+            findings_with_detail,
+            columns=[
+                ("Severity",     lambda r: r["f"].severity),
+                ("Type",         lambda r: r["f"].finding_type.name),
+                ("Category",     lambda r: (r["f"].finding_type.category.name if r["f"].finding_type.category else "")),
+                ("Client",       lambda r: (r["f"].client.display_name if r["f"].client else "")),
+                ("Subject type", lambda r: r["f"].subject_type),
+                ("Subject id",   lambda r: str(r["f"].subject_id) if r["f"].subject_id else ""),
+                ("Hostname",     lambda r: (r["f"].finding_details or {}).get("hostname", "")),
+                ("Detail",       "detail"),
+                ("Online sources", "online_sources"),
+                ("Status",       lambda r: r["f"].status),
+                ("Confidence",   lambda r: r["f"].confidence),
+                ("First seen",   lambda r: r["f"].first_seen_at),
+                ("Last seen",    lambda r: r["f"].last_seen_at),
+                ("Last detected", lambda r: r["f"].last_detected_at),
+                ("Snoozed until", lambda r: r["f"].snoozed_until),
+                ("Owner",        lambda r: (r["f"].owner.username if r["f"].owner else "")),
+            ],
+            filename_stem="findings",
+        )
+
     paginator = Paginator(findings_with_detail, 50)
     page = paginator.get_page(request.GET.get("page"))
 
@@ -1757,6 +1782,21 @@ def software_page(request: HttpRequest) -> HttpResponse:
         for row in title_rows
     ]
 
+    if wants_csv(request):
+        return csv_response(
+            titles,
+            columns=[
+                ("Canonical name", "canonical_name"),
+                ("Publisher",      "publisher"),
+                ("Device count",   "device_count"),
+                ("Client count",   "client_count"),
+                ("Last install",   "last_install"),
+                ("Categories",     "categories"),
+                ("Decision",       "decision"),
+            ],
+            filename_stem="software",
+        )
+
     return render(
         request,
         "software_page.html",
@@ -1900,6 +1940,26 @@ def devices_page(request: HttpRequest) -> HttpResponse:
     clients = Client.objects.filter(
         tenant_id=1, deleted_at__isnull=True,
     ).order_by("display_name")
+
+    if wants_csv(request):
+        return csv_response(
+            devices,
+            columns=[
+                ("Hostname",       "hostname"),
+                ("Client",         "client_name"),
+                ("Serial",         "serial"),
+                ("Role",           "role"),
+                ("OS group",       "os_group"),
+                ("OS name",        "os_name"),
+                ("Online",         lambda r: "yes" if r["is_online"] else "no"),
+                ("Online sources", "online_sources"),
+                ("Last contact",   "last_contact"),
+                ("Patch scope",    "scope"),
+                ("Severe issues",  "severe"),
+                ("Device ID",      lambda r: str(r["id"])),
+            ],
+            filename_stem="devices",
+        )
 
     return render(
         request,

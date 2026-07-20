@@ -2,6 +2,40 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.71.0] — 2026-07-20 — CSV export helper + first three tables
+
+### Why
+Per the "every table should be exportable" rule (2026-07-20). Operators
+were browser-only for viewing tables; no way to pull a filtered view
+into a spreadsheet for offline review or handoff.
+
+### Added
+- `operations/apps/core/csv_export.py` — reusable helper. Any list
+  view can opt in by calling `csv_response(rows, columns, filename)`
+  when `wants_csv(request)` is True. Column declaration is
+  `(header_label, key_or_getter)` tuples; getter can be a string
+  field/dict key or a callable. Writes UTF-8-BOM CSV so Excel opens
+  cleanly with non-ASCII characters; filename is timestamped.
+- `operations/templates/_csv_download.html` — reusable include. Renders
+  a "⤓ CSV" link that preserves the current query string so the
+  exported CSV matches whatever filtered view the operator is on.
+- `a.csv-download` styling added to `base.html`.
+- Wired into three highest-traffic list views:
+  - `findings_queue` (`/findings/`) — 16 columns including severity,
+    type, category, client, hostname, detail, online sources,
+    status, confidence, timestamps.
+  - `devices_page` (`/devices/`) — hostname, client, serial, role,
+    OS group, OS name, online, sources, last contact, patch scope,
+    severe issues count, device ID.
+  - `software_page` (`/software/`) — canonical name, publisher,
+    device count, client count, last install, categories, decision.
+
+### Follow-up
+- Remaining tables (Software decisions queue, Client detail
+  scoreboard tables, Device detail tabs, admin queues, patching
+  views) get the same treatment — mechanical work per view. Track
+  as a follow-up slice.
+
 ## [0.70.0] — 2026-07-20 — Surface silent data-quality filters as Findings
 
 ### Why

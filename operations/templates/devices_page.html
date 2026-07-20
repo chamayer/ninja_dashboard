@@ -49,12 +49,15 @@
 </style>
 
 <div class="card">
-    <h1>Devices
-      <span class="muted" style="font-weight:400; font-size:0.9rem;">
-        {{ overview.total }} across all clients
-      </span>
-    </h1>
-    <p class="muted">Every device across every client — filter, search, drill in.</p>
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:1rem;">
+        <h1 style="margin:0;">Devices
+          <span class="muted" style="font-weight:400; font-size:0.9rem;">
+            {{ overview.total }} across all clients
+          </span>
+        </h1>
+        {% include "_csv_download.html" %}
+    </div>
+    <p class="muted" style="margin-top:0.5rem;">Every device across every client — filter, search, drill in.</p>
 </div>
 
 <div class="dv-overview">

@@ -33,10 +33,13 @@
 </style>
 
 <div class="card">
-    <h1>{% if active_category %}{{ active_category|humanize_label }} issues{% else %}Issues{% endif %}
-      <span class="muted" style="font-weight:400; font-size:0.9rem;">({{ total_matching }})</span>
-    </h1>
-    <p class="muted">Everything that needs your attention — filtered slice shown below.</p>
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:1rem;">
+        <h1 style="margin:0;">{% if active_category %}{{ active_category|humanize_label }} issues{% else %}Issues{% endif %}
+          <span class="muted" style="font-weight:400; font-size:0.9rem;">({{ total_matching }})</span>
+        </h1>
+        {% include "_csv_download.html" %}
+    </div>
+    <p class="muted" style="margin-top:0.5rem;">Everything that needs your attention — filtered slice shown below.</p>
 </div>
 
 <div class="tile-row">
