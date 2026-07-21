@@ -233,8 +233,9 @@ def _sync_device_roles(cur: Any, tenant_id: int, now: datetime) -> int:
                device_id, platform,
                COALESCE(canonical_data ->> 'device_role',
                         canonical_data ->> 'device_type') AS device_role
-        FROM operations.entity_observations
+        FROM operations.entity_observation_current
         WHERE tenant_id = %s AND device_id IS NOT NULL
+          AND active = TRUE
           AND COALESCE(canonical_data ->> 'device_role',
                        canonical_data ->> 'device_type') IS NOT NULL
           AND observed_at > now() - INTERVAL '7 days'
