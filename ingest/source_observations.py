@@ -416,9 +416,9 @@ def _write_observations(
                 ).digest()
                 current_rows.append(current)
             write_current_rows(cur, current_rows)
-            complete_run(cur, run_id, len(current_rows))
-            if not getattr(source, "is_partial_snapshot", False):
-                reconcile_complete_run(cur, run_id)
+        complete_run(cur, run_id, len(obs_rows))
+        if not getattr(source, "is_partial_snapshot", False):
+            reconcile_complete_run(cur, run_id)
             # A group is unmatched only if NO row in the batch resolved it.
             for gid in resolved_groups:
                 unmatched_groups.pop(gid, None)
