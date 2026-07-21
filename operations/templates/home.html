@@ -308,7 +308,7 @@
       {% for f in recent_findings %}
       <li>
         <span class="badge badge-{{ f.severity }}">{{ f.severity }}</span>
-        <span>{{ f.finding_type.name|humanize_label }}</span>
+        <span>{% finding_display_label f %}</span>
         {% if f.client %}<span class="muted">— {{ f.client.display_name }}</span>{% endif %}
         <span class="side-time">{{ f.first_seen_at|date:"H:i" }}</span>
       </li>

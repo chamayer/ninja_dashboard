@@ -178,7 +178,7 @@
                 <tr {% if f.snoozed_until %}style="opacity:0.6;"{% endif %}>
                     <td><input type="checkbox" name="ids" value="{{ f.id }}" class="bulk-cb"></td>
                     <td><span class="badge badge-{{ f.severity }}">{{ f.get_severity_display }}</span></td>
-                    <td>{{ f.finding_type.name|humanize_label }}</td>
+                    <td>{% finding_display_label f %}</td>
                     <td>{{ row.detail|default:"—" }}</td>
                     <td>
                         {% if row.online_sources %}

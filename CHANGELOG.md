@@ -2,6 +2,46 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.75.0] — 2026-07-21 — Finding label with platform + offline-agent visibility
+
+### Why
+Two operator-visibility fixes to how coverage findings appear:
+
+1. Device-detail Issues tab labeled every
+   `missing_required_platform` finding as the generic "Required
+   agent not installed" — operators had to click into the row to
+   see *which* agent.
+2. `stale_required_platform` findings were suppressed entirely when
+   the whole device was fully offline (per BLUEPRINT §1.8's
+   noise-reduction rule). Operators still wanted to see which agent
+   was missing on an offline device; the current behavior hid
+   information they needed.
+
+### Changed
+- **`finding_display_label` template tag** in `human_labels.py`.
+  Composed label = humanized FindingType name + `: {platform}` for
+  missing/stale-required findings + `(device offline)` suffix when
+  the evaluator marked the finding as offline-downgraded. Wired into
+  `device_detail.html`, `findings_queue.html`, `patching_queue.html`,
+  `home.html` — every place the finding row label renders.
+- **Evaluator** (`ingest/evaluator.py`) no longer skips
+  `stale_required_platform` on fully-offline devices. Instead:
+  demotes severity to `info` for both `stale_required_platform`
+  and `missing_required_platform` when the device is fully offline,
+  and marks `finding_details.reason_suppressed='device_offline'`.
+  Result: both findings visible in Issues + on Device Detail,
+  clearly labeled as offline-context, without dominating the
+  default active-severity queue view.
+
+### Impact
+- Findings queue default (active status) shows offline-downgraded
+  rows only when filtering to include `info` severity. Default
+  severity filter (critical / high / medium) continues to skip
+  them → no visible noise increase on the operator's daily view.
+- Device Detail Issues tab shows every applicable finding at any
+  severity, so offline devices now correctly display both their
+  device_offline status and the specific agent gaps that persist.
+
 ## [0.74.1] — 2026-07-20 — Fix: patch page 500s + sortable rollout
 
 ### Fixed

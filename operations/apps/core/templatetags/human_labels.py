@@ -171,6 +171,33 @@ def humanize_label(value):
     return key
 
 
+@register.simple_tag(name="finding_display_label")
+def finding_display_label(finding):
+    """Composed operator-facing label for a Finding.
+
+    Adds the specific agent product to `missing_required_platform` /
+    `stale_required_platform` labels so operators see *which* agent
+    is missing at a glance instead of the generic
+    "Required agent not installed". Also appends
+    "(device offline)" when the evaluator downgraded the finding
+    because the whole device is offline.
+    """
+    ft_name = getattr(getattr(finding, "finding_type", None), "name", None) or ""
+    details = getattr(finding, "finding_details", None) or {}
+    base = _LABELS.get(ft_name, ft_name)
+
+    platform = details.get("platform")
+    if platform and ft_name in (
+        "missing_required_platform", "stale_required_platform",
+    ):
+        base = f"{base}: {platform}"
+
+    if details.get("reason_suppressed") == "device_offline":
+        base = f"{base} (device offline)"
+
+    return base
+
+
 @register.filter(name="humanize_scope_reason")
 def humanize_scope_reason(value):
     """Alias — same behavior as humanize_label. Present so templates

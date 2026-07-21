@@ -160,7 +160,7 @@
             {% for row in rows %}
             {% with f=row.f %}
             <tr>
-                <td>{{ f.finding_type.name|humanize_label }}</td>
+                <td>{% finding_display_label f %}</td>
                 <td><span class="badge badge-{{ f.severity }}">{{ f.severity }}</span></td>
                 <td>
                     {% if f.subject_type == "device" and f.client %}

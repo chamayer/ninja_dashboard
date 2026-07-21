@@ -271,7 +271,7 @@
             {% for f in active_findings %}
             <tr>
                 <td><span class="badge badge-{{ f.severity }}">{{ f.severity }}</span></td>
-                <td>{{ f.finding_type.name|humanize_label }}</td>
+                <td>{% finding_display_label f %}</td>
                 <td><span class="badge badge-{{ f.status }}">{{ f.get_status_display }}</span></td>
                 <td class="muted num">{{ f.first_seen_at|date:"Y-m-d" }}</td>
                 <td class="muted num">{{ f.last_seen_at|date:"Y-m-d H:i" }}</td>

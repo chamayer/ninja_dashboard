@@ -690,6 +690,7 @@ def _evaluate_coverage(
             # BLUEPRINT 1.4 split:
             #   MISSING (last_observed IS NULL) → emit immediately.
             #   STALE (present but past gap_hours) → confidence ladder.
+            offline_downgrade = dev_id in fully_offline_devices
             if last_observed is None:
                 confidence = "confirmed" if dev_id in corroborated else "probable"
                 ftype, ft_name, sev = missing_ft, "missing_required_platform", severity
@@ -698,13 +699,6 @@ def _evaluate_coverage(
                     last_observed = last_observed.replace(tzinfo=timezone.utc)
                 gap_age_hours = (now - last_observed).total_seconds() / 3600
                 if gap_age_hours < gap_hours:
-                    continue
-                # BLUEPRINT §1.8: if the whole device is offline
-                # (all agents silent past the device_offline
-                # threshold), the device-level `device_offline`
-                # finding covers it. Per-agent stale would be
-                # redundant noise for a device nobody can reach.
-                if dev_id in fully_offline_devices:
                     continue
                 if gap_age_hours >= conf_hours:
                     confidence = "confirmed"
@@ -718,11 +712,25 @@ def _evaluate_coverage(
                     continue
                 ftype, ft_name, sev = stale_ft, "stale_required_platform", "medium"
 
+            # If the whole device is offline (all agents silent past
+            # the device_offline threshold), the device-level
+            # `device_offline` finding is the actionable signal. Keep
+            # the per-agent missing / stale finding VISIBLE — operators
+            # still want to see which agent is missing on an offline
+            # device — but demote severity to `info` and mark
+            # `finding_details.reason_suppressed='device_offline'` so
+            # the queue can filter it out and the label can hint at
+            # the offline context. Previously suppressed entirely
+            # (BLUEPRINT §1.8 pre-2026-07-21).
+            details = {"entity_type": entity_type, "platform": platform, "hostname": hostname}
+            if offline_downgrade:
+                sev = "info"
+                details["reason_suppressed"] = "device_offline"
+
             ckey = _condition_key(tenant_id, dev_client_id, dev_id, ft_name, platform)
             count += _upsert_finding(
                 cur, tenant_id, ftype, dev_client_id, dev_id,
-                ckey, sev, confidence, now,
-                {"entity_type": entity_type, "platform": platform, "hostname": hostname},
+                ckey, sev, confidence, now, details,
             )
 
     return count
