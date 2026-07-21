@@ -24,6 +24,7 @@ import psycopg
 from psycopg.types.json import Json
 
 from ingest import db
+from ingest.observations import write_current_rows
 from ingest.ninja_client import NinjaClient
 from ingest.normalize import (
     entity_type_for_node_class,
@@ -584,6 +585,21 @@ def _write_ninja_observations(
                     obs_rows,
                     conflict_keys=["tenant_id", "collector_instance_id", "batch_id", "observation_hash"],
                 )
+                current_rows = []
+                for row in obs_rows:
+                    current = dict(row)
+                    current["parent_source_key"] = ""
+                    current["last_seen_at"] = row["observed_at"]
+                    current["last_received_at"] = row["observed_at"]
+                    current["active"] = True
+                    current["withdrawn_at"] = None
+                    current["snapshot_scope"] = "Ninja"
+                    current["last_snapshot_run_id"] = None
+                    current["raw_hash"] = hashlib.sha256(
+                        str(row["raw_data"]).encode("utf-8")
+                    ).digest()
+                    current_rows.append(current)
+                write_current_rows(cur, current_rows)
             if unknown_classes:
                 # Never silently dropped — surfaced here, admin finding in E2.
                 log.warning(
