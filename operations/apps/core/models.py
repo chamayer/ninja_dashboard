@@ -1072,6 +1072,34 @@ class EntityObservationHistory(TenantScopedModel):
         )
 
 
+class ObservationSnapshotRun(TenantScopedModel):
+    """Durable completeness/health record for one source snapshot scope."""
+
+    run_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    source_binding = models.ForeignKey(SourceBinding, on_delete=models.PROTECT, related_name="observation_snapshot_runs")
+    snapshot_scope = models.CharField(max_length=120)
+    snapshot_at = models.DateTimeField()
+    status = models.CharField(max_length=20, default="started")
+    expected_rows = models.PositiveIntegerField(default=0)
+    written_rows = models.PositiveIntegerField(default=0)
+    failed_rows = models.PositiveIntegerField(default=0)
+    error = models.TextField(blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "observation_snapshot_runs"
+        constraints = (
+            models.UniqueConstraint(
+                fields=("tenant", "source_binding", "snapshot_scope", "snapshot_at"),
+                name="uq_obs_snapshot_run_boundary",
+            ),
+        )
+        indexes = (
+            models.Index(fields=("tenant", "source_binding", "snapshot_scope", "snapshot_at"), name="idx_obs_snapshot_latest"),
+            models.Index(fields=("tenant", "status"), name="idx_obs_snapshot_status"),
+        )
+
+
 class DeadLetterObservation(TenantScopedModel):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     source_binding = models.ForeignKey(
