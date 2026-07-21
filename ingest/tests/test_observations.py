@@ -12,3 +12,9 @@ def test_material_fields_change_hash_and_projection_is_sorted():
     changed = {**base, "os_version": "2"}
     assert material_hash(base) != material_hash(changed)
     assert list(material_projection(base)) == ["hostname", "os_version"]
+
+
+def test_parent_scope_is_part_of_identity_contract():
+    first = ("software", "device-a", "agent")
+    second = ("software", "device-b", "agent")
+    assert first != second
