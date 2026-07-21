@@ -1,322 +1,334 @@
 {% extends "base.html" %}
-{% load human_labels %}
 
 {% block title %}Dashboard{% endblock %}
 
 {% block content %}
 <style>
-  /* Domain overview cards — compact, above the portfolio */
-  .overview-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  .dashboard-heading {
+    display: flex; justify-content: space-between; gap: 1rem;
+    align-items: flex-start; margin-bottom: 1rem;
+  }
+  .dashboard-heading h1 { margin-bottom: 0.2rem; }
+  .dashboard-heading p { margin: 0; color: var(--muted); }
+  .dashboard-scope { text-align: right; font-size: 0.82rem; }
+  .dashboard-scope strong { display: block; }
+  .dashboard-scope span { display: block; margin-top: 0.15rem; color: var(--muted); }
+
+  .dashboard-fleet {
+    display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+    margin-bottom: 0.8rem; overflow: hidden; background: var(--surface);
+    border: 1px solid var(--border); border-radius: 7px;
+  }
+  .fleet-stat {
+    min-width: 0; padding: 0.8rem 1rem; border-right: 1px solid var(--border);
+    color: inherit; text-decoration: none;
+  }
+  .fleet-stat:last-child { border-right: 0; }
+  .fleet-stat.supporting { background: #fafbfc; }
+  .fleet-stat-label {
+    display: block; color: var(--muted); font-size: 0.7rem; font-weight: 700;
+    letter-spacing: 0.055em; text-transform: uppercase;
+  }
+  .fleet-stat-value { display: inline-block; margin-top: 0.1rem; color: #1e40af; font-size: 1.35rem; font-weight: 750; }
+  .fleet-stat.supporting .fleet-stat-value { font-size: 1.05rem; }
+  .fleet-stat-note { margin-left: 0.3rem; color: var(--muted); font-size: 0.72rem; }
+  .fleet-stat-detail { display: block; margin-top: 0.25rem; color: var(--muted); font-size: 0.68rem; line-height: 1.35; }
+
+  .dashboard-domains {
+    display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 0.65rem; margin-bottom: 1rem;
   }
-  .overview-card {
-    display: block;
-    padding: 0.75rem 1rem;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    text-decoration: none; color: inherit;
-    transition: box-shadow 0.15s, border-color 0.15s;
+  .domain-card {
+    display: flex; min-height: 178px; padding: 0.9rem 1rem;
+    flex-direction: column; background: var(--surface); border: 1px solid var(--border);
+    border-radius: 7px;
   }
-  .overview-card:hover { box-shadow: 0 2px 6px rgba(0,0,0,0.06); border-color: var(--accent); }
-  .overview-card .ov-label {
-    font-size: 0.72rem; font-weight: 700; color: var(--muted);
-    text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.2rem;
-  }
-  .overview-card .ov-value {
-    font-size: 1.6rem; font-weight: 700; line-height: 1.1; color: #1a1a2e;
-  }
-  .overview-card .ov-sub {
-    font-size: 0.75rem; color: var(--muted); margin-top: 0.2rem;
-  }
-  .overview-card.has-open .ov-value { color: #b45309; }
-  .overview-card.alert { border-color: #fca5a5; background: #fff5f5; }
-  .overview-card.alert .ov-value { color: #dc2626; }
+  .domain-card:hover { border-color: #b9c6da; box-shadow: 0 2px 8px rgba(17, 24, 39, 0.05); }
+  .domain-head { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+  .domain-head h2 { margin: 0; font-size: 0.96rem; }
+  .domain-description { min-height: 2.1em; margin: 0.25rem 0 0; color: var(--muted); font-size: 0.7rem; line-height: 1.35; }
+  .domain-state { padding: 0.18rem 0.45rem; border-radius: 999px; font-size: 0.67rem; font-weight: 700; white-space: nowrap; }
+  .state-needs_action { color: #b91c1c; background: #fee2e2; }
+  .state-review { color: #92400e; background: #fef3c7; }
+  .state-monitor { color: #1d4ed8; background: #dbeafe; }
+  .state-on_track { color: #047857; background: #d1fae5; }
+  .state-delayed, .state-unavailable { color: #4b5563; background: #e5e7eb; }
+  .domain-value { margin: 0.7rem 0 0.45rem; }
+  .domain-value strong { color: #1a1a2e; font-size: 1.45rem; letter-spacing: -0.03em; }
+  .domain-value span { color: var(--muted); font-size: 0.76rem; }
+  .domain-facts { display: flex; flex-wrap: wrap; gap: 0.25rem 0.7rem; font-size: 0.71rem; }
+  .domain-facts a { color: #465167; text-underline-offset: 2px; }
+  .domain-freshness { margin-top: auto; padding-top: 0.55rem; color: var(--muted); font-size: 0.67rem; }
+  .domain-open { align-self: flex-end; margin-top: 0.2rem; font-size: 0.74rem; font-weight: 700; }
 
-  /* Attention filter chips (above scoreboard) */
-  .view-chips { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.75rem; }
-  .view-chip {
-    display: inline-flex; align-items: center; gap: 0.4rem;
-    padding: 0.35rem 0.8rem; border: 1px solid var(--border);
-    border-radius: 999px; background: #fff; text-decoration: none;
-    color: #374151; font-size: 0.85rem;
+  .client-card { padding: 0; overflow: hidden; }
+  .client-card-head { padding: 1rem 1rem 0.75rem; border-bottom: 1px solid var(--border); }
+  .client-card-title { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; }
+  .client-card-title h2 { margin: 0; }
+  .client-card-title span { color: var(--muted); font-size: 0.72rem; }
+  .client-controls { display: flex; align-items: center; gap: 0.45rem; margin-top: 0.75rem; flex-wrap: wrap; }
+  .client-chips { display: flex; flex: 1; gap: 0.3rem; flex-wrap: wrap; }
+  .client-chip {
+    padding: 0.33rem 0.65rem; color: #374151; background: #fff;
+    border: 1px solid var(--border); border-radius: 999px; cursor: pointer; font-size: 0.76rem;
   }
-  .view-chip:hover { border-color: var(--accent); }
-  .view-chip.active { background: #1e40af; border-color: #1e40af; color: #fff; }
-  .view-chip .chip-count { font-weight: 600; }
-  .view-chip .chip-count.attention { color: #dc2626; }
-  .view-chip.active .chip-count.attention { color: #fecaca; }
-
-  /* Health traffic light in the scoreboard */
-  .health-light {
-    display: inline-block; width: 12px; height: 12px; border-radius: 50%;
-    vertical-align: middle;
+  .client-chip:hover { border-color: var(--accent); }
+  .client-chip.active { color: #fff; background: #1e40af; border-color: #1e40af; }
+  .client-search, .client-sort {
+    padding: 0.42rem 0.55rem; color: #374151; background: #fff;
+    border: 1px solid var(--border); border-radius: 5px; font-size: 0.76rem;
   }
-  .health-light.red    { background: #dc2626; box-shadow: 0 0 0 2px #fee2e2; }
-  .health-light.amber  { background: #ea580c; box-shadow: 0 0 0 2px #ffedd5; }
-  .health-light.green  { background: #16a34a; box-shadow: 0 0 0 2px #dcfce7; }
-  .health-light.no_data{ background: #9ca3af; box-shadow: 0 0 0 2px #f3f4f6; }
-
-  /* Client scoreboard */
-  .scoreboard th, .scoreboard td { padding: 0.5rem 0.75rem; vertical-align: middle; }
-  .scoreboard tbody tr { border-bottom: 1px solid var(--border); }
-  .finding-bar { display: flex; gap: 0.5rem; align-items: center; font-size: 0.82rem; }
-  .finding-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
-  .dot-critical { background: #dc2626; } .dot-high { background: #ea580c; } .dot-medium { background: #ca8a04; }
-
-  /* Attention exception panel — compact, scrollable if many */
-  .fire-panel { border-left: 3px solid #dc2626; padding: 0.9rem 1.25rem !important; }
-  .fire-list { max-height: 300px; overflow-y: auto; }
-  .fire-item { display: flex; align-items: center; gap: 0.5rem;
-    padding: 0.3rem 0; font-size: 0.85rem; border-bottom: 1px solid var(--border); }
-  .fire-item:last-child { border-bottom: none; padding-bottom: 0; }
-
-  /* Sidebar bottom section */
-  .sidebar-grid {
-    display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 1rem;
+  .client-search { width: 190px; }
+  .client-table-wrap { overflow-x: auto; }
+  .client-table { min-width: 1100px; }
+  .client-table th, .client-table td { padding: 0.55rem 0.65rem; vertical-align: middle; }
+  .client-table tbody tr { border-bottom: 1px solid var(--border); }
+  .client-table tbody tr:last-child { border-bottom: 0; }
+  .client-table tr[data-priority="immediate"] { background: linear-gradient(90deg, #fff7f6 0, #fff 26%); }
+  .client-name { min-width: 145px; }
+  .client-name a { color: #1a1a2e; font-weight: 700; text-decoration: none; }
+  .priority-badge { display: inline-block; padding: 0.22rem 0.42rem; border-radius: 5px; font-size: 0.68rem; font-weight: 700; white-space: nowrap; }
+  .priority-immediate { color: #b91c1c; background: #fee2e2; }
+  .priority-soon { color: #92400e; background: #fef3c7; }
+  .priority-routine { color: #1d4ed8; background: #dbeafe; }
+  .priority-none { color: #047857; background: #d1fae5; }
+  .priority-reason, .cell-detail { display: block; margin-top: 0.18rem; color: var(--muted); font-size: 0.66rem; line-height: 1.3; }
+  .domain-cell { min-width: 130px; }
+  .domain-cell a { color: #1a1a2e; font-size: 0.76rem; font-weight: 700; text-decoration: none; white-space: nowrap; }
+  .state-dot { display: inline-block; width: 7px; height: 7px; margin-right: 0.3rem; border-radius: 50%; }
+  .dot-needs_action { background: #dc2626; }
+  .dot-review { background: #d99a00; }
+  .dot-monitor { background: #2563eb; }
+  .dot-on_track { background: #15803d; }
+  .dot-delayed, .dot-unavailable { background: #7b8493; }
+  .data-status { min-width: 112px; font-size: 0.76rem; font-weight: 700; }
+  .data-delayed, .data-unavailable { color: #596273; }
+  details.client-preview { position: relative; }
+  details.client-preview summary { color: var(--accent); cursor: pointer; font-size: 0.74rem; font-weight: 700; list-style: none; white-space: nowrap; }
+  details.client-preview summary::-webkit-details-marker { display: none; }
+  .preview-panel {
+    position: absolute; right: 0; z-index: 10; width: 350px; margin-top: 0.4rem;
+    padding: 0.8rem; background: #fff; border: 1px solid #bfc9da;
+    border-radius: 6px; box-shadow: 0 8px 24px rgba(17, 24, 39, 0.15);
   }
-  @media (max-width: 900px) { .sidebar-grid { grid-template-columns: 1fr; } }
-  .sidebar-list { list-style: none; padding: 0; margin: 0; }
-  .sidebar-list li {
-    padding: 0.55rem 0; border-bottom: 1px solid var(--border);
-    font-size: 0.88rem; display: flex; align-items: baseline; gap: 0.6rem;
+  .preview-panel strong { display: block; margin-bottom: 0.4rem; }
+  .preview-reason { margin: 0.3rem 0; color: #465167; font-size: 0.74rem; }
+  .preview-updates { display: flex; flex-wrap: wrap; gap: 0.25rem 0.7rem; margin-top: 0.55rem; padding-top: 0.5rem; border-top: 1px solid var(--border); color: var(--muted); font-size: 0.67rem; }
+  .preview-open { display: block; margin-top: 0.55rem; text-align: right; font-size: 0.74rem; font-weight: 700; }
+  .no-clients { display: none; padding: 1rem; color: var(--muted); }
+
+  .activity-line {
+    display: flex; align-items: center; gap: 1rem; margin-top: 0.7rem; padding: 0.65rem 0.8rem;
+    background: #fafbfc; border: 1px solid var(--border); border-radius: 7px; font-size: 0.73rem;
   }
-  .sidebar-list li:last-child { border-bottom: none; }
-  .sidebar-list .side-time { color: var(--muted); font-size: 0.78rem; white-space: nowrap; margin-left: auto; }
+  .activity-line a:last-child { margin-left: auto; font-weight: 700; white-space: nowrap; }
+  .future-line { margin-top: 0.8rem; padding: 0.55rem; color: var(--muted); border-top: 1px dashed #cbd5e1; text-align: center; font-size: 0.72rem; }
+
+  @media (max-width: 1000px) {
+    .dashboard-domains { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  @media (max-width: 720px) {
+    .dashboard-heading { display: block; }
+    .dashboard-scope { margin-top: 0.5rem; text-align: left; }
+    .dashboard-fleet { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .fleet-stat:nth-child(2) { border-right: 0; }
+    .fleet-stat:nth-child(-n+2) { border-bottom: 1px solid var(--border); }
+    .dashboard-domains { grid-template-columns: 1fr; }
+    .client-card-title { display: block; }
+    .client-card-title span { display: block; margin-top: 0.2rem; }
+    .client-search { width: 100%; }
+    .activity-line { align-items: flex-start; flex-wrap: wrap; gap: 0.35rem 0.8rem; }
+    .preview-panel { position: fixed; top: 90px; right: 1rem; left: 1rem; width: auto; }
+  }
 </style>
 
-{# ── Alerts (only when actionable) ────────────────────────── #}
-{% if stale_sources %}
-<div style="background:#fffbeb; border:1px solid #fcd34d; border-radius:6px; padding:0.85rem 1.25rem; margin-bottom:0.75rem; display:flex; align-items:center; gap:0.75rem;">
-  <span style="width:10px; height:10px; border-radius:50%; background:#d97706; display:inline-block; flex-shrink:0;"></span>
-  <span style="font-weight:600; color:#92400e;">Stale ingest: {{ stale_sources|join:", " }}</span>
-  <a href="{% url 'sources_status' %}" style="margin-left:auto; font-size:0.85rem; color:#92400e;">Check sources →</a>
-</div>
-{% endif %}
-
-{% if severity_counts.critical %}
-<div style="background:#fef2f2; border:1px solid #fca5a5; border-radius:6px; padding:0.85rem 1.25rem; margin-bottom:1rem; display:flex; align-items:center; gap:0.75rem;">
-  <span style="width:10px; height:10px; border-radius:50%; background:#dc2626; display:inline-block; flex-shrink:0;"></span>
-  <span style="font-weight:600; color:#dc2626;">{{ severity_counts.critical }} critical issue{{ severity_counts.critical|pluralize }} across the fleet</span>
-  <a href="{% url 'findings_queue' %}?severity=critical" style="margin-left:auto; font-size:0.85rem; color:#dc2626;">View all →</a>
-</div>
-{% endif %}
-
-{# ── Overview cards — 6 domain summaries ─────────────────── #}
-<div class="overview-grid">
-  <a class="overview-card" href="{% url 'org_index' org_slug='all' %}">
-    <div class="ov-label">Devices</div>
-    <div class="ov-value">{{ total_devices }}</div>
-    <div class="ov-sub">across {{ total_clients }} clients</div>
-  </a>
-  <a class="overview-card" href="{% url 'patching_queue' %}">
-    <div class="ov-label">Patching</div>
-    <div class="ov-value">{{ patching_pop.in_scope }}</div>
-    <div class="ov-sub">of {{ patching_pop.total }} devices in scope</div>
-  </a>
-  <a class="overview-card {% if category_counts.software %}has-open{% endif %}"
-     href="{% url 'findings_queue' %}?category=software">
-    <div class="ov-label">Software</div>
-    <div class="ov-value">{{ category_counts.software|default:0 }}</div>
-    <div class="ov-sub">flagged installations</div>
-  </a>
-  <a class="overview-card {% if coverage_missing %}has-open{% endif %}"
-     href="{% url 'findings_queue' %}?type=missing_required_platform">
-    <div class="ov-label">Missing agents</div>
-    <div class="ov-value">{{ coverage_missing }}</div>
-    <div class="ov-sub">agent never installed</div>
-  </a>
-  <a class="overview-card"
-     href="{% url 'findings_queue' %}?type=stale_required_platform">
-    <div class="ov-label">Not reporting</div>
-    <div class="ov-value">{{ coverage_stale }}</div>
-    <div class="ov-sub">may include offline devices</div>
-  </a>
-  <a class="overview-card {% if reviews_pending.total %}has-open{% endif %}"
-     href="{% url 'client_candidates_queue' %}">
-    <div class="ov-label">Review</div>
-    <div class="ov-value">{{ reviews_pending.total }}</div>
-    <div class="ov-sub">decisions pending</div>
-  </a>
-  <a class="overview-card {% if stale_sources %}alert{% endif %}"
-     href="{% url 'sources_status' %}">
-    <div class="ov-label">Ingest</div>
-    <div class="ov-value">{{ sources_ok }}/{{ sources_total }}</div>
-    <div class="ov-sub">
-      {% if stale_sources %}stale: {{ stale_sources|join:", " }}{% else %}sources fresh{% endif %}
-    </div>
-  </a>
-</div>
-
-{# Clients with severe (critical+high) issues in ≥2 domains — top 5 #}
-{% if on_fire %}
-<div class="card fire-panel">
-  <h2 style="font-size:1rem; margin:0 0 0.5rem 0;">
-    Needs immediate attention
-    <span class="muted" style="font-weight:400; font-size:0.82rem;">
-      — severe issues in multiple areas ({{ on_fire|length }})
-    </span>
-  </h2>
-  <div class="fire-list">
-    {% for row in on_fire %}
-    <div class="fire-item">
-      <a href="{% url 'org_index' org_slug=row.client.slug %}"><strong>{{ row.client.display_name }}</strong></a>
-      <span class="muted">·</span>
-      <span class="muted">{{ row.severe_count }} severe · spanning {{ row.domain_count }} areas</span>
-      <a href="{% url 'findings_queue' %}?client={{ row.client.slug }}&severity=high" style="margin-left:auto; font-size:0.82rem;">Open →</a>
-    </div>
-    {% endfor %}
+<div class="dashboard-heading">
+  <div>
+    <h1>Operations overview</h1>
+    <p>What is working, what needs attention, and where to go next.</p>
   </div>
-</div>
-{% endif %}
-
-{# ── Client portfolio (star of the show) ──────────────────── #}
-<div class="card">
-  <h2>Client portfolio
-    <span class="muted" style="font-weight:400; font-size:0.85rem;">
-      ({{ client_health_total }})
-    </span>
-  </h2>
-
-  <div class="view-chips">
-    <a class="view-chip {% if not active_view or active_view == 'all' %}active{% endif %}" href="{% url 'home' %}">
-      All <span class="chip-count">{{ total_clients }}</span>
-    </a>
-    <a class="view-chip {% if active_view == 'attention' %}active{% endif %}" href="?view=attention">
-      Needs attention <span class="chip-count attention">{{ attention_count }}</span>
-    </a>
-    <a class="view-chip {% if active_view == 'healthy' %}active{% endif %}" href="?view=healthy">
-      Healthy <span class="chip-count">{{ health_counts.green }}</span>
-    </a>
-    <a class="view-chip {% if active_view == 'no_data' %}active{% endif %}" href="?view=no_data">
-      No data <span class="chip-count">{{ health_counts.no_data }}</span>
-    </a>
-  </div>
-
-  <form method="get" style="margin-bottom: 0.75rem; display: flex; gap: 0.5rem; align-items: center;">
-    <input type="search" name="client_q" placeholder="Search clients by name…"
-           value="{{ client_q|default:'' }}"
-           style="padding: 0.4rem 0.7rem; border: 1px solid var(--border); border-radius: 4px; font-size: 0.85rem; min-width: 260px;">
-    {% if active_view and active_view != 'all' %}<input type="hidden" name="view" value="{{ active_view }}">{% endif %}
-    <button type="submit">Search</button>
-    {% if client_q %}<a href="?{% if active_view and active_view != 'all' %}view={{ active_view }}{% endif %}" style="font-size: 0.85rem;">Clear</a>{% endif %}
-  </form>
-
-  {% if client_health %}
-  <table class="scoreboard" data-sortable>
-    <thead>
-      <tr>
-        <th style="width: 40px;"></th>
-        <th>Client</th>
-        <th style="text-align:right;">Devices</th>
-        <th>Issues</th>
-        <th style="text-align:right;">Missing agents</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for row in client_health %}
-      <tr>
-        <td>
-          <span class="health-light {{ row.health }}"
-                title="{{ row.health|humanize_label|default:row.health }}"></span>
-        </td>
-        <td>
-          <a href="{% url 'org_index' org_slug=row.client.slug %}">{{ row.client.display_name }}</a>
-        </td>
-        <td style="text-align:right;">
-          <a href="{% url 'org_devices' org_slug=row.client.slug %}" style="color:inherit; text-decoration:none;">{{ row.devices }}</a>
-        </td>
-        <td>
-          {% if row.total == 0 %}
-            <span class="muted" style="font-size:0.82rem;">None</span>
-          {% else %}
-          <div class="finding-bar">
-            {% if row.critical %}<span class="finding-dot dot-critical"></span><span>{{ row.critical }}</span>{% endif %}
-            {% if row.high %}<span class="finding-dot dot-high"></span><span>{{ row.high }}</span>{% endif %}
-            {% if row.medium %}<span class="finding-dot dot-medium"></span><span>{{ row.medium }}</span>{% endif %}
-            {% if row.trend == 'up' %}
-              <span title="{{ row.severe_delta_7d }} more severe issues than 7 days ago"
-                    style="color:#dc2626; font-weight:600; font-size:0.85rem;">▲</span>
-            {% elif row.trend == 'down' %}
-              <span title="{{ row.severe_delta_7d }} fewer severe issues than 7 days ago"
-                    style="color:#16a34a; font-weight:600; font-size:0.85rem;">▼</span>
-            {% elif row.severe_7d %}
-              <span title="No change vs 7 days ago"
-                    style="color:var(--muted); font-size:0.85rem;">◆</span>
-            {% endif %}
-            <a href="{% url 'findings_queue' %}?client={{ row.client.slug }}" style="margin-left:auto; font-size:0.78rem;">{{ row.total }} →</a>
-          </div>
-          {% endif %}
-        </td>
-        <td style="text-align:right;">
-          {% if row.missing_agents %}
-            <a href="{% url 'findings_queue' %}?client={{ row.client.slug }}&type=missing_required_platform" style="color:#dc2626; font-weight:600;">{{ row.missing_agents }}</a>
-          {% else %}
-            <span class="muted">—</span>
-          {% endif %}
-        </td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  {% if client_health_page.paginator.num_pages > 1 %}
-  <div style="margin-top: 0.75rem; display: flex; gap: 0.5rem; align-items: center; font-size: 0.85rem;">
-    <span class="muted">Page {{ client_health_page.number }} of {{ client_health_page.paginator.num_pages }}</span>
-    {% if client_health_page.has_previous %}<a href="?client_page={{ client_health_page.previous_page_number }}{% if client_q %}&client_q={{ client_q }}{% endif %}{% if active_view and active_view != 'all' %}&view={{ active_view }}{% endif %}">← Previous</a>{% endif %}
-    {% if client_health_page.has_next %}<a href="?client_page={{ client_health_page.next_page_number }}{% if client_q %}&client_q={{ client_q }}{% endif %}{% if active_view and active_view != 'all' %}&view={{ active_view }}{% endif %}">Next →</a>{% endif %}
-  </div>
-  {% endif %}
-  {% else %}
-  <p class="muted">{% if client_q or active_view %}No clients match the current filter.{% else %}No clients yet.{% endif %}</p>
-  {% endif %}
-</div>
-
-{# ── Sidebar: blocking work + recent activity ─────────────── #}
-<div class="sidebar-grid">
-  <div class="card">
-    <h2>Awaiting review
-      <span class="muted" style="font-weight:400; font-size:0.85rem;">({{ reviews_pending.total }})</span>
-    </h2>
-    {% if reviews_pending.total %}
-    <ul class="sidebar-list">
-      {% if reviews_pending.client_candidates %}
-      <li>
-        <a href="{% url 'client_candidates_queue' %}">Client candidates</a>
-        <span class="side-time">{{ reviews_pending.client_candidates }} pending</span>
-      </li>
-      {% endif %}
-      {% if reviews_pending.merge_candidates %}
-      <li>
-        <a href="{% url 'merge_candidates_queue' %}">Device merges</a>
-        <span class="side-time">{{ reviews_pending.merge_candidates }} pending</span>
-      </li>
-      {% endif %}
-    </ul>
+  <div class="dashboard-scope">
+    <strong>Across all {{ total_clients }} clients</strong>
+    {% if dashboard_updated_at %}
+    <span title="{{ dashboard_updated_at|date:'F j, Y g:i A T' }}">Last updated {{ dashboard_updated_at|timesince }} ago · {{ dashboard_updated_at|date:"M j, Y g:i A T" }}</span>
     {% else %}
-    <p class="muted">Nothing pending.</p>
-    {% endif %}
-  </div>
-
-  <div class="card">
-    <h2>New in last 24 hours
-      <span class="muted" style="font-weight:400; font-size:0.85rem;">({{ recent_findings|length }})</span>
-    </h2>
-    {% if recent_findings %}
-    <ul class="sidebar-list">
-      {% for f in recent_findings %}
-      <li>
-        <span class="badge badge-{{ f.severity }}">{{ f.severity }}</span>
-        <span>{% finding_display_label f %}</span>
-        {% if f.client %}<span class="muted">— {{ f.client.display_name }}</span>{% endif %}
-        <span class="side-time">{{ f.first_seen_at|date:"H:i" }}</span>
-      </li>
-      {% endfor %}
-    </ul>
-    {% else %}
-    <p class="muted">Nothing new.</p>
+    <span>Update time unavailable</span>
     {% endif %}
   </div>
 </div>
+
+<section class="dashboard-fleet" aria-label="Operations scope">
+  <a class="fleet-stat" href="{% url 'org_index' org_slug='all' %}">
+    <span class="fleet-stat-label">Clients</span>
+    <span class="fleet-stat-value">{{ total_clients }}</span>
+    <span class="fleet-stat-note">{{ clients_connected }} connected</span>
+  </a>
+  <a class="fleet-stat" href="{% url 'devices_page' %}">
+    <span class="fleet-stat-label">Active devices</span>
+    <span class="fleet-stat-value">{{ total_devices }}</span>
+    <span class="fleet-stat-note">{{ retired_devices }} retired</span>
+    <span class="fleet-stat-detail">{{ device_mix.workstations }} workstations · {{ device_mix.servers }} servers · {{ device_mix.virtual }} virtual · {{ device_mix.other }} other</span>
+  </a>
+  <a class="fleet-stat dashboard-filter-link" href="?view=attention#clients" data-filter="attention">
+    <span class="fleet-stat-label">Clients needing attention</span>
+    <span class="fleet-stat-value">{{ attention_count }}</span>
+    <span class="fleet-stat-note">{{ priority_counts.immediate }} act now · {{ priority_counts.soon }} review next</span>
+  </a>
+  <a class="fleet-stat supporting" href="{% url 'sources_status' %}">
+    <span class="fleet-stat-label">Data connections</span>
+    <span class="fleet-stat-value">{{ sources_ok }} of {{ sources_total }} working</span>
+    <span class="fleet-stat-detail">{% if stale_sources %}Delayed: {{ stale_sources|join:", " }}{% elif dashboard_updated_at %}Last checked {{ dashboard_updated_at|timesince }} ago{% else %}No updates received{% endif %}</span>
+  </a>
+</section>
+
+<section class="dashboard-domains" aria-label="Operational areas">
+  {% for domain in domain_summaries %}
+  <article class="domain-card">
+    <div class="domain-head">
+      <h2>{{ domain.name }}</h2>
+      <span class="domain-state state-{{ domain.state }}">{{ domain.state_label }}</span>
+    </div>
+    <p class="domain-description">{{ domain.description }}</p>
+    <div class="domain-value"><strong>{{ domain.value }}</strong> <span>{{ domain.value_label }}</span></div>
+    <div class="domain-facts">
+      {% for fact in domain.facts %}<a href="{{ fact.href }}">{{ fact.label }}</a>{% endfor %}
+    </div>
+    <div class="domain-freshness">
+      {% if domain.updated_at %}Updated {{ domain.updated_at|timesince }} ago · {{ domain.updated_at|date:"g:i A T" }}{% else %}Update time unavailable{% endif %}
+    </div>
+    <a class="domain-open" href="{{ domain.href }}">Open {{ domain.name }} →</a>
+  </article>
+  {% endfor %}
+</section>
+
+<section class="card client-card" id="clients">
+  <div class="client-card-head">
+    <div class="client-card-title">
+      <h2>All clients</h2>
+      <span>These controls affect this list only · retained for this session</span>
+    </div>
+    <div class="client-controls">
+      <div class="client-chips" role="group" aria-label="Client priority filter">
+        <button class="client-chip active" type="button" data-filter="all">All {{ total_clients }}</button>
+        <button class="client-chip" type="button" data-filter="attention">Needs attention {{ attention_count }}</button>
+        <button class="client-chip" type="button" data-filter="immediate">Act now {{ priority_counts.immediate }}</button>
+        <button class="client-chip" type="button" data-filter="soon">Review next {{ priority_counts.soon }}</button>
+        <button class="client-chip" type="button" data-filter="routine">Monitor {{ priority_counts.routine }}</button>
+        <button class="client-chip" type="button" data-filter="none">No current concerns {{ priority_counts.none }}</button>
+      </div>
+      <input class="client-search" id="client-search" type="search" placeholder="Search clients…" aria-label="Search clients">
+      <select class="client-sort" id="client-sort" aria-label="Sort clients">
+        <option value="priority">Sort: Priority</option>
+        <option value="name">Sort: Client name</option>
+        <option value="devices">Sort: Device count</option>
+        <option value="data">Sort: Data status</option>
+      </select>
+    </div>
+  </div>
+  <div class="client-table-wrap">
+    <table class="client-table" id="client-table">
+      <thead>
+        <tr><th>Client</th><th>Priority</th><th>Devices</th><th>Patching</th><th>Compliance</th><th>Software</th><th>Inventory</th><th>Data status</th><th></th></tr>
+      </thead>
+      <tbody>
+        {% for row in client_rows %}
+        <tr data-name="{{ row.client.display_name|lower }}" data-priority="{{ row.priority }}" data-devices="{{ row.devices }}" data-data="{{ row.data_sort }}">
+          <td class="client-name"><a href="{% url 'org_index' org_slug=row.client.slug %}">{{ row.client.display_name }}</a></td>
+          <td>
+            <span class="priority-badge priority-{{ row.priority }}">{{ row.priority_label }}</span>
+            {% if row.priority_reason %}<span class="priority-reason">{{ row.priority_reason }}</span>{% endif %}
+          </td>
+          <td><strong>{{ row.devices }}</strong><span class="cell-detail">active</span></td>
+          {% for domain in row.domains %}
+          <td class="domain-cell">
+            <a href="{{ domain.href }}" title="Open {{ row.client.display_name }} → {{ domain.name }}"><span class="state-dot dot-{{ domain.state }}"></span>{{ domain.state_label }}</a>
+            <span class="cell-detail">{{ domain.detail }}</span>
+          </td>
+          {% endfor %}
+          <td class="data-status data-{{ row.data_status }}">{{ row.data_label }}{% if row.data_detail %}<span class="cell-detail">{{ row.data_detail }}</span>{% endif %}</td>
+          <td>
+            <details class="client-preview">
+              <summary>Preview ▾</summary>
+              <div class="preview-panel">
+                <strong>{{ row.client.display_name }}</strong>
+                {% if row.priority_reason %}<p class="preview-reason">{{ row.priority_label }}: {{ row.priority_reason }}.</p>{% else %}<p class="preview-reason">No current concerns in the four operational areas.</p>{% endif %}
+                {% for domain in row.domains %}{% if domain.contributes %}<p class="preview-reason"><a href="{{ domain.href }}">{{ domain.name }}</a>: {{ domain.state_label|lower }} · {{ domain.detail }}</p>{% endif %}{% endfor %}
+                <div class="preview-updates">
+                  {% for source in row.source_updates %}<span>{{ source.name }}: {% if source.updated_at %}{{ source.updated_at|date:"M j g:i A T" }}{% else %}unavailable{% endif %}</span>{% empty %}<span>No active data connection</span>{% endfor %}
+                </div>
+                <a class="preview-open" href="{% url 'org_index' org_slug=row.client.slug %}">Open {{ row.client.display_name }} →</a>
+              </div>
+            </details>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <p class="no-clients" id="no-clients">No clients match the current controls.</p>
+  </div>
+</section>
+
+<section class="activity-line" aria-label="Recent activity">
+  <strong>Recent activity</strong>
+  <a href="{% url 'patch_activity_search_page' %}?days=1&status=Installed">{{ recent_activity.patch_installed }} updates installed</a>
+  <a href="{% url 'patch_activity_search_page' %}?days=1&status=Failed">{{ recent_activity.patch_failed }} update failures</a>
+  <a href="{% url 'findings_queue' %}?category=software">{{ recent_activity.software_new }} new software review items</a>
+  <a href="{% url 'patch_activity_search_page' %}?days=1">View activity →</a>
+</section>
+
+<div class="future-line"><strong>Coming next:</strong> users and people, plus richer account ownership, service stage, tier, and renewal context.</div>
+
+{{ initial_view|json_script:"dashboard-initial-view" }}
+<script>
+(() => {
+  const storageKey = "operationsDashboardControls";
+  const tableBody = document.querySelector("#client-table tbody");
+  const rows = Array.from(tableBody.querySelectorAll("tr"));
+  const chips = Array.from(document.querySelectorAll(".client-chip"));
+  const filterLinks = Array.from(document.querySelectorAll(".dashboard-filter-link"));
+  const search = document.querySelector("#client-search");
+  const sort = document.querySelector("#client-sort");
+  const noClients = document.querySelector("#no-clients");
+  const validFilters = new Set(["all", "attention", "immediate", "soon", "routine", "none"]);
+  const priorityRank = {immediate: 0, soon: 1, routine: 2, none: 3};
+  let saved = {};
+  try { saved = JSON.parse(sessionStorage.getItem(storageKey) || "{}"); } catch (_error) { saved = {}; }
+  const requested = JSON.parse(document.querySelector("#dashboard-initial-view").textContent);
+  let activeFilter = validFilters.has(requested) && requested !== "all" ? requested : (validFilters.has(saved.filter) ? saved.filter : "all");
+  search.value = saved.search || "";
+  sort.value = ["priority", "name", "devices", "data"].includes(saved.sort) ? saved.sort : "priority";
+
+  function matchesFilter(row) {
+    if (activeFilter === "all") return true;
+    if (activeFilter === "attention") return ["immediate", "soon"].includes(row.dataset.priority);
+    return row.dataset.priority === activeFilter;
+  }
+  function compareRows(a, b) {
+    if (sort.value === "name") return a.dataset.name.localeCompare(b.dataset.name);
+    if (sort.value === "devices") return Number(b.dataset.devices) - Number(a.dataset.devices);
+    if (sort.value === "data") return Number(b.dataset.data) - Number(a.dataset.data) || a.dataset.name.localeCompare(b.dataset.name);
+    return priorityRank[a.dataset.priority] - priorityRank[b.dataset.priority] || a.dataset.name.localeCompare(b.dataset.name);
+  }
+  function render() {
+    const query = search.value.trim().toLowerCase();
+    let visible = 0;
+    rows.sort(compareRows).forEach((row) => {
+      tableBody.appendChild(row);
+      const show = matchesFilter(row) && (!query || row.dataset.name.includes(query));
+      row.hidden = !show;
+      if (show) visible += 1;
+    });
+    chips.forEach((chip) => chip.classList.toggle("active", chip.dataset.filter === activeFilter));
+    noClients.style.display = visible ? "none" : "block";
+    sessionStorage.setItem(storageKey, JSON.stringify({filter: activeFilter, search: search.value, sort: sort.value}));
+  }
+  chips.forEach((chip) => chip.addEventListener("click", () => { activeFilter = chip.dataset.filter; render(); }));
+  filterLinks.forEach((link) => link.addEventListener("click", (event) => {
+    event.preventDefault(); activeFilter = link.dataset.filter; render(); document.querySelector("#clients").scrollIntoView({behavior: "smooth"});
+  }));
+  search.addEventListener("input", render);
+  sort.addEventListener("change", render);
+  render();
+})();
+</script>
 {% endblock %}

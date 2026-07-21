@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Operations Dashboard Proposal</title>
+  <style>
+    :root {
+      --ink:#172033; --muted:#697386; --line:#dfe4ec; --soft:#f5f7fa;
+      --blue:#2856b6; --blue-soft:#edf3ff; --green:#18794e; --green-soft:#eaf7f0;
+      --amber:#9a6700; --amber-soft:#fff6d8; --red:#b42318; --red-soft:#fff0ee;
+      --purple:#6941c6; --purple-soft:#f3efff; --shadow:0 8px 24px rgba(23,32,51,.07);
+    }
+    * { box-sizing:border-box; }
+    body { margin:0; color:var(--ink); background:#eef1f5; font:14px/1.45 Inter,Segoe UI,Arial,sans-serif; }
+    a { color:var(--blue); text-decoration:none; }
+    button, input, select { font:inherit; }
+    .shell { max-width:1440px; min-height:100vh; margin:auto; background:#fff; box-shadow:0 0 34px rgba(23,32,51,.08); }
+    .topbar { height:58px; display:flex; align-items:center; gap:28px; padding:0 28px; border-bottom:1px solid var(--line); }
+    .brand { display:flex; align-items:center; gap:10px; font-weight:750; letter-spacing:-.01em; }
+    .brand-mark { width:28px; height:28px; border-radius:8px; display:grid; place-items:center; color:#fff; background:linear-gradient(145deg,#2d67d5,#173d91); font-size:12px; }
+    .nav { display:flex; gap:5px; flex:1; }
+    .nav a { padding:8px 10px; border-radius:6px; color:#485267; font-weight:600; }
+    .nav a.active { background:var(--blue-soft); color:var(--blue); }
+    .admin { display:flex; gap:12px; color:var(--muted); font-size:13px; }
+    main { padding:25px 28px 36px; }
+    .proposal { display:flex; justify-content:space-between; gap:16px; margin-bottom:18px; }
+    .proposal h1 { margin:0 0 3px; font-size:24px; letter-spacing:-.025em; }
+    .proposal p { margin:0; color:var(--muted); }
+    .scope { text-align:right; }
+    .scope strong { display:block; font-size:13px; }
+    .scope span { color:var(--muted); font-size:12px; }
+    .tag { display:inline-flex; align-items:center; gap:6px; padding:4px 8px; border-radius:999px; background:var(--blue-soft); color:var(--blue); font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; }
+    .dot { width:7px; height:7px; border-radius:50%; background:var(--green); }
+    .fleet-strip { display:grid; grid-template-columns:repeat(4,1fr); border:1px solid var(--line); border-radius:10px; overflow:hidden; margin-bottom:14px; }
+    .fleet-stat { padding:13px 16px; border-right:1px solid var(--line); background:#fff; }
+    .fleet-stat:last-child { border-right:0; }
+    .fleet-stat label { display:block; color:var(--muted); font-size:11px; font-weight:750; text-transform:uppercase; letter-spacing:.055em; }
+    .fleet-stat b { display:inline-block; margin-top:2px; font-size:21px; letter-spacing:-.03em; }
+    .fleet-stat small { margin-left:6px; color:var(--muted); }
+    .fleet-stat .device-mix { display:block; margin:5px 0 0; color:var(--muted); font-size:11px; line-height:1.35; }
+    .fleet-stat.supporting { background:#fbfcfd; }
+    .fleet-stat.supporting b { font-size:17px; letter-spacing:-.01em; }
+    .domain-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:11px; margin-bottom:18px; }
+    .domain { position:relative; display:flex; min-height:168px; padding:15px 16px; border:1px solid var(--line); border-radius:10px; background:#fff; box-shadow:0 2px 8px rgba(23,32,51,.025); flex-direction:column; }
+    .domain:hover { border-color:#aebbd2; box-shadow:var(--shadow); }
+    .domain-head { display:flex; justify-content:space-between; align-items:center; }
+    .domain h2 { margin:0; font-size:15px; }
+    .domain-desc { min-height:29px; margin:4px 0 0; color:var(--muted); font-size:11px; line-height:1.3; }
+    .state { padding:3px 7px; border-radius:999px; font-size:11px; font-weight:750; }
+    .state.good { color:var(--green); background:var(--green-soft); }
+    .state.watch { color:var(--amber); background:var(--amber-soft); }
+    .state.action { color:var(--red); background:var(--red-soft); }
+    .state.delayed { color:#626b7a; background:#edf0f4; }
+    .domain-main { margin:9px 0 8px; }
+    .domain-main b { font-size:24px; letter-spacing:-.04em; }
+    .domain-main span { color:var(--muted); }
+    .facts { display:flex; flex-wrap:wrap; gap:5px 12px; color:#465167; font-size:12px; }
+    .facts a { color:#465167; text-decoration:underline; text-decoration-color:#bdc7d6; text-underline-offset:2px; }
+    .fresh { margin-top:auto; padding-top:8px; color:var(--muted); font-size:11px; }
+    .open { align-self:flex-end; margin-top:3px; font-weight:700; font-size:12px; }
+    .card { border:1px solid var(--line); border-radius:10px; background:#fff; }
+    .portfolio { overflow:hidden; box-shadow:var(--shadow); }
+    .card-head { padding:16px 18px 13px; border-bottom:1px solid var(--line); }
+    .card-title { display:flex; align-items:baseline; justify-content:space-between; gap:12px; }
+    .card-title h2 { margin:0; font-size:17px; }
+    .card-title p { margin:0; color:var(--muted); font-size:12px; }
+    .controls { display:flex; align-items:center; gap:8px; margin-top:12px; flex-wrap:wrap; }
+    .chips { display:flex; gap:5px; flex:1; flex-wrap:wrap; }
+    .chip { border:1px solid var(--line); border-radius:999px; padding:5px 10px; background:#fff; color:#485267; cursor:pointer; }
+    .chip.active { color:#fff; background:var(--blue); border-color:var(--blue); }
+    .search { width:205px; padding:7px 9px; border:1px solid var(--line); border-radius:7px; }
+    select { padding:7px 28px 7px 9px; border:1px solid var(--line); border-radius:7px; color:#374151; background:#fff; }
+    .table-wrap { overflow-x:auto; }
+    table { width:100%; border-collapse:collapse; }
+    th { padding:9px 11px; color:var(--muted); background:#f8f9fb; border-bottom:1px solid var(--line); text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:.045em; white-space:nowrap; }
+    td { padding:11px; border-bottom:1px solid #edf0f4; vertical-align:middle; }
+    tr:last-child td { border-bottom:0; }
+    tr[data-priority="immediate"] { background:linear-gradient(90deg,#fff7f6 0,#fff 28%); }
+    .client { min-width:155px; }
+    .client a { font-weight:750; color:var(--ink); }
+    .client small { display:block; color:var(--muted); margin-top:2px; }
+    .priority { display:inline-block; min-width:82px; padding:4px 7px; border-radius:6px; font-size:11px; font-weight:750; }
+    .priority.immediate { background:var(--red-soft); color:var(--red); }
+    .priority.soon { background:var(--amber-soft); color:var(--amber); }
+    .priority.routine { background:var(--blue-soft); color:var(--blue); }
+    .priority.none { background:var(--green-soft); color:var(--green); }
+    .priority-reason { display:block; max-width:112px; margin-top:4px; color:var(--muted); font-size:10px; line-height:1.25; }
+    .domain-cell { min-width:133px; }
+    .domain-cell a { display:block; color:var(--ink); font-weight:700; }
+    .domain-cell small { display:block; color:var(--muted); margin-top:2px; white-space:nowrap; }
+    .mini { display:inline-block; width:7px; height:7px; margin-right:5px; border-radius:50%; }
+    .mini.good { background:var(--green); } .mini.watch { background:#d99a00; } .mini.action { background:var(--red); } .mini.delayed { background:#7b8493; }
+    .data-status { min-width:112px; font-weight:700; }
+    .data-status small { display:block; margin-top:2px; color:var(--muted); font-weight:400; white-space:nowrap; }
+    .data-status.delayed { color:#596273; }
+    details { position:relative; }
+    summary { cursor:pointer; color:var(--blue); font-weight:700; list-style:none; white-space:nowrap; }
+    summary::-webkit-details-marker { display:none; }
+    .preview { position:absolute; right:0; z-index:3; width:340px; margin-top:8px; padding:13px; border:1px solid #bfc9da; border-radius:8px; background:#fff; box-shadow:var(--shadow); }
+    .preview strong { display:block; margin-bottom:6px; }
+    .preview-grid { display:grid; grid-template-columns:1fr 1fr; gap:5px 12px; color:#4b5565; font-size:12px; }
+    .preview .context { margin-top:9px; padding-top:8px; border-top:1px solid var(--line); color:var(--muted); font-size:11px; }
+    .preview-updates { display:flex; flex-wrap:wrap; gap:4px 12px; margin-top:8px; padding-top:8px; border-top:1px solid var(--line); color:var(--muted); font-size:10px; }
+    .activity-line { display:flex; align-items:center; gap:18px; margin-top:12px; padding:10px 13px; border:1px solid var(--line); border-radius:9px; background:#fbfcfd; color:#465167; font-size:12px; }
+    .activity-line strong { color:var(--ink); }
+    .activity-line a:last-child { margin-left:auto; font-weight:700; white-space:nowrap; }
+    .future { margin-top:14px; padding:9px 13px; border-top:1px dashed #ccd3de; color:var(--muted); font-size:12px; text-align:center; }
+    .future b { color:#526074; }
+    .mock-note { margin-top:12px; color:#8791a2; text-align:right; font-size:10px; }
+    @media (max-width:1050px) {
+      .domain-grid { grid-template-columns:1fr 1fr; }
+      .nav a:nth-last-child(-n+2) { display:none; }
+    }
+    @media (max-width:720px) {
+      main { padding:18px 14px; } .topbar { padding:0 14px; } .nav { display:none; }
+      .fleet-strip { grid-template-columns:1fr 1fr; } .fleet-stat:nth-child(2) { border-right:0; }
+      .fleet-stat:nth-child(-n+2) { border-bottom:1px solid var(--line); }
+      .domain-grid { grid-template-columns:1fr; } .proposal { display:block; } .scope { text-align:left; margin-top:8px; }
+      .search { width:100%; } .controls { align-items:stretch; } .preview { position:fixed; left:14px; right:14px; width:auto; top:90px; }
+      .activity-line { align-items:flex-start; flex-wrap:wrap; gap:6px 14px; }
+    }
+  </style>
+</head>
+<body>
+<div class="shell">
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark">OP</span> Operations</div>
+    <nav class="nav">
+      <a class="active" href="#">Dashboard</a><a href="#">Clients</a><a href="#">Devices</a>
+      <a href="#">Patching</a><a href="#">Software</a><a href="#">Issues</a>
+    </nav>
+    <div class="admin"><span>Review</span><span>Config</span><span>Integrations</span></div>
+  </header>
+
+  <main>
+    <div class="proposal">
+      <div>
+        <span class="tag">Visual proposal</span>
+        <h1>Operations overview</h1>
+        <p>What is working, what needs attention, and where to go next.</p>
+      </div>
+      <div class="scope"><strong><span class="dot"></span> Across all 76 clients</strong><span>Last updated 12 min ago · July 21, 2026 11:48 AM ET</span></div>
+    </div>
+
+    <section class="fleet-strip" aria-label="Fleet scope">
+      <a class="fleet-stat" href="#"><label>Clients</label><b>76</b><small>74 reporting</small></a>
+      <a class="fleet-stat" href="#"><label>Active devices</label><b>5,167</b><small>42 retired</small><span class="device-mix">3,820 workstations · 712 servers · 529 virtual · 106 other</span></a>
+      <a class="fleet-stat" href="#"><label>Clients needing attention</label><b>16</b><small>4 act now · 12 review next</small></a>
+      <a class="fleet-stat supporting" href="#"><label>Data connections</label><b>4 of 4 working</b><span class="device-mix">Last checked 12 min ago</span></a>
+    </section>
+
+    <section class="domain-grid" aria-label="Domain posture">
+      <article class="domain">
+        <div class="domain-head"><h2>Patching</h2><span class="state watch">Review</span></div>
+        <p class="domain-desc">Device updates and restart readiness</p>
+        <div class="domain-main"><b>91%</b> <span>covered</span></div>
+        <div class="facts"><a href="#">18 stalled</a><a href="#">7 never patched</a><a href="#">24 awaiting restart</a></div>
+        <span class="fresh">Updated 12 min ago · 11:48 AM</span><a class="open" href="#">Open Patching →</a>
+      </article>
+      <article class="domain">
+        <div class="domain-head"><h2>Compliance</h2><span class="state watch">Review</span></div>
+        <p class="domain-desc">Required controls and reporting</p>
+        <div class="domain-main"><b>94%</b> <span>required coverage</span></div>
+        <div class="facts"><a href="#">42 missing</a><a href="#">96 not reporting</a><a href="#">11 need review</a></div>
+        <span class="fresh">Updated 18 min ago · 11:42 AM</span><a class="open" href="#">Open Compliance →</a>
+      </article>
+      <article class="domain">
+        <div class="domain-head"><h2>Software</h2><span class="state delayed">Data delayed</span></div>
+        <p class="domain-desc">Applications, classification, and review</p>
+        <div class="domain-main"><b>5,225</b> <span>titles observed</span></div>
+        <div class="facts"><a href="#">88% classified</a><a href="#">34 new</a><a href="#">16 decisions pending</a></div>
+        <span class="fresh">Delayed · last updated 11:29 AM</span><a class="open" href="#">Open Software →</a>
+      </article>
+      <article class="domain">
+        <div class="domain-head"><h2>Inventory</h2><span class="state good">On track</span></div>
+        <p class="domain-desc">Devices, ownership, and data quality</p>
+        <div class="domain-main"><b>98%</b> <span>records resolved</span></div>
+        <div class="facts"><a href="#">5,167 managed</a><a href="#">11 unresolved</a><a href="#">4 possible duplicates</a></div>
+        <span class="fresh">Updated 15 min ago · 11:45 AM</span><a class="open" href="#">Open Inventory →</a>
+      </article>
+    </section>
+
+    <section class="card portfolio">
+      <div class="card-head">
+        <div class="card-title"><h2>All clients</h2><p>These controls affect this list only · retained for this session</p></div>
+        <div class="controls">
+          <div class="chips" role="group" aria-label="Attention filter">
+            <button class="chip active" data-filter="all">All 76</button>
+            <button class="chip" data-filter="immediate">Act now 4</button>
+            <button class="chip" data-filter="soon">Review next 12</button>
+            <button class="chip" data-filter="routine">Monitor 58</button>
+            <button class="chip" data-filter="none">No current concerns 2</button>
+          </div>
+          <input class="search" id="clientSearch" type="search" placeholder="Search clients…" aria-label="Search clients">
+          <select id="sortOrder" aria-label="Sort clients">
+            <option value="attention">Sort: Priority</option><option value="name">Sort: Client name</option>
+            <option value="estate">Sort: Device count</option><option value="freshness">Sort: Data status</option>
+            <option value="patching">Sort: Patching</option><option value="compliance">Sort: Compliance</option>
+          </select>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table id="portfolioTable">
+          <thead><tr><th>Client</th><th>Priority</th><th>Devices</th><th>Patching</th><th>Compliance</th><th>Software</th><th>Inventory</th><th>Data status</th><th></th></tr></thead>
+          <tbody>
+            <tr data-name="Northstar Dental" data-priority="immediate" data-estate="148" data-freshness="12">
+              <td class="client"><a href="#">Northstar Dental</a><small>Owner: J. Smith · Onboarding</small></td>
+              <td><span class="priority immediate">Act now</span><span class="priority-reason">Patching + 1 more area</span></td><td><b>148</b><br><small>active</small></td>
+              <td class="domain-cell"><a href="#" title="Open Northstar Dental → Patching"><span class="mini action"></span>Needs action</a><small>83% · 9 stalled</small></td>
+              <td class="domain-cell"><a href="#" title="Open Northstar Dental → Compliance"><span class="mini watch"></span>Review</a><small>91% · 5 missing</small></td>
+              <td class="domain-cell"><a href="#" title="Open Northstar Dental → Software"><span class="mini good"></span>On track</a><small>12 new · 1 review</small></td>
+              <td class="domain-cell"><a href="#" title="Open Northstar Dental → Inventory"><span class="mini good"></span>On track</a><small>99% resolved</small></td>
+              <td class="data-status">Current<small>All 4 areas updated</small></td><td><details><summary>Preview ▾</summary><div class="preview"><strong>Northstar Dental · client preview</strong><div class="preview-grid"><span>Workstations</span><b>112</b><span>Servers</span><b>21</b><span>Virtual machines</span><b>14</b><span>Other devices</span><b>1</b></div><div class="context">Act now: 9 patches are stalled. Also review 5 missing compliance controls. <a href="#">Open Northstar Dental →</a></div><div class="preview-updates"><span>Patching 11:48 AM</span><span>Compliance 11:42 AM</span><span>Software 11:29 AM</span><span>Inventory 11:45 AM</span></div></div></details></td>
+            </tr>
+            <tr data-name="Acme Manufacturing" data-priority="soon" data-estate="94" data-freshness="18">
+              <td class="client"><a href="#">Acme Manufacturing</a><small>Owner: R. Lee · Established</small></td><td><span class="priority soon">Review next</span><span class="priority-reason">Compliance and Software</span></td><td><b>94</b><br><small>active</small></td>
+              <td class="domain-cell"><a href="#" title="Open Acme Manufacturing → Patching"><span class="mini good"></span>On track</a><small>96% · 2 restarts</small></td><td class="domain-cell"><a href="#" title="Open Acme Manufacturing → Compliance"><span class="mini watch"></span>Review</a><small>93% · 4 not reporting</small></td><td class="domain-cell"><a href="#" title="Open Acme Manufacturing → Software"><span class="mini delayed"></span>Data delayed</a><small>Last updated 10:12 AM</small></td><td class="domain-cell"><a href="#" title="Open Acme Manufacturing → Inventory"><span class="mini good"></span>On track</a><small>100% resolved</small></td><td class="data-status delayed">Software delayed<small>Other areas current</small></td><td><details><summary>Preview ▾</summary><div class="preview"><strong>Acme Manufacturing · client preview</strong><div class="preview-grid"><span>Workstations</span><b>67</b><span>Servers</span><b>18</b><span>Virtual machines</span><b>7</b><span>Other devices</span><b>2</b></div><div class="context">Review 4 devices not reporting compliance. Software status is withheld until delayed data arrives. <a href="#">Open Acme Manufacturing →</a></div><div class="preview-updates"><span>Patching 11:46 AM</span><span>Compliance 11:42 AM</span><span>Software 10:12 AM</span><span>Inventory 11:45 AM</span></div></div></details></td>
+            </tr>
+            <tr data-name="City Legal Group" data-priority="soon" data-estate="61" data-freshness="21">
+              <td class="client"><a href="#">City Legal Group</a><small>Owner: M. Cole · Established</small></td><td><span class="priority soon">Review next</span><span class="priority-reason">Patching and Inventory</span></td><td><b>61</b><br><small>active</small></td>
+              <td class="domain-cell"><a href="#" title="Open City Legal Group → Patching"><span class="mini watch"></span>Review</a><small>89% · 3 stalled</small></td><td class="domain-cell"><a href="#" title="Open City Legal Group → Compliance"><span class="mini good"></span>On track</a><small>98% · 1 missing</small></td><td class="domain-cell"><a href="#" title="Open City Legal Group → Software"><span class="mini good"></span>On track</a><small>4 new · 0 to review</small></td><td class="domain-cell"><a href="#" title="Open City Legal Group → Inventory"><span class="mini watch"></span>Review</a><small>2 devices unresolved</small></td><td class="data-status">Current<small>All 4 areas updated</small></td><td><details><summary>Preview ▾</summary><div class="preview"><strong>City Legal Group · client preview</strong><div class="preview-grid"><span>Workstations</span><b>49</b><span>Servers</span><b>8</b><span>Virtual machines</span><b>4</b><span>Other devices</span><b>0</b></div><div class="context">Review 3 stalled patches and resolve 2 devices in Inventory. <a href="#">Open City Legal Group →</a></div><div class="preview-updates"><span>Patching 11:39 AM</span><span>Compliance 11:44 AM</span><span>Software 11:31 AM</span><span>Inventory 11:45 AM</span></div></div></details></td>
+            </tr>
+            <tr data-name="Harbor Property" data-priority="routine" data-estate="203" data-freshness="14">
+              <td class="client"><a href="#">Harbor Property</a><small>Owner: T. James · Established</small></td><td><span class="priority routine">Monitor</span><span class="priority-reason">Software review</span></td><td><b>203</b><br><small>active</small></td>
+              <td class="domain-cell"><a href="#" title="Open Harbor Property → Patching"><span class="mini good"></span>On track</a><small>97% · 4 restarts</small></td><td class="domain-cell"><a href="#" title="Open Harbor Property → Compliance"><span class="mini delayed"></span>Data delayed</a><small>Last updated 9:48 AM</small></td><td class="domain-cell"><a href="#" title="Open Harbor Property → Software"><span class="mini watch"></span>Review</a><small>19 new · 2 to review</small></td><td class="domain-cell"><a href="#" title="Open Harbor Property → Inventory"><span class="mini good"></span>On track</a><small>100% resolved</small></td><td class="data-status delayed">Compliance delayed<small>Other areas current</small></td><td><details><summary>Preview ▾</summary><div class="preview"><strong>Harbor Property · client preview</strong><div class="preview-grid"><span>Workstations</span><b>171</b><span>Servers</span><b>19</b><span>Virtual machines</span><b>11</b><span>Other devices</span><b>2</b></div><div class="context">Monitor 2 software decisions. Compliance status is withheld until delayed data arrives. <a href="#">Open Harbor Property →</a></div><div class="preview-updates"><span>Patching 11:46 AM</span><span>Compliance 9:48 AM</span><span>Software 11:29 AM</span><span>Inventory 11:45 AM</span></div></div></details></td>
+            </tr>
+            <tr data-name="Summit Architecture" data-priority="none" data-estate="73" data-freshness="16">
+              <td class="client"><a href="#">Summit Architecture</a><small>Owner: A. Green · Established</small></td><td><span class="priority none">No current concerns</span></td><td><b>73</b><br><small>active</small></td>
+              <td class="domain-cell"><a href="#" title="Open Summit Architecture → Patching"><span class="mini good"></span>On track</a><small>98% · no blockers</small></td><td class="domain-cell"><a href="#" title="Open Summit Architecture → Compliance"><span class="mini good"></span>On track</a><small>100% covered</small></td><td class="domain-cell"><a href="#" title="Open Summit Architecture → Software"><span class="mini good"></span>On track</a><small>2 new · 0 to review</small></td><td class="domain-cell"><a href="#" title="Open Summit Architecture → Inventory"><span class="mini good"></span>On track</a><small>100% resolved</small></td><td class="data-status">Current<small>All 4 areas updated</small></td><td><details><summary>Preview ▾</summary><div class="preview"><strong>Summit Architecture · client preview</strong><div class="preview-grid"><span>Workstations</span><b>59</b><span>Servers</span><b>7</b><span>Virtual machines</span><b>7</b><span>Other devices</span><b>0</b></div><div class="context">No current concerns across the four operational areas. <a href="#">Open Summit Architecture →</a></div><div class="preview-updates"><span>Patching 11:44 AM</span><span>Compliance 11:42 AM</span><span>Software 11:29 AM</span><span>Inventory 11:45 AM</span></div></div></details></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="activity-line" aria-label="Recent activity">
+      <strong>Recent activity</strong>
+      <a href="#">142 updates installed</a>
+      <a href="#">7 update failures</a>
+      <a href="#">31 new applications observed</a>
+      <a href="#">View activity →</a>
+    </section>
+
+    <div class="future"><b>Coming next:</b> users and people, plus richer account ownership, service stage, tier, and renewal context.</div>
+    <div class="mock-note">Standalone proposal · representative supporting values · no live behavior</div>
+  </main>
+</div>
+<script>
+  const rows = [...document.querySelectorAll('#portfolioTable tbody tr')];
+  const chips = [...document.querySelectorAll('.chip')];
+  const search = document.querySelector('#clientSearch');
+  const sort = document.querySelector('#sortOrder');
+  const saved = JSON.parse(sessionStorage.getItem('dashboardProposal') || '{}');
+  let activeFilter = saved.filter || 'all';
+  search.value = saved.search || '';
+  sort.value = saved.sort || 'attention';
+
+  function priorityRank(value) { return {immediate:0, soon:1, routine:2, none:3}[value] ?? 9; }
+  function render() {
+    const query = search.value.trim().toLowerCase();
+    rows.forEach(row => row.hidden = !((activeFilter === 'all' || row.dataset.priority === activeFilter) && row.dataset.name.toLowerCase().includes(query)));
+    const ordered = [...rows].sort((a,b) => {
+      if (sort.value === 'name') return a.dataset.name.localeCompare(b.dataset.name);
+      if (sort.value === 'estate') return Number(b.dataset.estate) - Number(a.dataset.estate);
+      if (sort.value === 'freshness') return Number(b.dataset.freshness) - Number(a.dataset.freshness);
+      return priorityRank(a.dataset.priority) - priorityRank(b.dataset.priority) || a.dataset.name.localeCompare(b.dataset.name);
+    });
+    ordered.forEach(row => row.parentNode.appendChild(row));
+    chips.forEach(chip => chip.classList.toggle('active', chip.dataset.filter === activeFilter));
+    sessionStorage.setItem('dashboardProposal', JSON.stringify({filter:activeFilter, search:search.value, sort:sort.value}));
+  }
+  chips.forEach(chip => chip.addEventListener('click', () => { activeFilter = chip.dataset.filter; render(); }));
+  search.addEventListener('input', render); sort.addEventListener('change', render); render();
+</script>
+</body>
+</html>
