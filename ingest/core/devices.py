@@ -25,6 +25,7 @@ from psycopg.types.json import Json
 
 from ingest import db
 from ingest.observations import write_current_rows
+from ingest.observation_runs import begin_run, complete_run, reconcile_complete_run
 from ingest.ninja_client import NinjaClient
 from ingest.normalize import (
     entity_type_for_node_class,
@@ -391,6 +392,10 @@ def _record_source_run(
     try:
         with db.transaction() as cur:
             cur.execute(f"SET LOCAL operations.tenant_id = {_TENANT_ID}")
+            run_id = begin_run(
+                cur, _TENANT_ID, NINJA_SOURCE_BINDING_ID, "Ninja",
+                snapshot_at, expected_rows=len(device_rows),
+            )
             cur.execute(
                 """
                 INSERT INTO operations.run_log
@@ -594,12 +599,14 @@ def _write_ninja_observations(
                     current["active"] = True
                     current["withdrawn_at"] = None
                     current["snapshot_scope"] = "Ninja"
-                    current["last_snapshot_run_id"] = None
+                    current["last_snapshot_run_id"] = run_id
                     current["raw_hash"] = hashlib.sha256(
                         str(row["raw_data"]).encode("utf-8")
                     ).digest()
                     current_rows.append(current)
                 write_current_rows(cur, current_rows)
+                complete_run(cur, run_id, len(current_rows))
+                reconcile_complete_run(cur, run_id)
             if unknown_classes:
                 # Never silently dropped — surfaced here, admin finding in E2.
                 log.warning(
