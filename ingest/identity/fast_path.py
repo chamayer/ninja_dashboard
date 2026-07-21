@@ -3,6 +3,13 @@
 Tries to match a source observation to an operations.devices row using
 increasingly loose signals. Called inline during ingest — must be fast.
 Returns None on miss; the polling resolver picks up unresolved observations.
+
+When a match is made via serial or hostname (steps 2 or 3), the function
+**also upserts** the corresponding `device_link` so operator-facing UI
+and later resolver passes see a consistent identity picture. Previously
+only the observation's `device_id` was set, which left presence tables
+populated but the `device_links` row missing — a real bug affecting
+21 SentinelOne devices in prod at time of fix (2026-07-21).
 """
 
 from __future__ import annotations
@@ -13,6 +20,51 @@ import uuid
 from ingest.normalize import is_usable_serial
 
 log = logging.getLogger(__name__)
+
+
+def _upsert_link_for_fast_match(
+    cur,
+    tenant_id: int,
+    source_name: str,
+    external_id: str,
+    device_id: uuid.UUID,
+    hostname: str | None,
+    match_method: str,
+    match_confidence: float,
+) -> None:
+    """Create the durable device_link row for a fast-path match.
+
+    Idempotent via ON CONFLICT — repeat calls just refresh
+    last_seen_at. Same-source-external_id already present with a
+    different device_id is a same-stream duplicate (handled by the
+    ON CONFLICT DO UPDATE — the incoming match wins, matching the
+    behavior of the polling resolver's `_attach_observation`).
+    """
+    cur.execute(
+        """
+        INSERT INTO operations.device_links
+            (id, version, tenant_id, device_id, source_id,
+             external_id, external_name, first_seen_at, last_seen_at,
+             match_method, match_confidence)
+        SELECT gen_random_uuid(), 1, %s, %s, s.id, %s, %s, NOW(), NOW(),
+               %s, %s
+        FROM operations.sources s WHERE s.name = %s
+        ON CONFLICT (tenant_id, source_id, external_id)
+        DO UPDATE SET
+            device_id     = EXCLUDED.device_id,
+            last_seen_at  = NOW(),
+            external_name = COALESCE(
+                NULLIF(EXCLUDED.external_name, ''),
+                operations.device_links.external_name
+            )
+        """,
+        (
+            tenant_id, device_id, external_id,
+            hostname or external_id,
+            match_method, match_confidence,
+            source_name,
+        ),
+    )
 
 
 def resolve_device_fast(
@@ -78,7 +130,12 @@ def resolve_device_fast(
         )
         rows = cur.fetchall()
         if len(rows) == 1:
-            return rows[0][0]
+            device_id = rows[0][0]
+            _upsert_link_for_fast_match(
+                cur, tenant_id, source_name, external_id, device_id,
+                hostname, "serial", 0.980,
+            )
+            return device_id
 
     # Step 3 — hostname match (only when unique and the device carries no
     # other record of this same stream — same-stream dups never merge)
@@ -101,7 +158,12 @@ def resolve_device_fast(
         )
         rows = cur.fetchall()
         if len(rows) == 1:
-            return rows[0][0]
+            device_id = rows[0][0]
+            _upsert_link_for_fast_match(
+                cur, tenant_id, source_name, external_id, device_id,
+                hostname, "hostname_strict", 0.900,
+            )
+            return device_id
 
     log.debug(
         "fast_path miss: source=%s external_id=%s hostname=%s",

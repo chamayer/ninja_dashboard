@@ -2,6 +2,27 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.75.1] — 2026-07-21 — Fix: fast-path device_link gap
+
+### Fixed
+- `ingest/identity/fast_path.py::resolve_device_fast` was returning
+  a matched device_id (via serial or hostname) without creating the
+  corresponding `device_link` row. Only step 1 (existing link) had
+  a link; steps 2 (serial) and 3 (hostname) skipped it. Result:
+  `entity_observations` had `device_id` set and derived matviews
+  showed the source on the device, but the `device_links` table
+  was missing the row entirely — visible on Device Detail as
+  "presence but no source identity."
+  - Field example: cl-15 in Chartwell Pharma had SentinelOne
+    presence + no SentinelOne source identity.
+  - Fleet-wide impact at time of fix: 21 devices.
+- Fix upserts the link at match time via
+  `_upsert_link_for_fast_match` — same ON CONFLICT semantics as the
+  polling resolver's `_attach_observation`.
+- Migration 0060 backfills the existing gap by deriving missing
+  `device_links` from `entity_observations`. Backfilled rows are
+  identified by `match_method='fast_path_backfill'`.
+
 ## [0.75.0] — 2026-07-21 — Finding label with platform + offline-agent visibility
 
 ### Why
