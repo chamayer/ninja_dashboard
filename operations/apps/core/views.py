@@ -1973,17 +1973,6 @@ def software_page(request: HttpRequest) -> HttpResponse:
     with transaction.atomic(), connection.cursor() as cur:
         cur.execute("SET LOCAL operations.tenant_id = 1")
 
-        # Overview aggregates
-        cur.execute(
-            """
-            SELECT COUNT(*) AS installations,
-                   COUNT(DISTINCT canonical_name) AS unique_titles
-            FROM operations.software_installations_current
-            WHERE tenant_id = 1 AND deleted_at IS NULL AND stale_since IS NULL
-            """
-        )
-        installations, unique_titles = cur.fetchone()
-
         cur.execute(
             """
             SELECT COUNT(*) FROM operations.software_catalog
@@ -2017,11 +2006,7 @@ def software_page(request: HttpRequest) -> HttpResponse:
         # Titles-across-the-fleet aggregate. One row per canonical
         # product with rollup counts. Filter by name, category,
         # decision.
-        where_clauses = [
-            "sic.tenant_id = 1",
-            "sic.deleted_at IS NULL",
-            "sic.stale_since IS NULL",
-        ]
+        where_clauses = ["sic.tenant_id = 1"]
         params: list = []
         if q_filter:
             where_clauses.append(
@@ -2066,11 +2051,31 @@ def software_page(request: HttpRequest) -> HttpResponse:
         where_sql = " AND ".join(where_clauses)
         cur.execute(
             f"""
-            SELECT sic.canonical_name,
-                   MAX(sic.publisher) AS publisher,
-                   COUNT(DISTINCT sic.device_id) AS device_count,
-                   COUNT(DISTINCT sic.client_id) AS client_count,
-                   MAX(sic.first_observed_at) AS last_install,
+            WITH title_rollup AS MATERIALIZED (
+                SELECT sic.tenant_id,
+                       sic.canonical_name,
+                       MAX(sic.publisher) AS publisher,
+                       COUNT(*) AS installation_count,
+                       COUNT(DISTINCT sic.device_id) AS device_count,
+                       COUNT(DISTINCT sic.client_id) AS client_count,
+                       MAX(sic.first_observed_at) AS last_install
+                FROM operations.software_installations_current sic
+                WHERE sic.tenant_id = 1
+                  AND sic.deleted_at IS NULL
+                  AND sic.stale_since IS NULL
+                GROUP BY sic.tenant_id, sic.canonical_name
+            ),
+            totals AS (
+                SELECT COALESCE(SUM(installation_count), 0)::bigint AS installations,
+                       COUNT(*)::bigint AS unique_titles
+                FROM title_rollup
+            ),
+            filtered AS (
+                SELECT sic.canonical_name,
+                       sic.publisher,
+                       sic.device_count,
+                       sic.client_count,
+                       sic.last_install,
                    (SELECT array_agg(DISTINCT cat_name)
                     FROM operations.software_catalog cat,
                          jsonb_array_elements_text(cat.categories) AS cat_name
@@ -2082,15 +2087,29 @@ def software_page(request: HttpRequest) -> HttpResponse:
                     WHERE sd.tenant_id = sic.tenant_id
                       AND sd.canonical_name = sic.canonical_name
                    ) AS decision
-            FROM operations.software_installations_current sic
-            WHERE {where_sql}
-            GROUP BY sic.tenant_id, sic.canonical_name
-            ORDER BY device_count DESC, sic.canonical_name
-            LIMIT 500
+                FROM title_rollup sic
+                WHERE {where_sql}
+                ORDER BY sic.device_count DESC, sic.canonical_name
+                LIMIT 500
+            )
+            SELECT filtered.canonical_name,
+                   filtered.publisher,
+                   filtered.device_count,
+                   filtered.client_count,
+                   filtered.last_install,
+                   filtered.categories,
+                   filtered.decision,
+                   totals.installations,
+                   totals.unique_titles
+            FROM totals
+            LEFT JOIN filtered ON TRUE
             """,
             params,
         )
-        title_rows = cur.fetchall()
+        software_rows = cur.fetchall()
+        installations = software_rows[0][7]
+        unique_titles = software_rows[0][8]
+        title_rows = [row[:7] for row in software_rows if row[0] is not None]
 
         # Recent installations — last 24h, first-seen
         cur.execute(
