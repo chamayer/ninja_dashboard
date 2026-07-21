@@ -268,8 +268,8 @@
     {% if user.is_authenticated %}
     <nav class="primary-nav">
         <div class="primary-nav-inner">
-            {# Row 1: operator workflow domains #}
             <div class="nav-row">
+                {# Operator workflow #}
                 <a class="nav-link {% if request.resolver_match.url_name == 'home' %}active{% endif %}"
                    href="{% url 'home' %}">Dashboard</a>
 
@@ -288,7 +288,7 @@
                 <a class="nav-link {% if request.resolver_match and 'finding' in request.resolver_match.url_name %}active{% endif %}"
                    href="{% url 'findings_queue' %}">Issues{% if nav_findings_count %} <span class="nav-badge">{{ nav_findings_count }}</span>{% endif %}</a>
 
-                {# Client context sub-nav — inline on row 1 when a client is scoped #}
+                {# Client context sub-nav — inline when a client is scoped #}
                 {% if current_client %}
                 <div class="nav-sep"></div>
                 <span class="nav-client-crumb">{{ current_client.display_name }} ›</span>
@@ -299,21 +299,14 @@
                 <a class="nav-link nav-sub {% if request.resolver_match and 'polic' in request.resolver_match.url_name %}active{% endif %}"
                    href="{% url 'org_policies' org_slug=current_client.slug %}">Policies</a>
                 {% endif %}
-            </div>
 
-            {# Row 2: admin cluster — configuration, review queues, platform health #}
-            <div class="nav-row nav-row-admin">
-                <a class="nav-link nav-admin {% if request.resolver_match and 'client_candidate' in request.resolver_match.url_name or 'identity' in request.resolver_match.url_name or 'merge' in request.resolver_match.url_name %}active{% endif %}"
-                   href="{% url 'client_candidates_queue' %}">Review</a>
-
-                <a class="nav-link nav-admin {% if request.resolver_match and 'notification' in request.resolver_match.url_name or 'requirement_profile' in request.resolver_match.url_name %}active{% endif %}"
-                   href="{% url 'notification_rules_list' %}">Config</a>
-
-                <a class="nav-link nav-admin {% if request.resolver_match.url_name == 'sources_status' or request.resolver_match.url_name == 'findings_admin_health' or request.resolver_match.url_name == 'fleet_coverage' %}active{% endif %}"
-                   href="{% url 'sources_status' %}">Integrations</a>
-
+                {# Admin — single entry point on the right. Sub-tabs
+                   (Review / Config / Integrations + their children)
+                   live in _admin_tabs.html strip on admin pages. #}
                 <div class="nav-fill"></div>
-                <a class="nav-link nav-admin" href="{% url 'admin:index' %}" title="Django admin">⚙</a>
+                <a class="nav-link {% if request.resolver_match and request.resolver_match.url_name and 'client_candidate' in request.resolver_match.url_name or 'identity' in request.resolver_match.url_name or 'merge_candidate' in request.resolver_match.url_name or 'notification' in request.resolver_match.url_name or 'requirement_profile' in request.resolver_match.url_name or 'sources_status' in request.resolver_match.url_name or 'findings_admin_health' in request.resolver_match.url_name or 'fleet_coverage' in request.resolver_match.url_name or 'classifier_config' in request.resolver_match.url_name or 'suppression' in request.resolver_match.url_name %}active{% endif %}"
+                   href="{% url 'client_candidates_queue' %}">Admin</a>
+                <a class="nav-link" href="{% url 'admin:index' %}" title="Django admin" style="padding-left:0.5rem;">⚙</a>
             </div>
         </div>
     </nav>

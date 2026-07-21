@@ -130,9 +130,16 @@ def classify(tenant_id: int = _TENANT_ID) -> int:
                     )
 
                 # 3. unauthorized_av / _rmm / _remote_access
+                # Match sanctioned list case-insensitively with substring
+                # containment either direction — the sanctioned set holds
+                # Agent product names (e.g. "LogMeIn") while `name` is a
+                # software canonical_name (e.g. "logmein client"), and
+                # they rarely line up as exact strings.
                 client_sanctioned = sanctioned.get(client_id, {})
                 for cat in ("av", "rmm", "remote_access"):
-                    if cat in cat_list and name not in client_sanctioned.get(cat, set()):
+                    if cat in cat_list and not _matches_sanctioned(
+                        name, client_sanctioned.get(cat, set())
+                    ):
                         finding_name = f"unauthorized_{cat}"
                         affected += _emit(
                             cur, tenant_id, finding_type_ids[finding_name],
@@ -298,6 +305,29 @@ def _resolve_decision(decisions: dict, device_id, client_id, name: str) -> str |
     if n in decisions["global"]:
         return decisions["global"][n]
     return None
+
+
+def _matches_sanctioned(canonical: str, sanctioned: set) -> bool:
+    """Case-insensitive containment match between a software canonical
+    name and any Agent-product name in the sanctioned set. Either
+    substring counts as a match — Agent name "LogMeIn" matches
+    software "logmein client", Agent "Ninja" matches "ninjarmmagent",
+    etc. Avoids false-positive `unauthorized_*` findings on required
+    agents whose canonical software name isn't identical to their
+    Agent-table name.
+    """
+    if not sanctioned:
+        return False
+    nl = (canonical or "").lower()
+    if not nl:
+        return False
+    for a in sanctioned:
+        al = str(a or "").lower()
+        if not al:
+            continue
+        if al in nl or nl in al:
+            return True
+    return False
 
 
 def _load_sanctioned_per_client(cur, tenant_id: int) -> dict:

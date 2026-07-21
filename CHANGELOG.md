@@ -2,6 +2,28 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.78.0] — 2026-07-21 — Sanctioned fuzzy-match + single Admin nav
+
+### Fixed
+- **Required agents no longer flagged as `unauthorized_*`.** The
+  sanctioned-set membership check in
+  `ingest/software_findings.py` compared Agent product names
+  (e.g. `"LogMeIn"`) against software canonical_names
+  (e.g. `"logmein client"`) as exact strings — they rarely line up.
+  New `_matches_sanctioned` helper does case-insensitive substring
+  match either direction: agent name in canonical, or canonical in
+  agent name. Handles LogMeIn / Ninja / ScreenConnect reliably;
+  edge cases (SentinelOne → `sentinelagent`) get their own mapping
+  if the pattern turns out to matter.
+
+### Changed
+- **Nav collapsed to a single `Admin` entry** at the right end of
+  the primary row. Row 2 (Review / Config / Integrations) removed;
+  those surfaces are still reachable via the existing
+  `_admin_tabs.html` strip on any admin page. `Admin` link lands on
+  the Review queue by default (`client_candidates_queue`). Django
+  admin ⚙ still to the far right.
+
 ## [0.77.3] — 2026-07-21 — Fix: comment leak on Config page + Detail/Subject cleanup
 
 ### Fixed
