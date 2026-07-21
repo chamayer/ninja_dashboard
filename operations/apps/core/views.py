@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import timedelta
 
@@ -1363,8 +1364,74 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
                 "kind": "patch", "at": patching["last_patch_installed_at"],
                 "label": "Patch installed", "severity": None,
             })
+    # Ninja activity feed — only when the Activity tab is active, to
+    # avoid an extra query on hot paths. Requires a Ninja device_link
+    # (any device without one just falls back to the finding-derived
+    # timeline).
+    if active_tab == "activity":
+        ninja_external_id = None
+        for link in links:
+            if link.source.name == "ninja":
+                ninja_external_id = link.external_id
+                break
+        if ninja_external_id:
+            try:
+                nid = int(ninja_external_id)
+            except (TypeError, ValueError):
+                nid = None
+            if nid is not None:
+                with transaction.atomic(), connection.cursor() as cur:
+                    cur.execute("SET LOCAL operations.tenant_id = 1")
+                    cur.execute(
+                        """
+                        SELECT activity_time, activity_type, source_name,
+                               severity, subject, message
+                        FROM ninja_activities.activities
+                        WHERE device_id = %s
+                        ORDER BY activity_time DESC
+                        LIMIT 100
+                        """,
+                        [nid],
+                    )
+                    for at, atype, sname, sev, subj, msg in cur.fetchall():
+                        activity.append({
+                            "kind": "ninja_event",
+                            "at": at,
+                            "severity": (sev or "").lower() or None,
+                            "label": subj or atype or "Ninja event",
+                            "status": msg or atype,
+                        })
+
     activity.sort(key=lambda e: (e["at"] or timezone.now()), reverse=True)
     activity = activity[:100]
+
+    # Raw per-source snapshots — only when the Identity & raw tab is
+    # active, since raw_data payloads can be several KB per observation.
+    raw_snapshots: list[dict] = []
+    if active_tab == "identity":
+        with transaction.atomic(), connection.cursor() as cur:
+            cur.execute("SET LOCAL operations.tenant_id = 1")
+            cur.execute(
+                """
+                SELECT DISTINCT ON (platform, entity_type)
+                       platform, entity_type, observed_at, raw_data
+                FROM operations.entity_observations
+                WHERE tenant_id = %s AND device_id = %s
+                ORDER BY platform, entity_type, observed_at DESC
+                """,
+                [1, str(device.id)],
+            )
+            for platform, entity_type, observed_at, raw_data in cur.fetchall():
+                try:
+                    pretty = json.dumps(raw_data, indent=2, sort_keys=True, default=str)
+                except (TypeError, ValueError):
+                    pretty = str(raw_data)
+                raw_snapshots.append({
+                    "platform": platform,
+                    "entity_type": entity_type,
+                    "observed_at": observed_at,
+                    "pretty": pretty,
+                })
 
     return render(
         request,
@@ -1383,6 +1450,7 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
             "activity": activity,
             "exemptions": exemptions,
             "entity_type_choices": entity_type_choices,
+            "raw_snapshots": raw_snapshots,
         },
     )
 

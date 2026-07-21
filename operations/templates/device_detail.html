@@ -124,6 +124,13 @@
             <strong style="color:#dc2626;">({{ severe_open }} severe)</strong>
         {% endif %}
         {% if device.canonical_serial %}&nbsp;·&nbsp; <code>{{ device.canonical_serial }}</code>{% endif %}
+        {% if exemptions %}&nbsp;·&nbsp;
+            <span style="padding:0.1rem 0.45rem; background:#fef3c7; border:1px solid #fbbf24; border-radius:999px; font-size:0.75rem; color:#92400e;"
+                  title="{% for etype, reason in exemptions.items %}{{ etype|humanize_exemption }}: {{ reason }}{% if not forloop.last %} · {% endif %}{% endfor %}">
+                Exempt from
+                {% for etype, reason in exemptions.items %}<strong>{{ etype|humanize_exemption }}</strong>{% if not forloop.last %}, {% endif %}{% endfor %}
+            </span>
+        {% endif %}
     </div>
 </div>
 
@@ -221,7 +228,7 @@
         <span style="display:inline-flex; align-items:center; gap:0.4rem;
                      padding:0.3rem 0.6rem; background:#fef3c7; border:1px solid #fbbf24;
                      border-radius:999px; font-size:0.8rem;">
-            <strong>{{ etype|humanize_label }}</strong>
+            <span>Exempt from <strong>{{ etype|humanize_exemption }}</strong></span>
             <span class="muted" style="font-size:0.75rem;">— {{ reason }}</span>
             <form method="post" action="{% url 'device_exemption_clear' org_slug=device.client.slug device_id=device.id %}"
                   style="display:inline; margin-left:0.2rem;"
@@ -243,7 +250,7 @@
             {% csrf_token %}
             <select name="entity_type" style="padding:0.35rem 0.6rem; font-size:0.85rem;">
                 {% for et in entity_type_choices %}
-                <option value="{{ et }}">{{ et|humanize_label }}</option>
+                <option value="{{ et }}">{{ et|humanize_exemption }}</option>
                 {% endfor %}
             </select>
             <input type="text" name="reason" placeholder="Why is this device exempt?" required
@@ -360,8 +367,8 @@
 <div class="card">
     <h2 style="margin-top:0;">Recent activity</h2>
     <p class="muted" style="font-size:0.82rem; margin-top:-0.4rem;">
-        Issue events + last boot + last patch install. Best-effort — no
-        full historical event stream yet.
+        Issue events, boot/patch summary, and Ninja's activity feed for
+        this device (last 100 events).
     </p>
     {% if activity %}
     {% for e in activity %}
@@ -495,12 +502,27 @@ function swFilter(q) {
 </div>
 
 <div class="card">
-    <p class="muted" style="font-size:0.85rem; margin:0;">
-        Raw per-source snapshot payloads are not yet surfaced here.
-        Deferred to a later batch — for now, use the source ID above to
-        look up the raw row in the source-specific schema (e.g.
-        <code>ninja_core.devices</code>).
+    <h2 style="margin-top:0;">Raw source snapshots
+        <span class="muted" style="font-weight:400; font-size:0.85rem;">
+            — most recent observation per source
+        </span>
+    </h2>
+    {% if raw_snapshots %}
+    {% for snap in raw_snapshots %}
+    <details style="margin-bottom:0.5rem; border:1px solid var(--border); border-radius:5px;">
+        <summary style="cursor:pointer; padding:0.55rem 0.75rem; background:#f8f9fb; display:flex; align-items:center; gap:0.55rem; font-size:0.85rem;">
+            <strong>{{ snap.platform }}</strong>
+            <span class="muted">{{ snap.entity_type|humanize_label }}</span>
+            <span class="muted num" style="margin-left:auto; font-size:0.78rem;">observed {{ snap.observed_at|date:"Y-m-d H:i" }}</span>
+        </summary>
+        <pre style="margin:0; padding:0.7rem 0.9rem; background:#0f172a; color:#e2e8f0; font-size:0.75rem; overflow:auto; max-height:520px; border-radius:0 0 5px 5px;">{{ snap.pretty }}</pre>
+    </details>
+    {% endfor %}
+    {% else %}
+    <p class="muted" style="font-size:0.85rem;">
+        No source observations recorded for this device.
     </p>
+    {% endif %}
 </div>
 {% endif %}
 

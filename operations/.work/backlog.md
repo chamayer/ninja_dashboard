@@ -21,6 +21,31 @@ This is the proposed successor to the genuinely open portion of
 - Constraint: deliver in bounded waves; preserve bookmarks and permissions or
   document redirects/breakage.
 
+### Admin landing page (summary → detail)
+
+- Candidate scope: new `/admin/` view rendering three cards
+  (Review, Config, Integrations), each showing sub-page links
+  with live pending counts (client candidates, merges, software
+  decisions, alert rules, suppressions, requirement profiles,
+  source health).
+- Motivation: 0.78.0 collapsed the Row-2 admin nav into a single
+  `Admin` link, which broke discoverability of Config and
+  Integrations. `_admin_tabs.html` only renders the current
+  group's sub-tabs. Landing page becomes the summary layer per
+  the UI "summary → detail" principle.
+- Constraint: Django's built-in admin URL stays untouched.
+  Existing `_admin_tabs.html` remains the in-group working strip.
+- Trigger: explicit approval.
+
+### Client sub-nav placement
+
+- Candidate scope: when a client is scoped, move the client
+  breadcrumb sub-nav (`<Client> › Devices | Software | Policies`)
+  from inline into a dedicated row 2 of the top nav.
+- Motivation: reduces per-page header clutter and keeps client
+  context anchored consistently.
+- Trigger: explicit approval.
+
 ### Bulk operator actions
 
 - Candidate scope: finding resolution/snooze, suppress-from-row, patching-scope
@@ -50,6 +75,28 @@ This is the proposed successor to the genuinely open portion of
 - Blocker: Wave UI-2.G business data capture.
 
 ## Platform cleanup
+
+### Integrate DMARC as an Operations domain
+
+- Direction: make DNS domains canonical Operations entities and model DMARC as
+  domain posture built from report observations, DNS discovery, sender
+  identity, derived rollout state, findings, operator dispositions, and audit
+  history.
+- Preserve: the existing DMARC project's five-category classification,
+  discovery evidence, rollout checklists, dispositions, bulk review,
+  administrative health, and historical decisions.
+- Boundary: retain `parse-dmarc` and report parsing/collection as a separate
+  source service. Operations becomes the eventual operator control plane; do
+  not rewrite or retire the mature Flask/SQLite application until parity is
+  demonstrated.
+- Migration shape: integrate summaries read-only first, introduce domain and
+  sender entities, dual-run/dual-validate workflows, migrate decisions and
+  history, then retire the old UI/storage only after an explicit cutover.
+- Risks: customer-specific trust isolation, classification drift, SQLite
+  report ownership/concurrency, DNS lookup behavior, audit continuity, and
+  loss of mature review/rollout functionality.
+- Trigger: explicit approval for a bounded discovery and data-contract phase
+  across the Operations and DMARC repositories.
 
 ### Retire legacy parity and agent-compliance paths
 

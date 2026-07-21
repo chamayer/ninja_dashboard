@@ -2,6 +2,37 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.79.0] — 2026-07-21 — Device Detail: exemptions, Raw tab, Ninja activity feed
+
+### Added
+- **Ninja activity feed on the Device Activity tab.** Reads the
+  last 100 events from `ninja_activities.activities` for the
+  device's Ninja `external_id` and merges them into the existing
+  timeline (issue events + boot + patch). Devices without a Ninja
+  link silently fall back to the previous timeline. New migration
+  `0062_grant_ninja_activities_select` grants Operations roles
+  `USAGE`/`SELECT` on the `ninja_activities` schema (mirrors 0059's
+  `ninja_patches` grant). Starter mapping of Ninja `activity_type`
+  strings (`PATCH_MANAGEMENT_APPLY_PATCH_COMPLETED` etc.) added to
+  `human_labels.py` for readable rendering.
+- **Raw source snapshots on the Identity & raw tab.** Replaced the
+  placeholder note with per-source collapsible sections showing
+  the most recent `entity_observations.raw_data` payload per
+  (platform, entity_type). Query runs only when the tab is active
+  to keep other tabs fast.
+- **Persistent exempt badge** in the device header meta line —
+  visible from every tab, tooltip lists reason per requirement.
+  Answers "where can I see this device is S1 exempt?" without
+  scrolling to the Coverage exemptions card.
+
+### Changed
+- **Exemption chips now read "Exempt from EDR — [reason]"** instead
+  of the awkward "EDR agent — [reason]". New `humanize_exemption`
+  filter renders entity-type keys as the requirement they exempt
+  from (`agent.edr` → "EDR", `agent.remote_access` → "Remote
+  access", etc.) rather than the agent noun. Add-exemption
+  dropdown uses the same filter for consistency.
+
 ## [0.78.0] — 2026-07-21 — Sanctioned fuzzy-match + single Admin nav
 
 ### Fixed

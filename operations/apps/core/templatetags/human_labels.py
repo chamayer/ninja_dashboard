@@ -136,6 +136,31 @@ _LABELS: dict[str, str] = {
     "red": "Attention needed — critical finding open",
     "amber": "Watching — high-severity finding open",
     "green": "Healthy",
+    # ── Activity timeline kinds ──────────────────────────────
+    "issue_open": "Issue",
+    "issue_reviewed": "Reviewed",
+    "reboot": "Reboot",
+    "patch": "Patch",
+    "ninja_event": "Ninja",
+    # ── Ninja activity types (subset — extend as needed) ─────
+    "PATCH_MANAGEMENT_APPLY_PATCH_COMPLETED": "Patch installed",
+    "PATCH_MANAGEMENT_APPLY_PATCH_FAILED": "Patch install failed",
+    "PATCH_MANAGEMENT_APPLY_PATCH_STARTED": "Patch install started",
+    "PATCH_MANAGEMENT_REBOOT": "Post-patch reboot",
+    "SYSTEM_REBOOTED": "System rebooted",
+    "SYSTEM_SHUTDOWN": "System shut down",
+    "NODE_CREATED": "Device enrolled",
+    "NODE_DELETED": "Device removed",
+    "NODE_APPROVAL_REQUESTED": "Approval requested",
+    "NODE_APPROVED": "Device approved",
+    "NODE_MAINTENANCE_START": "Maintenance start",
+    "NODE_MAINTENANCE_END": "Maintenance end",
+    "CONDITION_TRIGGERED": "Condition triggered",
+    "CONDITION_RESOLVED": "Condition resolved",
+    "SOFTWARE_INSTALL_COMPLETED": "Software installed",
+    "SOFTWARE_UNINSTALL_COMPLETED": "Software uninstalled",
+    "SCRIPT_COMPLETED": "Script ran",
+    "SCRIPT_FAILED": "Script failed",
 }
 
 
@@ -306,3 +331,30 @@ def humanize_scope_reason(value):
     can be self-documenting about what they're rendering.
     """
     return humanize_label(value)
+
+
+_EXEMPTION_LABELS: dict[str, str] = {
+    "agent.edr": "EDR",
+    "agent.rmm": "RMM",
+    "agent.remote_access": "Remote access",
+    "vm.guest": "VM tracking",
+    "vm.host": "Hypervisor tracking",
+    "network.device": "Network device tracking",
+    "monitor.target": "Uptime monitoring",
+}
+
+
+@register.filter(name="humanize_exemption")
+def humanize_exemption(value):
+    """Render an entity-type key as the requirement it exempts from.
+
+    Chip context reads "Exempt from <this>" so the label should name
+    the requirement, not the agent noun. Falls back to humanize_label
+    for unmapped keys.
+    """
+    if value is None:
+        return ""
+    key = str(value)
+    if key in _EXEMPTION_LABELS:
+        return _EXEMPTION_LABELS[key]
+    return humanize_label(key)
