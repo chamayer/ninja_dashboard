@@ -14,8 +14,9 @@ schema to the new Operations data model.
 
 ## Scope
 
-- In: normalization of incomplete legacy source observations; focused tests and
-  safe validation of the collection path.
+- In: normalization of incomplete legacy source observations; focused tests,
+  safe validation of the collection path, repair of organization-only rows,
+  and correcting the deployment-remote documentation.
 - Out: legacy-schema migration, changes to Operations ownership, alert-policy
   changes, cutover/decommissioning, deployment, commit, and push.
 
@@ -24,6 +25,8 @@ schema to the new Operations data model.
 - `ingest/agent_compliance/ingest.py` — legacy collection and persistence.
 - `ingest/tests/` — focused regression coverage if applicable.
 - `operations/.work/plan.md` — pointer to this cross-service work.
+- `AGENTS.md`, `docs/operations.md` — deployment remote authority and mirror
+  procedure.
 
 ## Steps
 
@@ -33,8 +36,12 @@ schema to the new Operations data model.
   no test suite/configuration, so validation will use focused compilation and
   a mocked database call.
 - [x] Run focused validation and review the diff.
-- [ ] Obtain separate approval before commit, push, deployment, or a live
-  refresh that could produce alerts.
+- [x] Commit the repair and push it to the secondary mirror.
+- [ ] Push the repair to deployment authority (`origin`) and verify GitOps
+  deploys it before the live refresh.
+- [ ] Repair the organization-only observation insertion exposed by live
+  validation, then repeat approval/commit/deploy/refresh validation.
+- [ ] Commit and push the deployment-documentation correction to both remotes.
 
 ## Decisions
 
@@ -70,8 +77,17 @@ schema to the new Operations data model.
   repository bytecode/cache directories, so package import and Ruff checks
   could not be completed here. Ruff also reports two pre-existing whole-file
   findings and format drift outside this change.
+- Commit `3cc482a` contains the repair and was first pushed only to the
+  secondary `a-m-rose` remote because the local branch tracks it. `origin`
+  (`chamayer`) is Portainer's deployment authority and must receive the same
+  commit before validation; the documented push order is being corrected.
+- Live validation of `3cc482a` proved the null-role repair passes. It then
+  revealed a separate pre-existing defect: SentinelOne organization-only rows
+  are needed for client synchronization but lack the non-null device columns
+  required by `platform_observations`. Keep them for synchronization and omit
+  them only from the device-observation persistence/matrix path.
 
 ## Next action
 
-- Obtain separate approval to commit, push, deploy, and run the refresh. A
-  successful legacy collection invokes its configured alert processing.
+- Validate the organization-only row repair, then request approval for its
+  separate commit, push to both remotes, deployment, and another live refresh.

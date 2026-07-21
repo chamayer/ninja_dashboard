@@ -78,7 +78,13 @@ def run() -> tuple[int, int]:
         aliases = load_aliases()
         id_links = load_id_links()
         for source_run_id, source, rows in fetched_sources:
-            resolved = _resolve_observations(rows, source, clients, aliases, id_links=id_links)
+            # Container-only organization rows help client/alias synchronization
+            # above, but are not device observations and cannot satisfy the
+            # non-null device columns in platform_observations.
+            device_rows = [row for row in rows if not row.get("_org_only")]
+            resolved = _resolve_observations(
+                device_rows, source, clients, aliases, id_links=id_links
+            )
             _insert_observations(source_run_id, resolved)
             _finish_source_run(source_run_id, "ok", len(resolved), None)
             all_observations.extend(resolved)
