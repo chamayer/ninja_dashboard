@@ -1422,6 +1422,32 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             return f"{base} (last: {last_src})" if last_src else base
         if name == "device_role_conflict":
             return f"{d.get('previous_role', '?')} → {d.get('new_role', '?')}"
+        if name in (
+            "unauthorized_av", "unauthorized_rmm", "unauthorized_remote_access",
+            "suspicious_name", "install_path_suspicious", "eol_runtime",
+        ):
+            cn = d.get("canonical_name") or ""
+            pub = d.get("publisher") or ""
+            pieces = [cn]
+            if pub:
+                pieces.append(f"({pub})")
+            loc = d.get("location") or d.get("install_path")
+            if loc:
+                pieces.append(f"@ {loc}")
+            return " ".join(pieces) if cn else (d.get("reason") or "")
+        if name == "multi_av_conflict":
+            avs = d.get("av_products") or []
+            return ", ".join(avs) if avs else "multiple AV products"
+        if name == "rare_recent":
+            n = d.get("fleet_device_count") or d.get("machine_count")
+            days = d.get("first_seen_days")
+            cn = d.get("canonical_name") or ""
+            pieces = [cn] if cn else []
+            if n is not None:
+                pieces.append(f"on {n} machine{'s' if n != 1 else ''}")
+            if days is not None:
+                pieces.append(f"first seen {days}d ago")
+            return " · ".join(pieces) if pieces else "rare install"
         # Fallback: platform if present, else empty
         return d.get("platform") or ""
 

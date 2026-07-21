@@ -2,6 +2,28 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.77.3] — 2026-07-21 — Fix: comment leak on Config page + Detail/Subject cleanup
+
+### Fixed
+- Multi-line `{# ... #}` comment leaked on every Config / Review /
+  Integrations page — `_admin_tabs.html` had a five-line block.
+  Django single-line inline comments require closing `#}` on the
+  same line; the block rendered as page text. Replaced with
+  `{% comment %} ... {% endcomment %}`.
+- Findings queue "Subject" column renamed to "Device" — 99% of
+  findings target a device; the type-agnostic "Subject" label was
+  confusing. Non-device rows still render via fallback in the cell.
+- Findings queue Detail column now uses `finding_detail_text`
+  template tag — previously used the view-computed `row.detail`
+  which only knew coverage/patching types, so every software
+  finding rendered as "—". Tag has broader coverage: unauthorized
+  AV/RMM/remote-access, suspicious_name, install_path_suspicious,
+  eol_runtime, multi_av_conflict, rare_recent + all data-quality
+  types.
+- `_detail_string()` in `findings_queue` view extended to match the
+  tag's software-finding coverage so CSV export matches the on-
+  screen row.
+
 ## [0.77.2] — 2026-07-21 — Fix: 500 on Issues queue with software findings
 
 ### Fixed

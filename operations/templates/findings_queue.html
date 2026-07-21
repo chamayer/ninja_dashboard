@@ -166,7 +166,7 @@
                     <th>Detail</th>
                     <th>Online</th>
                     <th>Client</th>
-                    <th>Subject</th>
+                    <th>Device</th>
                     <th>Status</th>
                     <th class="num">Last detected</th>
                     <th>Actions</th>
@@ -179,7 +179,7 @@
                     <td><input type="checkbox" name="ids" value="{{ f.id }}" class="bulk-cb"></td>
                     <td><span class="badge badge-{{ f.severity }}">{{ f.get_severity_display }}</span></td>
                     <td>{% finding_display_label f %}</td>
-                    <td>{{ row.detail|default:"—" }}</td>
+                    <td>{% finding_detail_text f as detail_text %}{{ detail_text|default:"—" }}</td>
                     <td>
                         {% if row.online_sources %}
                             {% for src in row.online_sources %}<span class="badge badge-low">{{ src }}</span> {% endfor %}

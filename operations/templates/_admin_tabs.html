@@ -1,8 +1,9 @@
-{# Shared admin sub-nav strip. Include at the top of every Review /
-   Config / Integrations page. Views must set:
-     admin_group = 'review' | 'config' | 'integrations'
-     admin_tab   = one of that group's tab keys
-#}
+{% comment %}
+Shared admin sub-nav strip. Include at the top of every Review /
+Config / Integrations page. Views must set:
+    admin_group = 'review' | 'config' | 'integrations'
+    admin_tab   = one of that group's tab keys
+{% endcomment %}
 <style>
   .at-strip {
     display: flex; align-items: center; gap: 0.6rem;
