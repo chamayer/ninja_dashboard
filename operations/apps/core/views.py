@@ -1232,8 +1232,8 @@ def _build_raw_snapshot_view(device, links):
             """
             SELECT DISTINCT ON (platform, entity_type)
                    platform, entity_type, observed_at, raw_data
-            FROM operations.entity_observations
-            WHERE tenant_id = %s AND device_id = %s
+            FROM operations.entity_observation_current
+            WHERE tenant_id = %s AND device_id = %s AND active = TRUE
             ORDER BY platform, entity_type, observed_at DESC
             """,
             [1, str(device.id)],
