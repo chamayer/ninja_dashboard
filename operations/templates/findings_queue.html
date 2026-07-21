@@ -191,18 +191,18 @@
                     </td>
                     <td>{{ f.client.display_name|default:"—" }}</td>
                     <td>
-                        <span class="muted">{{ f.get_subject_type_display }}</span>
-                        <br>
                         {% if f.subject_type == "device" and f.client and f.subject_id %}
-                            {# Always link the device even when hostname isn't in
-                               finding_details (software findings, etc.). Text falls
-                               back to the short subject_id so the row isn't just
-                               a bare "device" label. #}
-                            <a href="{% url 'device_detail' org_slug=f.client.slug device_id=f.subject_id %}"><code>{{ f.finding_details.hostname|default:f.subject_id|stringformat:"s"|slice:":8" }}</code></a>
+                            {% with device_name=row.subject_hostname|default:f.finding_details.hostname %}
+                            <a href="{% url 'device_detail' org_slug=f.client.slug device_id=f.subject_id %}">
+                                <code>{{ device_name|default_if_none:"(unnamed)" }}</code>
+                            </a>
+                            {% endwith %}
+                        {% elif f.subject_type == "client" and f.client %}
+                            <a href="{% url 'org_index' org_slug=f.client.slug %}">{{ f.client.display_name }}</a>
                         {% elif f.finding_details.hostname %}
                             <code>{{ f.finding_details.hostname }}</code>
                         {% else %}
-                            <span class="muted">—</span>
+                            <span class="muted">{{ f.get_subject_type_display }}</span>
                         {% endif %}
                         {% if f.finding_type.name == "identity_conflict" and f.finding_details.candidate_count == 2 and f.client %}
                             <br><a href="{% url 'device_merge' org_slug=f.client.slug device_id=f.finding_details.candidate_device_ids.0 target_id=f.finding_details.candidate_device_ids.1 %}"

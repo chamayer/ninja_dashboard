@@ -1425,11 +1425,32 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
         # Fallback: platform if present, else empty
         return d.get("platform") or ""
 
+    # Bulk-fetch hostnames for device-subject findings so the Subject
+    # column always has the actual device name (not a UUID snippet)
+    # even for software findings that don't carry hostname in
+    # finding_details. Single query, capped by findings page size.
+    device_subject_ids = {
+        f.subject_id
+        for f in findings
+        if f.subject_type == "device" and f.subject_id
+    }
+    hostname_by_device_id: dict = {}
+    if device_subject_ids:
+        hostname_by_device_id = dict(
+            Device.objects.filter(
+                tenant_id=1, id__in=device_subject_ids,
+            ).values_list("id", "canonical_hostname")
+        )
+
     findings_with_detail = [
         {
             "f": f,
             "detail": _detail_string(f),
             "online_sources": online_map.get(str(f.subject_id)) if f.subject_id else None,
+            "subject_hostname": (
+                hostname_by_device_id.get(f.subject_id)
+                if f.subject_type == "device" else None
+            ),
         }
         for f in findings
     ]
@@ -1444,7 +1465,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
                 ("Client",       lambda r: (r["f"].client.display_name if r["f"].client else "")),
                 ("Subject type", lambda r: r["f"].subject_type),
                 ("Subject id",   lambda r: str(r["f"].subject_id) if r["f"].subject_id else ""),
-                ("Hostname",     lambda r: (r["f"].finding_details or {}).get("hostname", "")),
+                ("Hostname",     lambda r: r.get("subject_hostname") or (r["f"].finding_details or {}).get("hostname", "")),
                 ("Detail",       "detail"),
                 ("Online sources", "online_sources"),
                 ("Status",       lambda r: r["f"].status),

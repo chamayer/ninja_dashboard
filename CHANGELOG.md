@@ -2,6 +2,29 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.77.1] — 2026-07-21 — Fix: Subject column shows real hostname + comment leak
+
+### Fixed
+- **Broken multi-line `{# ... #}` comment leaked into the Issues
+  queue Subject column**, rendering "Always link the device even
+  when hostname isn't in..." as visible page text. Django's inline
+  comment syntax is single-line only; multi-line requires
+  `{% comment %}...{% endcomment %}`. Comment removed outright —
+  the code is self-explanatory now.
+- **Subject column now shows the actual device hostname** for
+  every device-subject finding, not a UUID snippet. Software
+  findings (`unauthorized_av / _rmm / _remote_access`,
+  `suspicious_name`, etc.) don't carry `hostname` in
+  `finding_details`, which was leaving the column falling back to
+  8-char UUID. `findings_queue` view now bulk-fetches
+  `canonical_hostname` for every device-subject on the page in
+  one query, exposed as `row.subject_hostname` in the template.
+- **Subject column visual cleanup**: dropped the redundant "Device"
+  type label above every device row. Client-subject findings link
+  to the client detail. Non-device / no-hostname cases fall back
+  to the type label as a muted line.
+- CSV export "Hostname" column now uses the bulk-fetched name too.
+
 ## [0.77.0] — 2026-07-21 — Re-enable legacy AC scheduler (bridge)
 
 ### Why
