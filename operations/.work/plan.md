@@ -1,12 +1,13 @@
 # Active Operations work plan
 
-Track: **Top Dashboard live implementation**
+Track: **Dashboard sorting and Software timeout repair**
 
 ## Status
 
-- Complete locally — follow-up fixes keep the All clients headers visible and
-  repair client-detail queries that still referenced retired Finding/v_device
-  columns. A follow-up commit and push remain separately gated.
+- Complete locally — every meaningful All clients column sorts from its sticky
+  header, and the Software page no longer performs a redundant fleet-wide scan
+  implicated in a live Gunicorn timeout. Commit is approved; push remains
+  separately gated.
 
 ## Goal
 
@@ -18,7 +19,8 @@ without regressing tenant boundaries or page performance.
 
 - In: Dashboard view queries/context, live Dashboard template, client-side
   session filters/sorting, domain and client drill-throughs, focused tests for
-  priority/domain presentation helpers, and local validation.
+  priority/domain presentation helpers, Software fleet-page read-shape
+  optimization, and local/live read-only validation.
 - Out: database migrations, business-data capture, user/location entity work,
   other page redesigns, commit, push, deployment, and data rebuild.
 
@@ -28,6 +30,7 @@ without regressing tenant boundaries or page performance.
 - `docs/mockups/dashboard-proposal.png` — rendered desktop review image.
 - `apps/core/views.py` — efficient fleet/domain/client aggregates and priority.
 - `templates/home.html` — approved live Dashboard hierarchy and interactions.
+- `apps/core/views.py` — Software overview/title rollup query consolidation.
 - `apps/core/tests/test_dashboard.py` — focused helper/presentation tests if a
   clean test seam is introduced.
 - `operations/.work/plan.md` — active checkpoint.
@@ -140,8 +143,25 @@ without regressing tenant boundaries or page performance.
 - Follow-up local validation passed: Python compilation, `manage.py check`, all
   10 focused Dashboard tests, and `git diff --check`. The Python 3.14-only
   Django deprecation warnings remain unchanged.
+- Live logs showed `/software/` timing out at Gunicorn's 30-second limit while
+  executing its first fleet-wide installations aggregate. A read-only direct
+  retry completed with HTTP 200 in 4.543 seconds, confirming a load-sensitive
+  performance failure rather than a schema error.
+- Consolidated Software totals and the title rollup into one physical scan.
+  Read-only runtime-role validation returned the exact live totals (426,915
+  installations and 16,966 titles) and completed the consolidated query in
+  about 2.4 seconds. No migration or index change is required.
+- Removed the separate sort dropdown. Client, Priority, Devices, all four
+  operational domains, and Data status now sort by clicking their sticky
+  headers; repeat clicks reverse direction and the choice persists in session
+  storage. The preview-control column remains unsortable.
+- Headless Edge validation passed initial urgency order, name order, numeric
+  ascending/descending, operational-state order, `aria-sort`, and persistence
+  across reload. Python compilation, `manage.py check`, 10/10 focused tests,
+  focused fatal Ruff checks, and `git diff --check` passed. Full-file Ruff
+  formatting remains pre-existing broad churn and was not applied.
 
 ## Next action
 
-- Obtain explicit approval for one follow-up commit. After that commit, obtain
-  separate approval to push to `origin` and then mirror to `a-m-rose`.
+- Create the approved focused commit, then obtain separate push approval before
+  updating deployment authority `origin` and mirror `a-m-rose`.
