@@ -57,4 +57,29 @@ def reconcile_complete_run(cur: Any, run_id: uuid.UUID) -> int:
         """,
         (run_id,),
     )
-    return cur.rowcount
+    withdrawn = cur.rowcount
+    cur.execute(
+        """
+        UPDATE operations.entity_observation_history h
+           SET effective_to = r.snapshot_at,
+               active = FALSE,
+               last_seen_at = r.snapshot_at
+          FROM operations.observation_snapshot_runs r
+          JOIN operations.entity_observation_current c
+            ON c.tenant_id = r.tenant_id
+           AND c.source_binding_id = r.source_binding_id
+           AND c.snapshot_scope = r.snapshot_scope
+         WHERE r.run_id = %s
+           AND r.status = 'complete'
+           AND c.active = FALSE
+           AND c.last_snapshot_run_id = r.run_id
+           AND h.tenant_id = c.tenant_id
+           AND h.source_binding_id = c.source_binding_id
+           AND h.entity_type = c.entity_type
+           AND h.parent_source_key = c.parent_source_key
+           AND h.entity_key = c.entity_key
+           AND h.effective_to IS NULL
+        """,
+        (run_id,),
+    )
+    return withdrawn
