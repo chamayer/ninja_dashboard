@@ -49,7 +49,10 @@ Metabase as an upstream image.
 3. Pull shared source entities.
 4. Pull domain-specific facts and observations.
 5. Resolve or queue client/device identity.
-6. Refresh domain and Operations derived state in dependency order.
+6. Refresh domain and Operations derived state in dependency order. This is a
+   collection-completion invariant for scheduled, startup, and on-demand runs:
+   a run must not report completion until the current/derived state fed by its
+   collected data has refreshed successfully.
 7. Evaluate findings and notification workflows when enabled.
 8. Record run results and expose health/manual-run endpoints.
 

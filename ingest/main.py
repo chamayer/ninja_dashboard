@@ -33,6 +33,7 @@ import httpx
 from apscheduler.schedulers.background import BackgroundScheduler
 
 from ingest import db, migrations
+from ingest.derived import refresh_after_collection
 from ingest.config import settings
 from ingest.logging_utils import install_log_safety
 from ingest.activities import ingest as activities_ingest
@@ -120,6 +121,7 @@ def run_patching_once() -> None:
         _safe("activities",     activities_ingest.run, client)
         _safe("troubleshooting_signal", refresh_device_troubleshooting_signal)
         _refresh_inventory_current("patch ingest")
+    refresh_after_collection("Ninja patch collection")
     log.info("Patch ingest run complete")
 
 
@@ -168,6 +170,7 @@ def run_ninja_observations_once() -> None:
         _safe("organizations", organizations.run, client)
         _safe("locations",     locations.run, client)
         _safe("devices",       devices.run, client, snapshot_at)
+    refresh_after_collection("Ninja observations collection")
     log.info("Ninja observations run complete")
 
 
@@ -178,11 +181,13 @@ def run_agent_observations_once() -> None:
         observed_at = datetime.now(timezone.utc)
         counts = run_source_observations(sources, observed_at)
         total = sum(counts.values())
-        log.info("Agent observations complete: %s total=%d", counts, total)
         if total:
             run_identity_resolver_once()
+        refresh_after_collection("agent observations collection")
+        log.info("Agent observations run complete: %s total=%d", counts, total)
     except Exception:
         log.exception("Agent observations run failed")
+        raise
 
 
 def run_agent_compliance_once() -> None:
