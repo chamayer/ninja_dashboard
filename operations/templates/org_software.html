@@ -22,7 +22,12 @@
   .sw-row td { padding: 0.4rem 0.6rem; vertical-align: top; font-size: 0.88rem; }
   .sw-row.hidden-row { display: none; }
   .version-list { color: #52606d; font-size: 0.8rem; }
-  .loc-list { color: #52606d; font-size: 0.78rem; max-width: 240px; white-space: pre-line; }
+  .loc-list { color: #52606d; font-size: 0.78rem; }
+  .loc-list .loc-item {
+      max-width: 260px; overflow: hidden; text-overflow: ellipsis;
+      white-space: nowrap; display: block;
+  }
+  .loc-list .loc-more { color: var(--muted); font-size: 0.72rem; }
   .pager { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-top: 1rem; flex-wrap: wrap; }
   .pager-links { display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap; }
   .pager-link { display: inline-block; padding: 0.3rem 0.6rem; border: 1px solid var(--border);
@@ -172,7 +177,12 @@
                   </div>
                 </details>
             </td>
-            <td class="loc-list">{{ locations|default:"—" }}</td>
+            <td class="loc-list">
+                {% if locations %}
+                    {# Single-line ellipsis; hover shows the full multi-line list via the browser tooltip. #}
+                    <span class="loc-item" title="{{ locations }}">{{ locations|truncatechars:80 }}</span>
+                {% else %}—{% endif %}
+            </td>
         </tr>
         {% endfor %}
     </tbody>

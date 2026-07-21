@@ -2,6 +2,46 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.76.0] — 2026-07-21 — Nav rework + detail column + location truncate
+
+### Why
+Three UX fixes:
+
+1. Top nav had a wide empty gap between operator and admin clusters,
+   admin text was undersized and heavily muted.
+2. Software install-location column overflowed the page on long paths.
+3. Device Detail Issues tab showed the finding type but no context
+   ("Required agent not installed" with no hint which agent, no
+   click-through to see the full history of that issue on this
+   device).
+
+### Changed
+- **Two-row primary nav.** Row 1 = operator workflow at 0.95rem,
+  brighter (#cbd5e1). Row 2 = admin cluster (Review / Config /
+  Integrations / ⚙) at 0.86rem on a slightly darker band. No more
+  fill-gap. Client sub-nav stays inline on row 1 when a client is
+  scoped.
+- **Location column ellipsis + tooltip.** New `.trunc-160 /
+  -240 / -320` utility classes in `base.html` for reuse. Applied
+  to `org_software.html` (per-title locations list) and
+  `org_software_devices.html` (per-device install path) — first ~80
+  chars shown with `title` giving the full multi-line list on hover.
+- **Device Detail Issues tab detail column.** Each row now shows a
+  compact per-type detail via new `finding_detail_text` template tag
+  (unified with the `_detail_string` logic from findings_queue).
+  Coverage: platform for missing/stale, offline-since for
+  device_offline, KB counts for patch_failing_repeatedly, machine
+  count for rare_recent, plus all data-quality finding types.
+- **Click-through from Issues label → filtered findings queue.**
+  Clicking the issue label goes to
+  `/findings/?type={name}&subject_id={device_id}&status=all` —
+  full history of that finding type on this specific device across
+  every status.
+- **New `subject_id` filter on `findings_queue`.** Powers the
+  click-through above; also usable directly (`?subject_id=<uuid>`)
+  for anything targeting a specific subject. UUID-validated;
+  invalid values silently ignored.
+
 ## [0.75.2] — 2026-07-21 — Emergency: fast-path entity_type guard + cleanup
 
 ### Why

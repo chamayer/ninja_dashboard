@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from datetime import timedelta
 
 from django.contrib import messages
@@ -1260,6 +1261,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     client_filter = request.GET.get("client", "")
     platform_filter = request.GET.get("platform", "")
     online_filter = request.GET.get("online", "")
+    subject_id_filter = (request.GET.get("subject_id") or "").strip()
     q_filter = (request.GET.get("q") or "").strip()
 
     # Source names come from operations.sources (admin-editable
@@ -1296,6 +1298,15 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
         qs = qs.filter(client__slug=client_filter)
     if platform_filter:
         qs = qs.filter(finding_details__platform=platform_filter)
+    if subject_id_filter:
+        # Filter to findings targeting a specific subject (device / client
+        # / etc.). Used by Device Detail's "Issue → Issues page" clickthru.
+        try:
+            uuid.UUID(subject_id_filter)
+        except (ValueError, TypeError):
+            subject_id_filter = ""
+        else:
+            qs = qs.filter(subject_id=subject_id_filter)
     if q_filter:
         # Free-text match against canonical_name OR hostname in details
         qs = qs.filter(

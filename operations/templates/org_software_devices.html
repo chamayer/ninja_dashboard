@@ -45,7 +45,12 @@
             <td style="padding: 0.4rem 0.6rem;" class="muted">{{ version|default:"—" }}</td>
             <td style="padding: 0.4rem 0.6rem; white-space: nowrap;" class="muted">{{ install_date|date:"Y-m-d"|default:"—" }}</td>
             <td style="padding: 0.4rem 0.6rem; white-space: nowrap;" class="muted">{{ last_seen|date:"Y-m-d"|default:"—" }}</td>
-            <td style="padding: 0.4rem 0.6rem; font-size: 0.78rem;" class="muted">{{ install_location|default:"—" }}</td>
+            <td style="padding: 0.4rem 0.6rem; font-size: 0.78rem;" class="muted">
+                {% if install_location %}
+                    <span class="trunc-320" style="display:inline-block; vertical-align:middle;"
+                          title="{{ install_location }}">{{ install_location }}</span>
+                {% else %}—{% endif %}
+            </td>
         </tr>
         {% endfor %}
     </tbody>

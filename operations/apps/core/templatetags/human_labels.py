@@ -171,6 +171,84 @@ def humanize_label(value):
     return key
 
 
+@register.simple_tag(name="finding_detail_text")
+def finding_detail_text(finding):
+    """Compact per-type detail string for a Finding.
+
+    Mirrors the `_detail_string` helper in `findings_queue`. Keeps
+    surfaces (device_detail Issues tab, findings_queue) rendering
+    the same information for the same finding type without each
+    template inventing its own copy.
+    """
+    d = getattr(finding, "finding_details", None) or {}
+    name = getattr(getattr(finding, "finding_type", None), "name", None) or ""
+
+    if name == "missing_required_platform":
+        return f"missing {d.get('platform', '?')}"
+    if name == "stale_required_platform":
+        hours = d.get("gap_age_hours") or d.get("gap_hours")
+        base = f"stale {d.get('platform', '?')}"
+        return f"{base} · {int(hours)}h" if hours else base
+    if name == "device_unenrolled":
+        ps = d.get("power_state") or "unknown"
+        days = d.get("days_since_last_seen")
+        via = d.get("observed_via") or "tracked"
+        parts = [ps]
+        if days is not None:
+            parts.append(f"{days}d")
+        parts.append(f"via {via}")
+        return " · ".join(parts)
+    if name in ("device_offline", "device_long_offline"):
+        since = (
+            d.get("fully_offline_since")
+            or d.get("last_contact_at")
+            or d.get("last_seen_at")
+        )
+        last_src = d.get("last_seen_source")
+        base = f"offline since {since[:10]}" if since else "no source has contact"
+        return f"{base} (last: {last_src})" if last_src else base
+    if name == "device_role_conflict":
+        return f"{d.get('previous_role', '?')} → {d.get('new_role', '?')}"
+    if name == "device_missing_from_source":
+        return f"removed from {d.get('platform', '?')}"
+    if name == "device_never_patched":
+        return "no INSTALLED patches on record"
+    if name == "patching_stalled":
+        ls = d.get("last_patch_seen_at")
+        return f"last install {ls[:10]}" if ls else "no fresh scan (>35d)"
+    if name == "reboot_pending":
+        lb = d.get("last_boot_at")
+        return f"last boot {lb[:10]}" if lb else "no boot recorded"
+    if name == "patch_failing_repeatedly":
+        kbs = d.get("failing_patches") or []
+        return f"{len(kbs)} KB(s) failing"
+    if name == "patch_approval_backlog":
+        return f"{d.get('backlog_count', '?')} approved uninstalled"
+    if name == "placeholder_serial":
+        serial = d.get("serial", "")
+        return f"serial: {serial}" if serial else "placeholder serial"
+    if name == "shared_serial":
+        count = d.get("device_count")
+        return f"{count} devices share serial {d.get('serial', '')}" if count else "shared serial"
+    if name == "placeholder_mac":
+        macs = d.get("junk_macs") or []
+        return ", ".join(macs) if macs else "junk MAC"
+    if name == "identity_conflict":
+        n = d.get("candidate_count")
+        return f"{n} candidates share hostname {d.get('hostname', '')}" if n else "hostname collision"
+    if name == "duplicate_platform_record":
+        return f"duplicate {d.get('platform', '?')} record"
+    if name == "rare_recent":
+        n = d.get("machine_count")
+        return f"on {n} machines" if n else "rare install"
+    if name == "unmatched_source_group":
+        return f"source group {d.get('external_id', '?')}"
+    if name == "unnamed_source_group":
+        return f"binding {d.get('source_binding_id', '?')[:8]}…"
+    # Fallback: platform if present, else empty
+    return d.get("platform") or ""
+
+
 @register.simple_tag(name="finding_display_label")
 def finding_display_label(finding):
     """Composed operator-facing label for a Finding.

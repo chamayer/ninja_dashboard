@@ -98,34 +98,54 @@
 
         .primary-nav { background: #16213e; border-top: 1px solid #2a2a4e; }
         .primary-nav-inner {
-            max-width: 1200px; margin: 0 auto; padding: 0 1.5rem;
-            display: flex; align-items: stretch; gap: 0; overflow-x: auto;
+            max-width: 1200px; margin: 0 auto;
+            display: flex; flex-direction: column;
+        }
+        .nav-row {
+            display: flex; align-items: stretch; gap: 0.1rem;
+            padding: 0 1.5rem; overflow-x: auto;
+        }
+        .nav-row-admin {
+            background: #111a30; border-top: 1px solid #1f2a48;
         }
         .nav-link {
-            padding: 0.55rem 0.9rem; font-size: 0.82rem; color: #9ca3af;
+            padding: 0.7rem 1rem; font-size: 0.95rem; color: #cbd5e1;
             text-decoration: none; white-space: nowrap; display: flex;
-            align-items: center; gap: 0.3rem;
+            align-items: center; gap: 0.35rem;
             border-bottom: 2px solid transparent;
-            transition: color 0.1s;
+            transition: color 0.1s, border-color 0.1s;
         }
-        .nav-link:hover { color: #e5e7eb; border-bottom-color: #4d80c4; }
-        .nav-link.active { color: #f1f5f9; border-bottom-color: var(--accent); }
-        .nav-link.nav-admin { color: #6b7280; font-size: 0.78rem; }
-        .nav-link.nav-admin:hover { color: #9ca3af; }
-        .nav-link.nav-sub { color: #7dd3fc; font-size: 0.8rem; }
+        .nav-link:hover { color: #ffffff; border-bottom-color: #4d80c4; }
+        .nav-link.active { color: #ffffff; border-bottom-color: var(--accent); font-weight: 600; }
+        .nav-link.nav-admin {
+            padding: 0.5rem 0.9rem; font-size: 0.86rem; color: #94a3b8;
+        }
+        .nav-link.nav-admin:hover { color: #e2e8f0; }
+        .nav-link.nav-admin.active { color: #f1f5f9; border-bottom-color: var(--accent); font-weight: 600; }
+        .nav-link.nav-sub { color: #7dd3fc; font-size: 0.86rem; }
         .nav-link.nav-sub:hover { color: #bae6fd; }
         .nav-link.nav-sub.active { color: #fff; border-bottom-color: #7dd3fc; }
         .nav-client-crumb {
             display: flex; align-items: center; padding: 0 0.5rem;
-            font-size: 0.75rem; color: #4b5563; white-space: nowrap;
+            font-size: 0.82rem; color: #94a3b8; white-space: nowrap;
         }
         .nav-badge {
-            background: #dc2626; color: #fff; font-size: 0.65rem; font-weight: 700;
-            padding: 1px 5px; border-radius: 10px; line-height: 1.4;
+            background: #dc2626; color: #fff; font-size: 0.68rem; font-weight: 700;
+            padding: 1px 6px; border-radius: 10px; line-height: 1.4;
         }
         .nav-badge-muted { background: #4b5563; }
         .nav-sep { border-left: 1px solid #2a2a4e; margin: 0.3rem 0.35rem; align-self: stretch; }
         .nav-fill { flex: 1; }
+
+        /* Truncate-with-tooltip utility. Use inside a table cell:
+             <td><div class="trunc" title="{{ full_text }}">{{ full_text }}</div></td>
+           The div's max-width forces the ellipsis (td max-width alone
+           is ignored under table's default layout). Sizes come in two
+           variants; add more here as needed. */
+        .trunc { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .trunc-160 { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .trunc-240 { max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .trunc-320 { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
         /* Shared grammar (Track U) — see templates/_*.html includes */
         .filterbar { display: flex; gap: 0.5rem; align-items: end; flex-wrap: wrap; margin-bottom: 1rem; }
@@ -248,57 +268,53 @@
     {% if user.is_authenticated %}
     <nav class="primary-nav">
         <div class="primary-nav-inner">
-            {# Operator workflow domains #}
-            <a class="nav-link {% if request.resolver_match.url_name == 'home' %}active{% endif %}"
-               href="{% url 'home' %}">Dashboard</a>
+            {# Row 1: operator workflow domains #}
+            <div class="nav-row">
+                <a class="nav-link {% if request.resolver_match.url_name == 'home' %}active{% endif %}"
+                   href="{% url 'home' %}">Dashboard</a>
 
-            <a class="nav-link {% if request.resolver_match and 'org' in request.resolver_match.url_name %}active{% endif %}"
-               href="{% url 'org_index' org_slug='all' %}">Clients</a>
+                <a class="nav-link {% if request.resolver_match and 'org' in request.resolver_match.url_name %}active{% endif %}"
+                   href="{% url 'org_index' org_slug='all' %}">Clients</a>
 
-            <a class="nav-link {% if request.resolver_match.url_name == 'devices_page' %}active{% endif %}"
-               href="{% url 'devices_page' %}">Devices</a>
+                <a class="nav-link {% if request.resolver_match.url_name == 'devices_page' %}active{% endif %}"
+                   href="{% url 'devices_page' %}">Devices</a>
 
-            <a class="nav-link {% if request.resolver_match.url_name == 'patching_queue' %}active{% endif %}"
-               href="{% url 'patching_queue' %}">Patching{% if nav_patching_open %} <span class="nav-badge">{{ nav_patching_open }}</span>{% endif %}</a>
+                <a class="nav-link {% if request.resolver_match.url_name == 'patching_queue' %}active{% endif %}"
+                   href="{% url 'patching_queue' %}">Patching{% if nav_patching_open %} <span class="nav-badge">{{ nav_patching_open }}</span>{% endif %}</a>
 
-            <a class="nav-link {% if request.resolver_match.url_name == 'software_page' %}active{% endif %}"
-               href="{% url 'software_page' %}">Software</a>
+                <a class="nav-link {% if request.resolver_match.url_name == 'software_page' %}active{% endif %}"
+                   href="{% url 'software_page' %}">Software</a>
 
-            <a class="nav-link {% if request.resolver_match and 'finding' in request.resolver_match.url_name %}active{% endif %}"
-               href="{% url 'findings_queue' %}">Issues{% if nav_findings_count %} <span class="nav-badge">{{ nav_findings_count }}</span>{% endif %}</a>
+                <a class="nav-link {% if request.resolver_match and 'finding' in request.resolver_match.url_name %}active{% endif %}"
+                   href="{% url 'findings_queue' %}">Issues{% if nav_findings_count %} <span class="nav-badge">{{ nav_findings_count }}</span>{% endif %}</a>
 
-            {# Client context sub-nav #}
-            {% if current_client %}
-            <div class="nav-sep"></div>
-            <span class="nav-client-crumb">{{ current_client.display_name }} ›</span>
-            <a class="nav-link nav-sub {% if request.resolver_match and 'device' in request.resolver_match.url_name %}active{% endif %}"
-               href="{% url 'org_devices' org_slug=current_client.slug %}">Devices</a>
-            <a class="nav-link nav-sub {% if request.resolver_match and 'software' in request.resolver_match.url_name and 'decision' not in request.resolver_match.url_name %}active{% endif %}"
-               href="{% url 'org_software' org_slug=current_client.slug %}">Software</a>
-            <a class="nav-link nav-sub {% if request.resolver_match and 'polic' in request.resolver_match.url_name %}active{% endif %}"
-               href="{% url 'org_policies' org_slug=current_client.slug %}">Policies</a>
-            {% endif %}
+                {# Client context sub-nav — inline on row 1 when a client is scoped #}
+                {% if current_client %}
+                <div class="nav-sep"></div>
+                <span class="nav-client-crumb">{{ current_client.display_name }} ›</span>
+                <a class="nav-link nav-sub {% if request.resolver_match and 'device' in request.resolver_match.url_name %}active{% endif %}"
+                   href="{% url 'org_devices' org_slug=current_client.slug %}">Devices</a>
+                <a class="nav-link nav-sub {% if request.resolver_match and 'software' in request.resolver_match.url_name and 'decision' not in request.resolver_match.url_name %}active{% endif %}"
+                   href="{% url 'org_software' org_slug=current_client.slug %}">Software</a>
+                <a class="nav-link nav-sub {% if request.resolver_match and 'polic' in request.resolver_match.url_name %}active{% endif %}"
+                   href="{% url 'org_policies' org_slug=current_client.slug %}">Policies</a>
+                {% endif %}
+            </div>
 
-            {# Admin — right-aligned, consolidated. Wave D turns each
-               of these into a tabbed page; today each links to the
-               primary member of its group. #}
-            <div class="nav-fill"></div>
-            <div class="nav-sep"></div>
+            {# Row 2: admin cluster — configuration, review queues, platform health #}
+            <div class="nav-row nav-row-admin">
+                <a class="nav-link nav-admin {% if request.resolver_match and 'client_candidate' in request.resolver_match.url_name or 'identity' in request.resolver_match.url_name or 'merge' in request.resolver_match.url_name %}active{% endif %}"
+                   href="{% url 'client_candidates_queue' %}">Review</a>
 
-            {# Review = human-in-the-loop lifecycle queues
-               (client candidates, identity candidates, merge candidates). #}
-            <a class="nav-link nav-admin {% if request.resolver_match and 'client_candidate' in request.resolver_match.url_name or 'identity' in request.resolver_match.url_name or 'merge' in request.resolver_match.url_name %}active{% endif %}"
-               href="{% url 'client_candidates_queue' %}">Review</a>
+                <a class="nav-link nav-admin {% if request.resolver_match and 'notification' in request.resolver_match.url_name or 'requirement_profile' in request.resolver_match.url_name %}active{% endif %}"
+                   href="{% url 'notification_rules_list' %}">Config</a>
 
-            {# Config = admin-editable rules & profiles (notifications, requirement profiles, software decisions). #}
-            <a class="nav-link nav-admin {% if request.resolver_match and 'notification' in request.resolver_match.url_name or 'requirement_profile' in request.resolver_match.url_name %}active{% endif %}"
-               href="{% url 'notification_rules_list' %}">Config</a>
+                <a class="nav-link nav-admin {% if request.resolver_match.url_name == 'sources_status' or request.resolver_match.url_name == 'findings_admin_health' or request.resolver_match.url_name == 'fleet_coverage' %}active{% endif %}"
+                   href="{% url 'sources_status' %}">Integrations</a>
 
-            {# Integrations = ingest + platform health (sources, coverage, ingest issues). #}
-            <a class="nav-link nav-admin {% if request.resolver_match.url_name == 'sources_status' or request.resolver_match.url_name == 'findings_admin_health' or request.resolver_match.url_name == 'fleet_coverage' %}active{% endif %}"
-               href="{% url 'sources_status' %}">Integrations</a>
-
-            <a class="nav-link nav-admin" href="{% url 'admin:index' %}" title="Django admin">⚙</a>
+                <div class="nav-fill"></div>
+                <a class="nav-link nav-admin" href="{% url 'admin:index' %}" title="Django admin">⚙</a>
+            </div>
         </div>
     </nav>
     {% endif %}

@@ -261,6 +261,7 @@
             <tr>
                 <th>Severity</th>
                 <th>Issue</th>
+                <th>Detail</th>
                 <th>Status</th>
                 <th class="num">First seen</th>
                 <th class="num">Last seen</th>
@@ -271,7 +272,14 @@
             {% for f in active_findings %}
             <tr>
                 <td><span class="badge badge-{{ f.severity }}">{{ f.severity }}</span></td>
-                <td>{% finding_display_label f %}</td>
+                <td>
+                    {# Click-through to Issues filtered by this device + this finding type. #}
+                    <a href="{% url 'findings_queue' %}?type={{ f.finding_type.name }}&subject_id={{ device.id }}&status=all"
+                       title="View all {{ f.finding_type.name }} for this device">
+                        {% finding_display_label f %}
+                    </a>
+                </td>
+                <td class="muted">{% finding_detail_text f %}</td>
                 <td><span class="badge badge-{{ f.status }}">{{ f.get_status_display }}</span></td>
                 <td class="muted num">{{ f.first_seen_at|date:"Y-m-d" }}</td>
                 <td class="muted num">{{ f.last_seen_at|date:"Y-m-d H:i" }}</td>
