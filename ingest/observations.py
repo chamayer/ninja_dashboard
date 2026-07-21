@@ -72,3 +72,62 @@ def write_current_rows(cur: Any, rows: Iterable[dict[str, Any]]) -> int:
             "collector_version", "schema_version",
         ],
     )
+
+
+def write_history_changes(cur: Any, rows: Iterable[dict[str, Any]]) -> int:
+    """Append material/presence changes after closing the open version.
+
+    The caller supplies only rows already determined to be changed. The
+    update and insert execute in the caller's transaction so a failed batch
+    cannot leave overlapping intervals.
+    """
+    prepared = prepare_batch(rows)
+    if not prepared:
+        return 0
+    for row in prepared:
+        identity = (
+            row["tenant_id"], row["source_binding_id"], row["entity_type"],
+            row.get("parent_source_key", ""), row["entity_key"],
+        )
+        cur.execute(
+            """
+            UPDATE operations.entity_observation_history
+               SET effective_to = %(effective_to)s,
+                   last_seen_at = %(last_seen_at)s
+             WHERE tenant_id = %(tenant_id)s
+               AND source_binding_id = %(source_binding_id)s
+               AND entity_type = %(entity_type)s
+               AND parent_source_key = %(parent_source_key)s
+               AND entity_key = %(entity_key)s
+               AND effective_to IS NULL
+            """,
+            {
+                "tenant_id": identity[0], "source_binding_id": identity[1],
+                "entity_type": identity[2], "parent_source_key": identity[3],
+                "entity_key": identity[4], "effective_to": row["observed_at"],
+                "last_seen_at": row.get("last_seen_at") or row["observed_at"],
+            },
+        )
+    history_rows = [{
+        "id": row["observation_id"],
+        "tenant_id": row["tenant_id"],
+        "source_binding_id": row["source_binding_id"],
+        "collector_instance_id": row["collector_instance_id"],
+        "entity_type": row["entity_type"],
+        "parent_source_key": row.get("parent_source_key", ""),
+        "entity_key": row["entity_key"],
+        "effective_from": row["observed_at"],
+        "effective_to": None,
+        "last_seen_at": row.get("last_seen_at") or row["observed_at"],
+        "received_at": row.get("last_received_at") or row["observed_at"],
+        "material_data": row["material_data"],
+        "material_hash": row["material_hash"],
+        "hash_algorithm_version": row["hash_algorithm_version"],
+        "active": row.get("active", True),
+    } for row in prepared]
+    return db.insert_ignore(
+        cur,
+        "operations.entity_observation_history",
+        history_rows,
+        conflict_keys=["id"],
+    )
