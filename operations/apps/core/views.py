@@ -857,11 +857,17 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
             # Top attention: severe/high open findings, most recent first.
             cur.execute(
                 """
-                SELECT f.id, f.severity, ft.name AS ftype, f.title, f.last_detected_at,
+                SELECT f.id, f.severity, ft.name AS ftype,
+                       COALESCE(f.finding_details->>'title',
+                                f.finding_details->>'summary') AS title,
+                       f.last_detected_at,
                        d.id AS device_id, d.canonical_hostname
                 FROM operations.findings f
                 JOIN operations.finding_types ft ON ft.id = f.finding_type_id
-                LEFT JOIN operations.devices d ON d.id = f.device_id
+                LEFT JOIN operations.devices d
+                  ON f.subject_type = 'device'
+                 AND d.tenant_id = f.tenant_id
+                 AND d.id = f.subject_id
                 WHERE f.tenant_id = 1 AND f.client_id = %s
                   AND f.status IN ('open', 'acknowledged', 'investigating')
                   AND f.severity IN ('critical', 'high')
@@ -881,11 +887,13 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
             # Offline offenders — top 10 most-severe or longest-offline.
             cur.execute(
                 """
-                SELECT v.id, v.canonical_hostname, v.device_role, v.os_group,
+                SELECT v.device_id, v.canonical_hostname, v.device_role, v.os_group,
                        v.last_contact_at,
                        COALESCE((
                            SELECT COUNT(*)::int FROM operations.findings f
-                           WHERE f.tenant_id = 1 AND f.device_id = v.id
+                           WHERE f.tenant_id = 1
+                             AND f.subject_type = 'device'
+                             AND f.subject_id = v.device_id
                              AND f.status IN ('open', 'acknowledged', 'investigating')
                              AND f.severity IN ('critical', 'high')
                        ), 0) AS severe
@@ -928,7 +936,7 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
                 SELECT COUNT(*)::int
                 FROM operations.findings
                 WHERE tenant_id = 1 AND client_id = %s
-                  AND first_detected_at > NOW() - INTERVAL '24 hours'
+                  AND first_seen_at > NOW() - INTERVAL '24 hours'
                 """,
                 [str(client.id)],
             )

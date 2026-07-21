@@ -4,9 +4,9 @@ Track: **Top Dashboard live implementation**
 
 ## Status
 
-- Complete locally — approved Dashboard implemented and validated without a
-  migration. Commit, push, deployment, and deployed-page timing remain
-  separately gated.
+- Complete locally — follow-up fixes keep the All clients headers visible and
+  repair client-detail queries that still referenced retired Finding/v_device
+  columns. A follow-up commit and push remain separately gated.
 
 ## Goal
 
@@ -122,12 +122,26 @@ without regressing tenant boundaries or page performance.
   production Python 3.12. The resulting Django deprecation warnings are from
   that newer interpreter. Full-file Ruff still reports 22 pre-existing issues
   after the changed Dashboard region; the changed region introduces none.
-- No migration, data rebuild, commit, push, deployment, or production write was
-  performed. Deployed visual behavior and end-to-end page timing cannot be
-  verified until an approved commit/push/deployment occurs.
+- The initial Dashboard implementation was committed as `46e4335`, pushed to
+  deployment authority `origin` and secondary mirror `a-m-rose`, and observed
+  running live. No migration or data rebuild was performed.
+- Follow-up browser validation confirmed the All clients column headers remain
+  sticky while scrolling on desktop; at 1000 px the responsive horizontal
+  table remains usable and intentionally uses static headers.
+- Live logs identified the Client page 500 as stale schema references in the
+  detail query (`Finding.device_id`, `Finding.title`,
+  `Finding.first_detected_at`, and `v_device.id`). The local repair uses
+  subject identity, JSON finding details, `first_seen_at`, and
+  `v_device.device_id` respectively.
+- Read-only `EXPLAIN ANALYZE` validation against the deployed database for the
+  `am-rose` tenant succeeded for all three repaired query shapes at about 9.6
+  ms, 17.9 ms, and 3.5 ms. This was a schema compatibility defect, not missing
+  or corrupt `am-rose` data.
+- Follow-up local validation passed: Python compilation, `manage.py check`, all
+  10 focused Dashboard tests, and `git diff --check`. The Python 3.14-only
+  Django deprecation warnings remain unchanged.
 
 ## Next action
 
-- Review the local implementation diff. If approved, obtain separate commit
-  authorization, then separate push/deployment authorization before measuring
-  the deployed page end to end.
+- Obtain explicit approval for one follow-up commit. After that commit, obtain
+  separate approval to push to `origin` and then mirror to `a-m-rose`.

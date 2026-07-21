@@ -61,8 +61,8 @@
   .domain-freshness { margin-top: auto; padding-top: 0.55rem; color: var(--muted); font-size: 0.67rem; }
   .domain-open { align-self: flex-end; margin-top: 0.2rem; font-size: 0.74rem; font-weight: 700; }
 
-  .client-card { padding: 0; overflow: hidden; }
-  .client-card-head { padding: 1rem 1rem 0.75rem; border-bottom: 1px solid var(--border); }
+  .client-card { padding: 0; overflow: visible; }
+  .client-card-head { padding: 1rem 1rem 0.75rem; background: var(--surface); border-bottom: 1px solid var(--border); border-radius: 6px 6px 0 0; }
   .client-card-title { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; }
   .client-card-title h2 { margin: 0; }
   .client-card-title span { color: var(--muted); font-size: 0.72rem; }
@@ -79,9 +79,13 @@
     border: 1px solid var(--border); border-radius: 5px; font-size: 0.76rem;
   }
   .client-search { width: 190px; }
-  .client-table-wrap { overflow-x: auto; }
+  .client-table-wrap { overflow: visible; }
   .client-table { min-width: 1100px; }
   .client-table th, .client-table td { padding: 0.55rem 0.65rem; vertical-align: middle; }
+  .client-table thead th {
+    position: sticky; top: 0; z-index: 5;
+    box-shadow: inset 0 -1px 0 var(--border), 0 2px 4px rgba(17, 24, 39, 0.06);
+  }
   .client-table tbody tr { border-bottom: 1px solid var(--border); }
   .client-table tbody tr:last-child { border-bottom: 0; }
   .client-table tr[data-priority="immediate"] { background: linear-gradient(90deg, #fff7f6 0, #fff 26%); }
@@ -126,6 +130,10 @@
 
   @media (max-width: 1000px) {
     .dashboard-domains { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  @media (max-width: 1160px) {
+    .client-table-wrap { overflow-x: auto; }
+    .client-table thead th { position: static; }
   }
   @media (max-width: 720px) {
     .dashboard-heading { display: block; }
