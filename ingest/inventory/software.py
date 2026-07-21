@@ -25,6 +25,7 @@ from datetime import datetime, timezone
 from psycopg.types.json import Json
 
 from ingest import db
+from ingest.observations import write_current_rows
 from ingest.ninja_client import NinjaClient
 from ingest.runlog import run_log
 
@@ -156,6 +157,21 @@ def _flush(rows: list[dict]) -> None:
             rows,
             ["tenant_id", "collector_instance_id", "batch_id", "observation_hash"],
         )
+        current_rows = []
+        for row in rows:
+            current = dict(row)
+            current["parent_source_key"] = str(row["device_id"])
+            current["last_seen_at"] = row["observed_at"]
+            current["last_received_at"] = row["observed_at"]
+            current["active"] = True
+            current["withdrawn_at"] = None
+            current["snapshot_scope"] = "Ninja.software"
+            current["last_snapshot_run_id"] = None
+            current["raw_hash"] = hashlib.sha256(
+                str(row["raw_data"]).encode("utf-8")
+            ).digest()
+            current_rows.append(current)
+        write_current_rows(cur, current_rows)
 
 
 def _refresh_current() -> None:
