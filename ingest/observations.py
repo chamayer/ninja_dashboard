@@ -10,6 +10,8 @@ import hashlib
 import json
 from typing import Any, Iterable
 
+from ingest import db
+
 MATERIAL_HASH_VERSION = 1
 VOLATILE_FIELDS = frozenset({
     "last_seen_at", "last_contact", "is_online", "offline",
@@ -37,3 +39,36 @@ def prepare_observation(row: dict[str, Any]) -> dict[str, Any]:
 
 def prepare_batch(rows: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     return [prepare_observation(row) for row in rows]
+
+
+def write_current_rows(cur: Any, rows: Iterable[dict[str, Any]]) -> int:
+    """Upsert prepared rows into the current-state table.
+
+    Connector adapters remain responsible for resolving foreign keys and
+    snapshot metadata; this primitive owns only the stable column mapping.
+    """
+    prepared = prepare_batch(rows)
+    if not prepared:
+        return 0
+    columns = (
+        "observation_id", "tenant_id", "source_binding_id", "collector_instance_id",
+        "client_id", "device_id", "entity_type", "parent_source_key", "entity_key",
+        "platform", "subplatform", "observed_at", "last_seen_at", "last_received_at",
+        "active", "withdrawn_at", "snapshot_scope", "last_snapshot_run_id",
+        "raw_data", "canonical_data", "raw_hash", "material_hash",
+        "hash_algorithm_version", "batch_id", "collector_version", "schema_version",
+    )
+    shaped = [{key: row.get(key) for key in columns} for row in prepared]
+    return db.upsert(
+        cur,
+        "operations.entity_observation_current",
+        shaped,
+        conflict_keys=["tenant_id", "source_binding_id", "entity_type", "parent_source_key", "entity_key"],
+        update_cols=[
+            "client_id", "device_id", "platform", "subplatform", "observed_at",
+            "last_seen_at", "last_received_at", "active", "withdrawn_at",
+            "snapshot_scope", "last_snapshot_run_id", "raw_data", "canonical_data",
+            "raw_hash", "material_hash", "hash_algorithm_version", "batch_id",
+            "collector_version", "schema_version",
+        ],
+    )
