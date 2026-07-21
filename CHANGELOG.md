@@ -2,6 +2,52 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.75.2] — 2026-07-21 — Emergency: fast-path entity_type guard + cleanup
+
+### Why
+Two bugs in 0.75.1's fast-path fix, discovered when migration 0060
+crashed on production with
+`UniqueViolation: (1, 1, 'microsoft edge')`:
+
+1. `_upsert_link_for_fast_match` didn't check entity_type. Software
+   observations (`entity_type='software'`) use `entity_key` = software
+   name (e.g., `'microsoft edge'`), shared across many devices. Since
+   0.75.1 deploy, every software observation hitting fast_path step
+   2/3 was upserting a synthetic device_link keyed on the software
+   name, reassigning it between devices in-place via `ON CONFLICT
+   DO UPDATE`.
+2. Migration 0060's backfill had the same missing filter — it tried
+   to insert one device_link per (device, software) tuple, all
+   sharing `(source, external_id='microsoft edge')`, violating the
+   unique constraint on the first collision.
+
+### Fixed
+- `_is_identity_signal(entity_type)` gate in
+  `ingest/identity/fast_path.py` — only creates device_links for
+  entity types that are per-device identity signals:
+  `agent.*` + `vm.host` + `vm.guest` + `network.device` +
+  `monitor.target`. Software (and any other per-installation record)
+  gets its device_id set on the observation with no link, matching
+  pre-0.75.1 behavior for those types while still fixing the agent
+  gap.
+- Migration `0060` rewritten:
+  - **Cleanup step** removes any bogus `device_links` created by the
+    0.75.1 fast_path bug (`external_id` matches a software
+    `entity_key` in `entity_observations`) plus any prior
+    `fast_path_backfill` rows.
+  - **Backfill step** now filters `entity_type` to identity signals
+    only and uses `ON CONFLICT DO NOTHING` as a safety net.
+  - Both operations run in one migration → all-or-nothing.
+  - Idempotent — safe to re-run.
+
+### Impact
+- Any existing device attribution done through the corrupted
+  device_links since 0.75.1 deploy will re-resolve correctly on the
+  next fast_path or resolver pass — device_link is a display /
+  identity cache, not the source of truth for observation ↔ device
+  linkage (which is `entity_observations.device_id`).
+- No schema change; only data cleanup + code guard.
+
 ## [0.75.1] — 2026-07-21 — Fix: fast-path device_link gap
 
 ### Fixed

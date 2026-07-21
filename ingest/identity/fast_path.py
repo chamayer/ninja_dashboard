@@ -21,6 +21,22 @@ from ingest.normalize import is_usable_serial
 
 log = logging.getLogger(__name__)
 
+# Entity types whose (source, external_id) is a per-device identity
+# signal — a device_link is meaningful. Software observations (and
+# other per-installation records) share entity_key across devices;
+# they must never produce a device_link even when fast_path resolves
+# their device_id via serial or hostname.
+_IDENTITY_ENTITY_TYPES = {
+    "vm.host", "vm.guest", "network.device", "monitor.target",
+}
+
+
+def _is_identity_signal(entity_type: str) -> bool:
+    return (
+        entity_type.startswith("agent.")
+        or entity_type in _IDENTITY_ENTITY_TYPES
+    )
+
 
 def _upsert_link_for_fast_match(
     cur,
@@ -117,6 +133,12 @@ def resolve_device_fast(
         )
         return None
 
+    # Whether to persist a device_link on a successful step-2/3 match.
+    # Only per-device-identity entity types produce meaningful links;
+    # software (and any other per-installation records) share
+    # entity_key across devices and must never generate a device_link.
+    upsert_link = _is_identity_signal(entity_type)
+
     # Step 2 — serial match (only when unique; BIOS placeholder serials
     # like 'None' / 'Default string' are shared junk, never a match)
     if is_usable_serial(serial):
@@ -131,10 +153,11 @@ def resolve_device_fast(
         rows = cur.fetchall()
         if len(rows) == 1:
             device_id = rows[0][0]
-            _upsert_link_for_fast_match(
-                cur, tenant_id, source_name, external_id, device_id,
-                hostname, "serial", 0.980,
-            )
+            if upsert_link:
+                _upsert_link_for_fast_match(
+                    cur, tenant_id, source_name, external_id, device_id,
+                    hostname, "serial", 0.980,
+                )
             return device_id
 
     # Step 3 — hostname match (only when unique and the device carries no
@@ -159,10 +182,11 @@ def resolve_device_fast(
         rows = cur.fetchall()
         if len(rows) == 1:
             device_id = rows[0][0]
-            _upsert_link_for_fast_match(
-                cur, tenant_id, source_name, external_id, device_id,
-                hostname, "hostname_strict", 0.900,
-            )
+            if upsert_link:
+                _upsert_link_for_fast_match(
+                    cur, tenant_id, source_name, external_id, device_id,
+                    hostname, "hostname_strict", 0.900,
+                )
             return device_id
 
     log.debug(
