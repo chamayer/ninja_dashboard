@@ -12,14 +12,6 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.AlterModelOptions(
-            name='coveragerequirement',
-            options={'ordering': ('entity_type', 'platform')},
-        ),
-        migrations.AlterModelOptions(
-            name='queueregistry',
-            options={'ordering': ('queue_key',)},
-        ),
         migrations.CreateModel(
             name='ObservationSnapshotRun',
             fields=[
