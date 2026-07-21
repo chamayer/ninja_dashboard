@@ -351,8 +351,9 @@ def _evaluate_unknown_entities(cur: Any, tenant_id: int, now: datetime) -> int:
         """
         SELECT COALESCE(canonical_data ->> 'node_class', '(none)'),
                COUNT(*)::int
-        FROM operations.entity_observations
+        FROM operations.entity_observation_current
         WHERE tenant_id = %s AND entity_type = 'unknown'
+          AND active = TRUE
           AND observed_at > now() - INTERVAL '2 days'
         GROUP BY 1
         """,
@@ -405,8 +406,9 @@ def _evaluate_duplicate_records(cur: Any, tenant_id: int, now: datetime) -> int:
                canonical_data ->> 'is_online',
                canonical_data ->> 'last_seen_at',
                canonical_data ->> 'serial_number'
-        FROM operations.entity_observations
+        FROM operations.entity_observation_current
         WHERE tenant_id = %s AND entity_type <> 'software'
+          AND active = TRUE
           AND observed_at > now() - INTERVAL '2 days'
         ORDER BY platform, entity_type, entity_key, observed_at DESC
         """,
