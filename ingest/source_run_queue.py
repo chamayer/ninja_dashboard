@@ -177,7 +177,7 @@ def process_entry(entry_id: int) -> None:
                     drain_client_resolution()
                 except Exception:
                     log.exception("source_run_queue: client_resolver failed — continuing")
-                drain_resolution(batch_size=500)
+                drain_resolution(batch_size=500, refresh_current=False)
             refresh_after_collection(f"on-demand {df} collection")
         else:
             raise ValueError(f"Unknown source: {df!r}")

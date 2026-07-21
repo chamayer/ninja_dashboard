@@ -135,15 +135,15 @@ def _refresh_inventory_current(reason: str) -> None:
         log.exception("Inventory current refresh failed after %s", reason)
 
 
-def run_identity_resolver_once() -> None:
-    """Drain unresolved entity_observations and refresh device_agent_presence_current."""
+def run_identity_resolver_once(*, refresh_current: bool = True) -> None:
+    """Drain unresolved observations and optionally refresh presence state."""
     try:
         attached = _drain_client_resolution()
         log.info("Client resolver complete: attached=%d", attached)
     except Exception:
         log.exception("Client resolver failed")
     try:
-        resolved = _drain_resolution(batch_size=500)
+        resolved = _drain_resolution(batch_size=500, refresh_current=refresh_current)
         log.info("Identity resolver complete: resolved=%d", resolved)
     except Exception:
         log.exception("Identity resolver failed")
@@ -182,7 +182,7 @@ def run_agent_observations_once() -> None:
         counts = run_source_observations(sources, observed_at)
         total = sum(counts.values())
         if total:
-            run_identity_resolver_once()
+            run_identity_resolver_once(refresh_current=False)
         refresh_after_collection("agent observations collection")
         log.info("Agent observations run complete: %s total=%d", counts, total)
     except Exception:

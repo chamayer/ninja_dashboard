@@ -4,9 +4,9 @@ Track: **Collection-complete derived refresh**
 
 ## Status
 
-- Complete locally — derived-state refresh is now part of successful scheduled
-  and on-demand source collection completion. Commit, push, deployment, and
-  live refresh remain separately gated.
+- Complete locally and verified live — collection-complete refresh works, and
+  the follow-up removes the duplicate resolver refresh. Follow-up commit and
+  push remain separately gated.
 
 ## Goal
 
@@ -27,6 +27,8 @@ lag behind successfully collected data.
 - `ingest/derived.py` — one shared post-collection refresh boundary.
 - `ingest/main.py` — scheduled/startup and on-demand Ninja call sites.
 - `ingest/source_run_queue.py` — on-demand individual-source completion.
+- `ingest/identity/resolver.py` — skip its narrower refresh only when the
+  caller immediately runs the full coordinator.
 - `docs/architecture.md` — explicit collection-completion invariant.
 - `docs/decisions/0004-refresh-derived-state-after-collection.md` — durable
   decision and failure semantics.
@@ -87,9 +89,17 @@ lag behind successfully collected data.
 - Read-only live validation confirmed `ninja_ingest` has execute privilege on
   `operations.refresh_derived()` and the function is owned by
   `operations_migrate`.
+- Deployed commit `dca4855` completed startup collection successfully. Raw and
+  derived observation timestamps both advanced to 3:29 PM EDT; the explicit
+  refresh completed at 3:31:59 PM and only then did the collection log
+  completion. The run also revealed duplicate presence/session refreshes in
+  the resolver immediately before the full coordinator.
+- The follow-up passes `refresh_current=False` only when scheduled/startup or
+  on-demand source collection immediately invokes the full coordinator.
+  Standalone resolver calls retain the default `True` behavior. AST contract
+  checks, focused fatal Ruff checks, and `git diff --check` passed.
 
 ## Next action
 
-- Review the local diff. If approved, obtain separate commit and push
-  authorization, then verify deployment and a completed collection advance
-  `source_health_current` to the raw source timestamp.
+- Obtain approval for the narrow performance follow-up commit, then separate
+  push approval and one final deployed collection timing check.

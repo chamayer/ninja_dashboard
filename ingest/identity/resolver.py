@@ -37,11 +37,12 @@ TENANT_ID = 1
 _MIN_IDENTITY_CANDIDATES = 2
 
 
-def drain_resolution(batch_size: int = 200) -> int:
+def drain_resolution(batch_size: int = 200, *, refresh_current: bool = True) -> int:
     """Resolve up to batch_size unresolved entity_observations.
 
     Returns the count of observations that were resolved (device_id set).
-    Refreshes device_agent_presence_current if any observations were resolved.
+    Refreshes device_agent_presence_current if any observations were resolved,
+    unless the caller will immediately run the full derived-state coordinator.
     """
     resolved_count = 0
     with db.transaction() as cur:
@@ -142,7 +143,7 @@ def drain_resolution(batch_size: int = 200) -> int:
     except Exception:
         log.exception("resolver: device attribute sync failed — continuing")
 
-    if resolved_count or promoted_count:
+    if (resolved_count or promoted_count) and refresh_current:
         # Refresh derived presence matviews in dependency order:
         # device_agent_presence_current first (per-source × device), then
         # device_session_current (per-device rollup). Formalized as a
