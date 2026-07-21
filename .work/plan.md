@@ -41,6 +41,8 @@ schema to the new Operations data model.
   deploys it before the live refresh.
 - [ ] Repair the organization-only observation insertion exposed by live
   validation, then repeat approval/commit/deploy/refresh validation.
+- [ ] Normalize unknown device roles before both legacy persistence and matrix
+  construction, as exposed by the second live validation.
 - [ ] Commit and push the deployment-documentation correction to both remotes.
 
 ## Decisions
@@ -86,8 +88,12 @@ schema to the new Operations data model.
   are needed for client synchronization but lack the non-null device columns
   required by `platform_observations`. Keep them for synchronization and omit
   them only from the device-observation persistence/matrix path.
+- Live validation of `8bad044` completed all four source writes, but matrix
+  persistence still received the original in-memory null role. The
+  normalization was only applied to an insert copy; it must instead run before
+  both persistence and matrix construction.
 
 ## Next action
 
-- Validate the organization-only row repair, then request approval for its
+- Validate the shared role-normalization repair, then request approval for its
   separate commit, push to both remotes, deployment, and another live refresh.

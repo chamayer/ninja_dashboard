@@ -85,6 +85,7 @@ def run() -> tuple[int, int]:
             resolved = _resolve_observations(
                 device_rows, source, clients, aliases, id_links=id_links
             )
+            _normalize_device_types(resolved)
             _insert_observations(source_run_id, resolved)
             _finish_source_run(source_run_id, "ok", len(resolved), None)
             all_observations.extend(resolved)
@@ -425,19 +426,22 @@ def _resolution_confidence(method: str, client_id: int | None) -> int:
     return 50
 
 
+def _normalize_device_types(rows: list[dict[str, Any]]) -> None:
+    """Represent unclassifiable roles consistently across legacy consumers."""
+    for row in rows:
+        if row.get("device_type") is None:
+            row["device_type"] = "unknown"
+
+
 def _insert_observations(source_run_id: int, rows: list[dict[str, Any]]) -> None:
     if not rows:
         return
     insert_rows = []
     for row in rows:
         r = dict(row)
-        # `infer_device_role` deliberately returns None when upstream data
-        # does not identify a server/workstation role.  This legacy table
-        # represents that state as the explicit `unknown` value; passing an
-        # explicit NULL bypasses its database default and aborts the whole
-        # source refresh.
-        if r.get("device_type") is None:
-            r["device_type"] = "unknown"
+        # Preserve the insert safeguard for direct callers. The normal run
+        # normalizes earlier so its matrix builder sees the same value.
+        _normalize_device_types([r])
         r["source_run_id"] = source_run_id
         insert_rows.append(r)
     with db.transaction() as cur:
