@@ -82,9 +82,10 @@ def drain_client_resolution() -> int:
             SELECT DISTINCT ON (source_binding_id, entity_key)
                    observation_id, source_binding_id, entity_key,
                    platform, canonical_data, observed_at
-            FROM operations.entity_observations
+            FROM operations.entity_observation_current
             WHERE tenant_id = %s
               AND entity_type = 'org'
+              AND active = TRUE
               AND client_id IS NULL
             ORDER BY source_binding_id, entity_key, observed_at DESC
             """,
@@ -240,7 +241,7 @@ def _attach_group(
     """Attach every org + device observation for this group; mint the link."""
     cur.execute(
         """
-        UPDATE operations.entity_observations
+        UPDATE operations.entity_observation_current
         SET client_id = %s
         WHERE tenant_id = %s
           AND source_binding_id = %s
@@ -253,7 +254,7 @@ def _attach_group(
     # Backfill device observations whose canonical_data records this group.
     cur.execute(
         """
-        UPDATE operations.entity_observations
+        UPDATE operations.entity_observation_current
         SET client_id = %s
         WHERE tenant_id = %s
           AND source_binding_id = %s
