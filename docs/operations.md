@@ -5,8 +5,11 @@ host values, credentials, tokens, and customer data remain outside Git.
 
 ## Deployment model
 
-- Portainer follows the repository and rebuilds the stack after approved
-  pushes.
+- Portainer follows `origin` (`chamayer/ninja_dashboard`, `master`) and
+  rebuilds the stack after approved pushes. This is the deployment authority.
+- `a-m-rose/ninja_dashboard` is the required secondary mirror. Push the same
+  approved commit there after `origin`; it is not the repository Portainer
+  watches.
 - Postgres, ingest, and Operations use repository-built images.
 - Metabase uses its upstream image.
 - Runtime configuration and secrets are mounted from external files.
@@ -19,8 +22,10 @@ host values, credentials, tokens, and customer data remain outside Git.
 Commit, push, redeploy, schema migration, data rebuild, destructive cleanup,
 restore, and rollback require explicit approval. Commit and push approvals are
 separate.
-If branches or release tags must be sent to multiple remotes, confirm and
-approve each push target rather than assuming one remote is sufficient.
+Deployment commits must be pushed to both remotes: first `origin`
+(`chamayer/ninja_dashboard`) for GitOps, then `a-m-rose/ninja_dashboard` as
+the secondary mirror. Confirm and approve each push target rather than
+assuming one remote is sufficient.
 
 ## Pre-deployment checks
 

@@ -15,10 +15,14 @@ dashboards plus the Django-based Operations application.
 
 ## Safety and compatibility
 
-- Treat a push as a production-affecting action. Commit, push, deployment, data
-  rebuild, migration, and rollback actions require explicit authorization.
+- Treat a push as a production-affecting action. `origin`
+  (`chamayer/ninja_dashboard`) is the deployment authority watched by
+  Portainer; `a-m-rose/ninja_dashboard` is the required secondary mirror.
+  Commit, push, deployment, data rebuild, migration, and rollback actions
+  require explicit authorization.
 - Obtain separate approval for commit and push, keep commits to one logical
-  change, and report the short commit hash after a push.
+  change, push an approved deployment commit to `origin` before the secondary
+  mirror, and report the short commit hash after both pushes.
 - Never expose or commit environment values, tokens, customer data, databases,
   generated reports, or local permission settings.
 - Preserve schema and dashboard compatibility unless the request explicitly
