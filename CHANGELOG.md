@@ -2,6 +2,31 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.80.0] — 2026-07-21 — Raw tab: common-field matrix + category grouping + Ninja fallback
+
+### Added
+- **Common-fields matrix on the Identity & raw tab.** Fields that
+  appear in ≥2 source snapshots roll up into a top card, grouped
+  by category (Identity / Serial & IDs / Network / Operating
+  system / Hardware / Presence & state / Enrollment & grouping /
+  Other). Each row shows the value(s) with source attribution:
+  agreement collapses to one line; disagreement renders one line
+  per distinct value with which sources report it, and the row
+  gets an amber highlight + ⚠ prefix so cross-source conflicts
+  jump out visually. Category matching is case-insensitive and
+  strips `_`/`-` so `is_online` and `isOnline` bucket together.
+- **Per-source details card** replaces the previous per-source
+  raw-JSON blocks. Each source's `<details>` opens to (a) a table
+  of fields unique to that source, and (b) a nested `<details>`
+  for the full raw JSON payload — the noisy long-tail is one
+  extra click away, not the default view.
+- **Ninja read-side fallback.** When a Ninja `agent.rmm`
+  observation writes an empty `raw_data` (upstream ingest gap,
+  tracked as a follow-up), the view swaps in
+  `ninja_core.devices.data` for the device's Ninja external_id.
+  The section shows an "ⓘ from ninja_core.devices (raw
+  observation was empty)" note so operators know it's a fallback.
+
 ## [0.79.0] — 2026-07-21 — Device Detail: exemptions, Raw tab, Ninja activity feed
 
 ### Added

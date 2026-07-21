@@ -502,20 +502,103 @@ function swFilter(q) {
 </div>
 
 <div class="card">
-    <h2 style="margin-top:0;">Raw source snapshots
+    <h2 style="margin-top:0;">Common fields across sources
         <span class="muted" style="font-weight:400; font-size:0.85rem;">
-            — most recent observation per source
+            — fields reported by more than one source, grouped by category. Disagreements highlighted.
         </span>
     </h2>
-    {% if raw_snapshots %}
-    {% for snap in raw_snapshots %}
-    <details style="margin-bottom:0.5rem; border:1px solid var(--border); border-radius:5px;">
+    {% if raw_common_by_category %}
+    <style>
+      .raw-cat-heading {
+        padding: 0.35rem 0.65rem; margin: 0.9rem 0 0.15rem;
+        background: #eef2f7; color: #1e3a8a; font-size: 0.72rem;
+        font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em;
+        border-radius: 4px;
+      }
+      .raw-cat-heading:first-child { margin-top: 0; }
+      table.raw-common { width: 100%; border-collapse: collapse; font-size: 0.83rem; }
+      table.raw-common td, table.raw-common th {
+        padding: 0.4rem 0.55rem; vertical-align: top;
+        border-bottom: 1px solid var(--border);
+      }
+      table.raw-common th { text-align: left; font-weight: 600; color: #374151; width: 22%; }
+      table.raw-common tr.differs { background: #fffbea; }
+      table.raw-common tr.differs td.field-name::before {
+        content: "⚠ "; color: #ea580c;
+      }
+      .raw-value-group { display: block; margin-bottom: 0.15rem; }
+      .raw-value-group:last-child { margin-bottom: 0; }
+      .raw-value { font-family: ui-monospace, monospace; font-size: 0.78rem;
+                    color: #1a1a2e; word-break: break-all; }
+      .raw-value-sources { color: var(--muted); font-size: 0.72rem; margin-left: 0.4rem; }
+    </style>
+    {% for cat_name, fields in raw_common_by_category %}
+    <div class="raw-cat-heading">{{ cat_name }}</div>
+    <table class="raw-common">
+        <tbody>
+            {% for f in fields %}
+            <tr class="{% if f.differs %}differs{% endif %}">
+                <td class="field-name"><code>{{ f.field }}</code></td>
+                <td>
+                    {% for vg in f.value_groups %}
+                    <span class="raw-value-group">
+                        <span class="raw-value">{{ vg.value }}</span>
+                        <span class="raw-value-sources">— {{ vg.sources|join:", " }}</span>
+                    </span>
+                    {% endfor %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% endfor %}
+    {% else %}
+    <p class="muted" style="font-size:0.85rem;">
+        No overlapping fields across sources (or only one source reports on this device).
+    </p>
+    {% endif %}
+</div>
+
+<div class="card">
+    <h2 style="margin-top:0;">Per-source details
+        <span class="muted" style="font-weight:400; font-size:0.85rem;">
+            — fields unique to each source + full raw payload
+        </span>
+    </h2>
+    {% if raw_source_specific %}
+    {% for s in raw_source_specific %}
+    <details style="margin-bottom:0.6rem; border:1px solid var(--border); border-radius:5px;">
         <summary style="cursor:pointer; padding:0.55rem 0.75rem; background:#f8f9fb; display:flex; align-items:center; gap:0.55rem; font-size:0.85rem;">
-            <strong>{{ snap.platform }}</strong>
-            <span class="muted">{{ snap.entity_type|humanize_label }}</span>
-            <span class="muted num" style="margin-left:auto; font-size:0.78rem;">observed {{ snap.observed_at|date:"Y-m-d H:i" }}</span>
+            <strong>{{ s.platform }}</strong>
+            <span class="muted">{{ s.entity_type|humanize_label }}</span>
+            <span class="muted" style="font-size:0.75rem;">{{ s.extras|length }} unique field{{ s.extras|length|pluralize }}</span>
+            <span class="muted num" style="margin-left:auto; font-size:0.78rem;">observed {{ s.observed_at|date:"Y-m-d H:i" }}</span>
         </summary>
-        <pre style="margin:0; padding:0.7rem 0.9rem; background:#0f172a; color:#e2e8f0; font-size:0.75rem; overflow:auto; max-height:520px; border-radius:0 0 5px 5px;">{{ snap.pretty }}</pre>
+        <div style="padding:0.7rem 0.9rem;">
+            {% if s.fallback_note %}
+            <p class="muted" style="font-size:0.75rem; margin:0 0 0.5rem;">ⓘ {{ s.fallback_note }}</p>
+            {% endif %}
+            {% if s.extras %}
+            <table class="raw-common" style="margin-bottom:0.7rem;">
+                <tbody>
+                    {% for f in s.extras %}
+                    <tr>
+                        <td><code>{{ f.field }}</code>
+                            <span class="muted" style="font-size:0.7rem;">— {{ f.category }}</span>
+                        </td>
+                        <td><span class="raw-value">{{ f.value }}</span></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p class="muted" style="font-size:0.8rem; margin:0 0 0.5rem;">No fields unique to this source.</p>
+            {% endif %}
+            <details>
+                <summary style="cursor:pointer; font-size:0.78rem; color:var(--muted);">Show full raw payload</summary>
+                <pre style="margin:0.4rem 0 0; padding:0.7rem 0.9rem; background:#0f172a; color:#e2e8f0; font-size:0.75rem; overflow:auto; max-height:520px; border-radius:4px;">{{ s.pretty }}</pre>
+            </details>
+        </div>
     </details>
     {% endfor %}
     {% else %}

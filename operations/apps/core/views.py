@@ -1135,6 +1135,226 @@ def org_policies(request: HttpRequest, org_slug: str) -> HttpResponse:
     )
 
 
+# ── Raw snapshots on Device Detail (Identity & raw tab) ──────────────
+#
+# Groups top-level fields from each source's raw_data payload into a
+# category matrix. Fields that appear in ≥2 sources become the "common"
+# table (with per-value source attribution and disagreement highlight);
+# fields unique to one snapshot go into that source's specifics list.
+# The pretty-printed JSON is still available under each source for the
+# nested / long-tail fields the matrix collapses.
+
+_RAW_FIELD_CATEGORIES: list[tuple[str, set[str]]] = [
+    ("Identity", {
+        "hostname", "hostname", "hostname_", "hostnamefqdn",
+        "host", "name", "displayname", "systemname",
+        "computername", "netbiosname", "dnsname",
+    }),
+    ("Serial & IDs", {
+        "id", "uuid", "deviceid", "agentid", "endpointid",
+        "serial", "serialnumber", "sn", "assettag", "assetid",
+        "productcode",
+    }),
+    ("Network", {
+        "mac", "macaddress", "macaddresses", "ip", "ipaddress",
+        "ipaddresses", "publicip", "privateip", "externalip",
+        "internalip", "gateway", "subnet",
+    }),
+    ("Operating system", {
+        "os", "osname", "osfamily", "osversion", "osrevision",
+        "osarch", "osarchitecture", "osbuildnumber", "osreleaseid",
+        "platform", "kernelversion", "domain", "domainrole",
+    }),
+    ("Hardware", {
+        "cpu", "cpuid", "cpucount", "model", "manufacturer",
+        "chassistype", "totalmemorybytes", "memory",
+        "isvirtualmachine", "vmtype",
+    }),
+    ("Presence & state", {
+        "ishostonline", "isonline", "isactive", "offline",
+        "lastseen", "lastseenat", "lastcontact", "lastcontactat",
+        "lastactive", "lastactivetime", "hoststatechangedate",
+        "lastloggedinuser", "lastuser", "needsreboot",
+        "maintenancestatus", "state",
+    }),
+    ("Enrollment & grouping", {
+        "groupid", "groupname", "organizationid", "organization",
+        "locationid", "location", "policyid", "policyname",
+        "rolepolicyid", "nodeclass", "approvalstatus", "tags",
+        "site", "siteid", "siteid_", "tenantid",
+    }),
+]
+_RAW_CATEGORY_ORDER = [name for name, _ in _RAW_FIELD_CATEGORIES] + ["Other"]
+
+
+def _raw_field_category(field_name: str) -> str:
+    norm = field_name.lower().replace("_", "").replace("-", "")
+    for cat, keys in _RAW_FIELD_CATEGORIES:
+        if norm in keys:
+            return cat
+    return "Other"
+
+
+def _raw_value_display(value) -> tuple[str, bool]:
+    """Return (display_string, is_nested). Nested dicts/lists render as
+    compact JSON so the matrix cell stays one line.
+    """
+    if isinstance(value, (dict, list)):
+        try:
+            return json.dumps(value, sort_keys=True, default=str), True
+        except (TypeError, ValueError):
+            return str(value), True
+    if value is None:
+        return "—", False
+    return str(value), False
+
+
+def _build_raw_snapshot_view(device, links):
+    """Fetch and shape raw snapshots for the Identity & raw tab.
+
+    Returns (per_source_snapshots, common_by_category, source_specific).
+
+    Ninja fallback: agent.rmm observations currently write raw_data as
+    `{}` (upstream ingest gap tracked separately). When we detect that,
+    swap in `ninja_core.devices.data` for the device's Ninja
+    external_id so operators see the actual Ninja device payload.
+    """
+    ninja_external_id = None
+    for link in links:
+        if link.source.name == "ninja":
+            ninja_external_id = link.external_id
+            break
+
+    snapshots: list[dict] = []
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        cur.execute(
+            """
+            SELECT DISTINCT ON (platform, entity_type)
+                   platform, entity_type, observed_at, raw_data
+            FROM operations.entity_observations
+            WHERE tenant_id = %s AND device_id = %s
+            ORDER BY platform, entity_type, observed_at DESC
+            """,
+            [1, str(device.id)],
+        )
+        rows = cur.fetchall()
+
+        ninja_device_row = None
+        need_ninja_fallback = ninja_external_id and any(
+            (platform or "").lower() == "ninja"
+            and (entity_type or "").lower() == "agent.rmm"
+            and (not raw_data or raw_data == {})
+            for platform, entity_type, _observed_at, raw_data in rows
+        )
+        if need_ninja_fallback:
+            try:
+                nid = int(ninja_external_id)
+            except (TypeError, ValueError):
+                nid = None
+            if nid is not None:
+                cur.execute(
+                    "SELECT data FROM ninja_core.devices WHERE id = %s",
+                    [nid],
+                )
+                nrow = cur.fetchone()
+                if nrow:
+                    ninja_device_row = nrow[0] or {}
+
+        for platform, entity_type, observed_at, raw_data in rows:
+            payload = raw_data or {}
+            fallback_note = None
+            if (
+                ninja_device_row is not None
+                and (platform or "").lower() == "ninja"
+                and (entity_type or "").lower() == "agent.rmm"
+                and payload == {}
+            ):
+                payload = ninja_device_row
+                fallback_note = "from ninja_core.devices (raw observation was empty)"
+            try:
+                pretty = json.dumps(payload, indent=2, sort_keys=True, default=str)
+            except (TypeError, ValueError):
+                pretty = str(payload)
+            snapshots.append({
+                "platform": platform,
+                "entity_type": entity_type,
+                "observed_at": observed_at,
+                "raw_data": payload,
+                "pretty": pretty,
+                "fallback_note": fallback_note,
+                "source_label": f"{platform} ({entity_type})",
+            })
+
+    # Field appearances: field_name -> list of (source_label, display, is_nested)
+    field_appearances: dict[str, list[tuple[str, str, bool]]] = {}
+    for snap in snapshots:
+        if not isinstance(snap["raw_data"], dict):
+            continue
+        for field, value in snap["raw_data"].items():
+            display, is_nested = _raw_value_display(value)
+            field_appearances.setdefault(field, []).append(
+                (snap["source_label"], display, is_nested)
+            )
+
+    common_fields: list[dict] = []
+    per_source_extra: dict[str, list[dict]] = {s["source_label"]: [] for s in snapshots}
+    for field, appearances in field_appearances.items():
+        if len(appearances) >= 2:
+            # Group by display value
+            groups: dict[str, list[str]] = {}
+            any_nested = False
+            for src, disp, is_nested in appearances:
+                groups.setdefault(disp, []).append(src)
+                any_nested = any_nested or is_nested
+            value_groups = [
+                {"value": v, "sources": srcs}
+                for v, srcs in sorted(groups.items(), key=lambda kv: (-len(kv[1]), kv[0]))
+            ]
+            common_fields.append({
+                "field": field,
+                "category": _raw_field_category(field),
+                "value_groups": value_groups,
+                "differs": len(value_groups) > 1,
+                "is_nested": any_nested,
+            })
+        else:
+            src, disp, is_nested = appearances[0]
+            per_source_extra.setdefault(src, []).append({
+                "field": field,
+                "category": _raw_field_category(field),
+                "value": disp,
+                "is_nested": is_nested,
+            })
+
+    # Bucket common fields by category, respect fixed order
+    by_cat: dict[str, list[dict]] = {}
+    for f in common_fields:
+        by_cat.setdefault(f["category"], []).append(f)
+    for lst in by_cat.values():
+        lst.sort(key=lambda f: f["field"].lower())
+    common_by_category = [
+        (cat, by_cat[cat]) for cat in _RAW_CATEGORY_ORDER if cat in by_cat
+    ]
+
+    # Source-specific: attach the list to each snapshot in display order
+    source_specific = []
+    for snap in snapshots:
+        extras = per_source_extra.get(snap["source_label"], [])
+        extras.sort(key=lambda f: (_RAW_CATEGORY_ORDER.index(f["category"]), f["field"].lower()))
+        source_specific.append({
+            "source_label": snap["source_label"],
+            "platform": snap["platform"],
+            "entity_type": snap["entity_type"],
+            "observed_at": snap["observed_at"],
+            "extras": extras,
+            "pretty": snap["pretty"],
+            "fallback_note": snap["fallback_note"],
+        })
+
+    return snapshots, common_by_category, source_specific
+
+
 @login_required
 def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpResponse:
     device = get_object_or_404(
@@ -1408,30 +1628,12 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
     # Raw per-source snapshots — only when the Identity & raw tab is
     # active, since raw_data payloads can be several KB per observation.
     raw_snapshots: list[dict] = []
+    raw_common_by_category: list[tuple[str, list[dict]]] = []
+    raw_source_specific: list[dict] = []
     if active_tab == "identity":
-        with transaction.atomic(), connection.cursor() as cur:
-            cur.execute("SET LOCAL operations.tenant_id = 1")
-            cur.execute(
-                """
-                SELECT DISTINCT ON (platform, entity_type)
-                       platform, entity_type, observed_at, raw_data
-                FROM operations.entity_observations
-                WHERE tenant_id = %s AND device_id = %s
-                ORDER BY platform, entity_type, observed_at DESC
-                """,
-                [1, str(device.id)],
-            )
-            for platform, entity_type, observed_at, raw_data in cur.fetchall():
-                try:
-                    pretty = json.dumps(raw_data, indent=2, sort_keys=True, default=str)
-                except (TypeError, ValueError):
-                    pretty = str(raw_data)
-                raw_snapshots.append({
-                    "platform": platform,
-                    "entity_type": entity_type,
-                    "observed_at": observed_at,
-                    "pretty": pretty,
-                })
+        raw_snapshots, raw_common_by_category, raw_source_specific = (
+            _build_raw_snapshot_view(device, links)
+        )
 
     return render(
         request,
@@ -1451,6 +1653,8 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
             "exemptions": exemptions,
             "entity_type_choices": entity_type_choices,
             "raw_snapshots": raw_snapshots,
+            "raw_common_by_category": raw_common_by_category,
+            "raw_source_specific": raw_source_specific,
         },
     )
 
