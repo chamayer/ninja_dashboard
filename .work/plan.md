@@ -1,66 +1,77 @@
 # Active root work plan
 
-Router only. Current work is Operations-scoped; see
-`operations/.work/plan.md`.
+Track: **Legacy agent-compliance refresh bridge**
 
 ## Status
 
-- Planning — no active root-level code change. Awaiting selection of the next
-  slice.
+- In progress — repairing the legacy ingestion path while Operations remains the
+  planned replacement.
 
 ## Goal
 
-- Coordinate the next repository-wide slice only if work crosses the root
-  ingest/reporting boundary.
+Restore reliable legacy agent-compliance refreshes without coupling the legacy
+schema to the new Operations data model.
 
 ## Scope
 
-- In:
-  - Root coordination, release state, and cross-service changes when needed.
-- Out:
-  - Operations-only implementation details.
+- In: normalization of incomplete legacy source observations; focused tests and
+  safe validation of the collection path.
+- Out: legacy-schema migration, changes to Operations ownership, alert-policy
+  changes, cutover/decommissioning, deployment, commit, and push.
 
 ## Files involved
 
-- `operations/.work/plan.md` — module-scoped detail authority.
-- Root `VERSION`, `CHANGELOG.md` — stack release authorities.
+- `ingest/agent_compliance/ingest.py` — legacy collection and persistence.
+- `ingest/tests/` — focused regression coverage if applicable.
+- `operations/.work/plan.md` — pointer to this cross-service work.
 
 ## Steps
 
-- [ ] Keep this plan as a short router while work remains Operations-only.
-- [ ] Expand it only when an approved task changes ingest, root SQL, Metabase,
-  Compose, or other cross-service behavior.
+- [x] Diagnose the live refresh failure.
+- [x] Determine valid fallback semantics for source rows without a device type.
+- [x] Implement the smallest legacy-only normalization; this ingest package has
+  no test suite/configuration, so validation will use focused compilation and
+  a mocked database call.
+- [x] Run focused validation and review the diff.
+- [ ] Obtain separate approval before commit, push, deployment, or a live
+  refresh that could produce alerts.
 
 ## Decisions
 
-- Use the module plan as the detailed authority for Operations-only work.
-- Rationale: avoids duplicated, conflicting plan state.
-- Promote durable decisions to `docs/decisions/`.
+- Keep the repair within the legacy ingest bridge: Operations remains
+  independent and continues to consume its native derived state.
+- Do not invent a device classification until the existing schema constraints,
+  historic values, and requirement matching behavior have been verified.
+
+## Validation
+
+- Focused legacy ingestion test.
+- Relevant Python lint/format checks when the project environment supports
+  them.
+- `git diff --check`.
+- Live collection verification only after explicit approval of its alert
+  behavior and deployment.
 
 ## Current checkpoint
 
-- Stack version **0.63.0** is current.
-- Recent releases: 0.60.0 rare_recent reframe + classifier config; 0.61.0
-  presence matview rename; 0.61.1 `/software` 500 fix; 0.62.0 Finding
-  timestamps + dashboard trend arrows; 0.62.1 hotfix for missing
-  `resolved_at`; 0.63.0 `device_offline` evidence enrichment.
-- Track UI-2 waves **D / E / F** all landed. **G (business data capture)** and
-  **H (dashboard maturity)** are deferred together in the backlog.
-- Root-level candidates outstanding: ingest domain separation; legacy
-  agent-compliance cutover; Metabase card parity audit (informs Operations
-  build-out ahead of Metabase deprecation).
-
-## Remaining blockers
-
-- Human approval of the next slice.
+- Deployed legacy collection is enabled but the last successful matrix refresh
+  was 2026-07-20 20:10 UTC.
+- A manually requested collection on 2026-07-21 fetched all four sources, then
+  failed inserting a LogMeIn observation with a null `device_type` into the
+  non-null legacy `platform_observations.device_type` column.
+- The schema's explicit default is `unknown`; `infer_device_role` intentionally
+  returns `None` for an unclassifiable role. The ingestion bridge now converts
+  that explicit null to `unknown`, allowing the existing `all` scope fallback
+  to apply without guessing a device role.
+- Focused syntax parsing and an isolated mocked-cursor exercise pass; it proves
+  the inserted copy is normalized while the fetched source row is unchanged.
+- `git diff --check` passes. The local Python environment lacks the ingest
+  runtime dependencies (`httpx`, `pydantic`) and cannot write the parent
+  repository bytecode/cache directories, so package import and Ruff checks
+  could not be completed here. Ruff also reports two pre-existing whole-file
+  findings and format drift outside this change.
 
 ## Next action
 
-- Follow `operations/.work/plan.md` unless a cross-service requirement emerges.
-- Untracked reference material at repo root:
-  `Ninja+RMM+Public+API+v2.0.5+Device+Filter+Syntax.pdf` — likely input for a
-  future ingest filter change; not currently scoped.
-
-## Completion
-
-- Keep this plan until the next nontrivial root task replaces it.
+- Obtain separate approval to commit, push, deploy, and run the refresh. A
+  successful legacy collection invokes its configured alert processing.

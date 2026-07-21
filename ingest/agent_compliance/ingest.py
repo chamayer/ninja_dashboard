@@ -425,6 +425,13 @@ def _insert_observations(source_run_id: int, rows: list[dict[str, Any]]) -> None
     insert_rows = []
     for row in rows:
         r = dict(row)
+        # `infer_device_role` deliberately returns None when upstream data
+        # does not identify a server/workstation role.  This legacy table
+        # represents that state as the explicit `unknown` value; passing an
+        # explicit NULL bypasses its database default and aborts the whole
+        # source refresh.
+        if r.get("device_type") is None:
+            r["device_type"] = "unknown"
         r["source_run_id"] = source_run_id
         insert_rows.append(r)
     with db.transaction() as cur:
