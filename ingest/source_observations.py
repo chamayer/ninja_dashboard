@@ -36,6 +36,7 @@ from psycopg.types.json import Json
 
 from ingest import db
 from ingest.observations import write_current_rows
+from ingest.observation_runs import begin_run, complete_run, reconcile_complete_run
 from ingest.connectors import logmein, screenconnect, sentinelone
 from ingest.identity.fast_path import resolve_device_fast
 from ingest.normalize import (
@@ -222,6 +223,11 @@ def _write_observations(
     all_groups: dict[str, list] = {}                        # group_id → [name, count]
     with db.transaction() as cur:
         cur.execute(f"SET LOCAL operations.tenant_id = {_TENANT_ID}")
+        snapshot_scope = source.source_key or source.source_name
+        run_id = begin_run(
+            cur, _TENANT_ID, source.source_binding_id, snapshot_scope,
+            observed_at, expected_rows=len(rows),
+        )
         link_map = _load_client_links(cur, source)
         placeholder_names = _load_placeholder_names(cur)
         for row in rows:
@@ -403,13 +409,16 @@ def _write_observations(
                 current["last_received_at"] = row["observed_at"]
                 current["active"] = True
                 current["withdrawn_at"] = None
-                current["snapshot_scope"] = source.source_key or source.source_name
-                current["last_snapshot_run_id"] = None
+                current["snapshot_scope"] = snapshot_scope
+                current["last_snapshot_run_id"] = run_id
                 current["raw_hash"] = hashlib.sha256(
                     str(row["raw_data"]).encode("utf-8")
                 ).digest()
                 current_rows.append(current)
             write_current_rows(cur, current_rows)
+            complete_run(cur, run_id, len(current_rows))
+            if not getattr(source, "is_partial_snapshot", False):
+                reconcile_complete_run(cur, run_id)
             # A group is unmatched only if NO row in the batch resolved it.
             for gid in resolved_groups:
                 unmatched_groups.pop(gid, None)
