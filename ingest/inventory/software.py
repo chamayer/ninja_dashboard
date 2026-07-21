@@ -26,6 +26,7 @@ from psycopg.types.json import Json
 
 from ingest import db
 from ingest.observations import write_current_rows
+from ingest.observation_runs import begin_run, complete_run, reconcile_complete_run
 from ingest.ninja_client import NinjaClient
 from ingest.runlog import run_log
 
@@ -44,6 +45,12 @@ def run(client: NinjaClient, df: str | None = None) -> int:
     with run_log(domain) as stats:
         observed_at = datetime.now(timezone.utc)
         batch_id = uuid.uuid4()
+        with db.pool.connection() as conn, conn.cursor() as cur:
+            cur.execute(_GUC)
+            run_id = begin_run(
+                cur, TENANT_ID, NINJA_SOURCE_BINDING_ID, "Ninja.software",
+                observed_at,
+            )
 
         device_map = _load_device_map()
         if not device_map:
@@ -107,13 +114,18 @@ def run(client: NinjaClient, df: str | None = None) -> int:
             })
 
             if len(obs_rows) >= _BATCH_SIZE:
-                _flush(obs_rows)
+                _flush(obs_rows, run_id)
                 obs_rows.clear()
 
         if obs_rows:
-            _flush(obs_rows)
+            _flush(obs_rows, run_id)
 
         inserted = seen - unresolved
+        with db.pool.connection() as conn, conn.cursor() as cur:
+            cur.execute(_GUC)
+            complete_run(cur, run_id, inserted)
+            reconcile_complete_run(cur, run_id)
+
         log.info(
             "inventory.software: seen=%d inserted=%d unresolved=%d",
             seen, inserted, unresolved,
@@ -148,7 +160,7 @@ def _load_device_map() -> dict[str, tuple[uuid.UUID, uuid.UUID]]:
         return {row[0]: (row[1], row[2]) for row in cur.fetchall()}
 
 
-def _flush(rows: list[dict]) -> None:
+def _flush(rows: list[dict], run_id: uuid.UUID) -> None:
     with db.pool.connection() as conn, conn.cursor() as cur:
         cur.execute(_GUC)
         db.insert_ignore(
@@ -166,7 +178,7 @@ def _flush(rows: list[dict]) -> None:
             current["active"] = True
             current["withdrawn_at"] = None
             current["snapshot_scope"] = "Ninja.software"
-            current["last_snapshot_run_id"] = None
+            current["last_snapshot_run_id"] = run_id
             current["raw_hash"] = hashlib.sha256(
                 str(row["raw_data"]).encode("utf-8")
             ).digest()
