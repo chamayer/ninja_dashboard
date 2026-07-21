@@ -1999,9 +1999,26 @@ def main() -> None:
         minutes=15,
         id="source_run_queue_stale_recovery",
     )
-    # Legacy AC remains available by manual endpoint during cutover, but no
-    # longer auto-runs. Operations validation uses source_observations,
-    # identity resolver, and platform evaluator.
+    # Legacy AC — re-enabled as a bridge while operators transition to
+    # Operations-native surfaces. Both jobs are internally gated by
+    # settings.AGENT_COMPLIANCE_ENABLED, so scheduling here is safe
+    # even when the flag is off: the jobs fire on cadence and no-op.
+    # Set AGENT_COMPLIANCE_ENABLED=True in the deploy env to actually
+    # run them. Cadence matches modern AGENT_COMPLIANCE_SCHEDULE_HOURS.
+    scheduler.add_job(
+        run_agent_compliance_once,
+        "interval",
+        hours=settings.AGENT_COMPLIANCE_SCHEDULE_HOURS,
+        id="agent_compliance_ingest_cycle",
+        max_instances=1,
+    )
+    scheduler.add_job(
+        run_agent_compliance_evaluate_once,
+        "interval",
+        hours=settings.AGENT_COMPLIANCE_SCHEDULE_HOURS,
+        id="agent_compliance_evaluate_cycle",
+        max_instances=1,
+    )
     scheduler.add_job(
         run_identity_resolver_once,
         "interval",

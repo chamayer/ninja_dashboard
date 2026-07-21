@@ -2,6 +2,32 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.77.0] — 2026-07-21 — Re-enable legacy AC scheduler (bridge)
+
+### Why
+Legacy `ingest/agent_compliance/` was removed from the auto-run
+schedule during cutover to Operations, leaving `ninja_agent_compliance.*`
+tables stale and the AC Metabase dashboards frozen. Operators need
+the AC surface alive a while longer while they transition. Legacy
+AC uses its own platform fetchers (Ninja / S1 / LMI / SC) — not
+Operations data — so re-enabling means the module simply resumes
+its own ingest cycle.
+
+### Changed
+- `ingest/main.py` scheduler now includes two AC jobs:
+  - `agent_compliance_ingest_cycle` — `run_agent_compliance_once`
+    every `AGENT_COMPLIANCE_SCHEDULE_HOURS` (default 4h).
+  - `agent_compliance_evaluate_cycle` — `run_agent_compliance_evaluate_once`
+    on the same cadence.
+- Both jobs are internally gated by `settings.AGENT_COMPLIANCE_ENABLED`
+  (default `False`). Scheduling them is safe when the flag is off —
+  each fires and no-ops. Set `AGENT_COMPLIANCE_ENABLED=True` in the
+  deploy env to actually run them.
+- Comment above the jobs marks this as a bridge, not a permanent
+  arrangement — the legacy module still calls the platform APIs
+  directly (duplicating some ingest that Operations already does).
+  Retire when operators are off the AC dashboards.
+
 ## [0.76.1] — 2026-07-21 — Fix: software finding detail + Subject column always links
 
 ### Fixed
