@@ -35,6 +35,7 @@ from typing import Any
 from psycopg.types.json import Json
 
 from ingest import db
+from ingest.observations import write_current_rows
 from ingest.connectors import logmein, screenconnect, sentinelone
 from ingest.identity.fast_path import resolve_device_fast
 from ingest.normalize import (
@@ -392,6 +393,23 @@ def _write_observations(
                     "tenant_id", "collector_instance_id", "batch_id", "observation_hash"
                 ],
             )
+            # Dual-write the bounded current-state table. History/reconciliation
+            # is enabled only after the complete-snapshot ledger is wired.
+            current_rows = []
+            for row in obs_rows:
+                current = dict(row)
+                current["parent_source_key"] = ""
+                current["last_seen_at"] = row["observed_at"]
+                current["last_received_at"] = row["observed_at"]
+                current["active"] = True
+                current["withdrawn_at"] = None
+                current["snapshot_scope"] = source.source_key or source.source_name
+                current["last_snapshot_run_id"] = None
+                current["raw_hash"] = hashlib.sha256(
+                    str(row["raw_data"]).encode("utf-8")
+                ).digest()
+                current_rows.append(current)
+            write_current_rows(cur, current_rows)
             # A group is unmatched only if NO row in the batch resolved it.
             for gid in resolved_groups:
                 unmatched_groups.pop(gid, None)

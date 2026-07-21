@@ -30,7 +30,12 @@ def material_hash(canonical: dict[str, Any]) -> bytes:
 
 def prepare_observation(row: dict[str, Any]) -> dict[str, Any]:
     canonical = row.get("canonical_data") or {}
+    if hasattr(canonical, "obj"):
+        canonical = canonical.obj
+    if not isinstance(canonical, dict):
+        canonical = {}
     row = dict(row)
+    row["canonical_data"] = canonical
     row["material_hash"] = material_hash(canonical)
     row["material_data"] = material_projection(canonical)
     row["hash_algorithm_version"] = MATERIAL_HASH_VERSION
