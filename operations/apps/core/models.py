@@ -996,6 +996,82 @@ class EntityObservation(TenantScopedModel):
         return f"{self.entity_type}:{self.entity_key}"
 
 
+class EntityObservationCurrent(TenantScopedModel):
+    """Latest accepted observation for one source-scoped identity tuple."""
+
+    observation_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    source_binding = models.ForeignKey(SourceBinding, on_delete=models.PROTECT, related_name="current_observations")
+    collector_instance = models.ForeignKey(CollectorInstance, on_delete=models.PROTECT, related_name="current_observations")
+    client = models.ForeignKey(Client, on_delete=models.PROTECT, null=True, blank=True, related_name="current_observations")
+    device = models.ForeignKey(Device, on_delete=models.PROTECT, null=True, blank=True, related_name="current_observations")
+    entity_type = models.CharField(max_length=80)
+    parent_source_key = models.TextField(default="")
+    entity_key = models.TextField()
+    platform = models.CharField(max_length=80)
+    subplatform = models.CharField(max_length=120, blank=True)
+    observed_at = models.DateTimeField()
+    last_seen_at = models.DateTimeField()
+    last_received_at = models.DateTimeField()
+    active = models.BooleanField(default=True)
+    withdrawn_at = models.DateTimeField(null=True, blank=True)
+    snapshot_scope = models.CharField(max_length=120, blank=True)
+    last_snapshot_run_id = models.UUIDField(null=True, blank=True)
+    raw_data = models.JSONField(default=dict)
+    canonical_data = models.JSONField(default=dict)
+    raw_hash = models.BinaryField(null=True, blank=True)
+    material_hash = models.BinaryField()
+    hash_algorithm_version = models.PositiveIntegerField(default=1)
+    batch_id = models.UUIDField()
+    collector_version = models.CharField(max_length=80, blank=True)
+    schema_version = models.PositiveIntegerField()
+
+    class Meta:
+        db_table = "entity_observation_current"
+        constraints = (
+            models.UniqueConstraint(
+                fields=("tenant", "source_binding", "entity_type", "parent_source_key", "entity_key"),
+                name="uq_obs_current_identity",
+            ),
+        )
+        indexes = (
+            models.Index(fields=("tenant", "active", "entity_type"), name="idx_obs_current_active"),
+            models.Index(fields=("tenant", "observed_at"), name="idx_obs_current_observed"),
+        )
+
+
+class EntityObservationHistory(TenantScopedModel):
+    """SCD-2 material state and presence transitions."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    source_binding = models.ForeignKey(SourceBinding, on_delete=models.PROTECT, related_name="history_observations")
+    collector_instance = models.ForeignKey(CollectorInstance, on_delete=models.PROTECT, related_name="history_observations")
+    entity_type = models.CharField(max_length=80)
+    parent_source_key = models.TextField(default="")
+    entity_key = models.TextField()
+    effective_from = models.DateTimeField()
+    effective_to = models.DateTimeField(null=True, blank=True)
+    last_seen_at = models.DateTimeField()
+    received_at = models.DateTimeField()
+    material_data = models.JSONField(default=dict)
+    material_hash = models.BinaryField()
+    hash_algorithm_version = models.PositiveIntegerField(default=1)
+    active = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = "entity_observation_history"
+        indexes = (
+            models.Index(fields=("tenant", "effective_from"), name="idx_obs_hist_effective"),
+            models.Index(fields=("tenant", "effective_to"), name="idx_obs_hist_retention"),
+        )
+        constraints = (
+            models.UniqueConstraint(
+                fields=("tenant", "source_binding", "entity_type", "parent_source_key", "entity_key"),
+                condition=Q(effective_to__isnull=True),
+                name="uq_obs_hist_open_identity",
+            ),
+        )
+
+
 class DeadLetterObservation(TenantScopedModel):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     source_binding = models.ForeignKey(
