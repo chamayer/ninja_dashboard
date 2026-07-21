@@ -238,9 +238,33 @@ def finding_detail_text(finding):
         return f"{n} candidates share hostname {d.get('hostname', '')}" if n else "hostname collision"
     if name == "duplicate_platform_record":
         return f"duplicate {d.get('platform', '?')} record"
+    # ── software findings — canonical_name + publisher + reason ──
+    if name in (
+        "unauthorized_av", "unauthorized_rmm", "unauthorized_remote_access",
+        "suspicious_name", "install_path_suspicious", "eol_runtime",
+    ):
+        cn = d.get("canonical_name") or ""
+        pub = d.get("publisher") or ""
+        pieces = [cn]
+        if pub:
+            pieces.append(f"({pub})")
+        loc = d.get("location") or d.get("install_path")
+        if loc:
+            pieces.append(f"@ {loc}")
+        return " ".join(pieces) if cn else (d.get("reason") or "")
+    if name == "multi_av_conflict":
+        avs = d.get("av_products") or []
+        return ", ".join(avs) if avs else "multiple AV products"
     if name == "rare_recent":
-        n = d.get("machine_count")
-        return f"on {n} machines" if n else "rare install"
+        n = d.get("fleet_device_count") or d.get("machine_count")
+        days = d.get("first_seen_days")
+        cn = d.get("canonical_name") or ""
+        pieces = [cn] if cn else []
+        if n is not None:
+            pieces.append(f"on {n} machine{'s' if n != 1 else ''}")
+        if days is not None:
+            pieces.append(f"first seen {days}d ago")
+        return " · ".join(pieces) if pieces else "rare install"
     if name == "unmatched_source_group":
         return f"source group {d.get('external_id', '?')}"
     if name == "unnamed_source_group":

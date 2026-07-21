@@ -2,6 +2,24 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.76.1] — 2026-07-21 — Fix: software finding detail + Subject column always links
+
+### Fixed
+- `finding_detail_text` template tag now covers software findings:
+  `unauthorized_av / _rmm / _remote_access`, `suspicious_name`,
+  `install_path_suspicious`, `eol_runtime`, `multi_av_conflict`, and
+  `rare_recent`. Previously showed "—" (no detail) because the tag
+  had no branch for these types. Detail now renders as
+  `canonical_name (publisher) @ location` for the unauthorized/
+  suspicious/EOL types; comma-list of AVs for multi_av_conflict;
+  `canonical · on N machines · first seen Xd ago` for rare_recent.
+- Findings queue Subject column always renders a `device_detail`
+  link when `subject_type='device'` and a client is present, even
+  when `finding_details.hostname` isn't set (software findings
+  don't include hostname). Text falls back to the first 8 chars of
+  `subject_id` if hostname is missing, so the row is never a bare
+  "device" label with no click-through.
+
 ## [0.76.0] — 2026-07-21 — Nav rework + detail column + location truncate
 
 ### Why
