@@ -2,6 +2,24 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.77.2] — 2026-07-21 — Fix: 500 on Issues queue with software findings
+
+### Fixed
+The 0.77.1 template used
+`{% with device_name=row.subject_hostname|default:f.finding_details.hostname %}`.
+Django evaluates the `|default` argument eagerly and raises
+`VariableDoesNotExist` when a dict lookup misses — which happens
+for every software finding
+(`finding_details = {reason, category, publisher, canonical_name}`,
+no `hostname` key). Every Issues queue page load with a software
+finding on it 500ed.
+
+Fix computes the fallback in the view (`_subject_display_name`
+helper picks `hostname_by_device_id.get(subject_id)` first, then
+`finding_details.hostname`, else `None`). Template just uses
+`row.subject_hostname` with a plain-string default. No more dict
+lookups in the template.
+
 ## [0.77.1] — 2026-07-21 — Fix: Subject column shows real hostname + comment leak
 
 ### Fixed

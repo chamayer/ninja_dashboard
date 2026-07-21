@@ -1442,15 +1442,20 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             ).values_list("id", "canonical_hostname")
         )
 
+    def _subject_display_name(f: Finding) -> str | None:
+        if f.subject_type == "device":
+            return (
+                hostname_by_device_id.get(f.subject_id)
+                or (f.finding_details or {}).get("hostname")
+            )
+        return None
+
     findings_with_detail = [
         {
             "f": f,
             "detail": _detail_string(f),
             "online_sources": online_map.get(str(f.subject_id)) if f.subject_id else None,
-            "subject_hostname": (
-                hostname_by_device_id.get(f.subject_id)
-                if f.subject_type == "device" else None
-            ),
+            "subject_hostname": _subject_display_name(f),
         }
         for f in findings
     ]

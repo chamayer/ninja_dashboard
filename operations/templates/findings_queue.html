@@ -192,11 +192,9 @@
                     <td>{{ f.client.display_name|default:"—" }}</td>
                     <td>
                         {% if f.subject_type == "device" and f.client and f.subject_id %}
-                            {% with device_name=row.subject_hostname|default:f.finding_details.hostname %}
                             <a href="{% url 'device_detail' org_slug=f.client.slug device_id=f.subject_id %}">
-                                <code>{{ device_name|default_if_none:"(unnamed)" }}</code>
+                                <code>{{ row.subject_hostname|default:"(unnamed)" }}</code>
                             </a>
-                            {% endwith %}
                         {% elif f.subject_type == "client" and f.client %}
                             <a href="{% url 'org_index' org_slug=f.client.slug %}">{{ f.client.display_name }}</a>
                         {% elif f.finding_details.hostname %}
