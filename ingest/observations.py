@@ -64,6 +64,23 @@ def write_current_rows(cur: Any, rows: Iterable[dict[str, Any]]) -> int:
         "hash_algorithm_version", "batch_id", "collector_version", "schema_version",
     )
     shaped = [{key: row.get(key) for key in columns} for row in prepared]
+    changed = []
+    for row in prepared:
+        cur.execute(
+            """
+            SELECT material_hash, active FROM operations.entity_observation_current
+             WHERE tenant_id = %s AND source_binding_id = %s
+               AND entity_type = %s AND parent_source_key = %s
+               AND entity_key = %s
+            """,
+            (row["tenant_id"], row["source_binding_id"], row["entity_type"],
+             row.get("parent_source_key", ""), row["entity_key"]),
+        )
+        previous = cur.fetchone()
+        if previous is None or previous[0] != row["material_hash"] or previous[1] != row.get("active", True):
+            changed.append(row)
+    if changed:
+        write_history_changes(cur, changed)
     return db.upsert(
         cur,
         "operations.entity_observation_current",
