@@ -29,6 +29,16 @@ enabled), then compare against Operations state as of 0.69.0.
 
 ## Agent Compliance
 
+**Status note (verified 2026-07-21):** the legacy AC ingest module in
+`ingest/agent_compliance/` no longer auto-runs — `ingest/main.py`
+scheduler explicitly excludes it ("Legacy AC remains available by
+manual endpoint during cutover, but no longer auto-runs"). Data in
+`ninja_agent_compliance.*` tables therefore goes stale unless
+someone manually triggers a run. Operations native path
+(source_observations + identity resolver + platform evaluator) is
+the live surface. Retirement of the legacy AC module + schema is a
+bounded destructive slice when ready.
+
 ### `migrated/Multi_org_agent_compliance.ps1` (1972 lines)
 
 Cross-platform multi-org AC checker. What it does:
@@ -126,8 +136,10 @@ This is the substantial one. It's not just a data puller — it's a
 per-client software-risk analyzer with an Excel-based decision
 workflow. What it does:
 
-- Consumes PDQ Inventory CSV exports (not Ninja API — different
-  source, richer signal).
+- Consumes a Ninja-side CSV export produced by
+  `Ninja_sw_inventory.ps1` (same data Operations already ingests
+  continuously via `ingest/inventory/software.py` — the CSV was
+  just the offline export format the analyzer read).
 - Per-client `.xlsx` workbook with sheets: Summary, CVE Details,
   User Risk, Whitelist Suggestions, Action List (Software),
   Action List (Publishers), Approved, Tech Checklist, All Software,
@@ -172,7 +184,8 @@ workflow. What it does:
   is pattern-based only.
 - **User-risk analysis** — Operations doesn't associate installed
   software to users (ClientUser exists but isn't linked to
-  installations). Would need a new join if this matters.
+  installations). Wire the `lastLoggedInUser` field Ninja publishes
+  per device.
 - **Publisher rollups** — Operations has publisher data in the
   catalog but no dedicated rollup view / decision surface *for
   publisher-level decisions* beyond the software classifier's
@@ -189,10 +202,6 @@ workflow. What it does:
   Operators who preferred the Excel decision workflow lose that
   interaction pattern. The web decisions queue is functionally
   equivalent but different UX.
-- **PDQ Inventory as a signal source** — Operations pulls software
-  from Ninja only. PDQ provides different granularity (users,
-  install paths, sizes). If PDQ signal is operationally valuable,
-  a new ingest module would be needed.
 
 ---
 
