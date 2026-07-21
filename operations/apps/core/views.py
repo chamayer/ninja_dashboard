@@ -313,19 +313,17 @@ def home(request: HttpRequest) -> HttpResponse:
     client_health_paginator = Paginator(client_portfolio_all, 25)
     client_health_page = client_health_paginator.get_page(request.GET.get("client_page"))
 
-    # Source health: fresh if the source has produced at least one
-    # entity_observations row in the last 8 hours. Reads live data
-    # (not the retired source_run_queue, whose completed_at is
-    # frozen at legacy-retirement time).
+    # Source health is derived from observations, source runs, and agent
+    # presence during the refresh cycle. The Dashboard must not aggregate raw
+    # observation history on every render.
     stale_sources: list[str] = []
     source_health = []
     eight_hours_ago = timezone.now() - timedelta(hours=8)
     with connection.cursor() as cur:
         cur.execute("""
-            SELECT platform, MAX(observed_at) AS latest
-            FROM operations.entity_observations
+            SELECT platform, last_observed_at
+            FROM operations.source_health_current
             WHERE tenant_id = 1
-            GROUP BY platform
         """)
         latest_obs = {r[0]: r[1] for r in cur.fetchall()}
     for src in _SOURCES:
@@ -3276,25 +3274,17 @@ def sources_status(request: HttpRequest) -> HttpResponse:
         with connection.cursor() as cur:
             cur.execute("SET LOCAL operations.tenant_id = 1")
 
-            # Latest run per platform (any outcome)
+            # Current source health is derived once per refresh cycle. Queue
+            # state and the recent run history below remain live workflow data.
             cur.execute("""
-                SELECT DISTINCT ON (split_part(kind, '.', 2))
-                    split_part(kind, '.', 2), ok, ended_at, rows, error
-                FROM operations.run_log
-                WHERE kind LIKE 'source.%%'
-                ORDER BY split_part(kind, '.', 2), started_at DESC
+                SELECT platform, last_run_ok, last_run_ended_at,
+                       last_run_rows, last_run_error, last_success_at,
+                       last_success_rows, last_agent_observed_at,
+                       client_count, device_count
+                FROM operations.source_health_current
+                WHERE tenant_id = 1
             """)
-            last_run = {r[0]: r for r in cur.fetchall()}
-
-            # Latest successful run per platform
-            cur.execute("""
-                SELECT DISTINCT ON (split_part(kind, '.', 2))
-                    split_part(kind, '.', 2), ended_at, rows
-                FROM operations.run_log
-                WHERE kind LIKE 'source.%%' AND ok
-                ORDER BY split_part(kind, '.', 2), started_at DESC
-            """)
-            last_ok = {r[0]: r for r in cur.fetchall()}
+            source_health = {r[0]: r[1:] for r in cur.fetchall()}
 
             # Currently pending or processing (manual demand queue)
             cur.execute("""
@@ -3303,23 +3293,6 @@ def sources_status(request: HttpRequest) -> HttpResponse:
                 WHERE status IN ('pending', 'processing')
             """)
             active = {r[0]: r for r in cur.fetchall()}
-
-            # Last observation per platform from entity_observations
-            cur.execute("""
-                SELECT platform, MAX(observed_at) AS last_observed
-                FROM operations.entity_observations
-                WHERE entity_type LIKE 'agent.%%'
-                GROUP BY platform
-            """)
-            last_obs = {r[0]: r[1] for r in cur.fetchall()}
-
-            # Observed reach per platform
-            cur.execute("""
-                SELECT platform, COUNT(DISTINCT client_id), COUNT(DISTINCT device_id)
-                FROM operations.device_agent_presence_current
-                GROUP BY platform
-            """)
-            reach = {r[0]: (int(r[1]), int(r[2])) for r in cur.fetchall()}
 
             # Recent run history — every recorded source run
             cur.execute("""
@@ -3343,12 +3316,11 @@ def sources_status(request: HttpRequest) -> HttpResponse:
     now = timezone.now()
     sources = []
     for source in _SOURCES:
-        run = last_run.get(source)
-        ok_run = last_ok.get(source)
+        health = source_health.get(source)
         act = active.get(source)
-        last_success = ok_run[1] if ok_run else None
-        last_fail = run[2] if run and not run[1] else None
-        last_error = (run[4] or None) if run and not run[1] else None
+        last_success = health[4] if health else None
+        last_fail = health[1] if health and not health[0] else None
+        last_error = (health[3] or None) if health and not health[0] else None
         is_stale = last_success is None or (now - last_success).total_seconds() > 8 * 3600
         sources.append({
             "name":          source,
@@ -3356,11 +3328,11 @@ def sources_status(request: HttpRequest) -> HttpResponse:
             "has_pending":   bool(act and act[1] == "pending"),
             "last_success":  last_success,
             "last_failure":  last_fail,
-            "last_rows":     ok_run[2] if ok_run else None,
+            "last_rows":     health[5] if health else None,
             "last_error":    last_error,
-            "last_observed": last_obs.get(source),
-            "client_count":  reach.get(source, (0, 0))[0],
-            "device_count":  reach.get(source, (0, 0))[1],
+            "last_observed": health[6] if health else None,
+            "client_count":  health[7] if health else 0,
+            "device_count":  health[8] if health else 0,
             "is_stale":      is_stale,
         })
 
