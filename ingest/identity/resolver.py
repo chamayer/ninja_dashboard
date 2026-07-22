@@ -581,8 +581,9 @@ def _promote_unmatched_clusters(cur) -> int:
         SELECT client_id, platform, entity_type, entity_key,
                MIN(observed_at), MAX(observed_at),
                (ARRAY_AGG(canonical_data ORDER BY observed_at DESC))[1]
-        FROM operations.entity_observations
+        FROM operations.entity_observation_current
         WHERE tenant_id = %s AND device_id IS NULL AND client_id IS NOT NULL
+          AND active = TRUE
           AND entity_type <> 'org'  -- containers resolve to clients, not devices
         GROUP BY client_id, platform, entity_type, entity_key
         """,
@@ -1355,12 +1356,13 @@ def _sync_device_attributes(cur) -> None:
                     eo.tenant_id,
                     eo.device_id,
                     ARRAY_AGG(DISTINCT LOWER(mac_val)) AS junk_macs
-                FROM operations.entity_observations eo
+                FROM operations.entity_observation_current eo
                 CROSS JOIN LATERAL jsonb_array_elements_text(
                     COALESCE(eo.canonical_data->'macs', '[]'::jsonb)
                 ) AS mac_val
                 WHERE eo.tenant_id = %s
                   AND eo.device_id IS NOT NULL
+                  AND eo.active = TRUE
                   AND eo.observed_at > NOW() - INTERVAL '30 days'
                   AND LOWER(mac_val) IN (
                       '00:00:00:00:00:00',
