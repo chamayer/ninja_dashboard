@@ -32,9 +32,9 @@ def test_client_domain_never_calls_delayed_data_on_track():
 
 def test_known_problem_remains_visible_when_data_is_delayed():
     state = _display_state({"severities": {"critical": 1}}, data_delayed=True)
-    assert state == ("needs_action", "Needs action")
+    assert state == ("needs_action", "Attention")
 
 
 def test_known_problem_remains_visible_when_current_data_is_unavailable():
     state = _display_state({"severities": {"high": 1}}, has_data=False)
-    assert state == ("review", "Review")
+    assert state == ("review", "Watch")

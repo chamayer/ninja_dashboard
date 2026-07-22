@@ -30,8 +30,8 @@ DOMAIN_LABEL_BY_CATEGORY = {
     "data_quality": "Inventory",
 }
 STATE_LABELS = {
-    "needs_action": "Needs action",
-    "review": "Review",
+    "needs_action": "Attention",
+    "review": "Watch",
     "monitor": "Monitor",
     "on_track": "On track",
     "delayed": "Data delayed",
@@ -311,10 +311,10 @@ def build_client_workspace(client, existing: dict) -> dict:
             name="Inventory",
             description="Asset identity and record quality",
             value=f"{inventory['total']:,}",
-            value_label="items need review",
+            value_label="open items",
             facts=[
                 {"label": f"{_count(inventory, 'identity_conflict'):,} identity conflicts"},
-                {"label": f"{_count(inventory, 'device_unenrolled'):,} lifecycle reviews"},
+                {"label": f"{_count(inventory, 'device_unenrolled'):,} lifecycle items"},
                 {"label": f"{locations.get(client.id, 0):,} locations represented"},
             ],
             href=f"{reverse('findings_queue')}?client={client.slug}&category=identity",
@@ -369,7 +369,7 @@ def build_client_workspace(client, existing: dict) -> dict:
             value=f"{existing['software_count']:,}",
             value_label="applications observed",
             facts=[
-                {"label": f"{software['total']:,} findings need review"},
+                {"label": f"{software['total']:,} open findings"},
                 {"label": f"{software['new']:,} new since yesterday"},
                 {"label": f"{existing['software_decisions']:,} decisions recorded"},
             ],
