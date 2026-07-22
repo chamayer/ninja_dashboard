@@ -527,9 +527,10 @@ def _check_name_drift(cur, source_ids_by_name: dict[str, int]) -> None:
                    source_binding_id, entity_key,
                    canonical_data ->> 'name' AS observed_name,
                    canonical_data ->> 'normalized_name' AS observed_norm
-            FROM operations.entity_observations
+            FROM operations.entity_observation_current
             WHERE tenant_id = %s AND entity_type = 'org'
               AND client_id IS NOT NULL
+              AND active = TRUE
             ORDER BY source_binding_id, entity_key, observed_at DESC
         )
         SELECT cl.id, cl.client_id, cl.source_id, cl.external_id,
