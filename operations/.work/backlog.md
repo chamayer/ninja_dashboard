@@ -165,6 +165,24 @@ This is the proposed successor to the genuinely open portion of
 
 Each item needs a focused active plan before implementation.
 
+## Cleanup
+
+### Remove Device Detail Raw tab Ninja fallback
+
+- Candidate scope: delete the transition helper in
+  `apps/core/views.py::_build_raw_snapshot_view` that reads
+  `ninja_core.devices.data` when a Ninja `agent.rmm` observation has
+  `raw_data = '{}'`. Shipped 0.80.0 to protect the Raw tab while the
+  underlying writer bug was diagnosed.
+- Precondition: writer fix in 0.82.0
+  (`ingest/core/devices.py::_write_ninja_observations` now threads the
+  fetched Ninja API row through as `raw_data`) has cycled at least
+  once for every active `_current` row. Verify with:
+  `SELECT count(*) FROM operations.entity_observation_current WHERE
+  platform='Ninja' AND active=TRUE AND raw_data = '{}'::jsonb;`
+  Zero-cardinality result means the fallback can go.
+- Trigger: explicit approval after the verification query returns 0.
+
 ## Consolidate side tables into the standard Findings surface
 
 Principle: operator-visible findings live in `operations.findings` with a
