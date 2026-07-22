@@ -616,7 +616,7 @@ def _promote_unmatched_clusters(cur) -> int:
             if linked:
                 cur.execute(
                     """
-                    UPDATE operations.entity_observations
+                    UPDATE operations.entity_observation_current
                     SET device_id = %s
                     WHERE tenant_id = %s AND platform = %s AND entity_key = %s
                       AND device_id IS NULL
@@ -691,7 +691,7 @@ def _promote_unmatched_clusters(cur) -> int:
                     )
                     cur.execute(
                         """
-                        UPDATE operations.entity_observations
+                        UPDATE operations.entity_observation_current
                         SET device_id = %s
                         WHERE tenant_id = %s AND platform = %s AND entity_key = %s
                           AND device_id IS NULL
