@@ -5230,13 +5230,37 @@ def device_merge(
 @login_required
 def operations_admin_overview(request: HttpRequest) -> HttpResponse:
     """Custom Operations Admin landing; Django Admin remains at /admin/."""
+    now = timezone.now()
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        cur.execute(
+            """
+            SELECT platform, last_observed_at, last_run_ok
+            FROM operations.source_health_current
+            WHERE tenant_id = 1
+            """
+        )
+        source_health = cur.fetchall()
+    stale_sources = sum(
+        observed_at is None or not run_ok or (now - observed_at).total_seconds() > 8 * 3600
+        for _platform, observed_at, run_ok in source_health
+    )
     return render(
         request,
         "operations_admin_overview.html",
         {
             "admin_group": "overview",
             "profile_count": RequirementProfile.objects.filter(tenant_id=1).count(),
-            "source_count": Source.objects.count(),
+            "profiles_without_clients": RequirementProfile.objects.filter(
+                tenant_id=1, clients__isnull=True
+            ).count(),
+            "alert_rule_count": NotificationRule.objects.filter(tenant_id=1, enabled=True).count(),
+            "suppression_count": SuppressionRule.objects.filter(tenant_id=1).count(),
+            "source_count": len(source_health),
+            "stale_sources": stale_sources,
+            "admin_finding_count": AdminFinding.objects.filter(
+                tenant_id=1, status__in=("open", "acknowledged")
+            ).count(),
         },
     )
 

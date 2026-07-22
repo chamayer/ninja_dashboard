@@ -3,10 +3,37 @@
 {% block title %}Admin overview{% endblock %}
 
 {% block content %}
-<div class="page-heading"><div><h1>Operations Admin</h1><p>Configuration, review queues, and integration health.</p></div></div>
-<div class="tile-grid">
-  <a class="tile" href="{% url 'client_candidates_queue' %}"><div class="tile-label">Review</div><div class="tile-value">{{ nav_pending_client_candidates|add:nav_pending_merges|add:nav_pending_software_decisions }}</div><p class="muted">Client candidates, merges, and software decisions</p></a>
-  <a class="tile" href="{% url 'requirement_profiles_list' %}"><div class="tile-label">Configuration</div><div class="tile-value">{{ profile_count }}</div><p class="muted">Service requirements, alerts, and rules</p></a>
-  <a class="tile" href="{% url 'sources_status' %}"><div class="tile-label">Integrations</div><div class="tile-value">{{ source_count }}</div><p class="muted">Sources, coverage, and ingest health</p></a>
+<style>
+  .admin-overview { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:1rem; }
+  .admin-section { background:#fff; border:1px solid var(--border); border-radius:7px; overflow:hidden; }
+  .admin-section header { display:block; padding:.85rem 1rem; background:#f8f9fb; color:#1a1a2e; border-bottom:1px solid var(--border); }
+  .admin-section h2 { margin:0; font-size:1rem; }
+  .admin-section header p { margin:.2rem 0 0; color:var(--muted); font-size:.75rem; }
+  .admin-links { list-style:none; padding:0; margin:0; }
+  .admin-links a { display:flex; justify-content:space-between; gap:.75rem; padding:.75rem 1rem; color:#1a1a2e; text-decoration:none; border-bottom:1px solid var(--border); }
+  .admin-links a:hover { background:#f4f7fb; }
+  .admin-links li:last-child a { border-bottom:0; }
+  .admin-links small { display:block; margin-top:.12rem; color:var(--muted); font-size:.72rem; }
+  .admin-count { min-width:1.5rem; color:#1e40af; font-size:1.1rem; font-weight:700; text-align:right; }
+  .admin-count.warn { color:#b91c1c; }
+  @media (max-width:900px) { .admin-overview { grid-template-columns:1fr; } }
+</style>
+<div class="page-heading"><div><h1>Operations Admin</h1><p>Review decisions, maintain service policy, and keep integrations healthy.</p></div></div>
+<div class="admin-overview">
+  <section class="admin-section"><header><h2>Review now</h2><p>Items that need an operator decision.</p></header><ul class="admin-links">
+    <li><a href="{% url 'client_candidates_queue' %}"><span>Client candidates<small>Unresolved source groups</small></span><strong class="admin-count{% if nav_pending_client_candidates %} warn{% endif %}">{{ nav_pending_client_candidates }}</strong></a></li>
+    <li><a href="{% url 'merge_candidates_queue' %}"><span>Device merges<small>Potential duplicate device records</small></span><strong class="admin-count{% if nav_pending_merges %} warn{% endif %}">{{ nav_pending_merges }}</strong></a></li>
+    <li><a href="{% url 'software_decisions_queue' %}"><span>Software decisions<small>Classify software without leaving this workflow</small></span><strong>Open →</strong></a></li>
+  </ul></section>
+  <section class="admin-section"><header><h2>Configuration</h2><p>Coverage policy and notification behavior.</p></header><ul class="admin-links">
+    <li><a href="{% url 'requirement_profiles_list' %}"><span>Service requirements<small>{{ profiles_without_clients }} profiles currently have no clients</small></span><strong class="admin-count">{{ profile_count }}</strong></a></li>
+    <li><a href="{% url 'notification_rules_list' %}"><span>Alert rules<small>Enabled notification rules</small></span><strong class="admin-count">{{ alert_rule_count }}</strong></a></li>
+    <li><a href="{% url 'notification_suppressions_list' %}"><span>Suppressions<small>Active exceptions to finding notifications</small></span><strong class="admin-count">{{ suppression_count }}</strong></a></li>
+  </ul></section>
+  <section class="admin-section"><header><h2>Integration health</h2><p>Collection and platform health signals.</p></header><ul class="admin-links">
+    <li><a href="{% url 'sources_status' %}"><span>Sources<small>Delayed, failed, or current collection</small></span><strong class="admin-count{% if stale_sources %} warn{% endif %}">{{ stale_sources }} / {{ source_count }}</strong></a></li>
+    <li><a href="{% url 'findings_admin_health' %}"><span>Ingest health<small>Platform findings and failed processing</small></span><strong class="admin-count{% if admin_finding_count %} warn{% endif %}">{{ admin_finding_count }}</strong></a></li>
+    <li><a href="{% url 'fleet_coverage' %}"><span>Coverage<small>Cross-client service coverage gaps</small></span><strong>View →</strong></a></li>
+  </ul></section>
 </div>
 {% endblock %}

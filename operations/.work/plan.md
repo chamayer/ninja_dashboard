@@ -58,6 +58,10 @@ discoverable from a proportional two-tier navigation shell.
 - Follow-up fixed: the client-row More dropdown was clipped by horizontal
   scrolling. Its Users, Locations, History, and Policies destinations are now
   ordinary second-row links.
+- Follow-up refined: the Operations Admin landing now presents separate
+  actionable Review, Configuration, and Integration Health panels rather than
+  generic category tiles. It exposes pending decisions, policy inventory, and
+  delayed-source/admin-finding status with direct destinations.
 
 ## Next action
 
