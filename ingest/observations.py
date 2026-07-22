@@ -10,6 +10,8 @@ import hashlib
 import json
 from typing import Any, Iterable
 
+from psycopg.types.json import Json
+
 from ingest import db
 
 MATERIAL_HASH_VERSION = 1
@@ -35,9 +37,12 @@ def prepare_observation(row: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(canonical, dict):
         canonical = {}
     row = dict(row)
-    row["canonical_data"] = canonical
+    raw_data = row.get("raw_data")
+    if isinstance(raw_data, dict):
+        row["raw_data"] = Json(raw_data)
+    row["canonical_data"] = Json(canonical)
     row["material_hash"] = material_hash(canonical)
-    row["material_data"] = material_projection(canonical)
+    row["material_data"] = Json(material_projection(canonical))
     row["hash_algorithm_version"] = MATERIAL_HASH_VERSION
     return row
 
