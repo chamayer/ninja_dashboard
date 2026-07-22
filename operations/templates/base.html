@@ -313,8 +313,11 @@
                 <a class="nav-link nav-context {% if request.resolver_match and 'software' in request.resolver_match.url_name and 'decision' not in request.resolver_match.url_name %}active{% endif %}" href="{% url 'org_software' org_slug=current_client.slug %}">Software</a>
                 <a class="nav-link nav-context" href="{% url 'findings_queue' %}?client={{ current_client.slug }}">Issues</a>
                 <a class="nav-link nav-context {% if request.resolver_match.url_name == 'client_requirements_config' %}active{% endif %}" href="{% url 'client_requirements_config' current_client.slug %}">Configuration</a>
+                <a class="nav-link nav-context" href="{% url 'org_index' org_slug=current_client.slug %}#client-users">Users</a>
+                <a class="nav-link nav-context" href="{% url 'org_index' org_slug=current_client.slug %}#client-locations">Locations</a>
+                <a class="nav-link nav-context" href="{% url 'org_index' org_slug=current_client.slug %}#recent-changes">History</a>
+                <a class="nav-link nav-context {% if request.resolver_match.url_name == 'org_policies' %}active{% endif %}" href="{% url 'org_policies' org_slug=current_client.slug %}">Policies</a>
                 <div class="nav-fill"></div>
-                <details class="nav-more"><summary class="nav-link nav-context">More ▾</summary><div class="nav-more-menu"><a href="{% url 'org_index' org_slug=current_client.slug %}#client-users">Users</a><a href="{% url 'org_index' org_slug=current_client.slug %}#client-locations">Locations</a><a href="{% url 'org_index' org_slug=current_client.slug %}#recent-changes">History</a><a href="{% url 'org_policies' org_slug=current_client.slug %}">Policies</a></div></details>
             </div>
             {% elif admin_group %}
             <div class="nav-row nav-context-row" aria-label="Operations Admin navigation">

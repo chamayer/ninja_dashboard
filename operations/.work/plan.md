@@ -55,6 +55,9 @@ discoverable from a proportional two-tier navigation shell.
   were removed from page bodies.
 - Validation: Django check, URL reversal, template loading, focused
   client-workspace tests (8), import/format checks, and diff check pass.
+- Follow-up fixed: the client-row More dropdown was clipped by horizontal
+  scrolling. Its Users, Locations, History, and Policies destinations are now
+  ordinary second-row links.
 
 ## Next action
 
