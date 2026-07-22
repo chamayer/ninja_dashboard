@@ -95,3 +95,32 @@ shell until a later schema-removal migration.
 
 - Stop legacy append writes, deploy seed tooling, and execute the verified
   current/history migration before truncating legacy data.
+
+## Post-deployment hardening (2026-07-22)
+
+- Audit against ADR-0007 identified four gaps between intent and shipped
+  code — all closed:
+  1. `ingest/observations.py::write_current_rows` now takes a per-tuple
+     `pg_advisory_xact_lock` before `SELECT ... FOR UPDATE`, so absent-row
+     races between concurrent writers are serialized.
+  2. Out-of-order guard drops rows in Python when
+     `row.observed_at <= _current.observed_at` (equal timestamps are stale
+     to prevent zero-length SCD-2 intervals). SQL upsert mirrors the guard
+     with `WHERE _current.observed_at < EXCLUDED.observed_at`.
+  3. Bespoke observation upsert (not `db.upsert`) uses `COALESCE` on
+     `device_id` / `client_id` so a fresh connector NULL cannot clear a
+     resolver-populated value. Python-side preservation also applies.
+  4. Nightly retention wired in `ingest/main.py::run_observation_history_prune_once`
+     via `retention_observations.purge_all(days=90)` calling the
+     security-definer function `operations.purge_closed_observation_history`.
+- Also fixed: `write_history_changes` now closes with the prior
+  `_current.last_seen_at` (side-banded as `_prior_last_seen_at`), not the
+  incoming row's `last_seen_at`.
+- Tests: `ingest/tests/test_observations.py` covers out-of-order (older
+  and equal-timestamp), resolved-ID preservation, material-change close
+  with prior last_seen_at, heartbeat without material change, new
+  identity opens first history version, batch sorted by identity before
+  locking. `ingest/tests/test_retention_observations.py` asserts the
+  retention path routes through the security-definer function and never
+  issues raw DELETE. 12 tests pass locally.
+- ADR-0007 promoted to v5 with the hardening documented.

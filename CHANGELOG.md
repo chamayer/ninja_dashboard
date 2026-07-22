@@ -2,6 +2,63 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.81.0] — 2026-07-22 — Observation writer hardening + retention wired (ADR-0007 v5)
+
+### Fixed
+- **Absent-row race in `ingest/observations.py::write_current_rows`.**
+  `SELECT ... FOR UPDATE` alone cannot lock a row that does not exist
+  yet, so two concurrent writers claiming the same new identity could
+  both open a history version. The primitive now takes a
+  transaction-scoped `pg_advisory_xact_lock(hashtextextended(...))`
+  keyed on the 5-column identity tuple before the FOR UPDATE read.
+  Batches are pre-sorted by identity to prevent deadlocks between
+  concurrent writers that share some — but not all — identities.
+- **Out-of-order snapshot could overwrite newer `_current` state.** The
+  previous `db.upsert` path wrote `EXCLUDED.c` on every column with no
+  timestamp predicate. Delayed workers or clock-skewed sources could
+  poison newer state and open a phantom SCD-2 interval. The primitive
+  now drops rows in Python when `row.observed_at <= _current.observed_at`
+  (equal timestamps treated as stale to prevent zero-length intervals),
+  and the bespoke SQL upsert mirrors the guard as defence in depth:
+  `WHERE _current.observed_at < EXCLUDED.observed_at`.
+- **Connector NULL could clear resolver-populated `device_id`/`client_id`.**
+  Bespoke upsert now uses
+  `COALESCE(EXCLUDED.client_id, entity_observation_current.client_id)`
+  (and same for `device_id`), so post-hoc resolver and merge writes are
+  preserved. Python-side merge runs too, before shaping.
+- **`_history` close attributed the closing time to the new state.**
+  `write_history_changes` now closes with `_prior_last_seen_at`
+  (side-banded from the current row's prior `last_seen_at`), not the
+  incoming row's `last_seen_at`. The new state's `last_seen_at` is
+  correctly the new observation's confirmation time.
+
+### Added
+- **Nightly closed-history retention scheduler.** `ingest/main.py::
+  run_observation_history_prune_once` calls
+  `retention_observations.purge_all()`, which delegates to the
+  security-definer function `operations.purge_closed_observation_history(
+  cutoff)` (migration 0074). Default 90 days; overridable via
+  `OBSERVATION_HISTORY_RETENTION_DAYS` and
+  `OBSERVATION_HISTORY_RETENTION_HOUR`. Covers both
+  `entity_observation_history` and `software_installation_history`.
+  Cannot delete open SCD-2 versions (function DELETE is scoped to
+  `effective_to IS NOT NULL`).
+- Focused tests: 7 new hardening tests in
+  `ingest/tests/test_observations.py` (out-of-order older, equal-
+  timestamp, resolved-ID preservation, material-change with prior
+  last_seen_at, heartbeat without material change, new identity opens
+  first history version, batch sorted by identity before locking). New
+  `ingest/tests/test_retention_observations.py` asserts retention
+  routes through the security-definer function and never issues raw
+  DELETE from application code.
+
+### Changed
+- `ingest/core/devices.py` and `ingest/source_observations.py` now
+  record the actual return count from `write_current_rows` on the
+  snapshot run ledger (`operations.observation_snapshot_runs`) instead
+  of the input length, so skipped out-of-order rows are not counted as
+  written. Cosmetic accuracy improvement to the run log.
+
 ## [0.80.0] — 2026-07-21 — Raw tab: common-field matrix + category grouping + Ninja fallback
 
 ### Added

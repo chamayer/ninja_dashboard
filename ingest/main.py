@@ -32,7 +32,7 @@ from datetime import datetime, timedelta, timezone
 import httpx
 from apscheduler.schedulers.background import BackgroundScheduler
 
-from ingest import db, migrations
+from ingest import db, migrations, retention_observations
 from ingest.derived import refresh_after_collection
 from ingest.config import settings
 from ingest.logging_utils import install_log_safety
@@ -344,6 +344,24 @@ def run_review_digest_once() -> None:
         sent = review_digest.send_review_digest(datetime.now(timezone.utc))
         stats["alerts_sent"] = sent
     log.info("Review digest complete")
+
+
+def run_observation_history_prune_once() -> None:
+    """Delete closed history versions older than the configured retention.
+
+    Delegates to `operations.purge_closed_observation_history(cutoff)` via
+    `retention_observations.purge_all()`. The security-definer function
+    owns the "never delete an open version" guarantee (see migration 0074).
+    """
+    days = int(getattr(settings, "OBSERVATION_HISTORY_RETENTION_DAYS", 90))
+    log.info("Observation history retention starting: keep %d days", days)
+    try:
+        with run_log("retention.observation_history") as stats:
+            generic, software = retention_observations.purge_all(days=days)
+            stats["generic_deleted"] = generic
+            stats["software_deleted"] = software
+    except Exception:
+        log.exception("Observation history retention failed")
 
 
 def _safe(name: str, func, *args) -> None:
@@ -2055,6 +2073,16 @@ def main() -> None:
             id="notifications_digest_cycle",
             max_instances=1,
         )
+    # Nightly closed-history retention. Never touches open SCD-2 versions
+    # (guaranteed by the security-definer function in migration 0074).
+    scheduler.add_job(
+        run_observation_history_prune_once,
+        "cron",
+        hour=int(getattr(settings, "OBSERVATION_HISTORY_RETENTION_HOUR", 3)),
+        minute=0,
+        id="observation_history_retention_cycle",
+        max_instances=1,
+    )
     if settings.SOFTWARE_QUEUE_ENABLED:
         scheduler.add_job(
             enqueue_all_orgs_once,

@@ -390,6 +390,7 @@ def _write_observations(
                 "schema_version":        1,
             })
 
+        written = 0
         if obs_rows:
             current_rows = []
             for row in obs_rows:
@@ -405,8 +406,8 @@ def _write_observations(
                     str(row["raw_data"]).encode("utf-8")
                 ).digest()
                 current_rows.append(current)
-            write_current_rows(cur, current_rows)
-        complete_run(cur, run_id, len(obs_rows))
+            written = write_current_rows(cur, current_rows)
+        complete_run(cur, run_id, written)
         if not getattr(source, "is_partial_snapshot", False):
             reconcile_complete_run(cur, run_id)
             # A group is unmatched only if NO row in the batch resolved it.

@@ -598,8 +598,8 @@ def _write_ninja_observations(
                         str(row["raw_data"]).encode("utf-8")
                     ).digest()
                     current_rows.append(current)
-                write_current_rows(cur, current_rows)
-                complete_run(cur, run_id, len(current_rows))
+                written = write_current_rows(cur, current_rows)
+                complete_run(cur, run_id, written)
                 reconcile_complete_run(cur, run_id)
             if unknown_classes:
                 # Never silently dropped — surfaced here, admin finding in E2.
