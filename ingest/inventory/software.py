@@ -1,9 +1,4 @@
-"""Ninja software inventory with dedicated current state and SCD-2 history.
-
-The legacy observation stream remains a temporary rollback source.  Software
-itself is a device-to-product relationship inventory, so it deliberately does
-not populate the generic observation current/history tables.
-"""
+"""Ninja software inventory with dedicated current state and SCD-2 history."""
 
 from __future__ import annotations
 
@@ -130,12 +125,6 @@ def _load_device_map() -> dict[str, tuple[uuid.UUID, uuid.UUID]]:
 def _flush(rows: list[dict]) -> None:
     with db.pool.connection() as conn, conn.cursor() as cur:
         cur.execute(_GUC)
-        db.insert_ignore(
-            cur,
-            "operations.entity_observations",
-            rows,
-            ["tenant_id", "collector_instance_id", "batch_id", "observation_hash"],
-        )
         _write_installation_current(cur, rows)
 
 

@@ -584,12 +584,6 @@ def _write_ninja_observations(
                 })
 
             if obs_rows:
-                db.insert_ignore(
-                    cur,
-                    "operations.entity_observations",
-                    obs_rows,
-                    conflict_keys=["tenant_id", "collector_instance_id", "batch_id", "observation_hash"],
-                )
                 current_rows = []
                 for row in obs_rows:
                     current = dict(row)
@@ -615,7 +609,7 @@ def _write_ninja_observations(
                 )
             return len(obs_rows)
     except Exception:
-        log.exception("Ninja entity_observations write failed — continuing")
+        log.exception("Ninja current-observation write failed — continuing")
         return 0
 
 

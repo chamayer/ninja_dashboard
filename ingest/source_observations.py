@@ -391,16 +391,6 @@ def _write_observations(
             })
 
         if obs_rows:
-            db.insert_ignore(
-                cur,
-                "operations.entity_observations",
-                obs_rows,
-                conflict_keys=[
-                    "tenant_id", "collector_instance_id", "batch_id", "observation_hash"
-                ],
-            )
-            # Dual-write the bounded current-state table. History/reconciliation
-            # is enabled only after the complete-snapshot ledger is wired.
             current_rows = []
             for row in obs_rows:
                 current = dict(row)

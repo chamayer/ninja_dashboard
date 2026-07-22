@@ -1,35 +1,34 @@
 # Active Operations work plan
 
-Track: **Dedicated software installation current and history**
+Track: **Observation current/history data migration and legacy retirement**
 
 ## Status
 
-- In progress. Generic observation current/history is deployed for non-software
-  sources. Software still dual-writes the legacy observation stream and generic
-  observation tables, then rebuilds `software_installations_current`; that
-  yields roughly 427k device/software identities and makes generic state carry
-  a relationship inventory it is not intended to own.
+- In progress. Current/history schema and direct software current writer are
+  deployed. Legacy `entity_observations` still holds 3.04M append-cycle rows
+  and all three writers still append to it; this is the last storage-growth
+  path and blocks retirement.
 
 ## Goal
 
-Make `software_installations_current` the direct current-state store and add
-`software_installation_history` for SCD-2 install/change/removal history,
-without losing the existing software UI/query contract or prematurely removing
-the legacy observation stream.
+Migrate the retained legacy state into bounded current/history stores, stop
+legacy appends, validate runtime readers and cardinality, then truncate the
+3.04M-row legacy table while retaining its empty schema only as a compatibility
+shell until a later schema-removal migration.
 
 ## Scope
 
-- **In:** migration for dedicated history, tenant/RLS grants, direct Ninja
-  software writer, complete-snapshot staleness/history reconciliation,
-  generic-seed exclusion, tests and deployment validation.
-- **Out:** retaining raw payloads in the dedicated history (deferred), deleting
-  legacy `entity_observations`, and historical backfill before the direct
-  writer is verified in production.
+- **In:** current-state seed, baseline open-history seed, removal of legacy
+  writer calls, production verification, and approved legacy data truncation.
+- **Out:** reconstructing prior change intervals from append-cycle payloads;
+  the retained baseline is explicitly a starting state and future history is
+  change-only. Raw payload history remains deferred.
 
 ## Affected files
 
 - `apps/core/migrations/0073_software_installation_history.py`
 - `apps/core/management/commands/seed_observation_current.py`
+- `apps/core/management/commands/seed_observation_history.py`
 - `../ingest/inventory/software.py`
 - `../ingest/tests/test_software_inventory.py` (if present/new)
 - `.work/backlog.md`, `.work/plan.md`
@@ -49,6 +48,9 @@ the legacy observation stream.
 - Legacy append writes remain during the rollout for rollback compatibility.
   The generic software current/history write and refresh-function dependency
   are removed from the writer once the dedicated path is in place.
+- The migration seeds one truthful baseline interval per current identity; it
+  does not invent historical transitions from heartbeat rows. New writes carry
+  forward change-only SCD-2 history from that baseline.
 
 ## Steps
 
@@ -60,17 +62,19 @@ the legacy observation stream.
   reconcile only complete fleet runs.
 - [x] Exclude software from generic-current seed; document raw-data deferral.
 - [x] Add focused tests and run checks/formatting/migration review.
-- [ ] Commit, push both remotes, confirm GitOps rollout and live data shape.
-- [ ] Seed current state only after deployment validation; plan historical
-  backfill separately with an explicit retention window.
+- [ ] Remove the three legacy writer calls and add idempotent baseline-history
+  seed tooling.
+- [ ] Deploy, seed current and baseline history, and validate identity/count
+  parity with legacy latest-state queries.
+- [ ] Truncate legacy rows and confirm no writer or reader regresses.
 
 ## Validation plan
 
-- Targeted software inventory tests plus `python manage.py check`, `ruff check
-  .`, `ruff format --check .`, and `git diff --check`.
-- Review migration SQL for tenant GUC/RLS and full-versus-scoped reconciliation.
-- After GitOps deploy, verify migrations, healthy containers, writer logs, and
-  counts for dedicated current/history without a generic-software increase.
+- Targeted observation tests plus `python manage.py check`, `ruff check .`,
+  `ruff format --check .`, and `git diff --check`.
+- Compare legacy latest identities to seeded current rows; verify every active
+  current row has one open baseline history interval.
+- After truncation, verify containers, writer logs, and zero legacy rows.
 
 ## Checkpoint
 
@@ -89,5 +93,5 @@ the legacy observation stream.
 
 ## Next action
 
-- Review the staged diff, commit and push both remotes, then confirm GitOps
-  deployment before running any current-state seed.
+- Stop legacy append writes, deploy seed tooling, and execute the verified
+  current/history migration before truncating legacy data.
