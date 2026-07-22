@@ -1,68 +1,31 @@
 # Active Operations work plan
 
-Track: **Merged device Identity record**
+Track: **Devices estate dashboard**
 
 ## Status
 
-- In progress. The Identity tab must present collected data as a neutral,
-  grouped merged record rather than an issue/review surface.
+- Complete. Devices now presents estate/freshness context before device
+  exploration without becoming a triage queue.
 
 ## Goal
 
-Make device Identity a neutral, grouped merged record: show combined values
-with quiet source attribution, then retain all per-source fields in collapsed
-reference panels.
-
-## Scope
-
-- **In:** Identity-tab presentation, conflict/coverage summary data, focused
-  template tests and validation.
-- **Out:** changing identity resolution, source observations, merge behavior,
-  or raw-data retention.
-
-## Affected files
-
-- `apps/core/views.py`
-- `templates/device_detail.html`
-- `apps/core/tests/`
-- `.work/plan.md`
+Show the shape, freshness, and discoverability of the device estate without
+turning the Devices domain into a triage queue.
 
 ## Decisions
 
-- Source differences are alternative reports for the same field, never an
-  alert state in this tab.
-- Source attribution is muted parenthetical context beside each value.
-- Each collapsed source panel lists every source-native field, not only fields
-  absent from the merged record; raw JSON remains a final fallback.
+- Issues, Patching, and Review own work queues. Devices only provides
+  contextual status and drill-throughs.
+- Offline and not-reporting are distinct device states.
+- Legacy/Metabase is validation input, not the page's information architecture.
 
 ## Steps
 
-- [x] Inspect existing Identity-tab markers and layout.
-- [x] Add concise summary/conflict presentation data.
-- [x] Restructure the template around review-first and advanced details.
-- [ ] Replace review framing with the merged-record presentation.
-- [ ] Show all fields in collapsed per-source panels.
-- [ ] Validate, deploy, and exercise the affected Identity tab and issue link.
+- [x] Add estate/freshness and contextual coverage/identity summaries.
+- [x] Use human-readable current state in the device grid.
+- [x] Validate focused Devices rendering and queries.
 
-## Validation plan
+## Validation
 
-- Test the summary/conflict grouping independently.
-- Run Django checks, focused tests, template rendering, formatting, and diff
-  checks.
-- Exercise the deployed affected Identity tab after approved deployment.
-
-## Checkpoint
-
-- The warning triangle is intentionally emitted for any normalized field with
-  multiple reported values; “1 source” is informational coverage only.
-- The current tab leads with the full field matrix and raw payloads, which
-  makes it read as a debug surface.
-- The device-header Issues link supplied `device`, but Findings queue filters
-  by `subject_id`; the query parameter is now corrected.
-- Local validation passed: Django checks, focused dashboard tests (15), and
-  whitespace diff validation.
-- Prior hotfixes are deployed: `7c0f334`, `ae46f38`, and `1b61016`.
-
-## Next action
-
-- Commit, deploy, and validate the redesigned Identity tab and issue link.
+- `python manage.py check`, template loading, Python compilation, import
+  formatting, and `git diff --check` pass.

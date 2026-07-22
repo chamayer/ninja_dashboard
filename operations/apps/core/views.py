@@ -2754,6 +2754,7 @@ def devices_page(request: HttpRequest) -> HttpResponse:
     os_filter = request.GET.get("os", "")  # Windows | macOS | Linux | Other
     role_filter = request.GET.get("role", "")  # server | workstation | unknown
     online_filter = request.GET.get("online", "")  # online | offline
+    state_filter = request.GET.get("state", "")  # not-reporting
     client_filter = request.GET.get("client", "")  # slug
 
     with transaction.atomic(), connection.cursor() as cur:
@@ -2785,6 +2786,31 @@ def devices_page(request: HttpRequest) -> HttpResponse:
             "stale": row[6],
         }
 
+        cur.execute(
+            """
+            SELECT
+              COUNT(*) FILTER (WHERE fc.name = 'coverage')::int,
+              COUNT(*) FILTER (WHERE fc.name = 'identity')::int
+            FROM operations.findings f
+            JOIN operations.finding_types ft ON ft.id = f.finding_type_id
+            JOIN operations.finding_categories fc ON fc.id = ft.category_id
+            WHERE f.tenant_id = 1
+              AND f.status IN ('open', 'acknowledged', 'investigating')
+              AND f.subject_type = 'device'
+            """
+        )
+        coverage_issues, identity_issues = cur.fetchone()
+        cur.execute(
+            """
+            SELECT COUNT(*)::int
+            FROM operations.source_health_current
+            WHERE tenant_id = 1
+              AND (last_run_ok = FALSE OR last_observed_at IS NULL
+                   OR last_observed_at < NOW() - INTERVAL '8 hours')
+            """
+        )
+        delayed_sources = cur.fetchone()[0]
+
         # OS group breakdown for chip strip
         cur.execute(
             """
@@ -2810,6 +2836,10 @@ def devices_page(request: HttpRequest) -> HttpResponse:
             where.append("v.is_online_any")
         elif online_filter == "offline":
             where.append("NOT v.is_online_any")
+        if state_filter == "not-reporting":
+            where.append(
+                "(v.last_contact_at IS NULL OR v.last_contact_at < NOW() - INTERVAL '7 days')"
+            )
         if client_filter:
             where.append(
                 "v.client_id = (SELECT id FROM operations.clients WHERE slug = %s AND tenant_id = 1)"
@@ -2865,6 +2895,12 @@ def devices_page(request: HttpRequest) -> HttpResponse:
             health = "amber"
         else:
             health = "green"
+        if last_contact is None or last_contact < timezone.now() - timedelta(days=7):
+            state_label = "Not reporting"
+        elif is_online:
+            state_label = "Online"
+        else:
+            state_label = "Offline"
         devices.append(
             {
                 "id": did,
@@ -2881,6 +2917,7 @@ def devices_page(request: HttpRequest) -> HttpResponse:
                 "client_slug": client_slug,
                 "severe": severe or 0,
                 "health": health,
+                "state_label": state_label,
             }
         )
 
@@ -2921,7 +2958,11 @@ def devices_page(request: HttpRequest) -> HttpResponse:
             "active_os": os_filter,
             "active_role": role_filter,
             "active_online": online_filter,
+            "active_state": state_filter,
             "active_client": client_filter,
+            "coverage_issues": coverage_issues,
+            "identity_issues": identity_issues,
+            "delayed_sources": delayed_sources,
         },
     )
 

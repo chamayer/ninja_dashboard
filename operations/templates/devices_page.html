@@ -57,14 +57,16 @@
         </h1>
         {% include "_csv_download.html" %}
     </div>
-    <p class="muted" style="margin-top:0.5rem;">Every device across every client — filter, search, drill in.</p>
+    <p class="muted" style="margin-top:0.5rem;">A current view of devices across all clients — explore, filter, and drill in.</p>
 </div>
 
+<h2 style="margin:0 0 .5rem;">Estate snapshot</h2>
 <div class="dv-overview">
-    <div class="dv-tile">
+    <a class="dv-tile" href="{% url 'devices_page' %}">
         <div class="dv-label">Total</div>
         <div class="dv-value">{{ overview.total }}</div>
-    </div>
+        <div class="dv-sub">managed devices</div>
+    </a>
     <a class="dv-tile online" href="?online=online">
         <div class="dv-label">Online</div>
         <div class="dv-value">{{ overview.online }}</div>
@@ -73,7 +75,12 @@
     <a class="dv-tile alert" href="?online=offline">
         <div class="dv-label">Offline</div>
         <div class="dv-value">{{ overview.offline }}</div>
-        <div class="dv-sub">no source checking in</div>
+        <div class="dv-sub">currently unreachable</div>
+    </a>
+    <a class="dv-tile" href="?state=not-reporting">
+        <div class="dv-label">Not reporting</div>
+        <div class="dv-value">{{ overview.stale }}</div>
+        <div class="dv-sub">no contact in 7 days</div>
     </a>
     <a class="dv-tile" href="?role=server">
         <div class="dv-label">Servers</div>
@@ -83,14 +90,19 @@
         <div class="dv-label">Workstations</div>
         <div class="dv-value">{{ overview.workstations }}</div>
     </a>
-    <div class="dv-tile">
-        <div class="dv-label">In patch scope</div>
-        <div class="dv-value">{{ overview.in_patch_scope }}</div>
-    </div>
+</div>
+
+<div class="card" style="padding:1rem;">
+  <h2 style="font-size:.95rem; margin:0 0 .5rem;">Data and coverage context</h2>
+  <div class="dv-chips">
+    <a class="dv-chip" href="{% url 'findings_queue' %}?category=coverage">{{ coverage_issues }} coverage item{{ coverage_issues|pluralize }}</a>
+    <a class="dv-chip" href="{% url 'findings_queue' %}?category=identity">{{ identity_issues }} identity item{{ identity_issues|pluralize }}</a>
+    <a class="dv-chip" href="{% url 'sources_status' %}">{{ delayed_sources }} delayed data connection{{ delayed_sources|pluralize }}</a>
+  </div>
 </div>
 
 <div class="card">
-    <h2 style="font-size:0.95rem; margin:0 0 0.5rem 0; color:#9ca3af;">Filter by OS</h2>
+    <h2 style="font-size:0.95rem; margin:0 0 0.5rem 0;">Explore devices</h2>
     <div class="dv-chips">
         <a class="dv-chip {% if not active_os %}active{% endif %}" href="{% url 'devices_page' %}">
             All <span class="chip-count">{{ overview.total }}</span>
@@ -123,9 +135,13 @@
             <option value="online" {% if active_online == 'online' %}selected{% endif %}>Online only</option>
             <option value="offline" {% if active_online == 'offline' %}selected{% endif %}>Offline only</option>
         </select>
+        <select name="state" style="padding:0.4rem 0.7rem; border:1px solid var(--border); border-radius:4px;">
+            <option value="">Any reporting state</option>
+            <option value="not-reporting" {% if active_state == 'not-reporting' %}selected{% endif %}>Not reporting</option>
+        </select>
         {% if active_os %}<input type="hidden" name="os" value="{{ active_os }}">{% endif %}
         <button type="submit">Apply</button>
-        {% if active_q or active_client or active_role or active_online %}
+        {% if active_q or active_client or active_role or active_online or active_state %}
             <a href="?{% if active_os %}os={{ active_os }}{% endif %}" style="font-size:0.85rem;">Clear</a>
         {% endif %}
     </form>
@@ -146,7 +162,7 @@
                 <th>Client</th>
                 <th>Role</th>
                 <th>OS</th>
-                <th>Online sources</th>
+                <th>Current state</th>
                 <th class="num">Last contact</th>
                 <th class="num">Severe issues</th>
             </tr>
@@ -171,13 +187,7 @@
                 </td>
                 <td class="muted">{{ d.role|humanize_label|default:"—" }}</td>
                 <td class="muted">{{ d.os_group|humanize_label|default:"—" }}</td>
-                <td class="muted">
-                    {% if d.online_sources %}
-                        {{ d.online_sources|join:", " }}
-                    {% else %}
-                        <span style="color:#dc2626;">none</span>
-                    {% endif %}
-                </td>
+                <td>{{ d.state_label }}</td>
                 <td class="muted num">{{ d.last_contact|date:"Y-m-d H:i"|default:"—" }}</td>
                 <td class="num">
                     {% if d.severe %}
