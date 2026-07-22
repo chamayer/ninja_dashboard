@@ -2,6 +2,47 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.82.0] — 2026-07-22 — Device Detail Raw tab: canonical field matrix + Ninja `raw_data` fidelity
+
+### Fixed
+- **Ninja `raw_data` empty on every observation.** `ingest/core/devices.py`
+  wrote `Json({})` for every Ninja `entity_observation`, so the Device
+  Detail Raw tab could not show source fields for Ninja (the trigger
+  that opened ADR-0007). The Ninja API row is now side-banded via
+  `raw_by_id` from the fetch loop through `_write_ninja_observations`
+  and stored on `_current.raw_data`. Also applies to org observations,
+  which now carry `ninja_core.organizations.data`. Existing rows
+  overwrite on the next Ninja cycle.
+
+### Added
+- **Canonical field matrix on Device Detail → Identity & raw.** Rewrite
+  of the "Common fields across sources" section to read from
+  `canonical_data` (the normalized per-source projection) instead of
+  `raw_data`. Every source rewrites the same concepts (hostname,
+  os_name, serial_number, macs, is_online, etc.) into the same
+  canonical key names, so the matrix compares values across sources
+  directly. Every canonical field appears — even if only one source
+  reports it — with a "1 source" badge so operators see the whole
+  normalized picture. Cross-source disagreements still get the amber
+  highlight + ⚠ prefix. Values render legibly: lists comma-joined
+  (macs, tags), booleans as yes/no, empty as em dash, nested dicts as
+  compact JSON.
+- **Source-native fields** section replaces the previous "Per-source
+  details" — for each source snapshot, lists the raw_data keys not
+  represented in canonical_data. Alias-hiding is case-insensitive: raw
+  `hostName` normalizes to `hostname` and is hidden when canonical
+  already has `hostname`. Non-alias fields like `systemName`,
+  `dnsName`, source-specific IDs stay visible.
+- Additional category keywords for the field grouping: `macs`, `vmuuid`,
+  `powerstate`, `lastboottimeat`, `parentninjaid`, `platformgroupid`,
+  `entitytype`, `devicerole`. Was over-fitting the raw shape; now
+  matches canonical shape.
+
+### Changed
+- Section titles under Identity & raw: "Common fields across sources"
+  → "**Fields**" and "Per-source details" → "**Source-native
+  fields**". Copy tightened to describe the new canonical-first model.
+
 ## [0.81.0] — 2026-07-22 — Observation writer hardening + retention wired (ADR-0007 v5)
 
 ### Fixed

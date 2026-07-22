@@ -1155,26 +1155,30 @@ def org_policies(request: HttpRequest, org_slug: str) -> HttpResponse:
 
 # ── Raw snapshots on Device Detail (Identity & raw tab) ──────────────
 #
-# Groups top-level fields from each source's raw_data payload into a
-# category matrix. Fields that appear in ≥2 sources become the "common"
-# table (with per-value source attribution and disagreement highlight);
-# fields unique to one snapshot go into that source's specifics list.
-# The pretty-printed JSON is still available under each source for the
-# nested / long-tail fields the matrix collapses.
+# Cross-source field comparison uses `canonical_data` — the normalized
+# per-source projection the writer emits. Every source rewrites the same
+# concepts (hostname, os_name, serial_number, macs, is_online, ...) into
+# canonical_data with identical key names, so the matrix can compare
+# values directly across sources. Rendering priority:
+#
+#   1. Canonical fields, grouped by category, values shown per source
+#      with disagreement highlight.
+#   2. Per-source native (raw_data) fields the source uses but that are
+#      not part of the canonical projection.
+#   3. Full raw JSON payload under an inner collapse, for the long tail.
 
 _RAW_FIELD_CATEGORIES: list[tuple[str, set[str]]] = [
     ("Identity", {
-        "hostname", "hostname", "hostname_", "hostnamefqdn",
-        "host", "name", "displayname", "systemname",
-        "computername", "netbiosname", "dnsname",
+        "hostname", "hostnamefqdn", "host", "name", "displayname",
+        "systemname", "computername", "netbiosname", "dnsname",
     }),
     ("Serial & IDs", {
-        "id", "uuid", "deviceid", "agentid", "endpointid",
+        "id", "uuid", "vmuuid", "deviceid", "agentid", "endpointid",
         "serial", "serialnumber", "sn", "assettag", "assetid",
         "productcode",
     }),
     ("Network", {
-        "mac", "macaddress", "macaddresses", "ip", "ipaddress",
+        "mac", "macs", "macaddress", "macaddresses", "ip", "ipaddress",
         "ipaddresses", "publicip", "privateip", "externalip",
         "internalip", "gateway", "subnet",
     }),
@@ -1186,20 +1190,21 @@ _RAW_FIELD_CATEGORIES: list[tuple[str, set[str]]] = [
     ("Hardware", {
         "cpu", "cpuid", "cpucount", "model", "manufacturer",
         "chassistype", "totalmemorybytes", "memory",
-        "isvirtualmachine", "vmtype",
+        "isvirtualmachine", "isvm", "vmtype",
     }),
     ("Presence & state", {
         "ishostonline", "isonline", "isactive", "offline",
         "lastseen", "lastseenat", "lastcontact", "lastcontactat",
         "lastactive", "lastactivetime", "hoststatechangedate",
         "lastloggedinuser", "lastuser", "needsreboot",
-        "maintenancestatus", "state",
+        "maintenancestatus", "state", "powerstate", "lastboottimeat",
     }),
     ("Enrollment & grouping", {
         "groupid", "groupname", "organizationid", "organization",
         "locationid", "location", "policyid", "policyname",
         "rolepolicyid", "nodeclass", "approvalstatus", "tags",
-        "site", "siteid", "siteid_", "tenantid",
+        "site", "siteid", "tenantid", "entitytype", "devicerole",
+        "parentninjaid",
     }),
 ]
 _RAW_CATEGORY_ORDER = [name for name, _ in _RAW_FIELD_CATEGORIES] + ["Other"]
@@ -1214,28 +1219,62 @@ def _raw_field_category(field_name: str) -> str:
 
 
 def _raw_value_display(value) -> tuple[str, bool]:
-    """Return (display_string, is_nested). Nested dicts/lists render as
-    compact JSON so the matrix cell stays one line.
+    """Return (display_string, is_nested).
+
+    - Scalar → its string form.
+    - `None` → em dash.
+    - Empty list / dict → em dash (avoids `[]` / `{}` clutter that hides
+      that the field is present-but-empty).
+    - Non-empty list of scalars → comma-joined, so MACs and tags render
+      as readable values instead of JSON.
+    - Nested dict / list of dicts → pretty JSON string, `is_nested=True`
+      so the template can hide-by-default or format differently.
     """
-    if isinstance(value, (dict, list)):
+    if value is None:
+        return "—", False
+    if isinstance(value, list):
+        if not value:
+            return "—", False
+        if all(not isinstance(v, (dict, list)) for v in value):
+            return ", ".join("" if v is None else str(v) for v in value), False
         try:
             return json.dumps(value, sort_keys=True, default=str), True
         except (TypeError, ValueError):
             return str(value), True
-    if value is None:
-        return "—", False
+    if isinstance(value, dict):
+        if not value:
+            return "—", False
+        try:
+            return json.dumps(value, sort_keys=True, default=str), True
+        except (TypeError, ValueError):
+            return str(value), True
+    if isinstance(value, bool):
+        return "yes" if value else "no", False
     return str(value), False
 
 
 def _build_raw_snapshot_view(device, links):
     """Fetch and shape raw snapshots for the Identity & raw tab.
 
-    Returns (per_source_snapshots, common_by_category, source_specific).
+    Returns (per_source_snapshots, canonical_by_category, source_specific).
 
-    Ninja fallback: agent.rmm observations currently write raw_data as
-    `{}` (upstream ingest gap tracked separately). When we detect that,
-    swap in `ninja_core.devices.data` for the device's Ninja
-    external_id so operators see the actual Ninja device payload.
+    - `canonical_by_category` — the field matrix, driven by `canonical_data`
+      because every source rewrites the same concepts into the same key
+      names there. Fields shown for every source that reports on the
+      device; values grouped so agreement collapses and disagreement is
+      surfaced with a highlight.
+    - `source_specific` — for each source snapshot, the fields in
+      `raw_data` that are NOT already in canonical_data. That's the
+      source-native long tail. Plus the full raw JSON under a
+      collapse.
+
+    Ninja fallback: `agent.rmm` raw_data is written as `{}` in the
+    currently-deployed ingest. Fixed on the writer side in the same
+    commit as this rewrite, but existing rows keep `{}` until the next
+    Ninja cycle overwrites them. During the transition we swap in
+    `ninja_core.devices.data` so the per-source specifics stay populated.
+    The canonical matrix is not affected — canonical_data is populated
+    regardless.
     """
     ninja_external_id = None
     for link in links:
@@ -1248,11 +1287,11 @@ def _build_raw_snapshot_view(device, links):
         cur.execute("SET LOCAL operations.tenant_id = 1")
         cur.execute(
             """
-            SELECT DISTINCT ON (platform, entity_type)
-                   platform, entity_type, observed_at, raw_data
+            SELECT platform, entity_type, observed_at,
+                   canonical_data, raw_data
             FROM operations.entity_observation_current
             WHERE tenant_id = %s AND device_id = %s AND active = TRUE
-            ORDER BY platform, entity_type, observed_at DESC
+            ORDER BY platform, entity_type
             """,
             [1, str(device.id)],
         )
@@ -1263,7 +1302,7 @@ def _build_raw_snapshot_view(device, links):
             (platform or "").lower() == "ninja"
             and (entity_type or "").lower() == "agent.rmm"
             and (not raw_data or raw_data == {})
-            for platform, entity_type, _observed_at, raw_data in rows
+            for platform, entity_type, _obs, _canon, raw_data in rows
         )
         if need_ninja_fallback:
             try:
@@ -1279,87 +1318,108 @@ def _build_raw_snapshot_view(device, links):
                 if nrow:
                     ninja_device_row = nrow[0] or {}
 
-        for platform, entity_type, observed_at, raw_data in rows:
-            payload = raw_data or {}
+        for platform, entity_type, observed_at, canonical_data, raw_data in rows:
+            canonical = canonical_data or {}
+            raw_payload = raw_data or {}
             fallback_note = None
             if (
                 ninja_device_row is not None
                 and (platform or "").lower() == "ninja"
                 and (entity_type or "").lower() == "agent.rmm"
-                and payload == {}
+                and raw_payload == {}
             ):
-                payload = ninja_device_row
+                raw_payload = ninja_device_row
                 fallback_note = "from ninja_core.devices (raw observation was empty)"
             try:
-                pretty = json.dumps(payload, indent=2, sort_keys=True, default=str)
+                pretty = json.dumps(raw_payload, indent=2, sort_keys=True, default=str)
             except (TypeError, ValueError):
-                pretty = str(payload)
+                pretty = str(raw_payload)
             snapshots.append({
                 "platform": platform,
                 "entity_type": entity_type,
                 "observed_at": observed_at,
-                "raw_data": payload,
+                "canonical_data": canonical,
+                "raw_data": raw_payload,
                 "pretty": pretty,
                 "fallback_note": fallback_note,
                 "source_label": f"{platform} ({entity_type})",
             })
 
-    # Field appearances: field_name -> list of (source_label, display, is_nested)
-    field_appearances: dict[str, list[tuple[str, str, bool]]] = {}
+    # ── Canonical field matrix (cross-source comparison) ────────────
+    #
+    # `canonical_data` uses the same field names across sources, so we
+    # can compare values directly. Every canonical field appears — even
+    # if only one source reports it — because operators want to see the
+    # whole normalized picture, not just what happens to overlap.
+    canonical_appearances: dict[str, list[tuple[str, str, bool]]] = {}
     for snap in snapshots:
-        if not isinstance(snap["raw_data"], dict):
+        if not isinstance(snap["canonical_data"], dict):
             continue
-        for field, value in snap["raw_data"].items():
+        for field, value in snap["canonical_data"].items():
             display, is_nested = _raw_value_display(value)
-            field_appearances.setdefault(field, []).append(
+            canonical_appearances.setdefault(field, []).append(
                 (snap["source_label"], display, is_nested)
             )
 
-    common_fields: list[dict] = []
-    per_source_extra: dict[str, list[dict]] = {s["source_label"]: [] for s in snapshots}
-    for field, appearances in field_appearances.items():
-        if len(appearances) >= 2:
-            # Group by display value
-            groups: dict[str, list[str]] = {}
-            any_nested = False
-            for src, disp, is_nested in appearances:
-                groups.setdefault(disp, []).append(src)
-                any_nested = any_nested or is_nested
-            value_groups = [
-                {"value": v, "sources": srcs}
-                for v, srcs in sorted(groups.items(), key=lambda kv: (-len(kv[1]), kv[0]))
-            ]
-            common_fields.append({
-                "field": field,
-                "category": _raw_field_category(field),
-                "value_groups": value_groups,
-                "differs": len(value_groups) > 1,
-                "is_nested": any_nested,
-            })
-        else:
-            src, disp, is_nested = appearances[0]
-            per_source_extra.setdefault(src, []).append({
-                "field": field,
-                "category": _raw_field_category(field),
-                "value": disp,
-                "is_nested": is_nested,
-            })
+    canonical_rows: list[dict] = []
+    for field, appearances in canonical_appearances.items():
+        groups: dict[str, list[str]] = {}
+        any_nested = False
+        for src, disp, is_nested in appearances:
+            groups.setdefault(disp, []).append(src)
+            any_nested = any_nested or is_nested
+        value_groups = [
+            {"value": v, "sources": srcs}
+            for v, srcs in sorted(groups.items(), key=lambda kv: (-len(kv[1]), kv[0]))
+        ]
+        canonical_rows.append({
+            "field": field,
+            "category": _raw_field_category(field),
+            "value_groups": value_groups,
+            "differs": len(value_groups) > 1,
+            "single_source": len(appearances) == 1,
+            "is_nested": any_nested,
+        })
 
-    # Bucket common fields by category, respect fixed order
     by_cat: dict[str, list[dict]] = {}
-    for f in common_fields:
+    for f in canonical_rows:
         by_cat.setdefault(f["category"], []).append(f)
     for lst in by_cat.values():
         lst.sort(key=lambda f: f["field"].lower())
-    common_by_category = [
+    canonical_by_category = [
         (cat, by_cat[cat]) for cat in _RAW_CATEGORY_ORDER if cat in by_cat
     ]
 
-    # Source-specific: attach the list to each snapshot in display order
+    # ── Per-source native fields (raw_data \ canonical_data) ────────
+    #
+    # For each snapshot, list raw_data keys not represented in the
+    # canonical projection. Case-insensitive alias check: `hostName` in
+    # raw normalizes to `hostname` and is hidden when canonical already
+    # has `hostname`. `systemName`, `dnsName`, etc. are kept — they
+    # carry different values the operator wants to see.
     source_specific = []
     for snap in snapshots:
-        extras = per_source_extra.get(snap["source_label"], [])
-        extras.sort(key=lambda f: (_RAW_CATEGORY_ORDER.index(f["category"]), f["field"].lower()))
+        canonical_keys_norm = {
+            k.lower().replace("_", "").replace("-", "")
+            for k in (snap["canonical_data"] or {}).keys()
+        }
+        extras: list[dict] = []
+        if isinstance(snap["raw_data"], dict):
+            for field, value in snap["raw_data"].items():
+                norm = field.lower().replace("_", "").replace("-", "")
+                if norm in canonical_keys_norm:
+                    continue
+                display, is_nested = _raw_value_display(value)
+                extras.append({
+                    "field": field,
+                    "category": _raw_field_category(field),
+                    "value": display,
+                    "is_nested": is_nested,
+                })
+        extras.sort(key=lambda f: (
+            _RAW_CATEGORY_ORDER.index(f["category"]),
+            f["field"].lower(),
+        ))
         source_specific.append({
             "source_label": snap["source_label"],
             "platform": snap["platform"],
@@ -1370,7 +1430,7 @@ def _build_raw_snapshot_view(device, links):
             "fallback_note": snap["fallback_note"],
         })
 
-    return snapshots, common_by_category, source_specific
+    return snapshots, canonical_by_category, source_specific
 
 
 @login_required
@@ -1646,10 +1706,10 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
     # Raw per-source snapshots — only when the Identity & raw tab is
     # active, since raw_data payloads can be several KB per observation.
     raw_snapshots: list[dict] = []
-    raw_common_by_category: list[tuple[str, list[dict]]] = []
+    raw_canonical_by_category: list[tuple[str, list[dict]]] = []
     raw_source_specific: list[dict] = []
     if active_tab == "identity":
-        raw_snapshots, raw_common_by_category, raw_source_specific = (
+        raw_snapshots, raw_canonical_by_category, raw_source_specific = (
             _build_raw_snapshot_view(device, links)
         )
 
@@ -1671,7 +1731,7 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
             "exemptions": exemptions,
             "entity_type_choices": entity_type_choices,
             "raw_snapshots": raw_snapshots,
-            "raw_common_by_category": raw_common_by_category,
+            "raw_canonical_by_category": raw_canonical_by_category,
             "raw_source_specific": raw_source_specific,
         },
     )

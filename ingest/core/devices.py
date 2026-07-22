@@ -63,8 +63,14 @@ def _run(client: NinjaClient, snapshot_at: datetime) -> tuple[int, int]:
         # stored side-band so we don't try to insert non-existent
         # columns into ninja_core.devices.
         vm_tracking: dict[int, dict[str, object]] = {}
+        # Full fetched Ninja API row per device id — side-banded to
+        # `_write_ninja_observations` so the observation's `raw_data`
+        # carries the actual source payload (was being dropped as `{}`,
+        # which broke the Device Detail Raw tab).
+        raw_by_id: dict[int, dict] = {}
 
         for d in client.paginate_after("/devices-detailed"):
+            raw_by_id[d["id"]] = d
             os_data = d.get("os") or {}
             system_data = d.get("system") or {}
             maintenance = d.get("maintenance") or {}
@@ -152,7 +158,7 @@ def _run(client: NinjaClient, snapshot_at: datetime) -> tuple[int, int]:
 
         _refresh_active_devices_view()
         obs_count = _write_ninja_observations(
-            device_rows, snapshot_rows, snapshot_at, vm_tracking,
+            device_rows, snapshot_rows, snapshot_at, vm_tracking, raw_by_id,
         )
         _refresh_device_agent_presence_current()
         stats["rows_upserted"] = dev_count
@@ -411,6 +417,7 @@ def _write_ninja_observations(
     snapshot_rows: list[dict],
     snapshot_at: datetime,
     vm_tracking: dict[int, dict[str, object]] | None = None,
+    raw_by_id: dict[int, dict] | None = None,
 ) -> int:
     """Write one entity_observation per Ninja record seen in this sync.
 
@@ -534,7 +541,9 @@ def _write_ninja_observations(
                     "platform":                "Ninja",
                     "subplatform":             "",
                     "observed_at":             snapshot_at,
-                    "raw_data":                Json({}),
+                    "raw_data":                Json(
+                        (raw_by_id or {}).get(r["id"]) or {}
+                    ),
                     "canonical_data":          Json(canonical_data),
                     "batch_id":                batch_id,
                     "observation_hash":        obs_hash,
@@ -550,8 +559,8 @@ def _write_ninja_observations(
             for r in device_rows:
                 oid = str(r["organization_id"])
                 org_counts[oid] = org_counts.get(oid, 0) + 1
-            cur.execute("SELECT id, name FROM ninja_core.organizations")
-            for org_id, org_name in cur.fetchall():
+            cur.execute("SELECT id, name, data FROM ninja_core.organizations")
+            for org_id, org_name, org_data in cur.fetchall():
                 oid = str(org_id)
                 obs_rows.append({
                     "observation_id":        uuid.uuid4(),
@@ -565,7 +574,7 @@ def _write_ninja_observations(
                     "platform":              "Ninja",
                     "subplatform":           "",
                     "observed_at":           snapshot_at,
-                    "raw_data":              Json({}),
+                    "raw_data":              Json(org_data or {}),
                     "canonical_data":        Json({
                         "name":            org_name,
                         "normalized_name": normalize_org_name(org_name),
