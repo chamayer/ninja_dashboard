@@ -1,17 +1,17 @@
 # Active Operations work plan
 
-Track: **Operator-first device Identity tab**
+Track: **Merged device Identity record**
 
 ## Status
 
-- In progress. The deployed tab is technically correct but presents raw
-  diagnostics before operator-relevant identity evidence.
+- In progress. The Identity tab must present collected data as a neutral,
+  grouped merged record rather than an issue/review surface.
 
 ## Goal
 
-Make device Identity a calm review surface: summarize source coverage and
-meaningful normalized-field conflicts first, while retaining the complete
-canonical matrix and raw source payloads as advanced forensic detail.
+Make device Identity a neutral, grouped merged record: show combined values
+with quiet source attribution, then retain all per-source fields in collapsed
+reference panels.
 
 ## Scope
 
@@ -29,19 +29,20 @@ canonical matrix and raw source payloads as advanced forensic detail.
 
 ## Decisions
 
-- A cross-source value difference is review evidence, not automatically an
-  error; the UI must state that plainly.
-- Keep full normalized values and source-native payloads available under
-  Advanced details rather than removing diagnostic capability.
-- Only fields with conflicting normalized values appear in the default review
-  section; source identifiers remain directly visible.
+- Source differences are alternative reports for the same field, never an
+  alert state in this tab.
+- Source attribution is muted parenthetical context beside each value.
+- Each collapsed source panel lists every source-native field, not only fields
+  absent from the merged record; raw JSON remains a final fallback.
 
 ## Steps
 
 - [x] Inspect existing Identity-tab markers and layout.
 - [x] Add concise summary/conflict presentation data.
 - [x] Restructure the template around review-first and advanced details.
-- [ ] Commit, deploy, and validate the affected Identity tab and issue link.
+- [ ] Replace review framing with the merged-record presentation.
+- [ ] Show all fields in collapsed per-source panels.
+- [ ] Validate, deploy, and exercise the affected Identity tab and issue link.
 
 ## Validation plan
 

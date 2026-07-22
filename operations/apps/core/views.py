@@ -1525,25 +1525,15 @@ def _build_raw_snapshot_view(device, links):
         lst.sort(key=lambda f: f["field"].lower())
     canonical_by_category = [(cat, by_cat[cat]) for cat in _RAW_CATEGORY_ORDER if cat in by_cat]
 
-    # ── Per-source native fields (raw_data \ canonical_data) ────────
+    # ── Per-source collected fields ─────────────────────────────────
     #
-    # For each snapshot, list raw_data keys not represented in the
-    # canonical projection. Case-insensitive alias check: `hostName` in
-    # raw normalizes to `hostname` and is hidden when canonical already
-    # has `hostname`. `systemName`, `dnsName`, etc. are kept — they
-    # carry different values the operator wants to see.
+    # Keep every source-native field available in its collapsed reference
+    # panel. The combined record above is a convenience, not a lossy filter.
     source_specific = []
     for snap in snapshots:
-        canonical_keys_norm = {
-            k.lower().replace("_", "").replace("-", "")
-            for k in snap["canonical_data"]
-        }
         extras: list[dict] = []
         if isinstance(snap["raw_data"], dict):
             for field, value in snap["raw_data"].items():
-                norm = field.lower().replace("_", "").replace("-", "")
-                if norm in canonical_keys_norm:
-                    continue
                 display, is_nested = _raw_value_display(value)
                 extras.append(
                     {
