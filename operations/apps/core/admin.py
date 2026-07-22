@@ -15,7 +15,6 @@ from .models import (
     DeadLetterObservation,
     Device,
     DeviceLink,
-    EntityObservation,
     Finding,
     FindingType,
     MergeCandidate,
@@ -201,23 +200,6 @@ class SourceBindingAdmin(admin.ModelAdmin):
     list_display = ("source_instance", "collector_instance", "schedule", "enabled", "tenant", "version")
     list_filter = ("tenant", "enabled")
     search_fields = ("source_instance__source__name", "collector_instance__name", "schedule")
-
-
-@admin.register(EntityObservation)
-class EntityObservationAdmin(admin.ModelAdmin):
-    list_display = (
-        "entity_type",
-        "entity_key",
-        "platform",
-        "client",
-        "device",
-        "collector_instance",
-        "observed_at",
-        "tenant",
-    )
-    list_filter = ("tenant", "entity_type", "platform", "schema_version")
-    search_fields = ("entity_key", "platform", "subplatform", "collector_version")
-    readonly_fields = ("observation_id",)
 
 
 @admin.register(DeadLetterObservation)

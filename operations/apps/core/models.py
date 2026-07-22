@@ -952,50 +952,6 @@ class SourceBinding(UUIDTenantScopedModel):
         return f"{self.source_instance_id}:{self.collector_instance_id}"
 
 
-class EntityObservation(TenantScopedModel):
-    observation_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    client = models.ForeignKey(Client, on_delete=models.PROTECT, null=True, blank=True, related_name="observations")
-    device = models.ForeignKey(Device, on_delete=models.PROTECT, null=True, blank=True, related_name="observations")
-    collector_instance = models.ForeignKey(
-        CollectorInstance,
-        on_delete=models.PROTECT,
-        related_name="entity_observations",
-    )
-    source_binding = models.ForeignKey(
-        SourceBinding,
-        on_delete=models.PROTECT,
-        related_name="entity_observations",
-    )
-    entity_type = models.CharField(max_length=80)
-    entity_key = models.TextField()
-    platform = models.CharField(max_length=80)
-    subplatform = models.CharField(max_length=120, blank=True)
-    observed_at = models.DateTimeField()
-    raw_data = models.JSONField(default=dict)
-    canonical_data = models.JSONField(default=dict)
-    batch_id = models.UUIDField()
-    observation_hash = models.BinaryField()
-    collector_version = models.CharField(max_length=80, blank=True)
-    schema_version = models.PositiveIntegerField()
-
-    class Meta:
-        db_table = "entity_observations"
-        indexes = (
-            models.Index(fields=("tenant", "entity_type", "entity_key"), name="idx_entity_obs_entity_key"),
-            models.Index(fields=("tenant", "client", "device"), name="idx_entity_obs_client_device"),
-            models.Index(fields=("tenant", "observed_at"), name="idx_entity_obs_observed_at"),
-        )
-        constraints = (
-            models.UniqueConstraint(
-                fields=("tenant", "collector_instance", "batch_id", "observation_hash"),
-                name="uq_entity_obs_tenant_collector_batch_hash",
-            ),
-        )
-
-    def __str__(self) -> str:
-        return f"{self.entity_type}:{self.entity_key}"
-
-
 class EntityObservationCurrent(TenantScopedModel):
     """Latest accepted observation for one source-scoped identity tuple."""
 
