@@ -1,107 +1,102 @@
 # Active Operations work plan
 
-Track: **Clients directory and client workspace UI**
+Track: **Production startup hotfix — observation migration compatibility**
 
 ## Status
 
-- Implementation and local/live read-only validation complete; awaiting visual
-  review and refinement. Not committed, pushed, or deployed.
-- Separate cross-service observation redesign remains active in the repository
-  root plan. Its uncommitted ingest work is out of scope and must be preserved.
+- In progress. The 0070 retired-table guard has reached production and startup
+  advanced to migration 0071, which now fails because the renamed legacy
+  materialized view retains the new view's intended index name.
+- Client-workspace commit `7e61892` is already on both remotes. The push to
+  `origin` also included the preceding observation-cutover history; that
+  outgoing range was not audited before push and caused this migration failure.
 
 ## Goal
 
-Turn the Clients area into a human-friendly client directory and make each
-client overview a cross-domain workspace rather than a compliance issue list.
+Restore Operations startup with forward-compatible migration fixes, without
+recreating retired data or rolling back already-applied observation migrations.
 
 ## Scope
 
-- **In:** `/orgs/all/`; `/orgs/<client>/` using UTA as the representative;
-  compact client navigation; Devices, Inventory, Patching, Compliance,
-  Software, and Data Health summaries; clearly identified cross-domain
-  attention; client context; visible empty/unavailable states; live-render
-  performance; the exposed base-template comment defect.
-- **Out:** ownership/assignment (backlog); full history implementation;
-  location/user detail pages; new schema or migrations; Admin workflow
-  implementation; commit, push, and deployment.
+- **In:** make migration 0070 conditional on
+  `operations.identity_candidates` existing; validate migration ordering and
+  SQL behavior; rename the legacy source-health index in migration 0071 so the
+  replacement view can create its index; inspect deployed restart logs.
+- **Out:** recreating `identity_candidates`; rollback; data rebuild; unrelated
+  observation-cutover changes; commit, push, and deployment until separately
+  approved.
 
 ## Affected files
 
-- `apps/core/views.py`
-- `templates/base.html`
-- `templates/org_index.html`
-- `apps/core/tests/test_client_workspace.py` (new, if focused helpers warrant it)
-- `.work/backlog.md` (ownership/assignment follow-up only)
+- `apps/core/migrations/0070_identity_candidate_current_reference.py`
+- `apps/core/migrations/0071_source_health_current_observations.py`
+- `.work/plan.md`
 
 ## Decisions
 
-- Never hide a domain; distinguish operating normally, needs attention,
-  unconfigured, delayed, and unavailable.
-- Do not calculate one overall client health label. Summarize how many areas
-  need attention and retain separate domain states.
-- Domain panels precede the combined attention list. Attention rows identify
-  their domain and link to filtered workflows.
-- Client configuration lives under Admin; the overview is read-only context.
-- Preserve client scope and breadcrumbs on every drill-through.
-- Filters, sorting, and return state are session-scoped. Ownership/assignment
-  is deferred.
-- Inventory is foundational visibility; corrective identity work is Admin.
+- Migration 0054 is authoritative: `identity_candidates` is retired and must
+  not be recreated merely to satisfy migration 0070.
+- Migration 0070 remains useful only as compatibility behavior for databases
+  where the table still exists. Guard all table operations with `to_regclass`.
+- Prefer the forward fix because migrations through 0069 have already applied;
+  no destructive rollback is justified.
+- PostgreSQL index names do not change when a materialized view is renamed.
+  Migration 0071 must rename the legacy index before creating the replacement
+  view's index and restore the name on reverse.
 
 ## Steps
 
-- [x] Review current deployed Clients and UTA pages against legacy questions.
-- [x] Measure deployed server rendering and isolate the dominant query cost.
-- [x] Build the richer fleet directory and UTA cross-domain overview.
-- [x] Fix compact client navigation and the visible template comment.
-- [x] Avoid per-request full software anti-join scans in summary metrics.
-- [x] Add focused tests for derived presentation state where practical.
-- [x] Run Django checks, Ruff, targeted tests, template/request smoke checks,
-  and `git diff --check` in the documented environment.
-- [x] Render privacy-safe representative screenshots and review visually.
+- [x] Capture deployed container traceback and identify the failing migration.
+- [x] Confirm migration 0054 intentionally dropped the referenced table.
+- [x] Guard migration 0070 for both retired-table and compatibility cases.
+- [x] Rename the legacy source-health index in migration 0071 and reverse SQL.
+- [x] Run Django migration plan/checks, Python/Ruff checks, and diff review.
+- [ ] Obtain separate approval for commit and push/deployment.
+- [ ] After deployment, verify migrations, health, routes, and container logs.
 
 ## Validation plan
 
 - `python manage.py check`
-- `ruff check` and `ruff format --check` for changed Python/tests
-- Targeted pytest
-- Tenant-scoped render smoke checks for `/orgs/all/` and `/orgs/uta/`
-- Compare UTA server render/query timing with the measured 2.6-3.8 seconds and
-  26 queries; two software queries previously consumed about 1.9 seconds.
+- `python manage.py showmigrations operations --plan` where available
+- Python compile and Ruff for migration 0070
+- Review SQL against both `to_regclass(...) IS NULL` and present-table paths
 - `git diff --check`
 
 ## Checkpoint
 
-- Current live UI reviewed. `/orgs/all/` is a narrow three-column duplicate;
-  UTA is compliance-triage-heavy and exposes technical configuration.
-- Live UTA render measured at 2.554-3.836 seconds. Query capture attributed
-  1.879 seconds to two software queries, including a 1.733-second pending-title
-  anti-join.
-- `templates/base.html` uses a multiline `{# ... #}` comment that renders as
-  visible text and expands the navigation bar.
-- Unrelated uncommitted `../ingest/identity/resolver.py` work belongs to the
-  root observation redesign and was untouched. The shared branch advanced to
-  `095304c` through cross-service commits while this slice was in progress;
-  this UI work was reconciled afterward and has no overlapping files.
-- First visual now uses a compact context strip, six always-visible domain
-  panels, a domain-labelled attention table with session-persistent controls,
-  recent-change preview, and read-only Admin pointer. The fleet page is a
-  broader sortable/filterable client directory rather than an issue-priority
-  duplicate of Dashboard.
-- The multiline base-template comment is converted to a real Django comment;
-  the client nav is Overview, Devices, Patching, Software, Issues, and More.
-- Validation: `python manage.py check`; both templates load; Ruff check and
-  format-check pass for new Python/tests; import checks pass for the narrow
-  `views.py` edit; 18 targeted tests pass; `git diff --check` passes.
-- Read-only UTA timing against deployed data: existing context 0.568 seconds;
-  added workspace aggregation 0.236 seconds / 11 queries / 0.032 database
-  seconds. Fleet directory addition: 0.287 seconds / 8 queries / 0.092 database
-  seconds for 76 clients. No deployment timing is claimed yet.
-- Privacy-safe UTA and fleet screenshots were rendered at 1440px and reviewed.
+- `ninja-operations` repeatedly fails while applying 0070 with
+  `UndefinedTable: relation operations.identity_candidates does not exist`.
+- Migration 0054 explicitly dropped that table and removed its Django model.
+- Logs show 0070 is not applied; the migration transaction rolls back on each
+  restart. Migrations through 0069 are already past the executor checkpoint.
+- Local `master` and `a-m-rose/master` contain one additional concurrent
+  observation commit (`359be28`). The uncommitted recovery is isolated on
+  `hotfix/operations-startup` based directly on `origin/master` at `7e61892`,
+  so that additional commit cannot enter the primary recovery push.
+- Concurrent commit `27b3037` containing the 0070 guard was pushed to `origin`
+  outside this session's approval flow. GitOps rebuilt the container; 0070 then
+  applied successfully and startup advanced to 0071.
+- Migration 0071 currently rolls back with
+  `DuplicateTable: relation idx_source_health_current_pk already exists`.
+  Renaming the view retained its index name, colliding with the replacement
+  view's `CREATE UNIQUE INDEX` statement.
+- Migration 0071 now renames `idx_source_health_current_pk` to
+  `idx_source_health_current_legacy_pk` immediately after renaming the legacy
+  view. Reverse SQL restores both names. Python compilation, Django check,
+  Ruff check/format, and `git diff --check` pass for this extension.
+- Migration 0070 now wraps every operation on `identity_candidates` inside a
+  `to_regclass(...) IS NOT NULL` guard. The nested current-observation FK and
+  backfill remain available only when both compatibility tables exist.
+- Validation: Python compilation, `python manage.py check`, Ruff check/format,
+  migration graph/plan loading, and `git diff --check` pass. Local
+  `makemigrations --check --dry-run` reports a pre-existing model-state drift
+  that would generate migration 0073; it is unrelated to this SQL-only hotfix
+  and must not be folded into the outage recovery.
 
 ## Next action
 
-- Present the visual and validation result for user review. Refine the visual
-  if requested; seek separate approval before commit, push, or deployment.
+- Finish and validate the conditional migration. Present the diff and safe
+  commit/push strategy for separate approval.
 
 ## Cross-service pointer
 

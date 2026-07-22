@@ -1,9 +1,14 @@
-from django.db import migrations
+from __future__ import annotations
 
+from typing import ClassVar
+
+from django.db import migrations
 
 SQL = """
 ALTER MATERIALIZED VIEW IF EXISTS operations.source_health_current
     RENAME TO source_health_current_legacy;
+ALTER INDEX IF EXISTS operations.idx_source_health_current_pk
+    RENAME TO idx_source_health_current_legacy_pk;
 
 CREATE MATERIALIZED VIEW operations.source_health_current AS
 WITH observation_rollup AS (
@@ -59,14 +64,16 @@ ALTER MATERIALIZED VIEW operations.source_health_current OWNER TO operations_mig
 
 
 class Migration(migrations.Migration):
-    dependencies = [("operations", "0070_identity_candidate_current_reference")]
-    operations = [
+    dependencies: ClassVar = [("operations", "0070_identity_candidate_current_reference")]
+    operations: ClassVar = [
         migrations.RunSQL(
             SQL,
             """
             DROP MATERIALIZED VIEW IF EXISTS operations.source_health_current;
             ALTER MATERIALIZED VIEW IF EXISTS operations.source_health_current_legacy
                 RENAME TO source_health_current;
+            ALTER INDEX IF EXISTS operations.idx_source_health_current_legacy_pk
+                RENAME TO idx_source_health_current_pk;
             """,
         )
     ]
