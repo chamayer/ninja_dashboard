@@ -4,6 +4,18 @@
 {% block title %}Patching{% endblock %}
 
 {% block content %}
+<style>
+  .patch-status-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(155px,1fr)); gap:.65rem; margin-bottom:1rem; }
+  .patch-status-card { display:block; padding:.75rem .9rem; border:1px solid var(--border); border-radius:6px; color:inherit; text-decoration:none; background:var(--surface); }
+  .patch-status-card:hover { border-color:var(--accent); }
+  .patch-status-card .label { color:var(--muted); font-size:.72rem; font-weight:700; text-transform:uppercase; letter-spacing:.05em; }
+  .patch-status-card .value { color:#1a1a2e; font-size:1.45rem; font-weight:700; line-height:1.2; margin-top:.15rem; }
+  .patch-status-card .sub { color:var(--muted); font-size:.74rem; margin-top:.22rem; }
+  .patch-status-card.good { border-left:3px solid #16a34a; }
+  .patch-status-card.warn { border-left:3px solid #ea580c; }
+  .patch-status-card.alert { border-left:3px solid #dc2626; }
+  .patch-posture-table td, .patch-posture-table th { padding:.5rem .65rem; }
+</style>
 <div class="card">
     <div style="display:flex; align-items:center; justify-content:space-between; gap:1rem;">
         <h1 style="margin:0;">Patching</h1>
@@ -14,12 +26,7 @@
             {% include "_csv_download.html" %}
         </div>
     </div>
-    <p class="muted">
-        Only devices that are in patching scope produce these items.
-        Excluded and Not-managed devices are intentionally quiet in
-        the table below — browse them via the Device population
-        section.
-    </p>
+    <p class="muted">A status view of patching across the managed estate. Start with the population and recent Ninja evidence; work items are supporting detail below.</p>
 </div>
 
 {# Filter bar — top so tile counts visibly reflect the active selection. #}
@@ -67,20 +74,80 @@
     </form>
 </div>
 
-{# Device population summary — scope breakdown. Click a card to drill in. #}
+<div class="card">
+    <h2 style="font-size:1rem; margin:0 0 .25rem;">Patching status</h2>
+    <p class="muted" style="font-size:.84rem; margin-top:0;">Active means a device has contacted us in the last {{ active_device_days }} days. Recent patch activity means Ninja reported a patch scan/state or install outcome in the last {{ patch_activity_days }} days.</p>
+    <div class="patch-status-grid">
+        <a class="patch-status-card" href="?posture=active{% if filter_qs %}&amp;{{ filter_qs }}{% endif %}">
+            <div class="label">Active devices</div>
+            <div class="value">{{ patch_status.active }} / {{ patch_status.total }}</div>
+            <div class="sub">{{ active_device_days }}-day reporting window</div>
+        </a>
+        <a class="patch-status-card" href="?posture=active-in-scope{% if filter_qs %}&amp;{{ filter_qs }}{% endif %}">
+            <div class="label">Active in patching scope</div>
+            <div class="value">{{ patch_status.active_in_scope }} / {{ patch_status.active }}</div>
+            <div class="sub">policy-managed active devices</div>
+        </a>
+        <a class="patch-status-card good" href="?posture=recent-activity{% if filter_qs %}&amp;{{ filter_qs }}{% endif %}">
+            <div class="label">Recent patch activity</div>
+            <div class="value">{{ patch_status.recent_patch_activity }} / {{ patch_status.active_in_scope }}</div>
+            <div class="sub">Ninja evidence in {{ patch_activity_days }} days</div>
+        </a>
+        <a class="patch-status-card warn" href="?posture=quiet{% if filter_qs %}&amp;{{ filter_qs }}{% endif %}">
+            <div class="label">No recent patch activity</div>
+            <div class="value">{{ patch_status.quiet_patch_data }} / {{ patch_status.active_in_scope }}</div>
+            <div class="sub">active and in scope, but quiet</div>
+        </a>
+        <a class="patch-status-card alert" href="?posture=never-patched{% if filter_qs %}&amp;{{ filter_qs }}{% endif %}">
+            <div class="label">Never patched</div>
+            <div class="value">{{ patch_status.never_patched }} / {{ patch_status.active_in_scope }}</div>
+            <div class="sub">no Ninja installation on record</div>
+        </a>
+        <a class="patch-status-card warn" href="?posture=reboot-pending{% if filter_qs %}&amp;{{ filter_qs }}{% endif %}">
+            <div class="label">Awaiting restart</div>
+            <div class="value">{{ patch_status.reboot_pending }} / {{ patch_status.active_in_scope }}</div>
+            <div class="sub">Ninja reports a pending reboot</div>
+        </a>
+    </div>
+</div>
+
+{% if client_posture %}
+<div class="card">
+    <h2 style="font-size:1rem; margin:0 0 .25rem;">Client patching status</h2>
+    <p class="muted" style="font-size:.84rem; margin-top:0;">Compare active devices and patch evidence by client. Counts use the same definitions as the status cards above.</p>
+    <table class="patch-posture-table" data-sortable>
+        <thead><tr>
+            <th>Client</th><th class="num">Active</th><th class="num">In scope</th><th class="num">Recent activity</th><th class="num">Quiet</th><th class="num">Never patched</th><th class="num">Awaiting restart</th>
+        </tr></thead>
+        <tbody>{% for row in client_posture %}
+            <tr>
+                <td><a href="?client={{ row.slug }}">{{ row.name }}</a></td>
+                <td class="num">{{ row.active }}</td>
+                <td class="num">{{ row.in_scope }}</td>
+                <td class="num">{{ row.recent_activity }}</td>
+                <td class="num">{{ row.quiet }}</td>
+                <td class="num">{{ row.never_patched }}</td>
+                <td class="num">{{ row.reboot_pending }}</td>
+            </tr>
+        {% endfor %}</tbody>
+    </table>
+</div>
+{% endif %}
+
+{# Policy scope is context, not the page's primary status. #}
 <div class="card">
     <h2 style="font-size: 0.95rem; margin: 0 0 0.5rem 0; color: #9ca3af;">
-        Device population
+        Patching policy scope
         {% if active_client %}<span class="muted">({{ active_client|join:", " }})</span>{% endif %}
         {% if active_role %}<span class="muted">— {{ active_role|humanize_label|lower }} only</span>{% endif %}
     </h2>
     {% include "_tiles.html" with tiles=population_tiles %}
     <p class="muted" style="margin-top: 0.6rem; font-size: 0.85rem;">
         <strong>{{ population.in_scope }}</strong> of {{ population.total }}
-        devices in patching scope
+        devices included by policy
         {% if population.total %}(<strong>{{ population.in_scope_pct }}%</strong>){% endif %}.
-        Excluded = operator-set exclusion; Not managed = non-Windows or
-        no Ninja link; Not determined = no scope decision yet.
+        Excluded = operator-set exclusion; Not managed = outside the configured
+        patching service; Not determined = no scope decision yet.
     </p>
 </div>
 
@@ -96,7 +163,7 @@
 {% if device_rows %}
 <div class="card">
     <h2>
-        Devices — {{ active_scope|humanize_label }}
+        Devices — {% if active_posture %}{{ active_posture|humanize_label }}{% else %}{{ active_scope|humanize_label }}{% endif %}
         <span class="muted" style="font-weight: 400; font-size: 0.85rem;">
             ({{ device_rows|length }}{% if device_rows|length == 500 %}+{% endif %})
         </span>
@@ -110,6 +177,7 @@
                 <th>Why this scope</th>
                 <th>Override?</th>
                 <th class="num">Last contact</th>
+                <th class="num">Last Ninja patch data</th>
             </tr>
         </thead>
         <tbody>
@@ -133,6 +201,10 @@
                     {% endif %}
                 </td>
                 <td class="muted num">{{ d.last_contact|date:"Y-m-d H:i"|default:"—" }}</td>
+                <td class="muted num">
+                    {% if d.activity_url %}<a href="{{ d.activity_url }}">{{ d.last_patch_activity|date:"Y-m-d H:i"|default:"—" }}</a>
+                    {% else %}{{ d.last_patch_activity|date:"Y-m-d H:i"|default:"—" }}{% endif %}
+                </td>
             </tr>
             {% endfor %}
         </tbody>

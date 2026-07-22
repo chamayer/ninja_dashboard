@@ -9,6 +9,7 @@ from django.db.models import Count, Q
 from django.urls import reverse
 from django.utils import timezone
 
+from .device_status import DEVICE_ACTIVE_DAYS
 from .models import Finding, MergeCandidate
 from .templatetags.human_labels import humanize_label
 
@@ -270,6 +271,7 @@ def build_client_workspace(client, existing: dict) -> dict:
     online = device["online"]
     offline = device["offline"]
     stale = device["stale"]
+    active = device["active"]
     if not total:
         device_state = "unavailable"
     elif stale:
@@ -294,11 +296,12 @@ def build_client_workspace(client, existing: dict) -> dict:
             key="devices",
             name="Devices",
             description="Availability and recent contact",
-            value=f"{online:,} of {total:,}",
-            value_label="currently online",
+            value=f"{active:,} of {total:,}",
+            value_label="active devices",
             facts=[
+                {"label": f"{online:,} online now"},
                 {"label": f"{offline:,} offline"},
-                {"label": f"{stale:,} not seen in 7 days"},
+                {"label": f"{stale:,} not seen in {DEVICE_ACTIVE_DAYS} days"},
                 {"label": f"{device['servers']:,} servers"},
                 {"label": f"{device['workstations']:,} workstations"},
             ],

@@ -181,10 +181,10 @@
     <span class="fleet-stat-value">{{ total_clients }}</span>
     <span class="fleet-stat-note">{{ clients_connected }} connected</span>
   </a>
-  <a class="fleet-stat" href="{% url 'devices_page' %}">
+  <a class="fleet-stat" href="{% url 'devices_page' %}?state=active">
     <span class="fleet-stat-label">Active devices</span>
-    <span class="fleet-stat-value">{{ total_devices }}</span>
-    <span class="fleet-stat-note">{{ retired_devices }} retired</span>
+    <span class="fleet-stat-value">{{ active_devices }}</span>
+    <span class="fleet-stat-note">of {{ total_devices }} managed · {{ retired_devices }} retired</span>
     <span class="fleet-stat-detail">{{ device_mix.workstations }} workstations · {{ device_mix.servers }} servers · {{ device_mix.virtual }} virtual · {{ device_mix.other }} other</span>
   </a>
   <a class="fleet-stat dashboard-filter-link" href="?view=attention#clients" data-filter="attention">
@@ -260,7 +260,7 @@
             <span class="priority-badge priority-{{ row.priority }}">{{ row.priority_label }}</span>
             {% if row.priority_reason %}<span class="priority-reason">{{ row.priority_reason }}</span>{% endif %}
           </td>
-          <td><strong>{{ row.devices }}</strong><span class="cell-detail">active</span></td>
+          <td><strong>{{ row.devices }}</strong><span class="cell-detail">managed</span></td>
           {% for domain in row.domains %}
           <td class="domain-cell">
             <a href="{{ domain.href }}" title="Open {{ row.client.display_name }} → {{ domain.name }}"><span class="state-dot dot-{{ domain.state }}"></span>{{ domain.state_label }}</a>

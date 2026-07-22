@@ -67,6 +67,11 @@
         <div class="dv-value">{{ overview.total }}</div>
         <div class="dv-sub">managed devices</div>
     </a>
+    <a class="dv-tile" href="?state=active">
+        <div class="dv-label">Active</div>
+        <div class="dv-value">{{ overview.active }}</div>
+        <div class="dv-sub">contact within {{ active_device_days }} days</div>
+    </a>
     <a class="dv-tile online" href="?online=online">
         <div class="dv-label">Online</div>
         <div class="dv-value">{{ overview.online }}</div>
@@ -80,7 +85,7 @@
     <a class="dv-tile" href="?state=not-reporting">
         <div class="dv-label">Not reporting</div>
         <div class="dv-value">{{ overview.stale }}</div>
-        <div class="dv-sub">no contact in 7 days</div>
+        <div class="dv-sub">no contact in {{ active_device_days }} days</div>
     </a>
     <a class="dv-tile" href="?role=server">
         <div class="dv-label">Servers</div>

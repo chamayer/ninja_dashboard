@@ -18,6 +18,7 @@ from django.views.decorators.http import require_GET, require_POST
 
 from .client_workspace import build_client_directory, build_client_workspace
 from .csv_export import csv_response, wants_csv
+from .device_status import DEVICE_ACTIVE_DAYS, PATCH_ACTIVITY_DAYS
 from .forms import ClientPolicyForm
 from .models import (
     AdminFinding,
@@ -207,6 +208,18 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
         else:
             device_mix["other"] += count
     total_devices = sum(device_counts.values())
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        cur.execute(
+            f"""
+            SELECT COUNT(*)::int
+            FROM operations.v_device
+            WHERE tenant_id = 1
+              AND lifecycle_status <> 'retired'
+              AND last_contact_at >= NOW() - INTERVAL '{DEVICE_ACTIVE_DAYS} days'
+            """
+        )
+        active_devices = cur.fetchone()[0]
 
     # Aggregate active, unsnoozed issues by client/domain/type/severity. This
     # replaces filtered joins repeated for every dashboard metric and keeps the
@@ -471,7 +484,7 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
             "name": "Inventory",
             "description": "Devices, ownership, and data quality",
             "value": f"{total_devices:,}",
-            "value_label": "active devices",
+            "value_label": "managed devices",
             "has_data": total_devices > 0,
             "delayed": any_source_delayed,
             "updated_at": dashboard_updated_at,
@@ -643,6 +656,8 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
         "home.html",
         {
             "total_devices": total_devices,
+            "active_devices": active_devices,
+            "active_device_days": DEVICE_ACTIVE_DAYS,
             "retired_devices": retired_devices,
             "device_mix": device_mix,
             "total_clients": len(clients),
@@ -847,18 +862,20 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
 
             # Devices online/offline + patch-scope for this client.
             cur.execute(
-                """
-                SELECT COUNT(*) AS total,
-                       COUNT(*) FILTER (WHERE is_online_any) AS online,
-                       COUNT(*) FILTER (WHERE NOT is_online_any) AS offline,
-                       COUNT(*) FILTER (WHERE device_role = 'server') AS servers,
-                       COUNT(*) FILTER (WHERE device_role = 'workstation') AS workstations,
-                       COUNT(*) FILTER (WHERE effective_patching_scope = 'Included') AS in_patch_scope,
-                       COUNT(*) FILTER (WHERE last_contact_at IS NULL
-                                        OR last_contact_at < NOW() - INTERVAL '7 days') AS stale
+                f"""
+            SELECT COUNT(*) AS total,
+                   COUNT(*) FILTER (WHERE is_online_any) AS online,
+                   COUNT(*) FILTER (WHERE NOT is_online_any) AS offline,
+                   COUNT(*) FILTER (WHERE device_role = 'server') AS servers,
+                   COUNT(*) FILTER (WHERE device_role = 'workstation') AS workstations,
+                   COUNT(*) FILTER (WHERE effective_patching_scope = 'Included') AS in_patch_scope,
+                   COUNT(*) FILTER (WHERE lifecycle_status <> 'retired'
+                                     AND last_contact_at >= NOW() - INTERVAL '{DEVICE_ACTIVE_DAYS} days') AS active,
+                   COUNT(*) FILTER (WHERE last_contact_at IS NULL
+                                        OR last_contact_at < NOW() - INTERVAL '{DEVICE_ACTIVE_DAYS} days') AS stale
                 FROM operations.v_device
                 WHERE tenant_id = 1 AND client_id = %s
-                """,
+            """,
                 [str(client.id)],
             )
             r = cur.fetchone()
@@ -869,7 +886,8 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
                 "servers": r[3],
                 "workstations": r[4],
                 "in_patch_scope": r[5],
-                "stale": r[6],
+                "active": r[6],
+                "stale": r[7],
             }
 
             # Severity breakdown of open findings for this client.
@@ -1402,7 +1420,7 @@ def _build_raw_snapshot_view(device, links):
     """
     ninja_external_id = None
     for link in links:
-        if link.source.name == "ninja":
+        if link.source.name.lower() == "ninja":
             ninja_external_id = link.external_id
             break
 
@@ -1823,7 +1841,7 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
     if active_tab == "activity":
         ninja_external_id = None
         for link in links:
-            if link.source.name == "ninja":
+            if link.source.name.lower() == "ninja":
                 ninja_external_id = link.external_id
                 break
         if ninja_external_id:
@@ -1837,7 +1855,7 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
                     cur.execute(
                         """
                         SELECT activity_time, activity_type, source_name,
-                               severity, subject, message
+                               severity, subject, message, data, ingested_at
                         FROM ninja_activities.activities
                         WHERE device_id = %s
                         ORDER BY activity_time DESC
@@ -1845,7 +1863,7 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
                         """,
                         [nid],
                     )
-                    for at, atype, sname, sev, subj, msg in cur.fetchall():
+                    for at, atype, sname, sev, subj, msg, raw_data, ingested_at in cur.fetchall():
                         activity.append(
                             {
                                 "kind": "ninja_event",
@@ -1853,6 +1871,67 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
                                 "severity": (sev or "").lower() or None,
                                 "label": subj or atype or "Ninja event",
                                 "status": msg or atype,
+                                "source": sname,
+                                "collected_at": ingested_at,
+                                "raw_data": json.dumps(
+                                    raw_data, indent=2, sort_keys=True, default=str
+                                ),
+                            }
+                        )
+
+                    # Patch facts are Ninja's retained evidence of patch state
+                    # and install outcomes.  They answer a different question
+                    # from the generic activity feed, so keep both in the one
+                    # device timeline and preserve the original payload.
+                    cur.execute(
+                        """
+                        SELECT pf.fact_type, pf.status, pf.severity,
+                               pf.kb_number, pf.name, pf.type,
+                               pf.installed_at, pf.ninja_observed_at,
+                               pf.last_observed_at, pf.data
+                        FROM ninja_patches.patch_facts pf
+                        WHERE pf.device_id = %s
+                        ORDER BY COALESCE(pf.installed_at, pf.ninja_observed_at,
+                                          pf.last_observed_at) DESC NULLS LAST
+                        LIMIT 100
+                        """,
+                        [nid],
+                    )
+                    for (
+                        fact_type,
+                        status,
+                        severity,
+                        kb_number,
+                        name,
+                        patch_type,
+                        installed_at,
+                        ninja_observed_at,
+                        last_observed_at,
+                        raw_data,
+                    ) in cur.fetchall():
+                        event_at = installed_at or ninja_observed_at or last_observed_at
+                        patch_label = name or kb_number or "Patch record"
+                        activity.append(
+                            {
+                                "kind": "patch",
+                                "at": event_at,
+                                "severity": (severity or "").lower() or None,
+                                "label": patch_label,
+                                "status": status,
+                                "source": "Ninja patch data",
+                                "detail": " · ".join(
+                                    part
+                                    for part in (
+                                        fact_type.replace("_", " "),
+                                        kb_number,
+                                        patch_type,
+                                    )
+                                    if part
+                                ),
+                                "collected_at": last_observed_at,
+                                "raw_data": json.dumps(
+                                    raw_data, indent=2, sort_keys=True, default=str
+                                ),
                             }
                         )
 
@@ -2754,7 +2833,7 @@ def devices_page(request: HttpRequest) -> HttpResponse:
     os_filter = request.GET.get("os", "")  # Windows | macOS | Linux | Other
     role_filter = request.GET.get("role", "")  # server | workstation | unknown
     online_filter = request.GET.get("online", "")  # online | offline
-    state_filter = request.GET.get("state", "")  # not-reporting
+    state_filter = request.GET.get("state", "")  # active | not-reporting
     client_filter = request.GET.get("client", "")  # slug
 
     with transaction.atomic(), connection.cursor() as cur:
@@ -2762,15 +2841,17 @@ def devices_page(request: HttpRequest) -> HttpResponse:
 
         # Overview — reads v_device to get session state + scope in one query
         cur.execute(
-            """
+            f"""
             SELECT COUNT(*) AS total,
                    COUNT(*) FILTER (WHERE is_online_any) AS online,
                    COUNT(*) FILTER (WHERE NOT is_online_any) AS offline,
                    COUNT(*) FILTER (WHERE device_role = 'server') AS servers,
                    COUNT(*) FILTER (WHERE device_role = 'workstation') AS workstations,
                    COUNT(*) FILTER (WHERE effective_patching_scope = 'Included') AS in_patch_scope,
+                   COUNT(*) FILTER (WHERE lifecycle_status <> 'retired'
+                                     AND last_contact_at >= NOW() - INTERVAL '{DEVICE_ACTIVE_DAYS} days') AS active,
                    COUNT(*) FILTER (WHERE last_contact_at IS NULL
-                                    OR last_contact_at < NOW() - INTERVAL '7 days') AS stale
+                                    OR last_contact_at < NOW() - INTERVAL '{DEVICE_ACTIVE_DAYS} days') AS stale
             FROM operations.v_device
             WHERE tenant_id = 1
             """
@@ -2783,7 +2864,8 @@ def devices_page(request: HttpRequest) -> HttpResponse:
             "servers": row[3],
             "workstations": row[4],
             "in_patch_scope": row[5],
-            "stale": row[6],
+            "active": row[6],
+            "stale": row[7],
         }
 
         cur.execute(
@@ -2836,9 +2918,13 @@ def devices_page(request: HttpRequest) -> HttpResponse:
             where.append("v.is_online_any")
         elif online_filter == "offline":
             where.append("NOT v.is_online_any")
-        if state_filter == "not-reporting":
+        if state_filter == "active":
             where.append(
-                "(v.last_contact_at IS NULL OR v.last_contact_at < NOW() - INTERVAL '7 days')"
+                f"v.lifecycle_status <> 'retired' AND v.last_contact_at >= NOW() - INTERVAL '{DEVICE_ACTIVE_DAYS} days'"
+            )
+        elif state_filter == "not-reporting":
+            where.append(
+                f"(v.last_contact_at IS NULL OR v.last_contact_at < NOW() - INTERVAL '{DEVICE_ACTIVE_DAYS} days')"
             )
         if client_filter:
             where.append(
@@ -2895,7 +2981,9 @@ def devices_page(request: HttpRequest) -> HttpResponse:
             health = "amber"
         else:
             health = "green"
-        if last_contact is None or last_contact < timezone.now() - timedelta(days=7):
+        if last_contact is None or last_contact < timezone.now() - timedelta(
+            days=DEVICE_ACTIVE_DAYS
+        ):
             state_label = "Not reporting"
         elif is_online:
             state_label = "Online"
@@ -2951,6 +3039,7 @@ def devices_page(request: HttpRequest) -> HttpResponse:
         "devices_page.html",
         {
             "overview": overview,
+            "active_device_days": DEVICE_ACTIVE_DAYS,
             "os_rows": os_rows,
             "devices": devices,
             "clients": clients,
@@ -3115,36 +3204,206 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
         "in_scope_pct": (round(100.0 * pop_row[1] / pop_row[0], 1) if pop_row[0] else 0.0),
     }
 
+    # Status overview.  Keep the three ideas deliberately separate:
+    # device freshness (active), patching policy (Included), and evidence of
+    # patch work (a recent Ninja state observation or install outcome).
+    posture_where = ["v.tenant_id = %s", "v.lifecycle_status <> 'retired'"]
+    posture_params: list = [1]
+    if filtered_client_ids:
+        posture_where.append("v.client_id = ANY(%s::uuid[])")
+        posture_params.append(filtered_client_ids)
+    elif client_filter:
+        posture_where.append("FALSE")
+    if role_filter:
+        posture_where.append("v.device_role = %s")
+        posture_params.append(role_filter)
+    posture_where_sql = " AND ".join(posture_where)
+
+    posture_cte = f"""
+        WITH scoped_devices AS (
+            SELECT v.device_id, v.client_id, v.canonical_hostname,
+                   v.device_role, v.os_group, v.last_contact_at,
+                   v.needs_reboot, v.effective_patching_scope
+            FROM operations.v_device v
+            WHERE {posture_where_sql}
+        ), ninja_links AS (
+            SELECT DISTINCT dl.device_id, dl.external_id::integer AS ninja_device_id
+            FROM operations.device_links dl
+            JOIN operations.sources s ON s.id = dl.source_id
+            WHERE dl.tenant_id = 1 AND LOWER(s.name) = 'ninja'
+              AND dl.external_id ~ '^\\d+$'
+        ), patch_signal AS (
+            SELECT nl.device_id,
+                   BOOL_OR(COALESCE(dps.ever_installed, FALSE)) AS ever_installed
+            FROM ninja_links nl
+            JOIN ninja_patches.device_patch_signal dps
+              ON dps.device_id = nl.ninja_device_id
+            GROUP BY nl.device_id
+        ), patch_activity AS (
+            SELECT nl.device_id,
+                   MAX(COALESCE(pf.installed_at, pf.ninja_observed_at,
+                                pf.last_observed_at)) AS last_patch_activity_at
+            FROM ninja_links nl
+            JOIN ninja_patches.patch_facts pf
+              ON pf.device_id = nl.ninja_device_id
+            WHERE pf.fact_type IN ('patch_state', 'install_outcome')
+            GROUP BY nl.device_id
+        ), device_posture AS (
+            SELECT sd.*, pa.last_patch_activity_at,
+                   COALESCE(ps.ever_installed, FALSE) AS ever_installed,
+                   sd.last_contact_at >= NOW() - INTERVAL '{DEVICE_ACTIVE_DAYS} days' AS is_active,
+                   pa.last_patch_activity_at >= NOW() - INTERVAL '{PATCH_ACTIVITY_DAYS} days'
+                       AS has_recent_patch_activity
+            FROM scoped_devices sd
+            LEFT JOIN patch_signal ps ON ps.device_id = sd.device_id
+            LEFT JOIN patch_activity pa ON pa.device_id = sd.device_id
+        )
+    """
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        cur.execute(
+            posture_cte
+            + """
+            SELECT COUNT(*)::int AS total,
+                   COUNT(*) FILTER (WHERE is_active)::int AS active,
+                   COUNT(*) FILTER (WHERE is_active
+                                     AND effective_patching_scope = 'Included')::int AS active_in_scope,
+                   COUNT(*) FILTER (WHERE is_active
+                                     AND effective_patching_scope = 'Included'
+                                     AND has_recent_patch_activity)::int AS recent_patch_activity,
+                   COUNT(*) FILTER (WHERE is_active
+                                     AND effective_patching_scope = 'Included'
+                                     AND NOT has_recent_patch_activity)::int AS quiet_patch_data,
+                   COUNT(*) FILTER (WHERE is_active
+                                     AND effective_patching_scope = 'Included'
+                                     AND NOT ever_installed)::int AS never_patched,
+                   COUNT(*) FILTER (WHERE is_active
+                                     AND effective_patching_scope = 'Included'
+                                     AND needs_reboot)::int AS reboot_pending
+            FROM device_posture
+            """,
+            posture_params,
+        )
+        status_row = cur.fetchone() or (0, 0, 0, 0, 0, 0, 0)
+        cur.execute(
+            posture_cte
+            + """
+            SELECT dp.client_id, c.slug, c.display_name,
+                   COUNT(*) FILTER (WHERE dp.is_active)::int AS active,
+                   COUNT(*) FILTER (WHERE dp.is_active
+                                     AND dp.effective_patching_scope = 'Included')::int AS in_scope,
+                   COUNT(*) FILTER (WHERE dp.is_active
+                                     AND dp.effective_patching_scope = 'Included'
+                                     AND dp.has_recent_patch_activity)::int AS recent_activity,
+                   COUNT(*) FILTER (WHERE dp.is_active
+                                     AND dp.effective_patching_scope = 'Included'
+                                     AND NOT dp.has_recent_patch_activity)::int AS quiet,
+                   COUNT(*) FILTER (WHERE dp.is_active
+                                     AND dp.effective_patching_scope = 'Included'
+                                     AND NOT dp.ever_installed)::int AS never_patched,
+                   COUNT(*) FILTER (WHERE dp.is_active
+                                     AND dp.effective_patching_scope = 'Included'
+                                     AND dp.needs_reboot)::int AS reboot_pending
+            FROM device_posture dp
+            JOIN operations.clients c ON c.id = dp.client_id AND c.deleted_at IS NULL
+            GROUP BY dp.client_id, c.slug, c.display_name
+            ORDER BY quiet DESC, never_patched DESC, reboot_pending DESC, c.display_name
+            """,
+            posture_params,
+        )
+        client_posture_rows = cur.fetchall()
+
+    status_keys = (
+        "total",
+        "active",
+        "active_in_scope",
+        "recent_patch_activity",
+        "quiet_patch_data",
+        "never_patched",
+        "reboot_pending",
+    )
+    patch_status = dict(zip(status_keys, status_row, strict=True))
+    client_posture = [
+        dict(
+            zip(
+                (
+                    "client_id",
+                    "slug",
+                    "name",
+                    "active",
+                    "in_scope",
+                    "recent_activity",
+                    "quiet",
+                    "never_patched",
+                    "reboot_pending",
+                ),
+                row,
+                strict=True,
+            )
+        )
+        for row in client_posture_rows
+    ]
+
     # Device population by scope (drilldown from the summary tiles).
     # Optional "scope" query param drills into a specific bucket.
     scope_filter = request.GET.get("scope", "")
+    posture_filter = request.GET.get("posture", "")
     device_rows: list = []
-    if scope_filter in ("Included", "Excluded", "Unmanaged", "Unknown"):
+    if scope_filter in ("Included", "Excluded", "Unmanaged", "Unknown") or posture_filter in (
+        "active",
+        "active-in-scope",
+        "recent-activity",
+        "quiet",
+        "never-patched",
+        "reboot-pending",
+    ):
         with transaction.atomic(), connection.cursor() as cur:
             cur.execute("SET LOCAL operations.tenant_id = 1")
-            base_where = "tenant_id = %s AND effective_patching_scope = %s"
-            params: list = [1, scope_filter]
-            if filtered_client_ids:
-                base_where += " AND client_id = ANY(%s::uuid[])"
-                params.append(filtered_client_ids)
-            elif client_filter:
-                base_where += " AND FALSE"
-            if role_filter:
-                base_where += " AND device_role = %s"
-                params.append(role_filter)
+            base_where = ["1=1"]
+            if scope_filter:
+                base_where.append("effective_patching_scope = %s")
+            if posture_filter == "active":
+                base_where.append("is_active")
+            elif posture_filter == "active-in-scope":
+                base_where.extend(("is_active", "effective_patching_scope = 'Included'"))
+            elif posture_filter == "recent-activity":
+                base_where.extend(
+                    (
+                        "is_active",
+                        "effective_patching_scope = 'Included'",
+                        "has_recent_patch_activity",
+                    )
+                )
+            elif posture_filter == "quiet":
+                base_where.extend(
+                    (
+                        "is_active",
+                        "effective_patching_scope = 'Included'",
+                        "NOT has_recent_patch_activity",
+                    )
+                )
+            elif posture_filter == "never-patched":
+                base_where.extend(
+                    ("is_active", "effective_patching_scope = 'Included'", "NOT ever_installed")
+                )
+            elif posture_filter == "reboot-pending":
+                base_where.extend(
+                    ("is_active", "effective_patching_scope = 'Included'", "needs_reboot")
+                )
             cur.execute(
-                f"""
+                posture_cte
+                + f"""
                 SELECT device_id, canonical_hostname, client_id,
                        device_role, os_group,
-                       patching_scope_reason,
-                       patching_scope_override,
-                       last_contact_at
-                FROM operations.v_device
-                WHERE {base_where}
+                       NULL::text AS patching_scope_reason,
+                       NULL::text AS patching_scope_override,
+                       last_contact_at, last_patch_activity_at
+                FROM device_posture
+                WHERE {' AND '.join(base_where)}
                 ORDER BY canonical_hostname
                 LIMIT 500
                 """,
-                params,
+                posture_params + ([scope_filter] if scope_filter else []),
             )
             device_rows = cur.fetchall()
 
@@ -3164,6 +3423,7 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
                 "reason": reason,
                 "override": override,
                 "last_contact": last_contact,
+                "last_patch_activity": last_patch_activity,
                 "url": (
                     reverse(
                         "device_detail",
@@ -3175,8 +3435,30 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
                     if cid in client_slug_by_id
                     else None
                 ),
+                "activity_url": (
+                    reverse(
+                        "device_detail",
+                        kwargs={
+                            "org_slug": client_slug_by_id[cid],
+                            "device_id": did,
+                        },
+                    )
+                    + "?tab=activity"
+                    if cid in client_slug_by_id
+                    else None
+                ),
             }
-            for (did, hostname, cid, role, os_group, reason, override, last_contact) in device_rows
+            for (
+                did,
+                hostname,
+                cid,
+                role,
+                os_group,
+                reason,
+                override,
+                last_contact,
+                last_patch_activity,
+            ) in device_rows
         ]
 
     # Main table query = base_qs + type filter
@@ -3297,6 +3579,11 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
             "active_scope": scope_filter,
             "total_active": sum(tile_counts.values()),
             "population": population,
+            "patch_status": patch_status,
+            "client_posture": client_posture,
+            "active_device_days": DEVICE_ACTIVE_DAYS,
+            "patch_activity_days": PATCH_ACTIVITY_DAYS,
+            "active_posture": posture_filter,
             "filter_qs": filter_qs,
             "device_rows": device_rows,
             "page_query": page_query.urlencode(),
@@ -3658,8 +3945,10 @@ def patch_trends_page(request: HttpRequest) -> HttpResponse:
 
 @login_required
 def patch_activity_search_page(request: HttpRequest) -> HttpResponse:
-    """Free-text search across recent patch activity events (install
-    outcomes). Closes the Metabase "Activity Search" dashboard GAP.
+    """Free-text search across recent Ninja patch install outcomes.
+
+    Each result retains Ninja's event time, Operations collection time, and
+    source payload so an operator can inspect the evidence behind a status.
 
     Query params: `q` (patch name or KB), `days` (default 30, capped
     180), `status` (Installed/Failed/...), `client` (slug). CSV export
@@ -3700,6 +3989,10 @@ def patch_activity_search_page(request: HttpRequest) -> HttpResponse:
                 pf.severity,
                 pf.kb_number,
                 pf.name,
+                pf.fact_type,
+                pf.ninja_observed_at,
+                pf.last_observed_at,
+                pf.data,
                 d.id                     AS device_id,
                 d.canonical_hostname     AS hostname,
                 c.slug                   AS client_slug,
@@ -3721,18 +4014,70 @@ def patch_activity_search_page(request: HttpRequest) -> HttpResponse:
         )
         rows = cur.fetchall()
 
+        # Patch facts are structured patch evidence. Ninja's activity feed is
+        # the accompanying source event trail, so expose both in one search
+        # rather than making an operator leave Operations for the message
+        # Ninja reported.
+        ninja_activity_rows = []
+        if not status_filter:
+            activity_where = [
+                "a.activity_time > NOW() - (%s::text || ' days')::interval",
+            ]
+            activity_params: list = [str(days)]
+            if q_filter:
+                activity_where.append("(a.subject ILIKE %s OR a.message ILIKE %s)")
+                activity_params.extend([f"%{q_filter}%", f"%{q_filter}%"])
+            if client_filter:
+                activity_where.append("c.slug = %s")
+                activity_params.append(client_filter)
+            cur.execute(
+                f"""
+                SELECT a.activity_time, NULL::text AS status, a.severity,
+                       NULL::text AS kb_number, a.subject AS name,
+                       a.activity_type AS fact_type, a.activity_time AS ninja_observed_at,
+                       a.ingested_at AS last_observed_at, a.data,
+                       d.id AS device_id, d.canonical_hostname AS hostname,
+                       c.slug AS client_slug, c.display_name AS client_name
+                FROM ninja_activities.activities a
+                JOIN operations.device_links dl
+                  ON dl.external_id = a.device_id::text
+                 AND dl.tenant_id = 1
+                JOIN operations.sources s
+                  ON s.id = dl.source_id AND LOWER(s.name) = 'ninja'
+                JOIN operations.devices d
+                  ON d.id = dl.device_id AND d.deleted_at IS NULL
+                JOIN operations.clients c
+                  ON c.id = d.client_id AND c.deleted_at IS NULL
+                WHERE {' AND '.join(activity_where)}
+                ORDER BY a.activity_time DESC
+                LIMIT 500
+                """,
+                activity_params,
+            )
+            ninja_activity_rows = cur.fetchall()
+
     cols = [
         "installed_at",
         "status",
         "severity",
         "kb_number",
         "name",
+        "fact_type",
+        "ninja_observed_at",
+        "last_observed_at",
+        "raw_data",
         "device_id",
         "hostname",
         "client_slug",
         "client_name",
     ]
     activity = [dict(zip(cols, r, strict=True)) for r in rows]
+    activity.extend(dict(zip(cols, r, strict=True)) for r in ninja_activity_rows)
+    for row in activity:
+        row["raw_data"] = json.dumps(row["raw_data"], indent=2, sort_keys=True, default=str)
+        row["event_at"] = row["installed_at"] or row["ninja_observed_at"] or row["last_observed_at"]
+    activity.sort(key=lambda row: row["event_at"] or timezone.now(), reverse=True)
+    activity = activity[:500]
 
     if wants_csv(request):
         return csv_response(
@@ -3743,6 +4088,8 @@ def patch_activity_search_page(request: HttpRequest) -> HttpResponse:
                 ("Severity", "severity"),
                 ("KB", "kb_number"),
                 ("Patch", "name"),
+                ("Ninja event time", "ninja_observed_at"),
+                ("Collected", "last_observed_at"),
                 ("Client", "client_name"),
                 ("Hostname", "hostname"),
             ],
