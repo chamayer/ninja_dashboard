@@ -89,6 +89,29 @@ _DASHBOARD_STATE_PRIORITY = {
     "unavailable": 0,
 }
 
+_CLIENT_DOMAIN_LABELS = {
+    "patching": "Patching",
+    "coverage": "Compliance",
+    "software": "Software",
+    "identity": "Inventory",
+    "lifecycle": "Inventory",
+    "data_quality": "Inventory",
+}
+
+
+def _empty_issue_stats() -> dict:
+    return {"severities": {}, "types": {}, "subjects": {}, "total": 0, "new": 0}
+
+
+def _issue_state_from_stats(
+    stats: dict, *, has_data: bool = True, data_delayed: bool = False
+) -> tuple[str, str, str]:
+    issue_state = _dashboard_issue_state(stats["severities"])
+    display_state = _dashboard_display_state(
+        issue_state, has_data=has_data, data_delayed=data_delayed
+    )
+    return issue_state, display_state, _DASHBOARD_STATE_LABELS[display_state]
+
 
 def _dashboard_issue_state(severity_counts: dict[str, int]) -> str:
     """Return an operational state without treating data freshness as health."""
@@ -912,24 +935,18 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
                 for row in cur.fetchall()
             ]
 
-            # Software pending decisions for titles this client actually runs.
-            # Pending = no global decision AND no client-specific decision.
+            # Decision coverage is intentionally reported directly. Counting
+            # every installed title with no matching global/client decision
+            # required a large correlated anti-join on every overview render.
             cur.execute(
                 """
-                SELECT COUNT(DISTINCT si.canonical_name)::int
-                FROM operations.software_installations_current si
-                WHERE si.tenant_id = 1 AND si.client_id = %s
-                  AND si.deleted_at IS NULL
-                  AND NOT EXISTS (
-                      SELECT 1 FROM operations.software_decisions sd
-                      WHERE sd.tenant_id = si.tenant_id
-                        AND sd.canonical_name = si.canonical_name
-                        AND (sd.client_id IS NULL OR sd.client_id = si.client_id)
-                  )
+                SELECT COUNT(*)::int
+                FROM operations.software_decisions
+                WHERE tenant_id = 1 AND (client_id IS NULL OR client_id = %s)
                 """,
                 [str(client.id)],
             )
-            ctx["software_pending"] = cur.fetchone()[0]
+            ctx["software_decisions"] = cur.fetchone()[0]
 
             # Findings opened in the last 24h.
             cur.execute(
@@ -4144,12 +4161,13 @@ def client_candidate_detail(request: HttpRequest, candidate_id) -> HttpResponse:
                         eo.device_id,
                         d.client_id,
                         c.display_name
-                    FROM operations.entity_observations eo
+                    FROM operations.entity_observation_current eo
                     LEFT JOIN operations.devices d
                         ON d.id = eo.device_id AND d.deleted_at IS NULL
                     LEFT JOIN operations.clients c
                         ON c.id = d.client_id
                     WHERE eo.tenant_id = 1
+                      AND eo.active = TRUE
                       AND eo.entity_type <> 'org'
                       AND eo.canonical_data->>'platform_group_id' = ANY(%s)
                     ORDER BY eo.entity_key, eo.platform, eo.observed_at DESC
