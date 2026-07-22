@@ -170,8 +170,9 @@ def resolve_device_fast(
             WHERE d.tenant_id = %s AND d.canonical_hostname = %s AND d.deleted_at IS NULL
               AND (%s::uuid IS NULL OR d.client_id = %s)
               AND NOT EXISTS (
-                  SELECT 1 FROM operations.entity_observations eo
+                  SELECT 1 FROM operations.entity_observation_current eo
                   WHERE eo.tenant_id = d.tenant_id AND eo.device_id = d.id
+                    AND eo.active = TRUE
                     AND eo.platform = %s AND eo.entity_type = %s
                     AND eo.entity_key <> %s
               )
