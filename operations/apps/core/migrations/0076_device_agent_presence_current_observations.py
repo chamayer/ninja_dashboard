@@ -5,10 +5,11 @@ empty compatibility shell, but ``device_agent_presence_current`` still read
 from it.  That made every presence refresh silently produce no rows.
 
 The presence matview has two PostgreSQL OID dependents: device session and
-current source health.  Rebuild those current derived objects in the same
-transaction so they bind to the replacement presence matview.  The existing
-``source_health_current_legacy`` safety-net view remains bound to the renamed
-legacy presence matview for rollback comparison.
+current source health. `v_device` in turn depends on device session. Rebuild
+those current derived objects in the same transaction so they bind to the
+replacement presence matview. The existing ``source_health_current_legacy``
+safety-net view remains bound to the renamed legacy presence matview for
+rollback comparison.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ from typing import ClassVar
 from django.db import migrations
 
 DROP_CURRENT_DEPENDENTS_SQL = """
+DROP VIEW operations.v_device;
 DROP MATERIALIZED VIEW operations.source_health_current;
 DROP MATERIALIZED VIEW operations.device_session_current;
 """
@@ -159,6 +161,69 @@ ALTER MATERIALIZED VIEW operations.device_session_current
     OWNER TO operations_migrate;
 """
 
+CREATE_CURRENT_V_DEVICE_SQL = """
+CREATE VIEW operations.v_device
+WITH (security_invoker = true) AS
+SELECT
+    d.tenant_id,
+    d.id AS device_id,
+    d.client_id,
+    d.version,
+    d.canonical_hostname,
+    d.canonical_serial,
+    d.canonical_vm_uuid,
+    d.device_type,
+    d.device_role,
+    d.lifecycle_status,
+    d.os_name,
+    d.os_family,
+    d.os_group,
+    d.created_at,
+    d.created_reason,
+    d.updated_at,
+    d.updated_reason,
+    d.stale_since,
+    d.stale_reason,
+    d.deleted_at,
+    d.deleted_reason,
+    ds.last_contact_at,
+    ds.last_observed_at,
+    COALESCE(ds.is_online_any, FALSE) AS is_online_any,
+    COALESCE(ds.online_sources, ARRAY[]::text[]) AS online_sources,
+    COALESCE(ds.source_count_active, 0) AS source_count_active,
+    ds.needs_reboot,
+    ds.last_boot_at,
+    ds.last_power_state,
+    ds.computed_at AS session_computed_at,
+    COALESCE(op_exemptions.value, '{}'::jsonb) AS exemptions,
+    ps.scope_derived AS patching_scope_derived,
+    ps.scope_reason AS patching_scope_reason,
+    ps.computed_at AS patching_scope_computed_at,
+    op_patching.scope AS patching_scope_override,
+    op_patching.reason AS patching_scope_override_reason,
+    COALESCE(op_patching.scope, ps.scope_derived, 'Unmanaged')
+        AS effective_patching_scope
+FROM operations.devices d
+LEFT JOIN operations.device_session_current ds
+       ON ds.tenant_id = d.tenant_id
+      AND ds.device_id = d.id
+LEFT JOIN operations.device_operator_decisions op_exemptions
+       ON op_exemptions.tenant_id = d.tenant_id
+      AND op_exemptions.device_id = d.id
+      AND op_exemptions.dimension = 'exemptions'
+LEFT JOIN operations.device_patching_scope_current ps
+       ON ps.tenant_id = d.tenant_id
+      AND ps.device_id = d.id
+LEFT JOIN operations.device_patching_override op_patching
+       ON op_patching.tenant_id = d.tenant_id
+      AND op_patching.device_id = d.id
+WHERE d.deleted_at IS NULL;
+
+GRANT SELECT ON operations.v_device
+    TO operations_app, ninja_ingest, operations_readonly, metabase_ro;
+ALTER VIEW operations.v_device OWNER TO operations_migrate;
+"""
+
 CREATE_CURRENT_SOURCE_HEALTH_SQL = """
 CREATE MATERIALIZED VIEW operations.source_health_current AS
 WITH observation_rollup AS (
@@ -213,6 +278,7 @@ ALTER MATERIALIZED VIEW operations.source_health_current OWNER TO operations_mig
 """
 
 DROP_REPLACEMENT_SQL = """
+DROP VIEW operations.v_device;
 DROP MATERIALIZED VIEW operations.source_health_current;
 DROP MATERIALIZED VIEW operations.device_session_current;
 DROP MATERIALIZED VIEW operations.device_agent_presence_current;
@@ -239,6 +305,7 @@ FORWARD_SQL = (
     + RENAME_LEGACY_PRESENCE_SQL
     + CREATE_CURRENT_PRESENCE_SQL
     + CREATE_CURRENT_SESSION_SQL
+    + CREATE_CURRENT_V_DEVICE_SQL
     + CREATE_CURRENT_SOURCE_HEALTH_SQL
 )
 
@@ -246,6 +313,7 @@ REVERSE_SQL = (
     DROP_REPLACEMENT_SQL
     + RESTORE_LEGACY_PRESENCE_SQL
     + CREATE_CURRENT_SESSION_SQL
+    + CREATE_CURRENT_V_DEVICE_SQL
     + RESTORE_SOURCE_HEALTH_SQL
 )
 

@@ -4,9 +4,10 @@ Track: **Restore device agent presence after observation-store cutover**
 
 ## Status
 
-- Commit authorized. Deployment and migration application are authorized in
-  principle, but require a separate push/redeploy authorization because the
-  deployed stack consumes repository-built images.
+- Deployment validation found an omitted dependency: `v_device` depends on
+  `device_session_current`. Migration 0076 rolled back atomically before any
+  schema change. Corrective migration work is in progress; commit, push,
+  redeploy, and migration application remain authorized.
 
 ## Goal
 
@@ -48,6 +49,8 @@ reads, and source-health reach calculations use active rows from
 - [x] Add and review the dependency-safe migration.
 - [x] Add the deferred materialization review to the Operations backlog.
 - [x] Run migration-plan and focused local validation.
+- [x] Rebuild `v_device` in the same atomic swap and revalidate the rendered
+  forward and reverse migration SQL.
 
 ## Validation plan
 
@@ -78,8 +81,17 @@ reads, and source-health reach calculations use active rows from
   `python manage.py check`. Repository-wide `ruff check .` and
   `ruff format --check .` remain non-green because of pre-existing unrelated
   violations/reformatting in 41 and 9 files respectively.
+- Deployment attempt: the new Operations image started and migration 0076
+  began, but PostgreSQL rejected `DROP MATERIALIZED VIEW
+  device_session_current` because `operations.v_device` depends on it. Django
+  migrations run this SQL transactionally, so the failed operation rolled
+  back; migration 0076 remains unapplied.
+- Corrective migration change: `v_device` is now dropped before the dependent
+  session matview and recreated, with its security-invoker option, grants,
+  owner, and current patching-scope projection preserved. Focused lint,
+  formatting, diff, forward/reverse SQL rendering, and Django checks pass.
 
 ## Next action
 
-- Commit the validated hotfix. Then obtain separate approval to push and
-  redeploy before applying migration 0076 in the deployed environment.
+- Commit the corrective migration update, push to both approved remotes,
+  redeploy, and validate migration 0076 plus tenant-aware presence results.
