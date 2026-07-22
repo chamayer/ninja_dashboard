@@ -12,7 +12,7 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         tenant_id = options["tenant_id"]
         params = {"tenant_id": tenant_id}
-        identity = "''"
+        identity = "''::text"
         latest = f"""
             SELECT DISTINCT ON (o.tenant_id, o.source_binding_id, o.entity_type,
                                 {identity}, o.entity_key)
@@ -28,7 +28,7 @@ class Command(BaseCommand):
              WHERE o.tenant_id = %(tenant_id)s
                AND o.entity_type <> 'software'
              ORDER BY o.tenant_id, o.source_binding_id, o.entity_type,
-                      {identity}, o.entity_key, o.observed_at DESC, o.observation_id DESC
+                      parent_source_key, o.entity_key, o.observed_at DESC, o.observation_id DESC
         """
         with transaction.atomic(), connection.cursor() as cursor:
             cursor.execute("SET LOCAL operations.tenant_id = %s", [tenant_id])
