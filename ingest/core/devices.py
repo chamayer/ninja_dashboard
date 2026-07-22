@@ -392,10 +392,6 @@ def _record_source_run(
     try:
         with db.transaction() as cur:
             cur.execute(f"SET LOCAL operations.tenant_id = {_TENANT_ID}")
-            run_id = begin_run(
-                cur, _TENANT_ID, NINJA_SOURCE_BINDING_ID, "Ninja",
-                snapshot_at, expected_rows=len(device_rows),
-            )
             cur.execute(
                 """
                 INSERT INTO operations.run_log
@@ -438,6 +434,10 @@ def _write_ninja_observations(
     try:
         with db.transaction() as cur:
             cur.execute(f"SET LOCAL operations.tenant_id = {_TENANT_ID}")
+            run_id = begin_run(
+                cur, _TENANT_ID, NINJA_SOURCE_BINDING_ID, "Ninja",
+                snapshot_at, expected_rows=len(device_rows),
+            )
             cur.execute(
                 """
                 SELECT dl.external_id, dl.device_id, d.client_id
