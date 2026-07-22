@@ -246,3 +246,10 @@ duplicate lifecycle plumbing. See
 - Do not copy completed Tracks C, E, O, or other shipped milestones here.
 - Do not store session transcripts or full production query results.
 - Move only one approved slice at a time into `operations/.work/plan.md`.
+# Software raw payload retention
+
+Dedicated software installation history retains normalized material fields and
+presence intervals, not raw source payload JSON. Raw payload retention would
+multiply the highest-cardinality inventory data and does not support an
+approved reader. Revisit only when a concrete reader requires source-fidelity
+reconstruction; decide retention, access/RLS, and storage budget first.

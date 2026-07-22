@@ -16,8 +16,9 @@ from ingest import db
 
 MATERIAL_HASH_VERSION = 1
 VOLATILE_FIELDS = frozenset({
-    "last_seen_at", "last_contact", "offline",
+    "last_seen_at", "last_contact", "is_online", "offline",
     "hostStateChangeDate", "lastActive", "last_boot_time_at",
+    "power_state",
 })
 
 

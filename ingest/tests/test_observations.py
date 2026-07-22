@@ -2,10 +2,20 @@ from ingest.observations import material_hash, material_projection
 
 
 def test_volatile_fields_do_not_change_material_hash():
-    base = {"hostname": "host-1", "last_seen_at": "a", "is_online": True}
-    changed_heartbeat = {**base, "last_seen_at": "b"}
+    base = {
+        "hostname": "host-1",
+        "last_seen_at": "a",
+        "is_online": True,
+        "power_state": "on",
+    }
+    changed_heartbeat = {
+        **base,
+        "last_seen_at": "b",
+        "is_online": False,
+        "power_state": "off",
+    }
     assert material_hash(base) == material_hash(changed_heartbeat)
-    assert material_hash(base) != material_hash({**base, "is_online": False})
+    assert material_hash(base) != material_hash({**base, "hostname": "host-2"})
 
 
 def test_material_fields_change_hash_and_projection_is_sorted():

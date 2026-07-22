@@ -12,11 +12,7 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         tenant_id = options["tenant_id"]
         params = {"tenant_id": tenant_id}
-        identity = """
-            CASE WHEN o.entity_type = 'software'
-                 THEN COALESCE(o.device_id::text, 'unresolved:' || o.entity_key)
-                 ELSE '' END
-        """
+        identity = "''"
         latest = f"""
             SELECT DISTINCT ON (o.tenant_id, o.source_binding_id, o.entity_type,
                                 {identity}, o.entity_key)
@@ -27,9 +23,10 @@ class Command(BaseCommand):
                                       s.name, o.platform) END AS snapshot_scope
               FROM operations.entity_observations o
               LEFT JOIN operations.source_bindings sb ON sb.id = o.source_binding_id
-              LEFT JOIN operations.source_instances si ON si.id = sb.source_instance_id
-              LEFT JOIN operations.sources s ON s.id = si.source_id
+             LEFT JOIN operations.source_instances si ON si.id = sb.source_instance_id
+             LEFT JOIN operations.sources s ON s.id = si.source_id
              WHERE o.tenant_id = %(tenant_id)s
+               AND o.entity_type <> 'software'
              ORDER BY o.tenant_id, o.source_binding_id, o.entity_type,
                       {identity}, o.entity_key, o.observed_at DESC, o.observation_id DESC
         """
@@ -80,6 +77,6 @@ class Command(BaseCommand):
                 params,
             )
             affected = cursor.rowcount
-        self.stdout.write(self.style.SUCCESS(
-            f"Seeded or refreshed {affected} of {candidates} current identities"
-        ))
+        self.stdout.write(
+            self.style.SUCCESS(f"Seeded or refreshed {affected} of {candidates} current identities")
+        )
