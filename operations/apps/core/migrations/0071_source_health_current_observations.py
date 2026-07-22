@@ -4,12 +4,21 @@ from typing import ClassVar
 
 from django.db import migrations
 
-SQL = """
+RENAME_LEGACY_SQL = """
 ALTER MATERIALIZED VIEW IF EXISTS operations.source_health_current
     RENAME TO source_health_current_legacy;
 ALTER INDEX IF EXISTS operations.idx_source_health_current_pk
     RENAME TO idx_source_health_current_legacy_pk;
+"""
 
+RESTORE_LEGACY_SQL = """
+ALTER MATERIALIZED VIEW IF EXISTS operations.source_health_current_legacy
+    RENAME TO source_health_current;
+ALTER INDEX IF EXISTS operations.idx_source_health_current_legacy_pk
+    RENAME TO idx_source_health_current_pk;
+"""
+
+CREATE_CURRENT_SQL = """
 CREATE MATERIALIZED VIEW operations.source_health_current AS
 WITH observation_rollup AS (
     SELECT tenant_id, platform,
@@ -62,18 +71,20 @@ GRANT SELECT ON operations.source_health_current
 ALTER MATERIALIZED VIEW operations.source_health_current OWNER TO operations_migrate;
 """
 
+DROP_CURRENT_SQL = """
+DROP MATERIALIZED VIEW IF EXISTS operations.source_health_current;
+"""
+
 
 class Migration(migrations.Migration):
     dependencies: ClassVar = [("operations", "0070_identity_candidate_current_reference")]
     operations: ClassVar = [
         migrations.RunSQL(
-            SQL,
-            """
-            DROP MATERIALIZED VIEW IF EXISTS operations.source_health_current;
-            ALTER MATERIALIZED VIEW IF EXISTS operations.source_health_current_legacy
-                RENAME TO source_health_current;
-            ALTER INDEX IF EXISTS operations.idx_source_health_current_legacy_pk
-                RENAME TO idx_source_health_current_pk;
-            """,
-        )
+            RENAME_LEGACY_SQL,
+            RESTORE_LEGACY_SQL,
+        ),
+        migrations.RunSQL(
+            CREATE_CURRENT_SQL,
+            DROP_CURRENT_SQL,
+        ),
     ]
