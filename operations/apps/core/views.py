@@ -1571,7 +1571,17 @@ def _build_raw_snapshot_view(device, links):
             }
         )
 
-    return snapshots, canonical_by_category, source_specific
+    conflicts = [field for field in canonical_rows if field["differs"]]
+    identity_summary = {
+        "source_count": len(snapshots),
+        "field_count": len(canonical_rows),
+        "conflicts": conflicts,
+        "latest_observed_at": max(
+            (snapshot["observed_at"] for snapshot in snapshots if snapshot["observed_at"]),
+            default=None,
+        ),
+    }
+    return snapshots, canonical_by_category, source_specific, identity_summary
 
 
 @login_required
@@ -1864,10 +1874,14 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
     raw_snapshots: list[dict] = []
     raw_canonical_by_category: list[tuple[str, list[dict]]] = []
     raw_source_specific: list[dict] = []
+    raw_identity_summary: dict = {}
     if active_tab == "identity":
-        raw_snapshots, raw_canonical_by_category, raw_source_specific = _build_raw_snapshot_view(
-            device, links
-        )
+        (
+            raw_snapshots,
+            raw_canonical_by_category,
+            raw_source_specific,
+            raw_identity_summary,
+        ) = _build_raw_snapshot_view(device, links)
 
     return render(
         request,
@@ -1889,6 +1903,7 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
             "raw_snapshots": raw_snapshots,
             "raw_canonical_by_category": raw_canonical_by_category,
             "raw_source_specific": raw_source_specific,
+            "raw_identity_summary": raw_identity_summary,
         },
     )
 
