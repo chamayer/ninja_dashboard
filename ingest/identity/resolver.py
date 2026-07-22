@@ -921,8 +921,9 @@ def _sync_device_attributes(cur) -> None:
             SELECT device_id,
                    ARRAY_AGG(DISTINCT canonical_data->>'device_role')
                        FILTER (WHERE COALESCE(canonical_data->>'device_role', '') <> '') AS roles
-            FROM operations.entity_observations
+            FROM operations.entity_observation_current
             WHERE tenant_id = %s AND device_id IS NOT NULL
+              AND active = TRUE
             GROUP BY device_id
         )
         UPDATE operations.devices d
@@ -952,8 +953,9 @@ def _sync_device_attributes(cur) -> None:
                            OR COALESCE(eo.canonical_data->>'node_class', '') ~ '(_VMM_GUEST|_VM_GUEST)$'
                            OR COALESCE(eo.canonical_data->>'is_vm', '') IN ('true', 'True', '1')) AS is_vm,
                    BOOL_OR(eo.entity_type LIKE 'agent.%%') AS is_agent
-            FROM operations.entity_observations eo
+            FROM operations.entity_observation_current eo
             WHERE eo.tenant_id = %s AND eo.device_id IS NOT NULL
+              AND eo.active = TRUE
             GROUP BY eo.device_id
         )
         UPDATE operations.devices d
@@ -983,9 +985,10 @@ def _sync_device_attributes(cur) -> None:
     cur.execute(
         """
         SELECT DISTINCT ON (eo.device_id) eo.device_id, eo.canonical_data->>'os_name'
-        FROM operations.entity_observations eo
+        FROM operations.entity_observation_current eo
         JOIN operations.devices d ON d.id = eo.device_id
         WHERE eo.tenant_id = %s AND COALESCE(d.os_name, '') = ''
+          AND eo.active = TRUE
           AND COALESCE(eo.canonical_data->>'os_name', '') <> ''
         ORDER BY eo.device_id, eo.observed_at DESC
         """,
