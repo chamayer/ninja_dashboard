@@ -60,4 +60,13 @@ ALTER MATERIALIZED VIEW operations.source_health_current OWNER TO operations_mig
 
 class Migration(migrations.Migration):
     dependencies = [("operations", "0070_identity_candidate_current_reference")]
-    operations = [migrations.RunSQL(SQL, migrations.RunSQL.noop)]
+    operations = [
+        migrations.RunSQL(
+            SQL,
+            """
+            DROP MATERIALIZED VIEW IF EXISTS operations.source_health_current;
+            ALTER MATERIALIZED VIEW IF EXISTS operations.source_health_current_legacy
+                RENAME TO source_health_current;
+            """,
+        )
+    ]
