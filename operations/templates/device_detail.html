@@ -216,43 +216,6 @@
     </div>
 </div>
 
-<div class="dd-cards">
-    <div class="dd-card">
-        <div class="lbl">Reporting sources</div>
-        <div class="val">{{ raw_identity_summary.source_count|default:"0" }}</div>
-        <div class="sub">active source observation{{ raw_identity_summary.source_count|pluralize }}</div>
-    </div>
-    <div class="dd-card">
-        <div class="lbl">Normalized fields</div>
-        <div class="val">{{ raw_identity_summary.field_count|default:"0" }}</div>
-        <div class="sub">reported across linked sources</div>
-    </div>
-    <div class="dd-card {% if raw_identity_summary.conflicts %}warn{% endif %}">
-        <div class="lbl">Needs review</div>
-        <div class="val">{{ raw_identity_summary.conflicts|length }}</div>
-        <div class="sub">{% if raw_identity_summary.conflicts %}source values differ{% else %}no normalized conflicts{% endif %}</div>
-    </div>
-    <div class="dd-card">
-        <div class="lbl">Latest report</div>
-        <div class="val" style="font-size:1rem;">{{ raw_identity_summary.latest_observed_at|date:"Y-m-d H:i"|default:"—" }}</div>
-        <div class="sub">most recent source observation</div>
-    </div>
-</div>
-
-{% if raw_identity_summary.conflicts %}
-<div class="card" style="border-left:3px solid #ea580c;">
-    <h2 style="margin-top:0;">Review differing source values</h2>
-    <p class="muted" style="margin-top:-0.35rem; font-size:0.85rem;">These are differences to review, not automatic errors. They can reflect source timing or different source conventions.</p>
-    <table class="raw-common">
-        <tbody>
-        {% for f in raw_identity_summary.conflicts %}
-            <tr class="differs"><td class="field-name"><code>{{ f.field }}</code></td><td>{% for vg in f.value_groups %}<span class="raw-value-group"><span class="raw-value">{{ vg.value }}</span><span class="raw-value-sources">— {{ vg.sources|join:", " }}</span></span>{% endfor %}</td></tr>
-        {% endfor %}
-        </tbody>
-    </table>
-</div>
-{% endif %}
-
 <div class="card">
     <h2 style="margin-top:0;">Coverage exemptions
         <span class="muted" style="font-weight:400; font-size:0.85rem;">
@@ -507,6 +470,21 @@ function swFilter(q) {
         </tbody>
     </table>
 </div>
+
+<div class="dd-cards">
+    <div class="dd-card"><div class="lbl">Reporting sources</div><div class="val">{{ raw_identity_summary.source_count|default:"0" }}</div><div class="sub">active observations</div></div>
+    <div class="dd-card"><div class="lbl">Normalized fields</div><div class="val">{{ raw_identity_summary.field_count|default:"0" }}</div><div class="sub">facts collected across sources</div></div>
+    <div class="dd-card {% if raw_identity_summary.conflicts %}warn{% endif %}"><div class="lbl">Needs review</div><div class="val">{{ raw_identity_summary.conflicts|length }}</div><div class="sub">{% if raw_identity_summary.conflicts %}source values differ{% else %}no reported conflicts{% endif %}</div></div>
+    <div class="dd-card"><div class="lbl">Latest report</div><div class="val" style="font-size:1rem;">{{ raw_identity_summary.latest_observed_at|date:"Y-m-d H:i"|default:"—" }}</div><div class="sub">most recent source update</div></div>
+</div>
+
+{% if raw_identity_summary.conflicts %}
+<div class="card" style="border-left:3px solid #ea580c;">
+    <h2 style="margin-top:0;">Review differing source values</h2>
+    <p class="muted" style="margin-top:-0.35rem; font-size:0.85rem;">Differences are review evidence, not automatic errors. They can reflect source timing or different source conventions.</p>
+    <table class="raw-common"><tbody>{% for f in raw_identity_summary.conflicts %}<tr class="differs"><td class="field-name"><code>{{ f.field }}</code></td><td>{% for vg in f.value_groups %}<span class="raw-value-group"><span class="raw-value">{{ vg.value }}</span><span class="raw-value-sources">— {{ vg.sources|join:", " }}</span></span>{% endfor %}</td></tr>{% endfor %}</tbody></table>
+</div>
+{% endif %}
 
 <div class="card">
     <h2 style="margin-top:0;">Per-source identifiers</h2>
