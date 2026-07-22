@@ -39,15 +39,9 @@ $$;
 GRANT EXECUTE ON FUNCTION operations.purge_closed_observation_history(timestamptz)
     TO ninja_ingest, operations_app;
 
-DROP TABLE IF EXISTS operations.entity_observations;
 """
 
 
 class Migration(migrations.Migration):
     dependencies = [("operations", "0073_software_installation_history")]
-    operations = [
-        migrations.SeparateDatabaseAndState(
-            database_operations=[migrations.RunSQL(SQL, migrations.RunSQL.noop)],
-            state_operations=[migrations.DeleteModel(name="EntityObservation")],
-        ),
-    ]
+    operations = [migrations.RunSQL(SQL, migrations.RunSQL.noop)]
