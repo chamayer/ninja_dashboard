@@ -47,6 +47,27 @@ _LONG_OFFLINE_DAYS = 7
 _STALE_DATA_DAYS = 7
 
 
+def _requirement_key(row: tuple) -> tuple:
+    """Identify a requirement independently of its scope and thresholds."""
+    agent_id, entity_type, platform = row[2], row[3], row[4]
+    return ("agent", agent_id) if agent_id is not None else ("legacy", entity_type, platform)
+
+
+def _apply_requirement_overrides(baseline: list[tuple], overrides: list[tuple]) -> list[tuple]:
+    """Apply enabled/disabled client overrides to inherited requirements.
+
+    Override tuples add ``enabled`` at index 11. Enabled rows replace the
+    matching inherited requirement; disabled rows remove it.
+    """
+    effective = {_requirement_key(row): row for row in baseline}
+    for row in overrides:
+        if row[11]:
+            effective[_requirement_key(row)] = row[:11]
+        else:
+            effective.pop(_requirement_key(row), None)
+    return list(effective.values())
+
+
 def evaluate(tenant_id: int, device_id: uuid.UUID | None = None) -> int:
     """Evaluate coverage gaps and lifecycle events for a tenant.
 
@@ -108,7 +129,9 @@ def evaluate(tenant_id: int, device_id: uuid.UUID | None = None) -> int:
 
     log.info(
         "evaluator: tenant=%d findings_affected=%d skipped_platforms=%s",
-        tenant_id, affected, sorted(skip_platforms) or "-",
+        tenant_id,
+        affected,
+        sorted(skip_platforms) or "-",
     )
     return affected
 
@@ -116,6 +139,7 @@ def evaluate(tenant_id: int, device_id: uuid.UUID | None = None) -> int:
 # --------------------------------------------------------------------------
 # 1. Source-failure guard
 # --------------------------------------------------------------------------
+
 
 def _source_failure_guard(cur: Any, tenant_id: int, now: datetime) -> set[str]:
     """Return platforms to skip this cycle; maintain source_failure admin findings.
@@ -166,7 +190,12 @@ def _source_failure_guard(cur: Any, tenant_id: int, now: datetime) -> set[str]:
             if ft_id:
                 severity = "critical" if platform == "Ninja" else "high"
                 _upsert_admin_finding(
-                    cur, tenant_id, ft_id, condition_key, severity, now,
+                    cur,
+                    tenant_id,
+                    ft_id,
+                    condition_key,
+                    severity,
+                    now,
                     {"platform": platform},
                     {"reason": reason[:500]},
                 )
@@ -209,8 +238,14 @@ def _upsert_admin_finding(
             details          = EXCLUDED.details
         """,
         (
-            tenant_id, finding_type_id, condition_key, severity,
-            json.dumps(subject_ref), json.dumps(details), now, now,
+            tenant_id,
+            finding_type_id,
+            condition_key,
+            severity,
+            json.dumps(subject_ref),
+            json.dumps(details),
+            now,
+            now,
         ),
     )
 
@@ -218,6 +253,7 @@ def _upsert_admin_finding(
 # --------------------------------------------------------------------------
 # 2. Device-role sync (any source, never guessed)
 # --------------------------------------------------------------------------
+
 
 def _sync_device_roles(cur: Any, tenant_id: int, now: datetime) -> int:
     """Set device_role from any source's explicit signal; flag disagreements.
@@ -269,9 +305,7 @@ def _sync_device_roles(cur: Any, tenant_id: int, now: datetime) -> int:
             continue
         client_id, hostname, current_role = info
         distinct = set(dev_claims.values())
-        target = dev_claims.get("Ninja") or (
-            next(iter(distinct)) if len(distinct) == 1 else None
-        )
+        target = dev_claims.get("Ninja") or (next(iter(distinct)) if len(distinct) == 1 else None)
         if target and target != current_role:
             cur.execute(
                 "UPDATE operations.devices SET device_role = %s WHERE id = %s",
@@ -280,12 +314,17 @@ def _sync_device_roles(cur: Any, tenant_id: int, now: datetime) -> int:
         if len(distinct) > 1:
             conflict_ids.append(dev_id)
             if ft_id:
-                ckey = _condition_key(
-                    tenant_id, client_id, dev_id, "device_role_conflict", ""
-                )
+                ckey = _condition_key(tenant_id, client_id, dev_id, "device_role_conflict", "")
                 count += _upsert_finding(
-                    cur, tenant_id, ft_id, client_id, dev_id,
-                    ckey, "low", "confirmed", now,
+                    cur,
+                    tenant_id,
+                    ft_id,
+                    client_id,
+                    dev_id,
+                    ckey,
+                    "low",
+                    "confirmed",
+                    now,
                     {"hostname": hostname, "claims": dev_claims},
                 )
 
@@ -297,6 +336,7 @@ def _sync_device_roles(cur: Any, tenant_id: int, now: datetime) -> int:
 # --------------------------------------------------------------------------
 # 2b. Lifecycle status sync (platform truth from device_agent_presence_current)
 # --------------------------------------------------------------------------
+
 
 def _sync_lifecycle_status(cur: Any, tenant_id: int) -> None:
     """Advance/reset lifecycle_status from last platform contact.
@@ -342,6 +382,7 @@ def _sync_lifecycle_status(cur: Any, tenant_id: int) -> None:
 # 2c. Unmapped node_class surveillance (nothing dropped silently)
 # --------------------------------------------------------------------------
 
+
 def _evaluate_unknown_entities(cur: Any, tenant_id: int, now: datetime) -> int:
     """Admin finding per Ninja node_class that has no entity_type mapping."""
     ft_id = _get_finding_type_id(cur, "unmapped_node_class")
@@ -366,7 +407,12 @@ def _evaluate_unknown_entities(cur: Any, tenant_id: int, now: datetime) -> int:
         ckey = f"unmapped_node_class:{node_class}"
         present_keys.append(ckey)
         _upsert_admin_finding(
-            cur, tenant_id, ft_id, ckey, "medium", now,
+            cur,
+            tenant_id,
+            ft_id,
+            ckey,
+            "medium",
+            now,
             {"node_class": node_class},
             {"recent_observations": n},
         )
@@ -387,6 +433,7 @@ def _evaluate_unknown_entities(cur: Any, tenant_id: int, now: datetime) -> int:
 # --------------------------------------------------------------------------
 # 2d. Same-stream hostname duplicates (license-consuming rows, never merged)
 # --------------------------------------------------------------------------
+
 
 def _evaluate_duplicate_records(cur: Any, tenant_id: int, now: datetime) -> int:
     """Admin finding per (client, platform, stream, hostname) with >1 records.
@@ -415,19 +462,27 @@ def _evaluate_duplicate_records(cur: Any, tenant_id: int, now: datetime) -> int:
         (tenant_id,),
     )
     groups: dict[tuple, list[dict]] = {}
-    for (platform, entity_type, entity_key, client_id, hostname,
-         is_online, last_seen, serial) in cur.fetchall():
+    for (
+        platform,
+        entity_type,
+        entity_key,
+        client_id,
+        hostname,
+        is_online,
+        last_seen,
+        serial,
+    ) in cur.fetchall():
         norm = normalize_hostname(hostname)
         if not norm:
             continue
-        groups.setdefault(
-            (platform, entity_type, str(client_id or ""), norm), []
-        ).append({
-            "entity_key": entity_key,
-            "is_online": is_online,
-            "last_seen_at": last_seen,
-            "serial_number": serial,
-        })
+        groups.setdefault((platform, entity_type, str(client_id or ""), norm), []).append(
+            {
+                "entity_key": entity_key,
+                "is_online": is_online,
+                "last_seen_at": last_seen,
+                "serial_number": serial,
+            }
+        )
 
     count = 0
     present_keys: list[str] = []
@@ -439,15 +494,24 @@ def _evaluate_duplicate_records(cur: Any, tenant_id: int, now: datetime) -> int:
         severity = "high" if entity_type.startswith("agent.") else "low"
         records.sort(key=lambda r: r["last_seen_at"] or "", reverse=True)
         _upsert_admin_finding(
-            cur, tenant_id, ft_id, ckey, severity, now,
-            {"platform": platform, "entity_type": entity_type,
-             "hostname": norm, "client_id": client_key or None},
-            {"record_count": len(records),
-             "entity_keys": [r["entity_key"] for r in records],
-             "records": records,
-             "offline_count": sum(
-                 1 for r in records if r["is_online"] in ("false", "False")
-             )},
+            cur,
+            tenant_id,
+            ft_id,
+            ckey,
+            severity,
+            now,
+            {
+                "platform": platform,
+                "entity_type": entity_type,
+                "hostname": norm,
+                "client_id": client_key or None,
+            },
+            {
+                "record_count": len(records),
+                "entity_keys": [r["entity_key"] for r in records],
+                "records": records,
+                "offline_count": sum(1 for r in records if r["is_online"] in ("false", "False")),
+            },
         )
         count += 1
     cur.execute(
@@ -466,6 +530,7 @@ def _evaluate_duplicate_records(cur: Any, tenant_id: int, now: datetime) -> int:
 # --------------------------------------------------------------------------
 # 3. Coverage
 # --------------------------------------------------------------------------
+
 
 def _load_corroborated_devices(cur: Any, tenant_id: int) -> set[uuid.UUID]:
     """Devices some source saw online recently — allows 'confirmed' gaps."""
@@ -491,21 +556,13 @@ def _evaluate_coverage(
     skip_platforms: set[str],
     corroborated: set[uuid.UUID],
 ) -> int:
-    """Emit missing_/stale_required_platform findings per tiered lookup.
+    """Emit coverage findings from baseline requirements plus client overrides.
 
-    Requirement resolution is profile-first (BLUEPRINT C.6):
-
-        1. If Client.requirement_profile IS NOT NULL → use profile.items,
-           tier order (profile, device_role) → (profile, "all"). Empty
-           profile = "nothing required," no fall-through to global.
-        2. Else → fall through to global coverage_requirements
-           (client_id IS NULL), tier order (None, device_role) →
-           (None, "all").
-
-    A profile-bound client with ONE (all) item saying "Ninja only" gets
-    Ninja evaluated and nothing else — S1/LMI globals do not apply.
-    A profile-bound client with ZERO items (e.g. A.M.Rose) fires no
-    coverage findings at all.
+    A client-scoped ``coverage_requirements`` row is a sparse override:
+    enabled adds/replaces a service requirement and disabled explicitly removes
+    it.  With no override, the client inherits its profile; clients without a
+    profile inherit tenant-global requirements.  This keeps profiles reusable
+    while allowing a client to require or exempt one service independently.
     """
     # Agent reference: id → (name, entity_type, supported_os_groups)
     cur.execute(
@@ -532,6 +589,21 @@ def _evaluate_coverage(
         (tenant_id,),
     )
     global_rows = cur.fetchall()
+
+    # Client rows deliberately include disabled entries: a disabled row is an
+    # explicit "not required" override, not an inactive row to discard.
+    cur.execute(
+        """
+        SELECT id, client_id, agent_id, entity_type, platform, device_scope,
+               applicable_os_groups,
+               severity, gap_after_hours, confidence_probable, confidence_confirmed,
+               enabled
+        FROM operations.coverage_requirements
+        WHERE tenant_id = %s AND client_id IS NOT NULL
+        """,
+        (tenant_id,),
+    )
+    client_override_rows = cur.fetchall()
 
     # Profile-based tiers.
     cur.execute(
@@ -560,6 +632,10 @@ def _evaluate_coverage(
         scope = row[5]
         global_tiers.setdefault(scope, []).append(row)
 
+    client_override_tiers: dict[Any, dict[str, list[tuple]]] = {}
+    for row in client_override_rows:
+        client_override_tiers.setdefault(row[1], {}).setdefault(row[5], []).append(row)
+
     # client_id → profile_id
     cur.execute(
         """
@@ -571,25 +647,24 @@ def _evaluate_coverage(
     )
     client_profile: dict[Any, Any] = {row[0]: row[1] for row in cur.fetchall()}
 
-    if not global_rows and not profile_rows:
+    if not global_rows and not profile_rows and not client_override_rows:
         return 0
 
     def resolve_tier(dev_client_id, dev_role: str) -> list[tuple]:
         profile_id = client_profile.get(dev_client_id)
         if profile_id is not None:
             scopes = profile_tiers.get(profile_id, {})
-            # Profile-bound: use profile items only. Empty profile → [].
-            for scope_key in (dev_role, "all"):
-                rows = scopes.get(scope_key)
-                if rows:
-                    return rows
-            return []
-        # No profile → global fallback.
-        for scope_key in (dev_role, "all"):
-            rows = global_tiers.get(scope_key)
-            if rows:
-                return rows
-        return []
+            baseline = scopes.get(dev_role) or scopes.get("all") or []
+        else:
+            baseline = global_tiers.get(dev_role) or global_tiers.get("all") or []
+
+        # Apply broad overrides before role-specific overrides, so a scoped
+        # decision can intentionally refine a client-wide decision.
+        overrides = client_override_tiers.get(dev_client_id, {})
+        override_rows = list(overrides.get("all", []))
+        if dev_role != "all":
+            override_rows.extend(overrides.get(dev_role, []))
+        return _apply_requirement_overrides(baseline, override_rows)
 
     missing_ft = _get_finding_type_id(cur, "missing_required_platform")
     stale_ft = _get_finding_type_id(cur, "stale_required_platform")
@@ -654,8 +729,19 @@ def _evaluate_coverage(
         if not in_universe:
             continue
         tier_rows = resolve_tier(dev_client_id, dev_role or "all")
-        for (_rid, _rclient, agent_id, entity_type, platform, _rscope, aog,
-             severity, gap_hours, prob_hours, conf_hours) in tier_rows:
+        for (
+            _rid,
+            _rclient,
+            agent_id,
+            entity_type,
+            platform,
+            _rscope,
+            aog,
+            severity,
+            gap_hours,
+            prob_hours,
+            conf_hours,
+        ) in tier_rows:
             if platform in skip_platforms:
                 continue
             if entity_type in exemptions:
@@ -733,8 +819,16 @@ def _evaluate_coverage(
 
             ckey = _condition_key(tenant_id, dev_client_id, dev_id, ft_name, platform)
             count += _upsert_finding(
-                cur, tenant_id, ftype, dev_client_id, dev_id,
-                ckey, sev, confidence, now, details,
+                cur,
+                tenant_id,
+                ftype,
+                dev_client_id,
+                dev_id,
+                ckey,
+                sev,
+                confidence,
+                now,
+                details,
             )
 
     return count
@@ -743,6 +837,7 @@ def _evaluate_coverage(
 # --------------------------------------------------------------------------
 # 3b. Unenrolled devices (outside agent universe)
 # --------------------------------------------------------------------------
+
 
 def _evaluate_unenrolled(
     cur: Any,
@@ -800,9 +895,7 @@ def _evaluate_unenrolled(
         cd = cd or {}
         if obs_at and obs_at.tzinfo is None:
             obs_at = obs_at.replace(tzinfo=timezone.utc)
-        days = (
-            int((now - obs_at).total_seconds() // 86400) if obs_at else None
-        )
+        days = int((now - obs_at).total_seconds() // 86400) if obs_at else None
         details = {
             "hostname": hostname,
             "device_type": device_type,
@@ -814,11 +907,23 @@ def _evaluate_unenrolled(
             "days_since_last_seen": days,
         }
         ckey = _condition_key(
-            tenant_id, dev_client_id, dev_id, "device_unenrolled", "",
+            tenant_id,
+            dev_client_id,
+            dev_id,
+            "device_unenrolled",
+            "",
         )
         count += _upsert_finding(
-            cur, tenant_id, ft_id, dev_client_id, dev_id,
-            ckey, "medium", "confirmed", now, details,
+            cur,
+            tenant_id,
+            ft_id,
+            dev_client_id,
+            dev_id,
+            ckey,
+            "medium",
+            "confirmed",
+            now,
+            details,
         )
     return count
 
@@ -826,6 +931,7 @@ def _evaluate_unenrolled(
 # --------------------------------------------------------------------------
 # 4. Lifecycle
 # --------------------------------------------------------------------------
+
 
 def _evaluate_device_lifecycle(
     cur: Any,
@@ -854,10 +960,19 @@ def _evaluate_device_lifecycle(
             (tenant_id, threshold, device_id, device_id),
         )
         for dev_id, dev_client_id, hostname in cur.fetchall():
-            ckey = _condition_key(tenant_id, dev_client_id, dev_id, "device_missing_from_source", "")
+            ckey = _condition_key(
+                tenant_id, dev_client_id, dev_id, "device_missing_from_source", ""
+            )
             count += _upsert_finding(
-                cur, tenant_id, missing_type_id, dev_client_id, dev_id,
-                ckey, "high", "confirmed", now,
+                cur,
+                tenant_id,
+                missing_type_id,
+                dev_client_id,
+                dev_id,
+                ckey,
+                "high",
+                "confirmed",
+                now,
                 {"hostname": hostname},
             )
 
@@ -922,8 +1037,15 @@ def _evaluate_device_offline(cur: Any, tenant_id: int, now: datetime) -> int:
             last_seen_source = max(per_source, key=lambda k: per_source[k] or "")
         ckey = _condition_key(tenant_id, client_id, dev_id, "device_offline", "")
         count += _upsert_finding(
-            cur, tenant_id, ft_id, client_id, dev_id,
-            ckey, "medium", "confirmed", now,
+            cur,
+            tenant_id,
+            ft_id,
+            client_id,
+            dev_id,
+            ckey,
+            "medium",
+            "confirmed",
+            now,
             {
                 "hostname": hostname,
                 "last_contact_at": overall_last.isoformat() if overall_last else None,
@@ -960,8 +1082,15 @@ def _evaluate_stale_data(cur: Any, tenant_id: int, now: datetime) -> int:
         offenders.append(dev_id)
         ckey = _condition_key(tenant_id, client_id, dev_id, "device_stale_data", "")
         count += _upsert_finding(
-            cur, tenant_id, ft_id, client_id, dev_id,
-            ckey, "low", "confirmed", now,
+            cur,
+            tenant_id,
+            ft_id,
+            client_id,
+            dev_id,
+            ckey,
+            "low",
+            "confirmed",
+            now,
             {
                 "hostname": hostname,
                 "last_observed_at": last_observed.isoformat() if last_observed else None,
@@ -986,6 +1115,7 @@ def _evaluate_stale_data(cur: Any, tenant_id: int, now: datetime) -> int:
 # 5. Auto-resolve
 # --------------------------------------------------------------------------
 
+
 def _auto_resolve(
     cur: Any,
     tenant_id: int,
@@ -995,16 +1125,10 @@ def _auto_resolve(
     """Resolve findings where the condition has cleared."""
     count = 0
 
-    # Resolve missing/stale_required_platform whose (entity_type, platform)
-    # is no longer required by the device's client policy. Fires when the
-    # operator changes a client's requirement_profile (or empties it) —
-    # findings that were legitimate under the old policy become stale
-    # once the policy is edited. Reconciles per (device, entity_type,
-    # platform) tuple:
-    #   * client has profile → required = union of profile.items scoped to
-    #     the device's role or 'all'
-    #   * client has no profile → required = union of global
-    #     coverage_requirements scoped to the device's role or 'all'
+    # Resolve coverage findings whose (entity_type, platform) is no longer
+    # required. Client-scoped rows are sparse overrides: disabled suppresses
+    # the inherited service and enabled adds it. This mirrors the evaluator's
+    # profile → global fallback precedence.
     for ft_name in ("missing_required_platform", "stale_required_platform"):
         ft_id = _get_finding_type_id(cur, ft_name)
         if not ft_id:
@@ -1012,7 +1136,8 @@ def _auto_resolve(
         cur.execute(
             """
             WITH required_for_device AS (
-                -- Profile-bound clients: their profile.items are the truth
+                -- Profile-bound clients inherit profile items unless a
+                -- client-specific disabled override removes the same agent.
                 SELECT d.id AS device_id, rpi.entity_type, rpi.platform
                 FROM operations.devices d
                 JOIN operations.clients c ON c.id = d.client_id
@@ -1022,10 +1147,25 @@ def _auto_resolve(
                  AND (rpi.device_scope = 'all' OR rpi.device_scope = d.device_role)
                 WHERE d.tenant_id = %s AND d.deleted_at IS NULL
                   AND c.requirement_profile_id IS NOT NULL
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM operations.coverage_requirements o
+                      WHERE o.tenant_id = d.tenant_id
+                        AND o.client_id = d.client_id
+                        AND o.enabled = FALSE
+                        AND (o.device_scope = 'all' OR o.device_scope = d.device_role)
+                        AND (
+                            (o.agent_id IS NOT NULL AND o.agent_id = rpi.agent_id)
+                            OR (o.agent_id IS NULL
+                                AND o.entity_type = rpi.entity_type
+                                AND o.platform = rpi.platform)
+                        )
+                  )
 
                 UNION
 
-                -- Clients without a profile: fall through to global rows
+                -- Clients without a profile inherit global rows unless a
+                -- disabled client override removes the same service.
                 SELECT d.id AS device_id, cr.entity_type, cr.platform
                 FROM operations.devices d
                 JOIN operations.clients c ON c.id = d.client_id
@@ -1035,6 +1175,32 @@ def _auto_resolve(
                  AND (cr.device_scope = 'all' OR cr.device_scope = d.device_role)
                 WHERE d.tenant_id = %s AND d.deleted_at IS NULL
                   AND c.requirement_profile_id IS NULL
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM operations.coverage_requirements o
+                      WHERE o.tenant_id = d.tenant_id
+                        AND o.client_id = d.client_id
+                        AND o.enabled = FALSE
+                        AND (o.device_scope = 'all' OR o.device_scope = d.device_role)
+                        AND (
+                            (o.agent_id IS NOT NULL AND o.agent_id = cr.agent_id)
+                            OR (o.agent_id IS NULL
+                                AND o.entity_type = cr.entity_type
+                                AND o.platform = cr.platform)
+                        )
+                  )
+
+                UNION
+
+                -- Explicit required rows add a client-specific service.
+                SELECT d.id AS device_id, o.entity_type, o.platform
+                FROM operations.devices d
+                JOIN operations.coverage_requirements o
+                  ON o.tenant_id = d.tenant_id
+                 AND o.client_id = d.client_id
+                 AND o.enabled = TRUE
+                 AND (o.device_scope = 'all' OR o.device_scope = d.device_role)
+                WHERE d.tenant_id = %s AND d.deleted_at IS NULL
             )
             UPDATE operations.findings f
             SET status = 'resolved', last_seen_at = %s
@@ -1049,7 +1215,7 @@ def _auto_resolve(
                     AND r.platform    = (f.finding_details->>'platform')
               )
             """,
-            (tenant_id, tenant_id, now, tenant_id, ft_id, device_id, device_id),
+            (tenant_id, tenant_id, tenant_id, now, tenant_id, ft_id, device_id, device_id),
         )
         count += cur.rowcount or 0
 
@@ -1277,10 +1443,17 @@ def _upsert_finding(
             END
         """,
         (
-            tenant_id, finding_type_id, client_id,
-            device_id, json.dumps(details),
-            condition_key, severity, confidence,
-            now, now, now,
+            tenant_id,
+            finding_type_id,
+            client_id,
+            device_id,
+            json.dumps(details),
+            condition_key,
+            severity,
+            confidence,
+            now,
+            now,
+            now,
         ),
     )
     return 1

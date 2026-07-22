@@ -21,6 +21,7 @@ from .csv_export import csv_response, wants_csv
 from .forms import ClientPolicyForm
 from .models import (
     AdminFinding,
+    Agent,
     AuditLog,
     Client,
     ClientCandidate,
@@ -28,6 +29,7 @@ from .models import (
     ClientNameAlias,
     ClientOrgExclude,
     ClientPolicy,
+    CoverageRequirement,
     Device,
     DeviceOperatorDecision,
     DevicePatchingOverride,
@@ -4930,6 +4932,130 @@ def client_profile_assign(request: HttpRequest, org_slug: str) -> HttpResponse:
         f"{client.requirement_profile.name if client.requirement_profile else '— global fallback —'}.",
     )
     return redirect("org_index", org_slug=client.slug)
+
+
+def _client_service_requirement_rows(client: Client) -> list[dict]:
+    """Return profile/global baseline services plus sparse client overrides."""
+    profile_items = list(
+        client.requirement_profile.items.select_related("agent").all()
+        if client.requirement_profile_id
+        else []
+    )
+    global_rows = list(
+        CoverageRequirement.objects.filter(
+            tenant_id=1, client__isnull=True, enabled=True
+        ).select_related("agent")
+        if not client.requirement_profile_id
+        else []
+    )
+    overrides = {
+        (row.agent_id, row.device_scope): row
+        for row in CoverageRequirement.objects.filter(
+            tenant_id=1, client=client
+        ).select_related("agent")
+    }
+    candidates: dict[tuple, dict] = {}
+    for row in [*profile_items, *global_rows]:
+        if row.agent_id is None:
+            continue
+        candidates[(row.agent_id, row.device_scope)] = {
+            "agent": row.agent,
+            "scope": row.device_scope,
+            "baseline_required": True,
+        }
+    # Make every supported service independently configurable, even when it
+    # is not part of the inherited baseline.
+    for agent in Agent.objects.all().order_by("name"):
+        candidates.setdefault(
+            (agent.id, "all"),
+            {"agent": agent, "scope": "all", "baseline_required": False},
+        )
+    for key, override in overrides.items():
+        if key not in candidates and override.agent_id is not None:
+            candidates[key] = {
+                "agent": override.agent,
+                "scope": override.device_scope,
+                "baseline_required": False,
+            }
+    rows = []
+    for key, item in candidates.items():
+        override = overrides.get(key)
+        if override is None:
+            mode = "inherited"
+            required = item["baseline_required"]
+        else:
+            mode = "required" if override.enabled else "not_required"
+            required = override.enabled
+        rows.append({**item, "mode": mode, "required": required})
+    return sorted(rows, key=lambda row: (row["agent"].name.lower(), row["scope"]))
+
+
+@login_required
+@transaction.atomic
+def client_requirements_config(request: HttpRequest, org_slug: str) -> HttpResponse:
+    """Configure an inherited service baseline and per-client exceptions."""
+    client = get_object_or_404(
+        Client.objects.select_related("requirement_profile"),
+        tenant_id=1, slug=org_slug, deleted_at__isnull=True,
+    )
+    if request.method == "POST":
+        action = request.POST.get("action")
+        if action == "profile":
+            profile_id = request.POST.get("profile_id") or ""
+            before = client.requirement_profile_id
+            client.requirement_profile = (
+                get_object_or_404(RequirementProfile, id=profile_id, tenant_id=1)
+                if profile_id else None
+            )
+            client.save(update_fields=["requirement_profile"])
+            _audit(
+                request, "client.requirement_profile.assign", client.id,
+                {"requirement_profile_id": str(before) if before else None},
+                {"requirement_profile_id": str(client.requirement_profile_id) if client.requirement_profile_id else None},
+            )
+            messages.success(request, "Inherited service baseline updated.")
+        elif action == "override":
+            agent = get_object_or_404(Agent, id=request.POST.get("agent_id"))
+            scope = request.POST.get("device_scope") or "all"
+            mode = request.POST.get("mode")
+            existing = CoverageRequirement.objects.filter(
+                tenant_id=1, client=client, agent=agent, device_scope=scope
+            ).first()
+            before = {"mode": "required" if existing and existing.enabled else "not_required" if existing else "inherited"}
+            if mode == "inherited":
+                if existing:
+                    existing.delete()
+            elif mode in {"required", "not_required"}:
+                defaults = {
+                    "entity_type": agent.entity_type,
+                    "platform": agent.name,
+                    "enabled": mode == "required",
+                }
+                if existing:
+                    for field, value in defaults.items():
+                        setattr(existing, field, value)
+                    existing.save(update_fields=[*defaults])
+                else:
+                    CoverageRequirement.objects.create(
+                        tenant_id=1, client=client, agent=agent,
+                        device_scope=scope, **defaults,
+                    )
+            else:
+                messages.error(request, "Choose Required, Not required, or Inherit.")
+                return redirect("client_requirements_config", org_slug=client.slug)
+            _audit(
+                request, "client.coverage_requirement.override", client.id,
+                {"agent": agent.name, "scope": scope, **before},
+                {"agent": agent.name, "scope": scope, "mode": mode},
+            )
+            messages.success(request, f"{agent.name} requirement updated.")
+        return redirect("client_requirements_config", org_slug=client.slug)
+
+    return render(request, "client_requirements_config.html", {
+        "client": client,
+        "profiles": RequirementProfile.objects.filter(tenant_id=1).order_by("-is_tenant_default", "name"),
+        "service_rows": _client_service_requirement_rows(client),
+    })
 
 
 # ── Software classifier config (evaluator knobs, admin-editable) ────────

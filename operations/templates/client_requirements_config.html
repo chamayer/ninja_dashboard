@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+
+{% block title %}{{ client.display_name }} configuration{% endblock %}
+
+{% block content %}
+<nav class="crumbs" aria-label="Breadcrumb">
+  <a href="{% url 'org_index' org_slug='all' %}">Clients</a> ›
+  <a href="{% url 'org_index' org_slug=client.slug %}">{{ client.display_name }}</a> ›
+  <strong>Configuration</strong>
+</nav>
+
+<div class="card">
+  <h1>Service requirements</h1>
+  <p class="muted">Choose the inherited baseline, then make exceptions for individual services. Required services are evaluated only for devices in their stated scope.</p>
+  <form method="post" style="display:flex; align-items:end; gap:.6rem; flex-wrap:wrap;">
+    {% csrf_token %}<input type="hidden" name="action" value="profile">
+    <label>Inherited baseline<br>
+      <select name="profile_id">
+        <option value="">Tenant default requirements</option>
+        {% for profile in profiles %}<option value="{{ profile.id }}" {% if client.requirement_profile_id == profile.id %}selected{% endif %}>{{ profile.name }}{% if profile.is_tenant_default %} (tenant default){% endif %}</option>{% endfor %}
+      </select>
+    </label>
+    <button type="submit">Save baseline</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Services</h2>
+  <p class="muted">Inherit uses the selected baseline. Not required is an explicit client exception and suppresses an inherited service.</p>
+  <table class="ops-table">
+    <thead><tr><th>Service</th><th>Scope</th><th>Effective status</th><th>Client setting</th></tr></thead>
+    <tbody>
+    {% for row in service_rows %}
+      <tr>
+        <td><strong>{{ row.agent.name }}</strong><br><span class="muted">{{ row.agent.entity_type }}</span></td>
+        <td>{% if row.scope == "all" %}All eligible devices{% else %}{{ row.scope|title }}{% endif %}</td>
+        <td>{% if row.required %}<span class="badge badge-info">Required</span>{% else %}<span class="muted">Not required</span>{% endif %}</td>
+        <td><form method="post" style="display:flex; gap:.45rem; align-items:center;">
+            {% csrf_token %}<input type="hidden" name="action" value="override"><input type="hidden" name="agent_id" value="{{ row.agent.id }}"><input type="hidden" name="device_scope" value="{{ row.scope }}">
+            <select name="mode">
+              <option value="inherited" {% if row.mode == 'inherited' %}selected{% endif %}>Inherit</option>
+              <option value="required" {% if row.mode == 'required' %}selected{% endif %}>Required</option>
+              <option value="not_required" {% if row.mode == 'not_required' %}selected{% endif %}>Not required</option>
+            </select><button type="submit">Save</button>
+          </form></td>
+      </tr>
+    {% empty %}<tr><td colspan="4" class="muted">No services have been configured yet.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

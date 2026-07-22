@@ -196,7 +196,7 @@
       <dt>Data mappings</dt><dd>{{ client_links|length }} connections</dd>
     </dl>
     <p class="future-note">Configuration changes are managed separately. The overview remains read-only.</p>
-    <a href="{% url 'admin:operations_client_change' current_client.id %}">Open configuration →</a>
+    <a href="{% url 'client_requirements_config' current_client.slug %}">Open configuration →</a>
   </aside>
 </div>
 
@@ -222,7 +222,7 @@
       <button class="control-chip active" data-directory-filter="all" type="button">All {{ all_client_count }}</button>
       <button class="control-chip" data-directory-filter="attention" type="button">Open items {{ directory_attention }}</button>
       <button class="control-chip" data-directory-filter="delayed" type="button">Data delayed {{ directory_delayed }}</button>
-      <button class="control-chip" data-directory-filter="review" type="button">Configuration</button>
+      <button class="control-chip" data-directory-filter="review" type="button">Identity matches</button>
       <label>Search<input id="directory-search" type="search" placeholder="Search clients…"></label>
       <button class="reset-control" id="directory-reset" type="button">Reset</button>
     </div>
@@ -239,16 +239,16 @@
         <th><button class="sort-button" data-key="software" type="button">Software</button></th>
         <th><button class="sort-button" data-key="inventory" type="button">Inventory</button></th>
         <th><button class="sort-button" data-key="data" type="button">Data</button></th>
-        <th><button class="sort-button" data-key="review" type="button">Configuration</button></th>
+        <th><button class="sort-button" data-key="review" type="button">Identity matches</button></th>
       </tr></thead>
       <tbody>
       {% for row in directory_rows %}
         <tr data-name="{{ row.client.display_name|lower }}" data-devices="{{ row.devices }}" data-locations="{{ row.locations }}" data-users="{{ row.users }}" data-patching="{{ row.domains.0.state }}" data-compliance="{{ row.domains.1.state }}" data-software="{{ row.domains.2.state }}" data-inventory="{{ row.domains.3.state }}" data-data="{{ row.data_sort }}" data-review="{{ row.review_count }}" data-attention="{{ row.needs_attention|yesno:'1,0' }}" data-delayed="{% if row.data_state == 'delayed' %}1{% else %}0{% endif %}">
-          <td><a class="row-title" href="{% url 'org_index' org_slug=row.client.slug %}">{{ row.client.display_name }}</a><a class="row-detail" href="{% url 'admin:operations_client_change' row.client.id %}">Configuration →</a></td>
+          <td><a class="row-title" href="{% url 'org_index' org_slug=row.client.slug %}">{{ row.client.display_name }}</a><a class="row-detail" href="{% url 'client_requirements_config' row.client.slug %}">Configuration →</a></td>
           <td><strong>{{ row.devices }}</strong></td><td>{{ row.locations }}</td><td>{{ row.users }}</td>
           {% for domain in row.domains %}<td class="domain-cell"><a class="row-title" href="{{ domain.href }}"><span class="state-dot dot-{{ domain.state }}"></span>{{ domain.state_label }}</a><span class="row-detail">{{ domain.count }} open</span></td>{% endfor %}
           <td><span class="row-title"><span class="state-dot dot-{{ row.data_state }}"></span>{{ row.data_label }}</span></td>
-          <td>{% if row.review_count %}<a class="row-title" href="{% url 'merge_candidates_queue' %}">{{ row.review_count }} pending</a>{% else %}<a class="muted" href="{% url 'admin:operations_client_change' row.client.id %}">Open configuration →</a>{% endif %}</td>
+          <td>{% if row.review_count %}<a class="row-title" href="{% url 'merge_candidates_queue' %}">{{ row.review_count }} pending</a>{% else %}<a class="muted" href="{% url 'client_requirements_config' row.client.slug %}">Open configuration →</a>{% endif %}</td>
         </tr>
       {% endfor %}
       </tbody>

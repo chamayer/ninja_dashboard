@@ -99,8 +99,10 @@ Client/source-group mapping follows an explicit ladder:
 3. Collision/conflict finding
 4. Candidate for operator accept, map, exclude, or fix
 
-Requirements profiles provide reusable coverage policy, with client-scoped
-policy taking documented precedence.
+Requirement profiles provide reusable coverage policy. Client-scoped coverage
+requirements are sparse overrides: an enabled row explicitly requires a
+service, a disabled row explicitly exempts it, and no row inherits the
+assigned profile (or the tenant-global fallback when no profile is assigned).
 
 ## Queues
 

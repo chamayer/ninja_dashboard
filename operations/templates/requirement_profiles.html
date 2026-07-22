@@ -10,10 +10,10 @@
         {% include "_csv_download.html" %}
     </div>
     <p class="muted">
-        Each profile is a client's complete declared policy — the required
+        Each profile is a reusable baseline of required
         (entity_type, platform, device_scope) rows evaluated per device.
-        A client's profile is source of truth; global coverage_requirements
-        apply only to clients without a profile assigned.
+        A client can independently require or exempt a service from its
+        Configuration page; clients without a profile use tenant defaults.
         Edit items via <a href="{% url 'admin:index' %}">Django admin</a>
         until inline CRUD lands.
     </p>
