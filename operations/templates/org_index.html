@@ -100,11 +100,6 @@
 </style>
 
 {% if current_client %}
-<nav class="crumbs" aria-label="Breadcrumb">
-  <a href="{% url 'org_index' org_slug='all' %}">Clients</a> ›
-  <span>{{ current_client.display_name }}</span> › <strong>Overview</strong>
-</nav>
-
 <div class="page-heading">
   <div>
     <h1>{{ current_client.display_name }}</h1>

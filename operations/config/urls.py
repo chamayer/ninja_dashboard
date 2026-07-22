@@ -46,6 +46,7 @@ from apps.core.views import (
     notification_rule_toggle,
     notification_rules_list,
     notification_suppressions_list,
+    operations_admin_overview,
     org_devices,
     org_index,
     org_policies,
@@ -174,6 +175,7 @@ urlpatterns = [
     path(
         "admin/requirement-profiles/", requirement_profiles_list, name="requirement_profiles_list"
     ),
+    path("admin/overview/", operations_admin_overview, name="operations_admin_overview"),
     path("admin/classifier/", classifier_config, name="classifier_config"),
     path("software/decisions/", software_decisions_queue, name="software_decisions_queue"),
     path("software/decisions/create", software_decision_create, name="software_decision_create"),

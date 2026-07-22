@@ -24,19 +24,19 @@
         header {
             background: var(--header-bg);
             color: var(--header-fg);
-            padding: 0.9rem 1.5rem;
+            padding: 0.55rem 1.5rem;
             display: flex;
             align-items: center;
             justify-content: space-between;
             gap: 1rem;
         }
         header a { color: var(--header-fg); text-decoration: none; }
-        .brand { font-weight: 600; font-size: 1.15rem; letter-spacing: 0.02em; }
-        .brand small { display: block; font-size: 0.72rem; color: #b3b6c1; font-weight: 400; margin-top: 2px; }
-        .header-search { flex: 1; max-width: 480px; margin: 0 1rem; }
+        .brand { font-weight: 650; font-size: 1rem; letter-spacing: 0.01em; white-space: nowrap; }
+        .brand small { display: inline; font-size: 0.7rem; color: #b3b6c1; font-weight: 400; margin-left: 0.45rem; }
+        .header-search { flex: 1; max-width: 420px; margin: 0 1rem; }
         .header-search input {
             width: 100%;
-            padding: 0.45rem 0.75rem;
+            padding: 0.35rem 0.65rem;
             background: #16213e;
             color: var(--header-fg);
             border: 1px solid #333;
@@ -105,11 +105,11 @@
             display: flex; align-items: stretch; gap: 0.1rem;
             padding: 0 1.5rem; overflow-x: auto;
         }
-        .nav-row-admin {
+        .nav-context-row {
             background: #111a30; border-top: 1px solid #1f2a48;
         }
         .nav-link {
-            padding: 0.7rem 1rem; font-size: 0.95rem; color: #cbd5e1;
+            padding: 0.5rem 0.72rem; font-size: 0.84rem; color: #cbd5e1;
             text-decoration: none; white-space: nowrap; display: flex;
             align-items: center; gap: 0.35rem;
             border-bottom: 2px solid transparent;
@@ -117,17 +117,14 @@
         }
         .nav-link:hover { color: #ffffff; border-bottom-color: #4d80c4; }
         .nav-link.active { color: #ffffff; border-bottom-color: var(--accent); font-weight: 600; }
-        .nav-link.nav-admin {
-            padding: 0.5rem 0.9rem; font-size: 0.86rem; color: #94a3b8;
+        .nav-link.nav-context {
+            padding: 0.42rem 0.62rem; font-size: 0.79rem; color: #b8c5da;
         }
-        .nav-link.nav-admin:hover { color: #e2e8f0; }
-        .nav-link.nav-admin.active { color: #f1f5f9; border-bottom-color: var(--accent); font-weight: 600; }
-        .nav-link.nav-sub { color: #7dd3fc; font-size: 0.86rem; }
-        .nav-link.nav-sub:hover { color: #bae6fd; }
-        .nav-link.nav-sub.active { color: #fff; border-bottom-color: #7dd3fc; }
+        .nav-link.nav-context:hover { color: #fff; }
+        .nav-link.nav-context.active { color: #fff; border-bottom-color: #7dd3fc; font-weight: 600; }
         .nav-client-crumb {
             display: flex; align-items: center; padding: 0 0.5rem;
-            font-size: 0.82rem; color: #94a3b8; white-space: nowrap;
+            font-size: 0.76rem; color: #94a3b8; white-space: nowrap;
         }
         .nav-badge {
             background: #dc2626; color: #fff; font-size: 0.68rem; font-weight: 700;
@@ -302,41 +299,33 @@
                 <a class="nav-link {% if request.resolver_match and 'finding' in request.resolver_match.url_name %}active{% endif %}"
                    href="{% url 'findings_queue' %}">Issues{% if nav_findings_count %} <span class="nav-badge">{{ nav_findings_count }}</span>{% endif %}</a>
 
-                {# Client context sub-nav — inline when a client is scoped #}
-                {% if current_client %}
-                <div class="nav-sep"></div>
-                <span class="nav-client-crumb">{{ current_client.display_name }} ›</span>
-                <a class="nav-link nav-sub {% if request.resolver_match.url_name == 'org_index' %}active{% endif %}"
-                   href="{% url 'org_index' org_slug=current_client.slug %}">Overview</a>
-                <a class="nav-link nav-sub {% if request.resolver_match and 'device' in request.resolver_match.url_name %}active{% endif %}"
-                   href="{% url 'org_devices' org_slug=current_client.slug %}">Devices</a>
-                <a class="nav-link nav-sub"
-                   href="{% url 'patching_queue' %}?client={{ current_client.slug }}">Patching</a>
-                <a class="nav-link nav-sub {% if request.resolver_match and 'software' in request.resolver_match.url_name and 'decision' not in request.resolver_match.url_name %}active{% endif %}"
-                   href="{% url 'org_software' org_slug=current_client.slug %}">Software</a>
-                <a class="nav-link nav-sub"
-                   href="{% url 'findings_queue' %}?client={{ current_client.slug }}">Issues</a>
-                <details class="nav-more">
-                    <summary class="nav-link nav-sub">More ▾</summary>
-                    <div class="nav-more-menu">
-                        <a href="{% url 'org_index' org_slug=current_client.slug %}#client-users">Users</a>
-                        <a href="{% url 'org_index' org_slug=current_client.slug %}#client-locations">Locations</a>
-                        <a href="{% url 'org_index' org_slug=current_client.slug %}#recent-changes">History</a>
-                        <a href="{% url 'org_policies' org_slug=current_client.slug %}">Policies</a>
-                        <a href="{% url 'admin:operations_client_change' current_client.id %}">Client settings</a>
-                    </div>
-                </details>
-                {% endif %}
-
-                {% comment %}
-                Admin is the single entry point on the right. Review, Config,
-                Integrations, and their children live in the admin tab strip.
-                {% endcomment %}
                 <div class="nav-fill"></div>
-                <a class="nav-link {% if request.resolver_match and request.resolver_match.url_name and 'client_candidate' in request.resolver_match.url_name or 'identity' in request.resolver_match.url_name or 'merge_candidate' in request.resolver_match.url_name or 'notification' in request.resolver_match.url_name or 'requirement_profile' in request.resolver_match.url_name or 'sources_status' in request.resolver_match.url_name or 'findings_admin_health' in request.resolver_match.url_name or 'fleet_coverage' in request.resolver_match.url_name or 'classifier_config' in request.resolver_match.url_name or 'suppression' in request.resolver_match.url_name %}active{% endif %}"
-                   href="{% url 'client_candidates_queue' %}">Admin</a>
+                <a class="nav-link {% if admin_group %}active{% endif %}"
+                   href="{% url 'operations_admin_overview' %}">Admin</a>
                 <a class="nav-link" href="{% url 'admin:index' %}" title="Django admin" style="padding-left:0.5rem;">⚙</a>
             </div>
+            {% if current_client %}
+            <div class="nav-row nav-context-row" aria-label="Client navigation">
+                <span class="nav-client-crumb">Clients › {{ current_client.display_name }}</span>
+                <a class="nav-link nav-context {% if request.resolver_match.url_name == 'org_index' %}active{% endif %}" href="{% url 'org_index' org_slug=current_client.slug %}">Overview</a>
+                <a class="nav-link nav-context {% if request.resolver_match and 'device' in request.resolver_match.url_name %}active{% endif %}" href="{% url 'org_devices' org_slug=current_client.slug %}">Devices</a>
+                <a class="nav-link nav-context" href="{% url 'patching_queue' %}?client={{ current_client.slug }}">Patching</a>
+                <a class="nav-link nav-context {% if request.resolver_match and 'software' in request.resolver_match.url_name and 'decision' not in request.resolver_match.url_name %}active{% endif %}" href="{% url 'org_software' org_slug=current_client.slug %}">Software</a>
+                <a class="nav-link nav-context" href="{% url 'findings_queue' %}?client={{ current_client.slug }}">Issues</a>
+                <a class="nav-link nav-context {% if request.resolver_match.url_name == 'client_requirements_config' %}active{% endif %}" href="{% url 'client_requirements_config' current_client.slug %}">Configuration</a>
+                <div class="nav-fill"></div>
+                <details class="nav-more"><summary class="nav-link nav-context">More ▾</summary><div class="nav-more-menu"><a href="{% url 'org_index' org_slug=current_client.slug %}#client-users">Users</a><a href="{% url 'org_index' org_slug=current_client.slug %}#client-locations">Locations</a><a href="{% url 'org_index' org_slug=current_client.slug %}#recent-changes">History</a><a href="{% url 'org_policies' org_slug=current_client.slug %}">Policies</a></div></details>
+            </div>
+            {% elif admin_group %}
+            <div class="nav-row nav-context-row" aria-label="Operations Admin navigation">
+                <span class="nav-client-crumb">Admin ›</span>
+                <a class="nav-link nav-context {% if admin_group == 'overview' %}active{% endif %}" href="{% url 'operations_admin_overview' %}">Overview</a>
+                <a class="nav-link nav-context {% if admin_group == 'review' %}active{% endif %}" href="{% url 'client_candidates_queue' %}">Review</a>
+                <a class="nav-link nav-context {% if admin_group == 'config' %}active{% endif %}" href="{% url 'requirement_profiles_list' %}">Configuration</a>
+                <a class="nav-link nav-context {% if admin_group == 'integrations' %}active{% endif %}" href="{% url 'sources_status' %}">Integrations</a>
+                <div class="nav-fill"></div><a class="nav-link nav-context" href="{% url 'admin:index' %}">Django Admin ↗</a>
+            </div>
+            {% endif %}
         </div>
     </nav>
     {% endif %}

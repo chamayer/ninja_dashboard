@@ -3,12 +3,6 @@
 {% block title %}{{ client.display_name }} configuration{% endblock %}
 
 {% block content %}
-<nav class="crumbs" aria-label="Breadcrumb">
-  <a href="{% url 'org_index' org_slug='all' %}">Clients</a> ›
-  <a href="{% url 'org_index' org_slug=client.slug %}">{{ client.display_name }}</a> ›
-  <strong>Configuration</strong>
-</nav>
-
 <div class="card">
   <h1>Service requirements</h1>
   <p class="muted">Choose the inherited baseline, then make exceptions for individual services. Required services are evaluated only for devices in their stated scope.</p>

@@ -1,81 +1,61 @@
 # Active Operations work plan
 
-Track: **Client service requirements and profile overrides**
+Track: **Unified Operations navigation**
 
 ## Status
 
-- Complete. Requirement profiles are reusable baselines with explicit
-  per-client service overrides and an operator-facing configuration page.
+- Complete. The compact two-tier navigation and custom Operations Admin
+  landing are in place; Django Admin remains separate.
 
 ## Goal
 
-Let an operator independently require, exempt, or inherit each supported
-service for a client, without cloning a profile for every service combination.
+Make primary workflows, client context, and the three Operations Admin groups
+discoverable from a proportional two-tier navigation shell.
 
 ## Scope
 
-- **In:** evaluator requirement precedence, client configuration UI, audit,
-  tests, and architecture documentation.
-- **Out:** changing connector/source configuration, source-link mapping, or
-  finding severity semantics beyond an existing client override.
-
-## Affected files
-
-- `../ingest/evaluator.py`
-- `apps/core/views.py`, `config/urls.py`
-- `templates/client_requirements_config.html`, `templates/org_index.html`
-- tests and `docs/architecture.md`
-- `.work/plan.md`
+- **In:** shared navigation, custom Admin overview, client breadcrumb row, and
+  focused navigation tests/validation.
+- **Out:** replacing Django Admin, changing permissions, or restructuring the
+  underlying Review/Config/Integrations pages.
 
 ## Decisions
 
-- `RequirementProfile` remains a reusable baseline. A profile never appears as
-  the client name or primary dashboard identity.
-- Client-scoped `CoverageRequirement` rows are sparse overrides: enabled means
-  explicitly required, disabled means explicitly not required, and no row means
-  inherit.
-- Effective precedence is: client override → assigned profile → tenant-global
-  fallback. Overrides use the existing agent and device-scope semantics, not a
-  new source-policy model.
-- The client UI calls an `Agent` a service because that is understandable to an
-  operator; the evaluator remains agent-backed for OS compatibility and
-  thresholds.
+- Django Admin remains `/admin/`; the custom Operations landing is
+  `/admin/overview/`.
+- The top row is for fleet workflows. The second row is contextual: selected
+  client navigation or Operations Admin group navigation.
+- The existing group tab strip remains on Admin pages for in-group detail;
+  the global second row solves cross-group navigation.
 
 ## Steps
 
-- [x] Add override-aware effective-requirement resolution to the evaluator and
-  auto-resolution path.
-- [x] Add an audited per-client service-requirements configuration page.
-- [x] Link the client dashboard Configuration card to the new page.
-- [x] Add focused tests and update architecture documentation.
-- [x] Validate and review the migration-free deployment path.
+- [x] Add Operations Admin overview and route.
+- [x] Replace inline client links with a compact second navigation row.
+- [x] Add persistent Admin Overview/Review/Configuration/Integrations links.
+- [x] Reduce header and nav height; validate URLs/templates.
 
 ## Validation plan
 
-- Unit-test precedence, including explicit required and explicit not-required
-  overrides over a profile baseline.
-- Run targeted tests, `python manage.py check`, Ruff, and `git diff --check`.
+- Django checks, URL reversal/template loading, focused tests, format/diff
+  checks, and manual review of the shared template diff.
 
 ## Checkpoint
 
-- Current evaluator treats an assigned profile as complete truth and ignores
-  client-scoped `CoverageRequirement` rows. The table already contains the
-  `client_id`, `agent_id`, scope, thresholds, and enabled state needed for
-  sparse overrides; the missing work is precedence and UI.
-- Other-agent edits are present in `../ingest/core/devices.py`,
-  `apps/core/views.py`, and `templates/device_detail.html`. They are unrelated
-  raw-snapshot work and must remain intact.
-- The evaluator now applies `all` overrides before device-role overrides;
-  enabled rows add or replace requirements and disabled rows remove inherited
-  requirements. Auto-resolution applies the same disabled/explicit-required
-  semantics, so stale coverage findings close when a service becomes exempt.
-- Validation: `makemigrations --check --dry-run` reports no changes,
-  `python manage.py check` passes, focused tests pass (11), URL reversal and
-  template loading pass, import/format checks for changed standalone files and
-  `git diff --check` pass. Broad Ruff output still contains pre-existing
-  complexity/style findings in `evaluator.py` and other unrelated views.
+- The current top-level Admin link opens the Client Candidates queue, while
+  Config and Integrations are only visible after reaching a page in that group.
+- Client context is appended to the main navigation row, producing an
+  oversized, visually unbalanced header. The dedicated second-row work was
+  recorded in the backlog but not shipped.
+- `/admin/overview/` is the custom Operations landing; the top-level Admin
+  link leads there while the gear and explicit context-row link retain Django
+  Admin at `/admin/`.
+- Scoped client pages now expose `Clients › <client>` and the related actions
+  in the second row. The duplicated scoped overview/configuration breadcrumbs
+  were removed from page bodies.
+- Validation: Django check, URL reversal, template loading, focused
+  client-workspace tests (8), import/format checks, and diff check pass.
 
 ## Next action
 
-- Deploy and verify an explicit required and not-required override against a
-  test client before applying broader client configuration changes.
+- None.

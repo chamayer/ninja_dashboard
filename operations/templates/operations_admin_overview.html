@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+
+{% block title %}Admin overview{% endblock %}
+
+{% block content %}
+<div class="page-heading"><div><h1>Operations Admin</h1><p>Configuration, review queues, and integration health.</p></div></div>
+<div class="tile-grid">
+  <a class="tile" href="{% url 'client_candidates_queue' %}"><div class="tile-label">Review</div><div class="tile-value">{{ nav_pending_client_candidates|add:nav_pending_merges|add:nav_pending_software_decisions }}</div><p class="muted">Client candidates, merges, and software decisions</p></a>
+  <a class="tile" href="{% url 'requirement_profiles_list' %}"><div class="tile-label">Configuration</div><div class="tile-value">{{ profile_count }}</div><p class="muted">Service requirements, alerts, and rules</p></a>
+  <a class="tile" href="{% url 'sources_status' %}"><div class="tile-label">Integrations</div><div class="tile-value">{{ source_count }}</div><p class="muted">Sources, coverage, and ingest health</p></a>
+</div>
+{% endblock %}
