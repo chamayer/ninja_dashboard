@@ -1358,6 +1358,25 @@ def _raw_value_display(value) -> tuple[str, bool]:
     return str(value), False
 
 
+def _raw_json_object(value) -> dict:
+    """Return a JSON object for the raw-snapshot display surface.
+
+    psycopg normally decodes JSONB objects to dictionaries, but deployments
+    with a text loader can yield their JSON text instead. The display surface
+    only compares object keys, so scalar, list, and invalid values are safely
+    treated as empty objects.
+    """
+    if isinstance(value, dict):
+        return value
+    if not isinstance(value, str):
+        return {}
+    try:
+        parsed = json.loads(value)
+    except (TypeError, ValueError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
 def _build_raw_snapshot_view(device, links):
     """Fetch and shape raw snapshots for the Identity & raw tab.
 
@@ -1400,7 +1419,16 @@ def _build_raw_snapshot_view(device, links):
             """,
             [1, str(device.id)],
         )
-        rows = cur.fetchall()
+        rows = [
+            (
+                platform,
+                entity_type,
+                observed_at,
+                _raw_json_object(canonical_data),
+                _raw_json_object(raw_data),
+            )
+            for platform, entity_type, observed_at, canonical_data, raw_data in cur.fetchall()
+        ]
 
         ninja_device_row = None
         need_ninja_fallback = ninja_external_id and any(
@@ -1421,11 +1449,11 @@ def _build_raw_snapshot_view(device, links):
                 )
                 nrow = cur.fetchone()
                 if nrow:
-                    ninja_device_row = nrow[0] or {}
+                    ninja_device_row = _raw_json_object(nrow[0])
 
         for platform, entity_type, observed_at, canonical_data, raw_data in rows:
-            canonical = canonical_data or {}
-            raw_payload = raw_data or {}
+            canonical = canonical_data
+            raw_payload = raw_data
             fallback_note = None
             if (
                 ninja_device_row is not None
@@ -1508,7 +1536,7 @@ def _build_raw_snapshot_view(device, links):
     for snap in snapshots:
         canonical_keys_norm = {
             k.lower().replace("_", "").replace("-", "")
-            for k in (snap["canonical_data"] or {}).keys()
+            for k in snap["canonical_data"]
         }
         extras: list[dict] = []
         if isinstance(snap["raw_data"], dict):
