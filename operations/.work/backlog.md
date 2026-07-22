@@ -264,6 +264,21 @@ duplicate lifecycle plumbing. See
 - Do not copy completed Tracks C, E, O, or other shipped milestones here.
 - Do not store session transcripts or full production query results.
 - Move only one approved slice at a time into `operations/.work/plan.md`.
+
+## Review materialization of observation-derived state
+
+- Reason deferred: migration 0076 restores `device_agent_presence_current`
+  using the established materialized-view cutover pattern. Under ADR-0007,
+  presence is now a projection of content-hashed current rows rather than a
+  high-cardinality aggregation, so the performance value of materialization
+  needs an explicit architecture and measurement review.
+- Candidate scope: evaluate each observation-derived materialized view against
+  its actual query shape, refresh cost, reader volume, RLS boundary, and
+  freshness requirements; decide whether presence should become a plain view.
+- Constraint: do not convert or remove a matview merely for consistency;
+  preserve the existing derived-object dependency and rollback strategy.
+- Trigger: approved ADR-level review with representative query and refresh
+  measurements.
 # Software raw payload retention
 
 Dedicated software installation history retains normalized material fields and

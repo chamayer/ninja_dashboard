@@ -1,68 +1,85 @@
 # Active Operations work plan
 
-Track: **Unified Operations navigation**
+Track: **Restore device agent presence after observation-store cutover**
 
 ## Status
 
-- Complete. The compact two-tier navigation and custom Operations Admin
-  landing are in place; Django Admin remains separate.
+- Commit authorized. Deployment and migration application are authorized in
+  principle, but require a separate push/redeploy authorization because the
+  deployed stack consumes repository-built images.
 
 ## Goal
 
-Make primary workflows, client context, and the three Operations Admin groups
-discoverable from a proportional two-tier navigation shell.
+Restore `device_agent_presence_current` so device Identity pages, evaluator
+reads, and source-health reach calculations use active rows from
+`entity_observation_current`, not the empty compatibility table
+`entity_observations`.
 
 ## Scope
 
-- **In:** shared navigation, custom Admin overview, client breadcrumb row, and
-  focused navigation tests/validation.
-- **Out:** replacing Django Admin, changing permissions, or restructuring the
-  underlying Review/Config/Integrations pages.
+- **In:** one forward migration, required derived-object dependency rebuilds,
+  focused migration and Django validation, and a backlog entry for the broader
+  materialized-view suitability decision.
+- **Out:** applying the migration, retiring the compatibility table, changing
+  public interfaces, or deciding whether presence should eventually be a plain
+  view.
+
+## Affected files
+
+- `apps/core/migrations/0076_device_agent_presence_current_observations.py`
+- `.work/plan.md`
+- `.work/backlog.md`
 
 ## Decisions
 
-- Django Admin remains `/admin/`; the custom Operations landing is
-  `/admin/overview/`.
-- The top row is for fleet workflows. The second row is contextual: selected
-  client navigation or Operations Admin group navigation.
-- The existing group tab strip remains on Admin pages for in-group detail;
-  the global second row solves cross-group navigation.
+- Preserve the existing materialized-view shape for the hotfix. A broader
+  ADR-level review must decide which observation-derived state merits
+  materialization under ADR-0007.
+- Use `entity_observation_current` rows where `active` and non-software;
+  retain the established device join and public presence columns.
+- Rebuild every PostgreSQL derived object that has an OID dependency on the
+  replaced presence matview; verify the exact dependency graph first.
 
 ## Steps
 
-- [x] Add Operations Admin overview and route.
-- [x] Replace inline client links with a compact second navigation row.
-- [x] Add persistent Admin Overview/Review/Configuration/Integrations links.
-- [x] Reduce header and nav height; validate URLs/templates.
+- [x] Recover the interrupted-session intent and verify the working tree.
+- [x] Read applicable architecture and operational guidance.
+- [x] Inspect the live derived-object dependency graph (read-only).
+- [x] Add and review the dependency-safe migration.
+- [x] Add the deferred materialization review to the Operations backlog.
+- [x] Run migration-plan and focused local validation.
 
 ## Validation plan
 
-- Django checks, URL reversal/template loading, focused tests, format/diff
-  checks, and manual review of the shared template diff.
+- Confirm the migration plan is linear and the SQL preserves columns, indexes,
+  grants, ownership, and refresh order.
+- Run `python manage.py check`, `ruff check .`, `ruff format --check .`, and
+  relevant focused tests where available.
+- Do not run state-changing deployed-stack actions without separate approval.
 
 ## Checkpoint
 
-- The current top-level Admin link opens the Client Candidates queue, while
-  Config and Integrations are only visible after reaching a page in that group.
-- Client context is appended to the main navigation row, producing an
-  oversized, visually unbalanced header. The dedicated second-row work was
-  recorded in the backlog but not shipped.
-- `/admin/overview/` is the custom Operations landing; the top-level Admin
-  link leads there while the gear and explicit context-row link retain Django
-  Admin at `/admin/`.
-- Scoped client pages now expose `Clients › <client>` and the related actions
-  in the second row. The duplicated scoped overview/configuration breadcrumbs
-  were removed from page bodies.
-- Validation: Django check, URL reversal, template loading, focused
-  client-workspace tests (8), import/format checks, and diff check pass.
-- Follow-up fixed: the client-row More dropdown was clipped by horizontal
-  scrolling. Its Users, Locations, History, and Policies destinations are now
-  ordinary second-row links.
-- Follow-up refined: the Operations Admin landing now presents separate
-  actionable Review, Configuration, and Integration Health panels rather than
-  generic category tiles. It exposes pending decisions, policy inventory, and
-  delayed-source/admin-finding status with direct destinations.
+- The observed production symptom is an empty "Where this device is known"
+  card; the device Identity tab also returned 500 but that is not yet shown to
+  share this root cause.
+- `device_agent_presence_current` still selects from the empty legacy
+  `entity_observations` table, while the active observation pipeline writes
+  `entity_observation_current`.
+- The previously completed navigation plan was stale relative to this task;
+  the root cross-service observation plan is also historical and does not
+  reflect the implemented 0063--0075 cutover migrations.
+- Read-only production dependency inspection confirmed that
+  `device_session_current`, `source_health_current`, and
+  `source_health_current_legacy` depend on the old presence matview by OID.
+  The migration rebuilds the two current objects and deliberately retains the
+  legacy health object on the legacy presence matview as rollback evidence.
+- Validation passed: `git diff --check`; focused Ruff check and format check
+  for migration 0076; `python manage.py sqlmigrate operations 0076`; and
+  `python manage.py check`. Repository-wide `ruff check .` and
+  `ruff format --check .` remain non-green because of pre-existing unrelated
+  violations/reformatting in 41 and 9 files respectively.
 
 ## Next action
 
-- None.
+- Commit the validated hotfix. Then obtain separate approval to push and
+  redeploy before applying migration 0076 in the deployed environment.
