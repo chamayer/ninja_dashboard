@@ -5,8 +5,9 @@ Track: **Production startup hotfix — observation migration compatibility**
 ## Status
 
 - In progress. The 0070 retired-table guard has reached production and startup
-  advanced to migration 0071, which now fails because the renamed legacy
-  materialized view retains the new view's intended index name.
+  advanced to migration 0071. Commit `b9f1dbb` attempted to rename the legacy
+  index, but production still resolves the old index name when the replacement
+  index is created in the same SQL batch.
 - Client-workspace commit `7e61892` is already on both remotes. The push to
   `origin` also included the preceding observation-cutover history; that
   outgoing range was not audited before push and caused this migration failure.
@@ -43,6 +44,9 @@ recreating retired data or rolling back already-applied observation migrations.
 - PostgreSQL index names do not change when a materialized view is renamed.
   Migration 0071 must rename the legacy index before creating the replacement
   view's index and restore the name on reverse.
+- Execute the legacy rename and replacement-view creation as separate
+  `RunSQL` operations so PostgreSQL resolves the updated index namespace before
+  parsing the replacement `CREATE INDEX`.
 
 ## Steps
 
@@ -50,6 +54,8 @@ recreating retired data or rolling back already-applied observation migrations.
 - [x] Confirm migration 0054 intentionally dropped the referenced table.
 - [x] Guard migration 0070 for both retired-table and compatibility cases.
 - [x] Rename the legacy source-health index in migration 0071 and reverse SQL.
+- [x] Separate migration 0071's rename and replacement phases after the first
+  production attempt showed the single SQL batch retained the old name.
 - [x] Run Django migration plan/checks, Python/Ruff checks, and diff review.
 - [ ] Obtain separate approval for commit and push/deployment.
 - [ ] After deployment, verify migrations, health, routes, and container logs.
@@ -84,6 +90,14 @@ recreating retired data or rolling back already-applied observation migrations.
   `idx_source_health_current_legacy_pk` immediately after renaming the legacy
   view. Reverse SQL restores both names. Python compilation, Django check,
   Ruff check/format, and `git diff --check` pass for this extension.
+- Commit `b9f1dbb` was pushed to `origin/master` with approval and Portainer
+  reports that exact commit deployed. The container still fails in 0071 with
+  the same duplicate-index error, proving this is not rollout lag. The rename
+  and replacement creation are now separate `RunSQL` operations; Django will
+  issue them independently while retaining the migration transaction.
+- Follow-up validation passes: Python compilation, `python manage.py check`,
+  Ruff check/format, migration import and two-operation order inspection, and
+  `git diff --check`.
 - Migration 0070 now wraps every operation on `identity_candidates` inside a
   `to_regclass(...) IS NOT NULL` guard. The nested current-observation FK and
   backfill remain available only when both compatibility tables exist.
@@ -95,8 +109,8 @@ recreating retired data or rolling back already-applied observation migrations.
 
 ## Next action
 
-- Finish and validate the conditional migration. Present the diff and safe
-  commit/push strategy for separate approval.
+- Validate the split migration operations, then present the exact follow-up
+  diff for separate commit and push approval.
 
 ## Cross-service pointer
 
