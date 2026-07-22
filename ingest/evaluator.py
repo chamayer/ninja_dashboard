@@ -768,9 +768,10 @@ def _evaluate_unenrolled(
             SELECT DISTINCT ON (eo.device_id)
                    eo.device_id, eo.entity_type, eo.observed_at,
                    eo.canonical_data
-            FROM operations.entity_observations eo
+            FROM operations.entity_observation_current eo
             WHERE eo.tenant_id = %s
               AND eo.device_id IS NOT NULL
+              AND eo.active = TRUE
               AND eo.entity_type IN ('vm.guest', 'vm.host', 'network.device',
                                      'monitor.target')
             ORDER BY eo.device_id, eo.observed_at DESC
