@@ -1045,6 +1045,7 @@ class EntityObservationHistory(TenantScopedModel):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     source_binding = models.ForeignKey(SourceBinding, on_delete=models.PROTECT, related_name="history_observations")
     collector_instance = models.ForeignKey(CollectorInstance, on_delete=models.PROTECT, related_name="history_observations")
+    client = models.ForeignKey(Client, on_delete=models.PROTECT, null=True, blank=True, related_name="observation_history")
     device = models.ForeignKey(Device, on_delete=models.PROTECT, null=True, blank=True, related_name="observation_history")
     entity_type = models.CharField(max_length=80)
     platform = models.CharField(max_length=80, default="")

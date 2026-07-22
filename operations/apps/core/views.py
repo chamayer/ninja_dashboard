@@ -4108,8 +4108,8 @@ def client_candidate_detail(request: HttpRequest, candidate_id) -> HttpResponse:
                     continue
                 cur.execute(
                     """
-                    SELECT MIN(observed_at), MAX(observed_at), COUNT(*)
-                    FROM operations.entity_observations eo
+                    SELECT MIN(effective_from), MAX(COALESCE(effective_to, effective_from)), COUNT(*)
+                    FROM operations.entity_observation_history eo
                     JOIN operations.source_bindings sb
                          ON sb.id = eo.source_binding_id
                     JOIN operations.source_instances si
@@ -4125,8 +4125,8 @@ def client_candidate_detail(request: HttpRequest, candidate_id) -> HttpResponse:
 
                 cur.execute(
                     """
-                    SELECT MAX((canonical_data->>'device_count')::int)
-                    FROM operations.entity_observations eo
+                    SELECT MAX((material_data->>'device_count')::int)
+                    FROM operations.entity_observation_history eo
                     JOIN operations.source_bindings sb
                          ON sb.id = eo.source_binding_id
                     JOIN operations.source_instances si

@@ -135,6 +135,7 @@ def write_history_changes(cur: Any, rows: Iterable[dict[str, Any]]) -> int:
         "tenant_id": row["tenant_id"],
         "source_binding_id": row["source_binding_id"],
         "collector_instance_id": row["collector_instance_id"],
+        "client_id": row.get("client_id"),
         "device_id": row.get("device_id"),
         "entity_type": row["entity_type"],
         "platform": row.get("platform", ""),
