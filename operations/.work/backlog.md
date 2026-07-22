@@ -46,6 +46,26 @@ This is the proposed successor to the genuinely open portion of
   context anchored consistently.
 - Trigger: explicit approval.
 
+### Work ownership and assignment
+
+- Candidate scope: assign operational attention items to an owner, expose the
+  current owner in client and fleet workflows, and support reassignment.
+- Constraint: define ownership semantics, permissions, notification behavior,
+  audit history, and interaction with finding lifecycle before adding controls.
+- Trigger: explicit approval after the client workspace slice is established.
+
+### Client context and history follow-through
+
+- Candidate scope: client-scoped read-only Users and Locations views; a full
+  client history page reachable from `More` and the overview preview; a
+  fleet-wide activity/audit view under Admin.
+- History filters: date range, domain, event type, actor, and optional system
+  activity. Preserve client breadcrumbs and return-state behavior.
+- Constraint: distinguish operational events from administrative audit and
+  routine collection noise; do not expose incomplete entity types as complete.
+- Trigger: explicit approval after the first client-workspace visual is
+  accepted.
+
 ### Bulk operator actions
 
 - Candidate scope: finding resolution/snooze, suppress-from-row, patching-scope

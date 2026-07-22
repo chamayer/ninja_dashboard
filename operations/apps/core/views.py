@@ -16,6 +16,7 @@ from django.utils import timezone
 from django.utils.text import slugify
 from django.views.decorators.http import require_GET, require_POST
 
+from .client_workspace import build_client_directory, build_client_workspace
 from .csv_export import csv_response, wants_csv
 from .forms import ClientPolicyForm
 from .models import (
@@ -973,10 +974,12 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
         else:
             ctx["client_health"] = "green"
             ctx["client_bucket"] = "healthy"
+        ctx.update(build_client_workspace(client, ctx))
     else:
         # All-clients fleet view.
         clients_with_counts = list(
             Client.objects.filter(tenant_id=1, deleted_at__isnull=True)
+            .select_related("requirement_profile")
             .prefetch_related(
                 Prefetch(
                     "links",
@@ -1025,11 +1028,7 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
         ctx["open_finding_count"] = Finding.objects.filter(
             tenant_id=1, status__in=_FINDING_ACTIVE_STATUSES
         ).count()
-    ctx["all_profiles"] = list(
-        RequirementProfile.objects.filter(tenant_id=1).order_by(
-            "-is_tenant_default", "name"
-        )
-    )
+        ctx.update(build_client_directory(clients_with_counts))
     return render(request, "org_index.html", ctx)
 
 

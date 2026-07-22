@@ -136,6 +136,20 @@
         .nav-badge-muted { background: #4b5563; }
         .nav-sep { border-left: 1px solid #2a2a4e; margin: 0.3rem 0.35rem; align-self: stretch; }
         .nav-fill { flex: 1; }
+        .nav-more { position: relative; display: flex; align-items: stretch; }
+        .nav-more summary { list-style: none; cursor: pointer; }
+        .nav-more summary::-webkit-details-marker { display: none; }
+        .nav-more-menu {
+            position: absolute; top: calc(100% - 2px); right: 0; z-index: 30;
+            min-width: 190px; padding: 0.35rem; background: #fff;
+            border: 1px solid var(--border); border-radius: 0 0 6px 6px;
+            box-shadow: 0 10px 24px rgba(17, 24, 39, 0.18);
+        }
+        .nav-more-menu a {
+            display: block; padding: 0.55rem 0.65rem; color: #26334a;
+            border-radius: 4px; text-decoration: none; font-size: 0.82rem;
+        }
+        .nav-more-menu a:hover { background: #eef4fb; color: #1e40af; }
 
         /* Truncate-with-tooltip utility. Use inside a table cell:
              <td><div class="trunc" title="{{ full_text }}">{{ full_text }}</div></td>
@@ -292,17 +306,32 @@
                 {% if current_client %}
                 <div class="nav-sep"></div>
                 <span class="nav-client-crumb">{{ current_client.display_name }} ›</span>
+                <a class="nav-link nav-sub {% if request.resolver_match.url_name == 'org_index' %}active{% endif %}"
+                   href="{% url 'org_index' org_slug=current_client.slug %}">Overview</a>
                 <a class="nav-link nav-sub {% if request.resolver_match and 'device' in request.resolver_match.url_name %}active{% endif %}"
                    href="{% url 'org_devices' org_slug=current_client.slug %}">Devices</a>
+                <a class="nav-link nav-sub"
+                   href="{% url 'patching_queue' %}?client={{ current_client.slug }}">Patching</a>
                 <a class="nav-link nav-sub {% if request.resolver_match and 'software' in request.resolver_match.url_name and 'decision' not in request.resolver_match.url_name %}active{% endif %}"
                    href="{% url 'org_software' org_slug=current_client.slug %}">Software</a>
-                <a class="nav-link nav-sub {% if request.resolver_match and 'polic' in request.resolver_match.url_name %}active{% endif %}"
-                   href="{% url 'org_policies' org_slug=current_client.slug %}">Policies</a>
+                <a class="nav-link nav-sub"
+                   href="{% url 'findings_queue' %}?client={{ current_client.slug }}">Issues</a>
+                <details class="nav-more">
+                    <summary class="nav-link nav-sub">More ▾</summary>
+                    <div class="nav-more-menu">
+                        <a href="{% url 'org_index' org_slug=current_client.slug %}#client-users">Users</a>
+                        <a href="{% url 'org_index' org_slug=current_client.slug %}#client-locations">Locations</a>
+                        <a href="{% url 'org_index' org_slug=current_client.slug %}#recent-changes">History</a>
+                        <a href="{% url 'org_policies' org_slug=current_client.slug %}">Policies</a>
+                        <a href="{% url 'admin:operations_client_change' current_client.id %}">Client settings</a>
+                    </div>
+                </details>
                 {% endif %}
 
-                {# Admin — single entry point on the right. Sub-tabs
-                   (Review / Config / Integrations + their children)
-                   live in _admin_tabs.html strip on admin pages. #}
+                {% comment %}
+                Admin is the single entry point on the right. Review, Config,
+                Integrations, and their children live in the admin tab strip.
+                {% endcomment %}
                 <div class="nav-fill"></div>
                 <a class="nav-link {% if request.resolver_match and request.resolver_match.url_name and 'client_candidate' in request.resolver_match.url_name or 'identity' in request.resolver_match.url_name or 'merge_candidate' in request.resolver_match.url_name or 'notification' in request.resolver_match.url_name or 'requirement_profile' in request.resolver_match.url_name or 'sources_status' in request.resolver_match.url_name or 'findings_admin_health' in request.resolver_match.url_name or 'fleet_coverage' in request.resolver_match.url_name or 'classifier_config' in request.resolver_match.url_name or 'suppression' in request.resolver_match.url_name %}active{% endif %}"
                    href="{% url 'client_candidates_queue' %}">Admin</a>

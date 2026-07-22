@@ -1,364 +1,302 @@
 {% extends "base.html" %}
 {% load human_labels %}
 
-{% block title %}
-    {% if current_client %}{{ current_client.display_name }}{% else %}All clients{% endif %}
-{% endblock %}
+{% block title %}{% if current_client %}{{ current_client.display_name }}{% else %}Clients{% endif %}{% endblock %}
 
 {% block content %}
 <style>
-    .oc-header {
-        display: flex; align-items: center; gap: 0.9rem;
-        padding: 1rem 1.2rem;
-        background: var(--surface); border: 1px solid var(--border);
-        border-radius: 6px; margin-bottom: 1rem;
-    }
-    .oc-health {
-        width: 14px; height: 14px; border-radius: 50%;
-        flex-shrink: 0;
-    }
-    .oc-health.red { background: #dc2626; box-shadow: 0 0 0 3px #fee2e2; }
-    .oc-health.amber { background: #ea580c; box-shadow: 0 0 0 3px #ffedd5; }
-    .oc-health.green { background: #16a34a; box-shadow: 0 0 0 3px #dcfce7; }
-    .oc-health.grey { background: #9ca3af; box-shadow: 0 0 0 3px #f3f4f6; }
-    .oc-title { flex: 1; }
-    .oc-title h1 { margin: 0 0 0.2rem 0; font-size: 1.4rem; }
-    .oc-title .sub { color: var(--muted); font-size: 0.85rem; }
-    .oc-bucket {
-        padding: 0.25rem 0.7rem; border-radius: 999px;
-        font-size: 0.75rem; font-weight: 600; text-transform: uppercase;
-        letter-spacing: 0.05em;
-    }
-    .oc-bucket.red { background: #fee2e2; color: #991b1b; }
-    .oc-bucket.amber { background: #ffedd5; color: #9a3412; }
-    .oc-bucket.green { background: #dcfce7; color: #166534; }
-    .oc-bucket.grey { background: #f3f4f6; color: #6b7280; }
+  .crumbs { margin-bottom: 0.75rem; color: var(--muted); font-size: 0.78rem; }
+  .crumbs a { color: #52627b; }
+  .page-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:1rem; margin-bottom:1rem; }
+  .page-heading h1 { margin:0 0 0.2rem; }
+  .page-heading p { margin:0; color:var(--muted); font-size:0.86rem; }
+  .page-meta { color:var(--muted); font-size:0.76rem; text-align:right; }
 
-    .oc-cards {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-        gap: 0.65rem; margin-bottom: 1rem;
-    }
-    .oc-card {
-        display: block; padding: 0.8rem 1rem;
-        background: var(--surface); border: 1px solid var(--border);
-        border-radius: 6px; text-decoration: none; color: inherit;
-    }
-    .oc-card:hover { border-color: var(--accent); }
-    .oc-card .lbl {
-        font-size: 0.72rem; font-weight: 700; text-transform: uppercase;
-        letter-spacing: 0.06em; color: var(--muted); margin-bottom: 0.2rem;
-    }
-    .oc-card .val { font-size: 1.5rem; font-weight: 700; color: #1a1a2e; line-height: 1.1; }
-    .oc-card .sub { font-size: 0.72rem; color: var(--muted); margin-top: 0.2rem; }
-    .oc-card.alert { border-left: 3px solid #dc2626; }
-    .oc-card.alert .val { color: #dc2626; }
-    .oc-card.warn { border-left: 3px solid #ea580c; }
-    .oc-card.warn .val { color: #ea580c; }
-    .oc-card.ok { border-left: 3px solid #16a34a; }
+  .context-strip {
+    display:grid; grid-template-columns:minmax(240px, 1.6fr) repeat(4, minmax(110px, .7fr));
+    margin-bottom:1rem; background:#fff; border:1px solid var(--border); border-radius:7px; overflow:hidden;
+  }
+  .context-primary, .context-stat { padding:0.85rem 1rem; border-right:1px solid var(--border); }
+  .context-stat:last-child { border-right:0; }
+  .context-primary strong { display:block; font-size:1.05rem; }
+  .context-primary span, .context-stat span { display:block; margin-top:0.18rem; color:var(--muted); font-size:0.7rem; }
+  .context-stat strong { display:block; font-size:1.15rem; color:#1a1a2e; }
+  .context-label { color:var(--muted); font-size:0.67rem; font-weight:700; letter-spacing:.05em; text-transform:uppercase; }
 
-    .sev-mini { display: inline-flex; gap: 0.35rem; margin-top: 0.3rem; }
-    .sev-mini span {
-        font-size: 0.7rem; padding: 0.1rem 0.4rem; border-radius: 3px;
-        font-weight: 600;
-    }
-    .sev-mini .crit { background: #fee2e2; color: #991b1b; }
-    .sev-mini .high { background: #ffedd5; color: #9a3412; }
-    .sev-mini .med  { background: #fef3c7; color: #92400e; }
-    .sev-mini .low  { background: #e0e7ff; color: #3730a3; }
+  .domain-grid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:0.7rem; margin-bottom:1rem; }
+  .domain-panel { display:flex; flex-direction:column; min-height:190px; padding:1rem; background:#fff; border:1px solid var(--border); border-radius:7px; }
+  .domain-panel:hover { border-color:#b9c6da; box-shadow:0 2px 8px rgba(17,24,39,.05); }
+  .domain-head { display:flex; align-items:center; justify-content:space-between; gap:.75rem; }
+  .domain-head h2 { margin:0; font-size:1rem; }
+  .state-pill { padding:.2rem .5rem; border-radius:999px; font-size:.67rem; font-weight:700; white-space:nowrap; }
+  .state-needs_action { color:#b91c1c; background:#fee2e2; }
+  .state-review { color:#92400e; background:#fef3c7; }
+  .state-monitor { color:#1d4ed8; background:#dbeafe; }
+  .state-on_track { color:#047857; background:#d1fae5; }
+  .state-delayed, .state-unavailable { color:#4b5563; background:#e5e7eb; }
+  .domain-description { margin:.25rem 0 0; color:var(--muted); font-size:.72rem; }
+  .domain-value { margin:.75rem 0 .45rem; }
+  .domain-value strong { font-size:1.45rem; letter-spacing:-.025em; }
+  .domain-value span { color:var(--muted); font-size:.77rem; }
+  .domain-facts { display:flex; flex-wrap:wrap; gap:.3rem .85rem; color:#465167; font-size:.73rem; }
+  .domain-footer { display:flex; justify-content:space-between; gap:.75rem; margin-top:auto; padding-top:.7rem; color:var(--muted); font-size:.67rem; }
+  .domain-footer a { font-size:.74rem; font-weight:700; }
 
-    .oc-two { display: grid; grid-template-columns: 2fr 1fr; gap: 1rem; }
-    @media (max-width: 900px) { .oc-two { grid-template-columns: 1fr; } }
+  .section-card { padding:0; overflow:hidden; }
+  .section-head { padding:1rem 1rem .8rem; border-bottom:1px solid var(--border); }
+  .section-title { display:flex; justify-content:space-between; align-items:baseline; gap:1rem; }
+  .section-title h2 { margin:0; }
+  .section-title span { color:var(--muted); font-size:.7rem; }
+  .controls { display:flex; align-items:end; gap:.45rem; margin-top:.75rem; flex-wrap:wrap; }
+  .controls label { display:flex; flex-direction:column; gap:.15rem; color:var(--muted); font-size:.67rem; }
+  .controls input, .controls select { min-width:150px; padding:.4rem .55rem; background:#fff; border:1px solid var(--border); border-radius:4px; font-size:.78rem; }
+  .control-chip { padding:.4rem .65rem; background:#fff; border:1px solid var(--border); border-radius:999px; cursor:pointer; font-size:.73rem; }
+  .control-chip.active { color:#fff; background:#1e40af; border-color:#1e40af; }
+  .reset-control { padding:.4rem .2rem; border:0; background:none; color:var(--accent); cursor:pointer; font-size:.73rem; }
 
-    .attn-row {
-        display: grid;
-        grid-template-columns: 10px 60px 1fr 160px 90px;
-        gap: 0.6rem; align-items: center;
-        padding: 0.45rem 0.5rem; border-bottom: 1px solid var(--border);
-        font-size: 0.85rem;
-    }
-    .attn-row:last-child { border-bottom: 0; }
-    .attn-dot { width: 10px; height: 10px; border-radius: 50%; }
-    .attn-dot.crit { background: #dc2626; }
-    .attn-dot.high { background: #ea580c; }
-    .attn-sev {
-        font-size: 0.7rem; font-weight: 700; text-transform: uppercase;
-        padding: 0.1rem 0.4rem; border-radius: 3px;
-    }
-    .attn-sev.crit { background: #fee2e2; color: #991b1b; }
-    .attn-sev.high { background: #ffedd5; color: #9a3412; }
-    .attn-list { max-height: 380px; overflow-y: auto; }
+  .workspace-table-wrap { overflow-x:auto; }
+  .workspace-table { min-width:900px; }
+  .workspace-table th, .workspace-table td { padding:.58rem .65rem; text-align:left; vertical-align:middle; border-bottom:1px solid var(--border); font-size:.8rem; }
+  .workspace-table thead th { position:sticky; top:0; z-index:5; }
+  .sort-button { display:inline-flex; align-items:center; gap:.2rem; padding:0; border:0; background:none; color:inherit; font:inherit; font-weight:700; cursor:pointer; text-transform:inherit; letter-spacing:inherit; }
+  .sort-button::after { content:"↕"; color:#a0a7b2; font-size:.65rem; }
+  th[aria-sort="ascending"] .sort-button::after { content:"▲"; }
+  th[aria-sort="descending"] .sort-button::after { content:"▼"; }
+  .domain-tag { display:inline-block; min-width:76px; padding:.18rem .4rem; color:#334155; background:#eef2f7; border-radius:4px; font-size:.67rem; font-weight:700; }
+  .row-title { display:block; color:#1a1a2e; font-weight:700; text-decoration:none; }
+  .row-detail { display:block; margin-top:.16rem; color:var(--muted); font-size:.67rem; }
+  .state-dot { display:inline-block; width:7px; height:7px; margin-right:.3rem; border-radius:50%; }
+  .dot-needs_action { background:#dc2626; } .dot-review { background:#d99a00; }
+  .dot-monitor { background:#2563eb; } .dot-on_track { background:#15803d; }
+  .dot-delayed, .dot-unavailable { background:#7b8493; }
+  .empty-table { display:none; padding:1rem; color:var(--muted); }
 
-    details.oc-fold > summary {
-        cursor: pointer; padding: 0.4rem 0; font-weight: 600;
-        color: var(--muted); font-size: 0.85rem;
-    }
-    details.oc-fold[open] > summary { color: var(--fg); }
+  .lower-grid { display:grid; grid-template-columns:1.4fr 1fr; gap:1rem; }
+  .compact-list { margin:0; padding:0; list-style:none; }
+  .compact-list li { display:flex; justify-content:space-between; gap:1rem; padding:.5rem 0; border-bottom:1px solid var(--border); font-size:.78rem; }
+  .compact-list li:last-child { border-bottom:0; }
+  .settings-list { display:grid; grid-template-columns:auto 1fr; gap:.4rem .8rem; margin:0; font-size:.78rem; }
+  .settings-list dt { color:var(--muted); }
+  .settings-list dd { margin:0; }
+  .future-note { margin-top:.75rem; padding-top:.65rem; border-top:1px dashed #cbd5e1; color:var(--muted); font-size:.7rem; }
+
+  .directory-summary { display:grid; grid-template-columns:repeat(5, minmax(0,1fr)); margin-bottom:1rem; background:#fff; border:1px solid var(--border); border-radius:7px; overflow:hidden; }
+  .directory-stat { padding:.8rem 1rem; border-right:1px solid var(--border); }
+  .directory-stat:last-child { border-right:0; }
+  .directory-stat strong { display:block; font-size:1.25rem; }
+  .directory-stat span { color:var(--muted); font-size:.68rem; }
+  .directory-table { min-width:1180px; }
+  .directory-table .domain-cell { min-width:115px; }
+
+  @media (max-width:900px) {
+    .context-strip { grid-template-columns:repeat(2, minmax(0,1fr)); }
+    .context-primary { grid-column:1/-1; }
+    .context-primary, .context-stat { border-bottom:1px solid var(--border); }
+    .domain-grid, .lower-grid { grid-template-columns:1fr; }
+    .directory-summary { grid-template-columns:repeat(2, minmax(0,1fr)); }
+    .page-heading { display:block; }
+    .page-meta { margin-top:.4rem; text-align:left; }
+  }
 </style>
 
 {% if current_client %}
-<div class="oc-header">
-    <div class="oc-health {{ client_health }}" title="{{ client_health|humanize_label }}"></div>
-    <div class="oc-title">
-        <h1>{{ current_client.display_name }}</h1>
-        <div class="sub">
-            {{ dev_overview.total }} devices ·
-            {{ active_finding_count }} open issues
-            {% if severe_count %}({{ severe_count }} severe){% endif %}
-            {% if new_24h %} · {{ new_24h }} new in 24h{% endif %}
-        </div>
-    </div>
-    <span class="oc-bucket {{ client_health }}">{{ client_bucket|humanize_label }}</span>
-    <a href="{% url 'org_devices' org_slug=current_client.slug %}" class="nav-link">Devices</a>
-    <a href="{% url 'org_software' org_slug=current_client.slug %}" class="nav-link">Software</a>
-    <a href="{% url 'org_policies' org_slug=current_client.slug %}" class="nav-link">Policies</a>
+<nav class="crumbs" aria-label="Breadcrumb">
+  <a href="{% url 'org_index' org_slug='all' %}">Clients</a> ›
+  <span>{{ current_client.display_name }}</span> › <strong>Overview</strong>
+</nav>
+
+<div class="page-heading">
+  <div>
+    <h1>{{ current_client.display_name }}</h1>
+    <p>{% if areas_needing_attention %}{{ areas_needing_attention }} operational area{{ areas_needing_attention|pluralize }} need attention.{% else %}No current concerns across the operational areas.{% endif %}</p>
+  </div>
+  <div class="page-meta">
+    {% if workspace_updated_at %}Updated {{ workspace_updated_at|timesince }} ago · {{ workspace_updated_at|date:"M j, Y g:i A T" }}{% else %}Update time unavailable{% endif %}
+    {% if issue_trend %}<br>{{ issue_trend.open_now }} open issues · {% if issue_trend.open_change > 0 %}up {{ issue_trend.open_change }}{% elif issue_trend.open_change < 0 %}down {{ issue_trend.open_change_abs }}{% else %}unchanged{% endif %} from 7 days ago{% endif %}
+  </div>
 </div>
 
-<div class="oc-cards">
-    <a class="oc-card" href="{% url 'org_devices' org_slug=current_client.slug %}">
-        <div class="lbl">Devices</div>
-        <div class="val">{{ dev_overview.total }}</div>
-        <div class="sub">{{ dev_overview.online }} online · {{ dev_overview.offline }} offline</div>
-    </a>
-    <a class="oc-card {% if finding_severity.critical %}alert{% elif finding_severity.high %}warn{% endif %}"
-       href="{% url 'findings_queue' %}?client={{ current_client.slug }}">
-        <div class="lbl">Open issues</div>
-        <div class="val">{{ active_finding_count }}</div>
-        <div class="sev-mini">
-            {% if finding_severity.critical %}<span class="crit">{{ finding_severity.critical }} crit</span>{% endif %}
-            {% if finding_severity.high %}<span class="high">{{ finding_severity.high }} high</span>{% endif %}
-            {% if finding_severity.medium %}<span class="med">{{ finding_severity.medium }} med</span>{% endif %}
-            {% if finding_severity.low %}<span class="low">{{ finding_severity.low }} low</span>{% endif %}
-        </div>
-    </a>
-    <a class="oc-card" href="{% url 'org_devices' org_slug=current_client.slug %}?role=server">
-        <div class="lbl">Servers</div>
-        <div class="val">{{ dev_overview.servers }}</div>
-    </a>
-    <a class="oc-card" href="{% url 'org_devices' org_slug=current_client.slug %}?role=workstation">
-        <div class="lbl">Workstations</div>
-        <div class="val">{{ dev_overview.workstations }}</div>
-    </a>
-    <a class="oc-card" href="{% url 'org_software' org_slug=current_client.slug %}">
-        <div class="lbl">Software titles</div>
-        <div class="val">{{ software_count }}</div>
-        <div class="sub">
-            {% if software_pending %}{{ software_pending }} pending decision{% else %}All decided{% endif %}
-        </div>
-    </a>
-    <div class="oc-card">
-        <div class="lbl">In patch scope</div>
-        <div class="val">{{ dev_overview.in_patch_scope }}</div>
-        <div class="sub">of {{ dev_overview.total }} devices</div>
+<section class="context-strip" aria-label="Client context">
+  <div class="context-primary">
+    <div class="context-label">Client context</div>
+    <strong>{{ current_client.display_name }}</strong>
+    <span>{{ current_client.requirement_profile.name|default:"Company default requirements" }}</span>
+  </div>
+  <div class="context-stat"><div class="context-label">Devices</div><strong>{{ dev_overview.total }}</strong><span>{{ dev_overview.servers }} servers · {{ dev_overview.workstations }} workstations</span></div>
+  <div class="context-stat" id="client-locations"><div class="context-label">Locations</div><strong>{{ location_count }}</strong><span>client groupings</span></div>
+  <div class="context-stat" id="client-users"><div class="context-label">Users</div><strong>{{ client_user_count }}</strong><span>known client users</span></div>
+  <div class="context-stat"><div class="context-label">Data connections</div><strong>{{ source_updates|length }}</strong><span>{% for source in source_updates %}{{ source.name }}{% if not forloop.last %} · {% endif %}{% empty %}none configured{% endfor %}</span></div>
+</section>
+
+<section class="domain-grid" aria-label="Operational areas">
+  {% for domain in client_domains %}
+  <article class="domain-panel">
+    <div class="domain-head"><h2>{{ domain.name }}</h2><span class="state-pill state-{{ domain.state }}">{{ domain.state_label }}</span></div>
+    <p class="domain-description">{{ domain.description }}</p>
+    <div class="domain-value"><strong>{{ domain.value }}</strong> <span>{{ domain.value_label }}</span></div>
+    <div class="domain-facts">{% for fact in domain.facts %}<span>{{ fact.label }}</span>{% endfor %}</div>
+    <div class="domain-footer">
+      <span>{% if domain.updated_at %}Updated {{ domain.updated_at|timesince }} ago{% else %}Update time unavailable{% endif %}</span>
+      <a href="{{ domain.href }}">Open {{ domain.name }} →</a>
     </div>
-</div>
+  </article>
+  {% endfor %}
+</section>
 
-<div class="oc-two">
-    <div>
-        <div class="card">
-            <h2 style="margin-top:0;">Needs attention here</h2>
-            {% if attention_findings %}
-            <div class="attn-list">
-                {% for f in attention_findings %}
-                <div class="attn-row">
-                    <div class="attn-dot {% if f.severity == 'critical' %}crit{% else %}high{% endif %}"></div>
-                    <span class="attn-sev {% if f.severity == 'critical' %}crit{% else %}high{% endif %}">{{ f.severity }}</span>
-                    <div>
-                        <div>{{ f.title|default:f.ftype|humanize_label }}</div>
-                        {% if f.hostname %}
-                            <div class="muted" style="font-size:0.75rem;">
-                                <a href="{% url 'device_detail' org_slug=current_client.slug device_id=f.device_id %}"><code>{{ f.hostname }}</code></a>
-                            </div>
-                        {% endif %}
-                    </div>
-                    <div class="muted" style="font-size:0.75rem;">{{ f.last_detected_at|date:"Y-m-d H:i" }}</div>
-                    <a href="{% url 'finding_acknowledge' finding_id=f.id %}" style="font-size:0.75rem;">Ack</a>
-                </div>
-                {% endfor %}
-            </div>
-            {% else %}
-            <p class="muted">No severe or high open issues.</p>
-            {% endif %}
-        </div>
-
-        <div class="card">
-            <h2 style="margin-top:0;">Offline devices to check</h2>
-            {% if offender_devices %}
-            <table data-sortable style="width:100%;">
-                <thead>
-                    <tr>
-                        <th>Hostname</th>
-                        <th>Role</th>
-                        <th>OS</th>
-                        <th class="num">Last contact</th>
-                        <th class="num">Severe issues</th>
-                    </tr>
-                </thead>
-                <tbody>
-                {% for d in offender_devices %}
-                    <tr>
-                        <td>
-                            <a href="{% url 'device_detail' org_slug=current_client.slug device_id=d.id %}"><code>{{ d.hostname }}</code></a>
-                        </td>
-                        <td class="muted">{{ d.role|humanize_label|default:"—" }}</td>
-                        <td class="muted">{{ d.os_group|humanize_label|default:"—" }}</td>
-                        <td class="muted num">{{ d.last_contact_at|date:"Y-m-d"|default:"never" }}</td>
-                        <td class="num">
-                            {% if d.severe %}
-                                <span style="color:#dc2626; font-weight:600;">{{ d.severe }}</span>
-                            {% else %}
-                                <span class="muted">—</span>
-                            {% endif %}
-                        </td>
-                    </tr>
-                {% endfor %}
-                </tbody>
-            </table>
-            {% else %}
-            <p class="muted">All devices are currently reporting in.</p>
-            {% endif %}
-        </div>
-
-        {% if platform_coverage %}
-        <div class="card">
-            <details class="oc-fold">
-                <summary>Coverage detail — required agents by scope</summary>
-                <div style="margin-top: 0.5rem;">
-                    <style>
-                        .cov-mini { display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:0.7rem; }
-                        .cov-mini .cov-item { padding:0.7rem; border:1px solid var(--border); border-radius:6px; }
-                        .cov-bar-wrap { height: 6px; background:#e8edf2; border-radius:3px; margin-top:0.35rem; overflow:hidden; }
-                        .cov-bar-fill { height:100%; border-radius:3px; }
-                        .cov-critical { background:#c0392b; } .cov-high { background:#e67e22; }
-                        .cov-medium { background:#f1c40f; } .cov-ok { background:#27ae60; }
-                    </style>
-                    <div class="cov-mini">
-                    {% for platform, cov in platform_coverage.items %}
-                        <div class="cov-item">
-                            <div style="font-weight:600;">{{ platform }}
-                                <span class="muted" style="font-size:0.75rem; font-weight:400;">{{ cov.severity }}</span>
-                            </div>
-                            {% for scope, counts in cov.scopes.items %}
-                            <a href="{% url 'org_devices' org_slug=current_client.slug %}?missing={{ platform }}&amp;entity_type={{ counts.entity_type|urlencode }}{% if counts.role %}&amp;role={{ counts.role }}{% endif %}"
-                               style="display:block; margin-top:0.4rem; text-decoration:none; color:inherit;">
-                                <div style="display:flex; justify-content:space-between; font-size:0.82rem;">
-                                    <span class="muted" style="text-transform:capitalize;">{{ scope }}</span>
-                                    <span style="font-weight:600;">
-                                        {{ counts.present }}<span class="muted" style="font-weight:400;"> / {{ counts.total }}</span>
-                                        {% if counts.gap %}<span style="color:#c0392b; margin-left:0.3rem;">-{{ counts.gap }}</span>{% endif %}
-                                    </span>
-                                </div>
-                                {% if counts.total %}
-                                <div class="cov-bar-wrap">
-                                    <div class="cov-bar-fill {% if counts.gap == 0 %}cov-ok{% elif cov.severity == 'critical' %}cov-critical{% elif cov.severity == 'high' %}cov-high{% else %}cov-medium{% endif %}"
-                                         style="width: {% widthratio counts.present counts.total 100 %}%"></div>
-                                </div>
-                                {% endif %}
-                            </a>
-                            {% endfor %}
-                        </div>
-                    {% endfor %}
-                    </div>
-                </div>
-            </details>
-        </div>
-        {% endif %}
+<section class="card section-card" id="attention">
+  <div class="section-head">
+    <div class="section-title"><h2>Needs attention</h2><span>Summarized by operational area · controls retained for this session</span></div>
+    <div class="controls">
+      <label>Area<select id="attention-domain"><option value="all">All areas</option><option value="patching">Patching</option><option value="compliance">Compliance</option><option value="software">Software</option><option value="inventory">Inventory</option></select></label>
+      <label>Severity<select id="attention-severity"><option value="all">All severities</option><option value="critical">Critical</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option><option value="info">Information</option></select></label>
+      <label>Search<input id="attention-search" type="search" placeholder="Search attention items…"></label>
+      <button class="reset-control" id="attention-reset" type="button">Reset</button>
     </div>
+  </div>
+  <div class="workspace-table-wrap">
+    <table class="workspace-table" id="attention-table">
+      <thead><tr>
+        <th><button class="sort-button" data-key="domain" type="button">Area</button></th>
+        <th><button class="sort-button" data-key="severity" type="button">Severity</button></th>
+        <th><button class="sort-button" data-key="title" type="button">What needs review</button></th>
+        <th><button class="sort-button" data-key="affected" type="button">Affected</button></th>
+        <th><button class="sort-button" data-key="new" type="button">New since yesterday</button></th>
+        <th>Next step</th>
+      </tr></thead>
+      <tbody>
+      {% for item in attention_groups %}
+        <tr data-domain="{{ item.domain_key }}" data-severity="{{ item.severity }}" data-severity-rank="{{ item.severity_rank }}" data-title="{{ item.title|lower }}" data-affected="{{ item.affected }}" data-new="{{ item.new }}">
+          <td><span class="domain-tag">{{ item.domain }}</span></td>
+          <td><span class="badge badge-{{ item.severity }}">{{ item.severity|humanize_label }}</span></td>
+          <td><span class="row-title">{{ item.title }}</span><span class="row-detail">{{ item.count }} open issue{{ item.count|pluralize }}</span></td>
+          <td>{{ item.affected }}</td><td>{{ item.new }}</td><td><a href="{{ item.href }}">Review →</a></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <p class="empty-table" id="attention-empty">No attention items match the current filters.</p>
+  </div>
+</section>
 
-    <div>
-        <div class="card">
-            <h2 style="margin-top:0; font-size:0.95rem;">Profile</h2>
-            <div style="font-size:0.85rem;">
-                <div><span class="muted">Slug:</span> <code>{{ current_client.slug }}</code></div>
-                <div><span class="muted">Timezone:</span> {{ current_client.timezone }}</div>
-                <div style="margin-top:0.4rem;">
-                    <span class="muted">Profile:</span>
-                    <strong>{{ current_client.requirement_profile.name|default:"— global fallback —" }}</strong>
-                </div>
-            </div>
-            {% if request.user.is_authenticated %}
-            <form method="post" action="{% url 'client_profile_assign' org_slug=current_client.slug %}"
-                  style="margin-top:0.5rem; display:flex; flex-direction:column; gap:0.3rem;">
-                {% csrf_token %}
-                <select name="profile_id" style="padding:0.3rem 0.5rem; font-size:0.85rem;">
-                    <option value="">— global fallback —</option>
-                    {% for p in all_profiles %}
-                    <option value="{{ p.id }}"{% if current_client.requirement_profile_id == p.id %} selected{% endif %}>
-                        {{ p.name }}{% if p.is_tenant_default %} (default){% endif %}
-                    </option>
-                    {% endfor %}
-                </select>
-                <button type="submit" style="padding:0.3rem 0.7rem; font-size:0.85rem;">Apply</button>
-            </form>
-            {% endif %}
-        </div>
-
-        {% if client_links %}
-        <div class="card">
-            <h2 style="margin-top:0; font-size:0.95rem;">Known in</h2>
-            <table style="width:100%; font-size:0.85rem;">
-                <tbody>
-                {% for link in client_links %}
-                    <tr>
-                        <td style="padding:0.25rem 0;">{{ link.source.name }}</td>
-                        <td style="padding:0.25rem 0; color:var(--muted);">{{ link.external_name }}</td>
-                    </tr>
-                {% endfor %}
-                </tbody>
-            </table>
-        </div>
-        {% endif %}
-
-        {% if policy_count %}
-        <div class="card">
-            <h2 style="margin-top:0; font-size:0.95rem;">
-                <a href="{% url 'org_policies' org_slug=current_client.slug %}">Policies ({{ policy_count }})</a>
-            </h2>
-            <div class="muted" style="font-size:0.82rem;">
-                {% if policy_categories %}{{ policy_categories|join:" · " }}{% else %}None defined{% endif %}
-            </div>
-        </div>
-        {% endif %}
-    </div>
+<div class="lower-grid">
+  <section class="card" id="recent-changes">
+    <h2>Recent changes</h2>
+    <ul class="compact-list">
+      <li><span>Issues opened since yesterday</span><strong>{{ new_24h }}</strong></li>
+      <li><span>Open issues compared with 7 days ago</span><strong>{% if issue_trend.open_change > 0 %}+{% endif %}{{ issue_trend.open_change|default:0 }}</strong></li>
+      <li><span>Software decisions available to this client</span><strong>{{ software_decisions }}</strong></li>
+    </ul>
+    <div class="future-note">Full client history will be navigable from More and from this section when the history workflow is implemented.</div>
+  </section>
+  <aside class="card">
+    <h2>Client administration</h2>
+    <dl class="settings-list">
+      <dt>Service requirements</dt><dd>{{ current_client.requirement_profile.name|default:"Company default" }}</dd>
+      <dt>Policies</dt><dd><a href="{% url 'org_policies' org_slug=current_client.slug %}">{{ policy_count }} configured</a></dd>
+      <dt>Data mappings</dt><dd>{{ client_links|length }} connections</dd>
+    </dl>
+    <p class="future-note">Configuration changes belong in Admin. The overview remains read-only.</p>
+    <a href="{% url 'admin:operations_client_change' current_client.id %}">Open client settings in Admin →</a>
+  </aside>
 </div>
 
 {% else %}
-{# Fleet overview mode — /orgs/all/ #}
-<div class="oc-cards">
-    <div class="oc-card"><div class="lbl">Clients</div><div class="val">{{ all_client_count }}</div></div>
-    <div class="oc-card"><div class="lbl">Devices</div><div class="val">{{ all_device_count }}</div></div>
-    <div class="oc-card"><div class="lbl">Sources</div><div class="val">{{ source_coverage|length }}</div></div>
-    <a class="oc-card" href="{% url 'findings_queue' %}">
-        <div class="lbl">Open issues</div><div class="val">{{ open_finding_count }}</div>
-    </a>
+<nav class="crumbs" aria-label="Breadcrumb"><a href="{% url 'home' %}">Dashboard</a> › <strong>Clients</strong></nav>
+<div class="page-heading">
+  <div><h1>Clients</h1><p>Find a client, understand its coverage, and open its operational workspace.</p></div>
+  <div class="page-meta">{{ all_client_count }} active clients</div>
 </div>
 
-<div class="card">
-    <h2 style="margin-top:0;">Clients</h2>
-    {% if clients_with_counts %}
-    <table data-sortable style="width:100%;">
-        <thead>
-            <tr>
-                <th>Client</th>
-                <th class="num">Devices</th>
-                <th>Sources</th>
-            </tr>
-        </thead>
-        <tbody>
-        {% for c in clients_with_counts %}
-            <tr>
-                <td><a href="{% url 'org_index' org_slug=c.slug %}">{{ c.display_name }}</a></td>
-                <td class="num">{{ c.device_count }}</td>
-                <td class="muted">
-                    {% for name in c.source_names %}{{ name }}{% if not forloop.last %} · {% endif %}{% empty %}—{% endfor %}
-                </td>
-            </tr>
-        {% endfor %}
-        </tbody>
+<section class="directory-summary" aria-label="Client directory summary">
+  <div class="directory-stat"><strong>{{ all_client_count }}</strong><span>clients</span></div>
+  <div class="directory-stat"><strong>{{ all_device_count }}</strong><span>managed devices</span></div>
+  <div class="directory-stat"><strong>{{ all_location_count }}</strong><span>locations</span></div>
+  <div class="directory-stat"><strong>{{ all_user_count }}</strong><span>known client users</span></div>
+  <div class="directory-stat"><strong>{{ directory_attention }}</strong><span>clients needing attention</span></div>
+</section>
+
+<section class="card section-card">
+  <div class="section-head">
+    <div class="section-title"><h2>Client directory</h2><span>Click a heading to sort · controls retained for this session</span></div>
+    <div class="controls">
+      <button class="control-chip active" data-directory-filter="all" type="button">All {{ all_client_count }}</button>
+      <button class="control-chip" data-directory-filter="attention" type="button">Needs attention {{ directory_attention }}</button>
+      <button class="control-chip" data-directory-filter="delayed" type="button">Data delayed {{ directory_delayed }}</button>
+      <button class="control-chip" data-directory-filter="review" type="button">Configuration review</button>
+      <label>Search<input id="directory-search" type="search" placeholder="Search clients…"></label>
+      <button class="reset-control" id="directory-reset" type="button">Reset</button>
+    </div>
+  </div>
+  <div class="workspace-table-wrap">
+    <table class="workspace-table directory-table" id="directory-table">
+      <thead><tr>
+        <th><button class="sort-button" data-key="name" type="button">Client</button></th>
+        <th><button class="sort-button" data-key="devices" type="button">Devices</button></th>
+        <th><button class="sort-button" data-key="locations" type="button">Locations</button></th>
+        <th><button class="sort-button" data-key="users" type="button">Users</button></th>
+        <th><button class="sort-button" data-key="patching" type="button">Patching</button></th>
+        <th><button class="sort-button" data-key="compliance" type="button">Compliance</button></th>
+        <th><button class="sort-button" data-key="software" type="button">Software</button></th>
+        <th><button class="sort-button" data-key="inventory" type="button">Inventory</button></th>
+        <th><button class="sort-button" data-key="data" type="button">Data</button></th>
+        <th><button class="sort-button" data-key="review" type="button">Admin review</button></th>
+      </tr></thead>
+      <tbody>
+      {% for row in directory_rows %}
+        <tr data-name="{{ row.client.display_name|lower }}" data-devices="{{ row.devices }}" data-locations="{{ row.locations }}" data-users="{{ row.users }}" data-patching="{{ row.domains.0.state }}" data-compliance="{{ row.domains.1.state }}" data-software="{{ row.domains.2.state }}" data-inventory="{{ row.domains.3.state }}" data-data="{{ row.data_sort }}" data-review="{{ row.review_count }}" data-attention="{{ row.needs_attention|yesno:'1,0' }}" data-delayed="{% if row.data_state == 'delayed' %}1{% else %}0{% endif %}">
+          <td><a class="row-title" href="{% url 'org_index' org_slug=row.client.slug %}">{{ row.client.display_name }}</a><span class="row-detail">{{ row.client.requirement_profile.name|default:"Company default requirements" }}</span></td>
+          <td><strong>{{ row.devices }}</strong></td><td>{{ row.locations }}</td><td>{{ row.users }}</td>
+          {% for domain in row.domains %}<td class="domain-cell"><a class="row-title" href="{{ domain.href }}"><span class="state-dot dot-{{ domain.state }}"></span>{{ domain.state_label }}</a><span class="row-detail">{{ domain.count }} open</span></td>{% endfor %}
+          <td><span class="row-title"><span class="state-dot dot-{{ row.data_state }}"></span>{{ row.data_label }}</span></td>
+          <td>{% if row.review_count %}<a class="row-title" href="{% url 'merge_candidates_queue' %}">{{ row.review_count }} to review</a>{% else %}<span class="muted">None</span>{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
     </table>
-    {% else %}
-    <p class="muted">No clients yet.</p>
-    {% endif %}
-</div>
+    <p class="empty-table" id="directory-empty">No clients match the current controls.</p>
+  </div>
+</section>
 {% endif %}
+
+<script>
+(() => {
+  const stateRank = {needs_action:5, review:4, monitor:3, delayed:2, unavailable:1, on_track:0};
+  function read(key) { try { return JSON.parse(sessionStorage.getItem(key) || "{}"); } catch (_e) { return {}; } }
+  function setupAttention() {
+    const table = document.querySelector("#attention-table"); if (!table) return;
+    const key = "operationsClientAttentionControls"; const saved = read(key);
+    const body = table.tBodies[0]; const rows = Array.from(body.rows);
+    const domain = document.querySelector("#attention-domain"), severity = document.querySelector("#attention-severity"), search = document.querySelector("#attention-search"), empty = document.querySelector("#attention-empty");
+    domain.value = saved.domain || "all"; severity.value = saved.severity || "all"; search.value = saved.search || "";
+    let sort = saved.sort || "severity", direction = saved.direction || "desc";
+    function value(row, field) { if (field === "severity") return Number(row.dataset.severityRank); if (["affected","new"].includes(field)) return Number(row.dataset[field]); return row.dataset[field] || ""; }
+    function render() {
+      const query = search.value.trim().toLowerCase(); let visible = 0;
+      rows.sort((a,b) => { const av=value(a,sort), bv=value(b,sort); const result=typeof av === "number" ? av-bv : String(av).localeCompare(String(bv)); return (direction === "asc" ? result : -result) || b.dataset.affected-a.dataset.affected; }).forEach((row) => {
+        body.appendChild(row); const show=(domain.value === "all" || row.dataset.domain === domain.value) && (severity.value === "all" || row.dataset.severity === severity.value) && (!query || row.dataset.title.includes(query)); row.hidden=!show; if(show) visible++;
+      });
+      table.querySelectorAll("th").forEach((th) => { const button=th.querySelector("[data-key]"); th.setAttribute("aria-sort", button && button.dataset.key === sort ? (direction === "asc" ? "ascending" : "descending") : "none"); });
+      empty.style.display=visible ? "none" : "block"; sessionStorage.setItem(key, JSON.stringify({domain:domain.value,severity:severity.value,search:search.value,sort,direction}));
+    }
+    [domain,severity].forEach((control) => control.addEventListener("change",render)); search.addEventListener("input",render);
+    table.querySelectorAll("[data-key]").forEach((button) => button.addEventListener("click",() => { if(sort === button.dataset.key) direction=direction === "asc" ? "desc" : "asc"; else { sort=button.dataset.key; direction=["domain","title"].includes(sort) ? "asc" : "desc"; } render(); }));
+    document.querySelector("#attention-reset").addEventListener("click",() => { domain.value="all"; severity.value="all"; search.value=""; sort="severity"; direction="desc"; render(); }); render();
+  }
+  function setupDirectory() {
+    const table=document.querySelector("#directory-table"); if(!table) return;
+    const key="operationsClientDirectoryControls"; const saved=read(key); const body=table.tBodies[0]; const rows=Array.from(body.rows); const search=document.querySelector("#directory-search"), empty=document.querySelector("#directory-empty"), chips=Array.from(document.querySelectorAll("[data-directory-filter]"));
+    let filter=saved.filter || "all", sort=saved.sort || "name", direction=saved.direction || "asc"; search.value=saved.search || "";
+    function value(row,field) { if(["devices","locations","users","data","review"].includes(field)) return Number(row.dataset[field]); if(["patching","compliance","software","inventory"].includes(field)) return stateRank[row.dataset[field]]; return row.dataset[field] || ""; }
+    function render() {
+      const query=search.value.trim().toLowerCase(); let visible=0;
+      rows.sort((a,b) => { const av=value(a,sort), bv=value(b,sort); const result=typeof av === "number" ? av-bv : String(av).localeCompare(String(bv)); return (direction === "asc" ? result : -result) || a.dataset.name.localeCompare(b.dataset.name); }).forEach((row) => {
+        body.appendChild(row); const matchFilter=filter === "all" || (filter === "attention" && row.dataset.attention === "1") || (filter === "delayed" && row.dataset.delayed === "1") || (filter === "review" && Number(row.dataset.review) > 0); const show=matchFilter && (!query || row.dataset.name.includes(query)); row.hidden=!show; if(show) visible++;
+      });
+      chips.forEach((chip) => chip.classList.toggle("active",chip.dataset.directoryFilter === filter)); table.querySelectorAll("th").forEach((th) => { const button=th.querySelector("[data-key]"); th.setAttribute("aria-sort",button && button.dataset.key === sort ? (direction === "asc" ? "ascending" : "descending") : "none"); }); empty.style.display=visible ? "none" : "block"; sessionStorage.setItem(key,JSON.stringify({filter,search:search.value,sort,direction}));
+    }
+    chips.forEach((chip) => chip.addEventListener("click",() => { filter=chip.dataset.directoryFilter; render(); })); search.addEventListener("input",render); table.querySelectorAll("[data-key]").forEach((button) => button.addEventListener("click",() => { if(sort === button.dataset.key) direction=direction === "asc" ? "desc" : "asc"; else { sort=button.dataset.key; direction=sort === "name" ? "asc" : "desc"; } render(); })); document.querySelector("#directory-reset").addEventListener("click",() => { filter="all"; search.value=""; sort="name"; direction="asc"; render(); }); render();
+  }
+  setupAttention(); setupDirectory();
+})();
+</script>
 {% endblock %}
