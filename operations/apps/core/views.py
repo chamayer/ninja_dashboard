@@ -18,7 +18,9 @@ from django.views.decorators.http import require_GET, require_POST
 
 from .client_workspace import build_client_directory, build_client_workspace
 from .csv_export import csv_response, wants_csv
-from .device_status import DEVICE_ACTIVE_DAYS, PATCH_ACTIVITY_DAYS
+from .device_status import DEFAULTS as DEVICE_STATUS_DEFAULTS
+from .device_status import POLICY_NAME as DEVICE_STATUS_POLICY_NAME
+from .device_status import get_device_status_policy
 from .forms import ClientPolicyForm
 from .models import (
     AdminFinding,
@@ -175,8 +177,11 @@ def healthz(request: HttpRequest) -> JsonResponse:
 @login_required
 def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
     now = timezone.now()
+    device_policy = get_device_status_policy()
+    active_device_days = device_policy["active_device_days"]
+    source_delay_hours = device_policy["source_delay_hours"]
     yesterday = now - timedelta(hours=24)
-    stale_before = now - timedelta(hours=8)
+    stale_before = now - timedelta(hours=source_delay_hours)
     clients = list(
         Client.objects.filter(tenant_id=1, deleted_at__isnull=True).order_by("display_name")
     )
@@ -216,7 +221,7 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
             FROM operations.v_device
             WHERE tenant_id = 1
               AND lifecycle_status <> 'retired'
-              AND last_contact_at >= NOW() - INTERVAL '{DEVICE_ACTIVE_DAYS} days'
+              AND last_contact_at >= NOW() - INTERVAL '{active_device_days} days'
             """
         )
         active_devices = cur.fetchone()[0]
@@ -657,7 +662,7 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
         {
             "total_devices": total_devices,
             "active_devices": active_devices,
-            "active_device_days": DEVICE_ACTIVE_DAYS,
+            "active_device_days": active_device_days,
             "retired_devices": retired_devices,
             "device_mix": device_mix,
             "total_clients": len(clients),
@@ -700,6 +705,8 @@ def _type_summary(devices: list) -> list[tuple[str, str, int]]:
 @login_required
 def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
     """Summary hub for a client or the fleet."""
+    device_policy = get_device_status_policy()
+    active_device_days = device_policy["active_device_days"]
     ctx: dict = {}
     if getattr(request, "current_client", None):
         client = request.current_client
@@ -731,7 +738,7 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
                 # Total devices per scope. Device type is form factor only;
                 # coverage applicability comes from requirements/entity_type.
                 cur.execute(
-                    """
+                    f"""
                     SELECT od.device_role AS scope, COUNT(*)::int
                     FROM operations.devices od
                     WHERE od.tenant_id = 1 AND od.client_id = %s AND od.deleted_at IS NULL
@@ -753,7 +760,7 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
                     JOIN operations.devices od
                          ON od.id = ap.device_id AND od.deleted_at IS NULL
                     WHERE ap.tenant_id = 1 AND ap.client_id = %s
-                      AND ap.last_observed_at > NOW() - INTERVAL '7 days'
+                      AND ap.last_observed_at > NOW() - INTERVAL '{active_device_days} days'
                       AND od.lifecycle_status != 'retired'
                     GROUP BY 1, 2, 3
                     """,
@@ -870,9 +877,9 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
                    COUNT(*) FILTER (WHERE device_role = 'workstation') AS workstations,
                    COUNT(*) FILTER (WHERE effective_patching_scope = 'Included') AS in_patch_scope,
                    COUNT(*) FILTER (WHERE lifecycle_status <> 'retired'
-                                     AND last_contact_at >= NOW() - INTERVAL '{DEVICE_ACTIVE_DAYS} days') AS active,
+                                     AND last_contact_at >= NOW() - INTERVAL '{active_device_days} days') AS active,
                    COUNT(*) FILTER (WHERE last_contact_at IS NULL
-                                        OR last_contact_at < NOW() - INTERVAL '{DEVICE_ACTIVE_DAYS} days') AS stale
+                                        OR last_contact_at < NOW() - INTERVAL '{active_device_days} days') AS stale
                 FROM operations.v_device
                 WHERE tenant_id = 1 AND client_id = %s
             """,
@@ -1014,7 +1021,7 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
         else:
             ctx["client_health"] = "green"
             ctx["client_bucket"] = "healthy"
-        ctx.update(build_client_workspace(client, ctx))
+        ctx.update(build_client_workspace(client, ctx, device_policy=device_policy))
     else:
         # All-clients fleet view.
         clients_with_counts = list(
@@ -1074,6 +1081,7 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
 def org_devices(request: HttpRequest, org_slug: str) -> HttpResponse:
     """Device list for a specific client with server-side search/filter."""
     client = _get_client_by_slug(org_slug)
+    active_device_days = get_device_status_policy()["active_device_days"]
     base_qs = Device.objects.filter(tenant_id=1, client=client, deleted_at__isnull=True)
     type_counts = {
         row["device_type"]: row["count"]
@@ -1107,12 +1115,12 @@ def org_devices(request: HttpRequest, org_slug: str) -> HttpResponse:
         with transaction.atomic(), connection.cursor() as cur:
             cur.execute("SET LOCAL operations.tenant_id = 1")
             cur.execute(
-                """
+                f"""
                 SELECT DISTINCT device_id
                 FROM operations.device_agent_presence_current
                 WHERE tenant_id = 1 AND client_id = %s AND platform = %s
                   AND entity_type = %s
-                  AND last_observed_at > NOW() - INTERVAL '7 days'
+                  AND last_observed_at > NOW() - INTERVAL '{active_device_days} days'
                 """,
                 [str(client.id), missing_platform, missing_entity_type],
             )
@@ -2239,13 +2247,9 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
         ),
     )
 
-    # Per-device map of platforms currently in contact:
-    #   device_id → sorted list of platform names (empty = offline).
-    # Read from device_session_current (Track O batch O1) — the matview
-    # pre-aggregates per-source "in contact within 24h" and the vm.guest
-    # power_state='poweredon' signal, refreshed on every ingest cycle
-    # (~hourly). Consumer used to compute this inline off
-    # device_agent_presence_current.
+    # Per-device map of platforms whose latest source-reported state is online.
+    # Freshness is deliberately separate from this state and remains available
+    # on the device detail surface.
     subject_ids = [f.subject_id for f in findings if f.subject_id]
     online_map: dict[str, list[str]] = {}
     if subject_ids:
@@ -2263,7 +2267,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             for did, sources in cur.fetchall():
                 online_map[did] = list(sources or [])
 
-    # Coalesce noise: for a device with no source in contact, suppress
+    # Coalesce noise: for a device with no source reporting online, suppress
     # missing/stale_required_platform findings from the queue — they
     # aren't actionable while the device isn't reachable. Findings still
     # exist and appear on the device detail page.
@@ -2829,6 +2833,9 @@ def software_page(request: HttpRequest) -> HttpResponse:
 
 @login_required
 def devices_page(request: HttpRequest) -> HttpResponse:
+    device_policy = get_device_status_policy()
+    active_device_days = device_policy["active_device_days"]
+    source_delay_hours = device_policy["source_delay_hours"]
     q_filter = (request.GET.get("q") or "").strip()
     os_filter = request.GET.get("os", "")  # Windows | macOS | Linux | Other
     role_filter = request.GET.get("role", "")  # server | workstation | unknown
@@ -2849,9 +2856,9 @@ def devices_page(request: HttpRequest) -> HttpResponse:
                    COUNT(*) FILTER (WHERE device_role = 'workstation') AS workstations,
                    COUNT(*) FILTER (WHERE effective_patching_scope = 'Included') AS in_patch_scope,
                    COUNT(*) FILTER (WHERE lifecycle_status <> 'retired'
-                                     AND last_contact_at >= NOW() - INTERVAL '{DEVICE_ACTIVE_DAYS} days') AS active,
+                                     AND last_contact_at >= NOW() - INTERVAL '{active_device_days} days') AS active,
                    COUNT(*) FILTER (WHERE last_contact_at IS NULL
-                                    OR last_contact_at < NOW() - INTERVAL '{DEVICE_ACTIVE_DAYS} days') AS stale
+                                    OR last_contact_at < NOW() - INTERVAL '{active_device_days} days') AS stale
             FROM operations.v_device
             WHERE tenant_id = 1
             """
@@ -2883,12 +2890,12 @@ def devices_page(request: HttpRequest) -> HttpResponse:
         )
         coverage_issues, identity_issues = cur.fetchone()
         cur.execute(
-            """
+            f"""
             SELECT COUNT(*)::int
             FROM operations.source_health_current
             WHERE tenant_id = 1
               AND (last_run_ok = FALSE OR last_observed_at IS NULL
-                   OR last_observed_at < NOW() - INTERVAL '8 hours')
+                   OR last_observed_at < NOW() - INTERVAL '{source_delay_hours} hours')
             """
         )
         delayed_sources = cur.fetchone()[0]
@@ -2920,11 +2927,11 @@ def devices_page(request: HttpRequest) -> HttpResponse:
             where.append("NOT v.is_online_any")
         if state_filter == "active":
             where.append(
-                f"v.lifecycle_status <> 'retired' AND v.last_contact_at >= NOW() - INTERVAL '{DEVICE_ACTIVE_DAYS} days'"
+                f"v.lifecycle_status <> 'retired' AND v.last_contact_at >= NOW() - INTERVAL '{active_device_days} days'"
             )
         elif state_filter == "not-reporting":
             where.append(
-                f"(v.last_contact_at IS NULL OR v.last_contact_at < NOW() - INTERVAL '{DEVICE_ACTIVE_DAYS} days')"
+                f"(v.last_contact_at IS NULL OR v.last_contact_at < NOW() - INTERVAL '{active_device_days} days')"
             )
         if client_filter:
             where.append(
@@ -2982,7 +2989,7 @@ def devices_page(request: HttpRequest) -> HttpResponse:
         else:
             health = "green"
         if last_contact is None or last_contact < timezone.now() - timedelta(
-            days=DEVICE_ACTIVE_DAYS
+            days=active_device_days
         ):
             state_label = "Not reporting"
         elif is_online:
@@ -3039,7 +3046,7 @@ def devices_page(request: HttpRequest) -> HttpResponse:
         "devices_page.html",
         {
             "overview": overview,
-            "active_device_days": DEVICE_ACTIVE_DAYS,
+            "active_device_days": active_device_days,
             "os_rows": os_rows,
             "devices": devices,
             "clients": clients,
@@ -3078,6 +3085,10 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
     5 finding-type tiles reflecting the current filter, filterable
     table.
     """
+
+    device_policy = get_device_status_policy()
+    active_device_days = device_policy["active_device_days"]
+    patch_activity_days = device_policy["patch_activity_days"]
 
     # Multi-value filters accept BOTH native repeated params
     # (`?type=X&type=Y` — how HTML multi-select submits) AND
@@ -3251,8 +3262,8 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
         ), device_posture AS (
             SELECT sd.*, pa.last_patch_activity_at,
                    COALESCE(ps.ever_installed, FALSE) AS ever_installed,
-                   sd.last_contact_at >= NOW() - INTERVAL '{DEVICE_ACTIVE_DAYS} days' AS is_active,
-                   pa.last_patch_activity_at >= NOW() - INTERVAL '{PATCH_ACTIVITY_DAYS} days'
+                   sd.last_contact_at >= NOW() - INTERVAL '{active_device_days} days' AS is_active,
+                   pa.last_patch_activity_at >= NOW() - INTERVAL '{patch_activity_days} days'
                        AS has_recent_patch_activity
             FROM scoped_devices sd
             LEFT JOIN patch_signal ps ON ps.device_id = sd.device_id
@@ -3581,8 +3592,8 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
             "population": population,
             "patch_status": patch_status,
             "client_posture": client_posture,
-            "active_device_days": DEVICE_ACTIVE_DAYS,
-            "patch_activity_days": PATCH_ACTIVITY_DAYS,
+            "active_device_days": active_device_days,
+            "patch_activity_days": patch_activity_days,
             "active_posture": posture_filter,
             "filter_qs": filter_qs,
             "device_rows": device_rows,
@@ -5998,6 +6009,56 @@ def classifier_config(request: HttpRequest) -> HttpResponse:
                 ("high", "High"),
                 ("critical", "Critical"),
             ],
+        },
+    )
+
+
+@login_required
+def device_status_config(request: HttpRequest) -> HttpResponse:
+    """Tenant-wide thresholds for estate and patching status."""
+    row, _ = EvaluatorConfig.objects.get_or_create(
+        tenant_id=1,
+        evaluator_name=DEVICE_STATUS_POLICY_NAME,
+        defaults={"config": {}, "updated_by": request.user},
+    )
+    stored = row.config if isinstance(row.config, dict) else {}
+    effective = get_device_status_policy()
+
+    if request.method == "POST":
+        limits = {
+            "active_device_days": (1, 90),
+            "patch_activity_days": (1, 180),
+            "reboot_pending_days": (1, 90),
+            "repeated_failure_count": (1, 20),
+            "approval_backlog_count": (1, 10_000),
+            "source_delay_hours": (1, 168),
+        }
+        new_config = {}
+        for key, (minimum, maximum) in limits.items():
+            try:
+                value = int(request.POST.get(key) or DEVICE_STATUS_DEFAULTS[key])
+            except ValueError:
+                value = DEVICE_STATUS_DEFAULTS[key]
+            new_config[key] = max(minimum, min(value, maximum))
+        before = row.config
+        row.config = new_config
+        row.updated_by = request.user
+        row.save(update_fields=["config", "updated_by", "updated_at"])
+        _audit(request, "device_status.policy.update", row.id, before, new_config)
+        messages.success(request, "Device status and patching policy saved.")
+        return redirect("device_status_config")
+
+    return render(
+        request,
+        "device_status_config.html",
+        {
+            "admin_group": "config",
+            "admin_tab": "device-status",
+            "effective": effective,
+            "stored": stored,
+            "defaults": DEVICE_STATUS_DEFAULTS,
+            "updated_at": row.updated_at,
+            "updated_by": row.updated_by,
         },
     )
 

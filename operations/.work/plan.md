@@ -1,29 +1,28 @@
 # Active Operations work plan
 
-Track: **Patching status and Ninja activity evidence**
+Track: **Device-status policy and source-state configuration**
 
 ## Status
 
-- Implemented locally; awaiting deployed-stack smoke check before release.
+- In progress.
 
 ## Goal
 
-Make Patching a status overview of the managed estate, with clear denominators
-and drill-throughs, and make Ninja-collected patch activity inspectable at both
-fleet and device level.
+Replace hidden device-status policy thresholds with an explicit tenant-wide
+admin surface, and ensure online status reflects the latest source-reported
+state rather than an inferred contact-age window.
 
 ## Scope
 
-- `apps/core/views.py`, `apps/core/device_status.py`,
-  `apps/core/client_workspace.py`, and the Patching, Device, and Dashboard
-  templates.
-- No schema, ingestion, retention, or finding-contract changes.
+- Operations configuration/UI, shared device-status policy readers, Patching
+  evaluator consumption, and the derived current session view migration.
 
 ## Decisions
 
 - **Active device** means a non-retired device has contacted a source within
-  seven days. It is shared across Dashboard, Clients, Devices, and Patching,
-  and is distinct from `online now` (the 24-hour availability signal).
+  the tenant policy's active-device window (seven days by default). It is
+  shared across Dashboard, Clients, Devices, coverage drill-downs, and
+  Patching, and is distinct from `online now`.
 - **In patching scope** is a policy decision, not activity.
 - **Recent patch activity** means a Ninja patch scan/state observation or
   install outcome within the existing 35-day stalled-patching window.
@@ -32,16 +31,19 @@ fleet and device level.
 - Ninja patch facts are evidence. Show their event time, collection time,
   patch state/outcome, and the collected payload where present; never imply a
   payload field was normalized when it was merely collected raw.
+- **Online now** is the latest source-reported online state. Contact age is
+  displayed separately as freshness and never silently turns an old record
+  into "offline".
+- Operational thresholds are tenant-wide to preserve portfolio comparability.
 
 ## Steps
 
-- [x] Add scoped patch-status population and client posture queries.
-- [x] Reframe `/patching/` around status cards and client posture; preserve
-  the existing work list below the overview.
-- [x] Add fleet activity evidence and device-level Ninja patch timeline.
-- [x] Centralize the active-device definition and correct Dashboard/Client
-  labels that previously used "active" for all managed devices.
-- [x] Run focused tests/checks and document actual validation.
+- [x] Identify policy thresholds and distinguish guardrails from configurable
+  operational policy.
+- [x] Add the Device status & patching admin UI using `EvaluatorConfig`.
+- [x] Make Operations and the patch-finding evaluator read the tenant policy.
+- [x] Migrate session state to retain latest source-reported online state.
+- [ ] Validate migration SQL, policy defaults, templates, and affected tests.
 
 ## Validation plan
 
@@ -50,28 +52,29 @@ fleet and device level.
 
 ## Validation
 
-- `python -m compileall apps/core/views.py` — pass.
+- `python -m compileall` on changed Operations and ingest Python — pass.
 - `python manage.py check` — pass.
-- Template loading for Patching, Activity, and device detail — pass.
 - `pytest apps/core/tests -q` — 23 passed.
-- `ruff check apps/core/views.py --select F,E9` and `git diff --check` — pass.
-- Local Django settings have no database engine, so the new SQL has not been
-  run against the deployed Postgres schema from this workstation.
+- `python manage.py makemigrations --check --dry-run` — no changes detected.
+- `python manage.py sqlmigrate operations 0077` — rendered successfully.
+- Focused Ruff checks and `git diff --check` — pass.
+- Local Django settings have no database engine, so migration `0077` has not
+  been executed against a PostgreSQL instance from this workstation.
 
 ## Checkpoint
 
-- `/patching/` now distinguishes total, active (7-day contact), active in
-  scope, recent Ninja patch activity (patch state or install evidence in 35
-  days), quiet, never patched, and reboot pending. Every status card drills to
-  devices; client posture uses the same definitions. The device Activity tab
-  now includes Ninja messages and raw payloads plus retained patch facts; the
-  fleet Activity page combines both evidence sources when no outcome-status
-  filter is selected. Home now shows active out of managed, Devices has a
-  matching Active drilldown, and Client Overview uses active out of total as
-  its primary estate measure.
+- Commit `953955b` shipped the Patching overview and the initial shared
+  seven-day active-device definition.
+- The audit found active (7d), online inference (24h), patch stalled (35d),
+  reboot pending (3d), repeated failures (3), approval backlog (25), and
+  source delay (8h) as operational thresholds. They are now tenant policy;
+  page/CSV caps remain technical guardrails.
+- Migration `0077` recreates current presence/session readers so online uses
+  the latest explicit `is_online`/`offline` source value (or VM power state),
+  with freshness retained as a separate timestamp.
 
 ## Next action
 
-- Run final local validation, then commit and push this scoped change without
-  staging the existing `org_index.html` worktree change. A deployed-stack
-  smoke check remains the next operational step.
+- Run the final validation and commit the policy/UI, evaluator, and session
+  projection work while preserving the unrelated `org_index.html` worktree
+  change.

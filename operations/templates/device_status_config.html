@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+
+{% block title %}Device status configuration{% endblock %}
+
+{% block content %}
+{% include "_admin_tabs.html" %}
+
+<style>
+  .dsc-section { background:var(--surface); border:1px solid var(--border); border-radius:6px; padding:1.25rem; margin-bottom:1rem; }
+  .dsc-row { display:grid; grid-template-columns:280px 1fr; gap:1rem; align-items:center; padding:.7rem 0; border-bottom:1px solid var(--border); }
+  .dsc-row:last-child { border-bottom:0; }
+  .dsc-label { font-weight:600; font-size:.9rem; }
+  .dsc-hint { font-weight:400; color:var(--muted); font-size:.78rem; margin-top:.15rem; }
+  .dsc-row input { padding:.35rem .6rem; min-width:100px; }
+  .dsc-default { color:var(--muted); font-size:.75rem; margin-left:.5rem; }
+</style>
+
+<div class="dsc-section">
+  <h1 style="margin-top:0;">Device status &amp; patching</h1>
+  <p class="muted">Tenant-wide definitions used for estate reporting and patching status. These values stay consistent across every client.</p>
+  <p class="muted" style="font-size:.82rem;">Online now is not a timer: it is the latest state reported by a connected source. Freshness is shown separately.</p>
+  <p class="muted" style="font-size:.78rem;">{% if updated_by %}Last saved by {{ updated_by.username }} · {{ updated_at|date:"Y-m-d H:i" }}{% else %}Using default policy.{% endif %}</p>
+</div>
+
+<form method="post">
+{% csrf_token %}
+  <div class="dsc-section">
+    <h2 style="margin-top:0;">Device freshness</h2>
+    <div class="dsc-row"><div class="dsc-label">Active device window<div class="dsc-hint">A non-retired device is active when any source contact falls inside this window.</div></div><div><input type="number" min="1" max="90" name="active_device_days" value="{{ effective.active_device_days }}"> days <span class="dsc-default">default {{ defaults.active_device_days }}</span></div></div>
+    <div class="dsc-row"><div class="dsc-label">Data connection delay<div class="dsc-hint">A source is flagged delayed when its successful collection is older than this.</div></div><div><input type="number" min="1" max="168" name="source_delay_hours" value="{{ effective.source_delay_hours }}"> hours <span class="dsc-default">default {{ defaults.source_delay_hours }}</span></div></div>
+  </div>
+  <div class="dsc-section">
+    <h2 style="margin-top:0;">Patching</h2>
+    <div class="dsc-row"><div class="dsc-label">Recent patch activity<div class="dsc-hint">A scan/state observation or install outcome inside this window counts as recent.</div></div><div><input type="number" min="1" max="180" name="patch_activity_days" value="{{ effective.patch_activity_days }}"> days <span class="dsc-default">default {{ defaults.patch_activity_days }}</span></div></div>
+    <div class="dsc-row"><div class="dsc-label">Restart overdue<div class="dsc-hint">A device needing restart beyond this period is shown as pending.</div></div><div><input type="number" min="1" max="90" name="reboot_pending_days" value="{{ effective.reboot_pending_days }}"> days <span class="dsc-default">default {{ defaults.reboot_pending_days }}</span></div></div>
+    <div class="dsc-row"><div class="dsc-label">Repeated failure threshold<div class="dsc-hint">Consecutive failures of the same update before it becomes an issue.</div></div><div><input type="number" min="1" max="20" name="repeated_failure_count" value="{{ effective.repeated_failure_count }}"> failures <span class="dsc-default">default {{ defaults.repeated_failure_count }}</span></div></div>
+    <div class="dsc-row"><div class="dsc-label">Approval backlog threshold<div class="dsc-hint">Approved, uninstalled updates across a client before it becomes an issue.</div></div><div><input type="number" min="1" max="10000" name="approval_backlog_count" value="{{ effective.approval_backlog_count }}"> updates <span class="dsc-default">default {{ defaults.approval_backlog_count }}</span></div></div>
+  </div>
+  <button type="submit" style="padding:.55rem 1.2rem;">Save policy</button>
+</form>
+{% endblock %}

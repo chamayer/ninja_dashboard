@@ -9,7 +9,7 @@ from django.db.models import Count, Q
 from django.urls import reverse
 from django.utils import timezone
 
-from .device_status import DEVICE_ACTIVE_DAYS
+from .device_status import get_device_status_policy
 from .models import Finding, MergeCandidate
 from .templatetags.human_labels import humanize_label
 
@@ -205,8 +205,12 @@ def _shared_context() -> tuple[dict, dict, dict]:
     return locations, users, health
 
 
-def _source_updates(source_names: list[str], health: dict) -> list[dict]:
-    stale_before = timezone.now() - timedelta(hours=8)
+def _source_updates(
+    source_names: list[str], health: dict, *, source_delay_hours: int | None = None
+) -> list[dict]:
+    if source_delay_hours is None:
+        source_delay_hours = get_device_status_policy()["source_delay_hours"]
+    stale_before = timezone.now() - timedelta(hours=source_delay_hours)
     updates = []
     for name in source_names:
         source = health.get(name, {})
@@ -216,13 +220,18 @@ def _source_updates(source_names: list[str], health: dict) -> list[dict]:
     return updates
 
 
-def build_client_workspace(client, existing: dict) -> dict:
+def build_client_workspace(client, existing: dict, *, device_policy: dict | None = None) -> dict:
     """Build a cross-domain, client-scoped overview context."""
     locations, users, health = _shared_context()
+    device_policy = device_policy or get_device_status_policy()
     stats_by_client, issue_details = _issue_rollup(client_id=client.id)
     stats = stats_by_client.get(client.id, {})
     source_names = list(dict.fromkeys(link.source.name for link in existing["client_links"]))
-    source_updates = _source_updates(source_names, health)
+    source_updates = _source_updates(
+        source_names,
+        health,
+        source_delay_hours=device_policy["source_delay_hours"],
+    )
     any_delayed = any(source["delayed"] for source in source_updates)
     latest_update = max(
         (source["updated_at"] for source in source_updates if source["updated_at"]),
@@ -301,7 +310,7 @@ def build_client_workspace(client, existing: dict) -> dict:
             facts=[
                 {"label": f"{online:,} online now"},
                 {"label": f"{offline:,} offline"},
-                {"label": f"{stale:,} not seen in {DEVICE_ACTIVE_DAYS} days"},
+                {"label": f"{stale:,} not seen in {device_policy['active_device_days']} days"},
                 {"label": f"{device['servers']:,} servers"},
                 {"label": f"{device['workstations']:,} workstations"},
             ],
