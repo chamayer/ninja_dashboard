@@ -4264,7 +4264,7 @@ def _attach_group_to_client(
     )
     cur.execute(
         """
-        UPDATE operations.entity_observations eo
+        UPDATE operations.entity_observation_current eo
         SET client_id = %s
         FROM operations.source_bindings sb, operations.source_instances si
         WHERE eo.source_binding_id = sb.id
@@ -4279,7 +4279,7 @@ def _attach_group_to_client(
     )
     cur.execute(
         """
-        UPDATE operations.entity_observations eo
+        UPDATE operations.entity_observation_current eo
         SET client_id = %s
         FROM operations.source_bindings sb, operations.source_instances si
         WHERE eo.source_binding_id = sb.id
@@ -4727,7 +4727,7 @@ def _merge_devices(cur, survivor_id, loser_id: str, reason: str) -> dict:
 
     # 2. entity_observations
     cur.execute(
-        "UPDATE operations.entity_observations SET device_id=%s WHERE tenant_id=1 AND device_id=%s",
+        "UPDATE operations.entity_observation_current SET device_id=%s WHERE tenant_id=1 AND device_id=%s",
         (survivor_id, loser_id),
     )
     counts["observations_moved"] = cur.rowcount
