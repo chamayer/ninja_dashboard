@@ -174,6 +174,11 @@ def recover_stale_entries() -> int:
                 SET status = 'pending', started_at = NULL, worker_id = NULL
                 WHERE status = 'processing'
                   AND started_at < NOW() - INTERVAL '{_LEASE_MINUTES} minutes'
+                  AND NOT EXISTS (
+                      SELECT 1 FROM {table} pending
+                      WHERE pending.df = {table}.df
+                        AND pending.status = 'pending'
+                  )
                 """,
             )
             n = cur.rowcount

@@ -62,11 +62,11 @@ shell until a later schema-removal migration.
   reconcile only complete fleet runs.
 - [x] Exclude software from generic-current seed; document raw-data deferral.
 - [x] Add focused tests and run checks/formatting/migration review.
-- [ ] Remove the three legacy writer calls and add idempotent baseline-history
+- [x] Remove the three legacy writer calls and add idempotent baseline-history
   seed tooling.
-- [ ] Deploy, seed current and baseline history, and validate identity/count
+- [x] Deploy, seed current and baseline history, and validate identity/count
   parity with legacy latest-state queries.
-- [ ] Truncate legacy rows and confirm no writer or reader regresses.
+- [x] Truncate legacy rows and confirm no observation writer or reader regresses.
 
 ## Validation plan
 

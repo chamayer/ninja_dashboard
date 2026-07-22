@@ -1,6 +1,6 @@
 # 0007 — Observation model: content-hashed current + SCD-2 history
 
-Status: Proposed (v3 — revised after review 2026-07-21)
+Status: Accepted and deployed (v4 — software inventory separated)
 Date: 2026-07-21 (v1 drafted); 2026-07-21 (v2/v3 revised)
 
 ## Revision history
@@ -20,6 +20,10 @@ Date: 2026-07-21 (v1 drafted); 2026-07-21 (v2/v3 revised)
   boundary." Material-hash policy moved from a single global blocklist
   to per-entity-type policy with an explicit `hash_algorithm_version`.
 - v1 (2026-07-21). Initial draft. Superseded by v2/v3 in place.
+- **v4 (2026-07-22).** Software installations were separated from generic
+  observations into dedicated current/history tables. The legacy append table
+  was seeded into bounded current/history baselines and truncated; it remains
+  only as an empty compatibility shell.
 
 ## Context
 
@@ -90,6 +94,16 @@ Related decisions:
    history. Written when material or presence state changes. Retention lives
    here.
 
+### Software installation exception
+
+Software is a high-cardinality device-to-product relationship inventory, not
+generic source state. It uses `software_installations_current` and
+`software_installation_history`, keyed by tenant/client/device/canonical name.
+Its history records publisher, version, location, install date, and presence
+intervals. It does not retain raw payload JSON. The generic observation tables
+therefore cover device-like source state (`agent.*`, VMs, network devices,
+monitors, and orgs) only.
+
 ### Observation identity contract (uniform physical key)
 
 Both tables use one physical identity tuple:
@@ -103,11 +117,6 @@ changing the database key.
   `(tenant_id, source_binding_id, entity_type, '', entity_key)` is used.
   `entity_key` is the source's native id (Ninja device id, S1 uuid,
   LMI host id, org id), unique within its binding.
-- **`software`** — `(tenant_id, source_binding_id, entity_type,
-  parent_source_key, entity_key)`. `parent_source_key` is the source's
-  own device id (Ninja `deviceId`), NOT the operations `device_id`
-  (which is nullable and post-hoc mutable). `entity_key` is the
-  normalized software name.
 - **Future child-entity sources** must declare their parent scope in
   the writer primitive. Adding a new entity family is a code change
   in one file, not a schema migration.

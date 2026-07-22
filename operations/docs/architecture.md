@@ -23,7 +23,10 @@ material and must not override DESIGN or implemented behavior without review.
 Source connectors
     │
     ▼
-entity_observations and source-branded raw schemas
+source-branded raw schemas
+    │ normalized current-state writes
+    ├── entity_observation_current + entity_observation_history
+    └── software_installations_current + software_installation_history
     │ identity/client resolution
     ▼
 canonical clients/devices and source links
@@ -48,6 +51,17 @@ metadata. They are not automatically deleted due to source absence.
 Derived tables and materialized views summarize observations and domain logic.
 They are safe to recompute through documented refresh functions and dependency
 order.
+
+### Observation state and history
+
+Generic source state is stored once per source-scoped identity in
+`entity_observation_current`; `entity_observation_history` records only
+material and presence changes as SCD-2 intervals. Software installations are
+a high-cardinality device-to-product relationship inventory and use the
+dedicated `software_installations_current` and
+`software_installation_history` tables. The retired
+`entity_observations` table is an empty compatibility shell, not a runtime
+reader or writer target.
 
 ### Operator decisions
 
