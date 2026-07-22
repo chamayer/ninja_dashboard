@@ -52,8 +52,9 @@ def drain_resolution(batch_size: int = 200, *, refresh_current: bool = True) -> 
             """
             SELECT observation_id, entity_type, entity_key, platform, client_id,
                    observed_at, canonical_data
-            FROM operations.entity_observations
+            FROM operations.entity_observation_current
             WHERE tenant_id = %s AND device_id IS NULL
+              AND active = TRUE
               AND entity_type <> 'org'  -- containers resolve to clients, not devices
             ORDER BY observed_at DESC
             LIMIT %s
@@ -238,8 +239,9 @@ def _same_stream_conflict(
     """
     cur.execute(
         """
-        SELECT 1 FROM operations.entity_observations
+        SELECT 1 FROM operations.entity_observation_current
         WHERE tenant_id = %s AND device_id = %s
+          AND active = TRUE
           AND platform = %s AND entity_type = %s AND entity_key <> %s
         LIMIT 1
         """,
@@ -274,8 +276,9 @@ def _same_machine_on_device(
     cur.execute(
         """
         SELECT DISTINCT ON (entity_key) canonical_data
-        FROM operations.entity_observations
+        FROM operations.entity_observation_current
         WHERE tenant_id = %s AND device_id = %s
+          AND active = TRUE
           AND platform = %s AND entity_type = %s AND entity_key <> %s
         ORDER BY entity_key, observed_at DESC
         """,
