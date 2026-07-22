@@ -2789,8 +2789,8 @@ def devices_page(request: HttpRequest) -> HttpResponse:
         cur.execute(
             """
             SELECT
-              COUNT(*) FILTER (WHERE fc.name = 'coverage')::int,
-              COUNT(*) FILTER (WHERE fc.name = 'identity')::int
+              COUNT(DISTINCT f.subject_id) FILTER (WHERE fc.name = 'coverage')::int,
+              COUNT(DISTINCT f.subject_id) FILTER (WHERE fc.name = 'identity')::int
             FROM operations.findings f
             JOIN operations.finding_types ft ON ft.id = f.finding_type_id
             JOIN operations.finding_categories fc ON fc.id = ft.category_id

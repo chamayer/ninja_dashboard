@@ -92,14 +92,16 @@
     </a>
 </div>
 
+{% if coverage_issues or identity_issues or delayed_sources %}
 <div class="card" style="padding:1rem;">
-  <h2 style="font-size:.95rem; margin:0 0 .5rem;">Data and coverage context</h2>
+  <h2 style="font-size:.95rem; margin:0 0 .5rem;">Service and data status</h2>
   <div class="dv-chips">
-    <a class="dv-chip" href="{% url 'findings_queue' %}?category=coverage">{{ coverage_issues }} coverage item{{ coverage_issues|pluralize }}</a>
-    <a class="dv-chip" href="{% url 'findings_queue' %}?category=identity">{{ identity_issues }} identity item{{ identity_issues|pluralize }}</a>
-    <a class="dv-chip" href="{% url 'sources_status' %}">{{ delayed_sources }} delayed data connection{{ delayed_sources|pluralize }}</a>
+    {% if coverage_issues %}<a class="dv-chip" href="{% url 'findings_queue' %}?category=coverage">{{ coverage_issues }} device{{ coverage_issues|pluralize }} with a service coverage gap</a>{% endif %}
+    {% if identity_issues %}<a class="dv-chip" href="{% url 'findings_queue' %}?category=identity">{{ identity_issues }} device{{ identity_issues|pluralize }} with an identity conflict</a>{% endif %}
+    {% if delayed_sources %}<a class="dv-chip" href="{% url 'sources_status' %}">{{ delayed_sources }} source{{ delayed_sources|pluralize }} delayed</a>{% endif %}
   </div>
 </div>
+{% endif %}
 
 <div class="card">
     <h2 style="font-size:0.95rem; margin:0 0 0.5rem 0;">Explore devices</h2>
