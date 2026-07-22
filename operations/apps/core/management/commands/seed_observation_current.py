@@ -33,7 +33,7 @@ class Command(BaseCommand):
              ORDER BY o.tenant_id, o.source_binding_id, o.entity_type,
                       {identity}, o.entity_key, o.observed_at DESC, o.observation_id DESC
         """
-        with connection.cursor() as cursor:
+        with transaction.atomic(), connection.cursor() as cursor:
             cursor.execute("SET LOCAL operations.tenant_id = %s", [tenant_id])
             cursor.execute(f"SELECT count(*) FROM ({latest}) latest", params)
             candidates = cursor.fetchone()[0]
