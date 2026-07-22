@@ -472,10 +472,11 @@ def _load_corroborated_devices(cur: Any, tenant_id: int) -> set[uuid.UUID]:
     cur.execute(
         """
         SELECT DISTINCT device_id
-        FROM operations.entity_observations
+        FROM operations.entity_observation_history
         WHERE tenant_id = %s AND device_id IS NOT NULL
-          AND observed_at > now() - %s::interval
-          AND canonical_data ->> 'is_online' = 'true'
+          AND effective_from <= now()
+          AND (effective_to IS NULL OR effective_to > now() - %s::interval)
+          AND material_data ->> 'is_online' = 'true'
         """,
         (tenant_id, f"{_CORROBORATION_WINDOW_HOURS} hours"),
     )

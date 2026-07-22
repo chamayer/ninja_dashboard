@@ -14,7 +14,7 @@ from ingest import db
 
 MATERIAL_HASH_VERSION = 1
 VOLATILE_FIELDS = frozenset({
-    "last_seen_at", "last_contact", "is_online", "offline",
+    "last_seen_at", "last_contact", "offline",
     "hostStateChangeDate", "lastActive", "last_boot_time_at",
 })
 
@@ -135,7 +135,9 @@ def write_history_changes(cur: Any, rows: Iterable[dict[str, Any]]) -> int:
         "tenant_id": row["tenant_id"],
         "source_binding_id": row["source_binding_id"],
         "collector_instance_id": row["collector_instance_id"],
+        "device_id": row.get("device_id"),
         "entity_type": row["entity_type"],
+        "platform": row.get("platform", ""),
         "parent_source_key": row.get("parent_source_key", ""),
         "entity_key": row["entity_key"],
         "effective_from": row["observed_at"],
