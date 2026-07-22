@@ -383,7 +383,7 @@ def _attach_observation(
         )
     if obs_id is not None:
         cur.execute(
-            "UPDATE operations.entity_observations SET device_id = %s WHERE observation_id = %s",
+            "UPDATE operations.entity_observation_current SET device_id = %s WHERE observation_id = %s",
             (device_id, obs_id),
         )
 
