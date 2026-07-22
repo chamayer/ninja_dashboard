@@ -1135,9 +1135,9 @@ def _sync_device_attributes(cur) -> None:
             NULL, NULL, NOW(), NOW()
         FROM (
             SELECT eo.tenant_id, eo.device_id, ag.id AS agent_id,
-                   MIN(eo.observed_at) AS first_at,
-                   MAX(eo.observed_at) AS last_at
-            FROM operations.entity_observations eo
+                   MIN(eo.effective_from) AS first_at,
+                   MAX(COALESCE(eo.effective_to, eo.effective_from)) AS last_at
+            FROM operations.entity_observation_history eo
             JOIN operations.agents ag ON ag.name = eo.platform
             WHERE eo.tenant_id = %s
               AND eo.device_id IS NOT NULL
