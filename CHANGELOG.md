@@ -2,6 +2,26 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.88.0] — 2026-07-24 — Software safety intel: schema + ADR (Batch A)
+
+### Added
+- **ADR 0008 — Software safety intel layer.** Documents the
+  free-tier-bulk + free-on-demand strategy, source list, matcher and
+  scoring approach.
+- **`intel` Postgres schema** (sql migration `072_intel_schema.sql`) —
+  isolates raw threat data from operations, mirroring how
+  `ninja_patches` / `ninja_activities` separate source-specific stores.
+  Tables: `intel.cves`, `intel.cpes`.
+- **Operations-owned tables** — `operations.cve_match`,
+  `operations.safety_signal`, `operations.title_intel_cache`,
+  `operations.intel_ingest_status`.
+- **`ingest/intel/` package skeleton** with a `record_run` context
+  manager wrapping every connector so the last-run status, error, and
+  rows-touched surface on `intel_ingest_status` (nothing hidden).
+- **Six `INTEL_*` env knobs + six free API keys** wired into
+  `ingest.config.Settings` (all default off until Batch B enables the
+  first connector).
+
 ## [0.87.0] — 2026-07-24 — Software user-risk view
 
 ### Added
