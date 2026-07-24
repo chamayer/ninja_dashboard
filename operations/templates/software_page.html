@@ -5,28 +5,54 @@
 
 {% block content %}
 <style>
-  .sw-overview {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-    gap: 0.65rem; margin-bottom: 1rem;
+  /* ── High-level layout ─────────────────────────────────── */
+  .sw-hero {
+    display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.75rem;
+    justify-content: space-between; margin: 0 0 1rem;
   }
+  .sw-hero h1 { margin: 0; font-size: 1.4rem; }
+  .sw-hero .sub { color: var(--muted); font-size: 0.92rem; }
+
+  .sw-section-label {
+    font-size: 0.7rem; font-weight: 700; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--muted); margin: 1.2rem 0 0.4rem;
+  }
+
+  .sw-numbers, .sw-workflows {
+    display: grid; gap: 0.65rem;
+  }
+  .sw-numbers { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+  .sw-workflows { grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
+
   .sw-tile {
-    display: block; padding: 0.75rem 1rem;
+    display: block; padding: 0.85rem 1rem;
     background: var(--surface); border: 1px solid var(--border);
-    border-radius: 6px; text-decoration: none; color: inherit;
+    border-radius: 8px; text-decoration: none; color: inherit;
     transition: box-shadow 0.15s, border-color 0.15s;
   }
   .sw-tile:hover { box-shadow: 0 2px 6px rgba(0,0,0,0.06); border-color: var(--accent); }
-  .sw-tile .sw-label { font-size: 0.72rem; font-weight: 700; text-transform: uppercase;
-    letter-spacing: 0.06em; color: var(--muted); margin-bottom: 0.2rem; }
+  .sw-tile .sw-label {
+    font-size: 0.72rem; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.05em; color: var(--muted); margin-bottom: 0.2rem;
+  }
   .sw-tile .sw-value { font-size: 1.6rem; font-weight: 700; line-height: 1.1; color: #1a1a2e; }
-  .sw-tile .sw-sub { font-size: 0.75rem; color: var(--muted); margin-top: 0.2rem; }
+  .sw-tile .sw-sub { font-size: 0.78rem; color: var(--muted); margin-top: 0.25rem; }
   .sw-tile.has-open .sw-value { color: #b45309; }
 
-  .cat-chips { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.75rem; }
+  .sw-tile.workflow { display: flex; align-items: center; gap: 0.75rem; padding: 0.7rem 0.95rem; }
+  .sw-tile.workflow .icon {
+    width: 32px; height: 32px; border-radius: 8px; background: #eef2ff;
+    display: inline-flex; align-items: center; justify-content: center;
+    color: #4338ca; font-weight: 700; flex-shrink: 0;
+  }
+  .sw-tile.workflow .title { font-weight: 600; }
+  .sw-tile.workflow .desc  { font-size: 0.78rem; color: var(--muted); }
+
+  /* ── Category chips + filters ──────────────────────────── */
+  .cat-chips { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.6rem; }
   .cat-chip {
     display: inline-flex; align-items: center; gap: 0.4rem;
-    padding: 0.3rem 0.7rem; border: 1px solid var(--border);
+    padding: 0.28rem 0.65rem; border: 1px solid var(--border);
     border-radius: 999px; background: #fff; text-decoration: none;
     color: #374151; font-size: 0.82rem;
   }
@@ -35,217 +61,242 @@
   .cat-chip .chip-count { font-weight: 600; color: var(--muted); }
   .cat-chip.active .chip-count { color: #fecaca; }
 
-  .sw-table th, .sw-table td { padding: 0.5rem 0.75rem; vertical-align: middle; }
+  .sw-filterbar {
+    display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center;
+    margin-top: 0.4rem;
+  }
+  .sw-filterbar input, .sw-filterbar select {
+    padding: 0.4rem 0.7rem; border: 1px solid var(--border); border-radius: 4px;
+    font-size: 0.85rem;
+  }
+
+  /* ── Titles table ──────────────────────────────────────── */
+  .sw-table-wrap { overflow-x: auto; }
+  .sw-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+  .sw-table th, .sw-table td { padding: 0.55rem 0.7rem; vertical-align: middle; }
+  .sw-table thead th {
+    font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em;
+    color: var(--muted); border-bottom: 1px solid var(--border); text-align: left;
+  }
   .sw-table tbody tr { border-bottom: 1px solid var(--border); }
-  .decision-pill {
-    display: inline-block; padding: 1px 0.55rem; border-radius: 12px;
-    font-size: 0.72rem; font-weight: 600;
+  .sw-table tbody tr:hover { background: #fafafa; }
+  .sw-table .num { text-align: right; }
+  .sw-table .title-cell strong { font-weight: 600; }
+  .sw-table .title-cell .publisher { color: var(--muted); font-size: 0.8rem; }
+  .sw-table .actions { text-align: right; white-space: nowrap; }
+
+  .risk-pill, .decision-pill {
+    display: inline-block; padding: 0.15rem 0.55rem; border-radius: 999px;
+    font-size: 0.75rem; font-weight: 600;
   }
-  .safety-pill { display:inline-block; padding:0.15rem 0.55rem; border-radius:999px;
-                 font-size:0.75rem; font-weight:500; }
-  .safety-pill.high   { background:#fee2e2; color:#991b1b; }
-  .safety-pill.medium { background:#fef3c7; color:#92400e; }
-  .safety-pill.low    { background:#dbeafe; color:#1e3a8a; }
-  .safety-pill.clean  { background:#dcfce7; color:#14532d; }
-  .safety-pill.none   { background:#f3f4f6; color:#6b7280; }
-  .decision-pill.approve, .decision-pill.approve_publisher {
-    background: #dcfce7; color: #166534;
-  }
+  .risk-pill.high    { background: #fee2e2; color: #991b1b; }
+  .risk-pill.medium  { background: #fef3c7; color: #92400e; }
+  .risk-pill.low     { background: #dbeafe; color: #1e3a8a; }
+  .risk-pill.clean   { background: #dcfce7; color: #14532d; }
+  .risk-pill.unknown { background: #f3f4f6; color: #6b7280; font-weight: 500; }
+  .risk-pill.none    { background: #f3f4f6; color: #6b7280; font-weight: 400; }
+  .decision-pill.approve, .decision-pill.approve_publisher { background: #dcfce7; color: #166534; }
   .decision-pill.reject { background: #fee2e2; color: #991b1b; }
   .decision-pill.investigate { background: #fef3c7; color: #92400e; }
-  .decision-pill.none { background: #f3f4f6; color: #6b7280; }
+  .decision-pill.none { background: #f3f4f6; color: #6b7280; font-weight: 400; }
 
+  /* ── Side widgets ──────────────────────────────────────── */
   .sidebar-grid {
     display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 1rem;
   }
   @media (max-width: 900px) { .sidebar-grid { grid-template-columns: 1fr; } }
   .side-list { list-style: none; padding: 0; margin: 0; }
-  .side-list li { padding: 0.5rem 0; border-bottom: 1px solid var(--border);
-    font-size: 0.85rem; display: flex; align-items: baseline; gap: 0.5rem; }
+  .side-list li {
+    padding: 0.5rem 0; border-bottom: 1px solid var(--border);
+    font-size: 0.85rem; display: flex; align-items: baseline; gap: 0.5rem;
+  }
   .side-list li:last-child { border-bottom: none; }
   .side-time { color: var(--muted); font-size: 0.75rem; white-space: nowrap; margin-left: auto; }
 </style>
 
 <div class="card">
-    <div style="display:flex; align-items:center; justify-content:space-between; gap:1rem;">
-        <h1 style="margin:0;">Software
-          <span class="muted" style="font-weight:400; font-size:0.9rem;">
-            {{ installations }} installations across the fleet
-          </span>
-        </h1>
+    <div class="sw-hero">
+        <div>
+            <h1>Software</h1>
+            <div class="sub">{{ installations }} installations across {{ unique_titles }} titles</div>
+        </div>
         {% include "_csv_download.html" %}
     </div>
-    <p class="muted" style="margin-top:0.5rem;">Every product installed across your clients — inventory, classification, decisions, and open items.</p>
 </div>
 
-{# ── Overview cards ─────────────────────────────────────── #}
-<div class="sw-overview">
+{# ── Overview numbers ──────────────────────────────────── #}
+<div class="sw-section-label">Overview</div>
+<div class="sw-numbers">
     <div class="sw-tile">
         <div class="sw-label">Titles</div>
         <div class="sw-value">{{ unique_titles }}</div>
         <div class="sw-sub">unique products</div>
     </div>
-    <div class="sw-tile">
-        <div class="sw-label">Installations</div>
-        <div class="sw-value">{{ installations }}</div>
-        <div class="sw-sub">device × title pairs</div>
-    </div>
-    <div class="sw-tile">
-        <div class="sw-label">Categorized</div>
-        <div class="sw-value">{{ categorized_titles }}</div>
-        <div class="sw-sub">titles in catalog</div>
-    </div>
     <a class="sw-tile {% if uncategorized_titles %}has-open{% endif %}" href="?category=uncategorized">
-        <div class="sw-label">Uncategorized</div>
+        <div class="sw-label">Unclassified</div>
         <div class="sw-value">{{ uncategorized_titles }}</div>
-        <div class="sw-sub">titles not yet classified</div>
+        <div class="sw-sub">titles not yet categorised</div>
     </a>
-    <a class="sw-tile" href="{% url 'software_decisions_queue' %}">
-        <div class="sw-label">Decisions</div>
-        <div class="sw-value">{{ approved_titles }}</div>
-        <div class="sw-sub">approved · {{ rejected_titles }} rejected</div>
+    <a class="sw-tile" href="?decision=pending">
+        <div class="sw-label">Awaiting decision</div>
+        <div class="sw-value">{{ pending_decisions }}</div>
+        <div class="sw-sub">no approve/reject on record</div>
     </a>
-    <a class="sw-tile" href="{% url 'software_publishers' %}">
-        <div class="sw-label">Publishers</div>
-        <div class="sw-value">→</div>
-        <div class="sw-sub">rollup + publisher-scope decisions</div>
-    </a>
-    <a class="sw-tile" href="{% url 'software_tech_checklist' %}">
-        <div class="sw-label">Tech checklist</div>
-        <div class="sw-value">→</div>
-        <div class="sw-sub">per-device cleanup queue</div>
-    </a>
-    <a class="sw-tile" href="{% url 'software_user_risk' %}">
-        <div class="sw-label">User risk</div>
-        <div class="sw-value">→</div>
-        <div class="sw-sub">per-user rollup of checklist items</div>
+    <a class="sw-tile {% if high_risk_titles %}has-open{% endif %}" href="?safety=high">
+        <div class="sw-label">High risk</div>
+        <div class="sw-value">{{ high_risk_titles }}</div>
+        <div class="sw-sub">actively exploited or severe</div>
     </a>
     <a class="sw-tile {% if software_issues %}has-open{% endif %}" href="{% url 'findings_queue' %}?category=software">
         <div class="sw-label">Open items</div>
         <div class="sw-value">{{ software_issues }}</div>
         <div class="sw-sub">flagged installations</div>
     </a>
-    <a class="sw-tile {% if whitelist_suggestions %}has-open{% endif %}"
-       href="{% url 'findings_queue' %}?category=software&amp;type=whitelist_suggestion">
-        <div class="sw-label">Whitelist suggestions</div>
-        <div class="sw-value">{{ whitelist_suggestions }}</div>
-        <div class="sw-sub">titles ≥ threshold, undecided, uncategorised</div>
+</div>
+
+{# ── Workflow launchers ────────────────────────────────── #}
+<div class="sw-section-label">Workflows</div>
+<div class="sw-workflows">
+    <a class="sw-tile workflow" href="{% url 'software_publishers' %}">
+        <span class="icon">P</span>
+        <span>
+            <div class="title">Publishers</div>
+            <div class="desc">approve or reject a publisher across every title</div>
+        </span>
     </a>
-    <a class="sw-tile {% if high_risk_titles %}has-open{% endif %}" href="?safety=high">
-        <div class="sw-label">High risk</div>
-        <div class="sw-value">{{ high_risk_titles }}</div>
-        <div class="sw-sub">actively exploited or severely vulnerable titles</div>
+    <a class="sw-tile workflow" href="{% url 'software_decisions_queue' %}">
+        <span class="icon">D</span>
+        <span>
+            <div class="title">Decisions queue</div>
+            <div class="desc">{{ pending_decisions }} title(s) awaiting review</div>
+        </span>
+    </a>
+    <a class="sw-tile workflow" href="{% url 'software_tech_checklist' %}">
+        <span class="icon">✓</span>
+        <span>
+            <div class="title">Tech checklist</div>
+            <div class="desc">per-device cleanup list</div>
+        </span>
+    </a>
+    <a class="sw-tile workflow" href="{% url 'software_user_risk' %}">
+        <span class="icon">U</span>
+        <span>
+            <div class="title">User risk</div>
+            <div class="desc">rollup by last-logged-in user</div>
+        </span>
+    </a>
+    <a class="sw-tile workflow" href="{% url 'findings_queue' %}?category=software&amp;type=whitelist_suggestion">
+        <span class="icon">W</span>
+        <span>
+            <div class="title">Whitelist suggestions</div>
+            <div class="desc">{{ whitelist_suggestions }} common title(s) worth reviewing</div>
+        </span>
     </a>
 </div>
 
-{# ── Category chip strip ────────────────────────────────── #}
+{# ── Browse titles: chips + filters + compact table ───── #}
+<div class="sw-section-label">Browse titles</div>
 <div class="card">
-    <h2 style="font-size:0.95rem; margin:0 0 0.5rem 0; color:#9ca3af;">Categories</h2>
     <div class="cat-chips">
         <a class="cat-chip {% if not active_category %}active{% endif %}" href="{% url 'software_page' %}">
             All <span class="chip-count">{{ unique_titles }}</span>
         </a>
         {% for cat_name, cat_titles in category_rows %}
+            {% if cat_name != 'whitelist' %}
             <a class="cat-chip {% if active_category == cat_name %}active{% endif %}"
                href="?category={{ cat_name }}">
-                {{ cat_name|humanize_label|default:cat_name }}
+                {{ cat_name|humanize_label|default:cat_name|title }}
                 <span class="chip-count">{{ cat_titles }}</span>
             </a>
+            {% endif %}
         {% endfor %}
         <a class="cat-chip {% if active_category == 'uncategorized' %}active{% endif %}"
            href="?category=uncategorized">
-            Uncategorized <span class="chip-count">{{ uncategorized_titles }}</span>
+            Unclassified <span class="chip-count">{{ uncategorized_titles }}</span>
         </a>
     </div>
 
-    <form method="get" style="display:flex; gap:0.5rem; align-items:center; margin-top:0.5rem;">
+    <form method="get" class="sw-filterbar">
         <input type="search" name="q" placeholder="Search titles or publishers…"
-               value="{{ active_q|default:'' }}"
-               style="padding:0.4rem 0.7rem; border:1px solid var(--border); border-radius:4px; font-size:0.85rem; min-width:260px;">
+               value="{{ active_q|default:'' }}" style="min-width:240px;">
         {% if active_category %}<input type="hidden" name="category" value="{{ active_category }}">{% endif %}
-        <select name="decision" style="padding:0.4rem 0.7rem; border:1px solid var(--border); border-radius:4px;">
+        <select name="decision">
             <option value="">Any decision</option>
             <option value="approved" {% if active_decision == 'approved' %}selected{% endif %}>Approved</option>
             <option value="rejected" {% if active_decision == 'rejected' %}selected{% endif %}>Rejected</option>
             <option value="pending" {% if active_decision == 'pending' %}selected{% endif %}>No decision yet</option>
         </select>
+        <select name="safety">
+            <option value="">Any risk</option>
+            <option value="high" {% if active_safety == 'high' %}selected{% endif %}>High risk</option>
+            <option value="medium" {% if active_safety == 'medium' %}selected{% endif %}>Medium risk</option>
+            <option value="low" {% if active_safety == 'low' %}selected{% endif %}>Low risk</option>
+            <option value="clean" {% if active_safety == 'clean' %}selected{% endif %}>Approved</option>
+            <option value="unknown" {% if active_safety == 'unknown' %}selected{% endif %}>Not yet checked</option>
+        </select>
         <button type="submit">Apply</button>
-        {% if active_q or active_decision %}
+        {% if active_q or active_decision or active_safety %}
           <a href="?{% if active_category %}category={{ active_category }}{% endif %}" style="font-size:0.85rem;">Clear</a>
         {% endif %}
     </form>
 </div>
 
-{# ── Titles table ───────────────────────────────────────── #}
 <div class="card">
-    <h2>Titles
-      <span class="muted" style="font-weight:400; font-size:0.85rem;">
-        ({{ titles|length }}{% if titles|length == 500 %}+{% endif %})
-      </span>
-    </h2>
     {% if titles %}
+    <div class="sw-table-wrap">
     <table class="sw-table" data-sortable>
         <thead>
             <tr>
                 <th>Title</th>
-                <th>Publisher</th>
-                <th style="text-align:right;">Devices</th>
-                <th style="text-align:right;">Clients</th>
-                <th>Category</th>
-                <th>Decision</th>
+                <th class="num">Devices</th>
                 <th>Risk</th>
-                <th class="num">Latest install</th>
-                <th style="text-align:right;">Decide (global)</th>
+                <th>Decision</th>
+                <th class="actions">Actions</th>
             </tr>
         </thead>
         <tbody>
             {% for t in titles %}
             <tr>
-                <td>
+                <td class="title-cell">
                     <a href="{% url 'software_detail' name=t.canonical_name %}">
-                        <strong>{{ t.canonical_name }}</strong>
+                        <strong>{{ t.canonical_name|title }}</strong>
                     </a>
-                </td>
-                <td class="muted">
                     {% if t.publisher %}
-                        <a href="{% url 'software_publisher_detail' publisher=t.publisher %}">{{ t.publisher }}</a>
-                    {% else %}—{% endif %}
-                </td>
-                <td style="text-align:right;">{{ t.device_count }}</td>
-                <td style="text-align:right;">{{ t.client_count }}</td>
-                <td class="muted">
-                    {% if t.categories %}
-                        {% for cat in t.categories %}
-                            {{ cat|humanize_label|default:cat }}{% if not forloop.last %}, {% endif %}
-                        {% endfor %}
+                    <div class="publisher">
+                        <a href="{% url 'software_publisher_detail' publisher=t.publisher %}">{{ t.publisher|title }}</a>
+                        · on {{ t.client_count }} client{{ t.client_count|pluralize }}
+                    </div>
                     {% else %}
-                        <span class="muted">—</span>
+                    <div class="publisher">on {{ t.client_count }} client{{ t.client_count|pluralize }}</div>
+                    {% endif %}
+                </td>
+                <td class="num">{{ t.device_count }}</td>
+                <td>
+                    {% if t.safety_band == 'high' %}
+                        <span class="risk-pill high"
+                              title="Risk score {{ t.safety_score }} · {{ t.safety_cve_count }} known vulnerabilities · {{ t.safety_kev_count }} actively exploited · {{ t.safety_osint_hits }} threat-intel matches">High risk</span>
+                    {% elif t.safety_band == 'medium' %}
+                        <span class="risk-pill medium"
+                              title="Risk score {{ t.safety_score }} · {{ t.safety_cve_count }} known vulnerabilities · {{ t.safety_osint_hits }} threat-intel matches">Medium risk</span>
+                    {% elif t.safety_band == 'low' %}
+                        <span class="risk-pill low"
+                              title="Risk score {{ t.safety_score }} · {{ t.safety_osint_hits }} threat-intel matches">Low risk</span>
+                    {% elif t.safety_band == 'clean' %}
+                        <span class="risk-pill clean" title="Approved by operator">Approved</span>
+                    {% elif t.safety_band == 'unknown' %}
+                        <span class="risk-pill unknown" title="No risk data on record yet">Not yet checked</span>
+                    {% else %}
+                        <span class="risk-pill none">—</span>
                     {% endif %}
                 </td>
                 <td>
                     {% if t.decision %}
-                        <span class="decision-pill {{ t.decision }}">{{ t.decision|humanize_label|default:t.decision }}</span>
+                        <span class="decision-pill {{ t.decision }}">{{ t.decision|humanize_label|default:t.decision|title }}</span>
                     {% else %}
-                        <span class="decision-pill none">no decision</span>
+                        <span class="decision-pill none">No decision</span>
                     {% endif %}
                 </td>
-                <td>
-                    {% if t.safety_band %}
-                        <span class="safety-pill {{ t.safety_band }}"
-                              title="Risk score {{ t.safety_score }} · {{ t.safety_cve_count }} known vulnerabilities · {{ t.safety_kev_count }} actively exploited · {{ t.safety_osint_hits }} threat-intel matches">
-                            {% if t.safety_band == 'high' %}High risk
-                            {% elif t.safety_band == 'medium' %}Medium risk
-                            {% elif t.safety_band == 'low' %}Low risk
-                            {% elif t.safety_band == 'clean' %}Clean
-                            {% else %}{{ t.safety_band }}{% endif %}
-                            · {{ t.safety_score }}
-                        </span>
-                    {% else %}
-                        <span class="safety-pill none">—</span>
-                    {% endif %}
-                </td>
-                <td class="muted num">{{ t.last_install|date:"Y-m-d"|default:"—" }}</td>
-                <td style="text-align:right;">
+                <td class="actions">
                     <form method="post" action="{% url 'software_decision_create' %}" style="display:inline-flex; gap:0.25rem;">
                         {% csrf_token %}
                         <input type="hidden" name="canonical_name" value="{{ t.canonical_name }}">
@@ -264,12 +315,13 @@
             {% endfor %}
         </tbody>
     </table>
+    </div>
     {% else %}
     <p class="muted">No titles match the current filter.</p>
     {% endif %}
 </div>
 
-{# ── Sidebar: recent + pending ──────────────────────────── #}
+{# ── Sidebar: recent installs + decisions quick summary ─ #}
 <div class="sidebar-grid">
     <div class="card">
         <h2>New in last 24 hours
@@ -279,8 +331,8 @@
         <ul class="side-list">
             {% for name, publisher, client, first_seen in recent_installs %}
             <li>
-                <strong>{{ name }}</strong>
-                {% if publisher %}<span class="muted">— {{ publisher }}</span>{% endif %}
+                <a href="{% url 'software_detail' name=name %}"><strong>{{ name|title }}</strong></a>
+                {% if publisher %}<span class="muted">· {{ publisher|title }}</span>{% endif %}
                 <span class="muted">· {{ client }}</span>
                 <span class="side-time">{{ first_seen|date:"H:i" }}</span>
             </li>
@@ -293,7 +345,7 @@
 
     <div class="card">
         <h2>Decisions
-          <span class="muted" style="font-weight:400; font-size:0.85rem;">({{ pending_decisions }} pending)</span>
+          <span class="muted" style="font-weight:400; font-size:0.85rem;">({{ pending_decisions }} awaiting)</span>
         </h2>
         <p class="muted" style="font-size:0.85rem;">
             {{ approved_titles }} approved · {{ rejected_titles }} rejected ·

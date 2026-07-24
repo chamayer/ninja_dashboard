@@ -67,6 +67,7 @@ from apps.core.views import (
     software_publisher_detail,
     software_publishers,
     software_tech_checklist,
+    software_title_lookup,
     software_user_risk,
     sources_status,
 )
@@ -135,6 +136,11 @@ urlpatterns = [
     ),
     path("software/tech-checklist/", software_tech_checklist, name="software_tech_checklist"),
     path("software/user-risk/", software_user_risk, name="software_user_risk"),
+    path(
+        "software/title/<path:name>/lookup/<str:source>/",
+        software_title_lookup,
+        name="software_title_lookup",
+    ),
     path("devices/", devices_page, name="devices_page"),
     path("search/", search, name="search"),
     path("findings/<uuid:finding_id>/ack/", finding_acknowledge, name="finding_acknowledge"),

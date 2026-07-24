@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import json
+import os
 import uuid
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
+
+import requests
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -2602,6 +2605,18 @@ def software_page(request: HttpRequest) -> HttpResponse:
     category_filter = request.GET.get("category", "")  # av|rmm|remote_access|...|uncategorized
     safety_filter = request.GET.get("safety", "")      # high|medium|low|clean
 
+    # Intel layer availability probe — used to gate risk queries.
+    intel_available = False
+    try:
+        with connection.cursor() as pcur:
+            pcur.execute("SELECT to_regclass('operations.v_software_safety')")
+            (regclass,) = pcur.fetchone()
+            intel_available = regclass is not None
+    except Exception:
+        intel_available = False
+    if not intel_available and safety_filter:
+        safety_filter = ""
+
     with transaction.atomic(), connection.cursor() as cur:
         cur.execute("SET LOCAL operations.tenant_id = 1")
 
@@ -2689,7 +2704,7 @@ def software_page(request: HttpRequest) -> HttpResponse:
                 "        OR (sd.publisher <> '' "
                 "            AND LOWER(sd.publisher) = LOWER(COALESCE(sic.publisher, '')))))"
             )
-        if safety_filter in ("high", "medium", "low", "clean"):
+        if safety_filter in ("high", "medium", "low", "clean", "unknown"):
             where_clauses.append(
                 "EXISTS (SELECT 1 FROM operations.v_software_safety vs "
                 " WHERE vs.tenant_id = sic.tenant_id "
@@ -2761,37 +2776,7 @@ def software_page(request: HttpRequest) -> HttpResponse:
         unique_titles = software_rows[0][8]
         title_rows = [row[:7] for row in software_rows if row[0] is not None]
 
-        # Composite safety score for each shown title. One indexed lookup
-        # per title against the v_software_safety view.
         canonical_names = [row[0] for row in title_rows]
-        safety_by_title: dict[str, dict] = {}
-        high_risk_titles = 0
-        if canonical_names:
-            cur.execute(
-                """
-                SELECT canonical_name, safety_score, safety_band,
-                       cve_count, kev_count, osint_hits
-                FROM operations.v_software_safety
-                WHERE tenant_id = 1
-                  AND canonical_name = ANY(%s::text[])
-                """,
-                (canonical_names,),
-            )
-            for cn, score, band, cve_count, kev_count, osint_hits in cur.fetchall():
-                safety_by_title[cn] = {
-                    "score": score,
-                    "band": band,
-                    "cve_count": cve_count,
-                    "kev_count": kev_count,
-                    "osint_hits": osint_hits,
-                }
-            cur.execute(
-                """
-                SELECT COUNT(*) FROM operations.v_software_safety
-                WHERE tenant_id = 1 AND safety_band = 'high'
-                """
-            )
-            (high_risk_titles,) = cur.fetchone()
 
         # Recent installations — last 24h, first-seen
         cur.execute(
@@ -2807,6 +2792,42 @@ def software_page(request: HttpRequest) -> HttpResponse:
             """
         )
         recent_installs = cur.fetchall()
+
+    # Composite risk score per shown title from operations.v_software_safety.
+    # The view depends on migrations 072 (intel schema) + 0081 (view). On
+    # a fresh deploy either may not have run yet — fall back gracefully.
+    safety_by_title: dict[str, dict] = {}
+    high_risk_titles = 0
+    if canonical_names and intel_available:
+        try:
+            with transaction.atomic(), connection.cursor() as sc:
+                sc.execute("SET LOCAL operations.tenant_id = 1")
+                sc.execute(
+                    """
+                    SELECT canonical_name, safety_score, safety_band,
+                           cve_count, kev_count, osint_hits
+                    FROM operations.v_software_safety
+                    WHERE tenant_id = 1
+                      AND canonical_name = ANY(%s::text[])
+                    """,
+                    (canonical_names,),
+                )
+                for cn, score, band, cve_count, kev_count, osint_hits in sc.fetchall():
+                    safety_by_title[cn] = {
+                        "score": score, "band": band,
+                        "cve_count": cve_count, "kev_count": kev_count,
+                        "osint_hits": osint_hits,
+                    }
+                sc.execute(
+                    """
+                    SELECT COUNT(*) FROM operations.v_software_safety
+                    WHERE tenant_id = 1 AND safety_band = 'high'
+                    """
+                )
+                (high_risk_titles,) = sc.fetchone()
+        except Exception:
+            safety_by_title = {}
+            high_risk_titles = 0
 
     # Software issues count (Finding table). Split whitelist_suggestion
     # out of "issues" — it's a review candidate, not a problem.
@@ -3622,6 +3643,140 @@ def software_user_risk(request: HttpRequest) -> HttpResponse:
             "active_clients": client_slugs,
         },
     )
+
+
+# ─────────────────────────────────────────────────────────────────────
+# On-demand external lookup — VirusTotal free-tier search per canonical
+# title. Rate-limited to 10 lookups/hour/operator via title_intel_cache.
+# Results cached for 48 h so re-clicks are free.
+# ─────────────────────────────────────────────────────────────────────
+
+
+_LOOKUP_SOURCES = ("virustotal",)  # metadefender / abusech require a hash we don't yet track
+_LOOKUP_TTL = timedelta(hours=48)
+_LOOKUP_PER_HOUR_CAP = 10
+
+
+@login_required
+@require_POST
+def software_title_lookup(request: HttpRequest, name: str, source: str) -> HttpResponse:
+    canonical_name = name.strip()
+    if not canonical_name:
+        return redirect("software_page")
+    if source not in _LOOKUP_SOURCES:
+        messages.error(request, f"Unknown lookup source '{source}'.")
+        return redirect("software_detail", name=canonical_name)
+
+    now = datetime.now(timezone.utc)
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        cur.execute(
+            """
+            SELECT COUNT(*) FROM operations.title_intel_cache
+             WHERE tenant_id = 1
+               AND looked_up_by_id = %s
+               AND looked_up_at > %s
+            """,
+            (request.user.id, now - timedelta(hours=1)),
+        )
+        (used,) = cur.fetchone()
+        if used >= _LOOKUP_PER_HOUR_CAP:
+            messages.error(
+                request,
+                f"Too many lookups this hour ({used}/{_LOOKUP_PER_HOUR_CAP}). "
+                "Try again shortly — we cap this to protect the free-tier quota.",
+            )
+            return redirect("software_detail", name=canonical_name)
+
+        # Cache hit inside TTL: reuse.
+        cur.execute(
+            """
+            SELECT result_summary, looked_up_at
+              FROM operations.title_intel_cache
+             WHERE tenant_id = 1
+               AND source = %s
+               AND LOWER(canonical_name) = LOWER(%s)
+               AND looked_up_at > %s
+             ORDER BY looked_up_at DESC LIMIT 1
+            """,
+            (source, canonical_name, now - _LOOKUP_TTL),
+        )
+        cached = cur.fetchone()
+        if cached:
+            messages.info(
+                request,
+                f"Reusing cached {source} result from {cached[1]:%Y-%m-%d %H:%M}."
+                f" Summary: {cached[0]}",
+            )
+            return redirect("software_detail", name=canonical_name)
+
+    # Do the actual external call.
+    try:
+        result, summary = _do_lookup(source, canonical_name)
+    except Exception as exc:
+        messages.error(request, f"Lookup failed: {exc}")
+        return redirect("software_detail", name=canonical_name)
+
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        cur.execute(
+            """
+            INSERT INTO operations.title_intel_cache (
+                tenant_id, canonical_name, source,
+                looked_up_at, looked_up_by_id,
+                result, result_summary
+            ) VALUES (1, %s, %s, %s, %s, %s::jsonb, %s)
+            """,
+            (canonical_name, source, now, request.user.id,
+             json.dumps(result), summary[:1000]),
+        )
+    _audit(request, "software.lookup", uuid.uuid4(), {}, {
+        "canonical_name": canonical_name,
+        "source": source,
+        "summary": summary[:400],
+    })
+    messages.success(request, f"{source.title()} lookup complete: {summary}")
+    return redirect("software_detail", name=canonical_name)
+
+
+def _do_lookup(source: str, canonical_name: str) -> tuple[dict, str]:
+    if source == "virustotal":
+        return _lookup_virustotal(canonical_name)
+    raise ValueError(source)
+
+
+def _lookup_virustotal(canonical_name: str) -> tuple[dict, str]:
+    api_key = os.environ.get("VT_API_KEY", "").strip()
+    if not api_key:
+        return {"error": "VT_API_KEY not configured"}, "no API key configured on server"
+    r = requests.get(
+        "https://www.virustotal.com/api/v3/search",
+        params={"query": canonical_name[:120], "limit": 10},
+        headers={"x-apikey": api_key},
+        timeout=15,
+    )
+    if r.status_code == 429:
+        return {"error": "rate_limited"}, "VirusTotal rate-limited (free-tier daily cap)"
+    if r.status_code == 401:
+        return {"error": "unauthorized"}, "VirusTotal rejected our key"
+    if r.status_code >= 400:
+        return {"error": f"http_{r.status_code}"}, f"VirusTotal returned HTTP {r.status_code}"
+    payload = r.json() or {}
+    data = payload.get("data") or []
+    if not data:
+        return payload, "no matching files or domains found"
+    # Summarise the first hit.
+    first = data[0]
+    attrs = first.get("attributes") or {}
+    stats = attrs.get("last_analysis_stats") or {}
+    malicious = stats.get("malicious") or 0
+    suspicious = stats.get("suspicious") or 0
+    summary = (
+        f"{len(data)} match(es); top hit "
+        f"{first.get('id','?')[:40]} — {malicious} engines flagged as malicious, "
+        f"{suspicious} suspicious"
+    )
+    return payload, summary
 
 
 # ─────────────────────────────────────────────────────────────────────

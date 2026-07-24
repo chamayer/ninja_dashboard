@@ -2,6 +2,43 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.94.0] — 2026-07-24 — Software dashboard reshape, Risk labels, on-demand lookup (Batch G)
+
+### Fixed
+- **`/software/` worker timeout on some renders** — split the risk lookup
+  into its own atomic block, gated behind a `to_regclass` probe so the
+  page still loads when the intel view hasn't been migrated yet.
+- **"Whitelist" chip on the fleet page** was surfacing a legacy catalogue
+  category value; hidden from the chip strip. Trust now lives in
+  decisions, not the catalogue.
+
+### Changed (operator-facing)
+- **Fleet page reshape** — high-level dashboard with two rows of tiles:
+  numeric overview (Titles, Unclassified, Awaiting decision, High risk,
+  Open items) and workflow launchers (Publishers, Decisions queue, Tech
+  checklist, User risk, Whitelist suggestions). The titles table trims
+  to Title + publisher subline, Devices, Risk, Decision, Actions — no
+  more overflow, sortable, hover-highlighted.
+- **Product name display** — canonical names and publishers rendered
+  with `title` casing on the fleet, publisher, and detail pages so
+  lowercase raw values ("google chrome") don't look raw.
+- **Risk labels reworked** — "Clean" is reserved for titles the operator
+  has approved. Titles with no risk data and no approval now show
+  "Not yet checked" (new `unknown` band). Column headers changed from
+  "Safety" to "Risk", tooltips use "known vulnerabilities" /
+  "actively exploited" / "threat-intel matches".
+
+### Added
+- **On-demand VirusTotal lookup** — button on the title Risk card. Per
+  operator: 10 lookups/hour cap, 48-hour cache in
+  `operations.title_intel_cache`. Runs against the free-tier VirusTotal
+  API using the operator-supplied `VT_API_KEY` from the deploy env.
+  Result summary flashed as a Django message; full JSON stored in
+  cache.
+- **New URL** `software/title/<name>/lookup/<source>/`.
+- **Migration `0083`** updates the risk view to distinguish `clean`
+  (approved by operator) from `unknown` (no risk data on record).
+
 ## [0.93.0] — 2026-07-24 — Title Risk panel + vulnerable_software finding (Batch F)
 
 ### Added

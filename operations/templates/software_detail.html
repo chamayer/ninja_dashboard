@@ -213,7 +213,9 @@
             {% elif safety_summary.band == 'low' %}
                 <span class="sd-safety-band low">Low risk</span>
             {% elif safety_summary.band == 'clean' %}
-                <span class="sd-safety-band clean">Clean</span>
+                <span class="sd-safety-band clean">Approved</span>
+            {% elif safety_summary.band == 'unknown' %}
+                <span class="sd-safety-band" style="background:#f3f4f6; color:#6b7280;">Not yet checked</span>
             {% else %}
                 <span class="sd-safety-band">{{ safety_summary.band }}</span>
             {% endif %}
@@ -250,6 +252,16 @@
             {% endfor %}
         </div>
         {% endif %}
+        <div style="margin-top:0.75rem; padding-top:0.65rem; border-top:1px solid var(--border);">
+            <span class="muted" style="font-size:0.78rem;">Check external reputation:</span>
+            <form method="post" action="{% url 'software_title_lookup' name=canonical_name source='virustotal' %}" style="display:inline;">
+                {% csrf_token %}
+                <button type="submit" style="font-size:0.8rem; padding:0.25rem 0.55rem;"
+                        title="Runs a free-tier VirusTotal search for this title (capped 10/hour per operator; cached 48h).">
+                    Look up on VirusTotal
+                </button>
+            </form>
+        </div>
     </div>
 
     <div class="sd-card">
