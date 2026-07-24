@@ -42,6 +42,18 @@
     .sd-pill.reject { background: #fee2e2; color: #991b1b; }
     .sd-pill.investigate { background: #fef3c7; color: #92400e; }
     .sd-pill.none { background: #f3f4f6; color: #6b7280; }
+    .sd-safety-band { display:inline-block; padding:0.15rem 0.55rem; border-radius:999px;
+                      font-size:0.78rem; font-weight:600; }
+    .sd-safety-band.high   { background:#fee2e2; color:#991b1b; }
+    .sd-safety-band.medium { background:#fef3c7; color:#92400e; }
+    .sd-safety-band.low    { background:#dbeafe; color:#1e3a8a; }
+    .sd-safety-band.clean  { background:#dcfce7; color:#14532d; }
+    .sd-cve-row .kev { background:#fee2e2; color:#991b1b; padding:1px 6px;
+                       border-radius:4px; font-size:0.72rem; font-weight:600; }
+    .sd-cve-row .cvss { font-weight:600; }
+    .sd-cve-row.high  .cvss { color:#991b1b; }
+    .sd-cve-row.medium .cvss { color:#92400e; }
+    .sd-cve-row.low   .cvss { color:#1e3a8a; }
 </style>
 
 <div class="sd-header">
@@ -190,6 +202,108 @@
 </div>
 
 <div>
+    <div class="sd-card">
+        <h2>Risk</h2>
+        {% if safety_summary %}
+        <div style="margin-bottom:0.65rem;">
+            {% if safety_summary.band == 'high' %}
+                <span class="sd-safety-band high">High risk</span>
+            {% elif safety_summary.band == 'medium' %}
+                <span class="sd-safety-band medium">Medium risk</span>
+            {% elif safety_summary.band == 'low' %}
+                <span class="sd-safety-band low">Low risk</span>
+            {% elif safety_summary.band == 'clean' %}
+                <span class="sd-safety-band clean">Clean</span>
+            {% else %}
+                <span class="sd-safety-band">{{ safety_summary.band }}</span>
+            {% endif %}
+            <span class="muted" style="font-size:0.82rem; margin-left:0.4rem;">
+                risk score {{ safety_summary.score }} / 100
+            </span>
+        </div>
+        <ul style="list-style:none; padding:0; margin:0; font-size:0.85rem;">
+            <li>Known vulnerabilities: <strong>{{ safety_summary.cve_count }}</strong>
+                {% if safety_summary.kev_count %}
+                    · <span class="kev">{{ safety_summary.kev_count }} actively exploited</span>
+                {% endif %}
+            </li>
+            {% if safety_summary.max_cvss %}
+            <li>Worst severity score: <strong>{{ safety_summary.max_cvss }}</strong>/10 <span class="muted">(CVSS v3)</span></li>
+            {% endif %}
+            {% if safety_summary.max_epss %}
+            <li>Exploit likelihood (next 30 days): <strong>{{ safety_summary.max_epss|floatformat:2 }}</strong> <span class="muted">(EPSS 0–1)</span></li>
+            {% endif %}
+            <li>Threat-intel matches on this title: <strong>{{ safety_summary.osint_hits }}</strong></li>
+            {% if safety_summary.publisher_osint_hits %}
+            <li>Threat-intel matches on the publisher: <strong>{{ safety_summary.publisher_osint_hits }}</strong></li>
+            {% endif %}
+        </ul>
+        {% else %}
+        <p class="muted">No safety signals yet — either the intel connectors
+        haven't ingested this title, or nothing external mentions it.</p>
+        {% endif %}
+        {% if catalog_tags %}
+        <div style="margin-top:0.75rem;">
+            <span class="muted" style="font-size:0.78rem;">Community tags:</span>
+            {% for tag in catalog_tags|slice:":12" %}
+            <span style="display:inline-block; padding:1px 6px; background:#f3f4f6; border-radius:4px; font-size:0.75rem;">{{ tag }}</span>
+            {% endfor %}
+        </div>
+        {% endif %}
+    </div>
+
+    <div class="sd-card">
+        <h2>Known vulnerabilities
+            <span class="muted" style="font-size:0.8rem; font-weight:400;">({{ matched_cves|length }})</span>
+        </h2>
+        {% if matched_cves %}
+        <table data-sortable class="sd-table">
+            <thead>
+                <tr><th>ID</th><th>Severity</th><th class="num">Score</th>
+                    <th class="num">Likelihood</th><th>Flag</th></tr>
+            </thead>
+            <tbody>
+                {% for c in matched_cves|slice:":25" %}
+                <tr class="sd-cve-row {{ c.severity }}">
+                    <td><code><a href="https://nvd.nist.gov/vuln/detail/{{ c.cve_id }}" target="_blank" rel="noopener">{{ c.cve_id }}</a></code></td>
+                    <td>{{ c.severity|default:"—" }}</td>
+                    <td class="num cvss">{{ c.cvss_v3|default:"—" }}</td>
+                    <td class="num">{{ c.epss_score|floatformat:2|default:"—" }}</td>
+                    <td>
+                        {% if c.kev_flag %}<span class="kev">actively exploited</span>{% else %}—{% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% if matched_cves|length > 25 %}
+        <p class="muted" style="font-size:0.8rem;">Showing top 25 by exploitation + severity.</p>
+        {% endif %}
+        {% else %}
+        <p class="muted">No matched vulnerabilities.</p>
+        {% endif %}
+    </div>
+
+    <div class="sd-card">
+        <h2>Threat-intel matches</h2>
+        {% if osint_rows %}
+        <ul style="list-style:none; padding:0; margin:0; font-size:0.85rem;">
+            {% for s in osint_rows|slice:":15" %}
+            <li style="padding:0.3rem 0; border-bottom:1px solid var(--border);">
+                <strong>{{ s.source|title }}</strong>
+                <span class="muted">· {{ s.signal_type|humanize_label|default:s.signal_type }}</span>
+                <span class="muted">· {{ s.severity }}</span>
+                <div class="muted" style="font-size:0.75rem;">
+                    seen {{ s.observed_at|date:"Y-m-d H:i" }}
+                </div>
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <p class="muted">No threat-intel matches.</p>
+        {% endif %}
+    </div>
+
     <div class="sd-card">
         <h2>Publishers</h2>
         {% if publishers %}

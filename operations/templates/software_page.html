@@ -132,9 +132,9 @@
         <div class="sw-sub">titles ≥ threshold, undecided, uncategorised</div>
     </a>
     <a class="sw-tile {% if high_risk_titles %}has-open{% endif %}" href="?safety=high">
-        <div class="sw-label">Safety — high band</div>
+        <div class="sw-label">High risk</div>
         <div class="sw-value">{{ high_risk_titles }}</div>
-        <div class="sw-sub">KEV, CVSS ≥ 7, or high OSINT hit</div>
+        <div class="sw-sub">actively exploited or severely vulnerable titles</div>
     </a>
 </div>
 
@@ -193,7 +193,7 @@
                 <th style="text-align:right;">Clients</th>
                 <th>Category</th>
                 <th>Decision</th>
-                <th>Safety</th>
+                <th>Risk</th>
                 <th class="num">Latest install</th>
                 <th style="text-align:right;">Decide (global)</th>
             </tr>
@@ -231,8 +231,14 @@
                 </td>
                 <td>
                     {% if t.safety_band %}
-                        <span class="safety-pill {{ t.safety_band }}" title="score {{ t.safety_score }} · {{ t.safety_cve_count }} CVE, {{ t.safety_kev_count }} KEV, {{ t.safety_osint_hits }} OSINT">
-                            {{ t.safety_band }} · {{ t.safety_score }}
+                        <span class="safety-pill {{ t.safety_band }}"
+                              title="Risk score {{ t.safety_score }} · {{ t.safety_cve_count }} known vulnerabilities · {{ t.safety_kev_count }} actively exploited · {{ t.safety_osint_hits }} threat-intel matches">
+                            {% if t.safety_band == 'high' %}High risk
+                            {% elif t.safety_band == 'medium' %}Medium risk
+                            {% elif t.safety_band == 'low' %}Low risk
+                            {% elif t.safety_band == 'clean' %}Clean
+                            {% else %}{{ t.safety_band }}{% endif %}
+                            · {{ t.safety_score }}
                         </span>
                     {% else %}
                         <span class="safety-pill none">—</span>

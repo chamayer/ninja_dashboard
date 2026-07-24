@@ -3067,6 +3067,80 @@ def software_detail(request: HttpRequest, name: str) -> HttpResponse:
             for row in cur.fetchall()
         ]
 
+    # Safety intel — composite score + matched CVEs + OSINT signals.
+    safety_summary: dict = {}
+    matched_cves: list[dict] = []
+    osint_rows: list[dict] = []
+    catalog_tags: list[str] = []
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        cur.execute(
+            """
+            SELECT safety_score, safety_band,
+                   cve_count, kev_count, osint_hits, publisher_osint_hits,
+                   max_cvss, max_epss,
+                   title_approved, title_rejected,
+                   publisher_approved, publisher_rejected
+            FROM operations.v_software_safety
+            WHERE tenant_id = 1 AND LOWER(canonical_name) = LOWER(%s)
+            """,
+            [canonical_name],
+        )
+        row = cur.fetchone()
+        if row:
+            safety_summary = {
+                "score": row[0], "band": row[1],
+                "cve_count": row[2], "kev_count": row[3],
+                "osint_hits": row[4], "publisher_osint_hits": row[5],
+                "max_cvss": row[6], "max_epss": row[7],
+                "title_approved": row[8], "title_rejected": row[9],
+                "publisher_approved": row[10], "publisher_rejected": row[11],
+            }
+        cur.execute(
+            """
+            SELECT c.cve_id, c.severity, c.cvss_v3, c.epss_score, c.kev_flag,
+                   c.kev_added_at, c.description, cm.confidence, cm.match_kind
+            FROM operations.cve_match cm
+            JOIN intel.cves c ON c.cve_id = cm.cve_id
+            WHERE cm.tenant_id = 1 AND LOWER(cm.canonical_name) = LOWER(%s)
+            ORDER BY c.kev_flag DESC, c.cvss_v3 DESC NULLS LAST, c.epss_score DESC NULLS LAST
+            LIMIT 100
+            """,
+            [canonical_name],
+        )
+        for r in cur.fetchall():
+            matched_cves.append({
+                "cve_id": r[0], "severity": r[1], "cvss_v3": r[2],
+                "epss_score": r[3], "kev_flag": r[4], "kev_added_at": r[5],
+                "description": (r[6] or "")[:400],
+                "confidence": r[7], "match_kind": r[8],
+            })
+        cur.execute(
+            """
+            SELECT source, signal_type, severity, details, observed_at
+            FROM operations.safety_signal
+            WHERE tenant_id = 1
+              AND (LOWER(canonical_name) = LOWER(%s)
+                   OR (publisher <> ''
+                       AND LOWER(publisher) IN (
+                           SELECT LOWER(publisher)
+                           FROM operations.software_installations_current
+                           WHERE tenant_id = 1
+                             AND LOWER(canonical_name) = LOWER(%s)
+                             AND publisher <> ''
+                           LIMIT 5
+                       )))
+            ORDER BY severity DESC, observed_at DESC
+            LIMIT 50
+            """,
+            [canonical_name, canonical_name],
+        )
+        for r in cur.fetchall():
+            osint_rows.append({
+                "source": r[0], "signal_type": r[1], "severity": r[2],
+                "details": r[3], "observed_at": r[4],
+            })
+
     # Catalog metadata — categories, publisher hint, EOL, notes.
     catalog_entry = (
         SoftwareCatalog.objects.filter(canonical_name__iexact=canonical_name)
@@ -3074,6 +3148,13 @@ def software_detail(request: HttpRequest, name: str) -> HttpResponse:
         .order_by("tenant_id")
         .first()
     )
+    # Pull tags from winget/chocolatey safety_signal into a merged
+    # categorisation list. Operator-set catalog_entry.categories still wins.
+    for row in osint_rows:
+        if row["source"] in ("winget", "chocolatey") and row["signal_type"] == "category":
+            for tag in (row["details"] or {}).get("tags", []) or []:
+                if tag and tag not in catalog_tags:
+                    catalog_tags.append(str(tag))
 
     # Decision history — every scope for this canonical.
     decision_rows = list(
@@ -3123,6 +3204,10 @@ def software_detail(request: HttpRequest, name: str) -> HttpResponse:
             "related_findings": related_findings,
             "decision_choices": SoftwareDecision.Decision.choices,
             "back_url": request.META.get("HTTP_REFERER") or reverse("software_page"),
+            "safety_summary": safety_summary,
+            "matched_cves": matched_cves,
+            "osint_rows": osint_rows,
+            "catalog_tags": catalog_tags,
         },
     )
 

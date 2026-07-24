@@ -2,6 +2,35 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.93.0] — 2026-07-24 — Title Risk panel + vulnerable_software finding (Batch F)
+
+### Added
+- **Risk panel on `/software/title/<name>/`** — composite risk band,
+  score, known-vulnerability counts, worst severity, exploit likelihood
+  (EPSS), threat-intel match counts on title and publisher, and a
+  community-tag row merged from Winget/Chocolatey signals.
+- **Known vulnerabilities table** on the title page — top 25 CVEs by
+  active exploitation + severity, deep-linked to nvd.nist.gov.
+- **Threat-intel matches list** on the title page — one row per source
+  hit with severity and observed time.
+- **`vulnerable_software` FindingType** (migration `0082`) — fires per
+  device for installed titles that match a KEV-flagged CVE or a CVSS ≥
+  cutoff. Severity ranks KEV as critical, CVSS-severe as high.
+  Suppressed by approve / approve_publisher decisions since those
+  express operator acceptance of the risk.
+- **Classifier step 8** — new emit path in
+  `ingest/software_findings.py` with three new EvaluatorConfig knobs
+  (`vulnerable_software_enabled`, `_cvss_cutoff` default 7.0, per-tier
+  severity overrides).
+
+### Changed
+- Human-friendly operator labels: **"Safety"** renamed to **"Risk"** in
+  every visible surface (column, tile, card, pill). Internal names
+  (`v_software_safety`, `safety_signal`, template classes) unchanged.
+- Fleet Risk column shows "High risk / Medium risk / Low risk / Clean"
+  in words; tooltip uses "known vulnerabilities", "actively exploited",
+  and "threat-intel matches" instead of CVE / KEV / OSINT.
+
 ## [0.92.0] — 2026-07-24 — Composite safety score + fleet-page surface (Batch E)
 
 ### Added

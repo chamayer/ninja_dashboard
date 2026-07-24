@@ -46,6 +46,12 @@ _DEFAULT_CONFIG: dict = {
     "whitelist_suggestion_enabled": True,
     "whitelist_suggestion_min_devices": 10,
     "whitelist_suggestion_severity": "low",
+    # vulnerable_software — driven by intel matcher output. Fires when a
+    # matched CVE is actively exploited (KEV) or severe (CVSS >= cutoff).
+    "vulnerable_software_enabled": True,
+    "vulnerable_software_cvss_cutoff": 7.0,
+    "vulnerable_software_severity_kev": "critical",
+    "vulnerable_software_severity_high": "high",
 }
 
 
@@ -82,6 +88,15 @@ def classify(tenant_id: int = _TENANT_ID) -> int:
             fleet_rarity = _load_fleet_rarity(cur, tenant_id)
             finding_type_ids = _finding_type_ids(cur)
             cfg = _load_config(cur, tenant_id)
+            vuln_titles = (
+                _load_vulnerable_titles(
+                    cur, tenant_id,
+                    float(cfg.get("vulnerable_software_cvss_cutoff", 7.0)),
+                )
+                if cfg.get("vulnerable_software_enabled", True)
+                and "vulnerable_software" in finding_type_ids
+                else {}
+            )
 
             cur.execute(
                 """
@@ -212,6 +227,35 @@ def classify(tenant_id: int = _TENANT_ID) -> int:
                         client_id, device_id, name, publisher, "medium", now,
                         {"reason": "matches end-of-life runtime pattern"},
                         emitted_keys,
+                    )
+
+                # 8. vulnerable_software — installed title has a matched
+                # CVE that is either actively exploited (KEV) or severe
+                # (CVSS >= cutoff). Approval decisions still suppress:
+                # the operator has explicitly accepted the risk.
+                vuln = vuln_titles.get(name.lower())
+                if vuln and dec not in ("approve", "approve_publisher"):
+                    if vuln["kev"]:
+                        severity = str(cfg.get("vulnerable_software_severity_kev", "critical"))
+                        detail = {
+                            "reason": "actively exploited vulnerability (CISA KEV)",
+                            "kev_cves": vuln["kev"][:5],
+                            "high_cves": vuln["high"][:5],
+                            "worst_cvss": vuln["worst_cvss"],
+                            "max_epss": vuln["max_epss"],
+                        }
+                    else:
+                        severity = str(cfg.get("vulnerable_software_severity_high", "high"))
+                        detail = {
+                            "reason": "severe vulnerability (CVSS >= cutoff)",
+                            "high_cves": vuln["high"][:5],
+                            "worst_cvss": vuln["worst_cvss"],
+                            "max_epss": vuln["max_epss"],
+                        }
+                    affected += _emit(
+                        cur, tenant_id, finding_type_ids["vulnerable_software"],
+                        client_id, device_id, name, publisher, severity, now,
+                        detail, emitted_keys,
                     )
 
                 # 7. whitelist_suggestion — the "≥ N devices, undecided,
@@ -487,11 +531,42 @@ def _finding_type_ids(cur) -> dict[str, int]:
             'suspicious_name', 'install_path_suspicious',
             'unauthorized_av', 'unauthorized_rmm', 'unauthorized_remote_access',
             'multi_av_conflict', 'rare_recent', 'eol_runtime',
-            'whitelist_suggestion'
+            'whitelist_suggestion', 'vulnerable_software'
         )
         """
     )
     return {name: id for name, id in cur.fetchall()}
+
+
+def _load_vulnerable_titles(cur, tenant_id: int, cvss_cutoff: float) -> dict:
+    """Return {canonical_name_lower: {'kev': [cve...], 'high': [cve...],
+    'worst_cvss': float, 'max_epss': float}} — every title whose cve_match
+    rows include a KEV-flagged or high-CVSS CVE."""
+    cur.execute(
+        """
+        SELECT LOWER(cm.canonical_name), c.cve_id, c.cvss_v3, c.epss_score, c.kev_flag
+        FROM operations.cve_match cm
+        JOIN intel.cves c ON c.cve_id = cm.cve_id
+        WHERE cm.tenant_id = %s
+          AND (c.kev_flag OR c.cvss_v3 >= %s)
+        """,
+        (tenant_id, cvss_cutoff),
+    )
+    out: dict[str, dict] = {}
+    for canonical, cve_id, cvss, epss, kev in cur.fetchall():
+        entry = out.setdefault(
+            canonical,
+            {"kev": [], "high": [], "worst_cvss": 0.0, "max_epss": 0.0},
+        )
+        if kev:
+            entry["kev"].append(cve_id)
+        elif cvss and float(cvss) >= cvss_cutoff:
+            entry["high"].append(cve_id)
+        if cvss and float(cvss) > entry["worst_cvss"]:
+            entry["worst_cvss"] = float(cvss)
+        if epss and float(epss) > entry["max_epss"]:
+            entry["max_epss"] = float(epss)
+    return out
 
 
 # ── matching / emission ────────────────────────────────────────────────
