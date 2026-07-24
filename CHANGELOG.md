@@ -2,6 +2,27 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.82.1] — 2026-07-24 — Patching page perf: matview-backed posture rollup
+
+### Fixed
+- **`/patching/` slow to load.** The posture status cards were computed by
+  a CTE that (a) aggregated `MAX(...)` over 467k `ninja_patches.patch_facts`
+  rows to derive per-device `last_patch_activity_at`, and (b) executed twice
+  per request (once for fleet totals, once for the per-client rollup).
+  Deployed-DB dry-run measured the rewritten path end-to-end at 123 ms.
+
+### Added
+- **`ninja_patches.device_patch_activity` matview** (`sql/migrations/070`) —
+  one row per Ninja device with `last_patch_activity_at`, refreshed alongside
+  the existing patch summary matviews at the end of each patch ingest cycle
+  (`ingest/patches/ingest.py`).
+
+### Changed
+- **`patching_queue` view** now reads `device_patch_activity` instead of
+  aggregating `patch_facts` at request time, and consolidates the fleet
+  totals and per-client posture into a single `GROUPING SETS` query with
+  Python-side split.
+
 ## [0.82.0] — 2026-07-22 — Device Detail Raw tab: canonical field matrix + Ninja `raw_data` fidelity
 
 ### Fixed

@@ -135,6 +135,7 @@ def _refresh_summary_views() -> None:
         cur.execute("REFRESH MATERIALIZED VIEW ninja_patches.current_patch_state")
         cur.execute("REFRESH MATERIALIZED VIEW ninja_patches.latest_install_outcome")
         cur.execute("REFRESH MATERIALIZED VIEW ninja_patches.device_patch_signal")
+        cur.execute("REFRESH MATERIALIZED VIEW ninja_patches.device_patch_activity")
     log.info("Refreshed patch summary materialized views")
 
 

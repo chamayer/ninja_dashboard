@@ -3251,13 +3251,15 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
               ON dps.device_id = nl.ninja_device_id
             GROUP BY nl.device_id
         ), patch_activity AS (
+            -- Reads the device_patch_activity matview (sql migration 070)
+            -- rather than re-aggregating ninja_patches.patch_facts at request
+            -- time. A canonical device can be linked to multiple Ninja device
+            -- ids, so take MAX across links.
             SELECT nl.device_id,
-                   MAX(COALESCE(pf.installed_at, pf.ninja_observed_at,
-                                pf.last_observed_at)) AS last_patch_activity_at
+                   MAX(dpa.last_patch_activity_at) AS last_patch_activity_at
             FROM ninja_links nl
-            JOIN ninja_patches.patch_facts pf
-              ON pf.device_id = nl.ninja_device_id
-            WHERE pf.fact_type IN ('patch_state', 'install_outcome')
+            JOIN ninja_patches.device_patch_activity dpa
+              ON dpa.device_id = nl.ninja_device_id
             GROUP BY nl.device_id
         ), device_posture AS (
             SELECT sd.*, pa.last_patch_activity_at,
@@ -3270,39 +3272,19 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
             LEFT JOIN patch_activity pa ON pa.device_id = sd.device_id
         )
     """
+    # Single query returning the fleet totals row (GROUPING sentinel = 1) and
+    # one row per client (sentinel = 0). Halves the CTE work vs. running the
+    # rollup twice.
     with transaction.atomic(), connection.cursor() as cur:
         cur.execute("SET LOCAL operations.tenant_id = 1")
         cur.execute(
             posture_cte
             + """
-            SELECT COUNT(*)::int AS total,
-                   COUNT(*) FILTER (WHERE is_active)::int AS active,
-                   COUNT(*) FILTER (WHERE is_active
-                                     AND effective_patching_scope = 'Included')::int AS active_in_scope,
-                   COUNT(*) FILTER (WHERE is_active
-                                     AND effective_patching_scope = 'Included'
-                                     AND has_recent_patch_activity)::int AS recent_patch_activity,
-                   COUNT(*) FILTER (WHERE is_active
-                                     AND effective_patching_scope = 'Included'
-                                     AND NOT has_recent_patch_activity)::int AS quiet_patch_data,
-                   COUNT(*) FILTER (WHERE is_active
-                                     AND effective_patching_scope = 'Included'
-                                     AND NOT ever_installed)::int AS never_patched,
-                   COUNT(*) FILTER (WHERE is_active
-                                     AND effective_patching_scope = 'Included'
-                                     AND needs_reboot)::int AS reboot_pending
-            FROM device_posture
-            """,
-            posture_params,
-        )
-        status_row = cur.fetchone() or (0, 0, 0, 0, 0, 0, 0)
-        cur.execute(
-            posture_cte
-            + """
             SELECT dp.client_id, c.slug, c.display_name,
+                   COUNT(*)::int AS total,
                    COUNT(*) FILTER (WHERE dp.is_active)::int AS active,
                    COUNT(*) FILTER (WHERE dp.is_active
-                                     AND dp.effective_patching_scope = 'Included')::int AS in_scope,
+                                     AND dp.effective_patching_scope = 'Included')::int AS active_in_scope,
                    COUNT(*) FILTER (WHERE dp.is_active
                                      AND dp.effective_patching_scope = 'Included'
                                      AND dp.has_recent_patch_activity)::int AS recent_activity,
@@ -3314,47 +3296,68 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
                                      AND NOT dp.ever_installed)::int AS never_patched,
                    COUNT(*) FILTER (WHERE dp.is_active
                                      AND dp.effective_patching_scope = 'Included'
-                                     AND dp.needs_reboot)::int AS reboot_pending
+                                     AND dp.needs_reboot)::int AS reboot_pending,
+                   GROUPING(dp.client_id) AS is_total
             FROM device_posture dp
-            JOIN operations.clients c ON c.id = dp.client_id AND c.deleted_at IS NULL
-            GROUP BY dp.client_id, c.slug, c.display_name
-            ORDER BY quiet DESC, never_patched DESC, reboot_pending DESC, c.display_name
+            LEFT JOIN operations.clients c
+              ON c.id = dp.client_id AND c.deleted_at IS NULL
+            GROUP BY GROUPING SETS ((), (dp.client_id, c.slug, c.display_name))
+            ORDER BY is_total DESC,
+                     quiet DESC, never_patched DESC, reboot_pending DESC,
+                     c.display_name
             """,
             posture_params,
         )
-        client_posture_rows = cur.fetchall()
+        rollup_rows = cur.fetchall()
 
-    status_keys = (
-        "total",
-        "active",
-        "active_in_scope",
-        "recent_patch_activity",
-        "quiet_patch_data",
-        "never_patched",
-        "reboot_pending",
-    )
-    patch_status = dict(zip(status_keys, status_row, strict=True))
-    client_posture = [
-        dict(
-            zip(
-                (
-                    "client_id",
-                    "slug",
-                    "name",
-                    "active",
-                    "in_scope",
-                    "recent_activity",
-                    "quiet",
-                    "never_patched",
-                    "reboot_pending",
-                ),
-                row,
-                strict=True,
+    patch_status = {
+        "total": 0,
+        "active": 0,
+        "active_in_scope": 0,
+        "recent_patch_activity": 0,
+        "quiet_patch_data": 0,
+        "never_patched": 0,
+        "reboot_pending": 0,
+    }
+    client_posture: list[dict] = []
+    for row in rollup_rows:
+        (
+            client_id,
+            slug,
+            name,
+            total,
+            active,
+            active_in_scope,
+            recent_activity,
+            quiet,
+            never_patched,
+            reboot_pending,
+            is_total,
+        ) = row
+        if is_total == 1:
+            patch_status = {
+                "total": total,
+                "active": active,
+                "active_in_scope": active_in_scope,
+                "recent_patch_activity": recent_activity,
+                "quiet_patch_data": quiet,
+                "never_patched": never_patched,
+                "reboot_pending": reboot_pending,
+            }
+        elif slug is not None:
+            client_posture.append(
+                {
+                    "client_id": client_id,
+                    "slug": slug,
+                    "name": name,
+                    "active": active,
+                    "in_scope": active_in_scope,
+                    "recent_activity": recent_activity,
+                    "quiet": quiet,
+                    "never_patched": never_patched,
+                    "reboot_pending": reboot_pending,
+                }
             )
-        )
-        for row in client_posture_rows
-    ]
-
     # Device population by scope (drilldown from the summary tiles).
     # Optional "scope" query param drills into a specific bucket.
     scope_filter = request.GET.get("scope", "")
