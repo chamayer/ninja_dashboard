@@ -52,6 +52,12 @@ _DEFAULT_CONFIG: dict = {
     "vulnerable_software_cvss_cutoff": 7.0,
     "vulnerable_software_severity_kev": "critical",
     "vulnerable_software_severity_high": "high",
+    # known_malicious_hint — driven by safety_signal accumulation. Fires
+    # when a canonical title (or its publisher) has >= threshold open
+    # threat-intel hits and no operator approval.
+    "known_malicious_hint_enabled": True,
+    "known_malicious_hint_min_hits": 3,
+    "known_malicious_hint_severity": "low",
 }
 
 
@@ -95,6 +101,12 @@ def classify(tenant_id: int = _TENANT_ID) -> int:
                 )
                 if cfg.get("vulnerable_software_enabled", True)
                 and "vulnerable_software" in finding_type_ids
+                else {}
+            )
+            threat_hits = (
+                _load_threat_hit_counts(cur, tenant_id)
+                if cfg.get("known_malicious_hint_enabled", True)
+                and "known_malicious_hint" in finding_type_ids
                 else {}
             )
 
@@ -256,6 +268,26 @@ def classify(tenant_id: int = _TENANT_ID) -> int:
                         cur, tenant_id, finding_type_ids["vulnerable_software"],
                         client_id, device_id, name, publisher, severity, now,
                         detail, emitted_keys,
+                    )
+
+                # 9. known_malicious_hint — accumulated threat-intel
+                # signals on the title or its publisher. Explicitly a
+                # hint (OSINT is noisy). Suppressed by approve/approve_publisher.
+                hits = threat_hits.get(name.lower(), 0)
+                if (
+                    hits >= int(cfg.get("known_malicious_hint_min_hits", 3))
+                    and dec not in ("approve", "approve_publisher")
+                    and "known_malicious_hint" in finding_type_ids
+                ):
+                    severity = str(cfg.get("known_malicious_hint_severity", "low"))
+                    affected += _emit(
+                        cur, tenant_id, finding_type_ids["known_malicious_hint"],
+                        client_id, device_id, name, publisher, severity, now,
+                        {
+                            "threat_hit_count": hits,
+                            "reason": "community threat-intel accumulation",
+                        },
+                        emitted_keys,
                     )
 
                 # 7. whitelist_suggestion — the "≥ N devices, undecided,
@@ -531,11 +563,50 @@ def _finding_type_ids(cur) -> dict[str, int]:
             'suspicious_name', 'install_path_suspicious',
             'unauthorized_av', 'unauthorized_rmm', 'unauthorized_remote_access',
             'multi_av_conflict', 'rare_recent', 'eol_runtime',
-            'whitelist_suggestion', 'vulnerable_software'
+            'whitelist_suggestion', 'vulnerable_software',
+            'known_malicious_hint'
         )
         """
     )
     return {name: id for name, id in cur.fetchall()}
+
+
+def _load_threat_hit_counts(cur, tenant_id: int) -> dict[str, int]:
+    """Sum threat-intel hits per canonical title, including publisher-scope
+    signals that apply to any title from that publisher."""
+    cur.execute(
+        """
+        WITH title_hits AS (
+            SELECT LOWER(canonical_name) AS canonical, COUNT(*) AS n
+              FROM operations.safety_signal
+             WHERE tenant_id = %s
+               AND signal_type = 'threat_hit'
+               AND canonical_name <> ''
+             GROUP BY LOWER(canonical_name)
+        ), publisher_hits AS (
+            SELECT LOWER(publisher) AS publisher_lc, COUNT(*) AS n
+              FROM operations.safety_signal
+             WHERE tenant_id = %s
+               AND signal_type = 'threat_hit'
+               AND publisher <> ''
+             GROUP BY LOWER(publisher)
+        )
+        SELECT LOWER(sic.canonical_name) AS canonical,
+               COALESCE(th.n, 0) + COALESCE(ph.n, 0) AS hits
+        FROM operations.software_installations_current sic
+        LEFT JOIN title_hits th ON th.canonical = LOWER(sic.canonical_name)
+        LEFT JOIN publisher_hits ph
+               ON ph.publisher_lc = LOWER(COALESCE(sic.publisher, ''))
+        WHERE sic.tenant_id = %s
+          AND sic.deleted_at IS NULL
+          AND sic.stale_since IS NULL
+          AND sic.canonical_name <> ''
+          AND (th.n IS NOT NULL OR ph.n IS NOT NULL)
+        GROUP BY LOWER(sic.canonical_name), th.n, ph.n
+        """,
+        (tenant_id, tenant_id, tenant_id),
+    )
+    return {row[0]: int(row[1]) for row in cur.fetchall() if row[1]}
 
 
 def _load_vulnerable_titles(cur, tenant_id: int, cvss_cutoff: float) -> dict:

@@ -148,7 +148,13 @@ were a misreading and have been struck.
 
 ## Next action
 
-- Open Batch 6 — CVE enrichment. Introduces a new external data source
-  (NVD or equivalent) so needs its own ADR before any code lands:
-  storage model, refresh cadence, licence/rate-limit constraints,
-  matching heuristics (canonical_name × version → CPE), findings surface.
+- Software safety-intel track (Batches A–H, ADR 0008) is complete
+  through 0.95.0. The intel layer + on-demand VirusTotal lookup +
+  operator-facing Risk surfaces + two new finding types are all live.
+- Actual runtime activation is gated on `INTEL_ENABLED=true` in the
+  deploy env plus the six free API keys already added there.
+- Follow-up polish that could come next: fuzzy CPE matching with
+  publisher fallback (tune `cve_match.confidence`), abuse.ch on-demand
+  hash-lookup button (once we have hashes to look up), and a proper
+  Risk detail page enumerating each contributor to the composite
+  score. None are urgent.

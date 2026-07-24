@@ -2,6 +2,22 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.95.0] — 2026-07-24 — known_malicious_hint finding (Batch H)
+
+### Added
+- **`known_malicious_hint` FindingType** (migration `0084`) — fires per
+  device when the installed title (or its publisher) has accumulated
+  ≥ N open threat-intel hits (OTX + MalwareBazaar + ThreatFox) and the
+  operator has not approved. Explicitly a low-severity **hint** — OSINT
+  is community-curated and noisy — with two `EvaluatorConfig` knobs
+  (`known_malicious_hint_min_hits` default 3,
+  `known_malicious_hint_severity` default low).
+- **Classifier step 9** in `ingest/software_findings.py` — new emit
+  path with a helper `_load_threat_hit_counts` that folds title-scope
+  and matched publisher-scope signals into a per-canonical count.
+
+Software safety-intel track (Batches A–H) is now complete.
+
 ## [0.94.0] — 2026-07-24 — Software dashboard reshape, Risk labels, on-demand lookup (Batch G)
 
 ### Fixed
