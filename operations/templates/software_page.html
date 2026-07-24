@@ -108,6 +108,12 @@
         <div class="sw-value">{{ software_issues }}</div>
         <div class="sw-sub">flagged installations</div>
     </a>
+    <a class="sw-tile {% if whitelist_suggestions %}has-open{% endif %}"
+       href="{% url 'findings_queue' %}?category=software&amp;type=whitelist_suggestion">
+        <div class="sw-label">Whitelist suggestions</div>
+        <div class="sw-value">{{ whitelist_suggestions }}</div>
+        <div class="sw-sub">titles ≥ threshold, undecided, uncategorised</div>
+    </a>
 </div>
 
 {# ── Category chip strip ────────────────────────────────── #}

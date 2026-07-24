@@ -2,6 +2,23 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.85.0] — 2026-07-24 — Whitelist Suggestions
+
+### Added
+- **`whitelist_suggestion` FindingType** (migration `0080`, seeded under
+  the software category). Fires for uncategorised + undecided titles
+  installed on ≥ N devices fleet-wide — the "widespread but nobody has
+  decided on it" review queue.
+- **Software classifier step 7** — the ingest evaluator emits
+  `whitelist_suggestion` from the same per-install loop as the existing
+  seven steps, gated by three new `EvaluatorConfig` knobs
+  (`whitelist_suggestion_enabled` default true,
+  `whitelist_suggestion_min_devices` default 10,
+  `whitelist_suggestion_severity` default `low`).
+- **Whitelist suggestions tile on `/software/`** — deduped by
+  canonical_name, kept separate from the "flagged installations" tile
+  so review candidates don't inflate the problem count.
+
 ## [0.84.0] — 2026-07-24 — Software publisher rollup + publisher-scope decisions
 
 ### Added

@@ -40,6 +40,12 @@ _DEFAULT_CONFIG: dict = {
     "rare_recent_severity": "medium",
     "rare_recent_skip_categorized": True,
     "rare_recent_skip_decided": True,
+    # whitelist_suggestion — the other side of rarity: titles installed
+    # on ≥ N devices, uncategorised, and undecided at every scope. These
+    # are the titles worth reviewing for a fleet-wide APPROVE decision.
+    "whitelist_suggestion_enabled": True,
+    "whitelist_suggestion_min_devices": 10,
+    "whitelist_suggestion_severity": "low",
 }
 
 
@@ -207,6 +213,30 @@ def classify(tenant_id: int = _TENANT_ID) -> int:
                         {"reason": "matches end-of-life runtime pattern"},
                         emitted_keys,
                     )
+
+                # 7. whitelist_suggestion — the "≥ N devices, undecided,
+                # uncategorised" review candidate. Distinct from
+                # rare_recent (which fires at the ≤ 2 devices end); the
+                # two are mutually exclusive by device_count threshold.
+                if (
+                    cfg.get("whitelist_suggestion_enabled", True)
+                    and not dec
+                    and not cat_list
+                ):
+                    min_devices = int(cfg.get("whitelist_suggestion_min_devices", 10))
+                    fleet_devices = fleet_rarity.get(name.lower(), 0)
+                    if fleet_devices >= min_devices:
+                        severity = str(cfg.get("whitelist_suggestion_severity", "low"))
+                        affected += _emit(
+                            cur, tenant_id, finding_type_ids["whitelist_suggestion"],
+                            client_id, device_id, name, publisher, severity, now,
+                            {
+                                "fleet_device_count": fleet_devices,
+                                "threshold": min_devices,
+                                "reason": "uncategorised + undecided + widespread",
+                            },
+                            emitted_keys,
+                        )
 
             _auto_resolve(cur, tenant_id, emitted_keys, now)
     except Exception as exc:
@@ -456,7 +486,8 @@ def _finding_type_ids(cur) -> dict[str, int]:
         WHERE name IN (
             'suspicious_name', 'install_path_suspicious',
             'unauthorized_av', 'unauthorized_rmm', 'unauthorized_remote_access',
-            'multi_av_conflict', 'rare_recent', 'eol_runtime'
+            'multi_av_conflict', 'rare_recent', 'eol_runtime',
+            'whitelist_suggestion'
         )
         """
     )

@@ -2767,12 +2767,19 @@ def software_page(request: HttpRequest) -> HttpResponse:
         )
         recent_installs = cur.fetchall()
 
-    # Software issues count (Finding table)
-    software_issues = Finding.objects.filter(
+    # Software issues count (Finding table). Split whitelist_suggestion
+    # out of "issues" — it's a review candidate, not a problem.
+    software_open_qs = Finding.objects.filter(
         tenant_id=1,
         status__in=_FINDING_ACTIVE_STATUSES,
         finding_type__category__name="software",
+    )
+    software_issues = software_open_qs.exclude(
+        finding_type__name="whitelist_suggestion"
     ).count()
+    whitelist_suggestions = software_open_qs.filter(
+        finding_type__name="whitelist_suggestion"
+    ).values("finding_details__canonical_name").distinct().count()
 
     approved_titles = decision_counts.get("approve", 0) + decision_counts.get(
         "approve_publisher", 0
@@ -2825,6 +2832,7 @@ def software_page(request: HttpRequest) -> HttpResponse:
             "rejected_titles": rejected_titles,
             "pending_decisions": pending_decisions,
             "software_issues": software_issues,
+            "whitelist_suggestions": whitelist_suggestions,
             "category_rows": category_rows,  # [(category_name, titles), ...]
             "titles": titles,
             "recent_installs": recent_installs,

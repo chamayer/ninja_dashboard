@@ -86,10 +86,18 @@ were a misreading and have been struck.
   - [x] Nav: fleet page has a Publishers tile; per-title publisher list
         links to publisher detail; per-publisher title list links to
         title detail.
-- [ ] Batch 3 — Whitelist Suggestions.
-  - [ ] New FindingType `whitelist_suggestion` (installs ≥ threshold on
-        unclassified titles). Threshold in `EvaluatorConfig`.
-  - [ ] Findings queue filter chip; drill-through to `/software/<name>/`.
+- [x] Batch 3 — Whitelist Suggestions (0.85.0).
+  - [x] New `whitelist_suggestion` FindingType (migration 0080), seeded
+        via `get_or_create` under the software category with
+        `source_module='platform.software_findings'`.
+  - [x] Classifier step 7 emits it for uncategorised + undecided +
+        fleet_device_count ≥ threshold. Threshold + severity + enabled
+        knobs on the software_classifier `EvaluatorConfig`
+        (`whitelist_suggestion_min_devices` default 10, `_severity`
+        default low, `_enabled` default true).
+  - [x] Separate tile on `/software/` (deduped by canonical_name) —
+        distinct from the "flagged installations" tile so suggestions
+        don't inflate the problem count.
 - [ ] Batch 4 — Tech Checklist.
   - [ ] Per-device curated cleanup list (rejected + investigate +
         suspicious-rule matches on the device's install set) as an
@@ -132,8 +140,6 @@ were a misreading and have been struck.
 
 ## Next action
 
-- Open Batch 3 — Whitelist Suggestions. New `whitelist_suggestion`
-  FindingType emitted by the software findings evaluator for titles that
-  are (a) undecided at every scope, (b) uncategorised, (c) installed on
-  ≥ N devices. Threshold in `EvaluatorConfig`. Chip on the findings
-  queue + drill-through to `software_detail`.
+- Open Batch 4 — Tech Checklist. Per-device curated cleanup list:
+  reject/investigate decisions + suspicious-rule matches present on the
+  device's current install set, surfaced as an Operations report.
