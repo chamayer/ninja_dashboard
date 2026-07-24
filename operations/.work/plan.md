@@ -61,14 +61,14 @@ were a misreading and have been struck.
 
 ## Steps
 
-- [ ] Batch 1 — UI foundation.
-  - [ ] `/software/<canonical_name>/` detail view: version breakdown, per-
-        device install list, publisher facts, decision history, first/last
-        observed, rare/common posture.
-  - [ ] Row-level decision actions (Approve / Reject / Investigate /
-        Approve Publisher) on the fleet + per-org tables.
-  - [ ] Sortable columns on the fleet titles table (device_count,
-        client_count, last_install, publisher, canonical_name).
+- [x] Batch 1 — UI foundation (0.83.0).
+  - [x] `/software/title/<name>/` detail view.
+  - [x] Row-level decision actions on the fleet + per-org tables (per-org
+        already shipped; fleet added; both link to the new detail page).
+  - [x] Sortable columns — already provided by the universal `data-sortable`
+        JS in `base.html`, no per-page work needed.
+  - [x] Functional index (migration 0078) so case-insensitive canonical
+        lookups don't seq-scan software_installations_current.
 - [ ] Batch 2 — Publisher rollup + admin surface.
   - [ ] `/software/publishers/` list: publisher, distinct titles,
         distinct devices, decision status (approved-publisher / mixed /
@@ -101,19 +101,28 @@ were a misreading and have been struck.
 
 ## Validation
 
-- Not yet — batches unstarted.
+- Batch 1 (0.83.0):
+  - `python -m compileall` on changed views/urls — pass.
+  - `python manage.py check` — pass.
+  - `python manage.py sqlmigrate operations 0078` — renders cleanly.
+  - `python manage.py makemigrations --check --dry-run` — no changes.
+  - Template loading (`software_page`, `software_detail`, `org_software`,
+    `software_decisions`) — pass.
+  - `pytest apps/core/tests -q` — 23 passed.
+  - Deployed-DB dry-run (transaction + `ROLLBACK`): Google Chrome install
+    list 588 ms → 112 ms after functional index.
 
 ## Checkpoint
 
-- 0.82.2 (`7708a76`) shipped: patching page perf + grant fix. Software
-  track opens here.
-- PDQ correction committed alongside the plan: memory
-  `project_pdq_never_in_scope.md` filed;
-  `operations/docs/legacy-scripts-parity-audit.md` amended in three
-  places (analyzer description note, PARTIAL summary, § "Recommended
-  sequencing").
+- Batch 1 shipped as 0.83.0. Software fleet page has row-level decisions
+  and a working title detail drill-through; case-insensitive canonical
+  lookups are index-backed.
+- Next batches unstarted: publisher rollup, Whitelist Suggestions,
+  Tech Checklist, user-risk, CVE.
 
 ## Next action
 
-- Pick Batch 1 (UI foundation) starting scope: title detail page shape —
-  columns, sections, drill targets — and align before writing the view.
+- Open Batch 2 — publisher rollup + publisher-level decision surface.
+  Requires: `/software/publishers/` list view, `/software/publishers/<name>/`
+  detail, and inline `APPROVE_PUBLISHER` action. Aligns with the existing
+  decision model, no schema change expected.

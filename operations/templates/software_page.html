@@ -161,12 +161,17 @@
                 <th>Category</th>
                 <th>Decision</th>
                 <th class="num">Latest install</th>
+                <th style="text-align:right;">Decide (global)</th>
             </tr>
         </thead>
         <tbody>
             {% for t in titles %}
             <tr>
-                <td><strong>{{ t.canonical_name }}</strong></td>
+                <td>
+                    <a href="{% url 'software_detail' name=t.canonical_name %}">
+                        <strong>{{ t.canonical_name }}</strong>
+                    </a>
+                </td>
                 <td class="muted">{{ t.publisher|default:"—" }}</td>
                 <td style="text-align:right;">{{ t.device_count }}</td>
                 <td style="text-align:right;">{{ t.client_count }}</td>
@@ -187,6 +192,21 @@
                     {% endif %}
                 </td>
                 <td class="muted num">{{ t.last_install|date:"Y-m-d"|default:"—" }}</td>
+                <td style="text-align:right;">
+                    <form method="post" action="{% url 'software_decision_create' %}" style="display:inline-flex; gap:0.25rem;">
+                        {% csrf_token %}
+                        <input type="hidden" name="canonical_name" value="{{ t.canonical_name }}">
+                        <input type="hidden" name="scope" value="global">
+                        <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                        <select name="decision" style="padding:0.2rem 0.35rem; font-size:0.8rem;">
+                            {% for value, label in decision_choices %}
+                                <option value="{{ value }}"
+                                    {% if t.decision == value %}selected{% endif %}>{{ label }}</option>
+                            {% endfor %}
+                        </select>
+                        <button type="submit" style="padding:0.2rem 0.5rem; font-size:0.78rem;">Apply</button>
+                    </form>
+                </td>
             </tr>
             {% endfor %}
         </tbody>

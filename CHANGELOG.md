@@ -2,6 +2,34 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.83.0] — 2026-07-24 — Software title detail + row-level decisions
+
+### Added
+- **`/software/title/<name>/` detail page.** Per-canonical drill-through from
+  the fleet titles table. Summary tiles (installations, devices, clients,
+  versions, first/last observed), catalog metadata (categories, EOL, notes),
+  global-scope decision form, version breakdown, publisher breakdown, install
+  locations, per-device installation list with device-scope decision actions,
+  related active findings, and full client/device-scope decision history.
+- **Row-level decision actions on `/software/`.** Inline
+  Approve/Reject/Investigate/Approve-Publisher form on every fleet-titles row,
+  posting to the shared `software_decision_create` endpoint with a `next`
+  redirect so the operator lands back where they were.
+- **Per-org software table** links each title to the detail page.
+
+### Changed
+- `software_decision_create` now honours a `next` POST parameter (relative
+  URLs only, to avoid open-redirects), letting decision forms across the
+  Software surfaces return the operator to their origin page.
+
+### Performance
+- **Functional index** `software_installations_current_lower_canonical_idx`
+  on `(tenant_id, LOWER(canonical_name)) WHERE deleted_at IS NULL AND
+  stale_since IS NULL` (migration `0078`). Every case-insensitive lookup
+  against the installations table now uses an index scan; measured Google
+  Chrome install-list query drops from 588 ms (parallel seq scan of 432k
+  rows) to 112 ms (index scan).
+
 ## [0.82.2] — 2026-07-24 — Grant SELECT on `device_patch_activity`
 
 ### Fixed

@@ -2819,6 +2819,241 @@ def software_page(request: HttpRequest) -> HttpResponse:
             "active_q": q_filter,
             "active_category": category_filter,
             "active_decision": decision_filter,
+            "decision_choices": SoftwareDecision.Decision.choices,
+        },
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Software title detail — per-canonical drill-through from /software/.
+# Anchors row-level decisions, version breakdown, per-device install list,
+# publisher facts, catalog metadata, related findings, and decision history.
+# Case-insensitive canonical_name lookup; URL slug carries the display form.
+# ─────────────────────────────────────────────────────────────────────
+
+
+@login_required
+def software_detail(request: HttpRequest, name: str) -> HttpResponse:
+    canonical_name = name.strip()
+    if not canonical_name:
+        return redirect("software_page")
+
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+
+        # Fleet-wide install rollup for this title.
+        cur.execute(
+            """
+            SELECT COUNT(*)                             AS installations,
+                   COUNT(DISTINCT sic.device_id)        AS devices,
+                   COUNT(DISTINCT sic.client_id)        AS clients,
+                   MIN(sic.first_observed_at)           AS first_observed,
+                   MAX(sic.last_observed_at)            AS last_observed,
+                   MAX(sic.first_observed_at)           AS latest_install
+            FROM operations.software_installations_current sic
+            WHERE sic.tenant_id = 1
+              AND sic.deleted_at IS NULL
+              AND sic.stale_since IS NULL
+              AND LOWER(sic.canonical_name) = LOWER(%s)
+            """,
+            [canonical_name],
+        )
+        row = cur.fetchone()
+        installations, devices, clients, first_observed, last_observed, latest_install = row
+
+        if not installations:
+            # Fall back to any historical row (deleted / stale) so an
+            # operator following a stale finding link still lands somewhere.
+            cur.execute(
+                """
+                SELECT canonical_name FROM operations.software_installations_current
+                WHERE tenant_id = 1 AND LOWER(canonical_name) = LOWER(%s)
+                LIMIT 1
+                """,
+                [canonical_name],
+            )
+            r = cur.fetchone()
+            if not r:
+                messages.warning(
+                    request,
+                    f"No installations recorded for “{canonical_name}”.",
+                )
+                return redirect("software_page")
+            canonical_name = r[0]
+
+        # Preserve the display form the installations table uses.
+        cur.execute(
+            """
+            SELECT canonical_name FROM operations.software_installations_current
+            WHERE tenant_id = 1 AND LOWER(canonical_name) = LOWER(%s)
+            LIMIT 1
+            """,
+            [canonical_name],
+        )
+        r = cur.fetchone()
+        if r:
+            canonical_name = r[0]
+
+        # Publisher facts — every distinct publisher the fleet observed for
+        # this title, with per-publisher install counts. Multiple publishers
+        # for the same canonical_name usually indicate a rename / catalog
+        # merge and are worth surfacing.
+        cur.execute(
+            """
+            SELECT COALESCE(NULLIF(publisher, ''), '(unknown)') AS publisher,
+                   COUNT(*)::int AS installs,
+                   COUNT(DISTINCT device_id)::int AS devices
+            FROM operations.software_installations_current
+            WHERE tenant_id = 1 AND deleted_at IS NULL AND stale_since IS NULL
+              AND LOWER(canonical_name) = LOWER(%s)
+            GROUP BY 1
+            ORDER BY installs DESC
+            """,
+            [canonical_name],
+        )
+        publisher_rows = [
+            {"publisher": row[0], "installs": row[1], "devices": row[2]}
+            for row in cur.fetchall()
+        ]
+
+        # Version breakdown — one row per distinct version.
+        cur.execute(
+            """
+            SELECT COALESCE(NULLIF(version, ''), '(unknown)') AS version,
+                   COUNT(*)::int AS installs,
+                   COUNT(DISTINCT device_id)::int AS devices,
+                   COUNT(DISTINCT client_id)::int AS clients,
+                   MAX(last_observed_at) AS last_observed
+            FROM operations.software_installations_current
+            WHERE tenant_id = 1 AND deleted_at IS NULL AND stale_since IS NULL
+              AND LOWER(canonical_name) = LOWER(%s)
+            GROUP BY 1
+            ORDER BY installs DESC, version
+            """,
+            [canonical_name],
+        )
+        version_rows = [
+            {
+                "version": row[0],
+                "installs": row[1],
+                "devices": row[2],
+                "clients": row[3],
+                "last_observed": row[4],
+            }
+            for row in cur.fetchall()
+        ]
+
+        # Install-location breakdown.
+        cur.execute(
+            """
+            SELECT COALESCE(NULLIF(install_location, ''), '(unknown)') AS location,
+                   COUNT(*)::int AS installs
+            FROM operations.software_installations_current
+            WHERE tenant_id = 1 AND deleted_at IS NULL AND stale_since IS NULL
+              AND LOWER(canonical_name) = LOWER(%s)
+            GROUP BY 1
+            ORDER BY installs DESC
+            LIMIT 20
+            """,
+            [canonical_name],
+        )
+        location_rows = [
+            {"location": row[0], "installs": row[1]} for row in cur.fetchall()
+        ]
+
+        # Per-device install list — bounded so a mega-title doesn't OOM.
+        cur.execute(
+            """
+            SELECT sic.device_id, sic.client_id, c.slug, c.display_name,
+                   d.canonical_hostname, d.device_role, d.os_group,
+                   sic.version, sic.install_location, sic.install_date,
+                   sic.first_observed_at, sic.last_observed_at
+            FROM operations.software_installations_current sic
+            JOIN operations.clients c ON c.id = sic.client_id
+            JOIN operations.devices d ON d.id = sic.device_id
+            WHERE sic.tenant_id = 1
+              AND sic.deleted_at IS NULL
+              AND sic.stale_since IS NULL
+              AND LOWER(sic.canonical_name) = LOWER(%s)
+            ORDER BY c.display_name, d.canonical_hostname
+            LIMIT 500
+            """,
+            [canonical_name],
+        )
+        install_rows = [
+            {
+                "device_id": row[0],
+                "client_id": row[1],
+                "client_slug": row[2],
+                "client_name": row[3],
+                "hostname": row[4],
+                "device_role": row[5],
+                "os_group": row[6],
+                "version": row[7] or "",
+                "install_location": row[8] or "",
+                "install_date": row[9],
+                "first_observed": row[10],
+                "last_observed": row[11],
+            }
+            for row in cur.fetchall()
+        ]
+
+    # Catalog metadata — categories, publisher hint, EOL, notes.
+    catalog_entry = (
+        SoftwareCatalog.objects.filter(canonical_name__iexact=canonical_name)
+        .filter(Q(tenant_id=1) | Q(tenant__isnull=True))
+        .order_by("tenant_id")
+        .first()
+    )
+
+    # Decision history — every scope for this canonical.
+    decision_rows = list(
+        SoftwareDecision.objects.filter(
+            tenant_id=1, canonical_name__iexact=canonical_name
+        )
+        .select_related("client", "device", "decided_by")
+        .order_by("-decided_at", "-id")
+    )
+    global_decision = next(
+        (d for d in decision_rows if d.client_id is None and d.device_id is None),
+        None,
+    )
+    client_decisions = [d for d in decision_rows if d.client_id and not d.device_id]
+    device_decisions = [d for d in decision_rows if d.device_id]
+
+    # Related active findings that name this title.
+    related_findings = list(
+        Finding.objects.filter(
+            tenant_id=1,
+            status__in=_FINDING_ACTIVE_STATUSES,
+            finding_details__canonical_name__iexact=canonical_name,
+        )
+        .select_related("finding_type", "client")
+        .order_by("-last_detected_at", "-last_seen_at")[:50]
+    )
+
+    return render(
+        request,
+        "software_detail.html",
+        {
+            "canonical_name": canonical_name,
+            "catalog_entry": catalog_entry,
+            "installations": installations,
+            "device_count": devices,
+            "client_count": clients,
+            "first_observed": first_observed,
+            "last_observed": last_observed,
+            "latest_install": latest_install,
+            "publishers": publisher_rows,
+            "versions": version_rows,
+            "locations": location_rows,
+            "install_rows": install_rows,
+            "global_decision": global_decision,
+            "client_decisions": client_decisions,
+            "device_decisions": device_decisions,
+            "related_findings": related_findings,
+            "decision_choices": SoftwareDecision.Decision.choices,
+            "back_url": request.META.get("HTTP_REFERER") or reverse("software_page"),
         },
     )
 
@@ -5474,6 +5709,10 @@ def software_decision_create(request: HttpRequest) -> HttpResponse:
         f"{decision} recorded for {canonical_name} ({scope})."
         + (" Created." if created else " Updated."),
     )
+    next_url = request.POST.get("next") or ""
+    # Only follow relative URLs to avoid open-redirects.
+    if next_url.startswith("/") and not next_url.startswith("//"):
+        return redirect(next_url)
     return redirect("software_decisions_queue")
 
 
