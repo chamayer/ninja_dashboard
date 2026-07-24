@@ -337,6 +337,24 @@ def run_intel_matcher_once() -> None:
         log.exception("Intel matcher failed")
 
 
+def run_intel_winget_once() -> None:
+    try:
+        from ingest.intel import winget
+        rows = winget.run_once()
+        log.info("Intel Winget complete: rows=%d", rows)
+    except Exception:
+        log.exception("Intel Winget failed")
+
+
+def run_intel_chocolatey_once() -> None:
+    try:
+        from ingest.intel import chocolatey
+        rows = chocolatey.run_once()
+        log.info("Intel Chocolatey complete: rows=%d", rows)
+    except Exception:
+        log.exception("Intel Chocolatey failed")
+
+
 def run_notifications_dispatch_once() -> None:
     try:
         sent = notify_dispatch(tenant_id=1)
@@ -2177,6 +2195,20 @@ def main() -> None:
             "interval",
             hours=settings.INTEL_MATCHER_SCHEDULE_HOURS,
             id="intel_matcher_cycle",
+            max_instances=1,
+        )
+        scheduler.add_job(
+            run_intel_winget_once,
+            "interval",
+            hours=settings.INTEL_CATALOG_SCHEDULE_HOURS,
+            id="intel_winget_cycle",
+            max_instances=1,
+        )
+        scheduler.add_job(
+            run_intel_chocolatey_once,
+            "interval",
+            hours=settings.INTEL_CATALOG_SCHEDULE_HOURS,
+            id="intel_chocolatey_cycle",
             max_instances=1,
         )
     scheduler.start()

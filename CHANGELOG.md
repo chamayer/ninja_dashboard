@@ -2,6 +2,21 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.90.0] — 2026-07-24 — Intel catalogue enrichment: Winget + Chocolatey (Batch C)
+
+### Added
+- **Winget enrichment** (`ingest/intel/winget.py`) — per-canonical query
+  against the Windows Package Manager REST search endpoint (same one
+  the `winget` CLI uses). Only titles observed in the fleet, and only
+  those without a fresh signal, so the update set stays bounded. Tags,
+  publishers, and package identifiers land on
+  `operations.safety_signal` as `source='winget', signal_type='category'`.
+- **Chocolatey enrichment** (`ingest/intel/chocolatey.py`) — same
+  shape, hitting the community OData search feed. Tags aggregated per
+  title.
+- **Scheduler wiring** — both connectors run on `INTEL_CATALOG_SCHEDULE_HOURS`
+  under the `INTEL_ENABLED` master flag with independent enable flags.
+
 ## [0.89.0] — 2026-07-24 — Intel connectors: NVD + CPE + KEV + EPSS + matcher (Batch B)
 
 ### Added
