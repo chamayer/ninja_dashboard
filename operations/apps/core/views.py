@@ -3295,6 +3295,202 @@ def software_publisher_detail(request: HttpRequest, publisher: str) -> HttpRespo
 
 
 # ─────────────────────────────────────────────────────────────────────
+# User-risk view — per-user rollup of software checklist items on the
+# device that user last logged into. Anchored on Ninja's
+# lastLoggedInUser field, resolved via device_snapshots latest-per-device
+# and canonical device_links. Read-only.
+# ─────────────────────────────────────────────────────────────────────
+
+
+@login_required
+def software_user_risk(request: HttpRequest) -> HttpResponse:
+    client_slugs = [s for s in request.GET.getlist("client") if s]
+    filtered_client_ids: list[str] = []
+    if client_slugs:
+        filtered_client_ids = [
+            str(cid)
+            for cid in Client.objects.filter(
+                tenant_id=1, slug__in=client_slugs, deleted_at__isnull=True
+            ).values_list("id", flat=True)
+        ]
+
+    client_where = ""
+    client_params: list = []
+    if filtered_client_ids:
+        client_where = "AND d.client_id = ANY(%s::uuid[])"
+        client_params.append(filtered_client_ids)
+    elif client_slugs:
+        client_where = "AND FALSE"
+
+    sql = f"""
+        WITH latest_user AS (
+            SELECT DISTINCT ON (ds.device_id)
+                ds.device_id AS ninja_device_id,
+                TRIM(ds.last_user) AS last_user,
+                ds.snapshot_at
+            FROM ninja_core.device_snapshots ds
+            WHERE ds.last_user IS NOT NULL AND TRIM(ds.last_user) <> ''
+            ORDER BY ds.device_id, ds.snapshot_at DESC
+        ),
+        device_user AS (
+            SELECT DISTINCT dl.device_id AS ops_device_id, lu.last_user, lu.snapshot_at
+            FROM latest_user lu
+            JOIN operations.device_links dl
+              ON dl.external_id ~ '^\\d+$'
+             AND dl.external_id::integer = lu.ninja_device_id
+            JOIN operations.sources s ON s.id = dl.source_id
+            WHERE dl.tenant_id = 1 AND LOWER(s.name) = 'ninja'
+        ),
+        finding_items AS (
+            SELECT d.id AS device_id, d.client_id,
+                   f.finding_details->>'canonical_name' AS canonical_name,
+                   ft.name AS kind
+            FROM operations.findings f
+            JOIN operations.finding_types ft ON ft.id = f.finding_type_id
+            JOIN operations.finding_categories fc ON fc.id = ft.category_id
+            JOIN operations.devices d ON d.id = f.subject_id AND d.deleted_at IS NULL
+            WHERE f.tenant_id = 1
+              AND f.status IN ('open', 'acknowledged')
+              AND fc.name = 'software'
+              AND ft.name <> 'whitelist_suggestion'
+              AND f.subject_type = 'device'
+              {client_where}
+        ),
+        decision_items AS (
+            SELECT d.id AS device_id, d.client_id,
+                   sic.canonical_name,
+                   ('decision_' || sd.decision) AS kind
+            FROM operations.software_installations_current sic
+            JOIN operations.devices d ON d.id = sic.device_id AND d.deleted_at IS NULL
+            JOIN operations.software_decisions sd
+              ON sd.tenant_id = sic.tenant_id
+             AND sd.decision IN ('reject', 'investigate')
+             AND (
+                 (sd.canonical_name <> '' AND sd.canonical_name = sic.canonical_name)
+              OR (sd.publisher <> ''
+                  AND LOWER(sd.publisher) = LOWER(COALESCE(sic.publisher, '')))
+             )
+             AND (sd.device_id IS NULL OR sd.device_id = sic.device_id)
+             AND (sd.client_id IS NULL OR sd.client_id = sic.client_id)
+            WHERE sic.tenant_id = 1
+              AND sic.deleted_at IS NULL
+              AND sic.stale_since IS NULL
+              {client_where}
+        ),
+        all_items AS (
+            SELECT device_id, client_id, canonical_name, kind FROM finding_items
+            UNION ALL
+            SELECT device_id, client_id, canonical_name, kind FROM decision_items
+        )
+        SELECT du.last_user,
+               d.id AS device_id,
+               d.canonical_hostname,
+               c.slug AS client_slug,
+               c.display_name AS client_name,
+               ai.canonical_name,
+               ai.kind
+        FROM device_user du
+        JOIN operations.devices d ON d.id = du.ops_device_id AND d.deleted_at IS NULL
+        JOIN operations.clients c ON c.id = d.client_id AND c.deleted_at IS NULL
+        JOIN all_items ai ON ai.device_id = d.id
+        WHERE d.tenant_id = 1
+          {client_where}
+        ORDER BY du.last_user, d.canonical_hostname, ai.kind, ai.canonical_name
+    """
+
+    # client_where appears 3× in the SQL — client_params must repeat.
+    run_params = client_params * 3 if client_params else []
+
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        cur.execute(sql, run_params)
+        rows = cur.fetchall()
+
+    per_user: dict = {}
+    for last_user, device_id, hostname, client_slug, client_name, canonical, kind in rows:
+        entry = per_user.setdefault(
+            last_user,
+            {
+                "last_user": last_user,
+                "devices": {},
+                "clients": set(),
+                "item_count": 0,
+                "item_keys": set(),
+            },
+        )
+        item_key = (device_id, (canonical or "").lower(), kind)
+        if item_key in entry["item_keys"]:
+            continue
+        entry["item_keys"].add(item_key)
+        entry["item_count"] += 1
+        entry["clients"].add(client_name)
+        dev = entry["devices"].setdefault(
+            device_id,
+            {
+                "device_id": device_id,
+                "hostname": hostname,
+                "client_slug": client_slug,
+                "client_name": client_name,
+                "items": [],
+            },
+        )
+        dev["items"].append({"canonical_name": canonical or "", "kind": kind})
+
+    users = []
+    for entry in per_user.values():
+        entry.pop("item_keys", None)
+        entry["clients"] = sorted(entry["clients"])
+        entry["device_list"] = sorted(
+            entry["devices"].values(), key=lambda d: d["hostname"] or ""
+        )
+        entry.pop("devices", None)
+        users.append(entry)
+    users.sort(key=lambda u: (-u["item_count"], u["last_user"]))
+
+    clients = Client.objects.filter(
+        tenant_id=1, deleted_at__isnull=True
+    ).order_by("display_name")
+
+    if wants_csv(request):
+        flat_rows: list[dict] = []
+        for u in users:
+            for d in u["device_list"]:
+                for item in d["items"]:
+                    flat_rows.append(
+                        {
+                            "user": u["last_user"],
+                            "client": d["client_name"],
+                            "hostname": d["hostname"],
+                            "canonical_name": item["canonical_name"],
+                            "kind": item["kind"],
+                        }
+                    )
+        return csv_response(
+            flat_rows,
+            columns=[
+                ("Last logged-in user", "user"),
+                ("Client", "client"),
+                ("Device", "hostname"),
+                ("Title", "canonical_name"),
+                ("Reason kind", "kind"),
+            ],
+            filename_stem="user_risk",
+        )
+
+    return render(
+        request,
+        "software_user_risk.html",
+        {
+            "users": users[:500],
+            "user_count": len(users),
+            "total_items": sum(u["item_count"] for u in users),
+            "clients": clients,
+            "active_clients": client_slugs,
+        },
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────
 # Tech Checklist — per-device curated cleanup list combining active
 # software findings and reject/investigate decisions (title- or publisher-
 # scope). Answers "what should the tech clean up on this device?"

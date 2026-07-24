@@ -2,6 +2,18 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.87.0] — 2026-07-24 — Software user-risk view
+
+### Added
+- **`/software/user-risk/`** — per-user rollup of software checklist
+  items on the device the user last logged into. Anchored on Ninja's
+  `lastLoggedInUser` (latest snapshot per device via
+  `ninja_core.device_snapshots`) joined through `device_links`. Users
+  who log into multiple devices are aggregated across all of them, with
+  the checklist items grouped per-device. Multi-client filter, CSV
+  export, top-500 cap.
+- **User risk tile on `/software/`**.
+
 ## [0.86.0] — 2026-07-24 — Software Tech Checklist
 
 ### Added

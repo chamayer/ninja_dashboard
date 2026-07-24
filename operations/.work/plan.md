@@ -106,9 +106,13 @@ were a misreading and have been struck.
         cap with total counter.
   - [x] Tile on `/software/`; each row links to the device detail
         (Software tab).
-- [ ] Batch 5 — User-risk join.
-  - [ ] Correlate `Device.last_user` (or the merged ClientUser link) with
-        `software_installations_current` and surface a per-user risk view.
+- [x] Batch 5 — User-risk join (0.87.0).
+  - [x] `/software/user-risk/` — per-user rollup of software checklist
+        items on the device the user last logged into. Anchored on
+        Ninja's `lastLoggedInUser` (latest snapshot per device via
+        `ninja_core.device_snapshots`), joined through `device_links`.
+        A user across multiple devices aggregates across all of them.
+  - [x] Tile on `/software/`; each card links to per-device drilldowns.
 - [ ] Batch 6 — CVE enrichment (own ADR).
 
 ## Validation plan
@@ -144,8 +148,7 @@ were a misreading and have been struck.
 
 ## Next action
 
-- Open Batch 5 — User-risk join. Correlate device `last_user` with
-  installations to surface per-user risk (which users have suspicious /
-  rejected / investigate software on the device they last logged into).
-  ClientUser + ClientUserLink models already exist; only the join view +
-  UI need building.
+- Open Batch 6 — CVE enrichment. Introduces a new external data source
+  (NVD or equivalent) so needs its own ADR before any code lands:
+  storage model, refresh cadence, licence/rate-limit constraints,
+  matching heuristics (canonical_name × version → CPE), findings surface.
