@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% load human_labels %}
+
+{% block title %}Software publishers{% endblock %}
+
+{% block content %}
+<style>
+    .pub-header { padding: 1rem 1.2rem; background: var(--surface);
+                  border: 1px solid var(--border); border-radius: 6px;
+                  margin-bottom: 0.6rem; }
+    .pub-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+    .pub-table th, .pub-table td { padding: 0.5rem 0.65rem; text-align: left;
+                                   border-bottom: 1px solid var(--border); }
+    .pub-table th { color: var(--muted); font-weight: 500; font-size: 0.78rem;
+                    text-transform: uppercase; letter-spacing: 0.03em; }
+    .pub-table td.num, .pub-table th.num { text-align: right; }
+    .pub-pill { display: inline-block; padding: 0.15rem 0.55rem; border-radius: 999px;
+                font-size: 0.75rem; font-weight: 500; }
+    .pub-pill.approve, .pub-pill.approve_publisher { background: #dcfce7; color: #14532d; }
+    .pub-pill.reject { background: #fee2e2; color: #991b1b; }
+    .pub-pill.investigate { background: #fef3c7; color: #92400e; }
+    .pub-pill.none { background: #f3f4f6; color: #6b7280; }
+</style>
+
+<div class="pub-header">
+    <div style="font-size:0.8rem; color:var(--muted); margin-bottom:0.4rem;">
+        <a href="{% url 'software_page' %}">Software</a> › Publishers
+    </div>
+    <h1 style="margin:0;">Publishers</h1>
+    <p class="muted" style="margin-top:0.35rem;">
+        Every publisher observed across the fleet. Publisher-scope decisions
+        apply to every title from that publisher — including titles seen for
+        the first time after the decision is recorded.
+    </p>
+</div>
+
+<div class="card">
+    <form action="" method="get" class="filterbar" style="display:flex; gap:0.8rem; align-items:end;">
+        <div>
+            <label style="display:block; font-size:0.78rem; color:var(--muted);">Search</label>
+            <input type="search" name="q" value="{{ active_q }}" placeholder="publisher name…"
+                   style="padding:0.4rem 0.6rem; border:1px solid var(--border); border-radius:4px;">
+        </div>
+        <div><button type="submit">Apply</button></div>
+        {% if active_q %}
+        <div><a href="?" style="font-size:0.85rem;">Clear</a></div>
+        {% endif %}
+    </form>
+</div>
+
+<div class="card">
+    {% if publishers %}
+    <table data-sortable class="pub-table">
+        <thead>
+            <tr>
+                <th>Publisher</th>
+                <th class="num">Installations</th>
+                <th class="num">Titles</th>
+                <th class="num">Devices</th>
+                <th class="num">Clients</th>
+                <th class="num">Last observed</th>
+                <th>Decision</th>
+                <th style="text-align:right;">Decide (global)</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for p in publishers %}
+            <tr>
+                <td>
+                    <a href="{% url 'software_publisher_detail' publisher=p.publisher %}">
+                        <strong>{{ p.publisher }}</strong>
+                    </a>
+                </td>
+                <td class="num">{{ p.installations }}</td>
+                <td class="num">{{ p.titles }}</td>
+                <td class="num">{{ p.devices }}</td>
+                <td class="num">{{ p.clients }}</td>
+                <td class="num muted">{{ p.last_observed|date:"Y-m-d"|default:"—" }}</td>
+                <td>
+                    {% if p.global_decision %}
+                        <span class="pub-pill {{ p.global_decision }}">{{ p.global_decision|humanize_label|default:p.global_decision }}</span>
+                    {% else %}
+                        <span class="pub-pill none">no decision</span>
+                    {% endif %}
+                </td>
+                <td style="text-align:right;">
+                    <form method="post" action="{% url 'software_decision_create' %}" style="display:inline-flex; gap:0.25rem;">
+                        {% csrf_token %}
+                        <input type="hidden" name="publisher" value="{{ p.publisher }}">
+                        <input type="hidden" name="scope" value="global">
+                        <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                        <select name="decision" style="padding:0.2rem 0.35rem; font-size:0.8rem;">
+                            {% for value, label in decision_choices %}
+                                <option value="{{ value }}"
+                                    {% if p.global_decision == value %}selected{% endif %}>{{ label }}</option>
+                            {% endfor %}
+                        </select>
+                        <button type="submit" style="padding:0.2rem 0.5rem; font-size:0.78rem;">Apply</button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="muted">No publishers match the current filter.</p>
+    {% endif %}
+</div>
+{% endblock %}

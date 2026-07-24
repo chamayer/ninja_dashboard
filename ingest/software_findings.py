@@ -99,8 +99,9 @@ def classify(tenant_id: int = _TENANT_ID) -> int:
             emitted_keys: set[str] = set()
 
             for client_id, device_id, name, publisher, location, first_seen in installs:
-                # Decision tier: device > client > global
-                dec = _resolve_decision(decisions, device_id, client_id, name)
+                # Decision tier: title-scope (device > client > global) then
+                # publisher-scope (device > client > global).
+                dec = _resolve_decision(decisions, device_id, client_id, name, publisher)
                 if dec in ("approve", "approve_publisher"):
                     continue  # approved, skip all rules
 
@@ -269,41 +270,73 @@ def _load_catalog(cur, tenant_id: int) -> dict[str, dict]:
 
 
 def _load_decisions(cur, tenant_id: int) -> dict:
-    """Return a decision resolver dict:
+    """Return a decision resolver dict with title- and publisher-scoped
+    buckets at each scope tier:
     {
-      'device': {(device_id, name_lower): decision},
-      'client': {(client_id, name_lower): decision},
-      'global': {name_lower: decision},
+      'device':     {(device_id, name_lower): decision},
+      'client':     {(client_id, name_lower): decision},
+      'global':     {name_lower: decision},
+      'device_pub': {(device_id, pub_lower): decision},
+      'client_pub': {(client_id, pub_lower): decision},
+      'global_pub': {pub_lower: decision},
     }
     """
     cur.execute(
         """
-        SELECT client_id, device_id, canonical_name, decision
+        SELECT client_id, device_id, canonical_name, publisher, decision
         FROM operations.software_decisions
         WHERE tenant_id = %s
         """,
         (tenant_id,),
     )
-    out = {"device": {}, "client": {}, "global": {}}
-    for client_id, device_id, name, dec in cur.fetchall():
-        n = name.lower()
-        if device_id is not None:
-            out["device"][(device_id, n)] = dec
-        elif client_id is not None:
-            out["client"][(client_id, n)] = dec
-        else:
-            out["global"][n] = dec
+    out = {
+        "device": {},
+        "client": {},
+        "global": {},
+        "device_pub": {},
+        "client_pub": {},
+        "global_pub": {},
+    }
+    for client_id, device_id, name, publisher, dec in cur.fetchall():
+        if name:
+            n = name.lower()
+            if device_id is not None:
+                out["device"][(device_id, n)] = dec
+            elif client_id is not None:
+                out["client"][(client_id, n)] = dec
+            else:
+                out["global"][n] = dec
+        elif publisher:
+            p = publisher.lower()
+            if device_id is not None:
+                out["device_pub"][(device_id, p)] = dec
+            elif client_id is not None:
+                out["client_pub"][(client_id, p)] = dec
+            else:
+                out["global_pub"][p] = dec
     return out
 
 
-def _resolve_decision(decisions: dict, device_id, client_id, name: str) -> str | None:
-    n = name.lower()
+def _resolve_decision(
+    decisions: dict, device_id, client_id, name: str, publisher: str | None = None
+) -> str | None:
+    """Return the most specific decision. Title-scope wins over publisher-
+    scope; within each, device > client > global."""
+    n = (name or "").lower()
+    p = (publisher or "").lower()
     if (device_id, n) in decisions["device"]:
         return decisions["device"][(device_id, n)]
     if (client_id, n) in decisions["client"]:
         return decisions["client"][(client_id, n)]
     if n in decisions["global"]:
         return decisions["global"][n]
+    if p:
+        if (device_id, p) in decisions["device_pub"]:
+            return decisions["device_pub"][(device_id, p)]
+        if (client_id, p) in decisions["client_pub"]:
+            return decisions["client_pub"][(client_id, p)]
+        if p in decisions["global_pub"]:
+            return decisions["global_pub"][p]
     return None
 
 

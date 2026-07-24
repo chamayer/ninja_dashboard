@@ -198,7 +198,13 @@
             <tbody>
                 {% for p in publishers %}
                 <tr>
-                    <td><code>{{ p.publisher }}</code></td>
+                    <td>
+                        {% if p.publisher != '(unknown)' %}
+                            <a href="{% url 'software_publisher_detail' publisher=p.publisher %}"><code>{{ p.publisher }}</code></a>
+                        {% else %}
+                            <code>{{ p.publisher }}</code>
+                        {% endif %}
+                    </td>
                     <td class="num">{{ p.installs }}</td>
                     <td class="num">{{ p.devices }}</td>
                 </tr>

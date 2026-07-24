@@ -64,6 +64,8 @@ from apps.core.views import (
     software_decisions_queue,
     software_detail,
     software_page,
+    software_publisher_detail,
+    software_publishers,
     sources_status,
 )
 
@@ -123,6 +125,12 @@ urlpatterns = [
     path("software/", software_page, name="software_page"),
     # Path converter so canonical names containing slashes still resolve.
     path("software/title/<path:name>/", software_detail, name="software_detail"),
+    path("software/publishers/", software_publishers, name="software_publishers"),
+    path(
+        "software/publishers/<path:publisher>/",
+        software_publisher_detail,
+        name="software_publisher_detail",
+    ),
     path("devices/", devices_page, name="devices_page"),
     path("search/", search, name="search"),
     path("findings/<uuid:finding_id>/ack/", finding_acknowledge, name="finding_acknowledge"),

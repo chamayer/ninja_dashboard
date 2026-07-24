@@ -2658,23 +2658,35 @@ def software_page(request: HttpRequest) -> HttpResponse:
             params.append(category_filter)
         if decision_filter == "approved":
             where_clauses.append(
-                "EXISTS (SELECT 1 FROM operations.software_decisions sd "
+                "(EXISTS (SELECT 1 FROM operations.software_decisions sd "
                 " WHERE sd.tenant_id = sic.tenant_id "
                 "   AND sd.canonical_name = sic.canonical_name "
                 "   AND sd.decision IN ('approve','approve_publisher'))"
+                " OR EXISTS (SELECT 1 FROM operations.software_decisions sd "
+                " WHERE sd.tenant_id = sic.tenant_id "
+                "   AND sd.publisher <> '' "
+                "   AND LOWER(sd.publisher) = LOWER(COALESCE(sic.publisher, '')) "
+                "   AND sd.decision IN ('approve','approve_publisher')))"
             )
         elif decision_filter == "rejected":
             where_clauses.append(
-                "EXISTS (SELECT 1 FROM operations.software_decisions sd "
+                "(EXISTS (SELECT 1 FROM operations.software_decisions sd "
                 " WHERE sd.tenant_id = sic.tenant_id "
                 "   AND sd.canonical_name = sic.canonical_name "
                 "   AND sd.decision = 'reject')"
+                " OR EXISTS (SELECT 1 FROM operations.software_decisions sd "
+                " WHERE sd.tenant_id = sic.tenant_id "
+                "   AND sd.publisher <> '' "
+                "   AND LOWER(sd.publisher) = LOWER(COALESCE(sic.publisher, '')) "
+                "   AND sd.decision = 'reject'))"
             )
         elif decision_filter == "pending":
             where_clauses.append(
                 "NOT EXISTS (SELECT 1 FROM operations.software_decisions sd "
                 " WHERE sd.tenant_id = sic.tenant_id "
-                "   AND sd.canonical_name = sic.canonical_name)"
+                "   AND (sd.canonical_name = sic.canonical_name "
+                "        OR (sd.publisher <> '' "
+                "            AND LOWER(sd.publisher) = LOWER(COALESCE(sic.publisher, '')))))"
             )
 
         where_sql = " AND ".join(where_clauses)
@@ -3054,6 +3066,222 @@ def software_detail(request: HttpRequest, name: str) -> HttpResponse:
             "related_findings": related_findings,
             "decision_choices": SoftwareDecision.Decision.choices,
             "back_url": request.META.get("HTTP_REFERER") or reverse("software_page"),
+        },
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Software publisher rollup + per-publisher detail.
+# Complements the per-title surfaces with a publisher-level view and
+# publisher-scope decisions (SoftwareDecision.publisher, migration 0079).
+# ─────────────────────────────────────────────────────────────────────
+
+
+@login_required
+def software_publishers(request: HttpRequest) -> HttpResponse:
+    """List publishers with per-publisher install/title counts and current
+    publisher-scope decision status."""
+    q_filter = (request.GET.get("q") or "").strip()
+
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+
+        params: list = []
+        extra_where = ""
+        if q_filter:
+            extra_where = "AND publisher ILIKE %s"
+            params.append(f"%{q_filter}%")
+
+        cur.execute(
+            f"""
+            SELECT COALESCE(NULLIF(publisher, ''), '(unknown)') AS publisher,
+                   COUNT(*)::int AS installations,
+                   COUNT(DISTINCT canonical_name)::int AS titles,
+                   COUNT(DISTINCT device_id)::int AS devices,
+                   COUNT(DISTINCT client_id)::int AS clients,
+                   MAX(last_observed_at) AS last_observed
+            FROM operations.software_installations_current
+            WHERE tenant_id = 1
+              AND deleted_at IS NULL
+              AND stale_since IS NULL
+              {extra_where}
+            GROUP BY 1
+            ORDER BY installations DESC, publisher
+            LIMIT 500
+            """,
+            params,
+        )
+        rollup_rows = cur.fetchall()
+
+    # Publisher-scope global decisions, keyed by lower(publisher).
+    pub_decisions = {
+        d.publisher.lower(): d
+        for d in SoftwareDecision.objects.filter(
+            tenant_id=1, client__isnull=True, device__isnull=True
+        ).exclude(publisher="")
+    }
+
+    publishers = []
+    for pub, installations, titles, devices, clients, last_observed in rollup_rows:
+        dec = pub_decisions.get(pub.lower())
+        publishers.append(
+            {
+                "publisher": pub,
+                "installations": installations,
+                "titles": titles,
+                "devices": devices,
+                "clients": clients,
+                "last_observed": last_observed,
+                "global_decision": dec.decision if dec else "",
+            }
+        )
+
+    if wants_csv(request):
+        return csv_response(
+            publishers,
+            columns=[
+                ("Publisher", "publisher"),
+                ("Installations", "installations"),
+                ("Titles", "titles"),
+                ("Devices", "devices"),
+                ("Clients", "clients"),
+                ("Last observed", "last_observed"),
+                ("Global decision", "global_decision"),
+            ],
+            filename_stem="software_publishers",
+        )
+
+    return render(
+        request,
+        "software_publishers.html",
+        {
+            "publishers": publishers,
+            "active_q": q_filter,
+            "decision_choices": SoftwareDecision.Decision.choices,
+        },
+    )
+
+
+@login_required
+def software_publisher_detail(request: HttpRequest, publisher: str) -> HttpResponse:
+    """Per-publisher detail: titles under this publisher with per-title
+    decision state, and inline publisher-scope decision action."""
+    pub = publisher.strip()
+    if not pub:
+        return redirect("software_publishers")
+
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+
+        # Preserve the display-form of the publisher.
+        cur.execute(
+            """
+            SELECT publisher FROM operations.software_installations_current
+            WHERE tenant_id = 1 AND deleted_at IS NULL AND stale_since IS NULL
+              AND LOWER(publisher) = LOWER(%s)
+            LIMIT 1
+            """,
+            [pub],
+        )
+        r = cur.fetchone()
+        if r:
+            pub = r[0] or pub
+
+        # Rollup for the header tiles.
+        cur.execute(
+            """
+            SELECT COUNT(*)::int AS installations,
+                   COUNT(DISTINCT canonical_name)::int AS titles,
+                   COUNT(DISTINCT device_id)::int AS devices,
+                   COUNT(DISTINCT client_id)::int AS clients,
+                   MIN(first_observed_at) AS first_observed,
+                   MAX(last_observed_at) AS last_observed
+            FROM operations.software_installations_current
+            WHERE tenant_id = 1 AND deleted_at IS NULL AND stale_since IS NULL
+              AND LOWER(publisher) = LOWER(%s)
+            """,
+            [pub],
+        )
+        installations, titles, devices, clients, first_observed, last_observed = (
+            cur.fetchone()
+        )
+
+        # Titles under this publisher (bounded).
+        cur.execute(
+            """
+            SELECT canonical_name,
+                   COUNT(*)::int AS installs,
+                   COUNT(DISTINCT device_id)::int AS device_count,
+                   COUNT(DISTINCT client_id)::int AS client_count,
+                   MAX(last_observed_at) AS last_observed
+            FROM operations.software_installations_current
+            WHERE tenant_id = 1 AND deleted_at IS NULL AND stale_since IS NULL
+              AND LOWER(publisher) = LOWER(%s)
+            GROUP BY canonical_name
+            ORDER BY installs DESC, canonical_name
+            LIMIT 500
+            """,
+            [pub],
+        )
+        title_rows_raw = cur.fetchall()
+
+    canonical_names = [row[0] for row in title_rows_raw]
+    title_decisions = {
+        d.canonical_name.lower(): d
+        for d in SoftwareDecision.objects.filter(
+            tenant_id=1,
+            client__isnull=True,
+            device__isnull=True,
+            canonical_name__in=canonical_names,
+        )
+    }
+    title_rows = [
+        {
+            "canonical_name": row[0],
+            "installs": row[1],
+            "devices": row[2],
+            "clients": row[3],
+            "last_observed": row[4],
+            "decision": (
+                title_decisions[row[0].lower()].decision
+                if row[0].lower() in title_decisions
+                else ""
+            ),
+        }
+        for row in title_rows_raw
+    ]
+
+    # Publisher-scope decisions (all tiers).
+    pub_decision_rows = list(
+        SoftwareDecision.objects.filter(tenant_id=1, publisher__iexact=pub)
+        .select_related("client", "device", "decided_by")
+        .order_by("-decided_at", "-id")
+    )
+    global_pub_decision = next(
+        (d for d in pub_decision_rows if d.client_id is None and d.device_id is None),
+        None,
+    )
+    client_pub_decisions = [
+        d for d in pub_decision_rows if d.client_id and not d.device_id
+    ]
+    device_pub_decisions = [d for d in pub_decision_rows if d.device_id]
+
+    return render(
+        request,
+        "software_publisher_detail.html",
+        {
+            "publisher": pub,
+            "installations": installations,
+            "title_count": titles,
+            "device_count": devices,
+            "client_count": clients,
+            "first_observed": first_observed,
+            "last_observed": last_observed,
+            "title_rows": title_rows,
+            "global_pub_decision": global_pub_decision,
+            "client_pub_decisions": client_pub_decisions,
+            "device_pub_decisions": device_pub_decisions,
+            "decision_choices": SoftwareDecision.Decision.choices,
         },
     )
 
@@ -4705,6 +4933,7 @@ def org_software_decide(request: HttpRequest, org_slug: str) -> HttpResponse:
         tenant_id=1,
         client=client,
         canonical_name=sw_name,
+        publisher="",
         defaults={
             "decision": decision,
             "decided_by": request.user,
@@ -5658,16 +5887,24 @@ def software_decisions_queue(request: HttpRequest) -> HttpResponse:
 @transaction.atomic
 def software_decision_create(request: HttpRequest) -> HttpResponse:
     """Create or update a SoftwareDecision at the requested scope
-    (global / per-client / per-device). Audited."""
+    (global / per-client / per-device). Match key is either a
+    canonical_name (title-scope) or a publisher (publisher-scope, applies
+    to every title from that publisher). Audited."""
     canonical_name = (request.POST.get("canonical_name") or "").strip()
+    publisher = (request.POST.get("publisher") or "").strip()
     decision = (request.POST.get("decision") or "").strip()
     scope = request.POST.get("scope") or "global"
     client_slug = request.POST.get("client_slug") or ""
     device_id_str = request.POST.get("device_id") or ""
     reason = (request.POST.get("reason") or "").strip()
 
-    if not canonical_name or decision not in dict(SoftwareDecision.Decision.choices):
-        messages.error(request, "canonical_name and a valid decision are required.")
+    if decision not in dict(SoftwareDecision.Decision.choices):
+        messages.error(request, "A valid decision is required.")
+        return redirect("software_decisions_queue")
+    if bool(canonical_name) == bool(publisher):
+        messages.error(
+            request, "Provide exactly one of canonical_name or publisher."
+        )
         return redirect("software_decisions_queue")
 
     client = None
@@ -5682,6 +5919,7 @@ def software_decision_create(request: HttpRequest) -> HttpResponse:
     obj, created = SoftwareDecision.objects.update_or_create(
         tenant_id=1,
         canonical_name=canonical_name,
+        publisher=publisher,
         client=client,
         device=device,
         defaults={
@@ -5691,6 +5929,7 @@ def software_decision_create(request: HttpRequest) -> HttpResponse:
             "decided_at": timezone.now(),
         },
     )
+    match_key = canonical_name or f"publisher:{publisher}"
     _audit(
         request,
         "software_decision.set",
@@ -5698,6 +5937,7 @@ def software_decision_create(request: HttpRequest) -> HttpResponse:
         {},
         {
             "canonical_name": canonical_name,
+            "publisher": publisher,
             "scope": scope,
             "client_id": str(client.id) if client else None,
             "device_id": str(device.id) if device else None,
@@ -5706,7 +5946,7 @@ def software_decision_create(request: HttpRequest) -> HttpResponse:
     )
     messages.success(
         request,
-        f"{decision} recorded for {canonical_name} ({scope})."
+        f"{decision} recorded for {match_key} ({scope})."
         + (" Created." if created else " Updated."),
     )
     next_url = request.POST.get("next") or ""

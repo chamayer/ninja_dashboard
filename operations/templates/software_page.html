@@ -98,6 +98,11 @@
         <div class="sw-value">{{ approved_titles }}</div>
         <div class="sw-sub">approved · {{ rejected_titles }} rejected</div>
     </a>
+    <a class="sw-tile" href="{% url 'software_publishers' %}">
+        <div class="sw-label">Publishers</div>
+        <div class="sw-value">→</div>
+        <div class="sw-sub">rollup + publisher-scope decisions</div>
+    </a>
     <a class="sw-tile {% if software_issues %}has-open{% endif %}" href="{% url 'findings_queue' %}?category=software">
         <div class="sw-label">Open items</div>
         <div class="sw-value">{{ software_issues }}</div>
@@ -172,7 +177,11 @@
                         <strong>{{ t.canonical_name }}</strong>
                     </a>
                 </td>
-                <td class="muted">{{ t.publisher|default:"—" }}</td>
+                <td class="muted">
+                    {% if t.publisher %}
+                        <a href="{% url 'software_publisher_detail' publisher=t.publisher %}">{{ t.publisher }}</a>
+                    {% else %}—{% endif %}
+                </td>
                 <td style="text-align:right;">{{ t.device_count }}</td>
                 <td style="text-align:right;">{{ t.client_count }}</td>
                 <td class="muted">

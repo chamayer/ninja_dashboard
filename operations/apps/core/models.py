@@ -1181,7 +1181,11 @@ class SoftwareDecision(UUIDTenantScopedModel):
         null=True, blank=True,
         related_name="software_decisions",
     )
-    canonical_name = models.CharField(max_length=255)
+    # Match key — exactly one of these is set on any row (enforced by
+    # check constraint below). canonical_name binds a decision to a single
+    # title; publisher binds it to every title from that publisher.
+    canonical_name = models.CharField(max_length=255, blank=True, default="")
+    publisher = models.CharField(max_length=255, blank=True, default="")
     decision = models.CharField(max_length=32, choices=Decision.choices)
     reason = models.TextField(blank=True)
     decided_by = models.ForeignKey(
@@ -1200,18 +1204,42 @@ class SoftwareDecision(UUIDTenantScopedModel):
             # three partial constraints keyed by the scope shape.
             models.UniqueConstraint(
                 fields=("tenant", "canonical_name"),
-                condition=Q(client__isnull=True) & Q(device__isnull=True),
+                condition=Q(client__isnull=True) & Q(device__isnull=True) & ~Q(canonical_name=""),
                 name="uq_software_decisions_global",
             ),
             models.UniqueConstraint(
                 fields=("tenant", "client", "canonical_name"),
-                condition=Q(client__isnull=False) & Q(device__isnull=True),
+                condition=Q(client__isnull=False) & Q(device__isnull=True) & ~Q(canonical_name=""),
                 name="uq_software_decisions_client",
             ),
             models.UniqueConstraint(
                 fields=("tenant", "device", "canonical_name"),
-                condition=Q(device__isnull=False),
+                condition=Q(device__isnull=False) & ~Q(canonical_name=""),
                 name="uq_software_decisions_device",
+            ),
+            # Same shape for publisher-scoped decisions.
+            models.UniqueConstraint(
+                fields=("tenant", "publisher"),
+                condition=Q(client__isnull=True) & Q(device__isnull=True) & ~Q(publisher=""),
+                name="uq_software_decisions_pub_global",
+            ),
+            models.UniqueConstraint(
+                fields=("tenant", "client", "publisher"),
+                condition=Q(client__isnull=False) & Q(device__isnull=True) & ~Q(publisher=""),
+                name="uq_software_decisions_pub_client",
+            ),
+            models.UniqueConstraint(
+                fields=("tenant", "device", "publisher"),
+                condition=Q(device__isnull=False) & ~Q(publisher=""),
+                name="uq_software_decisions_pub_device",
+            ),
+            # Exactly one of (canonical_name, publisher) is set.
+            models.CheckConstraint(
+                condition=(
+                    (Q(canonical_name="") & ~Q(publisher=""))
+                    | (~Q(canonical_name="") & Q(publisher=""))
+                ),
+                name="ck_software_decisions_scope_key_xor",
             ),
         )
 

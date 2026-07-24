@@ -69,13 +69,23 @@ were a misreading and have been struck.
         JS in `base.html`, no per-page work needed.
   - [x] Functional index (migration 0078) so case-insensitive canonical
         lookups don't seq-scan software_installations_current.
-- [ ] Batch 2 — Publisher rollup + admin surface.
-  - [ ] `/software/publishers/` list: publisher, distinct titles,
-        distinct devices, decision status (approved-publisher / mixed /
-        undecided).
-  - [ ] `/software/publishers/<publisher>/` detail: titles under this
-        publisher with per-title decision state; publisher-level decision
-        button.
+- [x] Batch 2 — Publisher rollup + admin surface (0.84.0).
+  - [x] Migration 0079: adds `publisher` to `SoftwareDecision`, makes
+        `canonical_name` blank-able, XOR check constraint enforcing
+        exactly one of the two, six partial unique constraints.
+  - [x] `_load_decisions` / `_resolve_decision` in
+        `ingest/software_findings.py` now honour publisher-scope tiers
+        (title-scope wins; publisher-scope is fallback).
+  - [x] `/software/publishers/` list + `/software/publishers/<pub>/`
+        detail with row-level publisher-scope decisions and title
+        clickthrough.
+  - [x] `software_decision_create` accepts `publisher` and enforces the
+        XOR at the form level.
+  - [x] Fleet page `?decision=` filter now considers publisher-scope
+        approvals/rejections/pending.
+  - [x] Nav: fleet page has a Publishers tile; per-title publisher list
+        links to publisher detail; per-publisher title list links to
+        title detail.
 - [ ] Batch 3 — Whitelist Suggestions.
   - [ ] New FindingType `whitelist_suggestion` (installs ≥ threshold on
         unclassified titles). Threshold in `EvaluatorConfig`.
@@ -122,7 +132,8 @@ were a misreading and have been struck.
 
 ## Next action
 
-- Open Batch 2 — publisher rollup + publisher-level decision surface.
-  Requires: `/software/publishers/` list view, `/software/publishers/<name>/`
-  detail, and inline `APPROVE_PUBLISHER` action. Aligns with the existing
-  decision model, no schema change expected.
+- Open Batch 3 — Whitelist Suggestions. New `whitelist_suggestion`
+  FindingType emitted by the software findings evaluator for titles that
+  are (a) undecided at every scope, (b) uncategorised, (c) installed on
+  ≥ N devices. Threshold in `EvaluatorConfig`. Chip on the findings
+  queue + drill-through to `software_detail`.

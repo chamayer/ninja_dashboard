@@ -2,6 +2,36 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.84.0] — 2026-07-24 — Software publisher rollup + publisher-scope decisions
+
+### Added
+- **`/software/publishers/` list.** One row per observed publisher with
+  installations, distinct titles, distinct devices, distinct clients,
+  last observed, current global publisher-scope decision, and an inline
+  Approve/Reject/Investigate/Approve-publisher form.
+- **`/software/publishers/<publisher>/` detail.** Summary tiles, a
+  publisher-scope decision form, the full title list from that publisher
+  with per-title decision state and inline title-scope decision actions,
+  and publisher-scope decision history at client/device tiers.
+- **Publishers tile on `/software/`** and clickable publisher cells on the
+  fleet titles table and on the per-title detail page.
+
+### Changed
+- **`SoftwareDecision.publisher` field** (migration `0079`). Decisions now
+  bind to either a canonical_name (title-scope) or a publisher
+  (publisher-scope, applies to every title from that publisher including
+  titles first observed after the decision). A `CheckConstraint` enforces
+  exactly one of the two match keys is set.
+- **Classifier decision resolver** (`ingest/software_findings.py`) now
+  honours publisher-scope tiers: title-scope wins (device > client >
+  global), publisher-scope is the fallback (device > client > global).
+  Publisher-approving no longer requires per-title decisions to actually
+  suppress findings across the publisher's catalogue.
+- **Fleet page `?decision=` filter** now considers publisher-scope
+  approvals/rejections/pending when computing the title's disposition.
+- **`software_decision_create`** accepts a `publisher` POST param and
+  enforces the XOR at the form level.
+
 ## [0.83.0] — 2026-07-24 — Software title detail + row-level decisions
 
 ### Added
