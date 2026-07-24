@@ -2,6 +2,16 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.82.2] — 2026-07-24 — Grant SELECT on `device_patch_activity`
+
+### Fixed
+- **`/patching/` returned HTTP 500 after 0.82.1 deploy** because migration
+  070 created `ninja_patches.device_patch_activity` without the `GRANT SELECT`
+  statements the sibling matviews carry (`operations_app`,
+  `operations_readonly`, `metabase_ro`). Migration `071` grants those roles
+  the same read access they already have on `device_patch_signal`,
+  `current_patch_state`, and `latest_install_outcome`.
+
 ## [0.82.1] — 2026-07-24 — Patching page perf: matview-backed posture rollup
 
 ### Fixed

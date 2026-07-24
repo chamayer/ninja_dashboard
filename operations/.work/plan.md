@@ -80,5 +80,8 @@ per-client posture rollups into a single query.
 
 ## Next action
 
-- Commit as a scoped release (VERSION 0.82.1), push to `origin` first
-  (Portainer redeploys), then to the `a-m-rose` mirror.
+- 0.82.1 shipped as commit `ed20b64` but hit HTTP 500 in production because
+  migration 070 omitted the `GRANT SELECT` statements the sibling matviews
+  carry. Follow-up migration `071_device_patch_activity_grants.sql` restores
+  read access to `operations_app`, `operations_readonly`, `metabase_ro`;
+  released as 0.82.2.
