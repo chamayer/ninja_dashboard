@@ -2,6 +2,38 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.89.0] — 2026-07-24 — Intel connectors: NVD + CPE + KEV + EPSS + matcher (Batch B)
+
+### Added
+- **NVD v2 delta ingest** (`ingest/intel/nvd.py`) — paginated
+  `lastModStartDate` cursor, 120-day first-run lookback, 40-page safety
+  cap, 429-aware backoff, rate-limited to the free-tier ceiling
+  depending on whether an API key is present.
+- **NIST CPE 2.3 dictionary ingest** (`ingest/intel/cpe_dict.py`) —
+  same paginated shape, populates `intel.cpes` with lowered
+  vendor/product/version tokens for the matcher.
+- **CISA KEV ingest** (`ingest/intel/cisa_kev.py`) — single JSON pull,
+  upserts `kev_flag / kev_added_at / kev_notes` on every catalogued
+  CVE and clears the flag on rows CISA removed from the list.
+- **FIRST.org EPSS ingest** (`ingest/intel/epss.py`) — daily gzipped
+  CSV, only updates CVEs already present in `intel.cves` so the
+  update set stays bounded.
+- **Conservative day-one matcher** (`ingest/intel/matcher.py`) —
+  normalises canonical software names to alphanum tokens, exact-matches
+  against CPE `product`, then joins to CVEs via `affected_cpes ?|`.
+  Marks every hit `confidence='high', match_kind='cpe_exact'`.
+- **APScheduler wiring** — five new cycles under the `INTEL_ENABLED`
+  master flag with per-connector on/off flags and independent cadences.
+  Each cycle is single-instance so a slow run doesn't stack.
+
+### Notes
+- All new external calls are behind `INTEL_ENABLED`, which defaults to
+  `false`. Set it once the six free keys are in the deploy env and the
+  operator wants to start pulling.
+- Every connector wraps its run in `record_run`, so
+  `operations.intel_ingest_status` shows the last outcome, error, and
+  rows touched per source — nothing hidden.
+
 ## [0.88.0] — 2026-07-24 — Software safety intel: schema + ADR (Batch A)
 
 ### Added

@@ -292,6 +292,51 @@ def run_platform_evaluate_once() -> None:
         log.exception("Platform evaluate failed")
 
 
+def run_intel_nvd_once() -> None:
+    try:
+        from ingest.intel import nvd
+        rows = nvd.run_once()
+        log.info("Intel NVD complete: rows=%d", rows)
+    except Exception:
+        log.exception("Intel NVD failed")
+
+
+def run_intel_cpe_dict_once() -> None:
+    try:
+        from ingest.intel import cpe_dict
+        rows = cpe_dict.run_once()
+        log.info("Intel CPE dict complete: rows=%d", rows)
+    except Exception:
+        log.exception("Intel CPE dict failed")
+
+
+def run_intel_kev_once() -> None:
+    try:
+        from ingest.intel import cisa_kev
+        rows = cisa_kev.run_once()
+        log.info("Intel CISA KEV complete: rows=%d", rows)
+    except Exception:
+        log.exception("Intel CISA KEV failed")
+
+
+def run_intel_epss_once() -> None:
+    try:
+        from ingest.intel import epss
+        rows = epss.run_once()
+        log.info("Intel EPSS complete: rows=%d", rows)
+    except Exception:
+        log.exception("Intel EPSS failed")
+
+
+def run_intel_matcher_once() -> None:
+    try:
+        from ingest.intel import matcher
+        rows = matcher.run_once()
+        log.info("Intel matcher complete: rows=%d", rows)
+    except Exception:
+        log.exception("Intel matcher failed")
+
+
 def run_notifications_dispatch_once() -> None:
     try:
         sent = notify_dispatch(tenant_id=1)
@@ -2096,6 +2141,42 @@ def main() -> None:
             "interval",
             minutes=settings.SOFTWARE_QUEUE_POLL_MINUTES,
             id="software_queue_drain_cycle",
+            max_instances=1,
+        )
+    if settings.INTEL_ENABLED:
+        scheduler.add_job(
+            run_intel_nvd_once,
+            "interval",
+            hours=settings.INTEL_NVD_SCHEDULE_HOURS,
+            id="intel_nvd_cycle",
+            max_instances=1,
+        )
+        scheduler.add_job(
+            run_intel_cpe_dict_once,
+            "interval",
+            hours=settings.INTEL_CATALOG_SCHEDULE_HOURS,
+            id="intel_cpe_dict_cycle",
+            max_instances=1,
+        )
+        scheduler.add_job(
+            run_intel_kev_once,
+            "interval",
+            hours=settings.INTEL_KEV_SCHEDULE_HOURS,
+            id="intel_kev_cycle",
+            max_instances=1,
+        )
+        scheduler.add_job(
+            run_intel_epss_once,
+            "interval",
+            hours=settings.INTEL_EPSS_SCHEDULE_HOURS,
+            id="intel_epss_cycle",
+            max_instances=1,
+        )
+        scheduler.add_job(
+            run_intel_matcher_once,
+            "interval",
+            hours=settings.INTEL_MATCHER_SCHEDULE_HOURS,
+            id="intel_matcher_cycle",
             max_instances=1,
         )
     scheduler.start()
