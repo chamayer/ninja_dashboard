@@ -103,6 +103,11 @@
         <div class="sw-value">→</div>
         <div class="sw-sub">rollup + publisher-scope decisions</div>
     </a>
+    <a class="sw-tile" href="{% url 'software_tech_checklist' %}">
+        <div class="sw-label">Tech checklist</div>
+        <div class="sw-value">→</div>
+        <div class="sw-sub">per-device cleanup queue</div>
+    </a>
     <a class="sw-tile {% if software_issues %}has-open{% endif %}" href="{% url 'findings_queue' %}?category=software">
         <div class="sw-label">Open items</div>
         <div class="sw-value">{{ software_issues }}</div>

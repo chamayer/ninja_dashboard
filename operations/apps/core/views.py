@@ -3295,6 +3295,189 @@ def software_publisher_detail(request: HttpRequest, publisher: str) -> HttpRespo
 
 
 # ─────────────────────────────────────────────────────────────────────
+# Tech Checklist — per-device curated cleanup list combining active
+# software findings and reject/investigate decisions (title- or publisher-
+# scope). Answers "what should the tech clean up on this device?"
+# Optional ?client=<slug> filter for a per-client view.
+# ─────────────────────────────────────────────────────────────────────
+
+
+@login_required
+def software_tech_checklist(request: HttpRequest) -> HttpResponse:
+    client_slugs = [s for s in request.GET.getlist("client") if s]
+    filtered_client_ids: list[str] = []
+    if client_slugs:
+        filtered_client_ids = [
+            str(cid)
+            for cid in Client.objects.filter(
+                tenant_id=1, slug__in=client_slugs, deleted_at__isnull=True
+            ).values_list("id", flat=True)
+        ]
+
+    client_where = ""
+    client_params: list = []
+    if filtered_client_ids:
+        client_where = "AND d.client_id = ANY(%s::uuid[])"
+        client_params.append(filtered_client_ids)
+    elif client_slugs:
+        client_where = "AND FALSE"
+
+    findings_sql = f"""
+        SELECT d.client_id, c.slug, c.display_name,
+               d.id AS device_id, d.canonical_hostname,
+               d.device_role, d.os_group,
+               f.finding_details->>'canonical_name' AS canonical_name,
+               f.finding_details->>'publisher'      AS publisher,
+               f.finding_details->>'reason'         AS reason,
+               ft.name AS finding_type,
+               f.severity
+        FROM operations.findings f
+        JOIN operations.finding_types ft ON ft.id = f.finding_type_id
+        JOIN operations.finding_categories fc ON fc.id = ft.category_id
+        JOIN operations.devices d ON d.id = f.subject_id AND d.deleted_at IS NULL
+        JOIN operations.clients c ON c.id = d.client_id AND c.deleted_at IS NULL
+        WHERE f.tenant_id = 1
+          AND f.status IN ('open', 'acknowledged')
+          AND fc.name = 'software'
+          AND ft.name <> 'whitelist_suggestion'
+          AND f.subject_type = 'device'
+          {client_where}
+    """
+
+    # Reject / investigate decisions that hit an active install on the
+    # device (title-scope or publisher-scope). These may not have a
+    # classifier finding (e.g. reject-only) but still belong on the
+    # cleanup list.
+    decisions_sql = f"""
+        SELECT d.client_id, c.slug, c.display_name,
+               d.id AS device_id, d.canonical_hostname,
+               d.device_role, d.os_group,
+               sic.canonical_name,
+               sic.publisher,
+               CASE sd.decision
+                   WHEN 'reject' THEN 'operator rejected'
+                   WHEN 'investigate' THEN 'operator flagged for investigation'
+                   ELSE 'operator decision'
+               END AS reason,
+               ('decision_' || sd.decision) AS finding_type,
+               'medium' AS severity
+        FROM operations.software_installations_current sic
+        JOIN operations.devices d ON d.id = sic.device_id AND d.deleted_at IS NULL
+        JOIN operations.clients c ON c.id = d.client_id AND c.deleted_at IS NULL
+        JOIN operations.software_decisions sd
+          ON sd.tenant_id = sic.tenant_id
+         AND sd.decision IN ('reject', 'investigate')
+         AND (
+              (sd.canonical_name <> '' AND sd.canonical_name = sic.canonical_name)
+           OR (sd.publisher <> ''
+               AND LOWER(sd.publisher) = LOWER(COALESCE(sic.publisher, '')))
+         )
+         AND (sd.device_id IS NULL OR sd.device_id = sic.device_id)
+         AND (sd.client_id IS NULL OR sd.client_id = sic.client_id)
+        WHERE sic.tenant_id = 1
+          AND sic.deleted_at IS NULL
+          AND sic.stale_since IS NULL
+          {client_where}
+    """
+
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        cur.execute(findings_sql, client_params)
+        finding_rows = cur.fetchall()
+        cur.execute(decisions_sql, client_params)
+        decision_rows = cur.fetchall()
+
+    per_device: dict = {}
+    for row in list(finding_rows) + list(decision_rows):
+        (
+            client_id, slug, client_name, device_id, hostname,
+            device_role, os_group, canonical, publisher, reason,
+            finding_type, severity,
+        ) = row
+        entry = per_device.setdefault(
+            device_id,
+            {
+                "device_id": device_id,
+                "client_slug": slug,
+                "client_name": client_name,
+                "hostname": hostname,
+                "device_role": device_role,
+                "os_group": os_group,
+                "items": [],
+                "item_keys": set(),
+            },
+        )
+        item_key = (finding_type, (canonical or "").lower())
+        if item_key in entry["item_keys"]:
+            continue
+        entry["item_keys"].add(item_key)
+        entry["items"].append(
+            {
+                "canonical_name": canonical or "",
+                "publisher": publisher or "",
+                "reason": reason or "",
+                "finding_type": finding_type,
+                "severity": severity,
+            }
+        )
+
+    devices = []
+    for entry in per_device.values():
+        entry.pop("item_keys", None)
+        entry["item_count"] = len(entry["items"])
+        entry["items"].sort(key=lambda i: (i["finding_type"], i["canonical_name"]))
+        devices.append(entry)
+    devices.sort(
+        key=lambda e: (-e["item_count"], e["client_name"], e["hostname"] or "")
+    )
+
+    clients = Client.objects.filter(
+        tenant_id=1, deleted_at__isnull=True
+    ).order_by("display_name")
+
+    if wants_csv(request):
+        flat_rows: list[dict] = []
+        for entry in devices:
+            for item in entry["items"]:
+                flat_rows.append(
+                    {
+                        "client": entry["client_name"],
+                        "hostname": entry["hostname"],
+                        "canonical_name": item["canonical_name"],
+                        "publisher": item["publisher"],
+                        "finding_type": item["finding_type"],
+                        "reason": item["reason"],
+                        "severity": item["severity"],
+                    }
+                )
+        return csv_response(
+            flat_rows,
+            columns=[
+                ("Client", "client"),
+                ("Device", "hostname"),
+                ("Title", "canonical_name"),
+                ("Publisher", "publisher"),
+                ("Reason kind", "finding_type"),
+                ("Reason", "reason"),
+                ("Severity", "severity"),
+            ],
+            filename_stem="tech_checklist",
+        )
+
+    return render(
+        request,
+        "software_tech_checklist.html",
+        {
+            "devices": devices[:500],
+            "device_count": len(devices),
+            "total_items": sum(e["item_count"] for e in devices),
+            "clients": clients,
+            "active_clients": client_slugs,
+        },
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────
 # Devices fleet page — entity-first browse across every client.
 # Parallels /software/ and /patching/ — overview cards + filter chips
 # + main table. Per-client /orgs/<slug>/devices/ stays as-is for the

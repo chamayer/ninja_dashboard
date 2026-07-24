@@ -2,6 +2,19 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.86.0] — 2026-07-24 — Software Tech Checklist
+
+### Added
+- **`/software/tech-checklist/`** — per-device curated cleanup queue,
+  the operator-facing analog of the legacy analyzer's "Tech Checklist"
+  sheet. Combines active software findings (all software finding types
+  except `whitelist_suggestion`) with installations that hit a
+  reject/investigate decision at title-scope or publisher-scope. One
+  card per device with client / role / OS metadata, a per-item reason
+  line, and a link straight to the device detail. Multi-client filter,
+  CSV export, top-500 cap.
+- **Tech Checklist tile on `/software/`** links to the new page.
+
 ## [0.85.0] — 2026-07-24 — Whitelist Suggestions
 
 ### Added

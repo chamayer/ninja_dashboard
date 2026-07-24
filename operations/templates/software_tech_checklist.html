@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% load human_labels %}
+
+{% block title %}Tech Checklist{% endblock %}
+
+{% block content %}
+<style>
+    .tc-header { padding: 1rem 1.2rem; background: var(--surface);
+                 border: 1px solid var(--border); border-radius: 6px;
+                 margin-bottom: 0.6rem; }
+    .tc-tiles { display: grid; gap: 0.65rem;
+                grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+                margin-bottom: 0.9rem; }
+    .tc-tile { background: var(--surface); border: 1px solid var(--border);
+               border-radius: 6px; padding: 0.75rem 0.9rem; }
+    .tc-tile .label { color: var(--muted); font-size: 0.75rem;
+                      text-transform: uppercase; letter-spacing: 0.04em; }
+    .tc-tile .value { font-size: 1.35rem; font-weight: 600; margin-top: 0.2rem; }
+    .tc-card { background: var(--surface); border: 1px solid var(--border);
+               border-radius: 6px; padding: 0.9rem 1.1rem; margin-bottom: 0.5rem; }
+    .tc-card h3 { margin: 0 0 0.4rem; font-size: 0.95rem; display: flex;
+                  align-items: center; gap: 0.6rem; }
+    .tc-card h3 .count { font-size: 0.75rem; padding: 0.15rem 0.55rem;
+                         background: #fee2e2; color: #991b1b; border-radius: 999px; }
+    .tc-item { display: grid; gap: 0.5rem;
+               grid-template-columns: 2fr 1fr 1fr 1fr;
+               align-items: baseline; padding: 0.35rem 0;
+               border-bottom: 1px dashed var(--border); font-size: 0.86rem; }
+    .tc-item .kind { font-size: 0.75rem; color: var(--muted); }
+    .tc-item .publisher { color: var(--muted); font-size: 0.82rem; }
+    .tc-item .reason { color: var(--muted); font-size: 0.82rem; }
+</style>
+
+<div class="tc-header">
+    <div style="font-size:0.8rem; color:var(--muted); margin-bottom:0.4rem;">
+        <a href="{% url 'software_page' %}">Software</a> › Tech Checklist
+    </div>
+    <h1 style="margin:0;">Tech Checklist</h1>
+    <p class="muted" style="margin-top:0.35rem;">
+        Per-device software cleanup queue. Combines active classifier
+        findings (suspicious names, unauthorized products, EOL runtimes,
+        etc.) with installations flagged by operator reject/investigate
+        decisions — the actionable list a technician can work through.
+    </p>
+</div>
+
+<div class="tc-tiles">
+    <div class="tc-tile"><div class="label">Devices with items</div><div class="value">{{ device_count }}</div></div>
+    <div class="tc-tile"><div class="label">Total items</div><div class="value">{{ total_items }}</div></div>
+</div>
+
+<div class="card">
+    <form action="" method="get" style="display:flex; gap:0.8rem; align-items:end;">
+        <div>
+            <label style="display:block; font-size:0.78rem; color:var(--muted);">Clients</label>
+            <select name="client" multiple size="1" style="min-width:220px; padding:0.4rem;">
+                {% for c in clients %}
+                    <option value="{{ c.slug }}" {% if c.slug in active_clients %}selected{% endif %}>{{ c.display_name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div><button type="submit">Apply</button></div>
+        {% if active_clients %}
+        <div><a href="?" style="font-size:0.85rem;">Clear</a></div>
+        {% endif %}
+        <div style="margin-left:auto;">
+            {% include "_csv_download.html" %}
+        </div>
+    </form>
+</div>
+
+{% if devices %}
+{% for d in devices %}
+<div class="tc-card">
+    <h3>
+        <a href="{% url 'device_detail' org_slug=d.client_slug device_id=d.device_id %}">{{ d.hostname }}</a>
+        <span class="muted" style="font-weight:400;">· {{ d.client_name }} · {{ d.device_role|humanize_label|default:d.device_role }} · {{ d.os_group|humanize_label|default:d.os_group }}</span>
+        <span class="count">{{ d.item_count }}</span>
+    </h3>
+    {% for i in d.items %}
+    <div class="tc-item">
+        <div>
+            <a href="{% url 'software_detail' name=i.canonical_name %}">
+                <strong>{{ i.canonical_name }}</strong>
+            </a>
+            {% if i.publisher %}
+                <div class="publisher">{{ i.publisher }}</div>
+            {% endif %}
+        </div>
+        <div class="kind">{{ i.finding_type|humanize_label|default:i.finding_type }}</div>
+        <div class="reason">{{ i.reason|default:"—" }}</div>
+        <div style="text-align:right;">
+            <a href="{% url 'device_detail' org_slug=d.client_slug device_id=d.device_id %}?tab=software" style="font-size:0.82rem;">Open device →</a>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% endfor %}
+{% if device_count > 500 %}
+<p class="muted">Showing first 500 devices (of {{ device_count }}). Filter by client to narrow.</p>
+{% endif %}
+{% else %}
+<p class="muted">Nothing on the checklist for the current filter.</p>
+{% endif %}
+{% endblock %}

@@ -98,10 +98,14 @@ were a misreading and have been struck.
   - [x] Separate tile on `/software/` (deduped by canonical_name) —
         distinct from the "flagged installations" tile so suggestions
         don't inflate the problem count.
-- [ ] Batch 4 — Tech Checklist.
-  - [ ] Per-device curated cleanup list (rejected + investigate +
-        suspicious-rule matches on the device's install set) as an
-        Operations report / view.
+- [x] Batch 4 — Tech Checklist (0.86.0).
+  - [x] `/software/tech-checklist/` — per-device cleanup queue combining
+        active software findings (excluding `whitelist_suggestion`) with
+        installations that hit a title- or publisher-scope reject/
+        investigate decision. Multi-client filter, CSV export, top-500
+        cap with total counter.
+  - [x] Tile on `/software/`; each row links to the device detail
+        (Software tab).
 - [ ] Batch 5 — User-risk join.
   - [ ] Correlate `Device.last_user` (or the merged ClientUser link) with
         `software_installations_current` and surface a per-user risk view.
@@ -140,6 +144,8 @@ were a misreading and have been struck.
 
 ## Next action
 
-- Open Batch 4 — Tech Checklist. Per-device curated cleanup list:
-  reject/investigate decisions + suspicious-rule matches present on the
-  device's current install set, surfaced as an Operations report.
+- Open Batch 5 — User-risk join. Correlate device `last_user` with
+  installations to surface per-user risk (which users have suspicious /
+  rejected / investigate software on the device they last logged into).
+  ClientUser + ClientUserLink models already exist; only the join view +
+  UI need building.
