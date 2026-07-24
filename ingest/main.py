@@ -355,6 +355,24 @@ def run_intel_chocolatey_once() -> None:
         log.exception("Intel Chocolatey failed")
 
 
+def run_intel_otx_once() -> None:
+    try:
+        from ingest.intel import otx
+        rows = otx.run_once()
+        log.info("Intel OTX complete: rows=%d", rows)
+    except Exception:
+        log.exception("Intel OTX failed")
+
+
+def run_intel_abusech_once() -> None:
+    try:
+        from ingest.intel import abusech
+        rows = abusech.run_once()
+        log.info("Intel abuse.ch complete: rows=%d", rows)
+    except Exception:
+        log.exception("Intel abuse.ch failed")
+
+
 def run_notifications_dispatch_once() -> None:
     try:
         sent = notify_dispatch(tenant_id=1)
@@ -2209,6 +2227,20 @@ def main() -> None:
             "interval",
             hours=settings.INTEL_CATALOG_SCHEDULE_HOURS,
             id="intel_chocolatey_cycle",
+            max_instances=1,
+        )
+        scheduler.add_job(
+            run_intel_otx_once,
+            "interval",
+            hours=settings.INTEL_OSINT_SCHEDULE_HOURS,
+            id="intel_otx_cycle",
+            max_instances=1,
+        )
+        scheduler.add_job(
+            run_intel_abusech_once,
+            "interval",
+            hours=settings.INTEL_OSINT_SCHEDULE_HOURS,
+            id="intel_abusech_cycle",
             max_instances=1,
         )
     scheduler.start()

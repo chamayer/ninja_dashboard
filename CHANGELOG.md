@@ -2,6 +2,19 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.91.0] — 2026-07-24 — Intel OSINT: OTX + abuse.ch (Batch D)
+
+### Added
+- **AlienVault OTX ingest** (`ingest/intel/otx.py`) — pulls recently
+  modified subscribed pulses, matches indicators + tags against
+  canonical software names and publishers we track. Signals stored at
+  `severity='low'` (community-curated, noisy).
+- **abuse.ch MalwareBazaar + ThreatFox ingest** (`ingest/intel/abusech.py`) —
+  pulls the recent dump files per abuse.ch's fair-use guidance (single
+  HTTPS GET each, no per-hash API loops). Matches on publisher
+  signature and filename tokens; signals stored at `severity='medium'`.
+- **Two new APScheduler cycles** on `INTEL_OSINT_SCHEDULE_HOURS`.
+
 ## [0.90.0] — 2026-07-24 — Intel catalogue enrichment: Winget + Chocolatey (Batch C)
 
 ### Added
