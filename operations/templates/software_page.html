@@ -41,6 +41,13 @@
     display: inline-block; padding: 1px 0.55rem; border-radius: 12px;
     font-size: 0.72rem; font-weight: 600;
   }
+  .safety-pill { display:inline-block; padding:0.15rem 0.55rem; border-radius:999px;
+                 font-size:0.75rem; font-weight:500; }
+  .safety-pill.high   { background:#fee2e2; color:#991b1b; }
+  .safety-pill.medium { background:#fef3c7; color:#92400e; }
+  .safety-pill.low    { background:#dbeafe; color:#1e3a8a; }
+  .safety-pill.clean  { background:#dcfce7; color:#14532d; }
+  .safety-pill.none   { background:#f3f4f6; color:#6b7280; }
   .decision-pill.approve, .decision-pill.approve_publisher {
     background: #dcfce7; color: #166534;
   }
@@ -124,6 +131,11 @@
         <div class="sw-value">{{ whitelist_suggestions }}</div>
         <div class="sw-sub">titles ≥ threshold, undecided, uncategorised</div>
     </a>
+    <a class="sw-tile {% if high_risk_titles %}has-open{% endif %}" href="?safety=high">
+        <div class="sw-label">Safety — high band</div>
+        <div class="sw-value">{{ high_risk_titles }}</div>
+        <div class="sw-sub">KEV, CVSS ≥ 7, or high OSINT hit</div>
+    </a>
 </div>
 
 {# ── Category chip strip ────────────────────────────────── #}
@@ -181,6 +193,7 @@
                 <th style="text-align:right;">Clients</th>
                 <th>Category</th>
                 <th>Decision</th>
+                <th>Safety</th>
                 <th class="num">Latest install</th>
                 <th style="text-align:right;">Decide (global)</th>
             </tr>
@@ -214,6 +227,15 @@
                         <span class="decision-pill {{ t.decision }}">{{ t.decision|humanize_label|default:t.decision }}</span>
                     {% else %}
                         <span class="decision-pill none">no decision</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if t.safety_band %}
+                        <span class="safety-pill {{ t.safety_band }}" title="score {{ t.safety_score }} · {{ t.safety_cve_count }} CVE, {{ t.safety_kev_count }} KEV, {{ t.safety_osint_hits }} OSINT">
+                            {{ t.safety_band }} · {{ t.safety_score }}
+                        </span>
+                    {% else %}
+                        <span class="safety-pill none">—</span>
                     {% endif %}
                 </td>
                 <td class="muted num">{{ t.last_install|date:"Y-m-d"|default:"—" }}</td>

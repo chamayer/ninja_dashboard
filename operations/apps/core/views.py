@@ -2600,6 +2600,7 @@ def software_page(request: HttpRequest) -> HttpResponse:
     q_filter = (request.GET.get("q") or "").strip()
     decision_filter = request.GET.get("decision", "")  # approved|rejected|pending|any
     category_filter = request.GET.get("category", "")  # av|rmm|remote_access|...|uncategorized
+    safety_filter = request.GET.get("safety", "")      # high|medium|low|clean
 
     with transaction.atomic(), connection.cursor() as cur:
         cur.execute("SET LOCAL operations.tenant_id = 1")
@@ -2688,6 +2689,14 @@ def software_page(request: HttpRequest) -> HttpResponse:
                 "        OR (sd.publisher <> '' "
                 "            AND LOWER(sd.publisher) = LOWER(COALESCE(sic.publisher, '')))))"
             )
+        if safety_filter in ("high", "medium", "low", "clean"):
+            where_clauses.append(
+                "EXISTS (SELECT 1 FROM operations.v_software_safety vs "
+                " WHERE vs.tenant_id = sic.tenant_id "
+                "   AND vs.canonical_name = sic.canonical_name "
+                "   AND vs.safety_band = %s)"
+            )
+            params.append(safety_filter)
 
         where_sql = " AND ".join(where_clauses)
         cur.execute(
@@ -2752,6 +2761,38 @@ def software_page(request: HttpRequest) -> HttpResponse:
         unique_titles = software_rows[0][8]
         title_rows = [row[:7] for row in software_rows if row[0] is not None]
 
+        # Composite safety score for each shown title. One indexed lookup
+        # per title against the v_software_safety view.
+        canonical_names = [row[0] for row in title_rows]
+        safety_by_title: dict[str, dict] = {}
+        high_risk_titles = 0
+        if canonical_names:
+            cur.execute(
+                """
+                SELECT canonical_name, safety_score, safety_band,
+                       cve_count, kev_count, osint_hits
+                FROM operations.v_software_safety
+                WHERE tenant_id = 1
+                  AND canonical_name = ANY(%s::text[])
+                """,
+                (canonical_names,),
+            )
+            for cn, score, band, cve_count, kev_count, osint_hits in cur.fetchall():
+                safety_by_title[cn] = {
+                    "score": score,
+                    "band": band,
+                    "cve_count": cve_count,
+                    "kev_count": kev_count,
+                    "osint_hits": osint_hits,
+                }
+            cur.execute(
+                """
+                SELECT COUNT(*) FROM operations.v_software_safety
+                WHERE tenant_id = 1 AND safety_band = 'high'
+                """
+            )
+            (high_risk_titles,) = cur.fetchone()
+
         # Recent installations — last 24h, first-seen
         cur.execute(
             """
@@ -2790,18 +2831,24 @@ def software_page(request: HttpRequest) -> HttpResponse:
     if pending_decisions < 0:
         pending_decisions = 0
 
-    titles = [
-        {
-            "canonical_name": row[0],
+    titles = []
+    for row in title_rows:
+        canonical = row[0]
+        safety = safety_by_title.get(canonical, {})
+        titles.append({
+            "canonical_name": canonical,
             "publisher": row[1] or "",
             "device_count": row[2],
             "client_count": row[3],
             "last_install": row[4],
             "categories": row[5] or [],
             "decision": row[6],
-        }
-        for row in title_rows
-    ]
+            "safety_score": safety.get("score"),
+            "safety_band": safety.get("band", ""),
+            "safety_cve_count": safety.get("cve_count", 0),
+            "safety_kev_count": safety.get("kev_count", 0),
+            "safety_osint_hits": safety.get("osint_hits", 0),
+        })
 
     if wants_csv(request):
         return csv_response(
@@ -2833,12 +2880,14 @@ def software_page(request: HttpRequest) -> HttpResponse:
             "pending_decisions": pending_decisions,
             "software_issues": software_issues,
             "whitelist_suggestions": whitelist_suggestions,
+            "high_risk_titles": high_risk_titles,
             "category_rows": category_rows,  # [(category_name, titles), ...]
             "titles": titles,
             "recent_installs": recent_installs,
             "active_q": q_filter,
             "active_category": category_filter,
             "active_decision": decision_filter,
+            "active_safety": safety_filter,
             "decision_choices": SoftwareDecision.Decision.choices,
         },
     )

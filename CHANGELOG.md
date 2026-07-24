@@ -2,6 +2,19 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.92.0] — 2026-07-24 — Composite safety score + fleet-page surface (Batch E)
+
+### Added
+- **`operations.v_software_safety` view** (migration `0081`) — per
+  canonical title, composite safety score 0..100, safety band
+  (clean / low / medium / high), matched CVE / KEV / OSINT-hit counts,
+  and title/publisher-scope decision status. Weights follow ADR 0008.
+- **Safety column on `/software/`** — pill showing band + score, tooltip
+  with CVE / KEV / OSINT breakdown. Sortable.
+- **Safety filter (`?safety=high` etc.)** on the fleet page.
+- **Safety tile on `/software/`** — high-band title count links to the
+  filtered view.
+
 ## [0.91.0] — 2026-07-24 — Intel OSINT: OTX + abuse.ch (Batch D)
 
 ### Added
