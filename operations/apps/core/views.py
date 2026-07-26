@@ -2829,6 +2829,129 @@ def software_page(request: HttpRequest) -> HttpResponse:
             safety_by_title = {}
             high_risk_titles = 0
 
+    # Risk distribution + this-week highlights + workflow aggregates.
+    # Everything below is derived cheaply from v_software_safety /
+    # software_installations_current / findings; single small
+    # queries, tolerated to fail on fresh installs.
+    risk_distribution = {"high": 0, "medium": 0, "low": 0, "clean": 0, "unknown": 0}
+    this_week: dict = {"new_products": 0, "new_high_risk": 0, "top_new_product": None}
+    workflow_state: dict = {
+        "publishers_undecided": 0,
+        "tech_checklist_devices": 0,
+        "user_risk_users": 0,
+    }
+    if intel_available:
+        try:
+            with transaction.atomic(), connection.cursor() as sc:
+                sc.execute("SET LOCAL operations.tenant_id = 1")
+                sc.execute(
+                    """
+                    SELECT safety_band, COUNT(*)::int
+                    FROM operations.v_software_safety
+                    WHERE tenant_id = 1
+                    GROUP BY safety_band
+                    """
+                )
+                for band, cnt in sc.fetchall():
+                    if band in risk_distribution:
+                        risk_distribution[band] = cnt
+        except Exception:
+            pass
+
+    try:
+        with transaction.atomic(), connection.cursor() as sc:
+            sc.execute("SET LOCAL operations.tenant_id = 1")
+            sc.execute(
+                """
+                SELECT COUNT(DISTINCT canonical_name)::int
+                FROM operations.software_installations_current
+                WHERE tenant_id = 1 AND deleted_at IS NULL AND stale_since IS NULL
+                  AND first_observed_at >= NOW() - INTERVAL '7 days'
+                """
+            )
+            (this_week["new_products"],) = sc.fetchone()
+            sc.execute(
+                """
+                SELECT canonical_name, COUNT(*)::int AS devices
+                FROM operations.software_installations_current
+                WHERE tenant_id = 1 AND deleted_at IS NULL AND stale_since IS NULL
+                  AND first_observed_at >= NOW() - INTERVAL '7 days'
+                GROUP BY canonical_name
+                ORDER BY devices DESC LIMIT 1
+                """
+            )
+            row = sc.fetchone()
+            if row:
+                this_week["top_new_product"] = {"name": row[0], "devices": row[1]}
+    except Exception:
+        pass
+
+    if intel_available:
+        try:
+            with transaction.atomic(), connection.cursor() as sc:
+                sc.execute("SET LOCAL operations.tenant_id = 1")
+                sc.execute(
+                    """
+                    SELECT COUNT(*)::int FROM operations.v_software_safety
+                    WHERE tenant_id = 1 AND safety_band = 'high'
+                      AND canonical_name IN (
+                          SELECT DISTINCT canonical_name
+                          FROM operations.software_installations_current
+                          WHERE tenant_id = 1 AND deleted_at IS NULL
+                            AND stale_since IS NULL
+                            AND first_observed_at >= NOW() - INTERVAL '7 days'
+                      )
+                    """
+                )
+                (this_week["new_high_risk"],) = sc.fetchone()
+        except Exception:
+            pass
+
+    try:
+        with transaction.atomic(), connection.cursor() as sc:
+            sc.execute("SET LOCAL operations.tenant_id = 1")
+            # Publishers with at least one fleet install and no
+            # global publisher-scope decision.
+            sc.execute(
+                """
+                SELECT COUNT(DISTINCT LOWER(sic.publisher))::int
+                FROM operations.software_installations_current sic
+                WHERE sic.tenant_id = 1
+                  AND sic.deleted_at IS NULL AND sic.stale_since IS NULL
+                  AND COALESCE(sic.publisher, '') <> ''
+                  AND NOT EXISTS (
+                      SELECT 1 FROM operations.software_decisions sd
+                      WHERE sd.tenant_id = 1
+                        AND sd.publisher <> ''
+                        AND sd.client_id IS NULL AND sd.device_id IS NULL
+                        AND LOWER(sd.publisher) = LOWER(sic.publisher)
+                  )
+                """
+            )
+            (workflow_state["publishers_undecided"],) = sc.fetchone()
+    except Exception:
+        pass
+
+    try:
+        with transaction.atomic(), connection.cursor() as sc:
+            sc.execute("SET LOCAL operations.tenant_id = 1")
+            sc.execute(
+                """
+                SELECT COUNT(DISTINCT f.subject_id)::int
+                FROM operations.findings f
+                JOIN operations.finding_types ft ON ft.id = f.finding_type_id
+                JOIN operations.finding_categories fc ON fc.id = ft.category_id
+                WHERE f.tenant_id = 1
+                  AND f.status IN ('open','acknowledged')
+                  AND fc.name = 'software'
+                  AND ft.name <> 'whitelist_suggestion'
+                  AND f.subject_type = 'device'
+                """
+            )
+            (workflow_state["tech_checklist_devices"],) = sc.fetchone()
+    except Exception:
+        pass
+
     # Software issues count (Finding table). Split whitelist_suggestion
     # out of "issues" — it's a review candidate, not a problem.
     software_open_qs = Finding.objects.filter(
@@ -2910,6 +3033,9 @@ def software_page(request: HttpRequest) -> HttpResponse:
             "active_decision": decision_filter,
             "active_safety": safety_filter,
             "decision_choices": SoftwareDecision.Decision.choices,
+            "risk_distribution": risk_distribution,
+            "this_week": this_week,
+            "workflow_state": workflow_state,
         },
     )
 

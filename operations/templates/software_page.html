@@ -5,7 +5,7 @@
 
 {% block content %}
 <style>
-  /* ── High-level layout ─────────────────────────────────── */
+  /* ── Layout ────────────────────────────────────────────── */
   .sw-hero {
     display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.75rem;
     justify-content: space-between; margin: 0 0 1rem;
@@ -18,12 +18,9 @@
     text-transform: uppercase; color: var(--muted); margin: 1.2rem 0 0.4rem;
   }
 
-  .sw-numbers, .sw-workflows {
-    display: grid; gap: 0.65rem;
+  .sw-numbers { display: grid; gap: 0.65rem;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   }
-  .sw-numbers { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
-  .sw-workflows { grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
-
   .sw-tile {
     display: block; padding: 0.85rem 1rem;
     background: var(--surface); border: 1px solid var(--border);
@@ -39,14 +36,69 @@
   .sw-tile .sw-sub { font-size: 0.78rem; color: var(--muted); margin-top: 0.25rem; }
   .sw-tile.has-open .sw-value { color: #b45309; }
 
-  .sw-tile.workflow { display: flex; align-items: center; gap: 0.75rem; padding: 0.7rem 0.95rem; }
-  .sw-tile.workflow .icon {
-    width: 32px; height: 32px; border-radius: 8px; background: #eef2ff;
-    display: inline-flex; align-items: center; justify-content: center;
-    color: #4338ca; font-weight: 700; flex-shrink: 0;
+  /* ── Workflow cards ────────────────────────────────────── */
+  .sw-workflows {
+    display: grid; gap: 0.75rem; margin-bottom: 0.5rem;
+    grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
   }
-  .sw-tile.workflow .title { font-weight: 600; }
-  .sw-tile.workflow .desc  { font-size: 0.78rem; color: var(--muted); }
+  .wf-card {
+    display: grid; grid-template-columns: 40px 1fr auto; gap: 0.8rem;
+    align-items: center; padding: 0.85rem 1rem;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; text-decoration: none; color: inherit;
+  }
+  .wf-card:hover { box-shadow: 0 2px 6px rgba(0,0,0,0.06); border-color: var(--accent); }
+  .wf-card .wf-icon {
+    width: 40px; height: 40px; border-radius: 8px;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  .wf-card .wf-icon.blue   { background: #eef2ff; color: #4338ca; }
+  .wf-card .wf-icon.green  { background: #ecfdf5; color: #059669; }
+  .wf-card .wf-icon.amber  { background: #fef3c7; color: #b45309; }
+  .wf-card .wf-icon.rose   { background: #fee2e2; color: #b91c1c; }
+  .wf-card .wf-icon.violet { background: #f5f3ff; color: #6d28d9; }
+  .wf-card .wf-body .wf-title { font-weight: 600; color: #1a1a2e; }
+  .wf-card .wf-body .wf-desc  { font-size: 0.78rem; color: var(--muted); margin-top: 0.15rem; }
+  .wf-card .wf-count {
+    text-align: right; font-weight: 700; font-size: 1.15rem; color: #1a1a2e;
+    line-height: 1; min-width: 2.5rem;
+  }
+  .wf-card .wf-count.zero { color: var(--muted); font-weight: 500; }
+  .wf-card .wf-count small {
+    display: block; font-weight: 500; font-size: 0.7rem;
+    color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin-top: 0.2rem;
+  }
+
+  /* ── Distribution strips ───────────────────────────────── */
+  .dist-strip { display: flex; height: 12px; border-radius: 999px; overflow: hidden;
+                background: #f3f4f6; margin: 0.35rem 0 0.55rem; }
+  .dist-seg { height: 100%; }
+  .dist-seg.high    { background: #dc2626; }
+  .dist-seg.medium  { background: #f59e0b; }
+  .dist-seg.low     { background: #3b82f6; }
+  .dist-seg.clean   { background: #16a34a; }
+  .dist-seg.unknown { background: #9ca3af; }
+  .dist-seg.approve, .dist-seg.approve_publisher { background: #16a34a; }
+  .dist-seg.reject { background: #dc2626; }
+  .dist-seg.investigate { background: #f59e0b; }
+  .dist-seg.pending { background: #9ca3af; }
+
+  .dist-legend { display: flex; flex-wrap: wrap; gap: 0.55rem 1rem;
+                 font-size: 0.78rem; color: #374151; }
+  .dist-legend .swatch { display: inline-block; width: 10px; height: 10px;
+                        border-radius: 2px; margin-right: 0.35rem; vertical-align: middle; }
+
+  /* ── This week card ────────────────────────────────────── */
+  .sw-week { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+             gap: 0.65rem; }
+  .sw-week-item {
+    padding: 0.75rem 1rem; background: var(--surface);
+    border: 1px solid var(--border); border-radius: 8px;
+  }
+  .sw-week-item .k { font-size: 0.72rem; color: var(--muted); text-transform: uppercase;
+                     letter-spacing: 0.05em; font-weight: 700; }
+  .sw-week-item .v { font-size: 1.25rem; font-weight: 700; margin-top: 0.2rem; }
+  .sw-week-item .sub { font-size: 0.78rem; color: var(--muted); }
 
   /* ── Category chips + filters ──────────────────────────── */
   .cat-chips { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.6rem; }
@@ -60,17 +112,15 @@
   .cat-chip.active { background: #1e40af; border-color: #1e40af; color: #fff; }
   .cat-chip .chip-count { font-weight: 600; color: var(--muted); }
   .cat-chip.active .chip-count { color: #fecaca; }
-
   .sw-filterbar {
-    display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center;
-    margin-top: 0.4rem;
+    display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-top: 0.4rem;
   }
   .sw-filterbar input, .sw-filterbar select {
     padding: 0.4rem 0.7rem; border: 1px solid var(--border); border-radius: 4px;
     font-size: 0.85rem;
   }
 
-  /* ── Titles table ──────────────────────────────────────── */
+  /* ── Products table (moved to bottom) ──────────────────── */
   .sw-table-wrap { overflow-x: auto; }
   .sw-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
   .sw-table th, .sw-table td { padding: 0.55rem 0.7rem; vertical-align: middle; }
@@ -100,7 +150,6 @@
   .decision-pill.investigate { background: #fef3c7; color: #92400e; }
   .decision-pill.none { background: #f3f4f6; color: #6b7280; font-weight: 400; }
 
-  /* ── Side widgets ──────────────────────────────────────── */
   .sidebar-grid {
     display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 1rem;
   }
@@ -112,35 +161,45 @@
   }
   .side-list li:last-child { border-bottom: none; }
   .side-time { color: var(--muted); font-size: 0.75rem; white-space: nowrap; margin-left: auto; }
+
+  details.sw-browse > summary {
+    list-style: none; cursor: pointer;
+    font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted); font-size: 0.7rem;
+    display: inline-flex; align-items: center; gap: 0.35rem;
+  }
+  details.sw-browse[open] > summary { color: #1e40af; }
+  details.sw-browse > summary::before { content: '▸'; display: inline-block; transition: transform 0.15s; }
+  details.sw-browse[open] > summary::before { transform: rotate(90deg); }
 </style>
 
 <div class="card">
     <div class="sw-hero">
         <div>
             <h1>Software</h1>
-            <div class="sub">{{ installations }} installations across {{ unique_titles }} titles</div>
+            <div class="sub">{{ installations }} installations across {{ unique_titles }} products</div>
         </div>
         {% include "_csv_download.html" %}
     </div>
 </div>
 
-{# ── Overview numbers ──────────────────────────────────── #}
+{# ── Overview KPIs ─────────────────────────────────────── #}
 <div class="sw-section-label">Overview</div>
 <div class="sw-numbers">
     <div class="sw-tile">
-        <div class="sw-label">Titles</div>
+        <div class="sw-label">Products</div>
         <div class="sw-value">{{ unique_titles }}</div>
-        <div class="sw-sub">unique products</div>
+        <div class="sw-sub">unique across the fleet</div>
     </div>
     <a class="sw-tile {% if uncategorized_titles %}has-open{% endif %}" href="?category=uncategorized">
         <div class="sw-label">Unclassified</div>
         <div class="sw-value">{{ uncategorized_titles }}</div>
-        <div class="sw-sub">titles not yet categorised</div>
+        <div class="sw-sub">not yet categorised</div>
     </a>
     <a class="sw-tile" href="?decision=pending">
         <div class="sw-label">Awaiting decision</div>
         <div class="sw-value">{{ pending_decisions }}</div>
-        <div class="sw-sub">no approve/reject on record</div>
+        <div class="sw-sub">no approve or reject yet</div>
     </a>
     <a class="sw-tile {% if high_risk_titles %}has-open{% endif %}" href="?safety=high">
         <div class="sw-label">High risk</div>
@@ -148,180 +207,175 @@
         <div class="sw-sub">actively exploited or severe</div>
     </a>
     <a class="sw-tile {% if software_issues %}has-open{% endif %}" href="{% url 'findings_queue' %}?category=software">
-        <div class="sw-label">Open items</div>
+        <div class="sw-label">Open issues</div>
         <div class="sw-value">{{ software_issues }}</div>
         <div class="sw-sub">flagged installations</div>
     </a>
 </div>
 
-{# ── Workflow launchers ────────────────────────────────── #}
+{# ── Distribution strips ──────────────────────────────── #}
+<div class="sw-section-label">Where the fleet stands</div>
+<div class="card">
+    <div style="display:grid; gap:0.9rem; grid-template-columns: 1fr 1fr;">
+        <div>
+            <div style="display:flex; justify-content:space-between; align-items:baseline;">
+                <strong style="font-size:0.88rem;">Products by risk</strong>
+                <span class="muted" style="font-size:0.75rem;">
+                    {% widthratio risk_distribution.high 1 1 %} high ·
+                    {% widthratio risk_distribution.medium 1 1 %} medium ·
+                    {% widthratio risk_distribution.low 1 1 %} low
+                </span>
+            </div>
+            {% with total_risk=unique_titles %}
+            <div class="dist-strip" title="{{ risk_distribution.high }} high / {{ risk_distribution.medium }} medium / {{ risk_distribution.low }} low / {{ risk_distribution.clean }} approved / {{ risk_distribution.unknown }} not yet checked">
+                {% if total_risk %}
+                <div class="dist-seg high"    style="width: {% widthratio risk_distribution.high    total_risk 100 %}%;"></div>
+                <div class="dist-seg medium"  style="width: {% widthratio risk_distribution.medium  total_risk 100 %}%;"></div>
+                <div class="dist-seg low"     style="width: {% widthratio risk_distribution.low     total_risk 100 %}%;"></div>
+                <div class="dist-seg clean"   style="width: {% widthratio risk_distribution.clean   total_risk 100 %}%;"></div>
+                <div class="dist-seg unknown" style="width: {% widthratio risk_distribution.unknown total_risk 100 %}%;"></div>
+                {% endif %}
+            </div>
+            {% endwith %}
+            <div class="dist-legend">
+                <span><span class="swatch" style="background:#dc2626;"></span>High risk ({{ risk_distribution.high }})</span>
+                <span><span class="swatch" style="background:#f59e0b;"></span>Medium ({{ risk_distribution.medium }})</span>
+                <span><span class="swatch" style="background:#3b82f6;"></span>Low ({{ risk_distribution.low }})</span>
+                <span><span class="swatch" style="background:#16a34a;"></span>Approved ({{ risk_distribution.clean }})</span>
+                <span><span class="swatch" style="background:#9ca3af;"></span>Not yet checked ({{ risk_distribution.unknown }})</span>
+            </div>
+        </div>
+
+        <div>
+            <div style="display:flex; justify-content:space-between; align-items:baseline;">
+                <strong style="font-size:0.88rem;">Products by decision</strong>
+                <span class="muted" style="font-size:0.75rem;">
+                    {{ approved_titles }} approved · {{ pending_decisions }} awaiting
+                </span>
+            </div>
+            {% with total_dec=unique_titles %}
+            <div class="dist-strip">
+                {% if total_dec %}
+                <div class="dist-seg approve"     style="width: {% widthratio approved_titles    total_dec 100 %}%;"></div>
+                <div class="dist-seg reject"      style="width: {% widthratio rejected_titles    total_dec 100 %}%;"></div>
+                <div class="dist-seg investigate" style="width: {% widthratio investigate_titles total_dec 100 %}%;"></div>
+                <div class="dist-seg pending"     style="width: {% widthratio pending_decisions  total_dec 100 %}%;"></div>
+                {% endif %}
+            </div>
+            {% endwith %}
+            <div class="dist-legend">
+                <span><span class="swatch" style="background:#16a34a;"></span>Approved ({{ approved_titles }})</span>
+                <span><span class="swatch" style="background:#dc2626;"></span>Rejected ({{ rejected_titles }})</span>
+                <span><span class="swatch" style="background:#f59e0b;"></span>Investigate ({{ investigate_titles }})</span>
+                <span><span class="swatch" style="background:#9ca3af;"></span>No decision yet ({{ pending_decisions }})</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# ── This week ─────────────────────────────────────────── #}
+<div class="sw-section-label">This week</div>
+<div class="sw-week">
+    <div class="sw-week-item">
+        <div class="k">New products</div>
+        <div class="v">{{ this_week.new_products }}</div>
+        <div class="sub">first observed in the last 7 days</div>
+    </div>
+    <div class="sw-week-item">
+        <div class="k">New high-risk</div>
+        <div class="v">{{ this_week.new_high_risk }}</div>
+        <div class="sub">new products already scored high</div>
+    </div>
+    <div class="sw-week-item">
+        <div class="k">Top new product</div>
+        {% if this_week.top_new_product %}
+            <div class="v" style="font-size:1rem;">
+                <a href="{% url 'software_detail' name=this_week.top_new_product.name %}">
+                    {{ this_week.top_new_product.name|title }}
+                </a>
+            </div>
+            <div class="sub">on {{ this_week.top_new_product.devices }} device{{ this_week.top_new_product.devices|pluralize }}</div>
+        {% else %}
+            <div class="v muted" style="font-size:1rem;">nothing new</div>
+            <div class="sub">no new installs in the last week</div>
+        {% endif %}
+    </div>
+</div>
+
+{# ── Workflow cards with state ────────────────────────── #}
 <div class="sw-section-label">Workflows</div>
 <div class="sw-workflows">
-    <a class="sw-tile workflow" href="{% url 'software_publishers' %}">
-        <span class="icon">P</span>
-        <span>
-            <div class="title">Publishers</div>
-            <div class="desc">approve or reject a publisher across every title</div>
+    <a class="wf-card" href="{% url 'software_publishers' %}">
+        <span class="wf-icon blue" aria-hidden="true">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21V7l9-4 9 4v14"></path><path d="M9 21V12h6v9"></path></svg>
+        </span>
+        <span class="wf-body">
+            <div class="wf-title">Publishers</div>
+            <div class="wf-desc">approve or reject across every product</div>
+        </span>
+        <span class="wf-count {% if not workflow_state.publishers_undecided %}zero{% endif %}">
+            {{ workflow_state.publishers_undecided }}
+            <small>undecided</small>
         </span>
     </a>
-    <a class="sw-tile workflow" href="{% url 'software_decisions_queue' %}">
-        <span class="icon">D</span>
-        <span>
-            <div class="title">Decisions queue</div>
-            <div class="desc">{{ pending_decisions }} title(s) awaiting review</div>
+
+    <a class="wf-card" href="{% url 'software_decisions_queue' %}">
+        <span class="wf-icon green" aria-hidden="true">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 12l2 2 4-4"></path><path d="M21 12c0 4.97-4.03 9-9 9s-9-4.03-9-9 4.03-9 9-9 9 4.03 9 9z"></path></svg>
+        </span>
+        <span class="wf-body">
+            <div class="wf-title">Decisions queue</div>
+            <div class="wf-desc">products awaiting review</div>
+        </span>
+        <span class="wf-count {% if not pending_decisions %}zero{% endif %}">
+            {{ pending_decisions }}
+            <small>awaiting</small>
         </span>
     </a>
-    <a class="sw-tile workflow" href="{% url 'software_tech_checklist' %}">
-        <span class="icon">✓</span>
-        <span>
-            <div class="title">Tech checklist</div>
-            <div class="desc">per-device cleanup list</div>
+
+    <a class="wf-card" href="{% url 'software_tech_checklist' %}">
+        <span class="wf-icon amber" aria-hidden="true">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3 8-8"></path><path d="M20 12v7a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h11"></path></svg>
+        </span>
+        <span class="wf-body">
+            <div class="wf-title">Tech checklist</div>
+            <div class="wf-desc">per-device cleanup queue</div>
+        </span>
+        <span class="wf-count {% if not workflow_state.tech_checklist_devices %}zero{% endif %}">
+            {{ workflow_state.tech_checklist_devices }}
+            <small>devices</small>
         </span>
     </a>
-    <a class="sw-tile workflow" href="{% url 'software_user_risk' %}">
-        <span class="icon">U</span>
-        <span>
-            <div class="title">User risk</div>
-            <div class="desc">rollup by last-logged-in user</div>
+
+    <a class="wf-card" href="{% url 'software_user_risk' %}">
+        <span class="wf-icon violet" aria-hidden="true">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+        </span>
+        <span class="wf-body">
+            <div class="wf-title">User risk</div>
+            <div class="wf-desc">rollup by last-logged-in user</div>
+        </span>
+        <span class="wf-count zero">
+            → <small>open</small>
         </span>
     </a>
-    <a class="sw-tile workflow" href="{% url 'findings_queue' %}?category=software&amp;type=whitelist_suggestion">
-        <span class="icon">W</span>
-        <span>
-            <div class="title">Whitelist suggestions</div>
-            <div class="desc">{{ whitelist_suggestions }} common title(s) worth reviewing</div>
+
+    <a class="wf-card" href="{% url 'findings_queue' %}?category=software&amp;type=whitelist_suggestion">
+        <span class="wf-icon rose" aria-hidden="true">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l3 7h7l-5.5 4.5L18 21l-6-4-6 4 1.5-7.5L2 9h7l3-7z"></path></svg>
+        </span>
+        <span class="wf-body">
+            <div class="wf-title">Whitelist suggestions</div>
+            <div class="wf-desc">common products worth reviewing</div>
+        </span>
+        <span class="wf-count {% if not whitelist_suggestions %}zero{% endif %}">
+            {{ whitelist_suggestions }}
+            <small>candidates</small>
         </span>
     </a>
 </div>
 
-{# ── Browse titles: chips + filters + compact table ───── #}
-<div class="sw-section-label">Browse titles</div>
-<div class="card">
-    <div class="cat-chips">
-        <a class="cat-chip {% if not active_category %}active{% endif %}" href="{% url 'software_page' %}">
-            All <span class="chip-count">{{ unique_titles }}</span>
-        </a>
-        {% for cat_name, cat_titles in category_rows %}
-            {% if cat_name != 'whitelist' %}
-            <a class="cat-chip {% if active_category == cat_name %}active{% endif %}"
-               href="?category={{ cat_name }}">
-                {{ cat_name|humanize_label|default:cat_name|title }}
-                <span class="chip-count">{{ cat_titles }}</span>
-            </a>
-            {% endif %}
-        {% endfor %}
-        <a class="cat-chip {% if active_category == 'uncategorized' %}active{% endif %}"
-           href="?category=uncategorized">
-            Unclassified <span class="chip-count">{{ uncategorized_titles }}</span>
-        </a>
-    </div>
-
-    <form method="get" class="sw-filterbar">
-        <input type="search" name="q" placeholder="Search titles or publishers…"
-               value="{{ active_q|default:'' }}" style="min-width:240px;">
-        {% if active_category %}<input type="hidden" name="category" value="{{ active_category }}">{% endif %}
-        <select name="decision">
-            <option value="">Any decision</option>
-            <option value="approved" {% if active_decision == 'approved' %}selected{% endif %}>Approved</option>
-            <option value="rejected" {% if active_decision == 'rejected' %}selected{% endif %}>Rejected</option>
-            <option value="pending" {% if active_decision == 'pending' %}selected{% endif %}>No decision yet</option>
-        </select>
-        <select name="safety">
-            <option value="">Any risk</option>
-            <option value="high" {% if active_safety == 'high' %}selected{% endif %}>High risk</option>
-            <option value="medium" {% if active_safety == 'medium' %}selected{% endif %}>Medium risk</option>
-            <option value="low" {% if active_safety == 'low' %}selected{% endif %}>Low risk</option>
-            <option value="clean" {% if active_safety == 'clean' %}selected{% endif %}>Approved</option>
-            <option value="unknown" {% if active_safety == 'unknown' %}selected{% endif %}>Not yet checked</option>
-        </select>
-        <button type="submit">Apply</button>
-        {% if active_q or active_decision or active_safety %}
-          <a href="?{% if active_category %}category={{ active_category }}{% endif %}" style="font-size:0.85rem;">Clear</a>
-        {% endif %}
-    </form>
-</div>
-
-<div class="card">
-    {% if titles %}
-    <div class="sw-table-wrap">
-    <table class="sw-table" data-sortable>
-        <thead>
-            <tr>
-                <th>Title</th>
-                <th class="num">Devices</th>
-                <th>Risk</th>
-                <th>Decision</th>
-                <th class="actions">Actions</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for t in titles %}
-            <tr>
-                <td class="title-cell">
-                    <a href="{% url 'software_detail' name=t.canonical_name %}">
-                        <strong>{{ t.canonical_name|title }}</strong>
-                    </a>
-                    {% if t.publisher %}
-                    <div class="publisher">
-                        <a href="{% url 'software_publisher_detail' publisher=t.publisher %}">{{ t.publisher|title }}</a>
-                        · on {{ t.client_count }} client{{ t.client_count|pluralize }}
-                    </div>
-                    {% else %}
-                    <div class="publisher">on {{ t.client_count }} client{{ t.client_count|pluralize }}</div>
-                    {% endif %}
-                </td>
-                <td class="num">{{ t.device_count }}</td>
-                <td>
-                    {% if t.safety_band == 'high' %}
-                        <span class="risk-pill high"
-                              title="Risk score {{ t.safety_score }} · {{ t.safety_cve_count }} known vulnerabilities · {{ t.safety_kev_count }} actively exploited · {{ t.safety_osint_hits }} threat-intel matches">High risk</span>
-                    {% elif t.safety_band == 'medium' %}
-                        <span class="risk-pill medium"
-                              title="Risk score {{ t.safety_score }} · {{ t.safety_cve_count }} known vulnerabilities · {{ t.safety_osint_hits }} threat-intel matches">Medium risk</span>
-                    {% elif t.safety_band == 'low' %}
-                        <span class="risk-pill low"
-                              title="Risk score {{ t.safety_score }} · {{ t.safety_osint_hits }} threat-intel matches">Low risk</span>
-                    {% elif t.safety_band == 'clean' %}
-                        <span class="risk-pill clean" title="Approved by operator">Approved</span>
-                    {% elif t.safety_band == 'unknown' %}
-                        <span class="risk-pill unknown" title="No risk data on record yet">Not yet checked</span>
-                    {% else %}
-                        <span class="risk-pill none">—</span>
-                    {% endif %}
-                </td>
-                <td>
-                    {% if t.decision %}
-                        <span class="decision-pill {{ t.decision }}">{{ t.decision|humanize_label|default:t.decision|title }}</span>
-                    {% else %}
-                        <span class="decision-pill none">No decision</span>
-                    {% endif %}
-                </td>
-                <td class="actions">
-                    <form method="post" action="{% url 'software_decision_create' %}" style="display:inline-flex; gap:0.25rem;">
-                        {% csrf_token %}
-                        <input type="hidden" name="canonical_name" value="{{ t.canonical_name }}">
-                        <input type="hidden" name="scope" value="global">
-                        <input type="hidden" name="next" value="{{ request.get_full_path }}">
-                        <select name="decision" style="padding:0.2rem 0.35rem; font-size:0.8rem;">
-                            {% for value, label in decision_choices %}
-                                <option value="{{ value }}"
-                                    {% if t.decision == value %}selected{% endif %}>{{ label }}</option>
-                            {% endfor %}
-                        </select>
-                        <button type="submit" style="padding:0.2rem 0.5rem; font-size:0.78rem;">Apply</button>
-                    </form>
-                </td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-    </div>
-    {% else %}
-    <p class="muted">No titles match the current filter.</p>
-    {% endif %}
-</div>
-
-{# ── Sidebar: recent installs + decisions quick summary ─ #}
+{# ── Sidebar: recent + summary ────────────────────────── #}
 <div class="sidebar-grid">
     <div class="card">
         <h2>New in last 24 hours
@@ -344,14 +398,141 @@
     </div>
 
     <div class="card">
-        <h2>Decisions
-          <span class="muted" style="font-weight:400; font-size:0.85rem;">({{ pending_decisions }} awaiting)</span>
-        </h2>
+        <h2>Decisions summary</h2>
         <p class="muted" style="font-size:0.85rem;">
             {{ approved_titles }} approved · {{ rejected_titles }} rejected ·
-            {{ pending_decisions }} awaiting review
+            {{ investigate_titles }} investigating · {{ pending_decisions }} awaiting
         </p>
         <a href="{% url 'software_decisions_queue' %}" style="font-size:0.85rem;">Open decisions queue →</a>
     </div>
+</div>
+
+{# ── Browse all products (collapsed by default) ───────── #}
+<div style="margin-top: 1.5rem;">
+    <details class="sw-browse" {% if active_q or active_category or active_decision or active_safety %}open{% endif %}>
+        <summary>Browse all products</summary>
+
+        <div class="card" style="margin-top:0.7rem;">
+            <div class="cat-chips">
+                <a class="cat-chip {% if not active_category %}active{% endif %}" href="{% url 'software_page' %}">
+                    All <span class="chip-count">{{ unique_titles }}</span>
+                </a>
+                {% for cat_name, cat_titles in category_rows %}
+                    {% if cat_name != 'whitelist' %}
+                    <a class="cat-chip {% if active_category == cat_name %}active{% endif %}"
+                       href="?category={{ cat_name }}">
+                        {{ cat_name|humanize_label|default:cat_name|title }}
+                        <span class="chip-count">{{ cat_titles }}</span>
+                    </a>
+                    {% endif %}
+                {% endfor %}
+                <a class="cat-chip {% if active_category == 'uncategorized' %}active{% endif %}"
+                   href="?category=uncategorized">
+                    Unclassified <span class="chip-count">{{ uncategorized_titles }}</span>
+                </a>
+            </div>
+
+            <form method="get" class="sw-filterbar">
+                <input type="search" name="q" placeholder="Search products or publishers…"
+                       value="{{ active_q|default:'' }}" style="min-width:240px;">
+                {% if active_category %}<input type="hidden" name="category" value="{{ active_category }}">{% endif %}
+                <select name="decision">
+                    <option value="">Any decision</option>
+                    <option value="approved" {% if active_decision == 'approved' %}selected{% endif %}>Approved</option>
+                    <option value="rejected" {% if active_decision == 'rejected' %}selected{% endif %}>Rejected</option>
+                    <option value="pending" {% if active_decision == 'pending' %}selected{% endif %}>No decision yet</option>
+                </select>
+                <select name="safety">
+                    <option value="">Any risk</option>
+                    <option value="high" {% if active_safety == 'high' %}selected{% endif %}>High risk</option>
+                    <option value="medium" {% if active_safety == 'medium' %}selected{% endif %}>Medium risk</option>
+                    <option value="low" {% if active_safety == 'low' %}selected{% endif %}>Low risk</option>
+                    <option value="clean" {% if active_safety == 'clean' %}selected{% endif %}>Approved</option>
+                    <option value="unknown" {% if active_safety == 'unknown' %}selected{% endif %}>Not yet checked</option>
+                </select>
+                <button type="submit">Apply</button>
+                {% if active_q or active_decision or active_safety %}
+                  <a href="?{% if active_category %}category={{ active_category }}{% endif %}" style="font-size:0.85rem;">Clear</a>
+                {% endif %}
+            </form>
+        </div>
+
+        <div class="card">
+            {% if titles %}
+            <div class="sw-table-wrap">
+            <table class="sw-table" data-sortable>
+                <thead>
+                    <tr>
+                        <th>Product</th>
+                        <th class="num">Devices</th>
+                        <th>Risk</th>
+                        <th>Decision</th>
+                        <th class="actions">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for t in titles %}
+                    <tr>
+                        <td class="title-cell">
+                            <a href="{% url 'software_detail' name=t.canonical_name %}">
+                                <strong>{{ t.canonical_name|title }}</strong>
+                            </a>
+                            {% if t.publisher %}
+                            <div class="publisher">
+                                <a href="{% url 'software_publisher_detail' publisher=t.publisher %}">{{ t.publisher|title }}</a>
+                                · on {{ t.client_count }} client{{ t.client_count|pluralize }}
+                            </div>
+                            {% else %}
+                            <div class="publisher">on {{ t.client_count }} client{{ t.client_count|pluralize }}</div>
+                            {% endif %}
+                        </td>
+                        <td class="num">{{ t.device_count }}</td>
+                        <td>
+                            {% if t.safety_band == 'high' %}
+                                <span class="risk-pill high" title="Risk score {{ t.safety_score }} · {{ t.safety_cve_count }} known vulnerabilities · {{ t.safety_kev_count }} actively exploited">High risk</span>
+                            {% elif t.safety_band == 'medium' %}
+                                <span class="risk-pill medium" title="Risk score {{ t.safety_score }}">Medium risk</span>
+                            {% elif t.safety_band == 'low' %}
+                                <span class="risk-pill low" title="Risk score {{ t.safety_score }}">Low risk</span>
+                            {% elif t.safety_band == 'clean' %}
+                                <span class="risk-pill clean" title="Approved by operator">Approved</span>
+                            {% elif t.safety_band == 'unknown' %}
+                                <span class="risk-pill unknown" title="No risk data on record yet">Not yet checked</span>
+                            {% else %}
+                                <span class="risk-pill none">—</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if t.decision %}
+                                <span class="decision-pill {{ t.decision }}">{{ t.decision|humanize_label|default:t.decision|title }}</span>
+                            {% else %}
+                                <span class="decision-pill none">No decision</span>
+                            {% endif %}
+                        </td>
+                        <td class="actions">
+                            <form method="post" action="{% url 'software_decision_create' %}" style="display:inline-flex; gap:0.25rem;">
+                                {% csrf_token %}
+                                <input type="hidden" name="canonical_name" value="{{ t.canonical_name }}">
+                                <input type="hidden" name="scope" value="global">
+                                <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                                <select name="decision" style="padding:0.2rem 0.35rem; font-size:0.8rem;">
+                                    {% for value, label in decision_choices %}
+                                        <option value="{{ value }}"
+                                            {% if t.decision == value %}selected{% endif %}>{{ label }}</option>
+                                    {% endfor %}
+                                </select>
+                                <button type="submit" style="padding:0.2rem 0.5rem; font-size:0.78rem;">Apply</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            </div>
+            {% else %}
+            <p class="muted">No products match the current filter.</p>
+            {% endif %}
+        </div>
+    </details>
 </div>
 {% endblock %}

@@ -2,6 +2,28 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.96.0] — 2026-07-24 — Software dashboard reshape + auto-intel on software cycle
+
+### Changed (operator-facing)
+- **`/software/` is now a proper dashboard.** Overview KPIs, risk +
+  decision distribution strips ("where the fleet stands"), a "This
+  week" summary card (new products, new high-risk, top new product),
+  workflow tiles with real state ("undecided", "awaiting", "devices",
+  "candidates") plus inline SVG icons instead of single-letter
+  monograms. Products table moved to the bottom under a collapsed
+  "Browse all products" disclosure that auto-opens when a filter is
+  applied.
+- **Terminology pass**: "Titles" renamed to "Products" throughout the
+  operator-facing page and search placeholder; "Open items" reworded;
+  workflow card descriptions phrased for humans.
+
+### Changed (behaviour)
+- **Intel matcher + Winget + Chocolatey enrichers now fire on the
+  software classify cycle**, before the classifier itself. Newly
+  ingested products get scored and enriched in the same run instead of
+  waiting for the next 6-hour intel cadence. Steps are best-effort —
+  a broken intel connector never blocks the classifier.
+
 ## [0.95.0] — 2026-07-24 — known_malicious_hint finding (Batch H)
 
 ### Added

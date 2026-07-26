@@ -390,6 +390,20 @@ def run_notifications_digest_once() -> None:
 
 
 def run_software_classify_once() -> None:
+    # When intel is enabled, the intel matcher + Winget/Chocolatey
+    # enrichers run first so the classifier sees fresh cve_match rows
+    # and safety_signal rows for newly ingested products. Each intel
+    # step is best-effort and never blocks the classifier itself.
+    if settings.INTEL_ENABLED:
+        for step_name, step_fn in (
+            ("intel matcher pre-classify",     run_intel_matcher_once),
+            ("intel Winget pre-classify",      run_intel_winget_once),
+            ("intel Chocolatey pre-classify",  run_intel_chocolatey_once),
+        ):
+            try:
+                step_fn()
+            except Exception:
+                log.exception("Best-effort intel step failed: %s", step_name)
     try:
         affected = software_classify(tenant_id=1)
         log.info("Software classifier complete: affected=%d", affected)
