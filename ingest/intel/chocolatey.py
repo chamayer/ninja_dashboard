@@ -20,7 +20,7 @@ from ingest.intel.status import record_run
 
 log = logging.getLogger(__name__)
 
-_ENDPOINT = "https://community.chocolatey.org/api/v2/Search()"
+_ENDPOINT = "https://community.chocolatey.org/api/v2/Packages()"
 _TENANT_ID = 1
 _STALE_AFTER = timedelta(days=30)
 _MAX_TITLES_PER_RUN = 500
@@ -46,7 +46,14 @@ def _enrich() -> int:
     if not titles:
         return 0
     written = 0
-    with httpx.Client(timeout=20.0) as client:
+    with httpx.Client(
+        timeout=20.0,
+        headers={
+            "User-Agent": "ninja-dashboard/intel-chocolatey (+ops)",
+            "Accept": "application/atom+xml,application/xml;q=0.9,*/*;q=0.5",
+        },
+        follow_redirects=True,
+    ) as client:
         for canonical in titles[:_MAX_TITLES_PER_RUN]:
             try:
                 tags, titles_found = _search(client, canonical)
@@ -85,14 +92,17 @@ def _titles_needing_refresh() -> list[str]:
 
 
 def _search(client: httpx.Client, canonical: str) -> tuple[list[str], list[str]]:
-    r = client.get(
-        _ENDPOINT,
-        params={
-            "$filter": "IsLatestVersion",
-            "$top": "5",
-            "searchTerm": f"'{canonical[:120]}'",
-        },
+    # OData wants ``searchTerm='...'`` quoted, ``$filter`` unmodified,
+    # and both keys as raw ``$``-prefixed names. httpx URL-encodes
+    # params too aggressively for OData, so hand-assemble the query.
+    from urllib.parse import quote
+    quoted = quote(canonical[:120].replace("'", ""), safe="")
+    url = (
+        f"{_ENDPOINT}?searchTerm=%27{quoted}%27"
+        "&$filter=IsLatestVersion"
+        "&$top=5"
     )
+    r = client.get(url)
     if r.status_code == 404:
         return [], []
     r.raise_for_status()

@@ -2,6 +2,37 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.97.5] — 2026-07-26 — Winget/Chocolatey endpoints, per-source jobs, subject_layer default
+
+### Fixed
+- **Platform evaluator failed with "null value in column subject_layer"** —
+  the `findings.subject_layer` column was `NOT NULL` without a DB
+  default. The Django model declares `default=""` but raw-SQL
+  writers in `ingest/evaluator.py` etc. bypass the ORM. Migration
+  `0085` sets `DEFAULT ''` at the DB level and backfills any nulls,
+  fixing every writer without code changes. Evaluator's own INSERT
+  now also lists the column explicitly.
+- **Winget enrichment** — Microsoft's `cdn.winget.microsoft.com`
+  endpoint returns 405 for third-party POSTs. Switched to the
+  community `api.winget.run/v2/packages` REST API (same manifest
+  data, GET-friendly, no auth). Verified 200 with real Packages
+  response.
+- **Chocolatey enrichment** — the `/Search()` OData endpoint 400s.
+  Switched to `/Packages()?$filter=IsLatestVersion&$top=5&searchTerm='…'`,
+  which returns proper Atom feed XML.
+
+### Added
+- **Jobs page — per-source rows** — every distinct
+  `source.<Platform>[.<Instance>]` kind that ever ran shows up as
+  its own row under Source Ingest. The Run-now button is replaced
+  with a "Scoped run…" link that opens the ingest form for that
+  category (per-instance triggers go through the org / device
+  selector).
+- **On-demand scoped runs section** at the bottom of `/admin/jobs/` —
+  three cards linking to the ingest container's org / device selector
+  forms: Software inventory (queued), Source ingest (per-instance),
+  Direct scoped software run (inline).
+
 ## [0.97.4] — 2026-07-26 — /software perf: fetch v_software_safety once
 
 ### Fixed

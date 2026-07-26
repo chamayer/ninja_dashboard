@@ -1422,12 +1422,12 @@ def _upsert_finding(
         """
         INSERT INTO operations.findings (
             id, version, tenant_id, finding_type_id, client_id,
-            subject_type, subject_id, finding_details,
+            subject_type, subject_id, subject_layer, finding_details,
             condition_key, severity, confidence, status,
             first_seen_at, last_seen_at, last_detected_at
         ) VALUES (
             gen_random_uuid(), 1, %s, %s, %s,
-            'device', %s, %s::jsonb,
+            'device', %s, '', %s::jsonb,
             %s, %s, %s, 'open',
             %s, %s, %s
         )

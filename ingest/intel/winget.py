@@ -1,10 +1,16 @@
-"""Winget manifest search enrichment → operations.safety_signal.
+"""Winget enrichment via the community `winget.run` REST API.
 
-Bulk-cloning ``microsoft/winget-pkgs`` costs multiple GB; instead we
-query the same REST search endpoint the winget CLI uses, once per
-canonical title we've observed in the fleet that we don't already have
-a fresh signal for. Tags land as ``signal_type='category'``; publisher
-context as ``signal_type='community_flag'``.
+Microsoft's own ``cdn.winget.microsoft.com/cache/api/manifestSearch``
+endpoint returns 405 UnsupportedHttpVerb on POST from arbitrary
+clients — that CDN is designed for the winget CLI, not third-party
+callers. The community-run https://api.winget.run mirror serves the
+same manifest data through a simple GET-friendly REST API with no
+auth, so we use it as the enrichment source for tags and publisher.
+
+Per-title queries against ``/v2/packages`` (search); one HTTPS GET per
+canonical we've observed and don't already have a fresh signal for.
+Results merge into ``operations.safety_signal`` as one aggregated row
+per canonical (source='winget', signal_type='category').
 """
 
 from __future__ import annotations
@@ -22,11 +28,12 @@ from ingest.intel.status import record_run
 
 log = logging.getLogger(__name__)
 
-_ENDPOINT = "https://cdn.winget.microsoft.com/cache/api/manifestSearch"
+_SEARCH_ENDPOINT = "https://api.winget.run/v2/packages"
 _TENANT_ID = 1
 _STALE_AFTER = timedelta(days=30)
 _MAX_TITLES_PER_RUN = 500
-_DELAY_SECONDS = 0.4  # ~2.5 req/s, well under any reasonable free-tier ceiling
+_DELAY_SECONDS = 0.4
+_USER_AGENT = "ninja-dashboard/intel-winget (+ops)"
 
 
 def run_once() -> int:
@@ -45,7 +52,11 @@ def _enrich() -> int:
     if not titles:
         return 0
     written = 0
-    with httpx.Client(timeout=20.0) as client:
+    with httpx.Client(
+        timeout=20.0,
+        headers={"User-Agent": _USER_AGENT, "Accept": "application/json"},
+        follow_redirects=True,
+    ) as client:
         for canonical in titles[:_MAX_TITLES_PER_RUN]:
             try:
                 packages = _search(client, canonical)
@@ -53,7 +64,7 @@ def _enrich() -> int:
                 log.warning("Winget search failed for %s: %s", canonical, exc)
                 continue
             if packages:
-                written += _write_signals(canonical, packages)
+                written += _write_signal(canonical, packages)
             time.sleep(_DELAY_SECONDS)
     return written
 
@@ -84,43 +95,43 @@ def _titles_needing_refresh() -> list[str]:
 
 
 def _search(client: httpx.Client, canonical: str) -> list[dict]:
-    body = {
-        "Query": {"KeyWord": canonical[:120], "MatchType": "Substring"},
-        "MaximumResults": 5,
-    }
-    r = client.post(_ENDPOINT, json=body)
+    r = client.get(
+        _SEARCH_ENDPOINT,
+        params={"query": canonical[:120], "take": 5},
+    )
     if r.status_code == 404:
         return []
     r.raise_for_status()
-    data = r.json() or {}
-    return data.get("Data") or []
+    body = r.json() or {}
+    packages = body.get("Packages") or body.get("packages") or []
+    return packages if isinstance(packages, list) else []
 
 
-def _write_signals(canonical: str, packages: list[dict]) -> int:
-    # One aggregated row per (canonical, source, signal_type) to match
-    # the partial unique index. Multiple package matches are folded
-    # into a single JSON payload.
+def _write_signal(canonical: str, packages: list[dict]) -> int:
     tags: set[str] = set()
-    publishers: list[str] = []
-    monikers: list[str] = []
-    identifiers: list[str] = []
+    publishers: set[str] = set()
+    package_ids: set[str] = set()
     for pkg in packages:
-        for tag in (pkg.get("Tags") or []):
+        latest = pkg.get("Latest") or pkg.get("latest") or {}
+        pkg_meta = pkg.get("Metadata") or pkg
+        for tag in (latest.get("Tags") or pkg_meta.get("Tags") or []):
             if tag:
                 tags.add(str(tag))
-        publisher = pkg.get("Publisher") or pkg.get("PackageName") or ""
+        publisher = (
+            latest.get("Publisher")
+            or pkg_meta.get("Publisher")
+            or ""
+        )
         if publisher:
-            publishers.append(publisher)
-        moniker = pkg.get("Moniker") or ""
-        if moniker:
-            monikers.append(moniker)
-        pkg_id = pkg.get("PackageIdentifier")
+            publishers.add(str(publisher))
+        pkg_id = pkg.get("Id") or pkg_meta.get("Id") or ""
         if pkg_id:
-            identifiers.append(pkg_id)
+            package_ids.add(str(pkg_id))
+    if not (tags or publishers or package_ids):
+        return 0
     details = {
-        "package_identifiers": identifiers,
-        "publishers": publishers,
-        "monikers": monikers,
+        "package_identifiers": sorted(package_ids),
+        "publishers": sorted(publishers),
         "tags": sorted(tags),
     }
     with db.transaction() as cur:

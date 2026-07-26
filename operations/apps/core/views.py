@@ -3938,10 +3938,28 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
                     best_at = at
         return best
 
+    # Dynamic per-source-instance rows — one entry per distinct
+    # source.<Platform>[.<Instance>] kind we've ever seen. These aren't
+    # in the static catalogue because instance names come from data.
+    dynamic_source_entries: list[dict] = []
+    seen_source_kinds = [k for k in run_log_status.keys() if k.startswith("source.")]
+    for kind in seen_source_kinds:
+        instance = kind[len("source."):]
+        dynamic_source_entries.append({
+            "id": f"source-{instance.lower().replace('.', '-')}",
+            "name": f"Source: {instance}",
+            "category": "source ingest",
+            "endpoint": "run/sources/enqueue",  # opens the ingest form
+            "status_key": kind,
+            "status_source": "run_log",
+            "description": f"Ingest run history for {instance}.",
+            "no_run_now": True,  # per-instance triggers go through the /run/sources/enqueue form
+        })
+
     now = timezone.now()
     jobs = []
     categories = set()
-    for entry in _JOB_CATALOG:
+    for entry in list(_JOB_CATALOG) + dynamic_source_entries:
         categories.add(entry["category"])
         source = entry["status_source"]
         if source == "intel":
@@ -3974,6 +3992,7 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
             "rows_touched": status.get("rows_touched", 0),
             "last_error": status.get("last_error", ""),
             "is_stale": is_stale,
+            "no_run_now": entry.get("no_run_now", False),
         })
 
     if category_filter:

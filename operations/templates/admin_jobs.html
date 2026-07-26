@@ -173,10 +173,17 @@
             {% endif %}
         </div>
         <div>
+            {% if j.no_run_now %}
+                <a href="/run/sources/enqueue" target="_blank" rel="noopener"
+                   style="display:inline-block; padding:0.4rem 0.85rem; border-radius:4px; border:1px solid var(--border); background:#fff; text-decoration:none; font-size:0.85rem; font-weight:600; color:#1a1a2e;">
+                   Scoped run…
+                </a>
+            {% else %}
             <form method="post" action="{% url 'admin_jobs_run' job_id=j.id %}">
                 {% csrf_token %}
                 <button type="submit">Run now</button>
             </form>
+            {% endif %}
         </div>
     </div>
     {% endfor %}
@@ -184,6 +191,61 @@
 {% empty %}
 <p class="muted">No jobs match the current filter.</p>
 {% endfor %}
+
+{# ─── On-demand scoped runs ────────────────────────────── #}
+<div class="jobs-section-label">On-demand scoped runs — pick org / device</div>
+<div class="jobs-list">
+    <div class="job-row">
+        <div>
+            <div><span class="name">Software inventory (by client or device)</span></div>
+            <div class="desc">
+                Queue a Ninja software-inventory run for one or more clients or specific
+                devices. Opens the ingest container's form in a new tab with the org /
+                device selector.
+            </div>
+        </div>
+        <div class="meta">served by <code>ingest:8090</code></div>
+        <div>
+            <a href="/run/software/enqueue" target="_blank" rel="noopener"
+               style="display:inline-block; padding:0.4rem 0.85rem; border-radius:4px; border:1px solid var(--border); background:#fff; text-decoration:none; font-size:0.85rem; font-weight:600; color:#1a1a2e;">
+                Open selector →
+            </a>
+        </div>
+    </div>
+    <div class="job-row">
+        <div>
+            <div><span class="name">Source ingest (single source or client)</span></div>
+            <div class="desc">
+                Trigger a specific source's ingest run for a single client or every
+                client. Opens the ingest container's <code>/run/sources/enqueue</code>
+                form.
+            </div>
+        </div>
+        <div class="meta">served by <code>ingest:8090</code></div>
+        <div>
+            <a href="/run/sources/enqueue" target="_blank" rel="noopener"
+               style="display:inline-block; padding:0.4rem 0.85rem; border-radius:4px; border:1px solid var(--border); background:#fff; text-decoration:none; font-size:0.85rem; font-weight:600; color:#1a1a2e;">
+                Open selector →
+            </a>
+        </div>
+    </div>
+    <div class="job-row">
+        <div>
+            <div><span class="name">Direct scoped software run (bypasses queue)</span></div>
+            <div class="desc">
+                Same shape as the queued form but runs the software pull inline —
+                faster response for a small scope, but no queue-status page to watch.
+            </div>
+        </div>
+        <div class="meta">served by <code>ingest:8090</code></div>
+        <div>
+            <a href="/run/software/scoped" target="_blank" rel="noopener"
+               style="display:inline-block; padding:0.4rem 0.85rem; border-radius:4px; border:1px solid var(--border); background:#fff; text-decoration:none; font-size:0.85rem; font-weight:600; color:#1a1a2e;">
+                Open selector →
+            </a>
+        </div>
+    </div>
+</div>
 
 <div class="recent-panel">
     <h3>Recent activity <span class="muted" style="font-weight:400; font-size:0.8rem;">(last 25 across every source)</span></h3>
