@@ -3848,27 +3848,29 @@ _INGEST_BASE_URL = os.environ.get("INGEST_BASE_URL", "http://ingest:8090")
 # a small helper query (intel jobs use intel_ingest_status; everything
 # else uses run_log).
 _JOB_CATALOG: list[dict] = [
-    # Source ingest
-    {"id": "patches",     "name": "Patch ingest",         "category": "source ingest", "endpoint": "run/patches",         "status_key": "patches",     "status_source": "run_log", "description": "Pull the Ninja patch queue and refresh the patch summary matviews."},
-    {"id": "agent-observations", "name": "Agent observations", "category": "source ingest", "endpoint": "run/agents",   "status_key": "agents",      "status_source": "run_log", "description": "Fetch device inventory + agent presence from every source."},
+    # Source ingest — Ninja patch cycle. status_key is a LIKE prefix
+    # against run_log.kind so any per-instance source row surfaces.
+    {"id": "patches",            "name": "Ninja source cycle",   "category": "source ingest", "endpoint": "run/patches",   "status_key": "source.Ninja",         "status_source": "run_log_like",  "description": "Full Ninja API pull: devices, activities, patches, custom fields, matviews."},
+    {"id": "agent-observations", "name": "Agent observations",   "category": "source ingest", "endpoint": "run/agents",    "status_key": "source.",              "status_source": "run_log_like",  "description": "Fetch device inventory + agent presence from every source."},
     # Evaluators
-    {"id": "software-classify", "name": "Software classifier + auto-intel", "category": "evaluators", "endpoint": "run/software-classify", "status_key": "software.classify", "status_source": "run_log", "description": "Run intel matcher + catalogue enrichers then the software finding classifier."},
-    {"id": "patch-classify",    "name": "Patch classifier",   "category": "evaluators", "endpoint": "run/patch-classify",   "status_key": "patches.classify", "status_source": "run_log", "description": "Emit patch findings from the current patch inventory."},
-    {"id": "platform-evaluate", "name": "Platform evaluator", "category": "evaluators", "endpoint": "run/platform-evaluate", "status_key": "platform.evaluate", "status_source": "run_log", "description": "Refresh coverage, identity, and lifecycle findings."},
-    {"id": "resolver",          "name": "Identity resolver",  "category": "evaluators", "endpoint": "run/resolver",   "status_key": "resolver",    "status_source": "run_log", "description": "Merge candidate resolver + layered-entity write path."},
+    {"id": "software-classify",  "name": "Software classifier (+ auto-intel)", "category": "evaluators", "endpoint": "run/software-classify", "status_key": "software_classifier", "status_source": "run_log", "description": "Run intel matcher + catalogue enrichers then the software finding classifier."},
+    {"id": "patch-classify",     "name": "Patch classifier",     "category": "evaluators", "endpoint": "run/patch-classify",    "status_key": "patch_findings",   "status_source": "run_log", "description": "Emit patch findings from the current patch inventory."},
+    {"id": "platform-evaluate",  "name": "Platform evaluator",   "category": "evaluators", "endpoint": "run/platform-evaluate", "status_key": "platform_evaluator", "status_source": "run_log", "description": "Refresh coverage, identity, and lifecycle findings."},
+    {"id": "resolver",           "name": "Identity resolver",    "category": "evaluators", "endpoint": "run/resolver",          "status_key": "identity_resolver", "status_source": "run_log", "description": "Merge candidate resolver + layered-entity write path."},
+    {"id": "parity-check",       "name": "Parity check",         "category": "evaluators", "endpoint": "run/parity-check",      "status_key": "parity_check",     "status_source": "run_log", "description": "Cross-check ingest state against derived operational reality."},
     # Intel connectors
-    {"id": "intel-kev",         "name": "Intel: CISA KEV",           "category": "intel", "endpoint": "run/intel-kev",         "status_key": "cisa_kev",   "status_source": "intel", "description": "CISA Known Exploited Vulnerabilities feed (~1,200 CVEs)."},
-    {"id": "intel-nvd",         "name": "Intel: NVD (CVE feed)",     "category": "intel", "endpoint": "run/intel-nvd",         "status_key": "nvd",        "status_source": "intel", "description": "NIST NVD v2 CVE delta pull."},
-    {"id": "intel-cpe-dict",    "name": "Intel: CPE dictionary",     "category": "intel", "endpoint": "run/intel-cpe-dict",    "status_key": "cpe_dict",   "status_source": "intel", "description": "NIST CPE 2.3 vendor / product dictionary for CVE matching."},
-    {"id": "intel-epss",        "name": "Intel: EPSS scores",        "category": "intel", "endpoint": "run/intel-epss",        "status_key": "epss",       "status_source": "intel", "description": "FIRST.org EPSS exploit-likelihood scores."},
-    {"id": "intel-matcher",     "name": "Intel: title × CVE matcher","category": "intel", "endpoint": "run/intel-matcher",     "status_key": "matcher",    "status_source": "intel", "description": "Match installed products to CPE entries and populate cve_match."},
-    {"id": "intel-winget",      "name": "Intel: Winget enrichment",  "category": "intel", "endpoint": "run/intel-winget",      "status_key": "winget",     "status_source": "intel", "description": "Per-product tags + publisher from Windows Package Manager."},
-    {"id": "intel-chocolatey",  "name": "Intel: Chocolatey enrichment","category": "intel","endpoint": "run/intel-chocolatey", "status_key": "chocolatey", "status_source": "intel", "description": "Per-product tags from the Chocolatey community feed."},
-    {"id": "intel-otx",         "name": "Intel: AlienVault OTX",     "category": "intel", "endpoint": "run/intel-otx",         "status_key": "otx",        "status_source": "intel", "description": "Community threat-intel pulses from OTX."},
-    {"id": "intel-abusech",     "name": "Intel: abuse.ch",           "category": "intel", "endpoint": "run/intel-abusech",     "status_key": "abusech",    "status_source": "intel", "description": "MalwareBazaar + ThreatFox recent dump files."},
+    {"id": "intel-kev",          "name": "Intel: CISA KEV",           "category": "intel", "endpoint": "run/intel-kev",         "status_key": "cisa_kev",   "status_source": "intel", "description": "CISA Known Exploited Vulnerabilities feed (~1,200 CVEs)."},
+    {"id": "intel-nvd",          "name": "Intel: NVD (CVE feed)",     "category": "intel", "endpoint": "run/intel-nvd",         "status_key": "nvd",        "status_source": "intel", "description": "NIST NVD v2 CVE delta pull."},
+    {"id": "intel-cpe-dict",     "name": "Intel: CPE dictionary",     "category": "intel", "endpoint": "run/intel-cpe-dict",    "status_key": "cpe_dict",   "status_source": "intel", "description": "NIST CPE 2.3 vendor / product dictionary for CVE matching."},
+    {"id": "intel-epss",         "name": "Intel: EPSS scores",        "category": "intel", "endpoint": "run/intel-epss",        "status_key": "epss",       "status_source": "intel", "description": "FIRST.org EPSS exploit-likelihood scores."},
+    {"id": "intel-matcher",      "name": "Intel: title × CVE matcher","category": "intel", "endpoint": "run/intel-matcher",     "status_key": "matcher",    "status_source": "intel", "description": "Match installed products to CPE entries and populate cve_match."},
+    {"id": "intel-winget",       "name": "Intel: Winget enrichment",  "category": "intel", "endpoint": "run/intel-winget",      "status_key": "winget",     "status_source": "intel", "description": "Per-product tags + publisher from Windows Package Manager."},
+    {"id": "intel-chocolatey",   "name": "Intel: Chocolatey enrichment","category": "intel","endpoint": "run/intel-chocolatey", "status_key": "chocolatey", "status_source": "intel", "description": "Per-product tags from the Chocolatey community feed."},
+    {"id": "intel-otx",          "name": "Intel: AlienVault OTX",     "category": "intel", "endpoint": "run/intel-otx",         "status_key": "otx",        "status_source": "intel", "description": "Community threat-intel pulses from OTX."},
+    {"id": "intel-abusech",      "name": "Intel: abuse.ch",           "category": "intel", "endpoint": "run/intel-abusech",     "status_key": "abusech",    "status_source": "intel", "description": "MalwareBazaar + ThreatFox recent dump files."},
     # Notifications
-    {"id": "notifications-dispatch", "name": "Notifications dispatch", "category": "notifications", "endpoint": "run/notifications/dispatch", "status_key": "notifications.dispatch", "status_source": "run_log", "description": "Deliver queued notifications."},
-    {"id": "notifications-digest",   "name": "Notifications digest",   "category": "notifications", "endpoint": "run/notifications/digest",   "status_key": "notifications.digest",   "status_source": "run_log", "description": "Send scheduled digest routes."},
+    {"id": "notifications-dispatch", "name": "Notifications dispatch", "category": "notifications", "endpoint": "run/notifications/dispatch", "status_key": "notifications_dispatch", "status_source": "run_log", "description": "Deliver queued notifications."},
+    {"id": "notifications-digest",   "name": "Notifications digest",   "category": "notifications", "endpoint": "run/notifications/digest",   "status_key": "notifications_digest",   "status_source": "run_log", "description": "Send scheduled digest routes."},
 ]
 
 _JOB_INDEX = {j["id"]: j for j in _JOB_CATALOG}
@@ -3900,6 +3902,7 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
             intel_status = {}
 
     run_log_status: dict[str, dict] = {}
+    recent_runs: list[dict] = []
     try:
         with transaction.atomic(), connection.cursor() as cur:
             cur.execute("SET LOCAL operations.tenant_id = 1")
@@ -3918,16 +3921,67 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
                     "rows_touched": r[4] or 0,
                     "last_error": (r[5] or "")[:200],
                 }
+            # Aggregate recent activity for the panel at the bottom.
+            cur.execute(
+                """
+                SELECT kind, ok, started_at, ended_at, rows, LEFT(COALESCE(error,''), 120)
+                FROM operations.run_log
+                ORDER BY started_at DESC
+                LIMIT 25
+                """
+            )
+            recent_runs = [
+                {
+                    "kind": r[0], "ok": r[1], "started_at": r[2],
+                    "ended_at": r[3], "rows": r[4] or 0, "error": r[5],
+                    "source": "run_log",
+                }
+                for r in cur.fetchall()
+            ]
+            # And the latest intel runs alongside.
+            cur.execute(
+                """
+                SELECT connector, last_status, last_run_at, last_success_at,
+                       rows_touched, LEFT(COALESCE(last_error,''), 120)
+                FROM operations.intel_ingest_status
+                ORDER BY last_run_at DESC NULLS LAST LIMIT 15
+                """
+            )
+            for r in cur.fetchall():
+                recent_runs.append({
+                    "kind": r[0], "ok": r[1] == "ok",
+                    "started_at": r[2], "ended_at": r[3],
+                    "rows": r[4] or 0, "error": r[5],
+                    "source": "intel",
+                })
     except Exception:
         run_log_status = {}
+        recent_runs = []
+    recent_runs.sort(key=lambda r: r["started_at"] or now - timedelta(days=365), reverse=True)
+    recent_runs = recent_runs[:25]
+
+    def _lookup_run_log_like(prefix: str) -> dict:
+        """Return the latest run_log entry whose kind starts with prefix."""
+        best: dict = {}
+        best_at = None
+        for kind, data in run_log_status.items():
+            if kind.startswith(prefix):
+                at = data.get("last_run_at")
+                if at and (best_at is None or at > best_at):
+                    best = data
+                    best_at = at
+        return best
 
     now = timezone.now()
     jobs = []
     categories = set()
     for entry in _JOB_CATALOG:
         categories.add(entry["category"])
-        if entry["status_source"] == "intel":
+        source = entry["status_source"]
+        if source == "intel":
             status = intel_status.get(entry["status_key"]) or {}
+        elif source == "run_log_like":
+            status = _lookup_run_log_like(entry["status_key"])
         else:
             status = run_log_status.get(entry["status_key"]) or {}
         last_run_at = status.get("last_run_at")
@@ -3967,6 +4021,12 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
     elif status_filter == "ok":
         jobs = [j for j in jobs if j["state"] == "ok" and not j["is_stale"]]
 
+    # Group by category so the template can render sections instead of
+    # a flat list. Preserve catalogue order within each group.
+    jobs_by_category: dict[str, list[dict]] = {}
+    for j in jobs:
+        jobs_by_category.setdefault(j["category"], []).append(j)
+
     return render(
         request,
         "admin_jobs.html",
@@ -3974,9 +4034,11 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
             "admin_group": "integrations",
             "admin_tab": "jobs",
             "jobs": jobs,
+            "jobs_by_category": jobs_by_category,
             "categories": sorted(categories),
             "active_category": category_filter,
             "active_status": status_filter,
+            "recent_runs": recent_runs,
         },
     )
 
@@ -3988,17 +4050,53 @@ def admin_jobs_run(request: HttpRequest, job_id: str) -> HttpResponse:
     if not entry:
         messages.error(request, f"Unknown job '{job_id}'.")
         return redirect("admin_jobs")
+    ok, note = _dispatch_job(entry)
+    (messages.success if ok else messages.error)(request, f"{entry['name']} → {note}")
+    return redirect(request.META.get("HTTP_REFERER") or reverse("admin_jobs"))
+
+
+@login_required
+@require_POST
+def admin_jobs_run_all(request: HttpRequest) -> HttpResponse:
+    """Fire every job in the catalogue, or every job in a category if
+    ``category`` is supplied on the POST body."""
+    category = (request.POST.get("category") or "").strip().lower()
+    targets = [j for j in _JOB_CATALOG if (not category or j["category"] == category)]
+    if not targets:
+        messages.warning(request, f"No jobs matched category '{category or 'all'}'.")
+        return redirect(request.META.get("HTTP_REFERER") or reverse("admin_jobs"))
+    fired = 0
+    failed = 0
+    for entry in targets:
+        ok, _note = _dispatch_job(entry)
+        if ok:
+            fired += 1
+        else:
+            failed += 1
+    scope = category or "all"
+    if failed:
+        messages.warning(
+            request,
+            f"Fired {fired} job(s) in '{scope}'; {failed} failed to dispatch — see the ingest log.",
+        )
+    else:
+        messages.success(request, f"Fired {fired} job(s) in '{scope}'.")
+    return redirect(request.META.get("HTTP_REFERER") or reverse("admin_jobs"))
+
+
+def _dispatch_job(entry: dict) -> tuple[bool, str]:
+    """POST to the ingest container's endpoint for a single job. Returns
+    (ok, note) — note is a short summary for the toast / audit."""
     url = _INGEST_BASE_URL.rstrip("/") + "/" + entry["endpoint"]
     try:
         req = _urllib_request.Request(url, data=b"", method="POST")
         with _urllib_request.urlopen(req, timeout=10) as resp:
             body = resp.read(200).decode("utf-8", errors="replace").strip()
-        messages.success(request, f"{entry['name']} → {resp.status} {body}")
+        return True, f"{resp.status} {body}"
     except HTTPError as exc:
-        messages.error(request, f"{entry['name']} → HTTP {exc.code}: {exc.reason}")
+        return False, f"HTTP {exc.code}: {exc.reason}"
     except URLError as exc:
-        messages.error(request, f"{entry['name']} → network error: {exc.reason}")
-    return redirect(request.META.get("HTTP_REFERER") or reverse("admin_jobs"))
+        return False, f"network error: {exc.reason}"
 
 
 # ─────────────────────────────────────────────────────────────────────

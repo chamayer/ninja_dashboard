@@ -2,6 +2,34 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.97.3] — 2026-07-26 — Jobs page: groups, run-all, correct kind mapping, recent activity
+
+### Fixed
+- **Every non-intel job showed "Never run"** — the catalogue's
+  `status_key`s did not match the actual `run_log.kind` values
+  emitted by the writers (`software_classifier`, `patch_findings`,
+  `platform_evaluator`, `parity_check`, `source.<Platform>`).
+  Corrected. Source-ingest jobs use a new `run_log_like` status
+  source that prefix-matches (e.g. `source.` catches every per-instance
+  source row).
+
+### Added
+- **Run everything now** button and per-category **Run all in this
+  category** buttons on `/admin/jobs/` — POST to
+  `/admin/jobs/run-all/`. Both prompt for confirmation.
+- **Recent activity panel** at the bottom of the jobs page — last 25
+  runs across `run_log` and `intel_ingest_status`, so an operator
+  who clicks Run-now can see the run appear when it completes.
+- **Auto-refresh every 20 s** on the jobs page (pauseable with
+  `?live=off`). Uses JS `setTimeout` so no `base.html` change needed.
+
+### Changed
+- Jobs page renders one section per category (Source ingest / Intel /
+  Evaluators / Notifications) instead of a flat list.
+- Added `Parity check` to the catalogue.
+- Category-level "Run all" buttons appear both above and inline with
+  each section heading.
+
 ## [0.97.2] — 2026-07-26 — Admin hub — every admin surface in one place
 
 ### Changed
