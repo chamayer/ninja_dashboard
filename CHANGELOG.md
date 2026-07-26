@@ -2,6 +2,26 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.97.2] — 2026-07-26 — Admin hub — every admin surface in one place
+
+### Changed
+- **`/admin/overview/` reshape** — the Admin landing was three thin
+  sections; now it is a proper hub with SVG-iconned cards grouped by
+  workflow:
+  - **Review queues** — Client candidates, Merge candidates, Software
+    decisions, All findings (with open counts).
+  - **Software** — Products, Publishers, Tech checklist, User risk,
+    Classifier rules (with enabled-rule count).
+  - **Policy &amp; configuration** — Service requirements, Device
+    status thresholds, Alert rules, Suppressions.
+  - **Data &amp; integrations** — Sources (stale / total), Jobs (with
+    intel connector ok / failed / not-run counts), Ingest health,
+    Coverage, Patching.
+  - **System** — Django admin.
+- Every tile is a link with a short description; badge counts are
+  computed in-view with cheap queries and tolerated to fail on fresh
+  installs (intel counters guarded by try / except).
+
 ## [0.97.1] — 2026-07-26 — EPSS endpoint + matcher token intersection
 
 ### Fixed

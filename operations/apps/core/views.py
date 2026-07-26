@@ -7266,8 +7266,11 @@ def device_merge(
 
 @login_required
 def operations_admin_overview(request: HttpRequest) -> HttpResponse:
-    """Custom Operations Admin landing; Django Admin remains at /admin/."""
+    """Operations Admin landing — one hub with every admin/operator
+    surface grouped by workflow area. Counts are cheap; each tile is
+    also a link."""
     now = timezone.now()
+
     with transaction.atomic(), connection.cursor() as cur:
         cur.execute("SET LOCAL operations.tenant_id = 1")
         cur.execute(
@@ -7282,22 +7285,85 @@ def operations_admin_overview(request: HttpRequest) -> HttpResponse:
         observed_at is None or not run_ok or (now - observed_at).total_seconds() > 8 * 3600
         for _platform, observed_at, run_ok in source_health
     )
+
+    # Intel connector status (optional — may not be present pre-migration).
+    intel_ok = intel_failed = intel_never = 0
+    try:
+        with transaction.atomic(), connection.cursor() as cur:
+            cur.execute("SET LOCAL operations.tenant_id = 1")
+            cur.execute(
+                "SELECT last_status FROM operations.intel_ingest_status"
+            )
+            for (status,) in cur.fetchall():
+                if status == "ok":
+                    intel_ok += 1
+                elif status:
+                    intel_failed += 1
+                else:
+                    intel_never += 1
+        # Every connector we know about, minus what's recorded.
+        intel_never += max(0, 9 - (intel_ok + intel_failed + intel_never))
+    except Exception:
+        intel_ok = intel_failed = intel_never = 0
+
+    open_findings = Finding.objects.filter(
+        tenant_id=1, status__in=_FINDING_ACTIVE_STATUSES
+    ).count()
+    software_findings_open = Finding.objects.filter(
+        tenant_id=1, status__in=_FINDING_ACTIVE_STATUSES,
+        finding_type__category__name="software",
+    ).count()
+    patching_findings_open = Finding.objects.filter(
+        tenant_id=1, status__in=_FINDING_ACTIVE_STATUSES,
+        finding_type__category__name="patching",
+    ).count()
+    software_decision_count = SoftwareDecision.objects.filter(tenant_id=1).count()
+    classifier_rule_count = 0
+    try:
+        from .models import SoftwareClassifierRule
+        classifier_rule_count = SoftwareClassifierRule.objects.filter(enabled=True).count()
+    except Exception:
+        classifier_rule_count = 0
+
     return render(
         request,
         "operations_admin_overview.html",
         {
             "admin_group": "overview",
+            # Review counts
+            "nav_pending_client_candidates": ClientCandidate.objects.filter(
+                tenant_id=1, status="open"
+            ).count(),
+            "nav_pending_merges": MergeCandidate.objects.filter(
+                tenant_id=1, status="open"
+            ).count(),
+            "nav_pending_software_decisions": Finding.objects.filter(
+                tenant_id=1,
+                status__in=_FINDING_ACTIVE_STATUSES,
+                finding_type__category__name="software",
+            ).count(),
+            "open_findings": open_findings,
+            "software_findings_open": software_findings_open,
+            "patching_findings_open": patching_findings_open,
+            # Software surface
+            "software_decision_count": software_decision_count,
+            "classifier_rule_count": classifier_rule_count,
+            # Config counts
             "profile_count": RequirementProfile.objects.filter(tenant_id=1).count(),
             "profiles_without_clients": RequirementProfile.objects.filter(
                 tenant_id=1, clients__isnull=True
             ).count(),
             "alert_rule_count": NotificationRule.objects.filter(tenant_id=1, enabled=True).count(),
             "suppression_count": SuppressionRule.objects.filter(tenant_id=1).count(),
+            # Integrations
             "source_count": len(source_health),
             "stale_sources": stale_sources,
             "admin_finding_count": AdminFinding.objects.filter(
                 tenant_id=1, status__in=("open", "acknowledged")
             ).count(),
+            "intel_ok": intel_ok,
+            "intel_failed": intel_failed,
+            "intel_never": intel_never,
         },
     )
 
