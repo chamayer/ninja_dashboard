@@ -20,7 +20,10 @@ from ingest.intel.status import record_run
 
 log = logging.getLogger(__name__)
 
-_ENDPOINT = "https://epss.cyentia.com/epss_scores-current.csv.gz"
+# FIRST/Empirical Security moved the daily EPSS export from
+# epss.cyentia.com to epss.empiricalsecurity.com in 2025; the old URL now
+# 301-redirects. Follow the redirect so historical config keeps working.
+_ENDPOINT = "https://epss.empiricalsecurity.com/epss_scores-current.csv.gz"
 
 
 def run_once() -> int:
@@ -35,7 +38,9 @@ def run_once() -> int:
 
 
 def _pull_and_upsert() -> int:
-    with httpx.Client(timeout=60.0) as client:
+    # `follow_redirects=True` also handles the eventual next move; the
+    # daily CSV is public so no auth needed.
+    with httpx.Client(timeout=60.0, follow_redirects=True) as client:
         r = client.get(_ENDPOINT)
         r.raise_for_status()
         payload = r.content

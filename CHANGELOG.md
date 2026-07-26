@@ -2,6 +2,30 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.97.1] — 2026-07-26 — EPSS endpoint + matcher token intersection
+
+### Fixed
+- **EPSS ingest** — the daily CSV moved from `epss.cyentia.com` to
+  `epss.empiricalsecurity.com` (301 redirect). Pointed the connector
+  at the new URL and enabled `follow_redirects=True` so the next
+  domain change is also handled transparently.
+- **Intel matcher matched zero products** — the day-one normaliser
+  concatenated every canonical name into a single token
+  (`googlechrome` etc.) and never lined up with CPE product names
+  (`chrome`). Rewrote the matcher as token-intersection: split every
+  canonical on alphanumeric boundaries, treat the resulting tokens as
+  a set, tier-1 match when a `(vendor, product)` from `intel.cpes`
+  falls fully inside the token set, and tier-2 fallback on a
+  distinctive product-only token (>= 4 chars, alphabetic, not in a
+  short generic stop list). Uses `affected_cpes ?| candidates::text[]`
+  (GIN-indexed jsonb operator) so per-canonical lookup stays sub-ms.
+
+### Notes
+- The next intel matcher run (either the natural 6-hour tick or a
+  manual "Run now" from `/admin/jobs/` for the Intel: title × CVE
+  matcher row) will populate `operations.cve_match` for every
+  canonical whose vendor + product resolve inside the CPE dictionary.
+
 ## [0.97.0] — 2026-07-26 — Jobs page, intel catch-up, bulk decisions, software sub-nav
 
 ### Added
