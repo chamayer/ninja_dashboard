@@ -2,6 +2,29 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.97.6] — 2026-07-26 — Ingest ready-state bug + unified software surfaces
+
+### Fixed
+- **`Run now` returned 503 for every job** — when I added
+  `_intel_catchup()` in 0.97.0, the "block forever" tail of `main()`
+  got captured inside the new function's body due to a misplaced
+  indentation. The main thread never returned from `_intel_catchup`,
+  so `_READY.set()` never fired and every `/run/*` endpoint answered
+  "still starting". Extracted the block-forever back into `main()`
+  after `_READY.set()`. Every Run-now now works after the next
+  ingest restart.
+
+### Changed (software surfaces — visual family)
+- **New shared style include** `_sw_style.html` provides the same
+  page header, filter bar, bulk-action bar, data table, pill styles
+  (risk + decision), and empty-state look for every software surface
+  (Products / Publishers / Decisions / Tech checklist / User risk).
+  Included on the pages that had drifted apart in styling.
+- **Publishers page rebuilt** on the shared style with a proper
+  filter bar (search + decision-status dropdown), bulk-select
+  checkboxes with an "Apply to selected publishers" button, and a
+  per-row single-picker matching the decisions queue exactly.
+
 ## [0.97.5] — 2026-07-26 — Winget/Chocolatey endpoints, per-source jobs, subject_layer default
 
 ### Fixed

@@ -3393,9 +3393,11 @@ def software_detail(request: HttpRequest, name: str) -> HttpResponse:
 
 @login_required
 def software_publishers(request: HttpRequest) -> HttpResponse:
-    """List publishers with per-publisher install/title counts and current
-    publisher-scope decision status."""
+    """List publishers with per-publisher install/product counts and
+    current publisher-scope decision status. Supports filtering by name
+    and by decision state (approved / rejected / pending)."""
     q_filter = (request.GET.get("q") or "").strip()
+    decision_filter = (request.GET.get("decision") or "").strip().lower()
 
     with transaction.atomic(), connection.cursor() as cur:
         cur.execute("SET LOCAL operations.tenant_id = 1")
@@ -3450,13 +3452,23 @@ def software_publishers(request: HttpRequest) -> HttpResponse:
             }
         )
 
+    # Filter by decision state after computing all decisions.
+    if decision_filter == "approved":
+        publishers = [p for p in publishers if p["global_decision"] in ("approve", "approve_publisher")]
+    elif decision_filter == "rejected":
+        publishers = [p for p in publishers if p["global_decision"] == "reject"]
+    elif decision_filter == "investigate":
+        publishers = [p for p in publishers if p["global_decision"] == "investigate"]
+    elif decision_filter == "pending":
+        publishers = [p for p in publishers if not p["global_decision"]]
+
     if wants_csv(request):
         return csv_response(
             publishers,
             columns=[
                 ("Publisher", "publisher"),
                 ("Installations", "installations"),
-                ("Titles", "titles"),
+                ("Products", "titles"),
                 ("Devices", "devices"),
                 ("Clients", "clients"),
                 ("Last observed", "last_observed"),
@@ -3471,6 +3483,7 @@ def software_publishers(request: HttpRequest) -> HttpResponse:
         {
             "publishers": publishers,
             "active_q": q_filter,
+            "active_decision": decision_filter,
             "decision_choices": SoftwareDecision.Decision.choices,
             "software_tab": "publishers",
         },

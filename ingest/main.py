@@ -2360,6 +2360,13 @@ def main() -> None:
     _READY.set()
     log.info("Ingest service ready")
 
+    # Block forever holding the server reference (the daemon thread
+    # serving requests dies if this main thread exits).
+    try:
+        threading.Event().wait()
+    finally:
+        httpd.shutdown()
+
 
 def _intel_catchup() -> None:
     """Fire any intel connector that has never successfully run.
@@ -2401,13 +2408,6 @@ def _intel_catchup() -> None:
         log.info("Intel catch-up: fired %s", ", ".join(fired))
     else:
         log.info("Intel catch-up: all connectors already have a successful run")
-
-    # Block forever holding the server reference (the daemon thread
-    # serving requests dies if this main thread exits).
-    try:
-        threading.Event().wait()
-    finally:
-        httpd.shutdown()
 
 
 if __name__ == "__main__":
