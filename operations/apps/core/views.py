@@ -4,8 +4,9 @@ import json
 import os
 import uuid
 from datetime import datetime, timedelta, timezone
-
-import requests
+from urllib import request as _urllib_request
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -3875,23 +3876,29 @@ def _lookup_virustotal(canonical_name: str) -> tuple[dict, str]:
     api_key = os.environ.get("VT_API_KEY", "").strip()
     if not api_key:
         return {"error": "VT_API_KEY not configured"}, "no API key configured on server"
-    r = requests.get(
-        "https://www.virustotal.com/api/v3/search",
-        params={"query": canonical_name[:120], "limit": 10},
-        headers={"x-apikey": api_key},
-        timeout=15,
+    qs = urlencode({"query": canonical_name[:120], "limit": 10})
+    req = _urllib_request.Request(
+        f"https://www.virustotal.com/api/v3/search?{qs}",
+        headers={"x-apikey": api_key, "Accept": "application/json"},
     )
-    if r.status_code == 429:
-        return {"error": "rate_limited"}, "VirusTotal rate-limited (free-tier daily cap)"
-    if r.status_code == 401:
-        return {"error": "unauthorized"}, "VirusTotal rejected our key"
-    if r.status_code >= 400:
-        return {"error": f"http_{r.status_code}"}, f"VirusTotal returned HTTP {r.status_code}"
-    payload = r.json() or {}
+    try:
+        with _urllib_request.urlopen(req, timeout=15) as resp:
+            body = resp.read()
+    except HTTPError as exc:
+        if exc.code == 429:
+            return {"error": "rate_limited"}, "VirusTotal rate-limited (free-tier daily cap)"
+        if exc.code == 401:
+            return {"error": "unauthorized"}, "VirusTotal rejected our key"
+        return {"error": f"http_{exc.code}"}, f"VirusTotal returned HTTP {exc.code}"
+    except URLError as exc:
+        return {"error": "network"}, f"Network error contacting VirusTotal: {exc.reason}"
+    try:
+        payload = json.loads(body.decode("utf-8", errors="replace"))
+    except ValueError:
+        return {"error": "bad_json"}, "VirusTotal returned unparseable JSON"
     data = payload.get("data") or []
     if not data:
         return payload, "no matching files or domains found"
-    # Summarise the first hit.
     first = data[0]
     attrs = first.get("attributes") or {}
     stats = attrs.get("last_analysis_stats") or {}

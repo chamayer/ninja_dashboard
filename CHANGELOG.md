@@ -2,6 +2,16 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.96.1] — 2026-07-25 — Fix operations import: swap `requests` for stdlib `urllib`
+
+### Fixed
+- **Operations container crash-loop after 0.94.0 / 0.96.0** — the
+  on-demand VirusTotal lookup imported `requests`, which isn't in the
+  deployed operations image. Rewrote `_lookup_virustotal` on top of
+  stdlib `urllib.request` so nothing outside the standard library is
+  required. Careless-mistakes rule #10: verify against the deployed
+  image, not the local venv.
+
 ## [0.96.0] — 2026-07-24 — Software dashboard reshape + auto-intel on software cycle
 
 ### Changed (operator-facing)
