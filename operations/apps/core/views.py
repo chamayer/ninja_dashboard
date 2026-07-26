@@ -2794,12 +2794,14 @@ def software_page(request: HttpRequest) -> HttpResponse:
         )
         recent_installs = cur.fetchall()
 
-    # Composite risk score per shown title from operations.v_software_safety.
-    # The view depends on migrations 072 (intel schema) + 0081 (view). On
-    # a fresh deploy either may not have run yet — fall back gracefully.
+    # Fetch v_software_safety ONCE. Every downstream aggregate (per-title
+    # risk map, high-risk count, risk distribution, new high-risk this
+    # week) is derived from this snapshot — the view is expensive to
+    # rebuild and calling it multiple times per request was the primary
+    # source of software-page slowness once the intel layer populated.
     safety_by_title: dict[str, dict] = {}
-    high_risk_titles = 0
-    if canonical_names and intel_available:
+    all_safety_rows: list[tuple] = []
+    if intel_available:
         try:
             with transaction.atomic(), connection.cursor() as sc:
                 sc.execute("SET LOCAL operations.tenant_id = 1")
@@ -2809,68 +2811,47 @@ def software_page(request: HttpRequest) -> HttpResponse:
                            cve_count, kev_count, osint_hits
                     FROM operations.v_software_safety
                     WHERE tenant_id = 1
-                      AND canonical_name = ANY(%s::text[])
-                    """,
-                    (canonical_names,),
-                )
-                for cn, score, band, cve_count, kev_count, osint_hits in sc.fetchall():
-                    safety_by_title[cn] = {
-                        "score": score, "band": band,
-                        "cve_count": cve_count, "kev_count": kev_count,
-                        "osint_hits": osint_hits,
-                    }
-                sc.execute(
-                    """
-                    SELECT COUNT(*) FROM operations.v_software_safety
-                    WHERE tenant_id = 1 AND safety_band = 'high'
                     """
                 )
-                (high_risk_titles,) = sc.fetchone()
+                all_safety_rows = list(sc.fetchall())
         except Exception:
-            safety_by_title = {}
-            high_risk_titles = 0
+            all_safety_rows = []
+
+    shown_set = {c for c in canonical_names}
+    high_risk_titles = 0
+    risk_distribution = {"high": 0, "medium": 0, "low": 0, "clean": 0, "unknown": 0}
+    for cn, score, band, cve_count, kev_count, osint_hits in all_safety_rows:
+        if band in risk_distribution:
+            risk_distribution[band] += 1
+        if band == "high":
+            high_risk_titles += 1
+        if cn in shown_set:
+            safety_by_title[cn] = {
+                "score": score, "band": band,
+                "cve_count": cve_count, "kev_count": kev_count,
+                "osint_hits": osint_hits,
+            }
 
     # Risk distribution + this-week highlights + workflow aggregates.
-    # Everything below is derived cheaply from v_software_safety /
-    # software_installations_current / findings; single small
-    # queries, tolerated to fail on fresh installs.
-    risk_distribution = {"high": 0, "medium": 0, "low": 0, "clean": 0, "unknown": 0}
     this_week: dict = {"new_products": 0, "new_high_risk": 0, "top_new_product": None}
     workflow_state: dict = {
         "publishers_undecided": 0,
         "tech_checklist_devices": 0,
         "user_risk_users": 0,
     }
-    if intel_available:
-        try:
-            with transaction.atomic(), connection.cursor() as sc:
-                sc.execute("SET LOCAL operations.tenant_id = 1")
-                sc.execute(
-                    """
-                    SELECT safety_band, COUNT(*)::int
-                    FROM operations.v_software_safety
-                    WHERE tenant_id = 1
-                    GROUP BY safety_band
-                    """
-                )
-                for band, cnt in sc.fetchall():
-                    if band in risk_distribution:
-                        risk_distribution[band] = cnt
-        except Exception:
-            pass
-
     try:
         with transaction.atomic(), connection.cursor() as sc:
             sc.execute("SET LOCAL operations.tenant_id = 1")
             sc.execute(
                 """
-                SELECT COUNT(DISTINCT canonical_name)::int
+                SELECT DISTINCT canonical_name
                 FROM operations.software_installations_current
                 WHERE tenant_id = 1 AND deleted_at IS NULL AND stale_since IS NULL
                   AND first_observed_at >= NOW() - INTERVAL '7 days'
                 """
             )
-            (this_week["new_products"],) = sc.fetchone()
+            new_products_set = {row[0] for row in sc.fetchall()}
+            this_week["new_products"] = len(new_products_set)
             sc.execute(
                 """
                 SELECT canonical_name, COUNT(*)::int AS devices
@@ -2884,29 +2865,14 @@ def software_page(request: HttpRequest) -> HttpResponse:
             row = sc.fetchone()
             if row:
                 this_week["top_new_product"] = {"name": row[0], "devices": row[1]}
+        # Derive new-high-risk from the safety snapshot rather than a
+        # separate view scan.
+        this_week["new_high_risk"] = sum(
+            1 for r in all_safety_rows
+            if r[2] == "high" and r[0] in new_products_set
+        )
     except Exception:
         pass
-
-    if intel_available:
-        try:
-            with transaction.atomic(), connection.cursor() as sc:
-                sc.execute("SET LOCAL operations.tenant_id = 1")
-                sc.execute(
-                    """
-                    SELECT COUNT(*)::int FROM operations.v_software_safety
-                    WHERE tenant_id = 1 AND safety_band = 'high'
-                      AND canonical_name IN (
-                          SELECT DISTINCT canonical_name
-                          FROM operations.software_installations_current
-                          WHERE tenant_id = 1 AND deleted_at IS NULL
-                            AND stale_since IS NULL
-                            AND first_observed_at >= NOW() - INTERVAL '7 days'
-                      )
-                    """
-                )
-                (this_week["new_high_risk"],) = sc.fetchone()
-        except Exception:
-            pass
 
     try:
         with transaction.atomic(), connection.cursor() as sc:

@@ -2,6 +2,18 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.97.4] — 2026-07-26 — /software perf: fetch v_software_safety once
+
+### Fixed
+- **/software loads slowly** — once the intel layer populated CVEs and
+  matches, the fleet page called `operations.v_software_safety` three
+  times per request (per-shown-title lookup, high-band count, band
+  distribution) plus a fourth "new-high-risk-this-week" JOIN. Each
+  view evaluation was ~700-900 ms, adding up to 3-4 s per render.
+  Now fetch the whole view **once** at the start of the request and
+  derive `safety_by_title`, `high_risk_titles`, `risk_distribution`,
+  and `this_week.new_high_risk` from that one snapshot in Python.
+
 ## [0.97.3] — 2026-07-26 — Jobs page: groups, run-all, correct kind mapping, recent activity
 
 ### Fixed
