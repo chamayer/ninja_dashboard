@@ -698,6 +698,60 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 return
             threading.Thread(target=run_notifications_digest_once, daemon=True).start()
             self._respond(202, b"notifications digest scheduled\n")
+        elif self.path == "/run/intel-nvd":
+            if not _READY.is_set():
+                self._respond(503, b"still starting - try again shortly\n")
+                return
+            threading.Thread(target=run_intel_nvd_once, daemon=True).start()
+            self._respond(202, b"intel NVD scheduled\n")
+        elif self.path == "/run/intel-cpe-dict":
+            if not _READY.is_set():
+                self._respond(503, b"still starting - try again shortly\n")
+                return
+            threading.Thread(target=run_intel_cpe_dict_once, daemon=True).start()
+            self._respond(202, b"intel CPE dictionary scheduled\n")
+        elif self.path == "/run/intel-kev":
+            if not _READY.is_set():
+                self._respond(503, b"still starting - try again shortly\n")
+                return
+            threading.Thread(target=run_intel_kev_once, daemon=True).start()
+            self._respond(202, b"intel CISA KEV scheduled\n")
+        elif self.path == "/run/intel-epss":
+            if not _READY.is_set():
+                self._respond(503, b"still starting - try again shortly\n")
+                return
+            threading.Thread(target=run_intel_epss_once, daemon=True).start()
+            self._respond(202, b"intel EPSS scheduled\n")
+        elif self.path == "/run/intel-matcher":
+            if not _READY.is_set():
+                self._respond(503, b"still starting - try again shortly\n")
+                return
+            threading.Thread(target=run_intel_matcher_once, daemon=True).start()
+            self._respond(202, b"intel matcher scheduled\n")
+        elif self.path == "/run/intel-winget":
+            if not _READY.is_set():
+                self._respond(503, b"still starting - try again shortly\n")
+                return
+            threading.Thread(target=run_intel_winget_once, daemon=True).start()
+            self._respond(202, b"intel Winget enrichment scheduled\n")
+        elif self.path == "/run/intel-chocolatey":
+            if not _READY.is_set():
+                self._respond(503, b"still starting - try again shortly\n")
+                return
+            threading.Thread(target=run_intel_chocolatey_once, daemon=True).start()
+            self._respond(202, b"intel Chocolatey enrichment scheduled\n")
+        elif self.path == "/run/intel-otx":
+            if not _READY.is_set():
+                self._respond(503, b"still starting - try again shortly\n")
+                return
+            threading.Thread(target=run_intel_otx_once, daemon=True).start()
+            self._respond(202, b"intel OTX scheduled\n")
+        elif self.path == "/run/intel-abusech":
+            if not _READY.is_set():
+                self._respond(503, b"still starting - try again shortly\n")
+                return
+            threading.Thread(target=run_intel_abusech_once, daemon=True).start()
+            self._respond(202, b"intel abuse.ch scheduled\n")
         elif self.path == "/run/software/enqueue" or self.path.startswith("/run/software/enqueue?"):
             self._handle_software_enqueue()
         elif self.path == "/run/software/scoped" or self.path.startswith("/run/software/scoped?"):
@@ -2291,12 +2345,62 @@ def main() -> None:
 
     log.info("Legacy agent compliance catch-up disabled")
 
+    # Intel catch-up on startup. Any connector with no successful run
+    # in ``operations.intel_ingest_status`` fires immediately in the
+    # background so a fresh deploy doesn't wait hours for the first
+    # scheduler tick. Each thread records its own outcome via
+    # ``ingest.intel.status.record_run``.
+    if settings.INTEL_ENABLED:
+        _intel_catchup()
+
     # Kick off Metabase bootstrap in the background — won't block
     # startup if Metabase isn't ready or creds aren't set.
     threading.Thread(target=bootstrap_metabase, daemon=True).start()
 
     _READY.set()
     log.info("Ingest service ready")
+
+
+def _intel_catchup() -> None:
+    """Fire any intel connector that has never successfully run.
+
+    Reads ``operations.intel_ingest_status`` once, then launches a
+    background thread per connector whose ``last_success_at`` is NULL.
+    Each launch respects the connector's own ``INTEL_*_ENABLED`` flag
+    (the wrapper functions already gate on those).
+    """
+    try:
+        with db.pool.connection() as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT connector FROM operations.intel_ingest_status"
+                " WHERE last_success_at IS NOT NULL"
+            )
+            done = {row[0] for row in cur.fetchall()}
+    except Exception:
+        log.exception("Intel catch-up status probe failed")
+        done = set()
+
+    plan: list[tuple[str, object]] = [
+        ("cisa_kev",   run_intel_kev_once),
+        ("nvd",        run_intel_nvd_once),
+        ("cpe_dict",   run_intel_cpe_dict_once),
+        ("epss",       run_intel_epss_once),
+        ("winget",     run_intel_winget_once),
+        ("chocolatey", run_intel_chocolatey_once),
+        ("otx",        run_intel_otx_once),
+        ("abusech",    run_intel_abusech_once),
+        ("matcher",    run_intel_matcher_once),
+    ]
+    fired = []
+    for connector, fn in plan:
+        if connector in done:
+            continue
+        threading.Thread(target=fn, daemon=True).start()
+        fired.append(connector)
+    if fired:
+        log.info("Intel catch-up: fired %s", ", ".join(fired))
+    else:
+        log.info("Intel catch-up: all connectors already have a successful run")
 
     # Block forever holding the server reference (the daemon thread
     # serving requests dies if this main thread exits).

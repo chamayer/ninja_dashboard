@@ -2,6 +2,44 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.97.0] — 2026-07-26 — Jobs page, intel catch-up, bulk decisions, software sub-nav
+
+### Added
+- **Jobs page (`/admin/jobs/`)** — every scheduled job (source ingest,
+  intel connectors, evaluators, notifications) with last-run status,
+  age, rows touched, last error, and a **Run now** button that POSTs
+  to the ingest container's `/run/<slug>` HTTP endpoint. Category +
+  status filters (ok / stale / failed / never run). Reachable from
+  the "Jobs" tab under the Integrations admin nav.
+- **Ingest `/run/intel-*` HTTP endpoints** for every intel connector
+  (kev / nvd / cpe-dict / epss / matcher / winget / chocolatey / otx /
+  abusech). Same 202-Accepted background-thread pattern the existing
+  `/run/*` endpoints already use.
+- **Intel catch-up on ingest startup** — any connector with no
+  successful run in `operations.intel_ingest_status` fires in a
+  background thread when the scheduler comes up, so a fresh deploy
+  doesn't wait hours for the first natural tick.
+- **Software sub-nav** (`_software_tabs.html`) included on every
+  software surface (Products, Publishers, Decisions, Tech checklist,
+  User risk). One consistent nav strip; each view sets `software_tab`
+  to highlight the active page.
+- **Publisher column + publisher-scope apply on the decisions queue**
+  — the current publisher-scope decision, if any, is rendered under
+  the product's own decision. Per-row picker has separate "Product"
+  and "Publisher" apply buttons.
+- **Bulk actions on the decisions queue** — checkboxes on every row
+  plus a bulk bar with a "Apply as: this product only / this
+  publisher (every product)" scope selector. Single POST to
+  `/software/decisions/bulk/` with the chosen decision applied to
+  every selection. Audited per-row.
+
+### Fixed
+- **`/software/` counted publisher-scope decisions as products** —
+  approving two publishers surfaced as "2 approved products".
+  Approved / rejected / investigating are now
+  `COUNT(DISTINCT canonical_name)` where the product **or its
+  publisher** has a global-scope decision.
+
 ## [0.96.1] — 2026-07-25 — Fix operations import: swap `requests` for stdlib `urllib`
 
 ### Fixed

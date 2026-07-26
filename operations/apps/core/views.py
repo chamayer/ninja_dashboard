@@ -2967,11 +2967,67 @@ def software_page(request: HttpRequest) -> HttpResponse:
         finding_type__name="whitelist_suggestion"
     ).values("finding_details__canonical_name").distinct().count()
 
-    approved_titles = decision_counts.get("approve", 0) + decision_counts.get(
-        "approve_publisher", 0
-    )
-    rejected_titles = decision_counts.get("reject", 0)
-    investigate_titles = decision_counts.get("investigate", 0)
+    # Product-level decision counts. A publisher-scope decision applies
+    # to every product from that publisher, so the raw
+    # SoftwareDecision row count is wrong. Count DISTINCT canonical_names
+    # that have EITHER a title-scope decision or a matching publisher-
+    # scope decision at global scope.
+    approved_titles = rejected_titles = investigate_titles = 0
+    try:
+        with transaction.atomic(), connection.cursor() as sc:
+            sc.execute("SET LOCAL operations.tenant_id = 1")
+            sc.execute(
+                """
+                SELECT
+                    COUNT(DISTINCT sic.canonical_name) FILTER (
+                        WHERE EXISTS (
+                            SELECT 1 FROM operations.software_decisions sd
+                            WHERE sd.tenant_id = 1 AND sd.client_id IS NULL AND sd.device_id IS NULL
+                              AND sd.decision IN ('approve','approve_publisher')
+                              AND (
+                                  (sd.canonical_name <> '' AND sd.canonical_name = sic.canonical_name)
+                                  OR (sd.publisher <> ''
+                                      AND LOWER(sd.publisher) = LOWER(COALESCE(sic.publisher,'')))
+                              )
+                        )
+                    ) AS approved,
+                    COUNT(DISTINCT sic.canonical_name) FILTER (
+                        WHERE EXISTS (
+                            SELECT 1 FROM operations.software_decisions sd
+                            WHERE sd.tenant_id = 1 AND sd.client_id IS NULL AND sd.device_id IS NULL
+                              AND sd.decision = 'reject'
+                              AND (
+                                  (sd.canonical_name <> '' AND sd.canonical_name = sic.canonical_name)
+                                  OR (sd.publisher <> ''
+                                      AND LOWER(sd.publisher) = LOWER(COALESCE(sic.publisher,'')))
+                              )
+                        )
+                    ) AS rejected,
+                    COUNT(DISTINCT sic.canonical_name) FILTER (
+                        WHERE EXISTS (
+                            SELECT 1 FROM operations.software_decisions sd
+                            WHERE sd.tenant_id = 1 AND sd.client_id IS NULL AND sd.device_id IS NULL
+                              AND sd.decision = 'investigate'
+                              AND (
+                                  (sd.canonical_name <> '' AND sd.canonical_name = sic.canonical_name)
+                                  OR (sd.publisher <> ''
+                                      AND LOWER(sd.publisher) = LOWER(COALESCE(sic.publisher,'')))
+                              )
+                        )
+                    ) AS investigating
+                FROM operations.software_installations_current sic
+                WHERE sic.tenant_id = 1 AND sic.deleted_at IS NULL AND sic.stale_since IS NULL
+                """
+            )
+            row = sc.fetchone() or (0, 0, 0)
+            approved_titles = row[0] or 0
+            rejected_titles = row[1] or 0
+            investigate_titles = row[2] or 0
+    except Exception:
+        # Fall back to raw counts if the join fails somehow.
+        approved_titles = decision_counts.get("approve", 0)
+        rejected_titles = decision_counts.get("reject", 0)
+        investigate_titles = decision_counts.get("investigate", 0)
     pending_decisions = unique_titles - approved_titles - rejected_titles - investigate_titles
     if pending_decisions < 0:
         pending_decisions = 0
@@ -3037,6 +3093,7 @@ def software_page(request: HttpRequest) -> HttpResponse:
             "risk_distribution": risk_distribution,
             "this_week": this_week,
             "workflow_state": workflow_state,
+            "software_tab": "overview",
         },
     )
 
@@ -3356,6 +3413,7 @@ def software_detail(request: HttpRequest, name: str) -> HttpResponse:
             "matched_cves": matched_cves,
             "osint_rows": osint_rows,
             "catalog_tags": catalog_tags,
+            "software_tab": "overview",
         },
     )
 
@@ -3448,6 +3506,7 @@ def software_publishers(request: HttpRequest) -> HttpResponse:
             "publishers": publishers,
             "active_q": q_filter,
             "decision_choices": SoftwareDecision.Decision.choices,
+            "software_tab": "publishers",
         },
     )
 
@@ -3572,6 +3631,7 @@ def software_publisher_detail(request: HttpRequest, publisher: str) -> HttpRespo
             "client_pub_decisions": client_pub_decisions,
             "device_pub_decisions": device_pub_decisions,
             "decision_choices": SoftwareDecision.Decision.choices,
+            "software_tab": "publishers",
         },
     )
 
@@ -3768,8 +3828,177 @@ def software_user_risk(request: HttpRequest) -> HttpResponse:
             "total_items": sum(u["item_count"] for u in users),
             "clients": clients,
             "active_clients": client_slugs,
+            "software_tab": "user-risk",
         },
     )
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Jobs — operator-facing catalogue of every scheduled ingest / intel /
+# evaluator / notifier job with last-run status and a "Run now" button
+# that POSTs to the ingest container's /run/<slug> HTTP endpoint.
+# ─────────────────────────────────────────────────────────────────────
+
+
+_INGEST_BASE_URL = os.environ.get("INGEST_BASE_URL", "http://ingest:8090")
+
+# Static catalogue of jobs surfaced on /admin/jobs/. Each row maps to an
+# existing /run/<slug> HTTP endpoint on the ingest container. Categories
+# keep the UI groupable; last-run status is looked up per-category with
+# a small helper query (intel jobs use intel_ingest_status; everything
+# else uses run_log).
+_JOB_CATALOG: list[dict] = [
+    # Source ingest
+    {"id": "patches",     "name": "Patch ingest",         "category": "source ingest", "endpoint": "run/patches",         "status_key": "patches",     "status_source": "run_log", "description": "Pull the Ninja patch queue and refresh the patch summary matviews."},
+    {"id": "agent-observations", "name": "Agent observations", "category": "source ingest", "endpoint": "run/agents",   "status_key": "agents",      "status_source": "run_log", "description": "Fetch device inventory + agent presence from every source."},
+    # Evaluators
+    {"id": "software-classify", "name": "Software classifier + auto-intel", "category": "evaluators", "endpoint": "run/software-classify", "status_key": "software.classify", "status_source": "run_log", "description": "Run intel matcher + catalogue enrichers then the software finding classifier."},
+    {"id": "patch-classify",    "name": "Patch classifier",   "category": "evaluators", "endpoint": "run/patch-classify",   "status_key": "patches.classify", "status_source": "run_log", "description": "Emit patch findings from the current patch inventory."},
+    {"id": "platform-evaluate", "name": "Platform evaluator", "category": "evaluators", "endpoint": "run/platform-evaluate", "status_key": "platform.evaluate", "status_source": "run_log", "description": "Refresh coverage, identity, and lifecycle findings."},
+    {"id": "resolver",          "name": "Identity resolver",  "category": "evaluators", "endpoint": "run/resolver",   "status_key": "resolver",    "status_source": "run_log", "description": "Merge candidate resolver + layered-entity write path."},
+    # Intel connectors
+    {"id": "intel-kev",         "name": "Intel: CISA KEV",           "category": "intel", "endpoint": "run/intel-kev",         "status_key": "cisa_kev",   "status_source": "intel", "description": "CISA Known Exploited Vulnerabilities feed (~1,200 CVEs)."},
+    {"id": "intel-nvd",         "name": "Intel: NVD (CVE feed)",     "category": "intel", "endpoint": "run/intel-nvd",         "status_key": "nvd",        "status_source": "intel", "description": "NIST NVD v2 CVE delta pull."},
+    {"id": "intel-cpe-dict",    "name": "Intel: CPE dictionary",     "category": "intel", "endpoint": "run/intel-cpe-dict",    "status_key": "cpe_dict",   "status_source": "intel", "description": "NIST CPE 2.3 vendor / product dictionary for CVE matching."},
+    {"id": "intel-epss",        "name": "Intel: EPSS scores",        "category": "intel", "endpoint": "run/intel-epss",        "status_key": "epss",       "status_source": "intel", "description": "FIRST.org EPSS exploit-likelihood scores."},
+    {"id": "intel-matcher",     "name": "Intel: title × CVE matcher","category": "intel", "endpoint": "run/intel-matcher",     "status_key": "matcher",    "status_source": "intel", "description": "Match installed products to CPE entries and populate cve_match."},
+    {"id": "intel-winget",      "name": "Intel: Winget enrichment",  "category": "intel", "endpoint": "run/intel-winget",      "status_key": "winget",     "status_source": "intel", "description": "Per-product tags + publisher from Windows Package Manager."},
+    {"id": "intel-chocolatey",  "name": "Intel: Chocolatey enrichment","category": "intel","endpoint": "run/intel-chocolatey", "status_key": "chocolatey", "status_source": "intel", "description": "Per-product tags from the Chocolatey community feed."},
+    {"id": "intel-otx",         "name": "Intel: AlienVault OTX",     "category": "intel", "endpoint": "run/intel-otx",         "status_key": "otx",        "status_source": "intel", "description": "Community threat-intel pulses from OTX."},
+    {"id": "intel-abusech",     "name": "Intel: abuse.ch",           "category": "intel", "endpoint": "run/intel-abusech",     "status_key": "abusech",    "status_source": "intel", "description": "MalwareBazaar + ThreatFox recent dump files."},
+    # Notifications
+    {"id": "notifications-dispatch", "name": "Notifications dispatch", "category": "notifications", "endpoint": "run/notifications/dispatch", "status_key": "notifications.dispatch", "status_source": "run_log", "description": "Deliver queued notifications."},
+    {"id": "notifications-digest",   "name": "Notifications digest",   "category": "notifications", "endpoint": "run/notifications/digest",   "status_key": "notifications.digest",   "status_source": "run_log", "description": "Send scheduled digest routes."},
+]
+
+_JOB_INDEX = {j["id"]: j for j in _JOB_CATALOG}
+
+
+@login_required
+def admin_jobs(request: HttpRequest) -> HttpResponse:
+    """List every schedulable job with last-run status and a run-now button."""
+    category_filter = (request.GET.get("category") or "").strip().lower()
+    status_filter = (request.GET.get("status") or "").strip().lower()
+
+    intel_status: dict[str, dict] = {}
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        try:
+            cur.execute(
+                "SELECT connector, last_status, last_run_at, last_success_at,"
+                " rows_touched, last_error FROM operations.intel_ingest_status"
+            )
+            for r in cur.fetchall():
+                intel_status[r[0]] = {
+                    "last_status": r[1] or "",
+                    "last_run_at": r[2],
+                    "last_success_at": r[3],
+                    "rows_touched": r[4] or 0,
+                    "last_error": (r[5] or "")[:200],
+                }
+        except Exception:
+            intel_status = {}
+
+    run_log_status: dict[str, dict] = {}
+    try:
+        with transaction.atomic(), connection.cursor() as cur:
+            cur.execute("SET LOCAL operations.tenant_id = 1")
+            cur.execute(
+                """
+                SELECT DISTINCT ON (kind) kind, ok, started_at, ended_at, rows, error
+                FROM operations.run_log
+                ORDER BY kind, started_at DESC
+                """
+            )
+            for r in cur.fetchall():
+                run_log_status[r[0]] = {
+                    "last_status": "ok" if r[1] else "failed",
+                    "last_run_at": r[2],
+                    "last_success_at": r[3] if r[1] else None,
+                    "rows_touched": r[4] or 0,
+                    "last_error": (r[5] or "")[:200],
+                }
+    except Exception:
+        run_log_status = {}
+
+    now = timezone.now()
+    jobs = []
+    categories = set()
+    for entry in _JOB_CATALOG:
+        categories.add(entry["category"])
+        if entry["status_source"] == "intel":
+            status = intel_status.get(entry["status_key"]) or {}
+        else:
+            status = run_log_status.get(entry["status_key"]) or {}
+        last_run_at = status.get("last_run_at")
+        last_success_at = status.get("last_success_at")
+        state = "never_run"
+        if status.get("last_status") == "ok":
+            state = "ok"
+        elif status.get("last_status"):
+            state = status["last_status"]
+        if last_run_at is not None:
+            age = now - last_run_at
+        else:
+            age = None
+        is_stale = last_success_at is None or (now - last_success_at) > timedelta(days=2)
+        jobs.append({
+            "id": entry["id"],
+            "name": entry["name"],
+            "category": entry["category"],
+            "description": entry["description"],
+            "state": state,
+            "last_run_at": last_run_at,
+            "last_success_at": last_success_at,
+            "age": age,
+            "rows_touched": status.get("rows_touched", 0),
+            "last_error": status.get("last_error", ""),
+            "is_stale": is_stale,
+        })
+
+    if category_filter:
+        jobs = [j for j in jobs if j["category"] == category_filter]
+    if status_filter == "never_run":
+        jobs = [j for j in jobs if j["state"] == "never_run"]
+    elif status_filter == "failed":
+        jobs = [j for j in jobs if j["state"] not in ("ok", "never_run")]
+    elif status_filter == "stale":
+        jobs = [j for j in jobs if j["is_stale"] and j["state"] != "never_run"]
+    elif status_filter == "ok":
+        jobs = [j for j in jobs if j["state"] == "ok" and not j["is_stale"]]
+
+    return render(
+        request,
+        "admin_jobs.html",
+        {
+            "admin_group": "integrations",
+            "admin_tab": "jobs",
+            "jobs": jobs,
+            "categories": sorted(categories),
+            "active_category": category_filter,
+            "active_status": status_filter,
+        },
+    )
+
+
+@login_required
+@require_POST
+def admin_jobs_run(request: HttpRequest, job_id: str) -> HttpResponse:
+    entry = _JOB_INDEX.get(job_id)
+    if not entry:
+        messages.error(request, f"Unknown job '{job_id}'.")
+        return redirect("admin_jobs")
+    url = _INGEST_BASE_URL.rstrip("/") + "/" + entry["endpoint"]
+    try:
+        req = _urllib_request.Request(url, data=b"", method="POST")
+        with _urllib_request.urlopen(req, timeout=10) as resp:
+            body = resp.read(200).decode("utf-8", errors="replace").strip()
+        messages.success(request, f"{entry['name']} → {resp.status} {body}")
+    except HTTPError as exc:
+        messages.error(request, f"{entry['name']} → HTTP {exc.code}: {exc.reason}")
+    except URLError as exc:
+        messages.error(request, f"{entry['name']} → network error: {exc.reason}")
+    return redirect(request.META.get("HTTP_REFERER") or reverse("admin_jobs"))
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -4091,6 +4320,7 @@ def software_tech_checklist(request: HttpRequest) -> HttpResponse:
             "total_items": sum(e["item_count"] for e in devices),
             "clients": clients,
             "active_clients": client_slugs,
+            "software_tab": "checklist",
         },
     )
 
@@ -6614,6 +6844,7 @@ def software_decisions_queue(request: HttpRequest) -> HttpResponse:
                 """
                 SELECT
                     f.finding_details->>'canonical_name' AS canonical,
+                    COALESCE(MAX(f.finding_details->>'publisher'), '') AS publisher,
                     f.finding_details->>'category' AS category,
                     MIN(sc.categories::text) AS catalog_categories,
                     COUNT(DISTINCT f.subject_id) AS device_count,
@@ -6628,34 +6859,45 @@ def software_decisions_queue(request: HttpRequest) -> HttpResponse:
                   AND f.status IN ('open', 'acknowledged')
                   AND ft.source_module = 'platform.software_findings'
                   AND f.finding_details->>'canonical_name' IS NOT NULL
-                GROUP BY 1, 2
+                GROUP BY 1, 3
                 ORDER BY device_count DESC, canonical
                 LIMIT 500
                 """,
             )
             rows = cur.fetchall()
 
-    # Attach existing decision (global scope) to each row
+    # Attach existing decision (global scope) to each row — either a
+    # title-scope decision on the canonical, or a publisher-scope
+    # decision on the observed publisher.
     canonical_names = [r[0] for r in rows if r[0]]
-    dec_map = {
-        (d.canonical_name.lower(), d.client_id, d.device_id): d
+    publisher_names = list({r[1] for r in rows if r[1]})
+    title_dec_map = {
+        d.canonical_name.lower(): d
         for d in SoftwareDecision.objects.filter(
-            tenant_id=1,
-            canonical_name__in=canonical_names,
-            client__isnull=True,
-            device__isnull=True,
-        )
+            tenant_id=1, canonical_name__in=canonical_names,
+            client__isnull=True, device__isnull=True,
+        ).exclude(canonical_name="")
+    }
+    pub_dec_map = {
+        d.publisher.lower(): d
+        for d in SoftwareDecision.objects.filter(
+            tenant_id=1, publisher__in=publisher_names,
+            client__isnull=True, device__isnull=True,
+        ).exclude(publisher="")
     }
     display_rows = []
-    for canonical, category, catalog_cats, device_count, latest in rows:
-        dec = dec_map.get((canonical.lower(), None, None))
+    for canonical, publisher, category, catalog_cats, device_count, latest in rows:
+        title_dec = title_dec_map.get(canonical.lower()) if canonical else None
+        pub_dec = pub_dec_map.get(publisher.lower()) if publisher else None
         display_rows.append(
             {
                 "canonical": canonical,
+                "publisher": publisher or "",
                 "category": category or (catalog_cats or ""),
                 "device_count": device_count,
                 "latest": latest,
-                "global_decision": dec.decision if dec else "",
+                "global_decision": title_dec.decision if title_dec else "",
+                "publisher_decision": pub_dec.decision if pub_dec else "",
             }
         )
 
@@ -6668,11 +6910,13 @@ def software_decisions_queue(request: HttpRequest) -> HttpResponse:
         return csv_response(
             display_rows,
             columns=[
-                ("Canonical name", "canonical"),
+                ("Product", "canonical"),
+                ("Publisher", "publisher"),
                 ("Category", "category"),
                 ("Device count", "device_count"),
                 ("Latest seen", "latest"),
-                ("Global decision", "global_decision"),
+                ("Product decision", "global_decision"),
+                ("Publisher decision", "publisher_decision"),
             ],
             filename_stem="software_decisions",
         )
@@ -6687,8 +6931,78 @@ def software_decisions_queue(request: HttpRequest) -> HttpResponse:
             "categories": categories_seen,
             "active_category": category_filter,
             "decision_choices": SoftwareDecision.Decision.choices,
+            "software_tab": "decisions",
         },
     )
+
+
+@login_required
+@require_POST
+@transaction.atomic
+def software_decision_bulk(request: HttpRequest) -> HttpResponse:
+    """Apply a single decision to a set of canonical names or publishers.
+
+    Form fields:
+      * canonical_name — repeated (from checkbox list); optional
+      * publisher      — repeated; optional
+      * decision       — one of SoftwareDecision.Decision.values
+      * scope          — global | client | device (currently only global
+                          supported in the queue UI)
+      * next           — return URL
+    """
+    decision = (request.POST.get("decision") or "").strip()
+    if decision not in dict(SoftwareDecision.Decision.choices):
+        messages.error(request, "Pick a decision before applying.")
+        return redirect(_safe_next(request, "software_decisions_queue"))
+
+    canonical_names = [n for n in request.POST.getlist("canonical_name") if n.strip()]
+    publishers      = [p for p in request.POST.getlist("publisher")      if p.strip()]
+    if not canonical_names and not publishers:
+        messages.error(request, "Select at least one product or publisher.")
+        return redirect(_safe_next(request, "software_decisions_queue"))
+
+    created, updated = 0, 0
+    for name in canonical_names:
+        obj, was_created = SoftwareDecision.objects.update_or_create(
+            tenant_id=1, canonical_name=name.strip(), publisher="",
+            client=None, device=None,
+            defaults={
+                "decision": decision, "reason": "",
+                "decided_by": request.user, "decided_at": timezone.now(),
+            },
+        )
+        _audit(request, "software_decision.bulk_set", obj.id, {},
+               {"canonical_name": name.strip(), "scope": "global", "decision": decision})
+        created += int(was_created)
+        updated += int(not was_created)
+    for pub in publishers:
+        obj, was_created = SoftwareDecision.objects.update_or_create(
+            tenant_id=1, canonical_name="", publisher=pub.strip(),
+            client=None, device=None,
+            defaults={
+                "decision": decision, "reason": "",
+                "decided_by": request.user, "decided_at": timezone.now(),
+            },
+        )
+        _audit(request, "software_decision.bulk_set", obj.id, {},
+               {"publisher": pub.strip(), "scope": "global", "decision": decision})
+        created += int(was_created)
+        updated += int(not was_created)
+    messages.success(
+        request,
+        f"{decision}: {created} new, {updated} updated across "
+        f"{len(canonical_names)} product(s) + {len(publishers)} publisher(s).",
+    )
+    return redirect(_safe_next(request, "software_decisions_queue"))
+
+
+def _safe_next(request: HttpRequest, fallback_url_name: str) -> str:
+    """Return the operator-supplied ``next`` if it's a relative URL,
+    otherwise reverse ``fallback_url_name``."""
+    nxt = request.POST.get("next") or ""
+    if nxt.startswith("/") and not nxt.startswith("//"):
+        return nxt
+    return reverse(fallback_url_name)
 
 
 @login_required

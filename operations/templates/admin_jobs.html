@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+{% load human_labels %}
+
+{% block title %}Jobs{% endblock %}
+
+{% block content %}
+{% include "_admin_tabs.html" %}
+<style>
+  .jobs-hero { display:flex; align-items:baseline; justify-content:space-between; gap:1rem; margin:0 0 1rem; }
+  .jobs-hero h1 { margin:0; font-size:1.35rem; }
+  .jobs-hero .sub { color:var(--muted); font-size:0.9rem; }
+
+  .jobs-filterbar {
+    display:flex; flex-wrap:wrap; gap:0.55rem; align-items:center; margin-bottom:0.85rem;
+    padding:0.6rem 0.85rem; background:var(--surface); border:1px solid var(--border); border-radius:6px;
+  }
+  .jobs-filterbar label { font-size:0.72rem; color:var(--muted); text-transform:uppercase; letter-spacing:0.05em; margin-right:0.3rem; }
+  .jobs-filterbar select, .jobs-filterbar input {
+    padding:0.35rem 0.65rem; border:1px solid var(--border); border-radius:4px; font-size:0.85rem;
+  }
+
+  .jobs-list { display:grid; gap:0.5rem; }
+  .job-row {
+    display:grid; grid-template-columns: 1fr auto auto; gap:0.9rem; align-items:center;
+    padding:0.75rem 1rem; background:var(--surface); border:1px solid var(--border); border-radius:6px;
+  }
+  .job-row .name { font-weight:600; font-size:0.95rem; }
+  .job-row .cat  { display:inline-block; padding:1px 8px; font-size:0.7rem; font-weight:600; text-transform:uppercase; letter-spacing:0.04em; border-radius:999px; margin-right:0.4rem; }
+  .job-row .cat.intel        { background:#eef2ff; color:#3730a3; }
+  .job-row .cat.evaluators   { background:#ecfeff; color:#155e75; }
+  .job-row .cat.source-ingest{ background:#f0fdf4; color:#166534; }
+  .job-row .cat.notifications{ background:#fef3c7; color:#92400e; }
+  .job-row .desc { color:var(--muted); font-size:0.83rem; margin-top:0.2rem; }
+  .job-row .meta { font-size:0.8rem; color:var(--muted); text-align:right; white-space:nowrap; }
+  .job-row .meta strong { color:#1a1a2e; }
+
+  .state-pill { display:inline-block; padding:0.15rem 0.6rem; border-radius:999px; font-size:0.72rem; font-weight:600; }
+  .state-pill.ok        { background:#dcfce7; color:#14532d; }
+  .state-pill.failed    { background:#fee2e2; color:#991b1b; }
+  .state-pill.never_run { background:#f3f4f6; color:#6b7280; }
+  .state-pill.stale     { background:#fef3c7; color:#92400e; }
+
+  .job-row form { margin:0; }
+  .job-row button {
+    padding:0.4rem 0.85rem; border-radius:4px; border:1px solid var(--border);
+    background:#fff; cursor:pointer; font-size:0.85rem; font-weight:600;
+  }
+  .job-row button:hover { background:#eef2ff; border-color:#4338ca; color:#312e81; }
+
+  .err-preview { font-size:0.75rem; color:#991b1b; margin-top:0.2rem; }
+</style>
+
+<div class="jobs-hero">
+    <div>
+        <h1>Jobs</h1>
+        <div class="sub">
+            {{ jobs|length }} job{{ jobs|length|pluralize }} — every scheduled task, plus a Run now button.
+        </div>
+    </div>
+</div>
+
+<form action="" method="get" class="jobs-filterbar">
+    <label>Category</label>
+    <select name="category" onchange="this.form.submit()">
+        <option value="">All categories</option>
+        {% for c in categories %}
+            <option value="{{ c }}" {% if active_category == c %}selected{% endif %}>{{ c|title }}</option>
+        {% endfor %}
+    </select>
+    <label>Status</label>
+    <select name="status" onchange="this.form.submit()">
+        <option value="">All statuses</option>
+        <option value="ok"        {% if active_status == 'ok'        %}selected{% endif %}>Ok, recent</option>
+        <option value="stale"     {% if active_status == 'stale'     %}selected{% endif %}>Stale (>2 days)</option>
+        <option value="failed"    {% if active_status == 'failed'    %}selected{% endif %}>Failed</option>
+        <option value="never_run" {% if active_status == 'never_run' %}selected{% endif %}>Never run</option>
+    </select>
+    {% if active_category or active_status %}
+        <a href="?" style="font-size:0.82rem;">Clear</a>
+    {% endif %}
+</form>
+
+<div class="jobs-list">
+    {% for j in jobs %}
+    <div class="job-row">
+        <div>
+            <div>
+                <span class="cat {{ j.category|slugify }}">{{ j.category|title }}</span>
+                <span class="name">{{ j.name }}</span>
+                {% if j.state == 'ok' %}
+                    {% if j.is_stale %}
+                        <span class="state-pill stale">Stale</span>
+                    {% else %}
+                        <span class="state-pill ok">Ok</span>
+                    {% endif %}
+                {% elif j.state == 'never_run' %}
+                    <span class="state-pill never_run">Never run</span>
+                {% else %}
+                    <span class="state-pill failed">{{ j.state|title }}</span>
+                {% endif %}
+            </div>
+            <div class="desc">{{ j.description }}</div>
+            {% if j.last_error %}
+                <div class="err-preview">Last error: {{ j.last_error }}</div>
+            {% endif %}
+        </div>
+        <div class="meta">
+            {% if j.last_run_at %}
+                Last run<br><strong>{{ j.last_run_at|date:"Y-m-d H:i" }}</strong>
+                {% if j.rows_touched %}<br>{{ j.rows_touched }} rows{% endif %}
+            {% else %}
+                <em>no runs yet</em>
+            {% endif %}
+        </div>
+        <div>
+            <form method="post" action="{% url 'admin_jobs_run' job_id=j.id %}">
+                {% csrf_token %}
+                <button type="submit">Run now</button>
+            </form>
+        </div>
+    </div>
+    {% empty %}
+    <p class="muted">No jobs match the current filter.</p>
+    {% endfor %}
+</div>
+{% endblock %}

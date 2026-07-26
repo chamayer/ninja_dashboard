@@ -68,5 +68,7 @@ Config / Integrations page. Views must set:
        href="{% url 'fleet_coverage' %}">Coverage</a>
     <a class="at-tab {% if admin_tab == 'ingest' %}active{% endif %}"
        href="{% url 'findings_admin_health' %}">Ingest</a>
+    <a class="at-tab {% if admin_tab == 'jobs' %}active{% endif %}"
+       href="{% url 'admin_jobs' %}">Jobs</a>
   {% endif %}
 </div>
