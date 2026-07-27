@@ -15,9 +15,8 @@
     <p class="muted">A status view of patching across the managed estate. Start with the population and recent Ninja evidence; work items are supporting detail below.</p>
 </div>
 
-{# Filter bar — top so tile counts visibly reflect the active selection. #}
 <div class="card">
-    <form action="" method="get" class="filterbar">
+    <form action="" method="get" class="filterbar" style="margin-bottom:1rem;">
         <div>
             <label>Status</label>
             <select name="status">
@@ -58,40 +57,35 @@
             <a href="{% url 'patching_queue' %}" style="margin-left: 0.5rem; font-size: 0.85rem;">Reset</a>
         </div>
     </form>
-</div>
-
-<div class="card">
-    <h2 class="section-label">Patching status</h2>
-    <p class="muted" style="font-size:.84rem; margin-top:0;">Active means a device has contacted us in the last {{ active_device_days }} days. Recent patch activity means Ninja reported a patch scan/state or install outcome in the last {{ patch_activity_days }} days.</p>
     <div class="tile-grid">
         <a class="tile" href="?posture=active{% if filter_qs %}&amp;{{ filter_qs }}{% endif %}">
             <div class="tile-label">Active devices</div>
-            <div class="tile-value">{{ patch_status.active }} / {{ patch_status.total }}</div>
-            <div class="tile-note">{{ active_device_days }}-day reporting window</div>
+            <div class="tile-value">{{ patch_status.active }}</div>
+            <div class="tile-note">of {{ patch_status.total }} tracked</div>
         </a>
         <a class="tile" href="?posture=active-in-scope{% if filter_qs %}&amp;{{ filter_qs }}{% endif %}">
             <div class="tile-label">In patching scope</div>
-            <div class="tile-value">{{ patch_status.active_in_scope }} / {{ patch_status.active }}</div>
-            <div class="tile-note">policy-managed active devices</div>
+            <div class="tile-value">{{ patch_status.active_in_scope }}</div>
+            <div class="tile-note">of {{ patch_status.active }} active</div>
         </a>
         <a class="tile tile-good" href="?posture=recent-activity{% if filter_qs %}&amp;{{ filter_qs }}{% endif %}">
             <div class="tile-label">Recent patch activity</div>
-            <div class="tile-value">{{ patch_status.recent_patch_activity }} / {{ patch_status.active_in_scope }}</div>
-            <div class="tile-note">Ninja evidence in {{ patch_activity_days }} days</div>
+            <div class="tile-value">{{ patch_status.recent_patch_activity }}</div>
+            <div class="tile-note">of {{ patch_status.active_in_scope }} in scope</div>
         </a>
         <a class="tile tile-warn" href="?posture=quiet{% if filter_qs %}&amp;{{ filter_qs }}{% endif %}">
             <div class="tile-label">No recent activity</div>
-            <div class="tile-value">{{ patch_status.quiet_patch_data }} / {{ patch_status.active_in_scope }}</div>
-            <div class="tile-note">in scope, but no recent evidence</div>
+            <div class="tile-value">{{ patch_status.quiet_patch_data }}</div>
+            <div class="tile-note">in scope, no recent evidence</div>
         </a>
         <a class="tile tile-alert" href="?posture=never-patched{% if filter_qs %}&amp;{{ filter_qs }}{% endif %}">
             <div class="tile-label">Never patched</div>
-            <div class="tile-value">{{ patch_status.never_patched }} / {{ patch_status.active_in_scope }}</div>
+            <div class="tile-value">{{ patch_status.never_patched }}</div>
             <div class="tile-note">no patch record in Ninja</div>
         </a>
         <a class="tile tile-warn" href="?posture=reboot-pending{% if filter_qs %}&amp;{{ filter_qs }}{% endif %}">
             <div class="tile-label">Awaiting restart</div>
-            <div class="tile-value">{{ patch_status.reboot_pending }} / {{ patch_status.active_in_scope }}</div>
+            <div class="tile-value">{{ patch_status.reboot_pending }}</div>
             <div class="tile-note">pending reboot reported</div>
         </a>
     </div>

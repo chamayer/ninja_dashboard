@@ -12,16 +12,14 @@
         </h1>
         {% include "_csv_download.html" %}
     </div>
-    <p class="muted" style="margin-top:0.5rem;">Everything that needs your attention — filtered slice shown below.</p>
-</div>
-
-<div class="tile-grid" style="margin-bottom:1rem;">
-    {% for t in severity_tiles %}
-        <a class="tile tile-{{ t.value }} {% if t.active %}tile-active{% endif %}" href="{{ t.href }}">
-            <div class="tile-label">{{ t.label }}</div>
-            <div class="tile-value">{{ t.count }}</div>
-        </a>
-    {% endfor %}
+    <div class="tile-grid" style="margin-top:1rem;">
+        {% for t in severity_tiles %}
+            <a class="tile tile-{{ t.value }} {% if t.active %}tile-active{% endif %}" href="{{ t.href }}">
+                <div class="tile-label">{{ t.label }}</div>
+                <div class="tile-value">{{ t.count }}</div>
+            </a>
+        {% endfor %}
+    </div>
 </div>
 
 <div class="card">

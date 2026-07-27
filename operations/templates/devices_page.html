@@ -35,9 +35,15 @@
         {% include "_csv_download.html" %}
     </div>
     <p class="muted" style="margin-top:0.5rem;">A current view of devices across all clients — explore, filter, and drill in.</p>
+    {% if coverage_issues or identity_issues or delayed_sources %}
+    <div class="dv-chips" style="margin-top:0.6rem;">
+        {% if coverage_issues %}<a class="dv-chip" href="{% url 'findings_queue' %}?category=coverage">{{ coverage_issues }} device{{ coverage_issues|pluralize }} with a coverage gap</a>{% endif %}
+        {% if identity_issues %}<a class="dv-chip" href="{% url 'findings_queue' %}?category=identity">{{ identity_issues }} device{{ identity_issues|pluralize }} with an identity conflict</a>{% endif %}
+        {% if delayed_sources %}<a class="dv-chip" href="{% url 'sources_status' %}">{{ delayed_sources }} source{{ delayed_sources|pluralize }} delayed</a>{% endif %}
+    </div>
+    {% endif %}
 </div>
 
-<h2 class="section-label">Estate snapshot</h2>
 <div class="tile-grid">
     <a class="tile" href="{% url 'devices_page' %}">
         <div class="tile-label">Total</div>
@@ -74,19 +80,8 @@
     </a>
 </div>
 
-{% if coverage_issues or identity_issues or delayed_sources %}
-<div class="card" style="padding:1rem;">
-  <h2 class="section-label">Service and data status</h2>
-  <div class="dv-chips">
-    {% if coverage_issues %}<a class="dv-chip" href="{% url 'findings_queue' %}?category=coverage">{{ coverage_issues }} device{{ coverage_issues|pluralize }} with a service coverage gap</a>{% endif %}
-    {% if identity_issues %}<a class="dv-chip" href="{% url 'findings_queue' %}?category=identity">{{ identity_issues }} device{{ identity_issues|pluralize }} with an identity conflict</a>{% endif %}
-    {% if delayed_sources %}<a class="dv-chip" href="{% url 'sources_status' %}">{{ delayed_sources }} source{{ delayed_sources|pluralize }} delayed</a>{% endif %}
-  </div>
-</div>
-{% endif %}
 
 <div class="card">
-    <h2 class="section-label">Explore devices</h2>
     <div class="dv-chips">
         <a class="dv-chip {% if not active_os %}active{% endif %}" href="{% url 'devices_page' %}">
             All <span class="chip-count">{{ overview.total }}</span>
