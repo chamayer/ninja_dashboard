@@ -2,6 +2,27 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.98.2] — 2026-07-27 — Decision log, Allow/Block/Review labels, tech-checklist filters
+
+### Added
+- **Software Decision log** at `/software/decisions/log/` — a
+  chronological audit of every `SoftwareDecision` regardless of
+  whether the corresponding product still has a finding. Filters:
+  free-text search over product / publisher / reason, scope (global /
+  client / device / publisher-scope / product-scope), and decision.
+  New "Log" tab in the Software sub-nav.
+- **Per-column filters on Tech Checklist**: search (device / client
+  / product / publisher), role, OS group, reason kind (e.g.
+  `suspicious_name`, `decision_reject`), and the pre-existing client
+  filter. Server-side WHERE for role / OS / client, Python-side for
+  the free-text and reason kind.
+
+### Changed
+- **Decision labels rendered as Allow / Block / Review / Trust
+  publisher** across every operator-facing surface. Internal DB
+  values (`approve` / `reject` / `investigate` / `approve_publisher`)
+  unchanged — this is a `human_labels` mapping, no data migration.
+
 ## [0.98.1] — 2026-07-27 — Matcher upgrade + matview refresh hooks
 
 ### Changed

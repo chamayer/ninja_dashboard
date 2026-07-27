@@ -4320,6 +4320,10 @@ def _lookup_virustotal(canonical_name: str) -> tuple[dict, str]:
 @login_required
 def software_tech_checklist(request: HttpRequest) -> HttpResponse:
     client_slugs = [s for s in request.GET.getlist("client") if s]
+    q_filter = (request.GET.get("q") or "").strip()
+    role_filter = (request.GET.get("role") or "").strip().lower()
+    os_filter = (request.GET.get("os") or "").strip()
+    kind_filter = (request.GET.get("kind") or "").strip()
     filtered_client_ids: list[str] = []
     if client_slugs:
         filtered_client_ids = [
@@ -4336,6 +4340,12 @@ def software_tech_checklist(request: HttpRequest) -> HttpResponse:
         client_params.append(filtered_client_ids)
     elif client_slugs:
         client_where = "AND FALSE"
+    if role_filter in ("server", "workstation", "unknown"):
+        client_where += " AND d.device_role = %s"
+        client_params.append(role_filter)
+    if os_filter:
+        client_where += " AND d.os_group = %s"
+        client_params.append(os_filter)
 
     findings_sql = f"""
         SELECT d.client_id, c.slug, c.display_name,
@@ -4479,6 +4489,25 @@ def software_tech_checklist(request: HttpRequest) -> HttpResponse:
             filename_stem="tech_checklist",
         )
 
+    # Post-fetch filtering for q + kind — filters that don't map
+    # cleanly to the SQL join. Small candidate set → done in Python.
+    def _match_row(entry: dict) -> bool:
+        if q_filter:
+            needle = q_filter.lower()
+            if needle not in (entry["hostname"] or "").lower() and needle not in (entry["client_name"] or "").lower():
+                if not any(
+                    needle in (i.get("canonical_name") or "").lower()
+                    or needle in (i.get("publisher") or "").lower()
+                    for i in entry["items"]
+                ):
+                    return False
+        if kind_filter:
+            if not any(kind_filter in (i.get("finding_type") or "") for i in entry["items"]):
+                return False
+        return True
+    if q_filter or kind_filter:
+        devices = [d for d in devices if _match_row(d)]
+
     return render(
         request,
         "software_tech_checklist.html",
@@ -4488,6 +4517,10 @@ def software_tech_checklist(request: HttpRequest) -> HttpResponse:
             "total_items": sum(e["item_count"] for e in devices),
             "clients": clients,
             "active_clients": client_slugs,
+            "active_q": q_filter,
+            "active_role": role_filter,
+            "active_os": os_filter,
+            "active_kind": kind_filter,
             "software_tab": "checklist",
         },
     )
@@ -7099,6 +7132,91 @@ def software_decisions_queue(request: HttpRequest) -> HttpResponse:
             "categories": categories_seen,
             "active_category": category_filter,
             "decision_choices": SoftwareDecision.Decision.choices,
+            "software_tab": "decisions",
+        },
+    )
+
+
+@login_required
+def software_decision_log(request: HttpRequest) -> HttpResponse:
+    """Chronological log of every SoftwareDecision — the complement to
+    the pending queue. Answers "what have I decided recently?".
+    Filters: scope, decision, publisher / product substring, date."""
+    scope_filter = (request.GET.get("scope") or "").strip().lower()
+    decision_filter = (request.GET.get("decision") or "").strip().lower()
+    q_filter = (request.GET.get("q") or "").strip()
+
+    qs = SoftwareDecision.objects.filter(tenant_id=1).select_related(
+        "client", "device", "decided_by"
+    )
+    if scope_filter == "global":
+        qs = qs.filter(client__isnull=True, device__isnull=True)
+    elif scope_filter == "client":
+        qs = qs.filter(client__isnull=False, device__isnull=True)
+    elif scope_filter == "device":
+        qs = qs.filter(device__isnull=False)
+    elif scope_filter == "publisher":
+        qs = qs.exclude(publisher="")
+    elif scope_filter == "product":
+        qs = qs.exclude(canonical_name="")
+    if decision_filter in ("approve", "approve_publisher", "reject", "investigate"):
+        qs = qs.filter(decision=decision_filter)
+    if q_filter:
+        qs = qs.filter(
+            Q(canonical_name__icontains=q_filter)
+            | Q(publisher__icontains=q_filter)
+            | Q(reason__icontains=q_filter)
+        )
+    qs = qs.order_by("-decided_at", "-id")[:500]
+
+    rows = [
+        {
+            "id": d.id,
+            "decision": d.decision,
+            "canonical_name": d.canonical_name,
+            "publisher": d.publisher,
+            "scope_label": (
+                "device" if d.device_id
+                else "client" if d.client_id
+                else "global"
+            ),
+            "target_label": (
+                d.canonical_name
+                or (f"publisher: {d.publisher}" if d.publisher else "?")
+            ),
+            "client": d.client.display_name if d.client else None,
+            "device_id": d.device_id,
+            "decided_by": d.decided_by.username if d.decided_by else None,
+            "decided_at": d.decided_at,
+            "reason": (d.reason or "")[:200],
+        }
+        for d in qs
+    ]
+
+    if wants_csv(request):
+        return csv_response(
+            rows,
+            columns=[
+                ("Decided at", "decided_at"),
+                ("Decision", "decision"),
+                ("Product", "canonical_name"),
+                ("Publisher", "publisher"),
+                ("Scope", "scope_label"),
+                ("Client", "client"),
+                ("Decided by", "decided_by"),
+                ("Reason", "reason"),
+            ],
+            filename_stem="software_decision_log",
+        )
+
+    return render(
+        request,
+        "software_decision_log.html",
+        {
+            "rows": rows,
+            "active_scope": scope_filter,
+            "active_decision": decision_filter,
+            "active_q": q_filter,
             "software_tab": "decisions",
         },
     )

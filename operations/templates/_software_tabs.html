@@ -32,6 +32,7 @@ user-risk.
   <a class="{% if software_tab == 'products'   %}active{% endif %}" href="{% url 'software_products' %}">Products</a>
   <a class="{% if software_tab == 'publishers' %}active{% endif %}" href="{% url 'software_publishers' %}">Publishers</a>
   <a class="{% if software_tab == 'decisions'  %}active{% endif %}" href="{% url 'software_decisions_queue' %}">Decisions</a>
+  <a class="{% if software_tab == 'log'        %}active{% endif %}" href="{% url 'software_decision_log' %}">Log</a>
   <a class="{% if software_tab == 'checklist'  %}active{% endif %}" href="{% url 'software_tech_checklist' %}">Tech checklist</a>
   <a class="{% if software_tab == 'user-risk'  %}active{% endif %}" href="{% url 'software_user_risk' %}">User risk</a>
 </div>

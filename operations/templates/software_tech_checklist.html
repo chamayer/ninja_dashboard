@@ -51,17 +51,44 @@
 </div>
 
 <div class="card">
-    <form action="" method="get" style="display:flex; gap:0.8rem; align-items:end;">
+    <form action="" method="get" style="display:flex; gap:0.8rem; align-items:end; flex-wrap:wrap;">
         <div>
-            <label style="display:block; font-size:0.78rem; color:var(--muted);">Clients</label>
-            <select name="client" multiple size="1" style="min-width:220px; padding:0.4rem;">
+            <label style="display:block; font-size:0.78rem; color:var(--muted);">Search</label>
+            <input type="search" name="q" value="{{ active_q }}" placeholder="device / client / product…" style="padding:0.4rem 0.65rem; border:1px solid var(--border); border-radius:4px; min-width:220px;">
+        </div>
+        <div>
+            <label style="display:block; font-size:0.78rem; color:var(--muted);">Client</label>
+            <select name="client" multiple size="1" style="min-width:180px; padding:0.4rem;">
                 {% for c in clients %}
                     <option value="{{ c.slug }}" {% if c.slug in active_clients %}selected{% endif %}>{{ c.display_name }}</option>
                 {% endfor %}
             </select>
         </div>
+        <div>
+            <label style="display:block; font-size:0.78rem; color:var(--muted);">Role</label>
+            <select name="role" style="padding:0.4rem;">
+                <option value="">Any</option>
+                <option value="server"      {% if active_role == 'server'      %}selected{% endif %}>Server</option>
+                <option value="workstation" {% if active_role == 'workstation' %}selected{% endif %}>Workstation</option>
+                <option value="unknown"     {% if active_role == 'unknown'     %}selected{% endif %}>Not determined</option>
+            </select>
+        </div>
+        <div>
+            <label style="display:block; font-size:0.78rem; color:var(--muted);">OS</label>
+            <select name="os" style="padding:0.4rem;">
+                <option value="">Any</option>
+                <option value="Windows"     {% if active_os == 'Windows'     %}selected{% endif %}>Windows</option>
+                <option value="macOS"       {% if active_os == 'macOS'       %}selected{% endif %}>macOS</option>
+                <option value="Linux"       {% if active_os == 'Linux'       %}selected{% endif %}>Linux</option>
+                <option value="Other"       {% if active_os == 'Other'       %}selected{% endif %}>Other</option>
+            </select>
+        </div>
+        <div>
+            <label style="display:block; font-size:0.78rem; color:var(--muted);">Reason kind</label>
+            <input type="search" name="kind" value="{{ active_kind }}" placeholder="e.g. suspicious_name" style="padding:0.4rem 0.65rem; border:1px solid var(--border); border-radius:4px; min-width:160px;">
+        </div>
         <div><button type="submit">Apply</button></div>
-        {% if active_clients %}
+        {% if active_q or active_clients or active_role or active_os or active_kind %}
         <div><a href="?" style="font-size:0.85rem;">Clear</a></div>
         {% endif %}
         <div style="margin-left:auto;">
