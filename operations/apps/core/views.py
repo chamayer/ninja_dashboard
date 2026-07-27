@@ -7104,6 +7104,18 @@ def software_decisions_queue(request: HttpRequest) -> HttpResponse:
     )
 
 
+def _refresh_software_risk_matview() -> None:
+    """Best-effort REFRESH MATERIALIZED VIEW on ``v_software_safety``.
+    Called after any operator decision write so the software UI shows
+    the updated band immediately. Never raises to the caller — the
+    write itself is what matters; the refresh is a courtesy."""
+    try:
+        with connection.cursor() as cur:
+            cur.execute("REFRESH MATERIALIZED VIEW operations.v_software_safety")
+    except Exception:
+        pass
+
+
 @login_required
 @require_POST
 @transaction.atomic
@@ -7121,13 +7133,15 @@ def software_decision_bulk(request: HttpRequest) -> HttpResponse:
     decision = (request.POST.get("decision") or "").strip()
     if decision not in dict(SoftwareDecision.Decision.choices):
         messages.error(request, "Pick a decision before applying.")
-        return redirect(_safe_next(request, "software_decisions_queue"))
+        _refresh_software_risk_matview()
+    return redirect(_safe_next(request, "software_decisions_queue"))
 
     canonical_names = [n for n in request.POST.getlist("canonical_name") if n.strip()]
     publishers      = [p for p in request.POST.getlist("publisher")      if p.strip()]
     if not canonical_names and not publishers:
         messages.error(request, "Select at least one product or publisher.")
-        return redirect(_safe_next(request, "software_decisions_queue"))
+        _refresh_software_risk_matview()
+    return redirect(_safe_next(request, "software_decisions_queue"))
 
     created, updated = 0, 0
     for name in canonical_names:
@@ -7161,6 +7175,7 @@ def software_decision_bulk(request: HttpRequest) -> HttpResponse:
         f"{decision}: {created} new, {updated} updated across "
         f"{len(canonical_names)} product(s) + {len(publishers)} publisher(s).",
     )
+    _refresh_software_risk_matview()
     return redirect(_safe_next(request, "software_decisions_queue"))
 
 
@@ -7240,6 +7255,7 @@ def software_decision_create(request: HttpRequest) -> HttpResponse:
         f"{decision} recorded for {match_key} ({scope})."
         + (" Created." if created else " Updated."),
     )
+    _refresh_software_risk_matview()
     next_url = request.POST.get("next") or ""
     # Only follow relative URLs to avoid open-redirects.
     if next_url.startswith("/") and not next_url.startswith("//"):

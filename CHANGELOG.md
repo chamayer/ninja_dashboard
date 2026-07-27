@@ -2,6 +2,28 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.98.1] — 2026-07-27 — Matcher upgrade + matview refresh hooks
+
+### Changed
+- **Matcher consults `intel_matcher_hints`.** Sub-component canonical
+  names that match any `ignore_sub_component` regex skip CVE matching
+  entirely; `require_third_token` vendors require a distinctive third
+  token beyond `vendor + product` before a tier-1 match fires. Both
+  hint lists are data-driven and admin-editable.
+- **Version-aware matcher.** A year token (2010..2035) or semver
+  major/minor prefix parsed from the canonical name filters CPE
+  candidates to those whose `version` component starts with that
+  string. Version-agnostic CPEs stay in the set as a safety net.
+- **`operations.v_software_safety` refreshes automatically** at three
+  points:
+  1. End of the intel matcher run (`ingest.intel.matcher.run_once`).
+  2. End of the software classifier cycle
+     (`run_software_classify_once` in ingest).
+  3. After every operator decision write (`software_decision_create`
+     and `software_decision_bulk` in operations).
+  All calls are best-effort — a matview refresh failure never
+  bubbles up as a request or run error.
+
 ## [0.98.0] — 2026-07-27 — Publisher aliases, category taxonomy, matcher hints, matview
 
 ### Added
