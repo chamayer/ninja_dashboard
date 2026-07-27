@@ -17,8 +17,11 @@ from .models import (
     DeviceLink,
     Finding,
     FindingType,
+    IntelMatcherHint,
     MergeCandidate,
     NotificationRoute,
+    PublisherAlias,
+    PublisherCategory,
     RunLog,
     Secret,
     SoftwareCatalog,
@@ -222,6 +225,27 @@ class SoftwareCatalogAdmin(admin.ModelAdmin):
     list_display = ("canonical_name", "tenant", "publisher_hint", "eol_date")
     list_filter = ("tenant", "eol_date")
     search_fields = ("canonical_name", "publisher_hint", "notes")
+
+
+@admin.register(PublisherAlias)
+class PublisherAliasAdmin(admin.ModelAdmin):
+    list_display = ("raw_pattern", "canonical_publisher", "enabled", "is_regex", "created_at")
+    list_filter = ("enabled", "is_regex")
+    search_fields = ("raw_pattern", "canonical_publisher", "note")
+
+
+@admin.register(PublisherCategory)
+class PublisherCategoryAdmin(admin.ModelAdmin):
+    list_display = ("publisher_pattern", "categories", "priority", "enabled", "created_at")
+    list_filter = ("enabled",)
+    search_fields = ("publisher_pattern", "note")
+
+
+@admin.register(IntelMatcherHint)
+class IntelMatcherHintAdmin(admin.ModelAdmin):
+    list_display = ("kind", "pattern", "enabled", "created_at")
+    list_filter = ("kind", "enabled")
+    search_fields = ("pattern", "note")
 
 
 @admin.register(SoftwareDecision)

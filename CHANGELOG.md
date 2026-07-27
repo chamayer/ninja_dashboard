@@ -2,6 +2,64 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.98.0] — 2026-07-27 — Publisher aliases, category taxonomy, matcher hints, matview
+
+### Added
+- **`operations.publisher_aliases`** (model + admin) — canonical
+  publisher-name normalisation. Raw variants preserved and shown on
+  the detail page; the alias is used for aggregation and matching
+  only. Every rule is a row, editable in Django admin.
+- **`operations.publisher_categories`** (model + admin) — data-driven
+  default categorisation: any product whose publisher matches a
+  pattern is auto-tagged with the row's categories. Applied on top of
+  the per-title catalogue entries.
+- **`operations.intel_matcher_hints`** (model + admin) — two kinds of
+  matcher tuning:
+  * `require_third_token` — for common vendors (Microsoft, Adobe,
+    Google, Oracle, IBM, Cisco, VMware, Citrix) a canonical name must
+    carry a distinctive third token before a CVE match fires. Blocks
+    `Microsoft Office Shared MUI` from inheriting every Office CVE.
+  * `ignore_sub_component` — regex patterns for support / language /
+    proofing / redistributable sub-components that inherit risk from
+    their parent, not from the CVE database directly.
+- **Documented canonical MSP taxonomy** on `PublisherCategory.categories`
+  help text: `system`, `driver`, `security`, `av`, `edr`, `browser`,
+  `productivity`, `communication`, `media`, `development`, `runtime`,
+  `remote-access`, `management`, `rmm`, `backup`, `virtualization`,
+  `storage`, `networking`, `database`, `engineering`, `utility`.
+- **Migration 0087** seeds ~55 publisher aliases, ~47 publisher →
+  category rules, and ~24 matcher hints — everything editable in
+  admin.
+
+### Changed
+- **`operations.v_software_safety` is now a materialised view** —
+  same shape and columns but backed by a matview with a unique
+  index on `(tenant_id, canonical_name)` and secondary indexes on
+  band and resolved publisher. Reads become index lookups; the
+  700-900 ms per-scan cost disappears from the software pages.
+- **Publisher-approve owns the band.** If the operator (or an alias-
+  resolved publisher decision) has approved a title or its publisher,
+  the band is `clean` regardless of CVE matches. Publisher-approve
+  score decrement raised from 60 → 100 so the composite stays
+  consistent.
+- **CVE recency filter.** The band-driving `max_cvss` / `max_epss` now
+  look at CVEs modified in the last 3 years or KEV-flagged. Older
+  CVEs stay counted in `cve_count` (informational) but do not paint
+  a modern install red.
+- **Publisher aliasing feeds the OSINT + decision joins.** The
+  resolved publisher (via `publisher_aliases`) drives publisher-scope
+  matching, so `Microsoft Corporation`, `Microsoft Corp.`,
+  `Microsoft, Inc.` all resolve to `Microsoft` for join purposes.
+  Raw publisher stays visible on every detail page.
+
+### Notes
+- The matview is not yet auto-refreshed; the migration creates it
+  and populates it. A refresh hook lands in the follow-up commits at
+  the end of the intel matcher, at software-classify, and after
+  `software_decision_create`. Until then the matview reflects the
+  state at migration time; run `/admin/jobs/` → Intel matcher →
+  Run now once and it will start reflecting fresh data.
+
 ## [0.97.9] — 2026-07-27 — Software nav split: Overview + Products
 
 ### Changed
