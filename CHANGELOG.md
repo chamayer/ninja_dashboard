@@ -2,6 +2,21 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.97.8] — 2026-07-27 — `/software/?safety=X` worker-timeout 500 fix
+
+### Fixed
+- **`/software/?safety=high` (or any risk band) 500'd via gunicorn
+  worker timeout** — the risk-band filter used an
+  `EXISTS (SELECT 1 FROM v_software_safety WHERE canonical=…)`
+  clause on the products query, which re-evaluated the multi-CTE
+  risk view once per product row. With 20 k products, that blew
+  through the 30 s gunicorn timeout. Reordered the request: fetch
+  `v_software_safety` **once** at the top (already done for the
+  distribution numbers), extract the canonical set for the target
+  band in Python, then pass that set as a single `ANY(%s::text[])`
+  filter to the products query. Zero extra view scans. Removed the
+  duplicate second fetch that was still on the code path.
+
 ## [0.97.7] — 2026-07-27 — On-demand card links point at ingest:8090
 
 ### Fixed

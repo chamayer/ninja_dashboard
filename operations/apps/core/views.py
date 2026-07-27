@@ -2618,6 +2618,42 @@ def software_page(request: HttpRequest) -> HttpResponse:
     if not intel_available and safety_filter:
         safety_filter = ""
 
+    # Fetch v_software_safety ONCE up front. Everything downstream —
+    # per-title risk map, high-risk count, distribution, this-week
+    # highlights, AND the ?safety=<band> filter — is derived from this
+    # single snapshot. Fetching once is essential; the view is a
+    # multi-CTE join that costs ~700-900 ms per evaluation.
+    all_safety_rows: list[tuple] = []
+    if intel_available:
+        try:
+            with transaction.atomic(), connection.cursor() as sc:
+                sc.execute("SET LOCAL operations.tenant_id = 1")
+                sc.execute(
+                    """
+                    SELECT canonical_name, safety_score, safety_band,
+                           cve_count, kev_count, osint_hits
+                    FROM operations.v_software_safety
+                    WHERE tenant_id = 1
+                    """
+                )
+                all_safety_rows = list(sc.fetchall())
+        except Exception:
+            all_safety_rows = []
+
+    # If a risk-band filter is set, resolve the matching canonical set
+    # up front so the main title-rollup query can filter with a cheap
+    # ANY() against that fixed list instead of a per-row EXISTS on the
+    # view (which timed out on fleets with tens of thousands of titles).
+    safety_filter_names: list[str] = []
+    if safety_filter in ("high", "medium", "low", "clean", "unknown"):
+        safety_filter_names = [
+            r[0] for r in all_safety_rows if r[2] == safety_filter
+        ]
+        if not safety_filter_names:
+            # No products in that band. Force the main query to return
+            # zero title rows without scanning the whole fleet.
+            safety_filter_names = ["\x00__no_match__\x00"]
+
     with transaction.atomic(), connection.cursor() as cur:
         cur.execute("SET LOCAL operations.tenant_id = 1")
 
@@ -2705,14 +2741,11 @@ def software_page(request: HttpRequest) -> HttpResponse:
                 "        OR (sd.publisher <> '' "
                 "            AND LOWER(sd.publisher) = LOWER(COALESCE(sic.publisher, '')))))"
             )
-        if safety_filter in ("high", "medium", "low", "clean", "unknown"):
-            where_clauses.append(
-                "EXISTS (SELECT 1 FROM operations.v_software_safety vs "
-                " WHERE vs.tenant_id = sic.tenant_id "
-                "   AND vs.canonical_name = sic.canonical_name "
-                "   AND vs.safety_band = %s)"
-            )
-            params.append(safety_filter)
+        if safety_filter_names:
+            # Filter to the pre-computed canonical set for this risk
+            # band — avoids re-evaluating v_software_safety per row.
+            where_clauses.append("sic.canonical_name = ANY(%s::text[])")
+            params.append(safety_filter_names)
 
         where_sql = " AND ".join(where_clauses)
         cur.execute(
@@ -2794,29 +2827,9 @@ def software_page(request: HttpRequest) -> HttpResponse:
         )
         recent_installs = cur.fetchall()
 
-    # Fetch v_software_safety ONCE. Every downstream aggregate (per-title
-    # risk map, high-risk count, risk distribution, new high-risk this
-    # week) is derived from this snapshot — the view is expensive to
-    # rebuild and calling it multiple times per request was the primary
-    # source of software-page slowness once the intel layer populated.
+    # v_software_safety was already fetched once at the top of the
+    # request. Reuse ``all_safety_rows`` for all downstream aggregates.
     safety_by_title: dict[str, dict] = {}
-    all_safety_rows: list[tuple] = []
-    if intel_available:
-        try:
-            with transaction.atomic(), connection.cursor() as sc:
-                sc.execute("SET LOCAL operations.tenant_id = 1")
-                sc.execute(
-                    """
-                    SELECT canonical_name, safety_score, safety_band,
-                           cve_count, kev_count, osint_hits
-                    FROM operations.v_software_safety
-                    WHERE tenant_id = 1
-                    """
-                )
-                all_safety_rows = list(sc.fetchall())
-        except Exception:
-            all_safety_rows = []
-
     shown_set = {c for c in canonical_names}
     high_risk_titles = 0
     risk_distribution = {"high": 0, "medium": 0, "low": 0, "clean": 0, "unknown": 0}
