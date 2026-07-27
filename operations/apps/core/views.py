@@ -48,6 +48,7 @@ from .models import (
     NotificationEvent,
     NotificationRoute,
     NotificationRule,
+    PublisherCategory,
     RequirementProfile,
     SoftwareCatalog,
     SoftwareDecision,
@@ -3512,6 +3513,28 @@ def software_publishers(request: HttpRequest) -> HttpResponse:
         ).exclude(publisher="")
     }
 
+    # Publisher → category from PublisherCategory rules (ILIKE patterns).
+    # Small table — fetch all enabled rules and match in Python.
+    pub_cat_rules = list(
+        PublisherCategory.objects.filter(enabled=True).order_by("-priority", "id")
+    )
+
+    def _publisher_categories(pub_name: str) -> str:
+        import fnmatch, re
+        lower = pub_name.lower()
+        for rule in pub_cat_rules:
+            if rule.is_regex:
+                try:
+                    if re.search(rule.publisher_pattern, lower, re.IGNORECASE):
+                        return ", ".join(rule.categories or [])
+                except re.error:
+                    pass
+            else:
+                pattern = rule.publisher_pattern.lower().replace("%", "*").replace("_", "?")
+                if fnmatch.fnmatch(lower, pattern):
+                    return ", ".join(rule.categories or [])
+        return ""
+
     publishers = []
     for pub, installations, titles, devices, clients, last_observed in rollup_rows:
         dec = pub_decisions.get(pub.lower())
@@ -3524,6 +3547,7 @@ def software_publishers(request: HttpRequest) -> HttpResponse:
                 "clients": clients,
                 "last_observed": last_observed,
                 "global_decision": dec.decision if dec else "",
+                "category": _publisher_categories(pub),
             }
         )
 
@@ -3701,6 +3725,8 @@ def software_publisher_detail(request: HttpRequest, publisher: str) -> HttpRespo
 @login_required
 def software_user_risk(request: HttpRequest) -> HttpResponse:
     client_slugs = [s for s in request.GET.getlist("client") if s]
+    q_filter = (request.GET.get("q") or "").strip().lower()
+    kind_filter = (request.GET.get("kind") or "").strip().lower()
     filtered_client_ids: list[str] = []
     if client_slugs:
         filtered_client_ids = [
@@ -3843,6 +3869,37 @@ def software_user_risk(request: HttpRequest) -> HttpResponse:
         users.append(entry)
     users.sort(key=lambda u: (-u["item_count"], u["last_user"]))
 
+    # Enrich items with category from SoftwareCatalog.
+    all_ur_canonicals = {
+        i["canonical_name"].lower()
+        for u in users
+        for d in u["device_list"]
+        for i in d["items"]
+        if i["canonical_name"]
+    }
+    ur_catalog_cats = {
+        c.canonical_name.lower(): ", ".join(c.categories or [])
+        for c in SoftwareCatalog.objects.filter(
+            canonical_name__in=list(all_ur_canonicals)
+        )
+    } if all_ur_canonicals else {}
+    for u in users:
+        for d in u["device_list"]:
+            for item in d["items"]:
+                item["category"] = ur_catalog_cats.get(
+                    (item["canonical_name"] or "").lower(), ""
+                )
+
+    # Apply user search and kind filter (post-fetch, small result set).
+    if q_filter:
+        users = [u for u in users if q_filter in (u["last_user"] or "").lower()]
+    if kind_filter:
+        for u in users:
+            for d in u["device_list"]:
+                d["items"] = [i for i in d["items"] if kind_filter in (i["kind"] or "").lower()]
+            u["device_list"] = [d for d in u["device_list"] if d["items"]]
+        users = [u for u in users if u["device_list"]]
+
     clients = Client.objects.filter(
         tenant_id=1, deleted_at__isnull=True
     ).order_by("display_name")
@@ -3882,6 +3939,8 @@ def software_user_risk(request: HttpRequest) -> HttpResponse:
             "total_items": sum(u["item_count"] for u in users),
             "clients": clients,
             "active_clients": client_slugs,
+            "active_q": q_filter,
+            "active_kind": kind_filter,
             "software_tab": "user-risk",
         },
     )
@@ -4469,6 +4528,23 @@ def software_tech_checklist(request: HttpRequest) -> HttpResponse:
     devices.sort(
         key=lambda e: (-e["item_count"], e["client_name"], e["hostname"] or "")
     )
+
+    # Enrich items with category from SoftwareCatalog (canonical lookup).
+    all_canonicals = {
+        i["canonical_name"].lower()
+        for e in devices
+        for i in e["items"]
+        if i["canonical_name"]
+    }
+    catalog_cats = {
+        c.canonical_name.lower(): ", ".join(c.categories or [])
+        for c in SoftwareCatalog.objects.filter(
+            canonical_name__in=list(all_canonicals)
+        )
+    } if all_canonicals else {}
+    for entry in devices:
+        for item in entry["items"]:
+            item["category"] = catalog_cats.get((item["canonical_name"] or "").lower(), "")
 
     clients = Client.objects.filter(
         tenant_id=1, deleted_at__isnull=True
@@ -7052,6 +7128,8 @@ def software_decisions_queue(request: HttpRequest) -> HttpResponse:
     per-client, or per-device scope.
     """
     category_filter = request.GET.get("category", "")
+    q_filter = (request.GET.get("q") or "").strip().lower()
+    decision_filter = (request.GET.get("decision") or "").strip().lower()
     with transaction.atomic():
         with connection.cursor() as cur:
             cur.execute("SET LOCAL operations.tenant_id = 1")
@@ -7118,6 +7196,19 @@ def software_decisions_queue(request: HttpRequest) -> HttpResponse:
 
     if category_filter:
         display_rows = [r for r in display_rows if category_filter in (r["category"] or "")]
+    if q_filter:
+        display_rows = [
+            r for r in display_rows
+            if q_filter in (r["canonical"] or "").lower()
+            or q_filter in (r["publisher"] or "").lower()
+        ]
+    if decision_filter == "pending":
+        display_rows = [r for r in display_rows if not r["global_decision"] and not r["publisher_decision"]]
+    elif decision_filter in ("approve", "reject", "investigate", "approve_publisher"):
+        display_rows = [
+            r for r in display_rows
+            if r["global_decision"] == decision_filter or r["publisher_decision"] == decision_filter
+        ]
 
     categories_seen = sorted({r["category"] for r in display_rows if r["category"]})
 
@@ -7145,6 +7236,8 @@ def software_decisions_queue(request: HttpRequest) -> HttpResponse:
             "rows": display_rows,
             "categories": categories_seen,
             "active_category": category_filter,
+            "active_q": q_filter,
+            "active_decision": decision_filter,
             "decision_choices": SoftwareDecision.Decision.choices,
             "software_tab": "decisions",
         },

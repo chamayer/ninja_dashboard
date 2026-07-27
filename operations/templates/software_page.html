@@ -74,7 +74,7 @@
   /* ── Distribution strips ───────────────────────────────── */
   .dist-strip { display: flex; height: 12px; border-radius: 999px; overflow: hidden;
                 background: #f3f4f6; margin: 0.35rem 0 0.55rem; }
-  .dist-seg { height: 100%; }
+  .dist-seg { height: 100%; display: block; }
   .dist-seg.high    { background: #dc2626; }
   .dist-seg.medium  { background: #f59e0b; }
   .dist-seg.low     { background: #3b82f6; }
@@ -84,9 +84,13 @@
   .dist-seg.reject { background: #dc2626; }
   .dist-seg.investigate { background: #f59e0b; }
   .dist-seg.pending { background: #9ca3af; }
+  a.dist-seg { opacity: 0.9; }
+  a.dist-seg:hover { opacity: 1; filter: brightness(1.1); }
 
   .dist-legend { display: flex; flex-wrap: wrap; gap: 0.55rem 1rem;
                  font-size: 0.78rem; color: #374151; }
+  .dist-legend a { color: #374151; text-decoration: none; }
+  .dist-legend a:hover { color: #1e40af; }
   .dist-legend .swatch { display: inline-block; width: 10px; height: 10px;
                         border-radius: 2px; margin-right: 0.35rem; vertical-align: middle; }
 
@@ -231,20 +235,20 @@
             {% with total_risk=unique_titles %}
             <div class="dist-strip" title="{{ risk_distribution.high }} high / {{ risk_distribution.medium }} medium / {{ risk_distribution.low }} low / {{ risk_distribution.clean }} approved / {{ risk_distribution.unknown }} not yet checked">
                 {% if total_risk %}
-                <div class="dist-seg high"    style="width: {% widthratio risk_distribution.high    total_risk 100 %}%;"></div>
-                <div class="dist-seg medium"  style="width: {% widthratio risk_distribution.medium  total_risk 100 %}%;"></div>
-                <div class="dist-seg low"     style="width: {% widthratio risk_distribution.low     total_risk 100 %}%;"></div>
-                <div class="dist-seg clean"   style="width: {% widthratio risk_distribution.clean   total_risk 100 %}%;"></div>
-                <div class="dist-seg unknown" style="width: {% widthratio risk_distribution.unknown total_risk 100 %}%;"></div>
+                <a class="dist-seg high"    href="{% url 'software_products' %}?safety=high"   title="{{ risk_distribution.high }} high-risk products"   style="width: {% widthratio risk_distribution.high    total_risk 100 %}%;"></a>
+                <a class="dist-seg medium"  href="{% url 'software_products' %}?safety=medium" title="{{ risk_distribution.medium }} medium-risk products" style="width: {% widthratio risk_distribution.medium  total_risk 100 %}%;"></a>
+                <a class="dist-seg low"     href="{% url 'software_products' %}?safety=low"    title="{{ risk_distribution.low }} low-risk products"      style="width: {% widthratio risk_distribution.low     total_risk 100 %}%;"></a>
+                <a class="dist-seg clean"   href="{% url 'software_products' %}?safety=clean"  title="{{ risk_distribution.clean }} approved products"    style="width: {% widthratio risk_distribution.clean   total_risk 100 %}%;"></a>
+                <a class="dist-seg unknown" href="{% url 'software_products' %}?safety=unknown" title="{{ risk_distribution.unknown }} not yet checked"   style="width: {% widthratio risk_distribution.unknown total_risk 100 %}%;"></a>
                 {% endif %}
             </div>
             {% endwith %}
             <div class="dist-legend">
-                <span><span class="swatch" style="background:#dc2626;"></span>High risk ({{ risk_distribution.high }})</span>
-                <span><span class="swatch" style="background:#f59e0b;"></span>Medium ({{ risk_distribution.medium }})</span>
-                <span><span class="swatch" style="background:#3b82f6;"></span>Low ({{ risk_distribution.low }})</span>
-                <span><span class="swatch" style="background:#16a34a;"></span>Approved ({{ risk_distribution.clean }})</span>
-                <span><span class="swatch" style="background:#9ca3af;"></span>Not yet checked ({{ risk_distribution.unknown }})</span>
+                <a href="{% url 'software_products' %}?safety=high"><span class="swatch" style="background:#dc2626;"></span>High risk ({{ risk_distribution.high }})</a>
+                <a href="{% url 'software_products' %}?safety=medium"><span class="swatch" style="background:#f59e0b;"></span>Medium ({{ risk_distribution.medium }})</a>
+                <a href="{% url 'software_products' %}?safety=low"><span class="swatch" style="background:#3b82f6;"></span>Low ({{ risk_distribution.low }})</a>
+                <a href="{% url 'software_products' %}?safety=clean"><span class="swatch" style="background:#16a34a;"></span>Approved ({{ risk_distribution.clean }})</a>
+                <a href="{% url 'software_products' %}?safety=unknown"><span class="swatch" style="background:#9ca3af;"></span>Not yet checked ({{ risk_distribution.unknown }})</a>
             </div>
         </div>
 

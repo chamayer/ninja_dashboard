@@ -50,17 +50,25 @@
 </div>
 
 <div class="card">
-    <form action="" method="get" style="display:flex; gap:0.8rem; align-items:end;">
+    <form action="" method="get" style="display:flex; gap:0.8rem; align-items:end; flex-wrap:wrap;">
         <div>
-            <label style="display:block; font-size:0.78rem; color:var(--muted);">Clients</label>
-            <select name="client" multiple size="1" style="min-width:220px; padding:0.4rem;">
+            <label style="display:block; font-size:0.78rem; color:var(--muted);">User</label>
+            <input type="search" name="q" value="{{ active_q }}" placeholder="search username…" style="padding:0.4rem 0.65rem; border:1px solid var(--border); border-radius:4px; min-width:180px;">
+        </div>
+        <div>
+            <label style="display:block; font-size:0.78rem; color:var(--muted);">Client</label>
+            <select name="client" multiple size="1" style="min-width:180px; padding:0.4rem;">
                 {% for c in clients %}
                     <option value="{{ c.slug }}" {% if c.slug in active_clients %}selected{% endif %}>{{ c.display_name }}</option>
                 {% endfor %}
             </select>
         </div>
+        <div>
+            <label style="display:block; font-size:0.78rem; color:var(--muted);">Reason kind</label>
+            <input type="search" name="kind" value="{{ active_kind }}" placeholder="e.g. suspicious_name" style="padding:0.4rem 0.65rem; border:1px solid var(--border); border-radius:4px; min-width:160px;">
+        </div>
         <div><button type="submit">Apply</button></div>
-        {% if active_clients %}
+        {% if active_q or active_clients or active_kind %}
         <div><a href="?" style="font-size:0.85rem;">Clear</a></div>
         {% endif %}
         <div style="margin-left:auto;">
@@ -91,7 +99,7 @@
             {% for item in d.items %}
             <span class="ur-item">
                 <a href="{% url 'software_detail' name=item.canonical_name %}">{{ item.canonical_name }}</a>
-                <span class="muted">· {{ item.kind|humanize_label|default:item.kind }}</span>
+                <span class="muted">· {{ item.kind|humanize_label|default:item.kind }}{% if item.category %} · {{ item.category }}{% endif %}</span>
             </span>
             {% endfor %}
         </div>

@@ -36,9 +36,15 @@
   .decision-pill.investigate { background: #fef3c7; color: #92400e; }
   .decision-pill.none { background: #f3f4f6; color: #6b7280; font-weight: 400; }
 
-  .row-actions { display: flex; gap: 0.35rem; align-items: center; justify-content: flex-end; }
-  .row-actions select { padding: 0.2rem 0.4rem; font-size: 0.8rem; }
-  .row-actions button { padding: 0.2rem 0.6rem; font-size: 0.78rem; }
+  .row-actions { display: flex; gap: 0.25rem; align-items: center; justify-content: flex-end; flex-wrap: wrap; }
+  .row-actions form { margin: 0; }
+  .row-actions button { padding: 0.2rem 0.5rem; font-size: 0.75rem; font-weight: 600; border-radius: 4px; cursor: pointer; }
+  .btn-allow    { background: #dcfce7; color: #166534; border: 1px solid #bbf7d0; }
+  .btn-block    { background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }
+  .btn-review   { background: #fef3c7; color: #92400e; border: 1px solid #fde68a; }
+  .btn-trust    { background: #dbeafe; color: #1e3a8a; border: 1px solid #bfdbfe; }
+  .action-group { display: flex; flex-direction: column; gap: 0.2rem; align-items: flex-end; }
+  .action-label { font-size: 0.65rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
 </style>
 
 <div class="card">
@@ -57,6 +63,10 @@
 <div class="card">
     <form action="" method="get" class="filterbar">
         <div>
+            <label>Search</label>
+            <input type="search" name="q" value="{{ active_q }}" placeholder="product or publisher…" style="min-width:200px;">
+        </div>
+        <div>
             <label>Category</label>
             <select name="category" onchange="this.form.submit()">
                 <option value="">Any</option>
@@ -65,7 +75,19 @@
                 {% endfor %}
             </select>
         </div>
+        <div>
+            <label>Decision</label>
+            <select name="decision" onchange="this.form.submit()">
+                <option value="">Any</option>
+                <option value="pending"           {% if active_decision == 'pending'           %}selected{% endif %}>No decision yet</option>
+                <option value="approve"           {% if active_decision == 'approve'           %}selected{% endif %}>Allowed</option>
+                <option value="approve_publisher" {% if active_decision == 'approve_publisher' %}selected{% endif %}>Publisher trusted</option>
+                <option value="reject"            {% if active_decision == 'reject'            %}selected{% endif %}>Blocked</option>
+                <option value="investigate"       {% if active_decision == 'investigate'       %}selected{% endif %}>Under review</option>
+            </select>
+        </div>
         <div><button type="submit">Apply</button></div>
+        {% if active_q or active_category or active_decision %}<a class="clear" href="?">Clear</a>{% endif %}
     </form>
 </div>
 
@@ -155,34 +177,19 @@
                         {% endif %}
                     </td>
                     <td>
-                        <div class="row-actions">
-                            {# Product-scope apply #}
-                            <form method="post" action="{% url 'software_decision_create' %}" style="display:inline-flex; gap:0.25rem;">
-                                {% csrf_token %}
-                                <input type="hidden" name="canonical_name" value="{{ r.canonical }}">
-                                <input type="hidden" name="scope" value="global">
-                                <input type="hidden" name="next" value="{{ request.get_full_path }}">
-                                <select name="decision">
-                                    {% for value, label in decision_choices %}
-                                        <option value="{{ value }}">{{ label }}</option>
-                                    {% endfor %}
-                                </select>
-                                <button type="submit" title="Apply decision to this product only">Product</button>
-                            </form>
-                            {# Publisher-scope apply — visible when publisher known #}
+                        <div class="action-group">
+                            <div class="action-label">Product</div>
+                            <div class="row-actions">
+                                <form method="post" action="{% url 'software_decision_create' %}">{% csrf_token %}<input type="hidden" name="canonical_name" value="{{ r.canonical }}"><input type="hidden" name="scope" value="global"><input type="hidden" name="next" value="{{ request.get_full_path }}"><input type="hidden" name="decision" value="approve"><button type="submit" class="btn-allow" title="Allow this product">Allow</button></form>
+                                <form method="post" action="{% url 'software_decision_create' %}">{% csrf_token %}<input type="hidden" name="canonical_name" value="{{ r.canonical }}"><input type="hidden" name="scope" value="global"><input type="hidden" name="next" value="{{ request.get_full_path }}"><input type="hidden" name="decision" value="reject"><button type="submit" class="btn-block" title="Block this product">Block</button></form>
+                                <form method="post" action="{% url 'software_decision_create' %}">{% csrf_token %}<input type="hidden" name="canonical_name" value="{{ r.canonical }}"><input type="hidden" name="scope" value="global"><input type="hidden" name="next" value="{{ request.get_full_path }}"><input type="hidden" name="decision" value="investigate"><button type="submit" class="btn-review" title="Flag for review">Review</button></form>
+                            </div>
                             {% if r.publisher %}
-                            <form method="post" action="{% url 'software_decision_create' %}" style="display:inline-flex; gap:0.25rem;">
-                                {% csrf_token %}
-                                <input type="hidden" name="publisher" value="{{ r.publisher }}">
-                                <input type="hidden" name="scope" value="global">
-                                <input type="hidden" name="next" value="{{ request.get_full_path }}">
-                                <select name="decision">
-                                    {% for value, label in decision_choices %}
-                                        <option value="{{ value }}">{{ label }}</option>
-                                    {% endfor %}
-                                </select>
-                                <button type="submit" title="Apply decision to every product from this publisher">Publisher</button>
-                            </form>
+                            <div class="action-label" style="margin-top:0.25rem;">Publisher</div>
+                            <div class="row-actions">
+                                <form method="post" action="{% url 'software_decision_create' %}">{% csrf_token %}<input type="hidden" name="publisher" value="{{ r.publisher }}"><input type="hidden" name="scope" value="global"><input type="hidden" name="next" value="{{ request.get_full_path }}"><input type="hidden" name="decision" value="approve_publisher"><button type="submit" class="btn-trust" title="Trust all products from this publisher">Trust pub.</button></form>
+                                <form method="post" action="{% url 'software_decision_create' %}">{% csrf_token %}<input type="hidden" name="publisher" value="{{ r.publisher }}"><input type="hidden" name="scope" value="global"><input type="hidden" name="next" value="{{ request.get_full_path }}"><input type="hidden" name="decision" value="reject"><button type="submit" class="btn-block" title="Block all products from this publisher">Block pub.</button></form>
+                            </div>
                             {% endif %}
                         </div>
                     </td>

@@ -6,6 +6,18 @@
 {% block content %}
 {% include "_software_tabs.html" %}
 {% include "_sw_style.html" %}
+<style>
+  .row-btns { display: flex; gap: 0.3rem; justify-content: flex-end; flex-wrap: wrap; }
+  .row-btns form { margin: 0; }
+  .btn-allow    { background: #dcfce7; color: #166534; border: 1px solid #bbf7d0; }
+  .btn-block    { background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }
+  .btn-review   { background: #fef3c7; color: #92400e; border: 1px solid #fde68a; }
+  .btn-trust    { background: #dbeafe; color: #1e3a8a; border: 1px solid #bfdbfe; }
+  .row-btns button {
+    padding: 0.2rem 0.55rem; font-size: 0.75rem; font-weight: 600;
+    border-radius: 4px; cursor: pointer; white-space: nowrap;
+  }
+</style>
 
 <div class="sw-page-header">
     <div>
@@ -60,13 +72,14 @@
             <tr>
                 <th style="width:2rem;"></th>
                 <th>Publisher</th>
+                <th>Category</th>
                 <th class="num">Installations</th>
                 <th class="num">Products</th>
                 <th class="num">Devices</th>
                 <th class="num">Clients</th>
                 <th class="num">Last observed</th>
                 <th>Decision</th>
-                <th class="actions">Apply (global)</th>
+                <th class="actions" style="text-align:right;">Actions</th>
             </tr>
         </thead>
         <tbody>
@@ -80,6 +93,7 @@
                         <strong>{{ p.publisher|title }}</strong>
                     </a>
                 </td>
+                <td class="muted" style="font-size:0.8rem;">{{ p.category|default:"—" }}</td>
                 <td class="num">{{ p.installations }}</td>
                 <td class="num">{{ p.titles }}</td>
                 <td class="num">{{ p.devices }}</td>
@@ -92,19 +106,33 @@
                         <span class="decision-pill none">no decision</span>
                     {% endif %}
                 </td>
-                <td class="actions">
-                    <form method="post" action="{% url 'software_decision_create' %}">
-                        {% csrf_token %}
-                        <input type="hidden" name="publisher" value="{{ p.publisher }}">
-                        <input type="hidden" name="scope" value="global">
-                        <input type="hidden" name="next" value="{{ request.get_full_path }}">
-                        <select name="decision">
-                            {% for value, label in decision_choices %}
-                                <option value="{{ value }}" {% if p.global_decision == value %}selected{% endif %}>{{ label }}</option>
-                            {% endfor %}
-                        </select>
-                        <button type="submit">Apply</button>
-                    </form>
+                <td>
+                    <div class="row-btns">
+                        <form method="post" action="{% url 'software_decision_create' %}">
+                            {% csrf_token %}
+                            <input type="hidden" name="publisher" value="{{ p.publisher }}">
+                            <input type="hidden" name="scope" value="global">
+                            <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                            <input type="hidden" name="decision" value="approve_publisher">
+                            <button type="submit" class="btn-allow" title="Allow all products from this publisher">Allow</button>
+                        </form>
+                        <form method="post" action="{% url 'software_decision_create' %}">
+                            {% csrf_token %}
+                            <input type="hidden" name="publisher" value="{{ p.publisher }}">
+                            <input type="hidden" name="scope" value="global">
+                            <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                            <input type="hidden" name="decision" value="reject">
+                            <button type="submit" class="btn-block" title="Block all products from this publisher">Block</button>
+                        </form>
+                        <form method="post" action="{% url 'software_decision_create' %}">
+                            {% csrf_token %}
+                            <input type="hidden" name="publisher" value="{{ p.publisher }}">
+                            <input type="hidden" name="scope" value="global">
+                            <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                            <input type="hidden" name="decision" value="investigate">
+                            <button type="submit" class="btn-review" title="Flag this publisher for review">Review</button>
+                        </form>
+                    </div>
                 </td>
             </tr>
             {% endfor %}

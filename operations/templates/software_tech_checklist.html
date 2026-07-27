@@ -111,9 +111,8 @@
             <a href="{% url 'software_detail' name=i.canonical_name %}">
                 <strong>{{ i.canonical_name }}</strong>
             </a>
-            {% if i.publisher %}
-                <div class="publisher">{{ i.publisher }}</div>
-            {% endif %}
+            {% if i.publisher %}<div class="publisher">{{ i.publisher }}</div>{% endif %}
+            {% if i.category %}<div class="kind">{{ i.category }}</div>{% endif %}
         </div>
         <div class="kind">{{ i.finding_type|humanize_label|default:i.finding_type }}</div>
         <div class="reason">{{ i.reason|default:"—" }}</div>

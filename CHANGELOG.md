@@ -2,6 +2,25 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.98.5] — 2026-07-27 — Software UX: clickable risk strip, action buttons, category columns, richer filters
+
+### Changed
+- **Risk distribution strip** on the Software Overview is now fully clickable:
+  each coloured segment and its legend label links to Products filtered by
+  the matching safety level (`?safety=high/medium/low/clean/unknown`).
+- **Publishers list** — added Category column (resolved from
+  `publisher_categories` rules); replaced the per-row dropdown+Apply with
+  direct **Allow / Block / Review** buttons; the new category column is
+  sortable.
+- **Decisions queue** — added Search (product/publisher substring) and
+  Decision-status filter to the filter bar; replaced the per-row
+  dropdown+Apply forms with **Allow / Block / Review** buttons for the
+  product scope and **Trust pub. / Block pub.** for publisher scope.
+- **Cleanup** (tech checklist) — category now shown inline under each
+  product name when available (sourced from `software_catalog`).
+- **User exposure** — added User search and Reason-kind filter; category
+  now shown inline per item where available.
+
 ## [0.98.4] — 2026-07-27 — Client overview polish
 
 ### Changed
