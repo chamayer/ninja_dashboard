@@ -4025,6 +4025,16 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
     for j in jobs:
         jobs_by_category.setdefault(j["category"], []).append(j)
 
+    # Ingest exposes its on-demand org/device selector forms on
+    # port 8090. Compute a browser-reachable URL for the operator by
+    # rewriting the current host's port. Overridable via the
+    # ``INGEST_PUBLIC_URL`` env var for setups where 8090 isn't the
+    # public port (e.g. behind a reverse proxy).
+    ingest_public_url = os.environ.get("INGEST_PUBLIC_URL", "").strip()
+    if not ingest_public_url:
+        host_no_port = request.get_host().split(":")[0]
+        ingest_public_url = f"{request.scheme}://{host_no_port}:8090"
+
     return render(
         request,
         "admin_jobs.html",
@@ -4037,6 +4047,7 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
             "active_category": category_filter,
             "active_status": status_filter,
             "recent_runs": recent_runs,
+            "ingest_public_url": ingest_public_url,
         },
     )
 

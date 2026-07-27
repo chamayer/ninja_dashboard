@@ -2,6 +2,17 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.97.7] — 2026-07-27 — On-demand card links point at ingest:8090
+
+### Fixed
+- **On-demand scoped-run cards on `/admin/jobs/` returned 404** —
+  their `href`s were current-host relative (`/run/sources/enqueue`),
+  which resolved against operations:3002, not the ingest container
+  where those endpoints actually live. Cards now use
+  `ingest_public_url` (defaults to `<scheme>://<current host>:8090`,
+  overridable via the `INGEST_PUBLIC_URL` env var for setups behind
+  a different reverse proxy).
+
 ## [0.97.6] — 2026-07-26 — Ingest ready-state bug + unified software surfaces
 
 ### Fixed
