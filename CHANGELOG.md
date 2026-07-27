@@ -2,6 +2,34 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.97.9] — 2026-07-27 — Software nav split: Overview + Products
+
+### Changed
+- **Software nav split.** The Products tab used to point at
+  `/software/`, which is really a dashboard with the products list
+  tucked away under "Browse all products". Renamed that landing to
+  **Overview**, and added a real **Products** tab at
+  `/software/products/` that opens the products list directly.
+- **`software_page` view refactored** — the request-handling body moved
+  into a shared `_software_page_data(request)` helper. `software_page`
+  now renders Overview (dashboard tiles + workflows + distribution +
+  this-week + recent installs). `software_products` renders the
+  full products table with per-column filters. Same context, two
+  templates.
+- **New per-column filters on the Products page**: search on product,
+  search on publisher, minimum device count, risk band, decision,
+  category chips. Every column that carries a decision or a category
+  now has its own control.
+- **Overview page shrinks.** Products table removed from the Overview
+  (was collapsed at the bottom); Overview is now purely a dashboard.
+
+### Notes
+- Decisions are still written to the same `operations.software_decisions`
+  table from every entry point (Products, Publishers, Decisions queue,
+  bulk actions). The Decisions queue is a *pending* queue, not a
+  decision log — a dedicated decision-log surface is on the follow-up
+  list.
+
 ## [0.97.8] — 2026-07-27 — `/software/?safety=X` worker-timeout 500 fix
 
 ### Fixed

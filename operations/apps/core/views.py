@@ -2599,12 +2599,21 @@ def findings_bulk_action(request: HttpRequest) -> HttpResponse:
 # ─────────────────────────────────────────────────────────────────────
 
 
-@login_required
-def software_page(request: HttpRequest) -> HttpResponse:
+def _software_page_data(request: HttpRequest) -> dict:
+    """Compute the full data set shared by the Software Overview and
+    Products list views. Returns a context dict ready for render().
+    Both views render different templates from the same data.
+    """
     q_filter = (request.GET.get("q") or "").strip()
     decision_filter = request.GET.get("decision", "")  # approved|rejected|pending|any
     category_filter = request.GET.get("category", "")  # av|rmm|remote_access|...|uncategorized
     safety_filter = request.GET.get("safety", "")      # high|medium|low|clean
+    publisher_filter = (request.GET.get("publisher") or "").strip()
+    min_devices = request.GET.get("min_devices", "").strip()
+    try:
+        min_devices_int = int(min_devices) if min_devices else 0
+    except ValueError:
+        min_devices_int = 0
 
     # Intel layer availability probe — used to gate risk queries.
     intel_available = False
@@ -2695,6 +2704,9 @@ def software_page(request: HttpRequest) -> HttpResponse:
         if q_filter:
             where_clauses.append("(sic.canonical_name ILIKE %s OR sic.publisher ILIKE %s)")
             params.extend([f"%{q_filter}%", f"%{q_filter}%"])
+        if publisher_filter:
+            where_clauses.append("sic.publisher ILIKE %s")
+            params.append(f"%{publisher_filter}%")
         if category_filter == "uncategorized":
             where_clauses.append(
                 "NOT EXISTS (SELECT 1 FROM operations.software_catalog cat "
@@ -2788,6 +2800,7 @@ def software_page(request: HttpRequest) -> HttpResponse:
                    ) AS decision
                 FROM title_rollup sic
                 WHERE {where_sql}
+                  AND sic.device_count >= {min_devices_int}
                 ORDER BY sic.device_count DESC, sic.canonical_name
                 LIMIT 500
             )
@@ -3030,9 +3043,47 @@ def software_page(request: HttpRequest) -> HttpResponse:
             "safety_osint_hits": safety.get("osint_hits", 0),
         })
 
+    return {
+        "installations": installations,
+        "unique_titles": unique_titles,
+        "categorized_titles": categorized_titles,
+        "uncategorized_titles": unique_titles - categorized_titles
+        if unique_titles > categorized_titles
+        else 0,
+        "approved_titles": approved_titles,
+        "rejected_titles": rejected_titles,
+        "investigate_titles": investigate_titles,
+        "pending_decisions": pending_decisions,
+        "software_issues": software_issues,
+        "whitelist_suggestions": whitelist_suggestions,
+        "high_risk_titles": high_risk_titles,
+        "category_rows": category_rows,
+        "titles": titles,
+        "recent_installs": recent_installs,
+        "active_q": q_filter,
+        "active_category": category_filter,
+        "active_decision": decision_filter,
+        "active_safety": safety_filter,
+        "active_publisher": publisher_filter,
+        "active_min_devices": min_devices_int,
+        "decision_choices": SoftwareDecision.Decision.choices,
+        "risk_distribution": risk_distribution,
+        "this_week": this_week,
+        "workflow_state": workflow_state,
+    }
+
+
+@login_required
+def software_page(request: HttpRequest) -> HttpResponse:
+    """Software Overview — dashboard tiles + workflows + distribution
+    + recent installs. The full products list lives under Products
+    (see software_products)."""
+    ctx = _software_page_data(request)
     if wants_csv(request):
+        # CSV export on Overview yields the top products the dashboard
+        # dashboards summarize; keep parity with the previous behaviour.
         return csv_response(
-            titles,
+            ctx["titles"],
             columns=[
                 ("Canonical name", "canonical_name"),
                 ("Publisher", "publisher"),
@@ -3044,37 +3095,34 @@ def software_page(request: HttpRequest) -> HttpResponse:
             ],
             filename_stem="software",
         )
+    ctx["software_tab"] = "overview"
+    return render(request, "software_page.html", ctx)
 
-    return render(
-        request,
-        "software_page.html",
-        {
-            "installations": installations,
-            "unique_titles": unique_titles,
-            "categorized_titles": categorized_titles,
-            "uncategorized_titles": unique_titles - categorized_titles
-            if unique_titles > categorized_titles
-            else 0,
-            "approved_titles": approved_titles,
-            "rejected_titles": rejected_titles,
-            "pending_decisions": pending_decisions,
-            "software_issues": software_issues,
-            "whitelist_suggestions": whitelist_suggestions,
-            "high_risk_titles": high_risk_titles,
-            "category_rows": category_rows,  # [(category_name, titles), ...]
-            "titles": titles,
-            "recent_installs": recent_installs,
-            "active_q": q_filter,
-            "active_category": category_filter,
-            "active_decision": decision_filter,
-            "active_safety": safety_filter,
-            "decision_choices": SoftwareDecision.Decision.choices,
-            "risk_distribution": risk_distribution,
-            "this_week": this_week,
-            "workflow_state": workflow_state,
-            "software_tab": "overview",
-        },
-    )
+
+@login_required
+def software_products(request: HttpRequest) -> HttpResponse:
+    """Software Products — the full products list with per-column
+    filters (search / publisher / min_devices / risk / decision /
+    category)."""
+    ctx = _software_page_data(request)
+    if wants_csv(request):
+        return csv_response(
+            ctx["titles"],
+            columns=[
+                ("Product", "canonical_name"),
+                ("Publisher", "publisher"),
+                ("Devices", "device_count"),
+                ("Clients", "client_count"),
+                ("Last install", "last_install"),
+                ("Categories", "categories"),
+                ("Decision", "decision"),
+                ("Risk band", "safety_band"),
+                ("Risk score", "safety_score"),
+            ],
+            filename_stem="software_products",
+        )
+    ctx["software_tab"] = "products"
+    return render(request, "software_products.html", ctx)
 
 
 # ─────────────────────────────────────────────────────────────────────
