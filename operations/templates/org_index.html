@@ -100,15 +100,10 @@
 </style>
 
 {% if current_client %}
-<nav class="crumbs" aria-label="Breadcrumb">
-  <a href="{% url 'org_index' org_slug='all' %}">Clients</a> ›
-  <span>{{ current_client.display_name }}</span> › <strong>Overview</strong>
-</nav>
-
 <div class="page-heading">
   <div>
     <h1>{{ current_client.display_name }}</h1>
-    <p>{% if areas_needing_attention %}{{ areas_needing_attention }} operational area{{ areas_needing_attention|pluralize }} need attention.{% else %}No current concerns across the operational areas.{% endif %}</p>
+    <p>{% if areas_needing_attention %}{{ areas_needing_attention }} operational area{{ areas_needing_attention|pluralize }} report open items.{% else %}All operational areas are reporting normally.{% endif %}</p>
   </div>
   <div class="page-meta">
     {% if workspace_updated_at %}Updated {{ workspace_updated_at|timesince }} ago · {{ workspace_updated_at|date:"M j, Y g:i A T" }}{% else %}Update time unavailable{% endif %}
@@ -120,7 +115,7 @@
   <div class="context-primary">
     <div class="context-label">Client context</div>
     <strong>{{ current_client.display_name }}</strong>
-    <span>{{ current_client.requirement_profile.name|default:"Company default requirements" }}</span>
+    <span>Client overview</span>
   </div>
   <div class="context-stat"><div class="context-label">Devices</div><strong>{{ dev_overview.total }}</strong><span>{{ dev_overview.servers }} servers · {{ dev_overview.workstations }} workstations</span></div>
   <div class="context-stat" id="client-locations"><div class="context-label">Locations</div><strong>{{ location_count }}</strong><span>client groupings</span></div>
@@ -145,11 +140,11 @@
 
 <section class="card section-card" id="attention">
   <div class="section-head">
-    <div class="section-title"><h2>Needs attention</h2><span>Summarized by operational area · controls retained for this session</span></div>
+    <div class="section-title"><h2>Open items</h2><span>Summarized by operational area · controls retained for this session</span></div>
     <div class="controls">
       <label>Area<select id="attention-domain"><option value="all">All areas</option><option value="patching">Patching</option><option value="compliance">Compliance</option><option value="software">Software</option><option value="inventory">Inventory</option></select></label>
       <label>Severity<select id="attention-severity"><option value="all">All severities</option><option value="critical">Critical</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option><option value="info">Information</option></select></label>
-      <label>Search<input id="attention-search" type="search" placeholder="Search attention items…"></label>
+      <label>Search<input id="attention-search" type="search" placeholder="Search open items…"></label>
       <button class="reset-control" id="attention-reset" type="button">Reset</button>
     </div>
   </div>
@@ -158,10 +153,10 @@
       <thead><tr>
         <th><button class="sort-button" data-key="domain" type="button">Area</button></th>
         <th><button class="sort-button" data-key="severity" type="button">Severity</button></th>
-        <th><button class="sort-button" data-key="title" type="button">What needs review</button></th>
-        <th><button class="sort-button" data-key="affected" type="button">Affected</button></th>
-        <th><button class="sort-button" data-key="new" type="button">New since yesterday</button></th>
-        <th>Next step</th>
+        <th><button class="sort-button" data-key="title" type="button">Item</button></th>
+        <th><button class="sort-button" data-key="affected" type="button">Affected devices</button></th>
+        <th><button class="sort-button" data-key="new" type="button">New today</button></th>
+        <th>Details</th>
       </tr></thead>
       <tbody>
       {% for item in attention_groups %}
@@ -169,34 +164,34 @@
           <td><span class="domain-tag">{{ item.domain }}</span></td>
           <td><span class="badge badge-{{ item.severity }}">{{ item.severity|humanize_label }}</span></td>
           <td><span class="row-title">{{ item.title }}</span><span class="row-detail">{{ item.count }} open issue{{ item.count|pluralize }}</span></td>
-          <td>{{ item.affected }}</td><td>{{ item.new }}</td><td><a href="{{ item.href }}">Review →</a></td>
+          <td>{{ item.affected }}</td><td>{{ item.new }}</td><td><a href="{{ item.href }}">View details →</a></td>
         </tr>
       {% endfor %}
       </tbody>
     </table>
-    <p class="empty-table" id="attention-empty">No attention items match the current filters.</p>
+    <p class="empty-table" id="attention-empty">No open items match the current filters.</p>
   </div>
 </section>
 
 <div class="lower-grid">
   <section class="card" id="recent-changes">
     <h2>Recent changes</h2>
+    <p class="muted">What changed recently for this client.</p>
     <ul class="compact-list">
       <li><span>Issues opened since yesterday</span><strong>{{ new_24h }}</strong></li>
       <li><span>Open issues compared with 7 days ago</span><strong>{% if issue_trend.open_change > 0 %}+{% endif %}{{ issue_trend.open_change|default:0 }}</strong></li>
       <li><span>Software decisions available to this client</span><strong>{{ software_decisions }}</strong></li>
     </ul>
-    <div class="future-note">Full client history will be navigable from More and from this section when the history workflow is implemented.</div>
   </section>
   <aside class="card">
-    <h2>Client administration</h2>
+    <h2>Configuration snapshot</h2>
+    <p class="muted">The policy baseline and source connections currently applied to this client.</p>
     <dl class="settings-list">
-      <dt>Service requirements</dt><dd>{{ current_client.requirement_profile.name|default:"Company default" }}</dd>
-      <dt>Policies</dt><dd><a href="{% url 'org_policies' org_slug=current_client.slug %}">{{ policy_count }} configured</a></dd>
-      <dt>Data mappings</dt><dd>{{ client_links|length }} connections</dd>
+      <dt>Requirement profile</dt><dd><a href="{% url 'client_requirements_config' current_client.slug %}">{{ current_client.requirement_profile.name|default:"Tenant default" }}</a></dd>
+      <dt>Client policies</dt><dd><a href="{% url 'org_policies' org_slug=current_client.slug %}">{{ policy_count }} configured</a></dd>
+      <dt>Connected sources</dt><dd>{{ client_links|length }} source connection{{ client_links|length|pluralize }}</dd>
     </dl>
-    <p class="future-note">Configuration changes belong in Admin. The overview remains read-only.</p>
-    <a href="{% url 'admin:operations_client_change' current_client.id %}">Open client settings in Admin →</a>
+    <a href="{% url 'client_requirements_config' current_client.slug %}">Manage requirements →</a>
   </aside>
 </div>
 
@@ -212,7 +207,7 @@
   <div class="directory-stat"><strong>{{ all_device_count }}</strong><span>managed devices</span></div>
   <div class="directory-stat"><strong>{{ all_location_count }}</strong><span>locations</span></div>
   <div class="directory-stat"><strong>{{ all_user_count }}</strong><span>known client users</span></div>
-  <div class="directory-stat"><strong>{{ directory_attention }}</strong><span>clients needing attention</span></div>
+  <div class="directory-stat"><strong>{{ directory_attention }}</strong><span>clients with open items</span></div>
 </section>
 
 <section class="card section-card">
@@ -220,9 +215,9 @@
     <div class="section-title"><h2>Client directory</h2><span>Click a heading to sort · controls retained for this session</span></div>
     <div class="controls">
       <button class="control-chip active" data-directory-filter="all" type="button">All {{ all_client_count }}</button>
-      <button class="control-chip" data-directory-filter="attention" type="button">Needs attention {{ directory_attention }}</button>
+      <button class="control-chip" data-directory-filter="attention" type="button">Open items {{ directory_attention }}</button>
       <button class="control-chip" data-directory-filter="delayed" type="button">Data delayed {{ directory_delayed }}</button>
-      <button class="control-chip" data-directory-filter="review" type="button">Configuration review</button>
+      <button class="control-chip" data-directory-filter="review" type="button">Identity matches</button>
       <label>Search<input id="directory-search" type="search" placeholder="Search clients…"></label>
       <button class="reset-control" id="directory-reset" type="button">Reset</button>
     </div>
@@ -239,16 +234,16 @@
         <th><button class="sort-button" data-key="software" type="button">Software</button></th>
         <th><button class="sort-button" data-key="inventory" type="button">Inventory</button></th>
         <th><button class="sort-button" data-key="data" type="button">Data</button></th>
-        <th><button class="sort-button" data-key="review" type="button">Admin review</button></th>
+        <th><button class="sort-button" data-key="review" type="button">Identity matches</button></th>
       </tr></thead>
       <tbody>
       {% for row in directory_rows %}
         <tr data-name="{{ row.client.display_name|lower }}" data-devices="{{ row.devices }}" data-locations="{{ row.locations }}" data-users="{{ row.users }}" data-patching="{{ row.domains.0.state }}" data-compliance="{{ row.domains.1.state }}" data-software="{{ row.domains.2.state }}" data-inventory="{{ row.domains.3.state }}" data-data="{{ row.data_sort }}" data-review="{{ row.review_count }}" data-attention="{{ row.needs_attention|yesno:'1,0' }}" data-delayed="{% if row.data_state == 'delayed' %}1{% else %}0{% endif %}">
-          <td><a class="row-title" href="{% url 'org_index' org_slug=row.client.slug %}">{{ row.client.display_name }}</a><span class="row-detail">{{ row.client.requirement_profile.name|default:"Company default requirements" }}</span></td>
+          <td><a class="row-title" href="{% url 'org_index' org_slug=row.client.slug %}">{{ row.client.display_name }}</a><a class="row-detail" href="{% url 'client_requirements_config' row.client.slug %}">Configuration →</a></td>
           <td><strong>{{ row.devices }}</strong></td><td>{{ row.locations }}</td><td>{{ row.users }}</td>
           {% for domain in row.domains %}<td class="domain-cell"><a class="row-title" href="{{ domain.href }}"><span class="state-dot dot-{{ domain.state }}"></span>{{ domain.state_label }}</a><span class="row-detail">{{ domain.count }} open</span></td>{% endfor %}
           <td><span class="row-title"><span class="state-dot dot-{{ row.data_state }}"></span>{{ row.data_label }}</span></td>
-          <td>{% if row.review_count %}<a class="row-title" href="{% url 'merge_candidates_queue' %}">{{ row.review_count }} to review</a>{% else %}<span class="muted">None</span>{% endif %}</td>
+          <td>{% if row.review_count %}<a class="row-title" href="{% url 'merge_candidates_queue' %}">{{ row.review_count }} pending</a>{% else %}<a class="muted" href="{% url 'client_requirements_config' row.client.slug %}">Open configuration →</a>{% endif %}</td>
         </tr>
       {% endfor %}
       </tbody>

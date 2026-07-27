@@ -1,27 +1,10 @@
 {% extends "base.html" %}
 
-{% block title %}Compliance{% endblock %}
+{% block title %}Coverage{% endblock %}
 
 {% block content %}
-{% include "_admin_tabs.html" %}
 <style>
-    .cov-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 1rem; margin-bottom: 1.25rem; }
-    .cov-tile { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1.1rem 1.5rem; }
-    .cov-tile.alert { border-color: #fca5a5; background: #fff5f5; }
-    .cov-tile .tl { font-size: 0.75rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.3rem; }
-    .cov-tile .tv { font-size: 2rem; font-weight: 700; line-height: 1; color: #1a1a2e; }
-    .cov-tile.alert .tv { color: #dc2626; }
-    .cov-tile .ts { font-size: 0.78rem; color: var(--muted); margin-top: 0.2rem; }
-
-    .filter-bar { display: flex; gap: 0.5rem; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; }
-    .filter-bar select { padding: 0.3rem 0.6rem; border: 1px solid var(--border); border-radius: 4px;
-                         font-size: 0.82rem; background: var(--surface); }
-    .filter-bar button { padding: 0.3rem 0.8rem; border-radius: 4px; border: 1px solid var(--border);
-                         font-size: 0.82rem; cursor: pointer; background: var(--surface); }
-    .filter-bar a.clear { font-size: 0.78rem; color: var(--muted); text-decoration: none; }
-    .filter-bar a.clear:hover { color: var(--accent); }
-
-    .conf-bar { display: flex; gap: 0.3rem; font-size: 0.78rem; }
+.conf-bar { display: flex; gap: 0.3rem; font-size: 0.78rem; }
     .conf-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; }
     .conf-confirmed { background: #dc2626; }
     .conf-probable  { background: #f59e0b; }
@@ -29,7 +12,7 @@
 
 <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:1rem;">
     <div>
-        <h1 style="margin:0;">Compliance</h1>
+        <h1 style="margin:0;">Coverage</h1>
         <p class="muted" style="margin:0.25rem 0 0;">Devices missing required agents — active issues</p>
     </div>
     <div style="display:flex; align-items:center; gap:0.75rem;">
@@ -44,27 +27,27 @@
     </div>
 </div>
 
-<div class="cov-tiles">
-    <div class="cov-tile {% if critical_count %}alert{% endif %}">
-        <div class="tl">Critical gaps</div>
-        <div class="tv">{{ critical_count|default:"0" }}</div>
-        <div class="ts">Missing required agents</div>
+<div class="tile-grid">
+    <div class="tile {% if critical_count %}tile-alert{% endif %}">
+        <div class="tile-label">Critical gaps</div>
+        <div class="tile-value">{{ critical_count|default:"0" }}</div>
+        <div class="tile-note">missing required agents</div>
     </div>
-    <div class="cov-tile">
-        <div class="tl">Total gaps</div>
-        <div class="tv">{{ total_gaps|default:"0" }}</div>
-        <div class="ts">Across all platforms</div>
+    <div class="tile">
+        <div class="tile-label">Total gaps</div>
+        <div class="tile-value">{{ total_gaps|default:"0" }}</div>
+        <div class="tile-note">across all platforms</div>
     </div>
-    <div class="cov-tile">
-        <div class="tl">Clients affected</div>
-        <div class="tv">{{ clients_affected|default:"0" }}</div>
-        <div class="ts">With open issues</div>
+    <div class="tile">
+        <div class="tile-label">Clients affected</div>
+        <div class="tile-value">{{ clients_affected|default:"0" }}</div>
+        <div class="tile-note">with open issues</div>
     </div>
     {% if missing_devices %}
-    <div class="cov-tile">
-        <div class="tl">Missing from Ninja</div>
-        <div class="tv">{{ missing_devices|length }}</div>
-        <div class="ts">Client{{ missing_devices|length|pluralize }} with vanished devices</div>
+    <div class="tile">
+        <div class="tile-label">Missing from Ninja</div>
+        <div class="tile-value">{{ missing_devices|length }}</div>
+        <div class="tile-note">client{{ missing_devices|length|pluralize }} with vanished devices</div>
     </div>
     {% endif %}
 </div>
@@ -72,7 +55,7 @@
 {% if gap_rows or platform_filter or client_filter or conf_filter %}
 <div class="card" style="padding:0;">
     <div style="padding:1rem 1rem 0.75rem; border-bottom:1px solid var(--border);">
-        <form method="get" class="filter-bar">
+        <form method="get" class="filterbar">
             <select name="client">
                 <option value="">All clients</option>
                 {% for fc in filter_clients %}
@@ -99,32 +82,26 @@
     </div>
 
     {% if gap_rows %}
-    <table data-sortable style="width:100%; border-collapse:collapse;">
+    <table class="ops-table" data-sortable>
         <thead>
-            <tr style="text-align:left; border-bottom:1px solid var(--border);">
-                <th style="padding:0.55rem 1rem;">Client</th>
-                <th style="padding:0.55rem 0.75rem;">Platform</th>
-                <th style="padding:0.55rem 0.75rem;">Severity</th>
-                <th style="padding:0.55rem 0.75rem; text-align:right;">Devices</th>
-                <th style="padding:0.55rem 0.75rem;">Confidence</th>
-                <th style="padding:0.55rem 0.75rem; color:var(--muted);">Oldest</th>
-                <th style="padding:0.55rem 1rem;"></th>
+            <tr>
+                <th>Client</th>
+                <th>Platform</th>
+                <th>Severity</th>
+                <th class="num">Devices</th>
+                <th>Confidence</th>
+                <th>Oldest</th>
+                <th></th>
             </tr>
         </thead>
         <tbody>
             {% for row in gap_rows %}
-            <tr style="border-bottom:1px solid var(--border);">
-                <td style="padding:0.5rem 1rem; font-weight:500;">
-                    <a href="{% url 'org_index' org_slug=row.client_slug %}">{{ row.client_name }}</a>
-                </td>
-                <td style="padding:0.5rem 0.75rem;">{{ row.platform }}</td>
-                <td style="padding:0.5rem 0.75rem;">
-                    <span class="badge badge-{{ row.severity }}">{{ row.severity }}</span>
-                </td>
-                <td style="padding:0.5rem 0.75rem; text-align:right; font-weight:600; font-size:1rem;">
-                    {{ row.total }}
-                </td>
-                <td style="padding:0.5rem 0.75rem;">
+            <tr>
+                <td><a href="{% url 'org_index' org_slug=row.client_slug %}">{{ row.client_name }}</a></td>
+                <td>{{ row.platform }}</td>
+                <td><span class="badge badge-{{ row.severity }}">{{ row.severity }}</span></td>
+                <td class="num" style="font-weight:600;">{{ row.total }}</td>
+                <td>
                     <div class="conf-bar">
                         {% if row.confirmed %}
                         <span class="conf-dot conf-confirmed"></span>
@@ -136,10 +113,8 @@
                         {% endif %}
                     </div>
                 </td>
-                <td style="padding:0.5rem 0.75rem; color:var(--muted); font-size:0.8rem;">
-                    {{ row.oldest_at|date:"Y-m-d" }}
-                </td>
-                <td style="padding:0.5rem 1rem;">
+                <td class="muted">{{ row.oldest_at|date:"Y-m-d" }}</td>
+                <td>
                     <a href="{% url 'findings_queue' %}?client={{ row.client_slug }}&type=missing_required_platform"
                        style="font-size:0.78rem; white-space:nowrap;">View →</a>
                 </td>
@@ -148,14 +123,14 @@
         </tbody>
     </table>
     {% else %}
-    <p class="muted" style="padding:1.25rem 1rem;">No compliance gaps match the selected filters.</p>
+    <p class="muted" style="padding:1.25rem 1rem;">No coverage gaps match the selected filters.</p>
     {% endif %}
 </div>
 {% else %}
 <div class="card">
     <p class="muted">
-        No active compliance gaps detected.
-        {% if not gap_rows %}Run an agent compliance ingest from <a href="{% url 'sources_status' %}">Sources</a> to populate items.{% endif %}
+        No active coverage gaps detected.
+        {% if not gap_rows %}Run an agent ingest from <a href="{% url 'sources_status' %}">Sources</a> to populate items.{% endif %}
     </p>
 </div>
 {% endif %}
@@ -166,22 +141,20 @@
     <p class="muted" style="font-size:0.85rem; margin-top:-0.5rem;">
         Devices that were previously tracked in Ninja but have disappeared — may indicate decommission or agent removal.
     </p>
-    <table data-sortable style="width:100%; border-collapse:collapse;">
+    <table class="ops-table" data-sortable>
         <thead>
-            <tr style="text-align:left; border-bottom:1px solid var(--border);">
-                <th style="padding:0.5rem 0.75rem;">Client</th>
-                <th style="padding:0.5rem 0.75rem; text-align:right;">Devices</th>
-                <th style="padding:0.5rem 0.75rem;"></th>
+            <tr>
+                <th>Client</th>
+                <th class="num">Devices</th>
+                <th></th>
             </tr>
         </thead>
         <tbody>
             {% for r in missing_devices %}
-            <tr style="border-bottom:1px solid var(--border);">
-                <td style="padding:0.45rem 0.75rem;">
-                    <a href="{% url 'org_index' org_slug=r.client_slug %}">{{ r.client_name }}</a>
-                </td>
-                <td style="padding:0.45rem 0.75rem; text-align:right; font-weight:600;">{{ r.count }}</td>
-                <td style="padding:0.45rem 0.75rem;">
+            <tr>
+                <td><a href="{% url 'org_index' org_slug=r.client_slug %}">{{ r.client_name }}</a></td>
+                <td class="num" style="font-weight:600;">{{ r.count }}</td>
+                <td>
                     <a href="{% url 'findings_queue' %}?client={{ r.client_slug }}&type=device_missing_from_source"
                        style="font-size:0.78rem;">View →</a>
                 </td>

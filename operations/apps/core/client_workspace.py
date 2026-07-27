@@ -9,6 +9,7 @@ from django.db.models import Count, Q
 from django.urls import reverse
 from django.utils import timezone
 
+from .device_status import get_device_status_policy
 from .models import Finding, MergeCandidate
 from .templatetags.human_labels import humanize_label
 
@@ -30,8 +31,8 @@ DOMAIN_LABEL_BY_CATEGORY = {
     "data_quality": "Inventory",
 }
 STATE_LABELS = {
-    "needs_action": "Needs action",
-    "review": "Review",
+    "needs_action": "Attention",
+    "review": "Watch",
     "monitor": "Monitor",
     "on_track": "On track",
     "delayed": "Data delayed",
@@ -204,8 +205,12 @@ def _shared_context() -> tuple[dict, dict, dict]:
     return locations, users, health
 
 
-def _source_updates(source_names: list[str], health: dict) -> list[dict]:
-    stale_before = timezone.now() - timedelta(hours=8)
+def _source_updates(
+    source_names: list[str], health: dict, *, source_delay_hours: int | None = None
+) -> list[dict]:
+    if source_delay_hours is None:
+        source_delay_hours = get_device_status_policy()["source_delay_hours"]
+    stale_before = timezone.now() - timedelta(hours=source_delay_hours)
     updates = []
     for name in source_names:
         source = health.get(name, {})
@@ -215,13 +220,18 @@ def _source_updates(source_names: list[str], health: dict) -> list[dict]:
     return updates
 
 
-def build_client_workspace(client, existing: dict) -> dict:
+def build_client_workspace(client, existing: dict, *, device_policy: dict | None = None) -> dict:
     """Build a cross-domain, client-scoped overview context."""
     locations, users, health = _shared_context()
+    device_policy = device_policy or get_device_status_policy()
     stats_by_client, issue_details = _issue_rollup(client_id=client.id)
     stats = stats_by_client.get(client.id, {})
     source_names = list(dict.fromkeys(link.source.name for link in existing["client_links"]))
-    source_updates = _source_updates(source_names, health)
+    source_updates = _source_updates(
+        source_names,
+        health,
+        source_delay_hours=device_policy["source_delay_hours"],
+    )
     any_delayed = any(source["delayed"] for source in source_updates)
     latest_update = max(
         (source["updated_at"] for source in source_updates if source["updated_at"]),
@@ -270,6 +280,7 @@ def build_client_workspace(client, existing: dict) -> dict:
     online = device["online"]
     offline = device["offline"]
     stale = device["stale"]
+    active = device["active"]
     if not total:
         device_state = "unavailable"
     elif stale:
@@ -294,11 +305,12 @@ def build_client_workspace(client, existing: dict) -> dict:
             key="devices",
             name="Devices",
             description="Availability and recent contact",
-            value=f"{online:,} of {total:,}",
-            value_label="currently online",
+            value=f"{active:,} of {total:,}",
+            value_label="active devices",
             facts=[
+                {"label": f"{online:,} online now"},
                 {"label": f"{offline:,} offline"},
-                {"label": f"{stale:,} not seen in 7 days"},
+                {"label": f"{stale:,} not seen in {device_policy['active_device_days']} days"},
                 {"label": f"{device['servers']:,} servers"},
                 {"label": f"{device['workstations']:,} workstations"},
             ],
@@ -311,10 +323,10 @@ def build_client_workspace(client, existing: dict) -> dict:
             name="Inventory",
             description="Asset identity and record quality",
             value=f"{inventory['total']:,}",
-            value_label="items need review",
+            value_label="open items",
             facts=[
                 {"label": f"{_count(inventory, 'identity_conflict'):,} identity conflicts"},
-                {"label": f"{_count(inventory, 'device_unenrolled'):,} lifecycle reviews"},
+                {"label": f"{_count(inventory, 'device_unenrolled'):,} lifecycle items"},
                 {"label": f"{locations.get(client.id, 0):,} locations represented"},
             ],
             href=f"{reverse('findings_queue')}?client={client.slug}&category=identity",
@@ -369,7 +381,7 @@ def build_client_workspace(client, existing: dict) -> dict:
             value=f"{existing['software_count']:,}",
             value_label="applications observed",
             facts=[
-                {"label": f"{software['total']:,} findings need review"},
+                {"label": f"{software['total']:,} open findings"},
                 {"label": f"{software['new']:,} new since yesterday"},
                 {"label": f"{existing['software_decisions']:,} decisions recorded"},
             ],

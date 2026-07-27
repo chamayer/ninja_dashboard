@@ -1,0 +1,280 @@
+{% extends "base.html" %}
+{% load human_labels %}
+
+{% block title %}Jobs{% endblock %}
+
+{% block content %}
+{% if request.GET.live != 'off' %}
+{# Auto-refresh via JS so status updates after Run-now. Pause with ?live=off. #}
+<script>
+  (function () {
+    var s = 20;
+    setTimeout(function () { location.reload(); }, s * 1000);
+  })();
+</script>
+{% endif %}
+<style>
+  .jobs-hero { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; margin: 0 0 1rem; flex-wrap: wrap; }
+  .jobs-hero h1 { margin: 0; font-size: 1.35rem; }
+  .jobs-hero .sub { color: var(--muted); font-size: 0.9rem; }
+
+  .jobs-filterbar {
+    display: flex; flex-wrap: wrap; gap: 0.55rem; align-items: center; margin-bottom: 0.85rem;
+    padding: 0.6rem 0.85rem; background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+  }
+  .jobs-filterbar label { font-size: 0.72rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin-right: 0.3rem; }
+  .jobs-filterbar select, .jobs-filterbar input {
+    padding: 0.35rem 0.65rem; border: 1px solid var(--border); border-radius: 4px; font-size: 0.85rem;
+  }
+
+  .jobs-section-label {
+    font-size: 0.7rem; font-weight: 700; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--muted);
+    margin: 1.15rem 0 0.5rem;
+    display: flex; align-items: center; gap: 0.75rem;
+  }
+  .jobs-section-label form { margin: 0; }
+  .jobs-section-label form button {
+    padding: 0.25rem 0.7rem; font-size: 0.78rem; border: 1px solid var(--border);
+    background: #fff; border-radius: 4px; cursor: pointer; text-transform: none;
+    letter-spacing: 0; color: #1a1a2e;
+  }
+  .jobs-section-label form button:hover { background: #eef2ff; border-color: #4338ca; color: #312e81; }
+
+  .jobs-list { display: grid; gap: 0.5rem; }
+  .job-row {
+    display: grid; grid-template-columns: 1fr auto auto; gap: 0.9rem; align-items: center;
+    padding: 0.75rem 1rem; background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+  }
+  .job-row .name { font-weight: 600; font-size: 0.95rem; }
+  .job-row .desc { color: var(--muted); font-size: 0.83rem; margin-top: 0.2rem; }
+  .job-row .meta { font-size: 0.8rem; color: var(--muted); text-align: right; white-space: nowrap; }
+  .job-row .meta strong { color: #1a1a2e; }
+
+  .state-pill { display: inline-block; padding: 0.15rem 0.6rem; border-radius: 999px; font-size: 0.72rem; font-weight: 600; margin-left: 0.4rem; }
+  .state-pill.ok        { background: #dcfce7; color: #14532d; }
+  .state-pill.failed    { background: #fee2e2; color: #991b1b; }
+  .state-pill.never_run { background: #f3f4f6; color: #6b7280; }
+  .state-pill.stale     { background: #fef3c7; color: #92400e; }
+
+  .job-row form { margin: 0; }
+  .job-row button {
+    padding: 0.4rem 0.85rem; border-radius: 4px; border: 1px solid var(--border);
+    background: #fff; cursor: pointer; font-size: 0.85rem; font-weight: 600;
+  }
+  .job-row button:hover { background: #eef2ff; border-color: #4338ca; color: #312e81; }
+
+  .err-preview { font-size: 0.75rem; color: #991b1b; margin-top: 0.2rem; }
+
+  .run-all-primary {
+    padding: 0.5rem 1rem; font-weight: 700; background: #1e40af; color: #fff;
+    border: none; border-radius: 6px; cursor: pointer; font-size: 0.9rem;
+  }
+  .run-all-primary:hover { background: #1e3a8a; }
+
+  .recent-panel {
+    margin-top: 1.5rem; padding: 0.85rem 1rem;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+  }
+  .recent-panel h3 { margin: 0 0 0.5rem; font-size: 0.95rem; }
+  .recent-runs { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+  .recent-runs th, .recent-runs td { padding: 0.35rem 0.5rem; text-align: left; border-bottom: 1px solid var(--border); }
+  .recent-runs th { color: var(--muted); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700; }
+  .recent-runs .ok  { color: #14532d; }
+  .recent-runs .bad { color: #991b1b; font-weight: 600; }
+
+  .live-hint {
+    font-size: 0.72rem; color: var(--muted);
+    padding: 0.35rem 0.6rem; background: #f8fafc; border: 1px dashed var(--border);
+    border-radius: 4px;
+  }
+</style>
+
+<div class="jobs-hero">
+    <div>
+        <h1>Jobs</h1>
+        <div class="sub">
+            {{ jobs|length }} job{{ jobs|length|pluralize }} across {{ jobs_by_category|length }} area{{ jobs_by_category|length|pluralize }}.
+            {% if request.GET.live != 'off' %}
+                <span class="live-hint">Auto-refreshing every 20 s — <a href="?live=off{% if active_category %}&amp;category={{ active_category }}{% endif %}">pause</a></span>
+            {% else %}
+                <span class="live-hint">Paused — <a href="?{% if active_category %}category={{ active_category }}{% endif %}">resume auto-refresh</a></span>
+            {% endif %}
+        </div>
+    </div>
+    <form method="post" action="{% url 'admin_jobs_run_all' %}"
+          onsubmit="return confirm('Fire every job right now? This will call the ingest container once per job.');">
+        {% csrf_token %}
+        <button type="submit" class="run-all-primary">Run everything now</button>
+    </form>
+</div>
+
+<form action="" method="get" class="jobs-filterbar">
+    <label>Category</label>
+    <select name="category" onchange="this.form.submit()">
+        <option value="">All categories</option>
+        {% for c in categories %}
+            <option value="{{ c }}" {% if active_category == c %}selected{% endif %}>{{ c|title }}</option>
+        {% endfor %}
+    </select>
+    <label>Status</label>
+    <select name="status" onchange="this.form.submit()">
+        <option value="">All statuses</option>
+        <option value="ok"        {% if active_status == 'ok'        %}selected{% endif %}>Ok, recent</option>
+        <option value="stale"     {% if active_status == 'stale'     %}selected{% endif %}>Stale (>2 days)</option>
+        <option value="failed"    {% if active_status == 'failed'    %}selected{% endif %}>Failed</option>
+        <option value="never_run" {% if active_status == 'never_run' %}selected{% endif %}>Never run</option>
+    </select>
+    {% if active_category or active_status %}
+        <a href="?" style="font-size:0.82rem;">Clear</a>
+    {% endif %}
+</form>
+
+{% for category, group in jobs_by_category.items %}
+<div class="jobs-section-label">
+    <span>{{ category|title }}</span>
+    <form method="post" action="{% url 'admin_jobs_run_all' %}"
+          onsubmit="return confirm('Fire every job in the {{ category|title }} category?');">
+        {% csrf_token %}
+        <input type="hidden" name="category" value="{{ category }}">
+        <button type="submit">Run all in this category</button>
+    </form>
+</div>
+<div class="jobs-list">
+    {% for j in group %}
+    <div class="job-row">
+        <div>
+            <div>
+                <span class="name">{{ j.name }}</span>
+                {% if j.state == 'ok' %}
+                    {% if j.is_stale %}
+                        <span class="state-pill stale">Stale</span>
+                    {% else %}
+                        <span class="state-pill ok">Ok</span>
+                    {% endif %}
+                {% elif j.state == 'never_run' %}
+                    <span class="state-pill never_run" title="No run log entry yet — job hasn't run since deploy, or emits no run_log">Never run</span>
+                {% else %}
+                    <span class="state-pill failed">{{ j.state|title }}</span>
+                {% endif %}
+            </div>
+            <div class="desc">{{ j.description }}</div>
+            {% if j.last_error %}
+                <div class="err-preview">Last error: {{ j.last_error }}</div>
+            {% endif %}
+        </div>
+        <div class="meta">
+            {% if j.last_run_at %}
+                Last run<br><strong>{{ j.last_run_at|date:"Y-m-d H:i" }}</strong>
+                {% if j.rows_touched %}<br>{{ j.rows_touched }} rows{% endif %}
+            {% else %}
+                <em>no runs recorded</em>
+            {% endif %}
+        </div>
+        <div>
+            {% if j.no_run_now %}
+                <a href="{{ ingest_public_url }}/run/sources/enqueue" target="_blank" rel="noopener"
+                   style="display:inline-block; padding:0.4rem 0.85rem; border-radius:4px; border:1px solid var(--border); background:#fff; text-decoration:none; font-size:0.85rem; font-weight:600; color:#1a1a2e;">
+                   Scoped run…
+                </a>
+            {% else %}
+            <form method="post" action="{% url 'admin_jobs_run' job_id=j.id %}">
+                {% csrf_token %}
+                <button type="submit">Run now</button>
+            </form>
+            {% endif %}
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% empty %}
+<p class="muted">No jobs match the current filter.</p>
+{% endfor %}
+
+{# ─── On-demand scoped runs ────────────────────────────── #}
+<div class="jobs-section-label">On-demand scoped runs — pick org / device</div>
+<div class="jobs-list">
+    <div class="job-row">
+        <div>
+            <div><span class="name">Software inventory (by client or device)</span></div>
+            <div class="desc">
+                Queue a Ninja software-inventory run for one or more clients or specific
+                devices. Opens the ingest container's form in a new tab with the org /
+                device selector.
+            </div>
+        </div>
+        <div class="meta">served by <code>ingest:8090</code></div>
+        <div>
+            <a href="{{ ingest_public_url }}/run/software/enqueue" target="_blank" rel="noopener"
+               style="display:inline-block; padding:0.4rem 0.85rem; border-radius:4px; border:1px solid var(--border); background:#fff; text-decoration:none; font-size:0.85rem; font-weight:600; color:#1a1a2e;">
+                Open selector →
+            </a>
+        </div>
+    </div>
+    <div class="job-row">
+        <div>
+            <div><span class="name">Source ingest (single source or client)</span></div>
+            <div class="desc">
+                Trigger a specific source's ingest run for a single client or every
+                client. Opens the ingest container's <code>/run/sources/enqueue</code>
+                form.
+            </div>
+        </div>
+        <div class="meta">served by <code>ingest:8090</code></div>
+        <div>
+            <a href="{{ ingest_public_url }}/run/sources/enqueue" target="_blank" rel="noopener"
+               style="display:inline-block; padding:0.4rem 0.85rem; border-radius:4px; border:1px solid var(--border); background:#fff; text-decoration:none; font-size:0.85rem; font-weight:600; color:#1a1a2e;">
+                Open selector →
+            </a>
+        </div>
+    </div>
+    <div class="job-row">
+        <div>
+            <div><span class="name">Direct scoped software run (bypasses queue)</span></div>
+            <div class="desc">
+                Same shape as the queued form but runs the software pull inline —
+                faster response for a small scope, but no queue-status page to watch.
+            </div>
+        </div>
+        <div class="meta">served by <code>ingest:8090</code></div>
+        <div>
+            <a href="{{ ingest_public_url }}/run/software/scoped" target="_blank" rel="noopener"
+               style="display:inline-block; padding:0.4rem 0.85rem; border-radius:4px; border:1px solid var(--border); background:#fff; text-decoration:none; font-size:0.85rem; font-weight:600; color:#1a1a2e;">
+                Open selector →
+            </a>
+        </div>
+    </div>
+</div>
+
+<div class="recent-panel">
+    <h3>Recent activity <span class="muted" style="font-weight:400; font-size:0.8rem;">(last 25 across every source)</span></h3>
+    {% if recent_runs %}
+    <table class="recent-runs">
+        <thead>
+            <tr>
+                <th>Kind / connector</th>
+                <th>Started</th>
+                <th>Ended</th>
+                <th>Rows</th>
+                <th>Status</th>
+                <th>Error</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for r in recent_runs %}
+            <tr>
+                <td><code>{{ r.kind }}</code> <span class="muted" style="font-size:0.7rem;">({{ r.source }})</span></td>
+                <td>{{ r.started_at|date:"Y-m-d H:i:s" }}</td>
+                <td>{{ r.ended_at|date:"H:i:s"|default:"—" }}</td>
+                <td>{{ r.rows }}</td>
+                <td>{% if r.ok %}<span class="ok">ok</span>{% else %}<span class="bad">failed</span>{% endif %}</td>
+                <td class="muted" style="max-width:32ch; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="{{ r.error }}">{{ r.error|default:"" }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="muted">No recent runs recorded.</p>
+    {% endif %}
+</div>
+{% endblock %}

@@ -44,7 +44,7 @@ Config / Integrations page. Views must set:
       {% if nav_pending_merges %}<span class="at-badge">{{ nav_pending_merges }}</span>{% endif %}
     </a>
     <a class="at-tab {% if admin_tab == 'software' %}active{% endif %}"
-       href="{% url 'software_decisions_queue' %}">
+       href="{% url 'software_products' %}?flagged=1">
       Software
       {% if nav_pending_software_decisions %}<span class="at-badge">{{ nav_pending_software_decisions }}</span>{% endif %}
     </a>
@@ -58,6 +58,8 @@ Config / Integrations page. Views must set:
        href="{% url 'requirement_profiles_list' %}">Requirements</a>
     <a class="at-tab {% if admin_tab == 'classifier' %}active{% endif %}"
        href="{% url 'classifier_config' %}">Classifier</a>
+    <a class="at-tab {% if admin_tab == 'device-status' %}active{% endif %}"
+       href="{% url 'device_status_config' %}">Device status</a>
   {% elif admin_group == 'integrations' %}
     <span class="at-group">Integrations</span>
     <a class="at-tab {% if admin_tab == 'sources' %}active{% endif %}"
@@ -66,5 +68,7 @@ Config / Integrations page. Views must set:
        href="{% url 'fleet_coverage' %}">Coverage</a>
     <a class="at-tab {% if admin_tab == 'ingest' %}active{% endif %}"
        href="{% url 'findings_admin_health' %}">Ingest</a>
+    <a class="at-tab {% if admin_tab == 'jobs' %}active{% endif %}"
+       href="{% url 'admin_jobs' %}">Jobs</a>
   {% endif %}
 </div>

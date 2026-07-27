@@ -1,0 +1,175 @@
+{% extends "base.html" %}
+{% load human_labels %}
+
+{% block title %}Products — Software{% endblock %}
+
+{% block content %}
+{% include "_sw_style.html" %}
+
+<div class="sw-page-header">
+    <div>
+        <h1>Products</h1>
+        <div class="sub">
+            {{ titles|length }}{% if titles|length == 500 %}+{% endif %} product{{ titles|length|pluralize }}
+            shown from a fleet of {{ unique_titles }} unique product{{ unique_titles|pluralize }}.
+        </div>
+    </div>
+    {% include "_csv_download.html" %}
+</div>
+
+{# ── Category chip strip (same source as Overview) ────────── #}
+<div class="sw-section-label">Categories</div>
+<div class="sw-filterbar" style="gap:0.4rem;">
+    <a class="cat-chip {% if not active_category %}active{% endif %}"
+       href="{% url 'software_products' %}"
+       style="padding:0.28rem 0.65rem; border:1px solid var(--border); border-radius:999px; background:#fff; text-decoration:none; color:#374151; font-size:0.82rem;{% if not active_category %} background:#1e40af; border-color:#1e40af; color:#fff;{% endif %}">
+        All {{ unique_titles }}
+    </a>
+    {% for cat_name, cat_titles in category_rows %}
+        {% if cat_name != 'whitelist' %}
+        <a class="cat-chip {% if active_category == cat_name %}active{% endif %}"
+           href="?category={{ cat_name }}"
+           style="padding:0.28rem 0.65rem; border:1px solid var(--border); border-radius:999px; background:#fff; text-decoration:none; color:#374151; font-size:0.82rem;{% if active_category == cat_name %} background:#1e40af; border-color:#1e40af; color:#fff;{% endif %}">
+            {{ cat_name|humanize_label|default:cat_name|title }} <strong>{{ cat_titles }}</strong>
+        </a>
+        {% endif %}
+    {% endfor %}
+    <a class="cat-chip {% if active_category == 'uncategorized' %}active{% endif %}"
+       href="?category=uncategorized"
+       style="padding:0.28rem 0.65rem; border:1px solid var(--border); border-radius:999px; background:#fff; text-decoration:none; color:#374151; font-size:0.82rem;{% if active_category == 'uncategorized' %} background:#1e40af; border-color:#1e40af; color:#fff;{% endif %}">
+        Not categorized <strong>{{ uncategorized_titles }}</strong>
+    </a>
+</div>
+
+{# ── Per-column filter bar ───────────────────────────────── #}
+<div class="sw-section-label">Filter</div>
+<form action="" method="get" class="sw-filterbar">
+    <div>
+        <label>Product</label>
+        <input type="search" name="q" value="{{ active_q }}" placeholder="name…" style="min-width:180px;">
+    </div>
+    <div>
+        <label>Publisher</label>
+        <input type="search" name="publisher" value="{{ active_publisher }}" placeholder="publisher…" style="min-width:160px;">
+    </div>
+    <div>
+        <label>Min devices</label>
+        <input type="number" min="0" name="min_devices" value="{% if active_min_devices %}{{ active_min_devices }}{% endif %}" style="width:6rem;">
+    </div>
+    <div>
+        <label>Risk</label>
+        <select name="safety">
+            <option value="">Any</option>
+            <option value="high"    {% if active_safety == 'high'    %}selected{% endif %}>High</option>
+            <option value="medium"  {% if active_safety == 'medium'  %}selected{% endif %}>Medium</option>
+            <option value="low"     {% if active_safety == 'low'     %}selected{% endif %}>Low</option>
+            <option value="clean"   {% if active_safety == 'clean'   %}selected{% endif %}>Approved</option>
+            <option value="unknown" {% if active_safety == 'unknown' %}selected{% endif %}>Not yet checked</option>
+        </select>
+    </div>
+    <div>
+        <label>Decision</label>
+        <select name="decision">
+            <option value="">Any</option>
+            <option value="approved" {% if active_decision == 'approved' %}selected{% endif %}>Allowed</option>
+            <option value="rejected" {% if active_decision == 'rejected' %}selected{% endif %}>Blocked</option>
+            <option value="pending"  {% if active_decision == 'pending'  %}selected{% endif %}>No decision</option>
+        </select>
+    </div>
+    <div>
+        <label>Classifier</label>
+        <label style="display:flex; align-items:center; gap:0.3rem; font-size:0.85rem;">
+            <input type="checkbox" name="flagged" value="1" {% if active_flagged %}checked{% endif %}>
+            Flagged
+        </label>
+    </div>
+    {% if active_category %}<input type="hidden" name="category" value="{{ active_category }}">{% endif %}
+    <button type="submit">Apply</button>
+    {% if active_q or active_publisher or active_min_devices or active_safety or active_decision %}
+        <a class="clear" href="?{% if active_category %}category={{ active_category }}{% endif %}">Clear</a>
+    {% endif %}
+</form>
+
+{# ── Products table ──────────────────────────────────────── #}
+<div class="sw-section-label">Products{% if titles|length == 500 %} (first 500) {% endif %}</div>
+<div class="sw-table-wrap">
+    {% if titles %}
+    <table class="ops-table" data-sortable>
+        <thead>
+            <tr>
+                <th>Product</th>
+                <th class="num">Devices</th>
+                <th class="num">Clients</th>
+                <th>Category</th>
+                <th>Risk</th>
+                <th>Decision</th>
+                <th class="actions">Apply</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for t in titles %}
+            <tr>
+                <td class="primary-cell">
+                    <a href="{% url 'software_detail' name=t.canonical_name %}">
+                        <strong>{{ t.canonical_name|title }}</strong>
+                    </a>
+                    {% if t.publisher %}
+                    <div class="secondary">
+                        <a href="{% url 'software_publisher_detail' publisher=t.publisher %}">{{ t.publisher|title }}</a>
+                    </div>
+                    {% endif %}
+                </td>
+                <td class="num">{{ t.device_count }}</td>
+                <td class="num">{{ t.client_count }}</td>
+                <td>
+                    {% if t.categories %}
+                        {% for cat in t.categories %}{% if not forloop.first %}, {% endif %}{{ cat|humanize_label|default:cat|title }}{% endfor %}
+                    {% else %}
+                        <span class="muted">—</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if t.safety_band == 'high' %}
+                        <span class="risk-pill high" title="Risk score {{ t.safety_score }} · {{ t.safety_cve_count }} known vulnerabilities · {{ t.safety_kev_count }} actively exploited">High</span>
+                    {% elif t.safety_band == 'medium' %}
+                        <span class="risk-pill medium">Medium</span>
+                    {% elif t.safety_band == 'low' %}
+                        <span class="risk-pill low">Low</span>
+                    {% elif t.safety_band == 'clean' %}
+                        <span class="risk-pill clean" title="Approved by operator">Approved</span>
+                    {% elif t.safety_band == 'unknown' %}
+                        <span class="risk-pill unknown">Not yet checked</span>
+                    {% else %}
+                        <span class="risk-pill none">—</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if t.decision %}
+                        <span class="decision-pill {{ t.decision }}">{{ t.decision|humanize_label|default:t.decision|title }}</span>
+                    {% else %}
+                        <span class="decision-pill none">No decision</span>
+                    {% endif %}
+                </td>
+                <td class="actions">
+                    <form method="post" action="{% url 'software_decision_create' %}">
+                        {% csrf_token %}
+                        <input type="hidden" name="canonical_name" value="{{ t.canonical_name }}">
+                        <input type="hidden" name="scope" value="global">
+                        <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                        <select name="decision">
+                            {% for value, label in decision_choices %}
+                                <option value="{{ value }}" {% if t.decision == value %}selected{% endif %}>{{ label }}</option>
+                            {% endfor %}
+                        </select>
+                        <button type="submit">Apply</button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="sw-empty">No products match the current filter.</div>
+    {% endif %}
+</div>
+{% endblock %}

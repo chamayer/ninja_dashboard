@@ -1,0 +1,411 @@
+{% extends "base.html" %}
+{% load human_labels %}
+
+{% block title %}{{ canonical_name }} — Software{% endblock %}
+
+{% block content %}
+<style>
+    .sd-header { padding: 1rem 1.2rem; background: var(--surface);
+                 border: 1px solid var(--border); border-radius: 6px;
+                 margin-bottom: 0.6rem; }
+    .sd-crumbs { font-size: 0.8rem; color: var(--muted); margin-bottom: 0.4rem; }
+    .sd-title h1 { margin: 0; font-size: 1.35rem; }
+    .sd-meta { color: var(--muted); font-size: 0.82rem; margin-top: 0.35rem; }
+    .sd-tiles { display: grid; gap: 0.65rem;
+                grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+                margin-bottom: 0.9rem; }
+    .sd-tile { background: var(--surface); border: 1px solid var(--border);
+               border-radius: 6px; padding: 0.75rem 0.9rem; }
+    .sd-tile .label { color: var(--muted); font-size: 0.75rem;
+                      text-transform: uppercase; letter-spacing: 0.04em; }
+    .sd-tile .value { font-size: 1.35rem; font-weight: 600; margin-top: 0.2rem; }
+    .sd-grid { display: grid; gap: 0.9rem; grid-template-columns: 2fr 1fr; }
+    @media (max-width: 900px) { .sd-grid { grid-template-columns: 1fr; } }
+    .sd-card { background: var(--surface); border: 1px solid var(--border);
+               border-radius: 6px; padding: 1rem 1.1rem; margin-bottom: 0.6rem; }
+    .sd-card h2 { margin: 0 0 0.6rem; font-size: 1rem; }
+    .sd-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+    .sd-table th, .sd-table td { padding: 0.4rem 0.55rem; text-align: left;
+                                 border-bottom: 1px solid var(--border); }
+    .sd-table th { color: var(--muted); font-weight: 500; font-size: 0.78rem;
+                   text-transform: uppercase; letter-spacing: 0.03em; }
+    .sd-table td.num, .sd-table th.num { text-align: right; }
+    .sd-decision-form { display: grid; gap: 0.5rem;
+                        grid-template-columns: 1fr auto; align-items: end; }
+    .sd-decision-form select, .sd-decision-form input[type=text] {
+        padding: 0.4rem 0.55rem; border: 1px solid var(--border);
+        border-radius: 4px; font-size: 0.88rem; }
+    .sd-decision-form button { padding: 0.45rem 0.9rem; }
+    .sd-pill { display: inline-block; padding: 0.15rem 0.55rem; border-radius: 999px;
+               font-size: 0.75rem; font-weight: 500; }
+    .sd-pill.approve, .sd-pill.approve_publisher { background: #dcfce7; color: #14532d; }
+    .sd-pill.reject { background: #fee2e2; color: #991b1b; }
+    .sd-pill.investigate { background: #fef3c7; color: #92400e; }
+    .sd-pill.none { background: #f3f4f6; color: #6b7280; }
+    .sd-safety-band { display:inline-block; padding:0.15rem 0.55rem; border-radius:999px;
+                      font-size:0.78rem; font-weight:600; }
+    .sd-safety-band.high   { background:#fee2e2; color:#991b1b; }
+    .sd-safety-band.medium { background:#fef3c7; color:#92400e; }
+    .sd-safety-band.low    { background:#dbeafe; color:#1e3a8a; }
+    .sd-safety-band.clean  { background:#dcfce7; color:#14532d; }
+    .sd-cve-row .kev { background:#fee2e2; color:#991b1b; padding:1px 6px;
+                       border-radius:4px; font-size:0.72rem; font-weight:600; }
+    .sd-cve-row .cvss { font-weight:600; }
+    .sd-cve-row.high  .cvss { color:#991b1b; }
+    .sd-cve-row.medium .cvss { color:#92400e; }
+    .sd-cve-row.low   .cvss { color:#1e3a8a; }
+</style>
+
+<div class="sd-header">
+    <div class="sd-crumbs">
+        <a href="{% url 'software_page' %}">Software</a> ›
+        <span>{{ canonical_name }}</span>
+    </div>
+    <div class="sd-title">
+        <h1>{{ canonical_name }}</h1>
+    </div>
+    <div class="sd-meta">
+        {% if publishers %}Publisher{{ publishers|length|pluralize }}:
+            {% for p in publishers %}<code>{{ p.publisher }}</code>{% if not forloop.last %}, {% endif %}{% endfor %} ·
+        {% endif %}
+        {% if catalog_entry and catalog_entry.categories %}Categories:
+            {% for c in catalog_entry.categories %}{{ c|humanize_label|default:c }}{% if not forloop.last %}, {% endif %}{% endfor %} ·
+        {% endif %}
+        {% if catalog_entry and catalog_entry.eol_date %}EOL: {{ catalog_entry.eol_date|date:"Y-m-d" }} · {% endif %}
+        {% if global_decision %}
+            Current global decision:
+            <span class="sd-pill {{ global_decision.decision }}">{{ global_decision.decision|humanize_label|default:global_decision.decision }}</span>
+        {% else %}
+            <span class="sd-pill none">no global decision</span>
+        {% endif %}
+    </div>
+</div>
+
+<div class="sd-tiles">
+    <div class="sd-tile"><div class="label">Installations</div><div class="value">{{ installations }}</div></div>
+    <div class="sd-tile"><div class="label">Devices</div><div class="value">{{ device_count }}</div></div>
+    <div class="sd-tile"><div class="label">Clients</div><div class="value">{{ client_count }}</div></div>
+    <div class="sd-tile"><div class="label">Versions observed</div><div class="value">{{ versions|length }}</div></div>
+    <div class="sd-tile"><div class="label">First observed</div><div class="value" style="font-size:0.95rem;">{{ first_observed|date:"Y-m-d"|default:"—" }}</div></div>
+    <div class="sd-tile"><div class="label">Last observed</div><div class="value" style="font-size:0.95rem;">{{ last_observed|date:"Y-m-d"|default:"—" }}</div></div>
+</div>
+
+<div class="sd-grid">
+<div>
+    <div class="sd-card">
+        <h2>Decision</h2>
+        <p class="muted" style="margin-top:0; font-size:0.85rem;">
+            Global scope applies to every install of this title unless a
+            narrower client- or device-scoped decision overrides it.
+            {% if catalog_entry %}Catalog notes:
+                <em>{{ catalog_entry.notes|default:"none" }}</em>.
+            {% endif %}
+        </p>
+        <form method="post" action="{% url 'software_decision_create' %}" class="sd-decision-form">
+            {% csrf_token %}
+            <input type="hidden" name="canonical_name" value="{{ canonical_name }}">
+            <input type="hidden" name="scope" value="global">
+            <input type="hidden" name="next" value="{{ request.get_full_path }}">
+            <div>
+                <label style="display:block; font-size:0.78rem; color:var(--muted);">Decision</label>
+                <select name="decision" style="width:100%;">
+                    {% for value, label in decision_choices %}
+                        <option value="{{ value }}"
+                            {% if global_decision and global_decision.decision == value %}selected{% endif %}>
+                            {{ label }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <button type="submit">Apply</button>
+        </form>
+        <p class="muted" style="margin-top:0.6rem; font-size:0.8rem;">
+            For a narrower scope, use the row action in the per-device list
+            below or the client's software page.
+        </p>
+    </div>
+
+    <div class="sd-card">
+        <h2>Versions observed</h2>
+        {% if versions %}
+        <table data-sortable class="sd-table">
+            <thead>
+                <tr><th>Version</th><th class="num">Installs</th>
+                    <th class="num">Devices</th><th class="num">Clients</th>
+                    <th class="num">Last observed</th></tr>
+            </thead>
+            <tbody>
+                {% for v in versions %}
+                <tr>
+                    <td><code>{{ v.version }}</code></td>
+                    <td class="num">{{ v.installs }}</td>
+                    <td class="num">{{ v.devices }}</td>
+                    <td class="num">{{ v.clients }}</td>
+                    <td class="num muted">{{ v.last_observed|date:"Y-m-d"|default:"—" }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p class="muted">No version data.</p>
+        {% endif %}
+    </div>
+
+    <div class="sd-card">
+        <h2>Installations
+            {% if install_rows|length == 500 %}
+                <span class="muted" style="font-size:0.8rem; font-weight:400;">(showing first 500)</span>
+            {% else %}
+                <span class="muted" style="font-size:0.8rem; font-weight:400;">({{ install_rows|length }})</span>
+            {% endif %}
+        </h2>
+        {% if install_rows %}
+        <table data-sortable class="sd-table">
+            <thead>
+                <tr><th>Client</th><th>Device</th><th>Role</th><th>OS</th>
+                    <th>Version</th><th>Install date</th><th>Last observed</th>
+                    <th style="text-align:right;">Decide</th></tr>
+            </thead>
+            <tbody>
+                {% for r in install_rows %}
+                <tr>
+                    <td><a href="{% url 'org_index' org_slug=r.client_slug %}">{{ r.client_name }}</a></td>
+                    <td><a href="{% url 'device_detail' org_slug=r.client_slug device_id=r.device_id %}">{{ r.hostname }}</a></td>
+                    <td class="muted">{{ r.device_role|humanize_label|default:r.device_role }}</td>
+                    <td class="muted">{{ r.os_group|humanize_label|default:r.os_group }}</td>
+                    <td><code>{{ r.version|default:"—" }}</code></td>
+                    <td class="muted">{{ r.install_date|date:"Y-m-d"|default:"—" }}</td>
+                    <td class="muted">{{ r.last_observed|date:"Y-m-d"|default:"—" }}</td>
+                    <td style="text-align:right;">
+                        <form method="post" action="{% url 'software_decision_create' %}" style="display:inline-flex; gap:0.25rem;">
+                            {% csrf_token %}
+                            <input type="hidden" name="canonical_name" value="{{ canonical_name }}">
+                            <input type="hidden" name="scope" value="device">
+                            <input type="hidden" name="device_id" value="{{ r.device_id }}">
+                            <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                            <select name="decision" style="padding:0.2rem 0.35rem; font-size:0.8rem;">
+                                {% for value, label in decision_choices %}
+                                    <option value="{{ value }}">{{ label }}</option>
+                                {% endfor %}
+                            </select>
+                            <button type="submit" style="padding:0.2rem 0.5rem; font-size:0.78rem;">Apply</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p class="muted">No active installations.</p>
+        {% endif %}
+    </div>
+</div>
+
+<div>
+    <div class="sd-card">
+        <h2>Risk</h2>
+        {% if safety_summary %}
+        <div style="margin-bottom:0.65rem;">
+            {% if safety_summary.band == 'high' %}
+                <span class="sd-safety-band high">High risk</span>
+            {% elif safety_summary.band == 'medium' %}
+                <span class="sd-safety-band medium">Medium risk</span>
+            {% elif safety_summary.band == 'low' %}
+                <span class="sd-safety-band low">Low risk</span>
+            {% elif safety_summary.band == 'clean' %}
+                <span class="sd-safety-band clean">Approved</span>
+            {% elif safety_summary.band == 'unknown' %}
+                <span class="sd-safety-band" style="background:#f3f4f6; color:#6b7280;">Not yet checked</span>
+            {% else %}
+                <span class="sd-safety-band">{{ safety_summary.band }}</span>
+            {% endif %}
+            <span class="muted" style="font-size:0.82rem; margin-left:0.4rem;">
+                risk score {{ safety_summary.score }} / 100
+            </span>
+        </div>
+        <ul style="list-style:none; padding:0; margin:0; font-size:0.85rem;">
+            <li>Known vulnerabilities: <strong>{{ safety_summary.cve_count }}</strong>
+                {% if safety_summary.kev_count %}
+                    · <span class="kev">{{ safety_summary.kev_count }} actively exploited</span>
+                {% endif %}
+            </li>
+            {% if safety_summary.max_cvss %}
+            <li>Worst severity score: <strong>{{ safety_summary.max_cvss }}</strong>/10 <span class="muted">(CVSS v3)</span></li>
+            {% endif %}
+            {% if safety_summary.max_epss %}
+            <li>Exploit likelihood (next 30 days): <strong>{{ safety_summary.max_epss|floatformat:2 }}</strong> <span class="muted">(EPSS 0–1)</span></li>
+            {% endif %}
+            <li>Threat-intel matches on this title: <strong>{{ safety_summary.osint_hits }}</strong></li>
+            {% if safety_summary.publisher_osint_hits %}
+            <li>Threat-intel matches on the publisher: <strong>{{ safety_summary.publisher_osint_hits }}</strong></li>
+            {% endif %}
+        </ul>
+        {% else %}
+        <p class="muted">No safety signals yet — either the intel connectors
+        haven't ingested this title, or nothing external mentions it.</p>
+        {% endif %}
+        {% if catalog_tags %}
+        <div style="margin-top:0.75rem;">
+            <span class="muted" style="font-size:0.78rem;">Community tags:</span>
+            {% for tag in catalog_tags|slice:":12" %}
+            <span style="display:inline-block; padding:1px 6px; background:#f3f4f6; border-radius:4px; font-size:0.75rem;">{{ tag }}</span>
+            {% endfor %}
+        </div>
+        {% endif %}
+        <div style="margin-top:0.75rem; padding-top:0.65rem; border-top:1px solid var(--border);">
+            <span class="muted" style="font-size:0.78rem;">Check external reputation:</span>
+            <form method="post" action="{% url 'software_title_lookup' name=canonical_name source='virustotal' %}" style="display:inline;">
+                {% csrf_token %}
+                <button type="submit" style="font-size:0.8rem; padding:0.25rem 0.55rem;"
+                        title="Runs a free-tier VirusTotal search for this title (capped 10/hour per operator; cached 48h).">
+                    Look up on VirusTotal
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <div class="sd-card">
+        <h2>Known vulnerabilities
+            <span class="muted" style="font-size:0.8rem; font-weight:400;">({{ matched_cves|length }})</span>
+        </h2>
+        {% if matched_cves %}
+        <table data-sortable class="sd-table">
+            <thead>
+                <tr><th>ID</th><th>Severity</th><th class="num">Score</th>
+                    <th class="num">Likelihood</th><th>Flag</th></tr>
+            </thead>
+            <tbody>
+                {% for c in matched_cves|slice:":25" %}
+                <tr class="sd-cve-row {{ c.severity }}">
+                    <td><code><a href="https://nvd.nist.gov/vuln/detail/{{ c.cve_id }}" target="_blank" rel="noopener">{{ c.cve_id }}</a></code></td>
+                    <td>{{ c.severity|default:"—" }}</td>
+                    <td class="num cvss">{{ c.cvss_v3|default:"—" }}</td>
+                    <td class="num">{{ c.epss_score|floatformat:2|default:"—" }}</td>
+                    <td>
+                        {% if c.kev_flag %}<span class="kev">actively exploited</span>{% else %}—{% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% if matched_cves|length > 25 %}
+        <p class="muted" style="font-size:0.8rem;">Showing top 25 by exploitation + severity.</p>
+        {% endif %}
+        {% else %}
+        <p class="muted">No matched vulnerabilities.</p>
+        {% endif %}
+    </div>
+
+    <div class="sd-card">
+        <h2>Threat-intel matches</h2>
+        {% if osint_rows %}
+        <ul style="list-style:none; padding:0; margin:0; font-size:0.85rem;">
+            {% for s in osint_rows|slice:":15" %}
+            <li style="padding:0.3rem 0; border-bottom:1px solid var(--border);">
+                <strong>{{ s.source|title }}</strong>
+                <span class="muted">· {{ s.signal_type|humanize_label|default:s.signal_type }}</span>
+                <span class="muted">· {{ s.severity }}</span>
+                <div class="muted" style="font-size:0.75rem;">
+                    seen {{ s.observed_at|date:"Y-m-d H:i" }}
+                </div>
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <p class="muted">No threat-intel matches.</p>
+        {% endif %}
+    </div>
+
+    <div class="sd-card">
+        <h2>Publishers</h2>
+        {% if publishers %}
+        <table data-sortable class="sd-table">
+            <thead><tr><th>Publisher</th><th class="num">Installs</th><th class="num">Devices</th></tr></thead>
+            <tbody>
+                {% for p in publishers %}
+                <tr>
+                    <td>
+                        {% if p.publisher != '(unknown)' %}
+                            <a href="{% url 'software_publisher_detail' publisher=p.publisher %}"><code>{{ p.publisher }}</code></a>
+                        {% else %}
+                            <code>{{ p.publisher }}</code>
+                        {% endif %}
+                    </td>
+                    <td class="num">{{ p.installs }}</td>
+                    <td class="num">{{ p.devices }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p class="muted">No publisher data.</p>
+        {% endif %}
+    </div>
+
+    <div class="sd-card">
+        <h2>Install locations</h2>
+        {% if locations %}
+        <table data-sortable class="sd-table">
+            <thead><tr><th>Location</th><th class="num">Installs</th></tr></thead>
+            <tbody>
+                {% for l in locations %}
+                <tr><td><code>{{ l.location }}</code></td><td class="num">{{ l.installs }}</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p class="muted">No location data.</p>
+        {% endif %}
+    </div>
+
+    <div class="sd-card">
+        <h2>Related findings</h2>
+        {% if related_findings %}
+        <ul style="list-style:none; padding:0; margin:0;">
+            {% for f in related_findings %}
+            <li style="padding:0.35rem 0; border-bottom:1px solid var(--border); font-size:0.85rem;">
+                <a href="{% url 'findings_queue' %}?q={{ canonical_name|urlencode }}">
+                    {{ f.finding_type.name|humanize_label|default:f.finding_type.name }}
+                </a>
+                {% if f.client %}· <span class="muted">{{ f.client.display_name }}</span>{% endif %}
+                <div class="muted" style="font-size:0.78rem;">
+                    {{ f.severity }} · last seen {{ f.last_detected_at|default:f.last_seen_at|date:"Y-m-d H:i" }}
+                </div>
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <p class="muted">No active findings for this title.</p>
+        {% endif %}
+    </div>
+
+    <div class="sd-card">
+        <h2>Decision history</h2>
+        {% if client_decisions or device_decisions %}
+        <ul style="list-style:none; padding:0; margin:0; font-size:0.85rem;">
+            {% for d in client_decisions %}
+            <li style="padding:0.35rem 0; border-bottom:1px solid var(--border);">
+                <span class="sd-pill {{ d.decision }}">{{ d.decision|humanize_label|default:d.decision }}</span>
+                {{ d.client.display_name }}
+                <div class="muted" style="font-size:0.78rem;">
+                    by {{ d.decided_by.username }} · {{ d.decided_at|date:"Y-m-d H:i" }}
+                </div>
+            </li>
+            {% endfor %}
+            {% for d in device_decisions %}
+            <li style="padding:0.35rem 0; border-bottom:1px solid var(--border);">
+                <span class="sd-pill {{ d.decision }}">{{ d.decision|humanize_label|default:d.decision }}</span>
+                device
+                <div class="muted" style="font-size:0.78rem;">
+                    by {{ d.decided_by.username }} · {{ d.decided_at|date:"Y-m-d H:i" }}
+                </div>
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <p class="muted">No client- or device-scoped decisions on this title.</p>
+        {% endif %}
+    </div>
+</div>
+</div>
+{% endblock %}

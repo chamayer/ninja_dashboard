@@ -40,6 +40,24 @@ _DEFAULT_CONFIG: dict = {
     "rare_recent_severity": "medium",
     "rare_recent_skip_categorized": True,
     "rare_recent_skip_decided": True,
+    # whitelist_suggestion — the other side of rarity: titles installed
+    # on ≥ N devices, uncategorised, and undecided at every scope. These
+    # are the titles worth reviewing for a fleet-wide APPROVE decision.
+    "whitelist_suggestion_enabled": True,
+    "whitelist_suggestion_min_devices": 10,
+    "whitelist_suggestion_severity": "low",
+    # vulnerable_software — driven by intel matcher output. Fires when a
+    # matched CVE is actively exploited (KEV) or severe (CVSS >= cutoff).
+    "vulnerable_software_enabled": True,
+    "vulnerable_software_cvss_cutoff": 7.0,
+    "vulnerable_software_severity_kev": "critical",
+    "vulnerable_software_severity_high": "high",
+    # known_malicious_hint — driven by safety_signal accumulation. Fires
+    # when a canonical title (or its publisher) has >= threshold open
+    # threat-intel hits and no operator approval.
+    "known_malicious_hint_enabled": True,
+    "known_malicious_hint_min_hits": 3,
+    "known_malicious_hint_severity": "low",
 }
 
 
@@ -76,6 +94,21 @@ def classify(tenant_id: int = _TENANT_ID) -> int:
             fleet_rarity = _load_fleet_rarity(cur, tenant_id)
             finding_type_ids = _finding_type_ids(cur)
             cfg = _load_config(cur, tenant_id)
+            vuln_titles = (
+                _load_vulnerable_titles(
+                    cur, tenant_id,
+                    float(cfg.get("vulnerable_software_cvss_cutoff", 7.0)),
+                )
+                if cfg.get("vulnerable_software_enabled", True)
+                and "vulnerable_software" in finding_type_ids
+                else {}
+            )
+            threat_hits = (
+                _load_threat_hit_counts(cur, tenant_id)
+                if cfg.get("known_malicious_hint_enabled", True)
+                and "known_malicious_hint" in finding_type_ids
+                else {}
+            )
 
             cur.execute(
                 """
@@ -99,8 +132,9 @@ def classify(tenant_id: int = _TENANT_ID) -> int:
             emitted_keys: set[str] = set()
 
             for client_id, device_id, name, publisher, location, first_seen in installs:
-                # Decision tier: device > client > global
-                dec = _resolve_decision(decisions, device_id, client_id, name)
+                # Decision tier: title-scope (device > client > global) then
+                # publisher-scope (device > client > global).
+                dec = _resolve_decision(decisions, device_id, client_id, name, publisher)
                 if dec in ("approve", "approve_publisher"):
                     continue  # approved, skip all rules
 
@@ -207,6 +241,79 @@ def classify(tenant_id: int = _TENANT_ID) -> int:
                         emitted_keys,
                     )
 
+                # 8. vulnerable_software — installed title has a matched
+                # CVE that is either actively exploited (KEV) or severe
+                # (CVSS >= cutoff). Approval decisions still suppress:
+                # the operator has explicitly accepted the risk.
+                vuln = vuln_titles.get(name.lower())
+                if vuln and dec not in ("approve", "approve_publisher"):
+                    if vuln["kev"]:
+                        severity = str(cfg.get("vulnerable_software_severity_kev", "critical"))
+                        detail = {
+                            "reason": "actively exploited vulnerability (CISA KEV)",
+                            "kev_cves": vuln["kev"][:5],
+                            "high_cves": vuln["high"][:5],
+                            "worst_cvss": vuln["worst_cvss"],
+                            "max_epss": vuln["max_epss"],
+                        }
+                    else:
+                        severity = str(cfg.get("vulnerable_software_severity_high", "high"))
+                        detail = {
+                            "reason": "severe vulnerability (CVSS >= cutoff)",
+                            "high_cves": vuln["high"][:5],
+                            "worst_cvss": vuln["worst_cvss"],
+                            "max_epss": vuln["max_epss"],
+                        }
+                    affected += _emit(
+                        cur, tenant_id, finding_type_ids["vulnerable_software"],
+                        client_id, device_id, name, publisher, severity, now,
+                        detail, emitted_keys,
+                    )
+
+                # 9. known_malicious_hint — accumulated threat-intel
+                # signals on the title or its publisher. Explicitly a
+                # hint (OSINT is noisy). Suppressed by approve/approve_publisher.
+                hits = threat_hits.get(name.lower(), 0)
+                if (
+                    hits >= int(cfg.get("known_malicious_hint_min_hits", 3))
+                    and dec not in ("approve", "approve_publisher")
+                    and "known_malicious_hint" in finding_type_ids
+                ):
+                    severity = str(cfg.get("known_malicious_hint_severity", "low"))
+                    affected += _emit(
+                        cur, tenant_id, finding_type_ids["known_malicious_hint"],
+                        client_id, device_id, name, publisher, severity, now,
+                        {
+                            "threat_hit_count": hits,
+                            "reason": "community threat-intel accumulation",
+                        },
+                        emitted_keys,
+                    )
+
+                # 7. whitelist_suggestion — the "≥ N devices, undecided,
+                # uncategorised" review candidate. Distinct from
+                # rare_recent (which fires at the ≤ 2 devices end); the
+                # two are mutually exclusive by device_count threshold.
+                if (
+                    cfg.get("whitelist_suggestion_enabled", True)
+                    and not dec
+                    and not cat_list
+                ):
+                    min_devices = int(cfg.get("whitelist_suggestion_min_devices", 10))
+                    fleet_devices = fleet_rarity.get(name.lower(), 0)
+                    if fleet_devices >= min_devices:
+                        severity = str(cfg.get("whitelist_suggestion_severity", "low"))
+                        affected += _emit(
+                            cur, tenant_id, finding_type_ids["whitelist_suggestion"],
+                            client_id, device_id, name, publisher, severity, now,
+                            {
+                                "fleet_device_count": fleet_devices,
+                                "threshold": min_devices,
+                                "reason": "uncategorised + undecided + widespread",
+                            },
+                            emitted_keys,
+                        )
+
             _auto_resolve(cur, tenant_id, emitted_keys, now)
     except Exception as exc:
         error = str(exc)[:2000]
@@ -269,41 +376,73 @@ def _load_catalog(cur, tenant_id: int) -> dict[str, dict]:
 
 
 def _load_decisions(cur, tenant_id: int) -> dict:
-    """Return a decision resolver dict:
+    """Return a decision resolver dict with title- and publisher-scoped
+    buckets at each scope tier:
     {
-      'device': {(device_id, name_lower): decision},
-      'client': {(client_id, name_lower): decision},
-      'global': {name_lower: decision},
+      'device':     {(device_id, name_lower): decision},
+      'client':     {(client_id, name_lower): decision},
+      'global':     {name_lower: decision},
+      'device_pub': {(device_id, pub_lower): decision},
+      'client_pub': {(client_id, pub_lower): decision},
+      'global_pub': {pub_lower: decision},
     }
     """
     cur.execute(
         """
-        SELECT client_id, device_id, canonical_name, decision
+        SELECT client_id, device_id, canonical_name, publisher, decision
         FROM operations.software_decisions
         WHERE tenant_id = %s
         """,
         (tenant_id,),
     )
-    out = {"device": {}, "client": {}, "global": {}}
-    for client_id, device_id, name, dec in cur.fetchall():
-        n = name.lower()
-        if device_id is not None:
-            out["device"][(device_id, n)] = dec
-        elif client_id is not None:
-            out["client"][(client_id, n)] = dec
-        else:
-            out["global"][n] = dec
+    out = {
+        "device": {},
+        "client": {},
+        "global": {},
+        "device_pub": {},
+        "client_pub": {},
+        "global_pub": {},
+    }
+    for client_id, device_id, name, publisher, dec in cur.fetchall():
+        if name:
+            n = name.lower()
+            if device_id is not None:
+                out["device"][(device_id, n)] = dec
+            elif client_id is not None:
+                out["client"][(client_id, n)] = dec
+            else:
+                out["global"][n] = dec
+        elif publisher:
+            p = publisher.lower()
+            if device_id is not None:
+                out["device_pub"][(device_id, p)] = dec
+            elif client_id is not None:
+                out["client_pub"][(client_id, p)] = dec
+            else:
+                out["global_pub"][p] = dec
     return out
 
 
-def _resolve_decision(decisions: dict, device_id, client_id, name: str) -> str | None:
-    n = name.lower()
+def _resolve_decision(
+    decisions: dict, device_id, client_id, name: str, publisher: str | None = None
+) -> str | None:
+    """Return the most specific decision. Title-scope wins over publisher-
+    scope; within each, device > client > global."""
+    n = (name or "").lower()
+    p = (publisher or "").lower()
     if (device_id, n) in decisions["device"]:
         return decisions["device"][(device_id, n)]
     if (client_id, n) in decisions["client"]:
         return decisions["client"][(client_id, n)]
     if n in decisions["global"]:
         return decisions["global"][n]
+    if p:
+        if (device_id, p) in decisions["device_pub"]:
+            return decisions["device_pub"][(device_id, p)]
+        if (client_id, p) in decisions["client_pub"]:
+            return decisions["client_pub"][(client_id, p)]
+        if p in decisions["global_pub"]:
+            return decisions["global_pub"][p]
     return None
 
 
@@ -423,11 +562,82 @@ def _finding_type_ids(cur) -> dict[str, int]:
         WHERE name IN (
             'suspicious_name', 'install_path_suspicious',
             'unauthorized_av', 'unauthorized_rmm', 'unauthorized_remote_access',
-            'multi_av_conflict', 'rare_recent', 'eol_runtime'
+            'multi_av_conflict', 'rare_recent', 'eol_runtime',
+            'whitelist_suggestion', 'vulnerable_software',
+            'known_malicious_hint'
         )
         """
     )
     return {name: id for name, id in cur.fetchall()}
+
+
+def _load_threat_hit_counts(cur, tenant_id: int) -> dict[str, int]:
+    """Sum threat-intel hits per canonical title, including publisher-scope
+    signals that apply to any title from that publisher."""
+    cur.execute(
+        """
+        WITH title_hits AS (
+            SELECT LOWER(canonical_name) AS canonical, COUNT(*) AS n
+              FROM operations.safety_signal
+             WHERE tenant_id = %s
+               AND signal_type = 'threat_hit'
+               AND canonical_name <> ''
+             GROUP BY LOWER(canonical_name)
+        ), publisher_hits AS (
+            SELECT LOWER(publisher) AS publisher_lc, COUNT(*) AS n
+              FROM operations.safety_signal
+             WHERE tenant_id = %s
+               AND signal_type = 'threat_hit'
+               AND publisher <> ''
+             GROUP BY LOWER(publisher)
+        )
+        SELECT LOWER(sic.canonical_name) AS canonical,
+               COALESCE(th.n, 0) + COALESCE(ph.n, 0) AS hits
+        FROM operations.software_installations_current sic
+        LEFT JOIN title_hits th ON th.canonical = LOWER(sic.canonical_name)
+        LEFT JOIN publisher_hits ph
+               ON ph.publisher_lc = LOWER(COALESCE(sic.publisher, ''))
+        WHERE sic.tenant_id = %s
+          AND sic.deleted_at IS NULL
+          AND sic.stale_since IS NULL
+          AND sic.canonical_name <> ''
+          AND (th.n IS NOT NULL OR ph.n IS NOT NULL)
+        GROUP BY LOWER(sic.canonical_name), th.n, ph.n
+        """,
+        (tenant_id, tenant_id, tenant_id),
+    )
+    return {row[0]: int(row[1]) for row in cur.fetchall() if row[1]}
+
+
+def _load_vulnerable_titles(cur, tenant_id: int, cvss_cutoff: float) -> dict:
+    """Return {canonical_name_lower: {'kev': [cve...], 'high': [cve...],
+    'worst_cvss': float, 'max_epss': float}} — every title whose cve_match
+    rows include a KEV-flagged or high-CVSS CVE."""
+    cur.execute(
+        """
+        SELECT LOWER(cm.canonical_name), c.cve_id, c.cvss_v3, c.epss_score, c.kev_flag
+        FROM operations.cve_match cm
+        JOIN intel.cves c ON c.cve_id = cm.cve_id
+        WHERE cm.tenant_id = %s
+          AND (c.kev_flag OR c.cvss_v3 >= %s)
+        """,
+        (tenant_id, cvss_cutoff),
+    )
+    out: dict[str, dict] = {}
+    for canonical, cve_id, cvss, epss, kev in cur.fetchall():
+        entry = out.setdefault(
+            canonical,
+            {"kev": [], "high": [], "worst_cvss": 0.0, "max_epss": 0.0},
+        )
+        if kev:
+            entry["kev"].append(cve_id)
+        elif cvss and float(cvss) >= cvss_cutoff:
+            entry["high"].append(cve_id)
+        if cvss and float(cvss) > entry["worst_cvss"]:
+            entry["worst_cvss"] = float(cvss)
+        if epss and float(epss) > entry["max_epss"]:
+            entry["max_epss"] = float(epss)
+    return out
 
 
 # ── matching / emission ────────────────────────────────────────────────

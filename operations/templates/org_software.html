@@ -141,7 +141,7 @@
     <tbody id="sw-tbody">
         {% for name, publisher, versions, device_count, first_installed, last_seen, locations, decision, findings_count in rows %}
         <tr class="sw-row" data-name="{{ name|lower }}" data-pub="{{ publisher|lower|default:'' }}">
-            <td>{{ name }}</td>
+            <td><a href="{% url 'software_detail' name=name %}">{{ name }}</a></td>
             <td class="muted">{{ publisher|default:"—" }}</td>
             <td style="text-align: right;">
                 <a href="{% url 'org_software_devices' org_slug=client.slug %}?name={{ name|urlencode }}&publisher={{ publisher|default:''|urlencode }}">{{ device_count }}</a>

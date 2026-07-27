@@ -1,0 +1,189 @@
+{% extends "base.html" %}
+{% load human_labels %}
+
+{% block title %}{{ publisher }} — Publisher{% endblock %}
+
+{% block content %}
+<style>
+    .pd-header { padding: 1rem 1.2rem; background: var(--surface);
+                 border: 1px solid var(--border); border-radius: 6px;
+                 margin-bottom: 0.6rem; }
+    .pd-tiles { display: grid; gap: 0.65rem;
+                grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+                margin-bottom: 0.9rem; }
+    .pd-tile { background: var(--surface); border: 1px solid var(--border);
+               border-radius: 6px; padding: 0.75rem 0.9rem; }
+    .pd-tile .label { color: var(--muted); font-size: 0.75rem;
+                      text-transform: uppercase; letter-spacing: 0.04em; }
+    .pd-tile .value { font-size: 1.35rem; font-weight: 600; margin-top: 0.2rem; }
+    .pd-grid { display: grid; gap: 0.9rem; grid-template-columns: 2fr 1fr; }
+    @media (max-width: 900px) { .pd-grid { grid-template-columns: 1fr; } }
+    .pd-card { background: var(--surface); border: 1px solid var(--border);
+               border-radius: 6px; padding: 1rem 1.1rem; margin-bottom: 0.6rem; }
+    .pd-card h2 { margin: 0 0 0.6rem; font-size: 1rem; }
+    .pd-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+    .pd-table th, .pd-table td { padding: 0.4rem 0.55rem; text-align: left;
+                                 border-bottom: 1px solid var(--border); }
+    .pd-table th { color: var(--muted); font-weight: 500; font-size: 0.78rem;
+                   text-transform: uppercase; letter-spacing: 0.03em; }
+    .pd-table td.num, .pd-table th.num { text-align: right; }
+    .pd-pill { display: inline-block; padding: 0.15rem 0.55rem; border-radius: 999px;
+               font-size: 0.75rem; font-weight: 500; }
+    .pd-pill.approve, .pd-pill.approve_publisher { background: #dcfce7; color: #14532d; }
+    .pd-pill.reject { background: #fee2e2; color: #991b1b; }
+    .pd-pill.investigate { background: #fef3c7; color: #92400e; }
+    .pd-pill.none { background: #f3f4f6; color: #6b7280; }
+</style>
+
+<div class="pd-header">
+    <div style="font-size:0.8rem; color:var(--muted); margin-bottom:0.4rem;">
+        <a href="{% url 'software_page' %}">Software</a> ›
+        <a href="{% url 'software_publishers' %}">Publishers</a> ›
+        <span>{{ publisher }}</span>
+    </div>
+    <h1 style="margin:0;">{{ publisher }}</h1>
+    <div class="muted" style="font-size:0.82rem; margin-top:0.35rem;">
+        {% if global_pub_decision %}
+            Current global publisher decision:
+            <span class="pd-pill {{ global_pub_decision.decision }}">{{ global_pub_decision.decision|humanize_label|default:global_pub_decision.decision }}</span>
+        {% else %}
+            <span class="pd-pill none">no global publisher decision</span>
+        {% endif %}
+    </div>
+</div>
+
+<div class="pd-tiles">
+    <div class="pd-tile"><div class="label">Installations</div><div class="value">{{ installations }}</div></div>
+    <div class="pd-tile"><div class="label">Titles</div><div class="value">{{ title_count }}</div></div>
+    <div class="pd-tile"><div class="label">Devices</div><div class="value">{{ device_count }}</div></div>
+    <div class="pd-tile"><div class="label">Clients</div><div class="value">{{ client_count }}</div></div>
+    <div class="pd-tile"><div class="label">First observed</div><div class="value" style="font-size:0.95rem;">{{ first_observed|date:"Y-m-d"|default:"—" }}</div></div>
+    <div class="pd-tile"><div class="label">Last observed</div><div class="value" style="font-size:0.95rem;">{{ last_observed|date:"Y-m-d"|default:"—" }}</div></div>
+</div>
+
+<div class="pd-grid">
+<div>
+    <div class="pd-card">
+        <h2>Publisher-scope decision</h2>
+        <p class="muted" style="margin-top:0; font-size:0.85rem;">
+            Applies to every title from this publisher, including titles
+            first observed after the decision is recorded.
+            Title-scope decisions on a specific title still override this.
+        </p>
+        <form method="post" action="{% url 'software_decision_create' %}"
+              style="display:grid; gap:0.5rem; grid-template-columns:1fr auto; align-items:end;">
+            {% csrf_token %}
+            <input type="hidden" name="publisher" value="{{ publisher }}">
+            <input type="hidden" name="scope" value="global">
+            <input type="hidden" name="next" value="{{ request.get_full_path }}">
+            <div>
+                <label style="display:block; font-size:0.78rem; color:var(--muted);">Decision</label>
+                <select name="decision" style="width:100%;">
+                    {% for value, label in decision_choices %}
+                        <option value="{{ value }}"
+                            {% if global_pub_decision and global_pub_decision.decision == value %}selected{% endif %}>
+                            {{ label }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <button type="submit">Apply</button>
+        </form>
+    </div>
+
+    <div class="pd-card">
+        <h2>Titles from {{ publisher }}
+            {% if title_rows|length == 500 %}
+                <span class="muted" style="font-size:0.8rem; font-weight:400;">(showing first 500)</span>
+            {% else %}
+                <span class="muted" style="font-size:0.8rem; font-weight:400;">({{ title_rows|length }})</span>
+            {% endif %}
+        </h2>
+        {% if title_rows %}
+        <table data-sortable class="pd-table">
+            <thead>
+                <tr>
+                    <th>Title</th>
+                    <th class="num">Installs</th>
+                    <th class="num">Devices</th>
+                    <th class="num">Clients</th>
+                    <th class="num">Last observed</th>
+                    <th>Title-scope decision</th>
+                    <th style="text-align:right;">Decide (global title)</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for t in title_rows %}
+                <tr>
+                    <td>
+                        <a href="{% url 'software_detail' name=t.canonical_name %}">
+                            {{ t.canonical_name }}
+                        </a>
+                    </td>
+                    <td class="num">{{ t.installs }}</td>
+                    <td class="num">{{ t.devices }}</td>
+                    <td class="num">{{ t.clients }}</td>
+                    <td class="num muted">{{ t.last_observed|date:"Y-m-d"|default:"—" }}</td>
+                    <td>
+                        {% if t.decision %}
+                            <span class="pd-pill {{ t.decision }}">{{ t.decision|humanize_label|default:t.decision }}</span>
+                        {% else %}
+                            <span class="pd-pill none">—</span>
+                        {% endif %}
+                    </td>
+                    <td style="text-align:right;">
+                        <form method="post" action="{% url 'software_decision_create' %}" style="display:inline-flex; gap:0.25rem;">
+                            {% csrf_token %}
+                            <input type="hidden" name="canonical_name" value="{{ t.canonical_name }}">
+                            <input type="hidden" name="scope" value="global">
+                            <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                            <select name="decision" style="padding:0.2rem 0.35rem; font-size:0.8rem;">
+                                {% for value, label in decision_choices %}
+                                    <option value="{{ value }}"
+                                        {% if t.decision == value %}selected{% endif %}>{{ label }}</option>
+                                {% endfor %}
+                            </select>
+                            <button type="submit" style="padding:0.2rem 0.5rem; font-size:0.78rem;">Apply</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p class="muted">No titles observed for this publisher.</p>
+        {% endif %}
+    </div>
+</div>
+
+<div>
+    <div class="pd-card">
+        <h2>Publisher-scope decision history</h2>
+        {% if client_pub_decisions or device_pub_decisions %}
+        <ul style="list-style:none; padding:0; margin:0; font-size:0.85rem;">
+            {% for d in client_pub_decisions %}
+            <li style="padding:0.35rem 0; border-bottom:1px solid var(--border);">
+                <span class="pd-pill {{ d.decision }}">{{ d.decision|humanize_label|default:d.decision }}</span>
+                {{ d.client.display_name }}
+                <div class="muted" style="font-size:0.78rem;">
+                    by {{ d.decided_by.username }} · {{ d.decided_at|date:"Y-m-d H:i" }}
+                </div>
+            </li>
+            {% endfor %}
+            {% for d in device_pub_decisions %}
+            <li style="padding:0.35rem 0; border-bottom:1px solid var(--border);">
+                <span class="pd-pill {{ d.decision }}">{{ d.decision|humanize_label|default:d.decision }}</span>
+                device
+                <div class="muted" style="font-size:0.78rem;">
+                    by {{ d.decided_by.username }} · {{ d.decided_at|date:"Y-m-d H:i" }}
+                </div>
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <p class="muted">No client- or device-scoped publisher decisions.</p>
+        {% endif %}
+    </div>
+</div>
+</div>
+{% endblock %}

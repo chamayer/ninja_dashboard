@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% load human_labels %}
+
+{% block title %}Decision log — Software{% endblock %}
+
+{% block content %}
+{% include "_sw_style.html" %}
+
+<div class="sw-page-header">
+    <div>
+        <h1>Decision log</h1>
+        <div class="sub">
+            {{ rows|length }}{% if rows|length == 500 %}+{% endif %}
+            decision{{ rows|length|pluralize }} shown — chronological, newest first.
+            Complements the Decisions queue (products awaiting review).
+        </div>
+    </div>
+    {% include "_csv_download.html" %}
+</div>
+
+<form action="" method="get" class="sw-filterbar">
+    <div>
+        <label>Search</label>
+        <input type="search" name="q" value="{{ active_q }}" placeholder="product / publisher / reason…" style="min-width:220px;">
+    </div>
+    <div>
+        <label>Scope</label>
+        <select name="scope" onchange="this.form.submit()">
+            <option value="">Any</option>
+            <option value="global"    {% if active_scope == 'global'    %}selected{% endif %}>Global</option>
+            <option value="client"    {% if active_scope == 'client'    %}selected{% endif %}>Client</option>
+            <option value="device"    {% if active_scope == 'device'    %}selected{% endif %}>Device</option>
+            <option value="publisher" {% if active_scope == 'publisher' %}selected{% endif %}>Publisher-scope</option>
+            <option value="product"   {% if active_scope == 'product'   %}selected{% endif %}>Product-scope</option>
+        </select>
+    </div>
+    <div>
+        <label>Decision</label>
+        <select name="decision" onchange="this.form.submit()">
+            <option value="">Any</option>
+            <option value="approve"           {% if active_decision == 'approve'           %}selected{% endif %}>Allow</option>
+            <option value="approve_publisher" {% if active_decision == 'approve_publisher' %}selected{% endif %}>Trust publisher</option>
+            <option value="reject"            {% if active_decision == 'reject'            %}selected{% endif %}>Block</option>
+            <option value="investigate"       {% if active_decision == 'investigate'       %}selected{% endif %}>Review</option>
+        </select>
+    </div>
+    <button type="submit">Apply</button>
+    {% if active_q or active_scope or active_decision %}
+        <a class="clear" href="?">Clear</a>
+    {% endif %}
+</form>
+
+<div class="sw-table-wrap">
+    {% if rows %}
+    <table class="ops-table" data-sortable>
+        <thead>
+            <tr>
+                <th>Decided at</th>
+                <th>Decision</th>
+                <th>Target</th>
+                <th>Scope</th>
+                <th>Client</th>
+                <th>By</th>
+                <th>Reason</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for r in rows %}
+            <tr>
+                <td class="muted num">{{ r.decided_at|date:"Y-m-d H:i" }}</td>
+                <td>
+                    <span class="decision-pill {{ r.decision }}">{{ r.decision|humanize_label|default:r.decision|title }}</span>
+                </td>
+                <td class="primary-cell">
+                    {% if r.canonical_name %}
+                        <a href="{% url 'software_detail' name=r.canonical_name %}"><strong>{{ r.canonical_name|title }}</strong></a>
+                    {% elif r.publisher %}
+                        Publisher — <a href="{% url 'software_publisher_detail' publisher=r.publisher %}"><strong>{{ r.publisher|title }}</strong></a>
+                    {% else %}
+                        <span class="muted">—</span>
+                    {% endif %}
+                </td>
+                <td>{{ r.scope_label|title }}</td>
+                <td class="muted">{{ r.client|default:"—" }}</td>
+                <td class="muted">{{ r.decided_by|default:"—" }}</td>
+                <td class="muted">{{ r.reason|default:"—" }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="sw-empty">No decisions match the current filter.</div>
+    {% endif %}
+</div>
+{% endblock %}

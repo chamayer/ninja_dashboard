@@ -1,20 +1,28 @@
-from django.core.management.base import BaseCommand
+"""Purge closed observation history beyond the approved retention window."""
 
-from ingest.retention_observations import purge
+from datetime import timedelta
+
+from django.core.management.base import BaseCommand
+from django.db import connection
+from django.utils import timezone
 
 
 class Command(BaseCommand):
-    help = "Delete closed observation-history intervals older than the retention window."
+    help = "Purge closed generic and software history older than the retention window."
 
     def add_arguments(self, parser):
-        parser.add_argument("--tenant-id", type=int, required=True)
         parser.add_argument("--days", type=int, default=90)
-        parser.add_argument("--batch-size", type=int, default=1000)
 
     def handle(self, *args, **options):
-        deleted = purge(
-            tenant_id=options["tenant_id"],
-            days=options["days"],
-            batch_size=options["batch_size"],
+        cutoff = timezone.now() - timedelta(days=options["days"])
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT * FROM operations.purge_closed_observation_history(%s)",
+                [cutoff],
+            )
+            generic, software = cursor.fetchone()
+        self.stdout.write(
+            self.style.SUCCESS(
+                f"Purged {generic} generic and {software} software closed history rows before {cutoff.isoformat()}"
+            )
         )
-        self.stdout.write(self.style.SUCCESS(f"Deleted {deleted} history rows"))

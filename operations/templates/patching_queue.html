@@ -4,22 +4,15 @@
 {% block title %}Patching{% endblock %}
 
 {% block content %}
+<style>
+  .patch-posture-table td, .patch-posture-table th { padding:.5rem .65rem; }
+</style>
 <div class="card">
     <div style="display:flex; align-items:center; justify-content:space-between; gap:1rem;">
         <h1 style="margin:0;">Patching</h1>
-        <div style="display:flex; align-items:center; gap:0.75rem;">
-            <a href="{% url 'patch_evidence_page' %}" style="font-size:0.85rem;">Evidence →</a>
-            <a href="{% url 'patch_trends_page' %}" style="font-size:0.85rem;">Trends →</a>
-            <a href="{% url 'patch_activity_search_page' %}" style="font-size:0.85rem;">Activity →</a>
-            {% include "_csv_download.html" %}
-        </div>
+        {% include "_csv_download.html" %}
     </div>
-    <p class="muted">
-        Only devices that are in patching scope produce these items.
-        Excluded and Not-managed devices are intentionally quiet in
-        the table below — browse them via the Device population
-        section.
-    </p>
+    <p class="muted">A status view of patching across the managed estate. Start with the population and recent Ninja evidence; work items are supporting detail below.</p>
 </div>
 
 {# Filter bar — top so tile counts visibly reflect the active selection. #}
@@ -67,39 +60,97 @@
     </form>
 </div>
 
-{# Device population summary — scope breakdown. Click a card to drill in. #}
 <div class="card">
-    <h2 style="font-size: 0.95rem; margin: 0 0 0.5rem 0; color: #9ca3af;">
-        Device population
+    <h2 class="section-label">Patching status</h2>
+    <p class="muted" style="font-size:.84rem; margin-top:0;">Active means a device has contacted us in the last {{ active_device_days }} days. Recent patch activity means Ninja reported a patch scan/state or install outcome in the last {{ patch_activity_days }} days.</p>
+    <div class="tile-grid">
+        <a class="tile" href="?posture=active{% if filter_qs %}&amp;{{ filter_qs }}{% endif %}">
+            <div class="tile-label">Active devices</div>
+            <div class="tile-value">{{ patch_status.active }} / {{ patch_status.total }}</div>
+            <div class="tile-note">{{ active_device_days }}-day reporting window</div>
+        </a>
+        <a class="tile" href="?posture=active-in-scope{% if filter_qs %}&amp;{{ filter_qs }}{% endif %}">
+            <div class="tile-label">In patching scope</div>
+            <div class="tile-value">{{ patch_status.active_in_scope }} / {{ patch_status.active }}</div>
+            <div class="tile-note">policy-managed active devices</div>
+        </a>
+        <a class="tile tile-good" href="?posture=recent-activity{% if filter_qs %}&amp;{{ filter_qs }}{% endif %}">
+            <div class="tile-label">Recent patch activity</div>
+            <div class="tile-value">{{ patch_status.recent_patch_activity }} / {{ patch_status.active_in_scope }}</div>
+            <div class="tile-note">Ninja evidence in {{ patch_activity_days }} days</div>
+        </a>
+        <a class="tile tile-warn" href="?posture=quiet{% if filter_qs %}&amp;{{ filter_qs }}{% endif %}">
+            <div class="tile-label">No recent activity</div>
+            <div class="tile-value">{{ patch_status.quiet_patch_data }} / {{ patch_status.active_in_scope }}</div>
+            <div class="tile-note">in scope, but no recent evidence</div>
+        </a>
+        <a class="tile tile-alert" href="?posture=never-patched{% if filter_qs %}&amp;{{ filter_qs }}{% endif %}">
+            <div class="tile-label">Never patched</div>
+            <div class="tile-value">{{ patch_status.never_patched }} / {{ patch_status.active_in_scope }}</div>
+            <div class="tile-note">no patch record in Ninja</div>
+        </a>
+        <a class="tile tile-warn" href="?posture=reboot-pending{% if filter_qs %}&amp;{{ filter_qs }}{% endif %}">
+            <div class="tile-label">Awaiting restart</div>
+            <div class="tile-value">{{ patch_status.reboot_pending }} / {{ patch_status.active_in_scope }}</div>
+            <div class="tile-note">pending reboot reported</div>
+        </a>
+    </div>
+</div>
+
+{% if client_posture %}
+<div class="card">
+    <h2 class="section-label">Client patching status</h2>
+    <p class="muted" style="font-size:.84rem; margin-top:0;">Compare active devices and patch evidence by client. Counts use the same definitions as the status cards above.</p>
+    <table class="ops-table patch-posture-table" data-sortable>
+        <thead><tr>
+            <th>Client</th><th class="num">Active</th><th class="num">In scope</th><th class="num">Recent activity</th><th class="num">Quiet</th><th class="num">Never patched</th><th class="num">Awaiting restart</th>
+        </tr></thead>
+        <tbody>{% for row in client_posture %}
+            <tr>
+                <td><a href="?client={{ row.slug }}">{{ row.name }}</a></td>
+                <td class="num">{{ row.active }}</td>
+                <td class="num">{{ row.in_scope }}</td>
+                <td class="num">{{ row.recent_activity }}</td>
+                <td class="num">{{ row.quiet }}</td>
+                <td class="num">{{ row.never_patched }}</td>
+                <td class="num">{{ row.reboot_pending }}</td>
+            </tr>
+        {% endfor %}</tbody>
+    </table>
+</div>
+{% endif %}
+
+{# Policy scope is context, not the page's primary status. #}
+<div class="card">
+    <h2 class="section-label">
+        Patching policy scope
         {% if active_client %}<span class="muted">({{ active_client|join:", " }})</span>{% endif %}
         {% if active_role %}<span class="muted">— {{ active_role|humanize_label|lower }} only</span>{% endif %}
     </h2>
     {% include "_tiles.html" with tiles=population_tiles %}
     <p class="muted" style="margin-top: 0.6rem; font-size: 0.85rem;">
         <strong>{{ population.in_scope }}</strong> of {{ population.total }}
-        devices in patching scope
+        devices included by policy
         {% if population.total %}(<strong>{{ population.in_scope_pct }}%</strong>){% endif %}.
-        Excluded = operator-set exclusion; Not managed = non-Windows or
-        no Ninja link; Not determined = no scope decision yet.
+        Excluded = operator-set exclusion; Not managed = outside the configured
+        patching service; Not determined = no scope decision yet.
     </p>
 </div>
 
 {# Per-type finding tiles — reflect all filters. Click → filter table by that type. #}
 <div class="card">
-    <h2 style="font-size: 0.95rem; margin: 0 0 0.5rem 0; color: #9ca3af;">
+    <h2 class="section-label">
         Open items by type
-        <span class="muted">({{ total_active }} total matching filters)</span>
+        <span>({{ total_active }} total matching filters)</span>
     </h2>
     {% include "_tiles.html" with tiles=tiles %}
 </div>
 
 {% if device_rows %}
 <div class="card">
-    <h2>
-        Devices — {{ active_scope|humanize_label }}
-        <span class="muted" style="font-weight: 400; font-size: 0.85rem;">
-            ({{ device_rows|length }}{% if device_rows|length == 500 %}+{% endif %})
-        </span>
+    <h2 class="section-label">
+        Devices — {% if active_posture %}{{ active_posture|humanize_label }}{% else %}{{ active_scope|humanize_label }}{% endif %}
+        <span style="font-weight:400;">({{ device_rows|length }}{% if device_rows|length == 500 %}+{% endif %})</span>
     </h2>
     <table data-sortable class="ops-table">
         <thead>
@@ -110,6 +161,7 @@
                 <th>Why this scope</th>
                 <th>Override?</th>
                 <th class="num">Last contact</th>
+                <th class="num">Last Ninja patch data</th>
             </tr>
         </thead>
         <tbody>
@@ -133,6 +185,10 @@
                     {% endif %}
                 </td>
                 <td class="muted num">{{ d.last_contact|date:"Y-m-d H:i"|default:"—" }}</td>
+                <td class="muted num">
+                    {% if d.activity_url %}<a href="{{ d.activity_url }}">{{ d.last_patch_activity|date:"Y-m-d H:i"|default:"—" }}</a>
+                    {% else %}{{ d.last_patch_activity|date:"Y-m-d H:i"|default:"—" }}{% endif %}
+                </td>
             </tr>
             {% endfor %}
         </tbody>
@@ -141,7 +197,7 @@
 {% endif %}
 
 <div class="card">
-    <h2>Items</h2>
+    <h2 class="section-label">Items</h2>
     {% if rows %}
     <table data-sortable>
         <thead>

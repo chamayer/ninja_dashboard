@@ -209,6 +209,28 @@ class Settings(BaseSettings):
             if s.strip()
         )
 
+    # ── Intel connectors (ADR 0008) ──────────────────────────────────
+    INTEL_ENABLED: bool = False
+    INTEL_NVD_ENABLED: bool = True
+    INTEL_CISA_KEV_ENABLED: bool = True
+    INTEL_EPSS_ENABLED: bool = True
+    INTEL_WINGET_ENABLED: bool = True
+    INTEL_CHOCOLATEY_ENABLED: bool = True
+    INTEL_OTX_ENABLED: bool = True
+    INTEL_ABUSECH_ENABLED: bool = True
+    NVD_API_KEY: SecretStr = SecretStr("")
+    OTX_API_KEY: SecretStr = SecretStr("")
+    ABUSECH_AUTH_KEY: SecretStr = SecretStr("")
+    VT_API_KEY: SecretStr = SecretStr("")
+    MD_API_KEY: SecretStr = SecretStr("")
+    CIRCL_AUTH: SecretStr = SecretStr("")
+    INTEL_NVD_SCHEDULE_HOURS: int = Field(default=6, ge=1, le=48)
+    INTEL_KEV_SCHEDULE_HOURS: int = Field(default=1, ge=1, le=24)
+    INTEL_EPSS_SCHEDULE_HOURS: int = Field(default=24, ge=1, le=48)
+    INTEL_CATALOG_SCHEDULE_HOURS: int = Field(default=24, ge=1, le=168)
+    INTEL_OSINT_SCHEDULE_HOURS: int = Field(default=6, ge=1, le=24)
+    INTEL_MATCHER_SCHEDULE_HOURS: int = Field(default=6, ge=1, le=24)
+
     @property
     def patch_ingest_schedule_hours(self) -> int:
         return self.PATCH_INGEST_SCHEDULE_HOURS or self.INGEST_SCHEDULE_HOURS

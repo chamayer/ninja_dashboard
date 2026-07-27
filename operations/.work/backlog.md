@@ -165,6 +165,24 @@ This is the proposed successor to the genuinely open portion of
 
 Each item needs a focused active plan before implementation.
 
+## Cleanup
+
+### Remove Device Detail Raw tab Ninja fallback
+
+- Candidate scope: delete the transition helper in
+  `apps/core/views.py::_build_raw_snapshot_view` that reads
+  `ninja_core.devices.data` when a Ninja `agent.rmm` observation has
+  `raw_data = '{}'`. Shipped 0.80.0 to protect the Raw tab while the
+  underlying writer bug was diagnosed.
+- Precondition: writer fix in 0.82.0
+  (`ingest/core/devices.py::_write_ninja_observations` now threads the
+  fetched Ninja API row through as `raw_data`) has cycled at least
+  once for every active `_current` row. Verify with:
+  `SELECT count(*) FROM operations.entity_observation_current WHERE
+  platform='Ninja' AND active=TRUE AND raw_data = '{}'::jsonb;`
+  Zero-cardinality result means the fallback can go.
+- Trigger: explicit approval after the verification query returns 0.
+
 ## Consolidate side tables into the standard Findings surface
 
 Principle: operator-visible findings live in `operations.findings` with a
@@ -246,3 +264,25 @@ duplicate lifecycle plumbing. See
 - Do not copy completed Tracks C, E, O, or other shipped milestones here.
 - Do not store session transcripts or full production query results.
 - Move only one approved slice at a time into `operations/.work/plan.md`.
+
+## Review materialization of observation-derived state
+
+- Reason deferred: migration 0076 restores `device_agent_presence_current`
+  using the established materialized-view cutover pattern. Under ADR-0007,
+  presence is now a projection of content-hashed current rows rather than a
+  high-cardinality aggregation, so the performance value of materialization
+  needs an explicit architecture and measurement review.
+- Candidate scope: evaluate each observation-derived materialized view against
+  its actual query shape, refresh cost, reader volume, RLS boundary, and
+  freshness requirements; decide whether presence should become a plain view.
+- Constraint: do not convert or remove a matview merely for consistency;
+  preserve the existing derived-object dependency and rollback strategy.
+- Trigger: approved ADR-level review with representative query and refresh
+  measurements.
+# Software raw payload retention
+
+Dedicated software installation history retains normalized material fields and
+presence intervals, not raw source payload JSON. Raw payload retention would
+multiply the highest-cardinality inventory data and does not support an
+approved reader. Revisit only when a concrete reader requires source-fidelity
+reconstruction; decide retention, access/RLS, and storage budget first.

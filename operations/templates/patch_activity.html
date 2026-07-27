@@ -4,13 +4,6 @@
 
 {% block content %}
 <style>
-    .pa-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
-    .pa-table th {
-        text-align: left; padding: 0.4rem 0.6rem; border-bottom: 2px solid var(--border);
-        font-size: 0.75rem; color: var(--muted); text-transform: uppercase;
-        letter-spacing: 0.04em; font-weight: 700;
-    }
-    .pa-table td { padding: 0.35rem 0.6rem; border-bottom: 1px solid var(--border); vertical-align: top; }
     .pa-kb { font-family: monospace; font-size: 0.8rem; color: #1e40af; }
     .pa-status-Installed { color: #16a34a; font-weight: 600; }
     .pa-status-Failed { color: #dc2626; font-weight: 600; }
@@ -36,9 +29,7 @@
         </div>
     </div>
     <p class="muted" style="margin-top:0.5rem;">
-        Free-text search over recent patch install outcomes
-        (<code>ninja_patches.patch_facts</code>, fact_type='install_outcome').
-        Newest first, capped at 500 rows per query.
+        Recent patch install results from Ninja, newest first.
     </p>
 </div>
 
@@ -88,7 +79,7 @@
 
 <div class="card">
 {% if rows %}
-    <table class="pa-table" data-sortable>
+    <table class="ops-table" data-sortable>
         <thead>
             <tr>
                 <th>Installed at</th>
@@ -98,6 +89,7 @@
                 <th>Patch</th>
                 <th>Client</th>
                 <th>Device</th>
+                <th>Evidence</th>
             </tr>
         </thead>
         <tbody>
@@ -113,6 +105,16 @@
                     <a href="{% url 'device_detail' org_slug=r.client_slug device_id=r.device_id %}">
                         <code>{{ r.hostname }}</code>
                     </a>
+                </td>
+                <td>
+                    <details>
+                        <summary style="cursor:pointer; font-size:.78rem;">View</summary>
+                        <div class="muted" style="font-size:.75rem; margin:.3rem 0;">
+                            Ninja event {{ r.ninja_observed_at|date:"Y-m-d H:i"|default:"—" }}<br>
+                            Collected {{ r.last_observed_at|date:"Y-m-d H:i"|default:"—" }}
+                        </div>
+                        <pre style="white-space:pre-wrap; overflow-wrap:anywhere; max-width:32rem; max-height:18rem; overflow:auto; padding:.5rem; background:#f8f9fb; border:1px solid var(--border); border-radius:4px; font-size:.72rem;">{{ r.raw_data }}</pre>
+                    </details>
                 </td>
             </tr>
             {% endfor %}

@@ -2,6 +2,824 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.98.5] — 2026-07-27 — Software UX: clickable risk strip, action buttons, category columns, richer filters
+
+### Changed
+- **Risk distribution strip** on the Software Overview is now fully clickable:
+  each coloured segment and its legend label links to Products filtered by
+  the matching safety level (`?safety=high/medium/low/clean/unknown`).
+- **Publishers list** — added Category column (resolved from
+  `publisher_categories` rules); replaced the per-row dropdown+Apply with
+  direct **Allow / Block / Review** buttons; the new category column is
+  sortable.
+- **Decisions queue** — added Search (product/publisher substring) and
+  Decision-status filter to the filter bar; replaced the per-row
+  dropdown+Apply forms with **Allow / Block / Review** buttons for the
+  product scope and **Trust pub. / Block pub.** for publisher scope.
+- **Cleanup** (tech checklist) — category now shown inline under each
+  product name when available (sourced from `software_catalog`).
+- **User exposure** — added User search and Reason-kind filter; category
+  now shown inline per item where available.
+
+## [0.98.4] — 2026-07-27 — Client overview polish
+
+### Changed
+- **Client overview** (`org_index.html`): removed placeholder "future-note"
+  banners, added plain-language descriptions to the Recent changes and
+  Configuration snapshot sections, improved label text ("Service requirements"
+  → "Requirement profile", "Data mappings" → "Connected sources"), linked the
+  Requirement profile label directly to its config page, and updated the
+  call-to-action to "Manage requirements →".
+
+## [0.98.3] — 2026-07-27 — Software nav: workflow verbs, retire Decisions tab
+
+### Changed
+- **Software sub-nav uses verbs / concepts, not admin nouns.**
+  Overview / Products / Publishers / **Cleanup** (was Tech checklist)
+  / **User exposure** (was User risk) / **Activity** (was Log).
+  The standalone "Decisions" tab is retired — its list was a
+  products-filtered-for-flagged view, which is now the built-in
+  **Review flagged products** workflow tile and a `?flagged=1`
+  filter on Products. Old `/software/decisions/` URL still resolves
+  for direct bookmarks.
+- **Overview workflow tiles** re-phrased with verb-first labels:
+  "Review flagged products" (was Decisions queue), "Activity" (was
+  Decision log), "Cleanup by device" (was Tech checklist), "User
+  exposure" (was User risk).
+- **"Where you stand" summary card** replaces "Decisions summary" at
+  the bottom of the Overview. Copy switched to Allow / Block / Review
+  / Waiting.
+- **Admin overview + admin nav** point at the new
+  `Products?flagged=1` path for the software review workflow. Card
+  titled "Review flagged software".
+
+## [0.98.2] — 2026-07-27 — Decision log, Allow/Block/Review labels, tech-checklist filters
+
+### Added
+- **Software Decision log** at `/software/decisions/log/` — a
+  chronological audit of every `SoftwareDecision` regardless of
+  whether the corresponding product still has a finding. Filters:
+  free-text search over product / publisher / reason, scope (global /
+  client / device / publisher-scope / product-scope), and decision.
+  New "Log" tab in the Software sub-nav.
+- **Per-column filters on Tech Checklist**: search (device / client
+  / product / publisher), role, OS group, reason kind (e.g.
+  `suspicious_name`, `decision_reject`), and the pre-existing client
+  filter. Server-side WHERE for role / OS / client, Python-side for
+  the free-text and reason kind.
+
+### Changed
+- **Decision labels rendered as Allow / Block / Review / Trust
+  publisher** across every operator-facing surface. Internal DB
+  values (`approve` / `reject` / `investigate` / `approve_publisher`)
+  unchanged — this is a `human_labels` mapping, no data migration.
+
+## [0.98.1] — 2026-07-27 — Matcher upgrade + matview refresh hooks
+
+### Changed
+- **Matcher consults `intel_matcher_hints`.** Sub-component canonical
+  names that match any `ignore_sub_component` regex skip CVE matching
+  entirely; `require_third_token` vendors require a distinctive third
+  token beyond `vendor + product` before a tier-1 match fires. Both
+  hint lists are data-driven and admin-editable.
+- **Version-aware matcher.** A year token (2010..2035) or semver
+  major/minor prefix parsed from the canonical name filters CPE
+  candidates to those whose `version` component starts with that
+  string. Version-agnostic CPEs stay in the set as a safety net.
+- **`operations.v_software_safety` refreshes automatically** at three
+  points:
+  1. End of the intel matcher run (`ingest.intel.matcher.run_once`).
+  2. End of the software classifier cycle
+     (`run_software_classify_once` in ingest).
+  3. After every operator decision write (`software_decision_create`
+     and `software_decision_bulk` in operations).
+  All calls are best-effort — a matview refresh failure never
+  bubbles up as a request or run error.
+
+## [0.98.0] — 2026-07-27 — Publisher aliases, category taxonomy, matcher hints, matview
+
+### Added
+- **`operations.publisher_aliases`** (model + admin) — canonical
+  publisher-name normalisation. Raw variants preserved and shown on
+  the detail page; the alias is used for aggregation and matching
+  only. Every rule is a row, editable in Django admin.
+- **`operations.publisher_categories`** (model + admin) — data-driven
+  default categorisation: any product whose publisher matches a
+  pattern is auto-tagged with the row's categories. Applied on top of
+  the per-title catalogue entries.
+- **`operations.intel_matcher_hints`** (model + admin) — two kinds of
+  matcher tuning:
+  * `require_third_token` — for common vendors (Microsoft, Adobe,
+    Google, Oracle, IBM, Cisco, VMware, Citrix) a canonical name must
+    carry a distinctive third token before a CVE match fires. Blocks
+    `Microsoft Office Shared MUI` from inheriting every Office CVE.
+  * `ignore_sub_component` — regex patterns for support / language /
+    proofing / redistributable sub-components that inherit risk from
+    their parent, not from the CVE database directly.
+- **Documented canonical MSP taxonomy** on `PublisherCategory.categories`
+  help text: `system`, `driver`, `security`, `av`, `edr`, `browser`,
+  `productivity`, `communication`, `media`, `development`, `runtime`,
+  `remote-access`, `management`, `rmm`, `backup`, `virtualization`,
+  `storage`, `networking`, `database`, `engineering`, `utility`.
+- **Migration 0087** seeds ~55 publisher aliases, ~47 publisher →
+  category rules, and ~24 matcher hints — everything editable in
+  admin.
+
+### Changed
+- **`operations.v_software_safety` is now a materialised view** —
+  same shape and columns but backed by a matview with a unique
+  index on `(tenant_id, canonical_name)` and secondary indexes on
+  band and resolved publisher. Reads become index lookups; the
+  700-900 ms per-scan cost disappears from the software pages.
+- **Publisher-approve owns the band.** If the operator (or an alias-
+  resolved publisher decision) has approved a title or its publisher,
+  the band is `clean` regardless of CVE matches. Publisher-approve
+  score decrement raised from 60 → 100 so the composite stays
+  consistent.
+- **CVE recency filter.** The band-driving `max_cvss` / `max_epss` now
+  look at CVEs modified in the last 3 years or KEV-flagged. Older
+  CVEs stay counted in `cve_count` (informational) but do not paint
+  a modern install red.
+- **Publisher aliasing feeds the OSINT + decision joins.** The
+  resolved publisher (via `publisher_aliases`) drives publisher-scope
+  matching, so `Microsoft Corporation`, `Microsoft Corp.`,
+  `Microsoft, Inc.` all resolve to `Microsoft` for join purposes.
+  Raw publisher stays visible on every detail page.
+
+### Notes
+- The matview is not yet auto-refreshed; the migration creates it
+  and populates it. A refresh hook lands in the follow-up commits at
+  the end of the intel matcher, at software-classify, and after
+  `software_decision_create`. Until then the matview reflects the
+  state at migration time; run `/admin/jobs/` → Intel matcher →
+  Run now once and it will start reflecting fresh data.
+
+## [0.97.9] — 2026-07-27 — Software nav split: Overview + Products
+
+### Changed
+- **Software nav split.** The Products tab used to point at
+  `/software/`, which is really a dashboard with the products list
+  tucked away under "Browse all products". Renamed that landing to
+  **Overview**, and added a real **Products** tab at
+  `/software/products/` that opens the products list directly.
+- **`software_page` view refactored** — the request-handling body moved
+  into a shared `_software_page_data(request)` helper. `software_page`
+  now renders Overview (dashboard tiles + workflows + distribution +
+  this-week + recent installs). `software_products` renders the
+  full products table with per-column filters. Same context, two
+  templates.
+- **New per-column filters on the Products page**: search on product,
+  search on publisher, minimum device count, risk band, decision,
+  category chips. Every column that carries a decision or a category
+  now has its own control.
+- **Overview page shrinks.** Products table removed from the Overview
+  (was collapsed at the bottom); Overview is now purely a dashboard.
+
+### Notes
+- Decisions are still written to the same `operations.software_decisions`
+  table from every entry point (Products, Publishers, Decisions queue,
+  bulk actions). The Decisions queue is a *pending* queue, not a
+  decision log — a dedicated decision-log surface is on the follow-up
+  list.
+
+## [0.97.8] — 2026-07-27 — `/software/?safety=X` worker-timeout 500 fix
+
+### Fixed
+- **`/software/?safety=high` (or any risk band) 500'd via gunicorn
+  worker timeout** — the risk-band filter used an
+  `EXISTS (SELECT 1 FROM v_software_safety WHERE canonical=…)`
+  clause on the products query, which re-evaluated the multi-CTE
+  risk view once per product row. With 20 k products, that blew
+  through the 30 s gunicorn timeout. Reordered the request: fetch
+  `v_software_safety` **once** at the top (already done for the
+  distribution numbers), extract the canonical set for the target
+  band in Python, then pass that set as a single `ANY(%s::text[])`
+  filter to the products query. Zero extra view scans. Removed the
+  duplicate second fetch that was still on the code path.
+
+## [0.97.7] — 2026-07-27 — On-demand card links point at ingest:8090
+
+### Fixed
+- **On-demand scoped-run cards on `/admin/jobs/` returned 404** —
+  their `href`s were current-host relative (`/run/sources/enqueue`),
+  which resolved against operations:3002, not the ingest container
+  where those endpoints actually live. Cards now use
+  `ingest_public_url` (defaults to `<scheme>://<current host>:8090`,
+  overridable via the `INGEST_PUBLIC_URL` env var for setups behind
+  a different reverse proxy).
+
+## [0.97.6] — 2026-07-26 — Ingest ready-state bug + unified software surfaces
+
+### Fixed
+- **`Run now` returned 503 for every job** — when I added
+  `_intel_catchup()` in 0.97.0, the "block forever" tail of `main()`
+  got captured inside the new function's body due to a misplaced
+  indentation. The main thread never returned from `_intel_catchup`,
+  so `_READY.set()` never fired and every `/run/*` endpoint answered
+  "still starting". Extracted the block-forever back into `main()`
+  after `_READY.set()`. Every Run-now now works after the next
+  ingest restart.
+
+### Changed (software surfaces — visual family)
+- **New shared style include** `_sw_style.html` provides the same
+  page header, filter bar, bulk-action bar, data table, pill styles
+  (risk + decision), and empty-state look for every software surface
+  (Products / Publishers / Decisions / Tech checklist / User risk).
+  Included on the pages that had drifted apart in styling.
+- **Publishers page rebuilt** on the shared style with a proper
+  filter bar (search + decision-status dropdown), bulk-select
+  checkboxes with an "Apply to selected publishers" button, and a
+  per-row single-picker matching the decisions queue exactly.
+
+## [0.97.5] — 2026-07-26 — Winget/Chocolatey endpoints, per-source jobs, subject_layer default
+
+### Fixed
+- **Platform evaluator failed with "null value in column subject_layer"** —
+  the `findings.subject_layer` column was `NOT NULL` without a DB
+  default. The Django model declares `default=""` but raw-SQL
+  writers in `ingest/evaluator.py` etc. bypass the ORM. Migration
+  `0085` sets `DEFAULT ''` at the DB level and backfills any nulls,
+  fixing every writer without code changes. Evaluator's own INSERT
+  now also lists the column explicitly.
+- **Winget enrichment** — Microsoft's `cdn.winget.microsoft.com`
+  endpoint returns 405 for third-party POSTs. Switched to the
+  community `api.winget.run/v2/packages` REST API (same manifest
+  data, GET-friendly, no auth). Verified 200 with real Packages
+  response.
+- **Chocolatey enrichment** — the `/Search()` OData endpoint 400s.
+  Switched to `/Packages()?$filter=IsLatestVersion&$top=5&searchTerm='…'`,
+  which returns proper Atom feed XML.
+
+### Added
+- **Jobs page — per-source rows** — every distinct
+  `source.<Platform>[.<Instance>]` kind that ever ran shows up as
+  its own row under Source Ingest. The Run-now button is replaced
+  with a "Scoped run…" link that opens the ingest form for that
+  category (per-instance triggers go through the org / device
+  selector).
+- **On-demand scoped runs section** at the bottom of `/admin/jobs/` —
+  three cards linking to the ingest container's org / device selector
+  forms: Software inventory (queued), Source ingest (per-instance),
+  Direct scoped software run (inline).
+
+## [0.97.4] — 2026-07-26 — /software perf: fetch v_software_safety once
+
+### Fixed
+- **/software loads slowly** — once the intel layer populated CVEs and
+  matches, the fleet page called `operations.v_software_safety` three
+  times per request (per-shown-title lookup, high-band count, band
+  distribution) plus a fourth "new-high-risk-this-week" JOIN. Each
+  view evaluation was ~700-900 ms, adding up to 3-4 s per render.
+  Now fetch the whole view **once** at the start of the request and
+  derive `safety_by_title`, `high_risk_titles`, `risk_distribution`,
+  and `this_week.new_high_risk` from that one snapshot in Python.
+
+## [0.97.3] — 2026-07-26 — Jobs page: groups, run-all, correct kind mapping, recent activity
+
+### Fixed
+- **Every non-intel job showed "Never run"** — the catalogue's
+  `status_key`s did not match the actual `run_log.kind` values
+  emitted by the writers (`software_classifier`, `patch_findings`,
+  `platform_evaluator`, `parity_check`, `source.<Platform>`).
+  Corrected. Source-ingest jobs use a new `run_log_like` status
+  source that prefix-matches (e.g. `source.` catches every per-instance
+  source row).
+
+### Added
+- **Run everything now** button and per-category **Run all in this
+  category** buttons on `/admin/jobs/` — POST to
+  `/admin/jobs/run-all/`. Both prompt for confirmation.
+- **Recent activity panel** at the bottom of the jobs page — last 25
+  runs across `run_log` and `intel_ingest_status`, so an operator
+  who clicks Run-now can see the run appear when it completes.
+- **Auto-refresh every 20 s** on the jobs page (pauseable with
+  `?live=off`). Uses JS `setTimeout` so no `base.html` change needed.
+
+### Changed
+- Jobs page renders one section per category (Source ingest / Intel /
+  Evaluators / Notifications) instead of a flat list.
+- Added `Parity check` to the catalogue.
+- Category-level "Run all" buttons appear both above and inline with
+  each section heading.
+
+## [0.97.2] — 2026-07-26 — Admin hub — every admin surface in one place
+
+### Changed
+- **`/admin/overview/` reshape** — the Admin landing was three thin
+  sections; now it is a proper hub with SVG-iconned cards grouped by
+  workflow:
+  - **Review queues** — Client candidates, Merge candidates, Software
+    decisions, All findings (with open counts).
+  - **Software** — Products, Publishers, Tech checklist, User risk,
+    Classifier rules (with enabled-rule count).
+  - **Policy &amp; configuration** — Service requirements, Device
+    status thresholds, Alert rules, Suppressions.
+  - **Data &amp; integrations** — Sources (stale / total), Jobs (with
+    intel connector ok / failed / not-run counts), Ingest health,
+    Coverage, Patching.
+  - **System** — Django admin.
+- Every tile is a link with a short description; badge counts are
+  computed in-view with cheap queries and tolerated to fail on fresh
+  installs (intel counters guarded by try / except).
+
+## [0.97.1] — 2026-07-26 — EPSS endpoint + matcher token intersection
+
+### Fixed
+- **EPSS ingest** — the daily CSV moved from `epss.cyentia.com` to
+  `epss.empiricalsecurity.com` (301 redirect). Pointed the connector
+  at the new URL and enabled `follow_redirects=True` so the next
+  domain change is also handled transparently.
+- **Intel matcher matched zero products** — the day-one normaliser
+  concatenated every canonical name into a single token
+  (`googlechrome` etc.) and never lined up with CPE product names
+  (`chrome`). Rewrote the matcher as token-intersection: split every
+  canonical on alphanumeric boundaries, treat the resulting tokens as
+  a set, tier-1 match when a `(vendor, product)` from `intel.cpes`
+  falls fully inside the token set, and tier-2 fallback on a
+  distinctive product-only token (>= 4 chars, alphabetic, not in a
+  short generic stop list). Uses `affected_cpes ?| candidates::text[]`
+  (GIN-indexed jsonb operator) so per-canonical lookup stays sub-ms.
+
+### Notes
+- The next intel matcher run (either the natural 6-hour tick or a
+  manual "Run now" from `/admin/jobs/` for the Intel: title × CVE
+  matcher row) will populate `operations.cve_match` for every
+  canonical whose vendor + product resolve inside the CPE dictionary.
+
+## [0.97.0] — 2026-07-26 — Jobs page, intel catch-up, bulk decisions, software sub-nav
+
+### Added
+- **Jobs page (`/admin/jobs/`)** — every scheduled job (source ingest,
+  intel connectors, evaluators, notifications) with last-run status,
+  age, rows touched, last error, and a **Run now** button that POSTs
+  to the ingest container's `/run/<slug>` HTTP endpoint. Category +
+  status filters (ok / stale / failed / never run). Reachable from
+  the "Jobs" tab under the Integrations admin nav.
+- **Ingest `/run/intel-*` HTTP endpoints** for every intel connector
+  (kev / nvd / cpe-dict / epss / matcher / winget / chocolatey / otx /
+  abusech). Same 202-Accepted background-thread pattern the existing
+  `/run/*` endpoints already use.
+- **Intel catch-up on ingest startup** — any connector with no
+  successful run in `operations.intel_ingest_status` fires in a
+  background thread when the scheduler comes up, so a fresh deploy
+  doesn't wait hours for the first natural tick.
+- **Software sub-nav** (`_software_tabs.html`) included on every
+  software surface (Products, Publishers, Decisions, Tech checklist,
+  User risk). One consistent nav strip; each view sets `software_tab`
+  to highlight the active page.
+- **Publisher column + publisher-scope apply on the decisions queue**
+  — the current publisher-scope decision, if any, is rendered under
+  the product's own decision. Per-row picker has separate "Product"
+  and "Publisher" apply buttons.
+- **Bulk actions on the decisions queue** — checkboxes on every row
+  plus a bulk bar with a "Apply as: this product only / this
+  publisher (every product)" scope selector. Single POST to
+  `/software/decisions/bulk/` with the chosen decision applied to
+  every selection. Audited per-row.
+
+### Fixed
+- **`/software/` counted publisher-scope decisions as products** —
+  approving two publishers surfaced as "2 approved products".
+  Approved / rejected / investigating are now
+  `COUNT(DISTINCT canonical_name)` where the product **or its
+  publisher** has a global-scope decision.
+
+## [0.96.1] — 2026-07-25 — Fix operations import: swap `requests` for stdlib `urllib`
+
+### Fixed
+- **Operations container crash-loop after 0.94.0 / 0.96.0** — the
+  on-demand VirusTotal lookup imported `requests`, which isn't in the
+  deployed operations image. Rewrote `_lookup_virustotal` on top of
+  stdlib `urllib.request` so nothing outside the standard library is
+  required. Careless-mistakes rule #10: verify against the deployed
+  image, not the local venv.
+
+## [0.96.0] — 2026-07-24 — Software dashboard reshape + auto-intel on software cycle
+
+### Changed (operator-facing)
+- **`/software/` is now a proper dashboard.** Overview KPIs, risk +
+  decision distribution strips ("where the fleet stands"), a "This
+  week" summary card (new products, new high-risk, top new product),
+  workflow tiles with real state ("undecided", "awaiting", "devices",
+  "candidates") plus inline SVG icons instead of single-letter
+  monograms. Products table moved to the bottom under a collapsed
+  "Browse all products" disclosure that auto-opens when a filter is
+  applied.
+- **Terminology pass**: "Titles" renamed to "Products" throughout the
+  operator-facing page and search placeholder; "Open items" reworded;
+  workflow card descriptions phrased for humans.
+
+### Changed (behaviour)
+- **Intel matcher + Winget + Chocolatey enrichers now fire on the
+  software classify cycle**, before the classifier itself. Newly
+  ingested products get scored and enriched in the same run instead of
+  waiting for the next 6-hour intel cadence. Steps are best-effort —
+  a broken intel connector never blocks the classifier.
+
+## [0.95.0] — 2026-07-24 — known_malicious_hint finding (Batch H)
+
+### Added
+- **`known_malicious_hint` FindingType** (migration `0084`) — fires per
+  device when the installed title (or its publisher) has accumulated
+  ≥ N open threat-intel hits (OTX + MalwareBazaar + ThreatFox) and the
+  operator has not approved. Explicitly a low-severity **hint** — OSINT
+  is community-curated and noisy — with two `EvaluatorConfig` knobs
+  (`known_malicious_hint_min_hits` default 3,
+  `known_malicious_hint_severity` default low).
+- **Classifier step 9** in `ingest/software_findings.py` — new emit
+  path with a helper `_load_threat_hit_counts` that folds title-scope
+  and matched publisher-scope signals into a per-canonical count.
+
+Software safety-intel track (Batches A–H) is now complete.
+
+## [0.94.0] — 2026-07-24 — Software dashboard reshape, Risk labels, on-demand lookup (Batch G)
+
+### Fixed
+- **`/software/` worker timeout on some renders** — split the risk lookup
+  into its own atomic block, gated behind a `to_regclass` probe so the
+  page still loads when the intel view hasn't been migrated yet.
+- **"Whitelist" chip on the fleet page** was surfacing a legacy catalogue
+  category value; hidden from the chip strip. Trust now lives in
+  decisions, not the catalogue.
+
+### Changed (operator-facing)
+- **Fleet page reshape** — high-level dashboard with two rows of tiles:
+  numeric overview (Titles, Unclassified, Awaiting decision, High risk,
+  Open items) and workflow launchers (Publishers, Decisions queue, Tech
+  checklist, User risk, Whitelist suggestions). The titles table trims
+  to Title + publisher subline, Devices, Risk, Decision, Actions — no
+  more overflow, sortable, hover-highlighted.
+- **Product name display** — canonical names and publishers rendered
+  with `title` casing on the fleet, publisher, and detail pages so
+  lowercase raw values ("google chrome") don't look raw.
+- **Risk labels reworked** — "Clean" is reserved for titles the operator
+  has approved. Titles with no risk data and no approval now show
+  "Not yet checked" (new `unknown` band). Column headers changed from
+  "Safety" to "Risk", tooltips use "known vulnerabilities" /
+  "actively exploited" / "threat-intel matches".
+
+### Added
+- **On-demand VirusTotal lookup** — button on the title Risk card. Per
+  operator: 10 lookups/hour cap, 48-hour cache in
+  `operations.title_intel_cache`. Runs against the free-tier VirusTotal
+  API using the operator-supplied `VT_API_KEY` from the deploy env.
+  Result summary flashed as a Django message; full JSON stored in
+  cache.
+- **New URL** `software/title/<name>/lookup/<source>/`.
+- **Migration `0083`** updates the risk view to distinguish `clean`
+  (approved by operator) from `unknown` (no risk data on record).
+
+## [0.93.0] — 2026-07-24 — Title Risk panel + vulnerable_software finding (Batch F)
+
+### Added
+- **Risk panel on `/software/title/<name>/`** — composite risk band,
+  score, known-vulnerability counts, worst severity, exploit likelihood
+  (EPSS), threat-intel match counts on title and publisher, and a
+  community-tag row merged from Winget/Chocolatey signals.
+- **Known vulnerabilities table** on the title page — top 25 CVEs by
+  active exploitation + severity, deep-linked to nvd.nist.gov.
+- **Threat-intel matches list** on the title page — one row per source
+  hit with severity and observed time.
+- **`vulnerable_software` FindingType** (migration `0082`) — fires per
+  device for installed titles that match a KEV-flagged CVE or a CVSS ≥
+  cutoff. Severity ranks KEV as critical, CVSS-severe as high.
+  Suppressed by approve / approve_publisher decisions since those
+  express operator acceptance of the risk.
+- **Classifier step 8** — new emit path in
+  `ingest/software_findings.py` with three new EvaluatorConfig knobs
+  (`vulnerable_software_enabled`, `_cvss_cutoff` default 7.0, per-tier
+  severity overrides).
+
+### Changed
+- Human-friendly operator labels: **"Safety"** renamed to **"Risk"** in
+  every visible surface (column, tile, card, pill). Internal names
+  (`v_software_safety`, `safety_signal`, template classes) unchanged.
+- Fleet Risk column shows "High risk / Medium risk / Low risk / Clean"
+  in words; tooltip uses "known vulnerabilities", "actively exploited",
+  and "threat-intel matches" instead of CVE / KEV / OSINT.
+
+## [0.92.0] — 2026-07-24 — Composite safety score + fleet-page surface (Batch E)
+
+### Added
+- **`operations.v_software_safety` view** (migration `0081`) — per
+  canonical title, composite safety score 0..100, safety band
+  (clean / low / medium / high), matched CVE / KEV / OSINT-hit counts,
+  and title/publisher-scope decision status. Weights follow ADR 0008.
+- **Safety column on `/software/`** — pill showing band + score, tooltip
+  with CVE / KEV / OSINT breakdown. Sortable.
+- **Safety filter (`?safety=high` etc.)** on the fleet page.
+- **Safety tile on `/software/`** — high-band title count links to the
+  filtered view.
+
+## [0.91.0] — 2026-07-24 — Intel OSINT: OTX + abuse.ch (Batch D)
+
+### Added
+- **AlienVault OTX ingest** (`ingest/intel/otx.py`) — pulls recently
+  modified subscribed pulses, matches indicators + tags against
+  canonical software names and publishers we track. Signals stored at
+  `severity='low'` (community-curated, noisy).
+- **abuse.ch MalwareBazaar + ThreatFox ingest** (`ingest/intel/abusech.py`) —
+  pulls the recent dump files per abuse.ch's fair-use guidance (single
+  HTTPS GET each, no per-hash API loops). Matches on publisher
+  signature and filename tokens; signals stored at `severity='medium'`.
+- **Two new APScheduler cycles** on `INTEL_OSINT_SCHEDULE_HOURS`.
+
+## [0.90.0] — 2026-07-24 — Intel catalogue enrichment: Winget + Chocolatey (Batch C)
+
+### Added
+- **Winget enrichment** (`ingest/intel/winget.py`) — per-canonical query
+  against the Windows Package Manager REST search endpoint (same one
+  the `winget` CLI uses). Only titles observed in the fleet, and only
+  those without a fresh signal, so the update set stays bounded. Tags,
+  publishers, and package identifiers land on
+  `operations.safety_signal` as `source='winget', signal_type='category'`.
+- **Chocolatey enrichment** (`ingest/intel/chocolatey.py`) — same
+  shape, hitting the community OData search feed. Tags aggregated per
+  title.
+- **Scheduler wiring** — both connectors run on `INTEL_CATALOG_SCHEDULE_HOURS`
+  under the `INTEL_ENABLED` master flag with independent enable flags.
+
+## [0.89.0] — 2026-07-24 — Intel connectors: NVD + CPE + KEV + EPSS + matcher (Batch B)
+
+### Added
+- **NVD v2 delta ingest** (`ingest/intel/nvd.py`) — paginated
+  `lastModStartDate` cursor, 120-day first-run lookback, 40-page safety
+  cap, 429-aware backoff, rate-limited to the free-tier ceiling
+  depending on whether an API key is present.
+- **NIST CPE 2.3 dictionary ingest** (`ingest/intel/cpe_dict.py`) —
+  same paginated shape, populates `intel.cpes` with lowered
+  vendor/product/version tokens for the matcher.
+- **CISA KEV ingest** (`ingest/intel/cisa_kev.py`) — single JSON pull,
+  upserts `kev_flag / kev_added_at / kev_notes` on every catalogued
+  CVE and clears the flag on rows CISA removed from the list.
+- **FIRST.org EPSS ingest** (`ingest/intel/epss.py`) — daily gzipped
+  CSV, only updates CVEs already present in `intel.cves` so the
+  update set stays bounded.
+- **Conservative day-one matcher** (`ingest/intel/matcher.py`) —
+  normalises canonical software names to alphanum tokens, exact-matches
+  against CPE `product`, then joins to CVEs via `affected_cpes ?|`.
+  Marks every hit `confidence='high', match_kind='cpe_exact'`.
+- **APScheduler wiring** — five new cycles under the `INTEL_ENABLED`
+  master flag with per-connector on/off flags and independent cadences.
+  Each cycle is single-instance so a slow run doesn't stack.
+
+### Notes
+- All new external calls are behind `INTEL_ENABLED`, which defaults to
+  `false`. Set it once the six free keys are in the deploy env and the
+  operator wants to start pulling.
+- Every connector wraps its run in `record_run`, so
+  `operations.intel_ingest_status` shows the last outcome, error, and
+  rows touched per source — nothing hidden.
+
+## [0.88.0] — 2026-07-24 — Software safety intel: schema + ADR (Batch A)
+
+### Added
+- **ADR 0008 — Software safety intel layer.** Documents the
+  free-tier-bulk + free-on-demand strategy, source list, matcher and
+  scoring approach.
+- **`intel` Postgres schema** (sql migration `072_intel_schema.sql`) —
+  isolates raw threat data from operations, mirroring how
+  `ninja_patches` / `ninja_activities` separate source-specific stores.
+  Tables: `intel.cves`, `intel.cpes`.
+- **Operations-owned tables** — `operations.cve_match`,
+  `operations.safety_signal`, `operations.title_intel_cache`,
+  `operations.intel_ingest_status`.
+- **`ingest/intel/` package skeleton** with a `record_run` context
+  manager wrapping every connector so the last-run status, error, and
+  rows-touched surface on `intel_ingest_status` (nothing hidden).
+- **Six `INTEL_*` env knobs + six free API keys** wired into
+  `ingest.config.Settings` (all default off until Batch B enables the
+  first connector).
+
+## [0.87.0] — 2026-07-24 — Software user-risk view
+
+### Added
+- **`/software/user-risk/`** — per-user rollup of software checklist
+  items on the device the user last logged into. Anchored on Ninja's
+  `lastLoggedInUser` (latest snapshot per device via
+  `ninja_core.device_snapshots`) joined through `device_links`. Users
+  who log into multiple devices are aggregated across all of them, with
+  the checklist items grouped per-device. Multi-client filter, CSV
+  export, top-500 cap.
+- **User risk tile on `/software/`**.
+
+## [0.86.0] — 2026-07-24 — Software Tech Checklist
+
+### Added
+- **`/software/tech-checklist/`** — per-device curated cleanup queue,
+  the operator-facing analog of the legacy analyzer's "Tech Checklist"
+  sheet. Combines active software findings (all software finding types
+  except `whitelist_suggestion`) with installations that hit a
+  reject/investigate decision at title-scope or publisher-scope. One
+  card per device with client / role / OS metadata, a per-item reason
+  line, and a link straight to the device detail. Multi-client filter,
+  CSV export, top-500 cap.
+- **Tech Checklist tile on `/software/`** links to the new page.
+
+## [0.85.0] — 2026-07-24 — Whitelist Suggestions
+
+### Added
+- **`whitelist_suggestion` FindingType** (migration `0080`, seeded under
+  the software category). Fires for uncategorised + undecided titles
+  installed on ≥ N devices fleet-wide — the "widespread but nobody has
+  decided on it" review queue.
+- **Software classifier step 7** — the ingest evaluator emits
+  `whitelist_suggestion` from the same per-install loop as the existing
+  seven steps, gated by three new `EvaluatorConfig` knobs
+  (`whitelist_suggestion_enabled` default true,
+  `whitelist_suggestion_min_devices` default 10,
+  `whitelist_suggestion_severity` default `low`).
+- **Whitelist suggestions tile on `/software/`** — deduped by
+  canonical_name, kept separate from the "flagged installations" tile
+  so review candidates don't inflate the problem count.
+
+## [0.84.0] — 2026-07-24 — Software publisher rollup + publisher-scope decisions
+
+### Added
+- **`/software/publishers/` list.** One row per observed publisher with
+  installations, distinct titles, distinct devices, distinct clients,
+  last observed, current global publisher-scope decision, and an inline
+  Approve/Reject/Investigate/Approve-publisher form.
+- **`/software/publishers/<publisher>/` detail.** Summary tiles, a
+  publisher-scope decision form, the full title list from that publisher
+  with per-title decision state and inline title-scope decision actions,
+  and publisher-scope decision history at client/device tiers.
+- **Publishers tile on `/software/`** and clickable publisher cells on the
+  fleet titles table and on the per-title detail page.
+
+### Changed
+- **`SoftwareDecision.publisher` field** (migration `0079`). Decisions now
+  bind to either a canonical_name (title-scope) or a publisher
+  (publisher-scope, applies to every title from that publisher including
+  titles first observed after the decision). A `CheckConstraint` enforces
+  exactly one of the two match keys is set.
+- **Classifier decision resolver** (`ingest/software_findings.py`) now
+  honours publisher-scope tiers: title-scope wins (device > client >
+  global), publisher-scope is the fallback (device > client > global).
+  Publisher-approving no longer requires per-title decisions to actually
+  suppress findings across the publisher's catalogue.
+- **Fleet page `?decision=` filter** now considers publisher-scope
+  approvals/rejections/pending when computing the title's disposition.
+- **`software_decision_create`** accepts a `publisher` POST param and
+  enforces the XOR at the form level.
+
+## [0.83.0] — 2026-07-24 — Software title detail + row-level decisions
+
+### Added
+- **`/software/title/<name>/` detail page.** Per-canonical drill-through from
+  the fleet titles table. Summary tiles (installations, devices, clients,
+  versions, first/last observed), catalog metadata (categories, EOL, notes),
+  global-scope decision form, version breakdown, publisher breakdown, install
+  locations, per-device installation list with device-scope decision actions,
+  related active findings, and full client/device-scope decision history.
+- **Row-level decision actions on `/software/`.** Inline
+  Approve/Reject/Investigate/Approve-Publisher form on every fleet-titles row,
+  posting to the shared `software_decision_create` endpoint with a `next`
+  redirect so the operator lands back where they were.
+- **Per-org software table** links each title to the detail page.
+
+### Changed
+- `software_decision_create` now honours a `next` POST parameter (relative
+  URLs only, to avoid open-redirects), letting decision forms across the
+  Software surfaces return the operator to their origin page.
+
+### Performance
+- **Functional index** `software_installations_current_lower_canonical_idx`
+  on `(tenant_id, LOWER(canonical_name)) WHERE deleted_at IS NULL AND
+  stale_since IS NULL` (migration `0078`). Every case-insensitive lookup
+  against the installations table now uses an index scan; measured Google
+  Chrome install-list query drops from 588 ms (parallel seq scan of 432k
+  rows) to 112 ms (index scan).
+
+## [0.82.2] — 2026-07-24 — Grant SELECT on `device_patch_activity`
+
+### Fixed
+- **`/patching/` returned HTTP 500 after 0.82.1 deploy** because migration
+  070 created `ninja_patches.device_patch_activity` without the `GRANT SELECT`
+  statements the sibling matviews carry (`operations_app`,
+  `operations_readonly`, `metabase_ro`). Migration `071` grants those roles
+  the same read access they already have on `device_patch_signal`,
+  `current_patch_state`, and `latest_install_outcome`.
+
+## [0.82.1] — 2026-07-24 — Patching page perf: matview-backed posture rollup
+
+### Fixed
+- **`/patching/` slow to load.** The posture status cards were computed by
+  a CTE that (a) aggregated `MAX(...)` over 467k `ninja_patches.patch_facts`
+  rows to derive per-device `last_patch_activity_at`, and (b) executed twice
+  per request (once for fleet totals, once for the per-client rollup).
+  Deployed-DB dry-run measured the rewritten path end-to-end at 123 ms.
+
+### Added
+- **`ninja_patches.device_patch_activity` matview** (`sql/migrations/070`) —
+  one row per Ninja device with `last_patch_activity_at`, refreshed alongside
+  the existing patch summary matviews at the end of each patch ingest cycle
+  (`ingest/patches/ingest.py`).
+
+### Changed
+- **`patching_queue` view** now reads `device_patch_activity` instead of
+  aggregating `patch_facts` at request time, and consolidates the fleet
+  totals and per-client posture into a single `GROUPING SETS` query with
+  Python-side split.
+
+## [0.82.0] — 2026-07-22 — Device Detail Raw tab: canonical field matrix + Ninja `raw_data` fidelity
+
+### Fixed
+- **Ninja `raw_data` empty on every observation.** `ingest/core/devices.py`
+  wrote `Json({})` for every Ninja `entity_observation`, so the Device
+  Detail Raw tab could not show source fields for Ninja (the trigger
+  that opened ADR-0007). The Ninja API row is now side-banded via
+  `raw_by_id` from the fetch loop through `_write_ninja_observations`
+  and stored on `_current.raw_data`. Also applies to org observations,
+  which now carry `ninja_core.organizations.data`. Existing rows
+  overwrite on the next Ninja cycle.
+
+### Added
+- **Canonical field matrix on Device Detail → Identity & raw.** Rewrite
+  of the "Common fields across sources" section to read from
+  `canonical_data` (the normalized per-source projection) instead of
+  `raw_data`. Every source rewrites the same concepts (hostname,
+  os_name, serial_number, macs, is_online, etc.) into the same
+  canonical key names, so the matrix compares values across sources
+  directly. Every canonical field appears — even if only one source
+  reports it — with a "1 source" badge so operators see the whole
+  normalized picture. Cross-source disagreements still get the amber
+  highlight + ⚠ prefix. Values render legibly: lists comma-joined
+  (macs, tags), booleans as yes/no, empty as em dash, nested dicts as
+  compact JSON.
+- **Source-native fields** section replaces the previous "Per-source
+  details" — for each source snapshot, lists the raw_data keys not
+  represented in canonical_data. Alias-hiding is case-insensitive: raw
+  `hostName` normalizes to `hostname` and is hidden when canonical
+  already has `hostname`. Non-alias fields like `systemName`,
+  `dnsName`, source-specific IDs stay visible.
+- Additional category keywords for the field grouping: `macs`, `vmuuid`,
+  `powerstate`, `lastboottimeat`, `parentninjaid`, `platformgroupid`,
+  `entitytype`, `devicerole`. Was over-fitting the raw shape; now
+  matches canonical shape.
+
+### Changed
+- Section titles under Identity & raw: "Common fields across sources"
+  → "**Fields**" and "Per-source details" → "**Source-native
+  fields**". Copy tightened to describe the new canonical-first model.
+
+## [0.81.0] — 2026-07-22 — Observation writer hardening + retention wired (ADR-0007 v5)
+
+### Fixed
+- **Absent-row race in `ingest/observations.py::write_current_rows`.**
+  `SELECT ... FOR UPDATE` alone cannot lock a row that does not exist
+  yet, so two concurrent writers claiming the same new identity could
+  both open a history version. The primitive now takes a
+  transaction-scoped `pg_advisory_xact_lock(hashtextextended(...))`
+  keyed on the 5-column identity tuple before the FOR UPDATE read.
+  Batches are pre-sorted by identity to prevent deadlocks between
+  concurrent writers that share some — but not all — identities.
+- **Out-of-order snapshot could overwrite newer `_current` state.** The
+  previous `db.upsert` path wrote `EXCLUDED.c` on every column with no
+  timestamp predicate. Delayed workers or clock-skewed sources could
+  poison newer state and open a phantom SCD-2 interval. The primitive
+  now drops rows in Python when `row.observed_at <= _current.observed_at`
+  (equal timestamps treated as stale to prevent zero-length intervals),
+  and the bespoke SQL upsert mirrors the guard as defence in depth:
+  `WHERE _current.observed_at < EXCLUDED.observed_at`.
+- **Connector NULL could clear resolver-populated `device_id`/`client_id`.**
+  Bespoke upsert now uses
+  `COALESCE(EXCLUDED.client_id, entity_observation_current.client_id)`
+  (and same for `device_id`), so post-hoc resolver and merge writes are
+  preserved. Python-side merge runs too, before shaping.
+- **`_history` close attributed the closing time to the new state.**
+  `write_history_changes` now closes with `_prior_last_seen_at`
+  (side-banded from the current row's prior `last_seen_at`), not the
+  incoming row's `last_seen_at`. The new state's `last_seen_at` is
+  correctly the new observation's confirmation time.
+
+### Added
+- **Nightly closed-history retention scheduler.** `ingest/main.py::
+  run_observation_history_prune_once` calls
+  `retention_observations.purge_all()`, which delegates to the
+  security-definer function `operations.purge_closed_observation_history(
+  cutoff)` (migration 0074). Default 90 days; overridable via
+  `OBSERVATION_HISTORY_RETENTION_DAYS` and
+  `OBSERVATION_HISTORY_RETENTION_HOUR`. Covers both
+  `entity_observation_history` and `software_installation_history`.
+  Cannot delete open SCD-2 versions (function DELETE is scoped to
+  `effective_to IS NOT NULL`).
+- Focused tests: 7 new hardening tests in
+  `ingest/tests/test_observations.py` (out-of-order older, equal-
+  timestamp, resolved-ID preservation, material-change with prior
+  last_seen_at, heartbeat without material change, new identity opens
+  first history version, batch sorted by identity before locking). New
+  `ingest/tests/test_retention_observations.py` asserts retention
+  routes through the security-definer function and never issues raw
+  DELETE from application code.
+
+### Changed
+- `ingest/core/devices.py` and `ingest/source_observations.py` now
+  record the actual return count from `write_current_rows` on the
+  snapshot run ledger (`operations.observation_snapshot_runs`) instead
+  of the input length, so skipped out-of-order rows are not counted as
+  written. Cosmetic accuracy improvement to the run log.
+
 ## [0.80.0] — 2026-07-21 — Raw tab: common-field matrix + category grouping + Ninja fallback
 
 ### Added

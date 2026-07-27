@@ -1,0 +1,289 @@
+{% extends "base.html" %}
+
+{% block title %}Admin overview{% endblock %}
+
+{% block content %}
+<style>
+  .admin-hero {
+    display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline;
+    gap: 1rem; margin: 0 0 1.2rem;
+  }
+  .admin-hero h1 { margin: 0; font-size: 1.35rem; }
+  .admin-hero .sub { color: var(--muted); font-size: 0.9rem; }
+
+  .admin-section-label {
+    font-size: 0.7rem; font-weight: 700; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--muted); margin: 1.35rem 0 0.55rem;
+  }
+
+  .admin-cards {
+    display: grid; gap: 0.75rem;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  }
+
+  .admin-card {
+    display: block; padding: 0.9rem 1.05rem;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; text-decoration: none; color: inherit;
+    transition: box-shadow 0.15s, border-color 0.15s;
+  }
+  .admin-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.06); border-color: var(--accent); }
+
+  .admin-card .top {
+    display: flex; align-items: center; gap: 0.65rem; margin-bottom: 0.25rem;
+  }
+  .admin-card .icon {
+    width: 34px; height: 34px; border-radius: 8px; flex-shrink: 0;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  .admin-card .icon.blue    { background: #eef2ff; color: #4338ca; }
+  .admin-card .icon.green   { background: #ecfdf5; color: #059669; }
+  .admin-card .icon.amber   { background: #fef3c7; color: #b45309; }
+  .admin-card .icon.rose    { background: #fee2e2; color: #b91c1c; }
+  .admin-card .icon.violet  { background: #f5f3ff; color: #6d28d9; }
+  .admin-card .icon.slate   { background: #f1f5f9; color: #334155; }
+  .admin-card .icon.teal    { background: #ccfbf1; color: #0f766e; }
+  .admin-card .title { font-weight: 600; color: #1a1a2e; font-size: 0.95rem; }
+  .admin-card .desc  { color: var(--muted); font-size: 0.8rem; margin-top: 0.15rem; line-height: 1.4; }
+
+  .admin-card .metric {
+    display: inline-block; margin-top: 0.55rem; padding: 0.15rem 0.55rem;
+    border-radius: 999px; background: #f1f5f9; color: #1a1a2e;
+    font-size: 0.75rem; font-weight: 600;
+  }
+  .admin-card .metric.warn { background: #fee2e2; color: #991b1b; }
+  .admin-card .metric.ok   { background: #dcfce7; color: #14532d; }
+</style>
+
+<div class="admin-hero">
+    <div>
+        <h1>Admin</h1>
+        <div class="sub">Every admin surface in one place — pick where to work.</div>
+    </div>
+</div>
+
+{# ─── Review queues ─────────────────────────────────────── #}
+<div class="admin-section-label">Review queues — items needing an operator decision</div>
+<div class="admin-cards">
+    <a class="admin-card" href="{% url 'client_candidates_queue' %}">
+        <div class="top">
+            <span class="icon blue">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+            </span>
+            <span class="title">Client candidates</span>
+        </div>
+        <div class="desc">Source-group observations awaiting mapping to a canonical client.</div>
+        <span class="metric {% if nav_pending_client_candidates %}warn{% else %}ok{% endif %}">{{ nav_pending_client_candidates }} open</span>
+    </a>
+
+    <a class="admin-card" href="{% url 'merge_candidates_queue' %}">
+        <div class="top">
+            <span class="icon violet">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="19" r="3"></circle><path d="M8.59 13.51l6.83 3.98"></path><path d="M15.41 6.51l-6.82 3.98"></path></svg>
+            </span>
+            <span class="title">Merge candidates</span>
+        </div>
+        <div class="desc">Potential duplicate devices flagged by the identity resolver.</div>
+        <span class="metric {% if nav_pending_merges %}warn{% else %}ok{% endif %}">{{ nav_pending_merges }} open</span>
+    </a>
+
+    <a class="admin-card" href="{% url 'software_products' %}?flagged=1">
+        <div class="top">
+            <span class="icon green">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
+            </span>
+            <span class="title">Review flagged software</span>
+        </div>
+        <div class="desc">Classifier flagged these products — allow, block, or send for review.</div>
+        <span class="metric {% if nav_pending_software_decisions %}warn{% else %}ok{% endif %}">{{ nav_pending_software_decisions }} waiting</span>
+    </a>
+
+    <a class="admin-card" href="{% url 'findings_queue' %}">
+        <div class="top">
+            <span class="icon amber">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+            </span>
+            <span class="title">All findings</span>
+        </div>
+        <div class="desc">Every open finding across coverage, patching, software, identity, etc.</div>
+        <span class="metric {% if open_findings %}warn{% else %}ok{% endif %}">{{ open_findings }} open</span>
+    </a>
+</div>
+
+{# ─── Software workflow ─────────────────────────────────── #}
+<div class="admin-section-label">Software</div>
+<div class="admin-cards">
+    <a class="admin-card" href="{% url 'software_page' %}">
+        <div class="top">
+            <span class="icon blue">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"></rect><line x1="9" y1="9" x2="15" y2="9"></line><line x1="9" y1="15" x2="15" y2="15"></line></svg>
+            </span>
+            <span class="title">Products</span>
+        </div>
+        <div class="desc">Every product installed across the fleet, with risk, category, and decision status.</div>
+        <span class="metric">{{ software_findings_open }} open issues</span>
+    </a>
+
+    <a class="admin-card" href="{% url 'software_publishers' %}">
+        <div class="top">
+            <span class="icon violet">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21V7l9-4 9 4v14"></path><path d="M9 21V12h6v9"></path></svg>
+            </span>
+            <span class="title">Publishers</span>
+        </div>
+        <div class="desc">One row per publisher; approve or reject an entire vendor's catalogue at once.</div>
+    </a>
+
+    <a class="admin-card" href="{% url 'software_tech_checklist' %}">
+        <div class="top">
+            <span class="icon amber">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"></path><path d="M20 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
+            </span>
+            <span class="title">Tech checklist</span>
+        </div>
+        <div class="desc">Per-device cleanup queue combining findings and reject/investigate decisions.</div>
+    </a>
+
+    <a class="admin-card" href="{% url 'software_user_risk' %}">
+        <div class="top">
+            <span class="icon rose">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+            </span>
+            <span class="title">User risk</span>
+        </div>
+        <div class="desc">Rollup by last-logged-in user — which users carry the most risky software.</div>
+    </a>
+
+    <a class="admin-card" href="{% url 'classifier_config' %}">
+        <div class="top">
+            <span class="icon teal">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+            </span>
+            <span class="title">Classifier rules</span>
+        </div>
+        <div class="desc">Regex rules for suspicious names, install paths, and EOL runtimes.</div>
+        <span class="metric">{{ classifier_rule_count }} enabled</span>
+    </a>
+</div>
+
+{# ─── Policy & configuration ────────────────────────────── #}
+<div class="admin-section-label">Policy &amp; configuration</div>
+<div class="admin-cards">
+    <a class="admin-card" href="{% url 'requirement_profiles_list' %}">
+        <div class="top">
+            <span class="icon slate">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+            </span>
+            <span class="title">Service requirements</span>
+        </div>
+        <div class="desc">Which agents / platforms every device should carry, per client.</div>
+        <span class="metric">{{ profile_count }} profiles · {{ profiles_without_clients }} unassigned</span>
+    </a>
+
+    <a class="admin-card" href="{% url 'device_status_config' %}">
+        <div class="top">
+            <span class="icon teal">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
+            </span>
+            <span class="title">Device status thresholds</span>
+        </div>
+        <div class="desc">Active-device / offline / stale timeouts — the numbers behind every "active" tile.</div>
+    </a>
+
+    <a class="admin-card" href="{% url 'notification_rules_list' %}">
+        <div class="top">
+            <span class="icon amber">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg>
+            </span>
+            <span class="title">Alert rules</span>
+        </div>
+        <div class="desc">Notifications for findings, sources going stale, and so on.</div>
+        <span class="metric">{{ alert_rule_count }} enabled</span>
+    </a>
+
+    <a class="admin-card" href="{% url 'notification_suppressions_list' %}">
+        <div class="top">
+            <span class="icon slate">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"></line></svg>
+            </span>
+            <span class="title">Suppressions</span>
+        </div>
+        <div class="desc">Exceptions that mute specific findings or devices.</div>
+        <span class="metric">{{ suppression_count }} active</span>
+    </a>
+</div>
+
+{# ─── Data & integrations ───────────────────────────────── #}
+<div class="admin-section-label">Data &amp; integrations</div>
+<div class="admin-cards">
+    <a class="admin-card" href="{% url 'sources_status' %}">
+        <div class="top">
+            <span class="icon blue">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path></svg>
+            </span>
+            <span class="title">Sources</span>
+        </div>
+        <div class="desc">Ninja / S1 / LMI / etc. — last-run health and rows collected.</div>
+        <span class="metric {% if stale_sources %}warn{% endif %}">{{ stale_sources }} stale / {{ source_count }} total</span>
+    </a>
+
+    <a class="admin-card" href="{% url 'admin_jobs' %}">
+        <div class="top">
+            <span class="icon teal">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+            </span>
+            <span class="title">Jobs</span>
+        </div>
+        <div class="desc">Every scheduled task with a Run-now button — intel connectors, evaluators, notifications, ingest.</div>
+        <span class="metric {% if intel_failed %}warn{% elif intel_never %}warn{% else %}ok{% endif %}">
+            {{ intel_ok }} ok · {{ intel_failed }} failed · {{ intel_never }} not run
+        </span>
+    </a>
+
+    <a class="admin-card" href="{% url 'findings_admin_health' %}">
+        <div class="top">
+            <span class="icon rose">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+            </span>
+            <span class="title">Ingest health</span>
+        </div>
+        <div class="desc">Platform-level admin findings — collector issues, missing IDs, dead-letter queue.</div>
+        <span class="metric {% if admin_finding_count %}warn{% else %}ok{% endif %}">{{ admin_finding_count }} open</span>
+    </a>
+
+    <a class="admin-card" href="{% url 'fleet_coverage' %}">
+        <div class="top">
+            <span class="icon green">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"></path></svg>
+            </span>
+            <span class="title">Coverage</span>
+        </div>
+        <div class="desc">Cross-client agent coverage against the requirement profiles.</div>
+    </a>
+
+    <a class="admin-card" href="{% url 'patching_queue' %}">
+        <div class="top">
+            <span class="icon amber">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg>
+            </span>
+            <span class="title">Patching</span>
+        </div>
+        <div class="desc">Patch scope, stalled devices, and evidence of recent patch activity.</div>
+        <span class="metric {% if patching_findings_open %}warn{% else %}ok{% endif %}">{{ patching_findings_open }} open</span>
+    </a>
+</div>
+
+{# ─── System ───────────────────────────────────────────── #}
+<div class="admin-section-label">System</div>
+<div class="admin-cards">
+    <a class="admin-card" href="/admin/">
+        <div class="top">
+            <span class="icon slate">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7h6V5a3 3 0 0 0-3-3z"></path><path d="M19 12H5a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-6a2 2 0 0 0-2-2z"></path></svg>
+            </span>
+            <span class="title">Django admin</span>
+        </div>
+        <div class="desc">Raw model editor for tenants, users, sources, catalog, decisions, findings, etc.</div>
+    </a>
+</div>
+{% endblock %}

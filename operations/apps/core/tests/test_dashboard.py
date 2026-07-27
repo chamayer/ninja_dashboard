@@ -4,6 +4,7 @@ from apps.core.views import (
     _dashboard_display_state,
     _dashboard_issue_state,
     _dashboard_priority,
+    _raw_json_object,
 )
 
 
@@ -51,3 +52,17 @@ def test_dashboard_priority_has_clear_no_concern_state():
     ]
 
     assert _dashboard_priority(domains) == ("none", "")
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ({"hostname": "example"}, {"hostname": "example"}),
+        ('{"hostname": "example"}', {"hostname": "example"}),
+        ("[1, 2]", {}),
+        ("not-json", {}),
+        (None, {}),
+    ],
+)
+def test_raw_json_object_normalizes_only_json_objects(value, expected):
+    assert _raw_json_object(value) == expected

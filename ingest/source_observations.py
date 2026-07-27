@@ -390,17 +390,8 @@ def _write_observations(
                 "schema_version":        1,
             })
 
+        written = 0
         if obs_rows:
-            db.insert_ignore(
-                cur,
-                "operations.entity_observations",
-                obs_rows,
-                conflict_keys=[
-                    "tenant_id", "collector_instance_id", "batch_id", "observation_hash"
-                ],
-            )
-            # Dual-write the bounded current-state table. History/reconciliation
-            # is enabled only after the complete-snapshot ledger is wired.
             current_rows = []
             for row in obs_rows:
                 current = dict(row)
@@ -415,8 +406,8 @@ def _write_observations(
                     str(row["raw_data"]).encode("utf-8")
                 ).digest()
                 current_rows.append(current)
-            write_current_rows(cur, current_rows)
-        complete_run(cur, run_id, len(obs_rows))
+            written = write_current_rows(cur, current_rows)
+        complete_run(cur, run_id, written)
         if not getattr(source, "is_partial_snapshot", False):
             reconcile_complete_run(cur, run_id)
             # A group is unmatched only if NO row in the batch resolved it.

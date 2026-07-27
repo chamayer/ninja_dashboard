@@ -953,19 +953,13 @@ class SourceBinding(UUIDTenantScopedModel):
 
 
 class EntityObservation(TenantScopedModel):
+    """Empty compatibility model retained until dependent views are rebuilt."""
+
     observation_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     client = models.ForeignKey(Client, on_delete=models.PROTECT, null=True, blank=True, related_name="observations")
     device = models.ForeignKey(Device, on_delete=models.PROTECT, null=True, blank=True, related_name="observations")
-    collector_instance = models.ForeignKey(
-        CollectorInstance,
-        on_delete=models.PROTECT,
-        related_name="entity_observations",
-    )
-    source_binding = models.ForeignKey(
-        SourceBinding,
-        on_delete=models.PROTECT,
-        related_name="entity_observations",
-    )
+    collector_instance = models.ForeignKey(CollectorInstance, on_delete=models.PROTECT, related_name="entity_observations")
+    source_binding = models.ForeignKey(SourceBinding, on_delete=models.PROTECT, related_name="entity_observations")
     entity_type = models.CharField(max_length=80)
     entity_key = models.TextField()
     platform = models.CharField(max_length=80)
@@ -991,9 +985,6 @@ class EntityObservation(TenantScopedModel):
                 name="uq_entity_obs_tenant_collector_batch_hash",
             ),
         )
-
-    def __str__(self) -> str:
-        return f"{self.entity_type}:{self.entity_key}"
 
 
 class EntityObservationCurrent(TenantScopedModel):
@@ -1190,7 +1181,11 @@ class SoftwareDecision(UUIDTenantScopedModel):
         null=True, blank=True,
         related_name="software_decisions",
     )
-    canonical_name = models.CharField(max_length=255)
+    # Match key — exactly one of these is set on any row (enforced by
+    # check constraint below). canonical_name binds a decision to a single
+    # title; publisher binds it to every title from that publisher.
+    canonical_name = models.CharField(max_length=255, blank=True, default="")
+    publisher = models.CharField(max_length=255, blank=True, default="")
     decision = models.CharField(max_length=32, choices=Decision.choices)
     reason = models.TextField(blank=True)
     decided_by = models.ForeignKey(
@@ -1209,23 +1204,162 @@ class SoftwareDecision(UUIDTenantScopedModel):
             # three partial constraints keyed by the scope shape.
             models.UniqueConstraint(
                 fields=("tenant", "canonical_name"),
-                condition=Q(client__isnull=True) & Q(device__isnull=True),
+                condition=Q(client__isnull=True) & Q(device__isnull=True) & ~Q(canonical_name=""),
                 name="uq_software_decisions_global",
             ),
             models.UniqueConstraint(
                 fields=("tenant", "client", "canonical_name"),
-                condition=Q(client__isnull=False) & Q(device__isnull=True),
+                condition=Q(client__isnull=False) & Q(device__isnull=True) & ~Q(canonical_name=""),
                 name="uq_software_decisions_client",
             ),
             models.UniqueConstraint(
                 fields=("tenant", "device", "canonical_name"),
-                condition=Q(device__isnull=False),
+                condition=Q(device__isnull=False) & ~Q(canonical_name=""),
                 name="uq_software_decisions_device",
+            ),
+            # Same shape for publisher-scoped decisions.
+            models.UniqueConstraint(
+                fields=("tenant", "publisher"),
+                condition=Q(client__isnull=True) & Q(device__isnull=True) & ~Q(publisher=""),
+                name="uq_software_decisions_pub_global",
+            ),
+            models.UniqueConstraint(
+                fields=("tenant", "client", "publisher"),
+                condition=Q(client__isnull=False) & Q(device__isnull=True) & ~Q(publisher=""),
+                name="uq_software_decisions_pub_client",
+            ),
+            models.UniqueConstraint(
+                fields=("tenant", "device", "publisher"),
+                condition=Q(device__isnull=False) & ~Q(publisher=""),
+                name="uq_software_decisions_pub_device",
+            ),
+            # Exactly one of (canonical_name, publisher) is set.
+            models.CheckConstraint(
+                condition=(
+                    (Q(canonical_name="") & ~Q(publisher=""))
+                    | (~Q(canonical_name="") & Q(publisher=""))
+                ),
+                name="ck_software_decisions_scope_key_xor",
             ),
         )
 
     def __str__(self) -> str:
         return f"{self.client_id}:{self.canonical_name}:{self.decision}"
+
+
+class PublisherAlias(models.Model):
+    """Publisher-name normalisation. Every raw publisher variant maps to
+    a canonical publisher for matching / grouping ONLY. Detail pages
+    still surface the raw ingested string; the alias is used for the
+    aggregation aggregate — no publisher name is ever hidden.
+    """
+    id = models.SmallAutoField(primary_key=True)
+    raw_pattern = models.CharField(max_length=255, help_text=(
+        "SQL ILIKE pattern (use %% wildcards) OR exact string. Matched "
+        "case-insensitively against operations.software_installations_current.publisher."
+    ))
+    canonical_publisher = models.CharField(max_length=255)
+    is_regex = models.BooleanField(default=False)
+    enabled = models.BooleanField(default=True)
+    note = models.CharField(max_length=240, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "publisher_aliases"
+        ordering = ("canonical_publisher", "raw_pattern")
+        constraints = (
+            models.UniqueConstraint(
+                fields=("raw_pattern",),
+                name="uq_publisher_alias_raw_pattern",
+            ),
+        )
+
+    def __str__(self) -> str:
+        return f"{self.raw_pattern} → {self.canonical_publisher}"
+
+
+class PublisherCategory(models.Model):
+    """Data-driven default categorisation: any product whose publisher
+    matches ``publisher_pattern`` is auto-tagged with ``categories``.
+    Editable in Django admin so operators can extend the rule set
+    without a deploy. Applied on top of, not instead of, the per-title
+    catalogue rows in ``SoftwareCatalog.categories``.
+    """
+    id = models.SmallAutoField(primary_key=True)
+    publisher_pattern = models.CharField(max_length=255, help_text=(
+        "SQL ILIKE pattern; matched against the canonical publisher "
+        "after PublisherAlias normalisation."
+    ))
+    categories = models.JSONField(default=list, blank=True, help_text=(
+        "List of category tokens from the canonical MSP taxonomy: "
+        "system, driver, security, av, edr, browser, productivity, "
+        "communication, media, development, runtime, remote-access, "
+        "management, rmm, backup, virtualization, storage, networking, "
+        "database, engineering, utility. Free-form tokens are allowed "
+        "but the built-in category chip strip only surfaces tokens "
+        "operators have historically used, so a stable token wins."
+    ))
+    is_regex = models.BooleanField(default=False)
+    enabled = models.BooleanField(default=True)
+    note = models.CharField(max_length=240, blank=True, default="")
+    priority = models.SmallIntegerField(default=0, help_text=(
+        "Higher priority wins when multiple patterns match the same "
+        "publisher. Ties broken by id."
+    ))
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "publisher_categories"
+        ordering = ("-priority", "publisher_pattern")
+
+    def __str__(self) -> str:
+        return f"{self.publisher_pattern}: {', '.join(self.categories or [])}"
+
+
+class IntelMatcherHint(models.Model):
+    """Data-driven adjustments to the intel matcher's precision.
+
+    Two kinds:
+      * ``require_third_token`` — for common vendors like Microsoft or
+        Adobe, a canonical name must carry a distinctive third token
+        (version, product line) beyond ``vendor + product`` before a
+        CVE match fires. Prevents `Microsoft Office Shared MUI` from
+        inheriting every Office CVE ever.
+      * ``ignore_sub_component`` — canonical names matching ``pattern``
+        skip CVE matching entirely because they are support / MUI /
+        proofing / language-pack components, not attack surfaces.
+        Their risk is inherited from the parent product via
+        publisher-scope decisions.
+
+    Every rule is admin-maintainable; nothing hardcoded in Python.
+    """
+    class Kind(models.TextChoices):
+        REQUIRE_THIRD_TOKEN = "require_third_token", "Require third token"
+        IGNORE_SUB_COMPONENT = "ignore_sub_component", "Ignore sub-component"
+
+    id = models.SmallAutoField(primary_key=True)
+    kind = models.CharField(max_length=32, choices=Kind.choices)
+    pattern = models.CharField(max_length=255, help_text=(
+        "For require_third_token: the vendor token (lowercase, e.g. "
+        "'microsoft'). For ignore_sub_component: a Python regex "
+        "matched case-insensitively against the canonical name."
+    ))
+    enabled = models.BooleanField(default=True)
+    note = models.CharField(max_length=240, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "intel_matcher_hints"
+        ordering = ("kind", "pattern")
+        constraints = (
+            models.UniqueConstraint(
+                fields=("kind", "pattern"),
+                name="uq_intel_matcher_hint_kind_pattern",
+            ),
+        )
+
+    def __str__(self) -> str:
+        return f"[{self.kind}] {self.pattern}"
 
 
 class SoftwareClassifierRule(models.Model):

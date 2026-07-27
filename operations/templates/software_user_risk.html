@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% load human_labels %}
+
+{% block title %}User exposure — Software{% endblock %}
+
+{% block content %}
+<style>
+    .ur-card { background: var(--surface); border: 1px solid var(--border);
+               border-radius: 6px; padding: 0.9rem 1.1rem; margin-bottom: 0.5rem; }
+    .ur-card h3 { margin: 0 0 0.4rem; font-size: 0.95rem; display: flex;
+                  align-items: center; gap: 0.6rem; }
+    .ur-card h3 .count { font-size: 0.75rem; padding: 0.15rem 0.55rem;
+                         background: #fee2e2; color: #991b1b; border-radius: 999px; }
+    .ur-device { margin-top: 0.5rem; padding-top: 0.4rem;
+                 border-top: 1px dashed var(--border); font-size: 0.86rem; }
+    .ur-device .head { color: var(--muted); font-size: 0.82rem; margin-bottom: 0.2rem; }
+    .ur-items { display: flex; flex-wrap: wrap; gap: 0.35rem 0.9rem; }
+    .ur-item { padding: 0.15rem 0.5rem; background: #f3f4f6; border-radius: 4px;
+               font-size: 0.82rem; }
+</style>
+
+<div class="card">
+    <h1 style="margin:0;">User exposure</h1>
+    <p class="muted" style="margin-top:0.35rem;">
+        Software items flagged on the last device each user logged into.
+        Users who log into multiple devices are shown across all of them.
+    </p>
+</div>
+
+<div class="tile-grid">
+    <div class="tile"><div class="tile-label">Users with items</div><div class="tile-value">{{ user_count }}</div></div>
+    <div class="tile"><div class="tile-label">Total items</div><div class="tile-value">{{ total_items }}</div></div>
+</div>
+
+<div class="card">
+    <form action="" method="get" class="filterbar">
+        <div>
+            <label>User</label>
+            <input type="search" name="q" value="{{ active_q }}" placeholder="search username…">
+        </div>
+        <div>
+            <label>Client</label>
+            <select name="client" multiple size="1">
+                {% for c in clients %}
+                    <option value="{{ c.slug }}" {% if c.slug in active_clients %}selected{% endif %}>{{ c.display_name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <label>Reason kind</label>
+            <input type="search" name="kind" value="{{ active_kind }}" placeholder="e.g. suspicious name">
+        </div>
+        <div><button type="submit">Apply</button></div>
+        {% if active_q or active_clients or active_kind %}
+        <div><a href="?" class="reset">Clear</a></div>
+        {% endif %}
+        <div style="margin-left:auto;">
+            {% include "_csv_download.html" %}
+        </div>
+    </form>
+</div>
+
+{% if users %}
+{% for u in users %}
+<div class="ur-card">
+    <h3>
+        <span><code>{{ u.last_user }}</code></span>
+        <span class="muted" style="font-weight:400;">
+            · {{ u.device_list|length }} device{{ u.device_list|length|pluralize }}
+            · {{ u.clients|length }} client{{ u.clients|length|pluralize }}
+            ({% for cn in u.clients %}{{ cn }}{% if not forloop.last %}, {% endif %}{% endfor %})
+        </span>
+        <span class="count">{{ u.item_count }}</span>
+    </h3>
+    {% for d in u.device_list %}
+    <div class="ur-device">
+        <div class="head">
+            <a href="{% url 'device_detail' org_slug=d.client_slug device_id=d.device_id %}">{{ d.hostname }}</a>
+            <span class="muted">· {{ d.client_name }}</span>
+        </div>
+        <div class="ur-items">
+            {% for item in d.items %}
+            <span class="ur-item">
+                <a href="{% url 'software_detail' name=item.canonical_name %}">{{ item.canonical_name }}</a>
+                <span class="muted">· {{ item.kind|humanize_label|default:item.kind }}{% if item.category %} · {{ item.category }}{% endif %}</span>
+            </span>
+            {% endfor %}
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% endfor %}
+{% if user_count > 500 %}
+<p class="muted">Showing top 500 users (of {{ user_count }}). Filter by client to narrow.</p>
+{% endif %}
+{% else %}
+<p class="muted">Nothing on the user-risk queue for the current filter.</p>
+{% endif %}
+{% endblock %}

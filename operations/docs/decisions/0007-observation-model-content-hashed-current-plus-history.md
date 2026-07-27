@@ -1,10 +1,28 @@
 # 0007 — Observation model: content-hashed current + SCD-2 history
 
-Status: Proposed (v3 — revised after review 2026-07-21)
-Date: 2026-07-21 (v1 drafted); 2026-07-21 (v2/v3 revised)
+Status: Accepted and deployed (v5 — writer hardening + retention wired)
+Date: 2026-07-21 (v1 drafted); 2026-07-21 (v2/v3 revised); 2026-07-22 (v4/v5)
 
 ## Revision history
 
+- **v5 (2026-07-22).** Post-deployment audit against ADR intent uncovered
+  four gaps in the writer primitive and the retention path. All closed:
+  (1) per-tuple `pg_advisory_xact_lock` covers the absent-row race that
+  `FOR UPDATE` alone cannot serialize; (2) out-of-order guard now runs
+  in Python before any history mutation and is mirrored in the SQL upsert
+  predicate — equal timestamps are treated as stale to prevent
+  zero-length SCD-2 intervals; (3) resolved `device_id` / `client_id`
+  are preserved via COALESCE in the SQL upsert and Python-side merge, so
+  a connector NULL cannot clear a resolver-populated value; (4) nightly
+  retention is wired into the ingest scheduler and routes through the
+  security-definer `operations.purge_closed_observation_history` function
+  which owns the "never delete an open version" guarantee. Closing
+  `_history.last_seen_at` is now correctly the prior current row's last
+  confirmed observation time, side-banded as `_prior_last_seen_at`.
+- **v4 (2026-07-22).** Software installations were separated from generic
+  observations into dedicated current/history tables. The legacy append
+  table was seeded into bounded current/history baselines and truncated;
+  it remains only as an empty compatibility shell.
 - **v3 (2026-07-21).** Added material history payloads, received-time
   provenance/skew handling, source-retention safety, raw-data governance,
   tenant-safe matview boundaries, and identity-evidence preservation.
@@ -90,6 +108,16 @@ Related decisions:
    history. Written when material or presence state changes. Retention lives
    here.
 
+### Software installation exception
+
+Software is a high-cardinality device-to-product relationship inventory, not
+generic source state. It uses `software_installations_current` and
+`software_installation_history`, keyed by tenant/client/device/canonical name.
+Its history records publisher, version, location, install date, and presence
+intervals. It does not retain raw payload JSON. The generic observation tables
+therefore cover device-like source state (`agent.*`, VMs, network devices,
+monitors, and orgs) only.
+
 ### Observation identity contract (uniform physical key)
 
 Both tables use one physical identity tuple:
@@ -103,11 +131,6 @@ changing the database key.
   `(tenant_id, source_binding_id, entity_type, '', entity_key)` is used.
   `entity_key` is the source's native id (Ninja device id, S1 uuid,
   LMI host id, org id), unique within its binding.
-- **`software`** — `(tenant_id, source_binding_id, entity_type,
-  parent_source_key, entity_key)`. `parent_source_key` is the source's
-  own device id (Ninja `deviceId`), NOT the operations `device_id`
-  (which is nullable and post-hoc mutable). `entity_key` is the
-  normalized software name.
 - **Future child-entity sources** must declare their parent scope in
   the writer primitive. Adding a new entity family is a code change
   in one file, not a schema migration.
@@ -147,9 +170,19 @@ Every write to `_current` (regardless of material hash change):
 - Does not overwrite `device_id` / `client_id` with NULL if the current
   row has a resolved value — post-hoc resolver / merge writes take
   precedence over connector NULLs.
-- Out-of-order guard: `UPDATE ... WHERE _current.observed_at <=
-  EXCLUDED.observed_at`. Older snapshots silently lose the race so
-  clock skew or delayed workers cannot poison newer state.
+- Out-of-order guard: the incoming row is dropped in Python whenever
+  `row.observed_at <= _current.observed_at` (equal timestamps are treated
+  as stale — different material at the same source time would otherwise
+  produce a zero-length SCD-2 interval). The bespoke SQL upsert mirrors
+  the guard as defence in depth: `WHERE _current.observed_at <
+  EXCLUDED.observed_at`. Older snapshots silently lose the race.
+- Absent-row race: `SELECT ... FOR UPDATE` cannot lock a row that does
+  not exist yet, so concurrent writers claiming the same new identity
+  would race. The primitive takes a transaction-scoped advisory lock
+  keyed on the identity tuple (`pg_advisory_xact_lock(hashtextextended(
+  tenant_id || source_binding_id || entity_type || parent_source_key ||
+  entity_key, 0))`) *before* the `FOR UPDATE` read, so both existing and
+  brand-new tuples are serialized.
 
 The history version-opening event stores immutable `received_at`, the ingest
 receipt time, separately from source/snapshot `observed_at`; `_current` stores
@@ -159,6 +192,9 @@ successful snapshot-run boundary rather than an unqualified wall-clock
 `NOW()`.
 
 `_history` writes are conditional on material or presence-state change.
+On close, `_history.last_seen_at` is the prior `_current.last_seen_at` —
+the last time the *old* state was confirmed. Using the incoming row's
+`last_seen_at` would attribute the closing time to the new state.
 
 ### Material-hash policy (per-entity-type family)
 
@@ -299,11 +335,26 @@ Constraint:
   RLS does not protect direct materialized-view reads; security-barrier
   wrappers or restricted grants are required where appropriate.
 
+**Retention (v5 wired):**
+
+- Nightly `run_observation_history_prune_once` (in `ingest/main.py`)
+  invokes `retention_observations.purge_all(days=90)`, which calls the
+  security-definer function `operations.purge_closed_observation_history(
+  cutoff)` (migration 0074). Default 90 days; overridable via
+  `OBSERVATION_HISTORY_RETENTION_DAYS` and
+  `OBSERVATION_HISTORY_RETENTION_HOUR` settings.
+- The function's DELETE predicate is
+  `effective_to IS NOT NULL AND effective_to < cutoff`, so the one open
+  version per identity is textually excluded from deletion. The Python
+  path routes through the function name only; a repo-level test
+  (`ingest/tests/test_retention_observations.py`) asserts no raw DELETE
+  is issued from application code.
+
 **Prohibited / rejected:**
 
 - Retention job on `_current` as a substitute for the design.
   Retention on `_history` (closed versions only, indexed on
-  `effective_to`) is a natural knob.
+  `effective_to`) is the sanctioned knob.
 - Per-connector variation of material-hash algorithm. Per-entity-type
   policy in shared config is the intended flexibility.
 - Overwriting resolved `device_id` / `client_id` on `_current` with

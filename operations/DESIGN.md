@@ -13,8 +13,11 @@ explicitly — never let them drift silently.
    Ninja is one source. The platform must work identically if Ninja is
    replaced by another RMM at any client or tenant.
 
-2. **One observation pipeline.** All sources write to
-   `operations.entity_observations`. No parallel observation tables.
+2. **One normalized observation pipeline.** Generic source state writes to
+   `operations.entity_observation_current` with material-change history in
+   `operations.entity_observation_history`. Software installations are a
+   dedicated device-to-product inventory with their own current/history
+   tables; they are not generic observations.
 
 3. **Modules provide data and configuration. The platform evaluates.**
    A module's job is to collect observations and define coverage
@@ -99,10 +102,16 @@ differentiates sources within a type.
 
 ### 3.2 Observation pipeline
 
-Every source connector writes to `operations.entity_observations`.
-`device_id` is resolved at write time where possible (see §4 Identity
-Resolution). Unresolved observations have `device_id = NULL` and are
-queued for async resolution.
+Every source connector writes one current row per source-scoped identity to
+`operations.entity_observation_current`; material and presence changes append
+SCD-2 intervals to `operations.entity_observation_history`. `device_id` is
+resolved at write time where possible (see §4 Identity Resolution). Unresolved
+current observations have `device_id = NULL` and are queued for async
+resolution. `software_installations_current` and
+`software_installation_history` hold Ninja's device-to-product inventory.
+
+`operations.entity_observations` is retired as an append-cycle store and
+retained empty only as a temporary compatibility shell.
 
 `ninja_agent_compliance.platform_observations` is the legacy
 multi-source observation table. It will be retired once:

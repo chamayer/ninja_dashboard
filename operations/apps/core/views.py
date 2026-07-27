@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import json
+import os
 import uuid
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
+from urllib import request as _urllib_request
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -18,9 +22,13 @@ from django.views.decorators.http import require_GET, require_POST
 
 from .client_workspace import build_client_directory, build_client_workspace
 from .csv_export import csv_response, wants_csv
+from .device_status import DEFAULTS as DEVICE_STATUS_DEFAULTS
+from .device_status import POLICY_NAME as DEVICE_STATUS_POLICY_NAME
+from .device_status import get_device_status_policy
 from .forms import ClientPolicyForm
 from .models import (
     AdminFinding,
+    Agent,
     AuditLog,
     Client,
     ClientCandidate,
@@ -28,6 +36,7 @@ from .models import (
     ClientNameAlias,
     ClientOrgExclude,
     ClientPolicy,
+    CoverageRequirement,
     Device,
     DeviceOperatorDecision,
     DevicePatchingOverride,
@@ -39,6 +48,7 @@ from .models import (
     NotificationEvent,
     NotificationRoute,
     NotificationRule,
+    PublisherCategory,
     RequirementProfile,
     SoftwareCatalog,
     SoftwareDecision,
@@ -172,8 +182,11 @@ def healthz(request: HttpRequest) -> JsonResponse:
 @login_required
 def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
     now = timezone.now()
+    device_policy = get_device_status_policy()
+    active_device_days = device_policy["active_device_days"]
+    source_delay_hours = device_policy["source_delay_hours"]
     yesterday = now - timedelta(hours=24)
-    stale_before = now - timedelta(hours=8)
+    stale_before = now - timedelta(hours=source_delay_hours)
     clients = list(
         Client.objects.filter(tenant_id=1, deleted_at__isnull=True).order_by("display_name")
     )
@@ -205,6 +218,18 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
         else:
             device_mix["other"] += count
     total_devices = sum(device_counts.values())
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        cur.execute(
+            f"""
+            SELECT COUNT(*)::int
+            FROM operations.v_device
+            WHERE tenant_id = 1
+              AND lifecycle_status <> 'retired'
+              AND last_contact_at >= NOW() - INTERVAL '{active_device_days} days'
+            """
+        )
+        active_devices = cur.fetchone()[0]
 
     # Aggregate active, unsnoozed issues by client/domain/type/severity. This
     # replaces filtered joins repeated for every dashboard metric and keeps the
@@ -469,7 +494,7 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
             "name": "Inventory",
             "description": "Devices, ownership, and data quality",
             "value": f"{total_devices:,}",
-            "value_label": "active devices",
+            "value_label": "managed devices",
             "has_data": total_devices > 0,
             "delayed": any_source_delayed,
             "updated_at": dashboard_updated_at,
@@ -641,6 +666,8 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
         "home.html",
         {
             "total_devices": total_devices,
+            "active_devices": active_devices,
+            "active_device_days": active_device_days,
             "retired_devices": retired_devices,
             "device_mix": device_mix,
             "total_clients": len(clients),
@@ -683,22 +710,20 @@ def _type_summary(devices: list) -> list[tuple[str, str, int]]:
 @login_required
 def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
     """Summary hub for a client or the fleet."""
+    device_policy = get_device_status_policy()
+    active_device_days = device_policy["active_device_days"]
     ctx: dict = {}
     if getattr(request, "current_client", None):
         client = request.current_client
         devices = list(
-            Device.objects.filter(
-                tenant_id=1, client=client, deleted_at__isnull=True
-            ).only("device_type")
+            Device.objects.filter(tenant_id=1, client=client, deleted_at__isnull=True).only(
+                "device_type"
+            )
         )
         ctx["device_count"] = len(devices)
         ctx["type_summary"] = _type_summary(devices)
-        ctx["client_links"] = list(
-            client.links.select_related("source").order_by("source__name")
-        )
-        ctx["policy_count"] = ClientPolicy.objects.filter(
-            tenant_id=1, client=client
-        ).count()
+        ctx["client_links"] = list(client.links.select_related("source").order_by("source__name"))
+        ctx["policy_count"] = ClientPolicy.objects.filter(tenant_id=1, client=client).count()
         ctx["policy_categories"] = list(
             ClientPolicy.objects.filter(tenant_id=1, client=client)
             .values_list("category", flat=True)
@@ -718,7 +743,7 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
                 # Total devices per scope. Device type is form factor only;
                 # coverage applicability comes from requirements/entity_type.
                 cur.execute(
-                    """
+                    f"""
                     SELECT od.device_role AS scope, COUNT(*)::int
                     FROM operations.devices od
                     WHERE od.tenant_id = 1 AND od.client_id = %s AND od.deleted_at IS NULL
@@ -740,7 +765,7 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
                     JOIN operations.devices od
                          ON od.id = ap.device_id AND od.deleted_at IS NULL
                     WHERE ap.tenant_id = 1 AND ap.client_id = %s
-                      AND ap.last_observed_at > NOW() - INTERVAL '7 days'
+                      AND ap.last_observed_at > NOW() - INTERVAL '{active_device_days} days'
                       AND od.lifecycle_status != 'retired'
                     GROUP BY 1, 2, 3
                     """,
@@ -790,7 +815,8 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
         presence_map: dict = {}
         for platform, etype, scope, present, last_seen in presence_rows:
             presence_map[(platform, etype, scope)] = {
-                "present": present, "last_seen": last_seen,
+                "present": present,
+                "last_seen": last_seen,
             }
 
         def _scope_total(scope: str) -> int:
@@ -801,12 +827,16 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
         def _scope_present(platform: str, etype: str, scope: str):
             if scope == "all":
                 count = sum(
-                    v["present"] for (p, e, _), v in presence_map.items()
+                    v["present"]
+                    for (p, e, _), v in presence_map.items()
                     if p == platform and e == etype
                 )
                 last = max(
-                    (v["last_seen"] for (p, e, _), v in presence_map.items()
-                     if p == platform and e == etype and v["last_seen"]),
+                    (
+                        v["last_seen"]
+                        for (p, e, _), v in presence_map.items()
+                        if p == platform and e == etype and v["last_seen"]
+                    ),
                     default=None,
                 )
                 return count, last
@@ -817,17 +847,20 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
         for platform, etype, scope, severity in req_rows:
             present, last_seen = _scope_present(platform, etype, scope)
             total = _scope_total(scope)
-            entry = platform_coverage.setdefault(platform, {
-                "severity": _PLATFORM_SEVERITY.get(platform, severity),
-                "scopes": {},
-            })
+            entry = platform_coverage.setdefault(
+                platform,
+                {
+                    "severity": _PLATFORM_SEVERITY.get(platform, severity),
+                    "scopes": {},
+                },
+            )
             scope_label = "all devices" if scope == "all" else scope + "s"
             entry["scopes"][scope_label] = {
-                "total":    total,
-                "present":  present,
-                "gap":      max(0, total - present),
+                "total": total,
+                "present": present,
+                "gap": max(0, total - present),
                 "last_seen": last_seen,
-                "role":     "" if scope == "all" else scope,
+                "role": "" if scope == "all" else scope,
                 "entity_type": etype,
             }
         ctx["platform_coverage"] = platform_coverage
@@ -841,25 +874,32 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
 
             # Devices online/offline + patch-scope for this client.
             cur.execute(
-                """
-                SELECT COUNT(*) AS total,
-                       COUNT(*) FILTER (WHERE is_online_any) AS online,
-                       COUNT(*) FILTER (WHERE NOT is_online_any) AS offline,
-                       COUNT(*) FILTER (WHERE device_role = 'server') AS servers,
-                       COUNT(*) FILTER (WHERE device_role = 'workstation') AS workstations,
-                       COUNT(*) FILTER (WHERE effective_patching_scope = 'Included') AS in_patch_scope,
-                       COUNT(*) FILTER (WHERE last_contact_at IS NULL
-                                        OR last_contact_at < NOW() - INTERVAL '7 days') AS stale
+                f"""
+            SELECT COUNT(*) AS total,
+                   COUNT(*) FILTER (WHERE is_online_any) AS online,
+                   COUNT(*) FILTER (WHERE NOT is_online_any) AS offline,
+                   COUNT(*) FILTER (WHERE device_role = 'server') AS servers,
+                   COUNT(*) FILTER (WHERE device_role = 'workstation') AS workstations,
+                   COUNT(*) FILTER (WHERE effective_patching_scope = 'Included') AS in_patch_scope,
+                   COUNT(*) FILTER (WHERE lifecycle_status <> 'retired'
+                                     AND last_contact_at >= NOW() - INTERVAL '{active_device_days} days') AS active,
+                   COUNT(*) FILTER (WHERE last_contact_at IS NULL
+                                        OR last_contact_at < NOW() - INTERVAL '{active_device_days} days') AS stale
                 FROM operations.v_device
                 WHERE tenant_id = 1 AND client_id = %s
-                """,
+            """,
                 [str(client.id)],
             )
             r = cur.fetchone()
             ctx["dev_overview"] = {
-                "total": r[0], "online": r[1], "offline": r[2],
-                "servers": r[3], "workstations": r[4],
-                "in_patch_scope": r[5], "stale": r[6],
+                "total": r[0],
+                "online": r[1],
+                "offline": r[2],
+                "servers": r[3],
+                "workstations": r[4],
+                "in_patch_scope": r[5],
+                "active": r[6],
+                "stale": r[7],
             }
 
             # Severity breakdown of open findings for this client.
@@ -903,9 +943,15 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
                 [str(client.id)],
             )
             ctx["attention_findings"] = [
-                {"id": row[0], "severity": row[1], "ftype": row[2],
-                 "title": row[3], "last_detected_at": row[4],
-                 "device_id": row[5], "hostname": row[6]}
+                {
+                    "id": row[0],
+                    "severity": row[1],
+                    "ftype": row[2],
+                    "title": row[3],
+                    "last_detected_at": row[4],
+                    "device_id": row[5],
+                    "hostname": row[6],
+                }
                 for row in cur.fetchall()
             ]
 
@@ -931,8 +977,14 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
                 [str(client.id)],
             )
             ctx["offender_devices"] = [
-                {"id": row[0], "hostname": row[1], "role": row[2],
-                 "os_group": row[3], "last_contact_at": row[4], "severe": row[5]}
+                {
+                    "id": row[0],
+                    "hostname": row[1],
+                    "role": row[2],
+                    "os_group": row[3],
+                    "last_contact_at": row[4],
+                    "severe": row[5],
+                }
                 for row in cur.fetchall()
             ]
 
@@ -974,7 +1026,7 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
         else:
             ctx["client_health"] = "green"
             ctx["client_bucket"] = "healthy"
-        ctx.update(build_client_workspace(client, ctx))
+        ctx.update(build_client_workspace(client, ctx, device_policy=device_policy))
     else:
         # All-clients fleet view.
         clients_with_counts = list(
@@ -1017,9 +1069,7 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
                 ORDER BY platform
                 """
             )
-            source_coverage = [
-                {"name": r[0], "client_count": int(r[1])} for r in cur.fetchall()
-            ]
+            source_coverage = [{"name": r[0], "client_count": int(r[1])} for r in cur.fetchall()]
         ctx["clients_with_counts"] = clients_with_counts
         ctx["all_device_count"] = sum(c.device_count for c in clients_with_counts)
         ctx["all_client_count"] = len(clients_with_counts)
@@ -1036,9 +1086,8 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
 def org_devices(request: HttpRequest, org_slug: str) -> HttpResponse:
     """Device list for a specific client with server-side search/filter."""
     client = _get_client_by_slug(org_slug)
-    base_qs = Device.objects.filter(
-        tenant_id=1, client=client, deleted_at__isnull=True
-    )
+    active_device_days = get_device_status_policy()["active_device_days"]
+    base_qs = Device.objects.filter(tenant_id=1, client=client, deleted_at__isnull=True)
     type_counts = {
         row["device_type"]: row["count"]
         for row in base_qs.values("device_type").annotate(count=Count("id"))
@@ -1071,12 +1120,12 @@ def org_devices(request: HttpRequest, org_slug: str) -> HttpResponse:
         with transaction.atomic(), connection.cursor() as cur:
             cur.execute("SET LOCAL operations.tenant_id = 1")
             cur.execute(
-                """
+                f"""
                 SELECT DISTINCT device_id
                 FROM operations.device_agent_presence_current
                 WHERE tenant_id = 1 AND client_id = %s AND platform = %s
                   AND entity_type = %s
-                  AND last_observed_at > NOW() - INTERVAL '7 days'
+                  AND last_observed_at > NOW() - INTERVAL '{active_device_days} days'
                 """,
                 [str(client.id), missing_platform, missing_entity_type],
             )
@@ -1098,11 +1147,11 @@ def org_devices(request: HttpRequest, org_slug: str) -> HttpResponse:
         return csv_response(
             devices_qs,
             columns=[
-                ("Hostname",     "canonical_hostname"),
-                ("Serial",       "canonical_serial"),
-                ("Type",         "device_type"),
-                ("Role",         "device_role"),
-                ("Device ID",    lambda d: str(d.id)),
+                ("Hostname", "canonical_hostname"),
+                ("Serial", "canonical_serial"),
+                ("Type", "device_type"),
+                ("Role", "device_role"),
+                ("Device ID", lambda d: str(d.id)),
             ],
             filename_stem=f"{org_slug}_devices",
         )
@@ -1141,9 +1190,7 @@ def org_devices(request: HttpRequest, org_slug: str) -> HttpResponse:
 @login_required
 def org_policies(request: HttpRequest, org_slug: str) -> HttpResponse:
     client = _get_client_by_slug(org_slug)
-    policies = list(
-        ClientPolicy.objects.filter(tenant_id=1, client=client).order_by("category")
-    )
+    policies = list(ClientPolicy.objects.filter(tenant_id=1, client=client).order_by("category"))
     return render(
         request,
         "org_policies.html",
@@ -1153,52 +1200,148 @@ def org_policies(request: HttpRequest, org_slug: str) -> HttpResponse:
 
 # ── Raw snapshots on Device Detail (Identity & raw tab) ──────────────
 #
-# Groups top-level fields from each source's raw_data payload into a
-# category matrix. Fields that appear in ≥2 sources become the "common"
-# table (with per-value source attribution and disagreement highlight);
-# fields unique to one snapshot go into that source's specifics list.
-# The pretty-printed JSON is still available under each source for the
-# nested / long-tail fields the matrix collapses.
+# Cross-source field comparison uses `canonical_data` — the normalized
+# per-source projection the writer emits. Every source rewrites the same
+# concepts (hostname, os_name, serial_number, macs, is_online, ...) into
+# canonical_data with identical key names, so the matrix can compare
+# values directly across sources. Rendering priority:
+#
+#   1. Canonical fields, grouped by category, values shown per source
+#      with disagreement highlight.
+#   2. Per-source native (raw_data) fields the source uses but that are
+#      not part of the canonical projection.
+#   3. Full raw JSON payload under an inner collapse, for the long tail.
 
 _RAW_FIELD_CATEGORIES: list[tuple[str, set[str]]] = [
-    ("Identity", {
-        "hostname", "hostname", "hostname_", "hostnamefqdn",
-        "host", "name", "displayname", "systemname",
-        "computername", "netbiosname", "dnsname",
-    }),
-    ("Serial & IDs", {
-        "id", "uuid", "deviceid", "agentid", "endpointid",
-        "serial", "serialnumber", "sn", "assettag", "assetid",
-        "productcode",
-    }),
-    ("Network", {
-        "mac", "macaddress", "macaddresses", "ip", "ipaddress",
-        "ipaddresses", "publicip", "privateip", "externalip",
-        "internalip", "gateway", "subnet",
-    }),
-    ("Operating system", {
-        "os", "osname", "osfamily", "osversion", "osrevision",
-        "osarch", "osarchitecture", "osbuildnumber", "osreleaseid",
-        "platform", "kernelversion", "domain", "domainrole",
-    }),
-    ("Hardware", {
-        "cpu", "cpuid", "cpucount", "model", "manufacturer",
-        "chassistype", "totalmemorybytes", "memory",
-        "isvirtualmachine", "vmtype",
-    }),
-    ("Presence & state", {
-        "ishostonline", "isonline", "isactive", "offline",
-        "lastseen", "lastseenat", "lastcontact", "lastcontactat",
-        "lastactive", "lastactivetime", "hoststatechangedate",
-        "lastloggedinuser", "lastuser", "needsreboot",
-        "maintenancestatus", "state",
-    }),
-    ("Enrollment & grouping", {
-        "groupid", "groupname", "organizationid", "organization",
-        "locationid", "location", "policyid", "policyname",
-        "rolepolicyid", "nodeclass", "approvalstatus", "tags",
-        "site", "siteid", "siteid_", "tenantid",
-    }),
+    (
+        "Identity",
+        {
+            "hostname",
+            "hostnamefqdn",
+            "host",
+            "name",
+            "displayname",
+            "systemname",
+            "computername",
+            "netbiosname",
+            "dnsname",
+        },
+    ),
+    (
+        "Serial & IDs",
+        {
+            "id",
+            "uuid",
+            "vmuuid",
+            "deviceid",
+            "agentid",
+            "endpointid",
+            "serial",
+            "serialnumber",
+            "sn",
+            "assettag",
+            "assetid",
+            "productcode",
+        },
+    ),
+    (
+        "Network",
+        {
+            "mac",
+            "macs",
+            "macaddress",
+            "macaddresses",
+            "ip",
+            "ipaddress",
+            "ipaddresses",
+            "publicip",
+            "privateip",
+            "externalip",
+            "internalip",
+            "gateway",
+            "subnet",
+        },
+    ),
+    (
+        "Operating system",
+        {
+            "os",
+            "osname",
+            "osfamily",
+            "osversion",
+            "osrevision",
+            "osarch",
+            "osarchitecture",
+            "osbuildnumber",
+            "osreleaseid",
+            "platform",
+            "kernelversion",
+            "domain",
+            "domainrole",
+        },
+    ),
+    (
+        "Hardware",
+        {
+            "cpu",
+            "cpuid",
+            "cpucount",
+            "model",
+            "manufacturer",
+            "chassistype",
+            "totalmemorybytes",
+            "memory",
+            "isvirtualmachine",
+            "isvm",
+            "vmtype",
+        },
+    ),
+    (
+        "Presence & state",
+        {
+            "ishostonline",
+            "isonline",
+            "isactive",
+            "offline",
+            "lastseen",
+            "lastseenat",
+            "lastcontact",
+            "lastcontactat",
+            "lastactive",
+            "lastactivetime",
+            "hoststatechangedate",
+            "lastloggedinuser",
+            "lastuser",
+            "needsreboot",
+            "maintenancestatus",
+            "state",
+            "powerstate",
+            "lastboottimeat",
+        },
+    ),
+    (
+        "Enrollment & grouping",
+        {
+            "groupid",
+            "groupname",
+            "organizationid",
+            "organization",
+            "locationid",
+            "location",
+            "policyid",
+            "policyname",
+            "rolepolicyid",
+            "nodeclass",
+            "approvalstatus",
+            "tags",
+            "site",
+            "siteid",
+            "tenantid",
+            "entitytype",
+            "devicerole",
+            "parentninjaid",
+        },
+    ),
 ]
 _RAW_CATEGORY_ORDER = [name for name, _ in _RAW_FIELD_CATEGORIES] + ["Other"]
 
@@ -1212,32 +1355,85 @@ def _raw_field_category(field_name: str) -> str:
 
 
 def _raw_value_display(value) -> tuple[str, bool]:
-    """Return (display_string, is_nested). Nested dicts/lists render as
-    compact JSON so the matrix cell stays one line.
+    """Return (display_string, is_nested).
+
+    - Scalar → its string form.
+    - `None` → em dash.
+    - Empty list / dict → em dash (avoids `[]` / `{}` clutter that hides
+      that the field is present-but-empty).
+    - Non-empty list of scalars → comma-joined, so MACs and tags render
+      as readable values instead of JSON.
+    - Nested dict / list of dicts → pretty JSON string, `is_nested=True`
+      so the template can hide-by-default or format differently.
     """
-    if isinstance(value, (dict, list)):
+    if value is None:
+        return "—", False
+    if isinstance(value, list):
+        if not value:
+            return "—", False
+        if all(not isinstance(v, (dict, list)) for v in value):
+            return ", ".join("" if v is None else str(v) for v in value), False
         try:
             return json.dumps(value, sort_keys=True, default=str), True
         except (TypeError, ValueError):
             return str(value), True
-    if value is None:
-        return "—", False
+    if isinstance(value, dict):
+        if not value:
+            return "—", False
+        try:
+            return json.dumps(value, sort_keys=True, default=str), True
+        except (TypeError, ValueError):
+            return str(value), True
+    if isinstance(value, bool):
+        return "yes" if value else "no", False
     return str(value), False
+
+
+def _raw_json_object(value) -> dict:
+    """Return a JSON object for the raw-snapshot display surface.
+
+    psycopg normally decodes JSONB objects to dictionaries, but deployments
+    with a text loader can yield their JSON text instead. The display surface
+    only compares object keys, so scalar, list, and invalid values are safely
+    treated as empty objects.
+    """
+    if isinstance(value, dict):
+        return value
+    if not isinstance(value, str):
+        return {}
+    try:
+        parsed = json.loads(value)
+    except (TypeError, ValueError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
 
 
 def _build_raw_snapshot_view(device, links):
     """Fetch and shape raw snapshots for the Identity & raw tab.
 
-    Returns (per_source_snapshots, common_by_category, source_specific).
+    Returns (per_source_snapshots, canonical_by_category, source_specific).
 
-    Ninja fallback: agent.rmm observations currently write raw_data as
-    `{}` (upstream ingest gap tracked separately). When we detect that,
-    swap in `ninja_core.devices.data` for the device's Ninja
-    external_id so operators see the actual Ninja device payload.
+    - `canonical_by_category` — the field matrix, driven by `canonical_data`
+      because every source rewrites the same concepts into the same key
+      names there. Fields shown for every source that reports on the
+      device; values grouped so agreement collapses and disagreement is
+      surfaced with a highlight.
+    - `source_specific` — for each source snapshot, the fields in
+      `raw_data` that are NOT already in canonical_data. That's the
+      source-native long tail. Plus the full raw JSON under a
+      collapse.
+
+    Ninja fallback: `agent.rmm` raw_data is written as `{}` in the
+    currently-deployed ingest. Fixed on the writer side in the same
+    commit as this rewrite, but existing rows keep `{}` until the next
+    Ninja cycle overwrites them. During the transition we swap in
+    `ninja_core.devices.data` so the per-source specifics stay populated.
+    The canonical matrix is not affected — canonical_data is populated
+    regardless.
     """
     ninja_external_id = None
     for link in links:
-        if link.source.name == "ninja":
+        if link.source.name.lower() == "ninja":
             ninja_external_id = link.external_id
             break
 
@@ -1246,22 +1442,31 @@ def _build_raw_snapshot_view(device, links):
         cur.execute("SET LOCAL operations.tenant_id = 1")
         cur.execute(
             """
-            SELECT DISTINCT ON (platform, entity_type)
-                   platform, entity_type, observed_at, raw_data
+            SELECT platform, entity_type, observed_at,
+                   canonical_data, raw_data
             FROM operations.entity_observation_current
             WHERE tenant_id = %s AND device_id = %s AND active = TRUE
-            ORDER BY platform, entity_type, observed_at DESC
+            ORDER BY platform, entity_type
             """,
             [1, str(device.id)],
         )
-        rows = cur.fetchall()
+        rows = [
+            (
+                platform,
+                entity_type,
+                observed_at,
+                _raw_json_object(canonical_data),
+                _raw_json_object(raw_data),
+            )
+            for platform, entity_type, observed_at, canonical_data, raw_data in cur.fetchall()
+        ]
 
         ninja_device_row = None
         need_ninja_fallback = ninja_external_id and any(
             (platform or "").lower() == "ninja"
             and (entity_type or "").lower() == "agent.rmm"
             and (not raw_data or raw_data == {})
-            for platform, entity_type, _observed_at, raw_data in rows
+            for platform, entity_type, _obs, _canon, raw_data in rows
         )
         if need_ninja_fallback:
             try:
@@ -1275,100 +1480,129 @@ def _build_raw_snapshot_view(device, links):
                 )
                 nrow = cur.fetchone()
                 if nrow:
-                    ninja_device_row = nrow[0] or {}
+                    ninja_device_row = _raw_json_object(nrow[0])
 
-        for platform, entity_type, observed_at, raw_data in rows:
-            payload = raw_data or {}
+        for platform, entity_type, observed_at, canonical_data, raw_data in rows:
+            canonical = canonical_data
+            raw_payload = raw_data
             fallback_note = None
             if (
                 ninja_device_row is not None
                 and (platform or "").lower() == "ninja"
                 and (entity_type or "").lower() == "agent.rmm"
-                and payload == {}
+                and raw_payload == {}
             ):
-                payload = ninja_device_row
+                raw_payload = ninja_device_row
                 fallback_note = "from ninja_core.devices (raw observation was empty)"
             try:
-                pretty = json.dumps(payload, indent=2, sort_keys=True, default=str)
+                pretty = json.dumps(raw_payload, indent=2, sort_keys=True, default=str)
             except (TypeError, ValueError):
-                pretty = str(payload)
-            snapshots.append({
-                "platform": platform,
-                "entity_type": entity_type,
-                "observed_at": observed_at,
-                "raw_data": payload,
-                "pretty": pretty,
-                "fallback_note": fallback_note,
-                "source_label": f"{platform} ({entity_type})",
-            })
+                pretty = str(raw_payload)
+            snapshots.append(
+                {
+                    "platform": platform,
+                    "entity_type": entity_type,
+                    "observed_at": observed_at,
+                    "canonical_data": canonical,
+                    "raw_data": raw_payload,
+                    "pretty": pretty,
+                    "fallback_note": fallback_note,
+                    "source_label": f"{platform} ({entity_type})",
+                }
+            )
 
-    # Field appearances: field_name -> list of (source_label, display, is_nested)
-    field_appearances: dict[str, list[tuple[str, str, bool]]] = {}
+    # ── Canonical field matrix (cross-source comparison) ────────────
+    #
+    # `canonical_data` uses the same field names across sources, so we
+    # can compare values directly. Every canonical field appears — even
+    # if only one source reports it — because operators want to see the
+    # whole normalized picture, not just what happens to overlap.
+    canonical_appearances: dict[str, list[tuple[str, str, bool]]] = {}
     for snap in snapshots:
-        if not isinstance(snap["raw_data"], dict):
+        if not isinstance(snap["canonical_data"], dict):
             continue
-        for field, value in snap["raw_data"].items():
+        for field, value in snap["canonical_data"].items():
             display, is_nested = _raw_value_display(value)
-            field_appearances.setdefault(field, []).append(
+            canonical_appearances.setdefault(field, []).append(
                 (snap["source_label"], display, is_nested)
             )
 
-    common_fields: list[dict] = []
-    per_source_extra: dict[str, list[dict]] = {s["source_label"]: [] for s in snapshots}
-    for field, appearances in field_appearances.items():
-        if len(appearances) >= 2:
-            # Group by display value
-            groups: dict[str, list[str]] = {}
-            any_nested = False
-            for src, disp, is_nested in appearances:
-                groups.setdefault(disp, []).append(src)
-                any_nested = any_nested or is_nested
-            value_groups = [
-                {"value": v, "sources": srcs}
-                for v, srcs in sorted(groups.items(), key=lambda kv: (-len(kv[1]), kv[0]))
-            ]
-            common_fields.append({
+    canonical_rows: list[dict] = []
+    for field, appearances in canonical_appearances.items():
+        groups: dict[str, list[str]] = {}
+        any_nested = False
+        for src, disp, is_nested in appearances:
+            groups.setdefault(disp, []).append(src)
+            any_nested = any_nested or is_nested
+        value_groups = [
+            {"value": v, "sources": srcs}
+            for v, srcs in sorted(groups.items(), key=lambda kv: (-len(kv[1]), kv[0]))
+        ]
+        canonical_rows.append(
+            {
                 "field": field,
                 "category": _raw_field_category(field),
                 "value_groups": value_groups,
                 "differs": len(value_groups) > 1,
+                "single_source": len(appearances) == 1,
                 "is_nested": any_nested,
-            })
-        else:
-            src, disp, is_nested = appearances[0]
-            per_source_extra.setdefault(src, []).append({
-                "field": field,
-                "category": _raw_field_category(field),
-                "value": disp,
-                "is_nested": is_nested,
-            })
+            }
+        )
 
-    # Bucket common fields by category, respect fixed order
     by_cat: dict[str, list[dict]] = {}
-    for f in common_fields:
+    for f in canonical_rows:
         by_cat.setdefault(f["category"], []).append(f)
     for lst in by_cat.values():
         lst.sort(key=lambda f: f["field"].lower())
-    common_by_category = [
-        (cat, by_cat[cat]) for cat in _RAW_CATEGORY_ORDER if cat in by_cat
-    ]
+    canonical_by_category = [(cat, by_cat[cat]) for cat in _RAW_CATEGORY_ORDER if cat in by_cat]
 
-    # Source-specific: attach the list to each snapshot in display order
+    # ── Per-source collected fields ─────────────────────────────────
+    #
+    # Keep every source-native field available in its collapsed reference
+    # panel. The combined record above is a convenience, not a lossy filter.
     source_specific = []
     for snap in snapshots:
-        extras = per_source_extra.get(snap["source_label"], [])
-        extras.sort(key=lambda f: (_RAW_CATEGORY_ORDER.index(f["category"]), f["field"].lower()))
-        source_specific.append({
-            "source_label": snap["source_label"],
-            "platform": snap["platform"],
-            "entity_type": snap["entity_type"],
-            "observed_at": snap["observed_at"],
-            "extras": extras,
-            "pretty": snap["pretty"],
-            "fallback_note": snap["fallback_note"],
-        })
+        extras: list[dict] = []
+        if isinstance(snap["raw_data"], dict):
+            for field, value in snap["raw_data"].items():
+                display, is_nested = _raw_value_display(value)
+                extras.append(
+                    {
+                        "field": field,
+                        "category": _raw_field_category(field),
+                        "value": display,
+                        "is_nested": is_nested,
+                    }
+                )
+        extras.sort(
+            key=lambda f: (
+                _RAW_CATEGORY_ORDER.index(f["category"]),
+                f["field"].lower(),
+            )
+        )
+        source_specific.append(
+            {
+                "source_label": snap["source_label"],
+                "platform": snap["platform"],
+                "entity_type": snap["entity_type"],
+                "observed_at": snap["observed_at"],
+                "extras": extras,
+                "pretty": snap["pretty"],
+                "fallback_note": snap["fallback_note"],
+            }
+        )
 
-    return snapshots, common_by_category, source_specific
+    conflicts = [field for field in canonical_rows if field["differs"]]
+    identity_summary = {
+        "source_count": len(snapshots),
+        "field_count": len(canonical_rows),
+        "conflicts": conflicts,
+        "latest_observed_at": max(
+            (snapshot["observed_at"] for snapshot in snapshots if snapshot["observed_at"]),
+            default=None,
+        ),
+    }
+    return snapshots, canonical_by_category, source_specific, identity_summary
 
 
 @login_required
@@ -1550,7 +1784,8 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
             "install_location": r[5],
             "decision": (decisions_map.get(r[0]) or {}).get("decision"),
             "decision_scope": (
-                "client" if (decisions_map.get(r[0]) or {}).get("client_id") is not None
+                "client"
+                if (decisions_map.get(r[0]) or {}).get("client_id") is not None
                 else ("global" if r[0] in decisions_map else None)
             ),
         }
@@ -1572,34 +1807,46 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
     # Activity events (unified timeline).
     activity: list = []
     for f in active_findings:
-        activity.append({
-            "kind": "issue_open",
-            "at": f.first_seen_at,
-            "severity": f.severity,
-            "label": f.finding_type.name,
-            "status": f.get_status_display(),
-            "finding_id": f.id,
-        })
-        if f.last_reviewed_at:
-            activity.append({
-                "kind": "issue_reviewed",
-                "at": f.last_reviewed_at,
+        activity.append(
+            {
+                "kind": "issue_open",
+                "at": f.first_seen_at,
                 "severity": f.severity,
                 "label": f.finding_type.name,
                 "status": f.get_status_display(),
                 "finding_id": f.id,
-            })
+            }
+        )
+        if f.last_reviewed_at:
+            activity.append(
+                {
+                    "kind": "issue_reviewed",
+                    "at": f.last_reviewed_at,
+                    "severity": f.severity,
+                    "label": f.finding_type.name,
+                    "status": f.get_status_display(),
+                    "finding_id": f.id,
+                }
+            )
     if patching:
         if patching.get("last_boot_at"):
-            activity.append({
-                "kind": "reboot", "at": patching["last_boot_at"],
-                "label": "Device booted", "severity": None,
-            })
+            activity.append(
+                {
+                    "kind": "reboot",
+                    "at": patching["last_boot_at"],
+                    "label": "Device booted",
+                    "severity": None,
+                }
+            )
         if patching.get("last_patch_installed_at"):
-            activity.append({
-                "kind": "patch", "at": patching["last_patch_installed_at"],
-                "label": "Patch installed", "severity": None,
-            })
+            activity.append(
+                {
+                    "kind": "patch",
+                    "at": patching["last_patch_installed_at"],
+                    "label": "Patch installed",
+                    "severity": None,
+                }
+            )
     # Ninja activity feed — only when the Activity tab is active, to
     # avoid an extra query on hot paths. Requires a Ninja device_link
     # (any device without one just falls back to the finding-derived
@@ -1607,7 +1854,7 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
     if active_tab == "activity":
         ninja_external_id = None
         for link in links:
-            if link.source.name == "ninja":
+            if link.source.name.lower() == "ninja":
                 ninja_external_id = link.external_id
                 break
         if ninja_external_id:
@@ -1621,7 +1868,7 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
                     cur.execute(
                         """
                         SELECT activity_time, activity_type, source_name,
-                               severity, subject, message
+                               severity, subject, message, data, ingested_at
                         FROM ninja_activities.activities
                         WHERE device_id = %s
                         ORDER BY activity_time DESC
@@ -1629,14 +1876,77 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
                         """,
                         [nid],
                     )
-                    for at, atype, sname, sev, subj, msg in cur.fetchall():
-                        activity.append({
-                            "kind": "ninja_event",
-                            "at": at,
-                            "severity": (sev or "").lower() or None,
-                            "label": subj or atype or "Ninja event",
-                            "status": msg or atype,
-                        })
+                    for at, atype, sname, sev, subj, msg, raw_data, ingested_at in cur.fetchall():
+                        activity.append(
+                            {
+                                "kind": "ninja_event",
+                                "at": at,
+                                "severity": (sev or "").lower() or None,
+                                "label": subj or atype or "Ninja event",
+                                "status": msg or atype,
+                                "source": sname,
+                                "collected_at": ingested_at,
+                                "raw_data": json.dumps(
+                                    raw_data, indent=2, sort_keys=True, default=str
+                                ),
+                            }
+                        )
+
+                    # Patch facts are Ninja's retained evidence of patch state
+                    # and install outcomes.  They answer a different question
+                    # from the generic activity feed, so keep both in the one
+                    # device timeline and preserve the original payload.
+                    cur.execute(
+                        """
+                        SELECT pf.fact_type, pf.status, pf.severity,
+                               pf.kb_number, pf.name, pf.type,
+                               pf.installed_at, pf.ninja_observed_at,
+                               pf.last_observed_at, pf.data
+                        FROM ninja_patches.patch_facts pf
+                        WHERE pf.device_id = %s
+                        ORDER BY COALESCE(pf.installed_at, pf.ninja_observed_at,
+                                          pf.last_observed_at) DESC NULLS LAST
+                        LIMIT 100
+                        """,
+                        [nid],
+                    )
+                    for (
+                        fact_type,
+                        status,
+                        severity,
+                        kb_number,
+                        name,
+                        patch_type,
+                        installed_at,
+                        ninja_observed_at,
+                        last_observed_at,
+                        raw_data,
+                    ) in cur.fetchall():
+                        event_at = installed_at or ninja_observed_at or last_observed_at
+                        patch_label = name or kb_number or "Patch record"
+                        activity.append(
+                            {
+                                "kind": "patch",
+                                "at": event_at,
+                                "severity": (severity or "").lower() or None,
+                                "label": patch_label,
+                                "status": status,
+                                "source": "Ninja patch data",
+                                "detail": " · ".join(
+                                    part
+                                    for part in (
+                                        fact_type.replace("_", " "),
+                                        kb_number,
+                                        patch_type,
+                                    )
+                                    if part
+                                ),
+                                "collected_at": last_observed_at,
+                                "raw_data": json.dumps(
+                                    raw_data, indent=2, sort_keys=True, default=str
+                                ),
+                            }
+                        )
 
     activity.sort(key=lambda e: (e["at"] or timezone.now()), reverse=True)
     activity = activity[:100]
@@ -1644,12 +1954,16 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
     # Raw per-source snapshots — only when the Identity & raw tab is
     # active, since raw_data payloads can be several KB per observation.
     raw_snapshots: list[dict] = []
-    raw_common_by_category: list[tuple[str, list[dict]]] = []
+    raw_canonical_by_category: list[tuple[str, list[dict]]] = []
     raw_source_specific: list[dict] = []
+    raw_identity_summary: dict = {}
     if active_tab == "identity":
-        raw_snapshots, raw_common_by_category, raw_source_specific = (
-            _build_raw_snapshot_view(device, links)
-        )
+        (
+            raw_snapshots,
+            raw_canonical_by_category,
+            raw_source_specific,
+            raw_identity_summary,
+        ) = _build_raw_snapshot_view(device, links)
 
     return render(
         request,
@@ -1669,8 +1983,9 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
             "exemptions": exemptions,
             "entity_type_choices": entity_type_choices,
             "raw_snapshots": raw_snapshots,
-            "raw_common_by_category": raw_common_by_category,
+            "raw_canonical_by_category": raw_canonical_by_category,
             "raw_source_specific": raw_source_specific,
+            "raw_identity_summary": raw_identity_summary,
         },
     )
 
@@ -1680,8 +1995,11 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
 def device_patch_scope_set(request: HttpRequest, org_slug: str, device_id: str) -> HttpResponse:
     """Operator override of a device's patching scope."""
     device = get_object_or_404(
-        Device, tenant_id=1, id=device_id,
-        client__slug=org_slug, deleted_at__isnull=True,
+        Device,
+        tenant_id=1,
+        id=device_id,
+        client__slug=org_slug,
+        deleted_at__isnull=True,
     )
     scope = (request.POST.get("scope") or "").strip()
     if scope not in (DevicePatchingOverride.Scope.INCLUDED, DevicePatchingOverride.Scope.EXCLUDED):
@@ -1689,9 +2007,9 @@ def device_patch_scope_set(request: HttpRequest, org_slug: str, device_id: str) 
         return redirect("device_detail", org_slug=org_slug, device_id=device_id)
     reason = (request.POST.get("reason") or "").strip()
     DevicePatchingOverride.objects.update_or_create(
-        tenant_id=1, device=device,
-        defaults={"scope": scope, "reason": reason,
-                  "set_by": request.user.username or ""},
+        tenant_id=1,
+        device=device,
+        defaults={"scope": scope, "reason": reason, "set_by": request.user.username or ""},
     )
     messages.info(request, f"Patch scope override set to {scope}.")
     return redirect("device_detail", org_slug=org_slug, device_id=device_id)
@@ -1702,8 +2020,11 @@ def device_patch_scope_set(request: HttpRequest, org_slug: str, device_id: str) 
 def device_exemption_add(request: HttpRequest, org_slug: str, device_id: str) -> HttpResponse:
     """Add or update an exemption key on the device's exemptions dict."""
     device = get_object_or_404(
-        Device, tenant_id=1, id=device_id,
-        client__slug=org_slug, deleted_at__isnull=True,
+        Device,
+        tenant_id=1,
+        id=device_id,
+        client__slug=org_slug,
+        deleted_at__isnull=True,
     )
     entity_type = (request.POST.get("entity_type") or "").strip()
     reason = (request.POST.get("reason") or "").strip()
@@ -1711,7 +2032,9 @@ def device_exemption_add(request: HttpRequest, org_slug: str, device_id: str) ->
         messages.warning(request, "Both entity type and reason are required.")
         return redirect("device_detail", org_slug=org_slug, device_id=device_id)
     row, _ = DeviceOperatorDecision.objects.get_or_create(
-        tenant_id=1, device=device, dimension="exemptions",
+        tenant_id=1,
+        device=device,
+        dimension="exemptions",
         defaults={"value": {}, "reason": "", "set_by": request.user.username or ""},
     )
     current = row.value if isinstance(row.value, dict) else {}
@@ -1727,13 +2050,18 @@ def device_exemption_add(request: HttpRequest, org_slug: str, device_id: str) ->
 @require_POST
 def device_exemption_clear(request: HttpRequest, org_slug: str, device_id: str) -> HttpResponse:
     device = get_object_or_404(
-        Device, tenant_id=1, id=device_id,
-        client__slug=org_slug, deleted_at__isnull=True,
+        Device,
+        tenant_id=1,
+        id=device_id,
+        client__slug=org_slug,
+        deleted_at__isnull=True,
     )
     entity_type = (request.POST.get("entity_type") or "").strip()
     try:
         row = DeviceOperatorDecision.objects.get(
-            tenant_id=1, device=device, dimension="exemptions",
+            tenant_id=1,
+            device=device,
+            dimension="exemptions",
         )
     except DeviceOperatorDecision.DoesNotExist:
         return redirect("device_detail", org_slug=org_slug, device_id=device_id)
@@ -1752,8 +2080,11 @@ def device_exemption_clear(request: HttpRequest, org_slug: str, device_id: str) 
 @require_POST
 def device_patch_scope_clear(request: HttpRequest, org_slug: str, device_id: str) -> HttpResponse:
     device = get_object_or_404(
-        Device, tenant_id=1, id=device_id,
-        client__slug=org_slug, deleted_at__isnull=True,
+        Device,
+        tenant_id=1,
+        id=device_id,
+        client__slug=org_slug,
+        deleted_at__isnull=True,
     )
     DevicePatchingOverride.objects.filter(tenant_id=1, device=device).delete()
     messages.info(request, "Patch scope override removed — reverted to derived scope.")
@@ -1776,18 +2107,14 @@ def search(request: HttpRequest) -> HttpResponse:
     """
     q = (request.GET.get("q") or "").strip()
     if not q:
-        return render(request, "search_results.html",
-                      {"q": "", "devices": [], "clients": []})
+        return render(request, "search_results.html", {"q": "", "devices": [], "clients": []})
 
     devices = list(
         Device.objects.filter(
             tenant_id=1,
             deleted_at__isnull=True,
         )
-        .filter(
-            Q(canonical_hostname__icontains=q)
-            | Q(canonical_serial__icontains=q)
-        )
+        .filter(Q(canonical_hostname__icontains=q) | Q(canonical_serial__icontains=q))
         .select_related("client")
         .order_by("canonical_hostname")[:100]
     )
@@ -1797,10 +2124,7 @@ def search(request: HttpRequest) -> HttpResponse:
             tenant_id=1,
             deleted_at__isnull=True,
         )
-        .filter(
-            Q(display_name__icontains=q)
-            | Q(slug__icontains=q)
-        )
+        .filter(Q(display_name__icontains=q) | Q(slug__icontains=q))
         .order_by("display_name")[:100]
     )
 
@@ -1808,16 +2132,19 @@ def search(request: HttpRequest) -> HttpResponse:
     if len(devices) == 1 and not clients:
         d = devices[0]
         if d.client:
-            return redirect("device_detail",
-                            org_slug=d.client.slug, device_id=d.id)
+            return redirect("device_detail", org_slug=d.client.slug, device_id=d.id)
     if len(clients) == 1 and not devices:
         return redirect("org_index", org_slug=clients[0].slug)
 
-    return render(request, "search_results.html", {
-        "q": q,
-        "devices": devices,
-        "clients": clients,
-    })
+    return render(
+        request,
+        "search_results.html",
+        {
+            "q": q,
+            "devices": devices,
+            "clients": clients,
+        },
+    )
 
 
 @login_required
@@ -1836,13 +2163,14 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
 
     # Source names come from operations.sources (admin-editable
     # reference data) — never hardcoded in code.
-    source_names = list(
-        Source.objects.order_by("name").values_list("name", flat=True)
-    )
+    source_names = list(Source.objects.order_by("name").values_list("name", flat=True))
     source_names_set = set(source_names)
 
     qs = Finding.objects.filter(tenant_id=1).select_related(
-        "finding_type", "finding_type__category", "client", "owner",
+        "finding_type",
+        "finding_type__category",
+        "client",
+        "owner",
     )
 
     show_snoozed = request.GET.get("snoozed") == "1"
@@ -1852,9 +2180,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
         qs = qs.filter(status=status_filter)
     # Hide snoozed issues by default; user can toggle to see them.
     if not show_snoozed and status_filter not in ("all",):
-        qs = qs.filter(
-            Q(snoozed_until__isnull=True) | Q(snoozed_until__lt=timezone.now())
-        )
+        qs = qs.filter(Q(snoozed_until__isnull=True) | Q(snoozed_until__lt=timezone.now()))
 
     if severity_filter:
         qs = qs.filter(severity=severity_filter)
@@ -1891,8 +2217,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     # that severity's slice (works as expected — you filter down,
     # tiles narrow).
     severity_tile_counts = {
-        row["severity"]: row["n"]
-        for row in qs.values("severity").annotate(n=Count("id"))
+        row["severity"]: row["n"] for row in qs.values("severity").annotate(n=Count("id"))
     }
     total_matching = sum(severity_tile_counts.values())
 
@@ -1908,24 +2233,28 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             params.pop("severity", None)  # click again to clear
         else:
             params["severity"] = sev
-        severity_tiles.append({
-            "value": sev,
-            "label": label,
-            "count": severity_tile_counts.get(sev, 0),
-            "href": "?" + params.urlencode() if params else "?",
-            "active": is_active,
-        })
+        severity_tiles.append(
+            {
+                "value": sev,
+                "label": label,
+                "count": severity_tile_counts.get(sev, 0),
+                "href": "?" + params.urlencode() if params else "?",
+                "active": is_active,
+            }
+        )
 
     _SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
-    findings = sorted(qs[:500], key=lambda f: (_SEVERITY_ORDER.get(f.severity, 9), -(f.last_detected_at or f.last_seen_at).timestamp()))
+    findings = sorted(
+        qs[:500],
+        key=lambda f: (
+            _SEVERITY_ORDER.get(f.severity, 9),
+            -(f.last_detected_at or f.last_seen_at).timestamp(),
+        ),
+    )
 
-    # Per-device map of platforms currently in contact:
-    #   device_id → sorted list of platform names (empty = offline).
-    # Read from device_session_current (Track O batch O1) — the matview
-    # pre-aggregates per-source "in contact within 24h" and the vm.guest
-    # power_state='poweredon' signal, refreshed on every ingest cycle
-    # (~hourly). Consumer used to compute this inline off
-    # device_agent_presence_current.
+    # Per-device map of platforms whose latest source-reported state is online.
+    # Freshness is deliberately separate from this state and remains available
+    # on the device detail surface.
     subject_ids = [f.subject_id for f in findings if f.subject_id]
     online_map: dict[str, list[str]] = {}
     if subject_ids:
@@ -1943,13 +2272,14 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             for did, sources in cur.fetchall():
                 online_map[did] = list(sources or [])
 
-    # Coalesce noise: for a device with no source in contact, suppress
+    # Coalesce noise: for a device with no source reporting online, suppress
     # missing/stale_required_platform findings from the queue — they
     # aren't actionable while the device isn't reachable. Findings still
     # exist and appear on the device detail page.
     _COALESCED_TYPES = {"missing_required_platform", "stale_required_platform"}
     findings = [
-        f for f in findings
+        f
+        for f in findings
         if not (
             f.finding_type.name in _COALESCED_TYPES
             and f.subject_id
@@ -1966,12 +2296,14 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
         findings = [f for f in findings if f.subject_id and not online_map.get(str(f.subject_id))]
     elif online_filter in source_names_set:
         findings = [
-            f for f in findings
+            f
+            for f in findings
             if f.subject_id and online_filter in online_map.get(str(f.subject_id), [])
         ]
 
     # Build a per-finding detail string for the inline column.
     _DAYS_KEYS = ("days_since_last_seen", "days_offline")
+
     def _detail_string(finding: Finding) -> str:
         d = finding.finding_details or {}
         name = finding.finding_type.name
@@ -1986,15 +2318,21 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             via = d.get("observed_via") or "tracked"
             return f"{ps}" + (f" · {days}d" if days is not None else "") + f" · via {via}"
         if name in ("device_offline", "device_long_offline"):
-            since = d.get("fully_offline_since") or d.get("last_contact_at") or d.get("last_seen_at")
+            since = (
+                d.get("fully_offline_since") or d.get("last_contact_at") or d.get("last_seen_at")
+            )
             last_src = d.get("last_seen_source")
             base = f"fully offline since {since[:10]}" if since else "no source has contact"
             return f"{base} (last: {last_src})" if last_src else base
         if name == "device_role_conflict":
             return f"{d.get('previous_role', '?')} → {d.get('new_role', '?')}"
         if name in (
-            "unauthorized_av", "unauthorized_rmm", "unauthorized_remote_access",
-            "suspicious_name", "install_path_suspicious", "eol_runtime",
+            "unauthorized_av",
+            "unauthorized_rmm",
+            "unauthorized_remote_access",
+            "suspicious_name",
+            "install_path_suspicious",
+            "eol_runtime",
         ):
             cn = d.get("canonical_name") or ""
             pub = d.get("publisher") or ""
@@ -2026,23 +2364,21 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     # even for software findings that don't carry hostname in
     # finding_details. Single query, capped by findings page size.
     device_subject_ids = {
-        f.subject_id
-        for f in findings
-        if f.subject_type == "device" and f.subject_id
+        f.subject_id for f in findings if f.subject_type == "device" and f.subject_id
     }
     hostname_by_device_id: dict = {}
     if device_subject_ids:
         hostname_by_device_id = dict(
             Device.objects.filter(
-                tenant_id=1, id__in=device_subject_ids,
+                tenant_id=1,
+                id__in=device_subject_ids,
             ).values_list("id", "canonical_hostname")
         )
 
     def _subject_display_name(f: Finding) -> str | None:
         if f.subject_type == "device":
-            return (
-                hostname_by_device_id.get(f.subject_id)
-                or (f.finding_details or {}).get("hostname")
+            return hostname_by_device_id.get(f.subject_id) or (f.finding_details or {}).get(
+                "hostname"
             )
         return None
 
@@ -2060,22 +2396,31 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
         return csv_response(
             findings_with_detail,
             columns=[
-                ("Severity",     lambda r: r["f"].severity),
-                ("Type",         lambda r: r["f"].finding_type.name),
-                ("Category",     lambda r: (r["f"].finding_type.category.name if r["f"].finding_type.category else "")),
-                ("Client",       lambda r: (r["f"].client.display_name if r["f"].client else "")),
+                ("Severity", lambda r: r["f"].severity),
+                ("Type", lambda r: r["f"].finding_type.name),
+                (
+                    "Category",
+                    lambda r: (
+                        r["f"].finding_type.category.name if r["f"].finding_type.category else ""
+                    ),
+                ),
+                ("Client", lambda r: (r["f"].client.display_name if r["f"].client else "")),
                 ("Subject type", lambda r: r["f"].subject_type),
-                ("Subject id",   lambda r: str(r["f"].subject_id) if r["f"].subject_id else ""),
-                ("Hostname",     lambda r: r.get("subject_hostname") or (r["f"].finding_details or {}).get("hostname", "")),
-                ("Detail",       "detail"),
+                ("Subject id", lambda r: str(r["f"].subject_id) if r["f"].subject_id else ""),
+                (
+                    "Hostname",
+                    lambda r: r.get("subject_hostname")
+                    or (r["f"].finding_details or {}).get("hostname", ""),
+                ),
+                ("Detail", "detail"),
                 ("Online sources", "online_sources"),
-                ("Status",       lambda r: r["f"].status),
-                ("Confidence",   lambda r: r["f"].confidence),
-                ("First seen",   lambda r: r["f"].first_seen_at),
-                ("Last seen",    lambda r: r["f"].last_seen_at),
+                ("Status", lambda r: r["f"].status),
+                ("Confidence", lambda r: r["f"].confidence),
+                ("First seen", lambda r: r["f"].first_seen_at),
+                ("Last seen", lambda r: r["f"].last_seen_at),
                 ("Last detected", lambda r: r["f"].last_detected_at),
                 ("Snoozed until", lambda r: r["f"].snoozed_until),
-                ("Owner",        lambda r: (r["f"].owner.username if r["f"].owner else "")),
+                ("Owner", lambda r: (r["f"].owner.username if r["f"].owner else "")),
             ],
             filename_stem="findings",
         )
@@ -2176,7 +2521,8 @@ def finding_suppress(request: HttpRequest, finding_id: str) -> HttpResponse:
     """Create a SuppressionRule matching this finding's subject."""
     finding = get_object_or_404(
         Finding.objects.select_related("finding_type"),
-        id=finding_id, tenant_id=1,
+        id=finding_id,
+        tenant_id=1,
     )
     reason = (request.POST.get("reason") or "").strip() or "Suppressed from Issues"
     expires_days = request.POST.get("expires_days")
@@ -2222,7 +2568,8 @@ def findings_bulk_action(request: HttpRequest) -> HttpResponse:
         # First-time ack sets acknowledged_at; reack (rare) leaves the
         # original stamp so MTTA stays honest.
         touched = qs.filter(status=Finding.Status.OPEN, acknowledged_at__isnull=True).update(
-            status=Finding.Status.ACKNOWLEDGED, acknowledged_at=now,
+            status=Finding.Status.ACKNOWLEDGED,
+            acknowledged_at=now,
         )
         touched += qs.filter(status=Finding.Status.OPEN, acknowledged_at__isnull=False).update(
             status=Finding.Status.ACKNOWLEDGED,
@@ -2252,11 +2599,71 @@ def findings_bulk_action(request: HttpRequest) -> HttpResponse:
 # facet (not the whole story).
 # ─────────────────────────────────────────────────────────────────────
 
-@login_required
-def software_page(request: HttpRequest) -> HttpResponse:
+
+def _software_page_data(request: HttpRequest) -> dict:
+    """Compute the full data set shared by the Software Overview and
+    Products list views. Returns a context dict ready for render().
+    Both views render different templates from the same data.
+    """
     q_filter = (request.GET.get("q") or "").strip()
     decision_filter = request.GET.get("decision", "")  # approved|rejected|pending|any
     category_filter = request.GET.get("category", "")  # av|rmm|remote_access|...|uncategorized
+    safety_filter = request.GET.get("safety", "")      # high|medium|low|clean
+    publisher_filter = (request.GET.get("publisher") or "").strip()
+    flagged_filter = request.GET.get("flagged", "").strip().lower() in ("1", "true", "yes", "on")
+    min_devices = request.GET.get("min_devices", "").strip()
+    try:
+        min_devices_int = int(min_devices) if min_devices else 0
+    except ValueError:
+        min_devices_int = 0
+
+    # Intel layer availability probe — used to gate risk queries.
+    intel_available = False
+    try:
+        with connection.cursor() as pcur:
+            pcur.execute("SELECT to_regclass('operations.v_software_safety')")
+            (regclass,) = pcur.fetchone()
+            intel_available = regclass is not None
+    except Exception:
+        intel_available = False
+    if not intel_available and safety_filter:
+        safety_filter = ""
+
+    # Fetch v_software_safety ONCE up front. Everything downstream —
+    # per-title risk map, high-risk count, distribution, this-week
+    # highlights, AND the ?safety=<band> filter — is derived from this
+    # single snapshot. Fetching once is essential; the view is a
+    # multi-CTE join that costs ~700-900 ms per evaluation.
+    all_safety_rows: list[tuple] = []
+    if intel_available:
+        try:
+            with transaction.atomic(), connection.cursor() as sc:
+                sc.execute("SET LOCAL operations.tenant_id = 1")
+                sc.execute(
+                    """
+                    SELECT canonical_name, safety_score, safety_band,
+                           cve_count, kev_count, osint_hits
+                    FROM operations.v_software_safety
+                    WHERE tenant_id = 1
+                    """
+                )
+                all_safety_rows = list(sc.fetchall())
+        except Exception:
+            all_safety_rows = []
+
+    # If a risk-band filter is set, resolve the matching canonical set
+    # up front so the main title-rollup query can filter with a cheap
+    # ANY() against that fixed list instead of a per-row EXISTS on the
+    # view (which timed out on fleets with tens of thousands of titles).
+    safety_filter_names: list[str] = []
+    if safety_filter in ("high", "medium", "low", "clean", "unknown"):
+        safety_filter_names = [
+            r[0] for r in all_safety_rows if r[2] == safety_filter
+        ]
+        if not safety_filter_names:
+            # No products in that band. Force the main query to return
+            # zero title rows without scanning the whole fleet.
+            safety_filter_names = ["\x00__no_match__\x00"]
 
     with transaction.atomic(), connection.cursor() as cur:
         cur.execute("SET LOCAL operations.tenant_id = 1")
@@ -2297,10 +2704,23 @@ def software_page(request: HttpRequest) -> HttpResponse:
         where_clauses = ["sic.tenant_id = 1"]
         params: list = []
         if q_filter:
-            where_clauses.append(
-                "(sic.canonical_name ILIKE %s OR sic.publisher ILIKE %s)"
-            )
+            where_clauses.append("(sic.canonical_name ILIKE %s OR sic.publisher ILIKE %s)")
             params.extend([f"%{q_filter}%", f"%{q_filter}%"])
+        if publisher_filter:
+            where_clauses.append("sic.publisher ILIKE %s")
+            params.append(f"%{publisher_filter}%")
+        if flagged_filter:
+            # Products with at least one open classifier finding — the
+            # "needs decision" set. Same signal the retired Decisions
+            # queue surfaced, now available as a filter on Products.
+            where_clauses.append(
+                "EXISTS (SELECT 1 FROM operations.findings f "
+                " JOIN operations.finding_types ft ON ft.id = f.finding_type_id "
+                " WHERE f.tenant_id = 1 "
+                "   AND f.status IN ('open', 'acknowledged') "
+                "   AND ft.source_module = 'platform.software_findings' "
+                "   AND f.finding_details->>'canonical_name' = sic.canonical_name)"
+            )
         if category_filter == "uncategorized":
             where_clauses.append(
                 "NOT EXISTS (SELECT 1 FROM operations.software_catalog cat "
@@ -2317,24 +2737,41 @@ def software_page(request: HttpRequest) -> HttpResponse:
             params.append(category_filter)
         if decision_filter == "approved":
             where_clauses.append(
-                "EXISTS (SELECT 1 FROM operations.software_decisions sd "
+                "(EXISTS (SELECT 1 FROM operations.software_decisions sd "
                 " WHERE sd.tenant_id = sic.tenant_id "
                 "   AND sd.canonical_name = sic.canonical_name "
                 "   AND sd.decision IN ('approve','approve_publisher'))"
+                " OR EXISTS (SELECT 1 FROM operations.software_decisions sd "
+                " WHERE sd.tenant_id = sic.tenant_id "
+                "   AND sd.publisher <> '' "
+                "   AND LOWER(sd.publisher) = LOWER(COALESCE(sic.publisher, '')) "
+                "   AND sd.decision IN ('approve','approve_publisher')))"
             )
         elif decision_filter == "rejected":
             where_clauses.append(
-                "EXISTS (SELECT 1 FROM operations.software_decisions sd "
+                "(EXISTS (SELECT 1 FROM operations.software_decisions sd "
                 " WHERE sd.tenant_id = sic.tenant_id "
                 "   AND sd.canonical_name = sic.canonical_name "
                 "   AND sd.decision = 'reject')"
+                " OR EXISTS (SELECT 1 FROM operations.software_decisions sd "
+                " WHERE sd.tenant_id = sic.tenant_id "
+                "   AND sd.publisher <> '' "
+                "   AND LOWER(sd.publisher) = LOWER(COALESCE(sic.publisher, '')) "
+                "   AND sd.decision = 'reject'))"
             )
         elif decision_filter == "pending":
             where_clauses.append(
                 "NOT EXISTS (SELECT 1 FROM operations.software_decisions sd "
                 " WHERE sd.tenant_id = sic.tenant_id "
-                "   AND sd.canonical_name = sic.canonical_name)"
+                "   AND (sd.canonical_name = sic.canonical_name "
+                "        OR (sd.publisher <> '' "
+                "            AND LOWER(sd.publisher) = LOWER(COALESCE(sic.publisher, '')))))"
             )
+        if safety_filter_names:
+            # Filter to the pre-computed canonical set for this risk
+            # band — avoids re-evaluating v_software_safety per row.
+            where_clauses.append("sic.canonical_name = ANY(%s::text[])")
+            params.append(safety_filter_names)
 
         where_sql = " AND ".join(where_clauses)
         cur.execute(
@@ -2377,6 +2814,7 @@ def software_page(request: HttpRequest) -> HttpResponse:
                    ) AS decision
                 FROM title_rollup sic
                 WHERE {where_sql}
+                  AND sic.device_count >= {min_devices_int}
                 ORDER BY sic.device_count DESC, sic.canonical_name
                 LIMIT 500
             )
@@ -2399,6 +2837,8 @@ def software_page(request: HttpRequest) -> HttpResponse:
         unique_titles = software_rows[0][8]
         title_rows = [row[:7] for row in software_rows if row[0] is not None]
 
+        canonical_names = [row[0] for row in title_rows]
+
         # Recent installations — last 24h, first-seen
         cur.execute(
             """
@@ -2414,69 +2854,1764 @@ def software_page(request: HttpRequest) -> HttpResponse:
         )
         recent_installs = cur.fetchall()
 
-    # Software issues count (Finding table)
-    software_issues = Finding.objects.filter(
+    # v_software_safety was already fetched once at the top of the
+    # request. Reuse ``all_safety_rows`` for all downstream aggregates.
+    safety_by_title: dict[str, dict] = {}
+    shown_set = {c for c in canonical_names}
+    high_risk_titles = 0
+    risk_distribution = {"high": 0, "medium": 0, "low": 0, "clean": 0, "unknown": 0}
+    for cn, score, band, cve_count, kev_count, osint_hits in all_safety_rows:
+        if band in risk_distribution:
+            risk_distribution[band] += 1
+        if band == "high":
+            high_risk_titles += 1
+        if cn in shown_set:
+            safety_by_title[cn] = {
+                "score": score, "band": band,
+                "cve_count": cve_count, "kev_count": kev_count,
+                "osint_hits": osint_hits,
+            }
+
+    # Risk distribution + this-week highlights + workflow aggregates.
+    this_week: dict = {"new_products": 0, "new_high_risk": 0, "top_new_product": None}
+    workflow_state: dict = {
+        "publishers_undecided": 0,
+        "tech_checklist_devices": 0,
+        "user_risk_users": 0,
+    }
+    try:
+        with transaction.atomic(), connection.cursor() as sc:
+            sc.execute("SET LOCAL operations.tenant_id = 1")
+            sc.execute(
+                """
+                SELECT DISTINCT canonical_name
+                FROM operations.software_installations_current
+                WHERE tenant_id = 1 AND deleted_at IS NULL AND stale_since IS NULL
+                  AND first_observed_at >= NOW() - INTERVAL '7 days'
+                """
+            )
+            new_products_set = {row[0] for row in sc.fetchall()}
+            this_week["new_products"] = len(new_products_set)
+            sc.execute(
+                """
+                SELECT canonical_name, COUNT(*)::int AS devices
+                FROM operations.software_installations_current
+                WHERE tenant_id = 1 AND deleted_at IS NULL AND stale_since IS NULL
+                  AND first_observed_at >= NOW() - INTERVAL '7 days'
+                GROUP BY canonical_name
+                ORDER BY devices DESC LIMIT 1
+                """
+            )
+            row = sc.fetchone()
+            if row:
+                this_week["top_new_product"] = {"name": row[0], "devices": row[1]}
+        # Derive new-high-risk from the safety snapshot rather than a
+        # separate view scan.
+        this_week["new_high_risk"] = sum(
+            1 for r in all_safety_rows
+            if r[2] == "high" and r[0] in new_products_set
+        )
+    except Exception:
+        pass
+
+    try:
+        with transaction.atomic(), connection.cursor() as sc:
+            sc.execute("SET LOCAL operations.tenant_id = 1")
+            # Publishers with at least one fleet install and no
+            # global publisher-scope decision.
+            sc.execute(
+                """
+                SELECT COUNT(DISTINCT LOWER(sic.publisher))::int
+                FROM operations.software_installations_current sic
+                WHERE sic.tenant_id = 1
+                  AND sic.deleted_at IS NULL AND sic.stale_since IS NULL
+                  AND COALESCE(sic.publisher, '') <> ''
+                  AND NOT EXISTS (
+                      SELECT 1 FROM operations.software_decisions sd
+                      WHERE sd.tenant_id = 1
+                        AND sd.publisher <> ''
+                        AND sd.client_id IS NULL AND sd.device_id IS NULL
+                        AND LOWER(sd.publisher) = LOWER(sic.publisher)
+                  )
+                """
+            )
+            (workflow_state["publishers_undecided"],) = sc.fetchone()
+    except Exception:
+        pass
+
+    try:
+        with transaction.atomic(), connection.cursor() as sc:
+            sc.execute("SET LOCAL operations.tenant_id = 1")
+            sc.execute(
+                """
+                SELECT COUNT(DISTINCT f.subject_id)::int
+                FROM operations.findings f
+                JOIN operations.finding_types ft ON ft.id = f.finding_type_id
+                JOIN operations.finding_categories fc ON fc.id = ft.category_id
+                WHERE f.tenant_id = 1
+                  AND f.status IN ('open','acknowledged')
+                  AND fc.name = 'software'
+                  AND ft.name <> 'whitelist_suggestion'
+                  AND f.subject_type = 'device'
+                """
+            )
+            (workflow_state["tech_checklist_devices"],) = sc.fetchone()
+    except Exception:
+        pass
+
+    # Software issues count (Finding table). Split whitelist_suggestion
+    # out of "issues" — it's a review candidate, not a problem.
+    software_open_qs = Finding.objects.filter(
         tenant_id=1,
         status__in=_FINDING_ACTIVE_STATUSES,
         finding_type__category__name="software",
-    ).count()
-
-    approved_titles = (
-        decision_counts.get("approve", 0)
-        + decision_counts.get("approve_publisher", 0)
     )
-    rejected_titles = decision_counts.get("reject", 0)
-    investigate_titles = decision_counts.get("investigate", 0)
+    software_issues = software_open_qs.exclude(
+        finding_type__name="whitelist_suggestion"
+    ).count()
+    whitelist_suggestions = software_open_qs.filter(
+        finding_type__name="whitelist_suggestion"
+    ).values("finding_details__canonical_name").distinct().count()
+
+    # Product-level decision counts. A publisher-scope decision applies
+    # to every product from that publisher, so the raw
+    # SoftwareDecision row count is wrong. Count DISTINCT canonical_names
+    # that have EITHER a title-scope decision or a matching publisher-
+    # scope decision at global scope.
+    approved_titles = rejected_titles = investigate_titles = 0
+    try:
+        with transaction.atomic(), connection.cursor() as sc:
+            sc.execute("SET LOCAL operations.tenant_id = 1")
+            sc.execute(
+                """
+                SELECT
+                    COUNT(DISTINCT sic.canonical_name) FILTER (
+                        WHERE EXISTS (
+                            SELECT 1 FROM operations.software_decisions sd
+                            WHERE sd.tenant_id = 1 AND sd.client_id IS NULL AND sd.device_id IS NULL
+                              AND sd.decision IN ('approve','approve_publisher')
+                              AND (
+                                  (sd.canonical_name <> '' AND sd.canonical_name = sic.canonical_name)
+                                  OR (sd.publisher <> ''
+                                      AND LOWER(sd.publisher) = LOWER(COALESCE(sic.publisher,'')))
+                              )
+                        )
+                    ) AS approved,
+                    COUNT(DISTINCT sic.canonical_name) FILTER (
+                        WHERE EXISTS (
+                            SELECT 1 FROM operations.software_decisions sd
+                            WHERE sd.tenant_id = 1 AND sd.client_id IS NULL AND sd.device_id IS NULL
+                              AND sd.decision = 'reject'
+                              AND (
+                                  (sd.canonical_name <> '' AND sd.canonical_name = sic.canonical_name)
+                                  OR (sd.publisher <> ''
+                                      AND LOWER(sd.publisher) = LOWER(COALESCE(sic.publisher,'')))
+                              )
+                        )
+                    ) AS rejected,
+                    COUNT(DISTINCT sic.canonical_name) FILTER (
+                        WHERE EXISTS (
+                            SELECT 1 FROM operations.software_decisions sd
+                            WHERE sd.tenant_id = 1 AND sd.client_id IS NULL AND sd.device_id IS NULL
+                              AND sd.decision = 'investigate'
+                              AND (
+                                  (sd.canonical_name <> '' AND sd.canonical_name = sic.canonical_name)
+                                  OR (sd.publisher <> ''
+                                      AND LOWER(sd.publisher) = LOWER(COALESCE(sic.publisher,'')))
+                              )
+                        )
+                    ) AS investigating
+                FROM operations.software_installations_current sic
+                WHERE sic.tenant_id = 1 AND sic.deleted_at IS NULL AND sic.stale_since IS NULL
+                """
+            )
+            row = sc.fetchone() or (0, 0, 0)
+            approved_titles = row[0] or 0
+            rejected_titles = row[1] or 0
+            investigate_titles = row[2] or 0
+    except Exception:
+        # Fall back to raw counts if the join fails somehow.
+        approved_titles = decision_counts.get("approve", 0)
+        rejected_titles = decision_counts.get("reject", 0)
+        investigate_titles = decision_counts.get("investigate", 0)
     pending_decisions = unique_titles - approved_titles - rejected_titles - investigate_titles
     if pending_decisions < 0:
         pending_decisions = 0
 
-    titles = [
-        {
-            "canonical_name": row[0],
+    titles = []
+    for row in title_rows:
+        canonical = row[0]
+        safety = safety_by_title.get(canonical, {})
+        titles.append({
+            "canonical_name": canonical,
             "publisher": row[1] or "",
             "device_count": row[2],
             "client_count": row[3],
             "last_install": row[4],
             "categories": row[5] or [],
             "decision": row[6],
-        }
-        for row in title_rows
-    ]
+            "safety_score": safety.get("score"),
+            "safety_band": safety.get("band", ""),
+            "safety_cve_count": safety.get("cve_count", 0),
+            "safety_kev_count": safety.get("kev_count", 0),
+            "safety_osint_hits": safety.get("osint_hits", 0),
+        })
+
+    return {
+        "installations": installations,
+        "unique_titles": unique_titles,
+        "categorized_titles": categorized_titles,
+        "uncategorized_titles": unique_titles - categorized_titles
+        if unique_titles > categorized_titles
+        else 0,
+        "approved_titles": approved_titles,
+        "rejected_titles": rejected_titles,
+        "investigate_titles": investigate_titles,
+        "pending_decisions": pending_decisions,
+        "software_issues": software_issues,
+        "whitelist_suggestions": whitelist_suggestions,
+        "high_risk_titles": high_risk_titles,
+        "category_rows": category_rows,
+        "titles": titles,
+        "recent_installs": recent_installs,
+        "active_q": q_filter,
+        "active_category": category_filter,
+        "active_decision": decision_filter,
+        "active_safety": safety_filter,
+        "active_publisher": publisher_filter,
+        "active_min_devices": min_devices_int,
+        "active_flagged": flagged_filter,
+        "decision_choices": SoftwareDecision.Decision.choices,
+        "risk_distribution": risk_distribution,
+        "this_week": this_week,
+        "workflow_state": workflow_state,
+    }
+
+
+@login_required
+def software_page(request: HttpRequest) -> HttpResponse:
+    """Software Overview — dashboard tiles + workflows + distribution
+    + recent installs. The full products list lives under Products
+    (see software_products)."""
+    ctx = _software_page_data(request)
+    if wants_csv(request):
+        # CSV export on Overview yields the top products the dashboard
+        # dashboards summarize; keep parity with the previous behaviour.
+        return csv_response(
+            ctx["titles"],
+            columns=[
+                ("Canonical name", "canonical_name"),
+                ("Publisher", "publisher"),
+                ("Device count", "device_count"),
+                ("Client count", "client_count"),
+                ("Last install", "last_install"),
+                ("Categories", "categories"),
+                ("Decision", "decision"),
+            ],
+            filename_stem="software",
+        )
+    ctx["software_tab"] = "overview"
+    return render(request, "software_page.html", ctx)
+
+
+@login_required
+def software_products(request: HttpRequest) -> HttpResponse:
+    """Software Products — the full products list with per-column
+    filters (search / publisher / min_devices / risk / decision /
+    category)."""
+    ctx = _software_page_data(request)
+    if wants_csv(request):
+        return csv_response(
+            ctx["titles"],
+            columns=[
+                ("Product", "canonical_name"),
+                ("Publisher", "publisher"),
+                ("Devices", "device_count"),
+                ("Clients", "client_count"),
+                ("Last install", "last_install"),
+                ("Categories", "categories"),
+                ("Decision", "decision"),
+                ("Risk band", "safety_band"),
+                ("Risk score", "safety_score"),
+            ],
+            filename_stem="software_products",
+        )
+    ctx["software_tab"] = "products"
+    return render(request, "software_products.html", ctx)
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Software title detail — per-canonical drill-through from /software/.
+# Anchors row-level decisions, version breakdown, per-device install list,
+# publisher facts, catalog metadata, related findings, and decision history.
+# Case-insensitive canonical_name lookup; URL slug carries the display form.
+# ─────────────────────────────────────────────────────────────────────
+
+
+@login_required
+def software_detail(request: HttpRequest, name: str) -> HttpResponse:
+    canonical_name = name.strip()
+    if not canonical_name:
+        return redirect("software_page")
+
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+
+        # Fleet-wide install rollup for this title.
+        cur.execute(
+            """
+            SELECT COUNT(*)                             AS installations,
+                   COUNT(DISTINCT sic.device_id)        AS devices,
+                   COUNT(DISTINCT sic.client_id)        AS clients,
+                   MIN(sic.first_observed_at)           AS first_observed,
+                   MAX(sic.last_observed_at)            AS last_observed,
+                   MAX(sic.first_observed_at)           AS latest_install
+            FROM operations.software_installations_current sic
+            WHERE sic.tenant_id = 1
+              AND sic.deleted_at IS NULL
+              AND sic.stale_since IS NULL
+              AND LOWER(sic.canonical_name) = LOWER(%s)
+            """,
+            [canonical_name],
+        )
+        row = cur.fetchone()
+        installations, devices, clients, first_observed, last_observed, latest_install = row
+
+        if not installations:
+            # Fall back to any historical row (deleted / stale) so an
+            # operator following a stale finding link still lands somewhere.
+            cur.execute(
+                """
+                SELECT canonical_name FROM operations.software_installations_current
+                WHERE tenant_id = 1 AND LOWER(canonical_name) = LOWER(%s)
+                LIMIT 1
+                """,
+                [canonical_name],
+            )
+            r = cur.fetchone()
+            if not r:
+                messages.warning(
+                    request,
+                    f"No installations recorded for “{canonical_name}”.",
+                )
+                return redirect("software_page")
+            canonical_name = r[0]
+
+        # Preserve the display form the installations table uses.
+        cur.execute(
+            """
+            SELECT canonical_name FROM operations.software_installations_current
+            WHERE tenant_id = 1 AND LOWER(canonical_name) = LOWER(%s)
+            LIMIT 1
+            """,
+            [canonical_name],
+        )
+        r = cur.fetchone()
+        if r:
+            canonical_name = r[0]
+
+        # Publisher facts — every distinct publisher the fleet observed for
+        # this title, with per-publisher install counts. Multiple publishers
+        # for the same canonical_name usually indicate a rename / catalog
+        # merge and are worth surfacing.
+        cur.execute(
+            """
+            SELECT COALESCE(NULLIF(publisher, ''), '(unknown)') AS publisher,
+                   COUNT(*)::int AS installs,
+                   COUNT(DISTINCT device_id)::int AS devices
+            FROM operations.software_installations_current
+            WHERE tenant_id = 1 AND deleted_at IS NULL AND stale_since IS NULL
+              AND LOWER(canonical_name) = LOWER(%s)
+            GROUP BY 1
+            ORDER BY installs DESC
+            """,
+            [canonical_name],
+        )
+        publisher_rows = [
+            {"publisher": row[0], "installs": row[1], "devices": row[2]}
+            for row in cur.fetchall()
+        ]
+
+        # Version breakdown — one row per distinct version.
+        cur.execute(
+            """
+            SELECT COALESCE(NULLIF(version, ''), '(unknown)') AS version,
+                   COUNT(*)::int AS installs,
+                   COUNT(DISTINCT device_id)::int AS devices,
+                   COUNT(DISTINCT client_id)::int AS clients,
+                   MAX(last_observed_at) AS last_observed
+            FROM operations.software_installations_current
+            WHERE tenant_id = 1 AND deleted_at IS NULL AND stale_since IS NULL
+              AND LOWER(canonical_name) = LOWER(%s)
+            GROUP BY 1
+            ORDER BY installs DESC, version
+            """,
+            [canonical_name],
+        )
+        version_rows = [
+            {
+                "version": row[0],
+                "installs": row[1],
+                "devices": row[2],
+                "clients": row[3],
+                "last_observed": row[4],
+            }
+            for row in cur.fetchall()
+        ]
+
+        # Install-location breakdown.
+        cur.execute(
+            """
+            SELECT COALESCE(NULLIF(install_location, ''), '(unknown)') AS location,
+                   COUNT(*)::int AS installs
+            FROM operations.software_installations_current
+            WHERE tenant_id = 1 AND deleted_at IS NULL AND stale_since IS NULL
+              AND LOWER(canonical_name) = LOWER(%s)
+            GROUP BY 1
+            ORDER BY installs DESC
+            LIMIT 20
+            """,
+            [canonical_name],
+        )
+        location_rows = [
+            {"location": row[0], "installs": row[1]} for row in cur.fetchall()
+        ]
+
+        # Per-device install list — bounded so a mega-title doesn't OOM.
+        cur.execute(
+            """
+            SELECT sic.device_id, sic.client_id, c.slug, c.display_name,
+                   d.canonical_hostname, d.device_role, d.os_group,
+                   sic.version, sic.install_location, sic.install_date,
+                   sic.first_observed_at, sic.last_observed_at
+            FROM operations.software_installations_current sic
+            JOIN operations.clients c ON c.id = sic.client_id
+            JOIN operations.devices d ON d.id = sic.device_id
+            WHERE sic.tenant_id = 1
+              AND sic.deleted_at IS NULL
+              AND sic.stale_since IS NULL
+              AND LOWER(sic.canonical_name) = LOWER(%s)
+            ORDER BY c.display_name, d.canonical_hostname
+            LIMIT 500
+            """,
+            [canonical_name],
+        )
+        install_rows = [
+            {
+                "device_id": row[0],
+                "client_id": row[1],
+                "client_slug": row[2],
+                "client_name": row[3],
+                "hostname": row[4],
+                "device_role": row[5],
+                "os_group": row[6],
+                "version": row[7] or "",
+                "install_location": row[8] or "",
+                "install_date": row[9],
+                "first_observed": row[10],
+                "last_observed": row[11],
+            }
+            for row in cur.fetchall()
+        ]
+
+    # Safety intel — composite score + matched CVEs + OSINT signals.
+    safety_summary: dict = {}
+    matched_cves: list[dict] = []
+    osint_rows: list[dict] = []
+    catalog_tags: list[str] = []
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        cur.execute(
+            """
+            SELECT safety_score, safety_band,
+                   cve_count, kev_count, osint_hits, publisher_osint_hits,
+                   max_cvss, max_epss,
+                   title_approved, title_rejected,
+                   publisher_approved, publisher_rejected
+            FROM operations.v_software_safety
+            WHERE tenant_id = 1 AND LOWER(canonical_name) = LOWER(%s)
+            """,
+            [canonical_name],
+        )
+        row = cur.fetchone()
+        if row:
+            safety_summary = {
+                "score": row[0], "band": row[1],
+                "cve_count": row[2], "kev_count": row[3],
+                "osint_hits": row[4], "publisher_osint_hits": row[5],
+                "max_cvss": row[6], "max_epss": row[7],
+                "title_approved": row[8], "title_rejected": row[9],
+                "publisher_approved": row[10], "publisher_rejected": row[11],
+            }
+        cur.execute(
+            """
+            SELECT c.cve_id, c.severity, c.cvss_v3, c.epss_score, c.kev_flag,
+                   c.kev_added_at, c.description, cm.confidence, cm.match_kind
+            FROM operations.cve_match cm
+            JOIN intel.cves c ON c.cve_id = cm.cve_id
+            WHERE cm.tenant_id = 1 AND LOWER(cm.canonical_name) = LOWER(%s)
+            ORDER BY c.kev_flag DESC, c.cvss_v3 DESC NULLS LAST, c.epss_score DESC NULLS LAST
+            LIMIT 100
+            """,
+            [canonical_name],
+        )
+        for r in cur.fetchall():
+            matched_cves.append({
+                "cve_id": r[0], "severity": r[1], "cvss_v3": r[2],
+                "epss_score": r[3], "kev_flag": r[4], "kev_added_at": r[5],
+                "description": (r[6] or "")[:400],
+                "confidence": r[7], "match_kind": r[8],
+            })
+        cur.execute(
+            """
+            SELECT source, signal_type, severity, details, observed_at
+            FROM operations.safety_signal
+            WHERE tenant_id = 1
+              AND (LOWER(canonical_name) = LOWER(%s)
+                   OR (publisher <> ''
+                       AND LOWER(publisher) IN (
+                           SELECT LOWER(publisher)
+                           FROM operations.software_installations_current
+                           WHERE tenant_id = 1
+                             AND LOWER(canonical_name) = LOWER(%s)
+                             AND publisher <> ''
+                           LIMIT 5
+                       )))
+            ORDER BY severity DESC, observed_at DESC
+            LIMIT 50
+            """,
+            [canonical_name, canonical_name],
+        )
+        for r in cur.fetchall():
+            osint_rows.append({
+                "source": r[0], "signal_type": r[1], "severity": r[2],
+                "details": r[3], "observed_at": r[4],
+            })
+
+    # Catalog metadata — categories, publisher hint, EOL, notes.
+    catalog_entry = (
+        SoftwareCatalog.objects.filter(canonical_name__iexact=canonical_name)
+        .filter(Q(tenant_id=1) | Q(tenant__isnull=True))
+        .order_by("tenant_id")
+        .first()
+    )
+    # Pull tags from winget/chocolatey safety_signal into a merged
+    # categorisation list. Operator-set catalog_entry.categories still wins.
+    for row in osint_rows:
+        if row["source"] in ("winget", "chocolatey") and row["signal_type"] == "category":
+            for tag in (row["details"] or {}).get("tags", []) or []:
+                if tag and tag not in catalog_tags:
+                    catalog_tags.append(str(tag))
+
+    # Decision history — every scope for this canonical.
+    decision_rows = list(
+        SoftwareDecision.objects.filter(
+            tenant_id=1, canonical_name__iexact=canonical_name
+        )
+        .select_related("client", "device", "decided_by")
+        .order_by("-decided_at", "-id")
+    )
+    global_decision = next(
+        (d for d in decision_rows if d.client_id is None and d.device_id is None),
+        None,
+    )
+    client_decisions = [d for d in decision_rows if d.client_id and not d.device_id]
+    device_decisions = [d for d in decision_rows if d.device_id]
+
+    # Related active findings that name this title.
+    related_findings = list(
+        Finding.objects.filter(
+            tenant_id=1,
+            status__in=_FINDING_ACTIVE_STATUSES,
+            finding_details__canonical_name__iexact=canonical_name,
+        )
+        .select_related("finding_type", "client")
+        .order_by("-last_detected_at", "-last_seen_at")[:50]
+    )
+
+    return render(
+        request,
+        "software_detail.html",
+        {
+            "canonical_name": canonical_name,
+            "catalog_entry": catalog_entry,
+            "installations": installations,
+            "device_count": devices,
+            "client_count": clients,
+            "first_observed": first_observed,
+            "last_observed": last_observed,
+            "latest_install": latest_install,
+            "publishers": publisher_rows,
+            "versions": version_rows,
+            "locations": location_rows,
+            "install_rows": install_rows,
+            "global_decision": global_decision,
+            "client_decisions": client_decisions,
+            "device_decisions": device_decisions,
+            "related_findings": related_findings,
+            "decision_choices": SoftwareDecision.Decision.choices,
+            "back_url": request.META.get("HTTP_REFERER") or reverse("software_page"),
+            "safety_summary": safety_summary,
+            "matched_cves": matched_cves,
+            "osint_rows": osint_rows,
+            "catalog_tags": catalog_tags,
+            "software_tab": "overview",
+        },
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Software publisher rollup + per-publisher detail.
+# Complements the per-title surfaces with a publisher-level view and
+# publisher-scope decisions (SoftwareDecision.publisher, migration 0079).
+# ─────────────────────────────────────────────────────────────────────
+
+
+@login_required
+def software_publishers(request: HttpRequest) -> HttpResponse:
+    """List publishers with per-publisher install/product counts and
+    current publisher-scope decision status. Supports filtering by name
+    and by decision state (approved / rejected / pending)."""
+    q_filter = (request.GET.get("q") or "").strip()
+    decision_filter = (request.GET.get("decision") or "").strip().lower()
+
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+
+        params: list = []
+        extra_where = ""
+        if q_filter:
+            extra_where = "AND publisher ILIKE %s"
+            params.append(f"%{q_filter}%")
+
+        cur.execute(
+            f"""
+            SELECT COALESCE(NULLIF(publisher, ''), '(unknown)') AS publisher,
+                   COUNT(*)::int AS installations,
+                   COUNT(DISTINCT canonical_name)::int AS titles,
+                   COUNT(DISTINCT device_id)::int AS devices,
+                   COUNT(DISTINCT client_id)::int AS clients,
+                   MAX(last_observed_at) AS last_observed
+            FROM operations.software_installations_current
+            WHERE tenant_id = 1
+              AND deleted_at IS NULL
+              AND stale_since IS NULL
+              {extra_where}
+            GROUP BY 1
+            ORDER BY installations DESC, publisher
+            LIMIT 500
+            """,
+            params,
+        )
+        rollup_rows = cur.fetchall()
+
+    # Publisher-scope global decisions, keyed by lower(publisher).
+    pub_decisions = {
+        d.publisher.lower(): d
+        for d in SoftwareDecision.objects.filter(
+            tenant_id=1, client__isnull=True, device__isnull=True
+        ).exclude(publisher="")
+    }
+
+    # Publisher → category from PublisherCategory rules (ILIKE patterns).
+    # Small table — fetch all enabled rules and match in Python.
+    pub_cat_rules = list(
+        PublisherCategory.objects.filter(enabled=True).order_by("-priority", "id")
+    )
+
+    def _publisher_categories(pub_name: str) -> str:
+        import fnmatch, re
+        lower = pub_name.lower()
+        for rule in pub_cat_rules:
+            if rule.is_regex:
+                try:
+                    if re.search(rule.publisher_pattern, lower, re.IGNORECASE):
+                        return ", ".join(rule.categories or [])
+                except re.error:
+                    pass
+            else:
+                pattern = rule.publisher_pattern.lower().replace("%", "*").replace("_", "?")
+                if fnmatch.fnmatch(lower, pattern):
+                    return ", ".join(rule.categories or [])
+        return ""
+
+    publishers = []
+    for pub, installations, titles, devices, clients, last_observed in rollup_rows:
+        dec = pub_decisions.get(pub.lower())
+        publishers.append(
+            {
+                "publisher": pub,
+                "installations": installations,
+                "titles": titles,
+                "devices": devices,
+                "clients": clients,
+                "last_observed": last_observed,
+                "global_decision": dec.decision if dec else "",
+                "category": _publisher_categories(pub),
+            }
+        )
+
+    # Filter by decision state after computing all decisions.
+    if decision_filter == "approved":
+        publishers = [p for p in publishers if p["global_decision"] in ("approve", "approve_publisher")]
+    elif decision_filter == "rejected":
+        publishers = [p for p in publishers if p["global_decision"] == "reject"]
+    elif decision_filter == "investigate":
+        publishers = [p for p in publishers if p["global_decision"] == "investigate"]
+    elif decision_filter == "pending":
+        publishers = [p for p in publishers if not p["global_decision"]]
 
     if wants_csv(request):
         return csv_response(
-            titles,
+            publishers,
             columns=[
-                ("Canonical name", "canonical_name"),
-                ("Publisher",      "publisher"),
-                ("Device count",   "device_count"),
-                ("Client count",   "client_count"),
-                ("Last install",   "last_install"),
-                ("Categories",     "categories"),
-                ("Decision",       "decision"),
+                ("Publisher", "publisher"),
+                ("Installations", "installations"),
+                ("Products", "titles"),
+                ("Devices", "devices"),
+                ("Clients", "clients"),
+                ("Last observed", "last_observed"),
+                ("Global decision", "global_decision"),
             ],
-            filename_stem="software",
+            filename_stem="software_publishers",
         )
 
     return render(
         request,
-        "software_page.html",
+        "software_publishers.html",
         {
-            "installations": installations,
-            "unique_titles": unique_titles,
-            "categorized_titles": categorized_titles,
-            "uncategorized_titles": unique_titles - categorized_titles if unique_titles > categorized_titles else 0,
-            "approved_titles": approved_titles,
-            "rejected_titles": rejected_titles,
-            "pending_decisions": pending_decisions,
-            "software_issues": software_issues,
-            "category_rows": category_rows,  # [(category_name, titles), ...]
-            "titles": titles,
-            "recent_installs": recent_installs,
+            "publishers": publishers,
             "active_q": q_filter,
-            "active_category": category_filter,
             "active_decision": decision_filter,
+            "decision_choices": SoftwareDecision.Decision.choices,
+            "software_tab": "publishers",
+        },
+    )
+
+
+@login_required
+def software_publisher_detail(request: HttpRequest, publisher: str) -> HttpResponse:
+    """Per-publisher detail: titles under this publisher with per-title
+    decision state, and inline publisher-scope decision action."""
+    pub = publisher.strip()
+    if not pub:
+        return redirect("software_publishers")
+
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+
+        # Preserve the display-form of the publisher.
+        cur.execute(
+            """
+            SELECT publisher FROM operations.software_installations_current
+            WHERE tenant_id = 1 AND deleted_at IS NULL AND stale_since IS NULL
+              AND LOWER(publisher) = LOWER(%s)
+            LIMIT 1
+            """,
+            [pub],
+        )
+        r = cur.fetchone()
+        if r:
+            pub = r[0] or pub
+
+        # Rollup for the header tiles.
+        cur.execute(
+            """
+            SELECT COUNT(*)::int AS installations,
+                   COUNT(DISTINCT canonical_name)::int AS titles,
+                   COUNT(DISTINCT device_id)::int AS devices,
+                   COUNT(DISTINCT client_id)::int AS clients,
+                   MIN(first_observed_at) AS first_observed,
+                   MAX(last_observed_at) AS last_observed
+            FROM operations.software_installations_current
+            WHERE tenant_id = 1 AND deleted_at IS NULL AND stale_since IS NULL
+              AND LOWER(publisher) = LOWER(%s)
+            """,
+            [pub],
+        )
+        installations, titles, devices, clients, first_observed, last_observed = (
+            cur.fetchone()
+        )
+
+        # Titles under this publisher (bounded).
+        cur.execute(
+            """
+            SELECT canonical_name,
+                   COUNT(*)::int AS installs,
+                   COUNT(DISTINCT device_id)::int AS device_count,
+                   COUNT(DISTINCT client_id)::int AS client_count,
+                   MAX(last_observed_at) AS last_observed
+            FROM operations.software_installations_current
+            WHERE tenant_id = 1 AND deleted_at IS NULL AND stale_since IS NULL
+              AND LOWER(publisher) = LOWER(%s)
+            GROUP BY canonical_name
+            ORDER BY installs DESC, canonical_name
+            LIMIT 500
+            """,
+            [pub],
+        )
+        title_rows_raw = cur.fetchall()
+
+    canonical_names = [row[0] for row in title_rows_raw]
+    title_decisions = {
+        d.canonical_name.lower(): d
+        for d in SoftwareDecision.objects.filter(
+            tenant_id=1,
+            client__isnull=True,
+            device__isnull=True,
+            canonical_name__in=canonical_names,
+        )
+    }
+    title_rows = [
+        {
+            "canonical_name": row[0],
+            "installs": row[1],
+            "devices": row[2],
+            "clients": row[3],
+            "last_observed": row[4],
+            "decision": (
+                title_decisions[row[0].lower()].decision
+                if row[0].lower() in title_decisions
+                else ""
+            ),
+        }
+        for row in title_rows_raw
+    ]
+
+    # Publisher-scope decisions (all tiers).
+    pub_decision_rows = list(
+        SoftwareDecision.objects.filter(tenant_id=1, publisher__iexact=pub)
+        .select_related("client", "device", "decided_by")
+        .order_by("-decided_at", "-id")
+    )
+    global_pub_decision = next(
+        (d for d in pub_decision_rows if d.client_id is None and d.device_id is None),
+        None,
+    )
+    client_pub_decisions = [
+        d for d in pub_decision_rows if d.client_id and not d.device_id
+    ]
+    device_pub_decisions = [d for d in pub_decision_rows if d.device_id]
+
+    return render(
+        request,
+        "software_publisher_detail.html",
+        {
+            "publisher": pub,
+            "installations": installations,
+            "title_count": titles,
+            "device_count": devices,
+            "client_count": clients,
+            "first_observed": first_observed,
+            "last_observed": last_observed,
+            "title_rows": title_rows,
+            "global_pub_decision": global_pub_decision,
+            "client_pub_decisions": client_pub_decisions,
+            "device_pub_decisions": device_pub_decisions,
+            "decision_choices": SoftwareDecision.Decision.choices,
+            "software_tab": "publishers",
+        },
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────
+# User-risk view — per-user rollup of software checklist items on the
+# device that user last logged into. Anchored on Ninja's
+# lastLoggedInUser field, resolved via device_snapshots latest-per-device
+# and canonical device_links. Read-only.
+# ─────────────────────────────────────────────────────────────────────
+
+
+@login_required
+def software_user_risk(request: HttpRequest) -> HttpResponse:
+    client_slugs = [s for s in request.GET.getlist("client") if s]
+    q_filter = (request.GET.get("q") or "").strip().lower()
+    kind_filter = (request.GET.get("kind") or "").strip().lower()
+    filtered_client_ids: list[str] = []
+    if client_slugs:
+        filtered_client_ids = [
+            str(cid)
+            for cid in Client.objects.filter(
+                tenant_id=1, slug__in=client_slugs, deleted_at__isnull=True
+            ).values_list("id", flat=True)
+        ]
+
+    client_where = ""
+    client_params: list = []
+    if filtered_client_ids:
+        client_where = "AND d.client_id = ANY(%s::uuid[])"
+        client_params.append(filtered_client_ids)
+    elif client_slugs:
+        client_where = "AND FALSE"
+
+    sql = f"""
+        WITH latest_user AS (
+            SELECT DISTINCT ON (ds.device_id)
+                ds.device_id AS ninja_device_id,
+                TRIM(ds.last_user) AS last_user,
+                ds.snapshot_at
+            FROM ninja_core.device_snapshots ds
+            WHERE ds.last_user IS NOT NULL AND TRIM(ds.last_user) <> ''
+            ORDER BY ds.device_id, ds.snapshot_at DESC
+        ),
+        device_user AS (
+            SELECT DISTINCT dl.device_id AS ops_device_id, lu.last_user, lu.snapshot_at
+            FROM latest_user lu
+            JOIN operations.device_links dl
+              ON dl.external_id ~ '^\\d+$'
+             AND dl.external_id::integer = lu.ninja_device_id
+            JOIN operations.sources s ON s.id = dl.source_id
+            WHERE dl.tenant_id = 1 AND LOWER(s.name) = 'ninja'
+        ),
+        finding_items AS (
+            SELECT d.id AS device_id, d.client_id,
+                   f.finding_details->>'canonical_name' AS canonical_name,
+                   ft.name AS kind
+            FROM operations.findings f
+            JOIN operations.finding_types ft ON ft.id = f.finding_type_id
+            JOIN operations.finding_categories fc ON fc.id = ft.category_id
+            JOIN operations.devices d ON d.id = f.subject_id AND d.deleted_at IS NULL
+            WHERE f.tenant_id = 1
+              AND f.status IN ('open', 'acknowledged')
+              AND fc.name = 'software'
+              AND ft.name <> 'whitelist_suggestion'
+              AND f.subject_type = 'device'
+              {client_where}
+        ),
+        decision_items AS (
+            SELECT d.id AS device_id, d.client_id,
+                   sic.canonical_name,
+                   ('decision_' || sd.decision) AS kind
+            FROM operations.software_installations_current sic
+            JOIN operations.devices d ON d.id = sic.device_id AND d.deleted_at IS NULL
+            JOIN operations.software_decisions sd
+              ON sd.tenant_id = sic.tenant_id
+             AND sd.decision IN ('reject', 'investigate')
+             AND (
+                 (sd.canonical_name <> '' AND sd.canonical_name = sic.canonical_name)
+              OR (sd.publisher <> ''
+                  AND LOWER(sd.publisher) = LOWER(COALESCE(sic.publisher, '')))
+             )
+             AND (sd.device_id IS NULL OR sd.device_id = sic.device_id)
+             AND (sd.client_id IS NULL OR sd.client_id = sic.client_id)
+            WHERE sic.tenant_id = 1
+              AND sic.deleted_at IS NULL
+              AND sic.stale_since IS NULL
+              {client_where}
+        ),
+        all_items AS (
+            SELECT device_id, client_id, canonical_name, kind FROM finding_items
+            UNION ALL
+            SELECT device_id, client_id, canonical_name, kind FROM decision_items
+        )
+        SELECT du.last_user,
+               d.id AS device_id,
+               d.canonical_hostname,
+               c.slug AS client_slug,
+               c.display_name AS client_name,
+               ai.canonical_name,
+               ai.kind
+        FROM device_user du
+        JOIN operations.devices d ON d.id = du.ops_device_id AND d.deleted_at IS NULL
+        JOIN operations.clients c ON c.id = d.client_id AND c.deleted_at IS NULL
+        JOIN all_items ai ON ai.device_id = d.id
+        WHERE d.tenant_id = 1
+          {client_where}
+        ORDER BY du.last_user, d.canonical_hostname, ai.kind, ai.canonical_name
+    """
+
+    # client_where appears 3× in the SQL — client_params must repeat.
+    run_params = client_params * 3 if client_params else []
+
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        cur.execute(sql, run_params)
+        rows = cur.fetchall()
+
+    per_user: dict = {}
+    for last_user, device_id, hostname, client_slug, client_name, canonical, kind in rows:
+        entry = per_user.setdefault(
+            last_user,
+            {
+                "last_user": last_user,
+                "devices": {},
+                "clients": set(),
+                "item_count": 0,
+                "item_keys": set(),
+            },
+        )
+        item_key = (device_id, (canonical or "").lower(), kind)
+        if item_key in entry["item_keys"]:
+            continue
+        entry["item_keys"].add(item_key)
+        entry["item_count"] += 1
+        entry["clients"].add(client_name)
+        dev = entry["devices"].setdefault(
+            device_id,
+            {
+                "device_id": device_id,
+                "hostname": hostname,
+                "client_slug": client_slug,
+                "client_name": client_name,
+                "items": [],
+            },
+        )
+        dev["items"].append({"canonical_name": canonical or "", "kind": kind})
+
+    users = []
+    for entry in per_user.values():
+        entry.pop("item_keys", None)
+        entry["clients"] = sorted(entry["clients"])
+        entry["device_list"] = sorted(
+            entry["devices"].values(), key=lambda d: d["hostname"] or ""
+        )
+        entry.pop("devices", None)
+        users.append(entry)
+    users.sort(key=lambda u: (-u["item_count"], u["last_user"]))
+
+    # Enrich items with category from SoftwareCatalog.
+    all_ur_canonicals = {
+        i["canonical_name"].lower()
+        for u in users
+        for d in u["device_list"]
+        for i in d["items"]
+        if i["canonical_name"]
+    }
+    ur_catalog_cats = {
+        c.canonical_name.lower(): ", ".join(c.categories or [])
+        for c in SoftwareCatalog.objects.filter(
+            canonical_name__in=list(all_ur_canonicals)
+        )
+    } if all_ur_canonicals else {}
+    for u in users:
+        for d in u["device_list"]:
+            for item in d["items"]:
+                item["category"] = ur_catalog_cats.get(
+                    (item["canonical_name"] or "").lower(), ""
+                )
+
+    # Apply user search and kind filter (post-fetch, small result set).
+    if q_filter:
+        users = [u for u in users if q_filter in (u["last_user"] or "").lower()]
+    if kind_filter:
+        for u in users:
+            for d in u["device_list"]:
+                d["items"] = [i for i in d["items"] if kind_filter in (i["kind"] or "").lower()]
+            u["device_list"] = [d for d in u["device_list"] if d["items"]]
+        users = [u for u in users if u["device_list"]]
+
+    clients = Client.objects.filter(
+        tenant_id=1, deleted_at__isnull=True
+    ).order_by("display_name")
+
+    if wants_csv(request):
+        flat_rows: list[dict] = []
+        for u in users:
+            for d in u["device_list"]:
+                for item in d["items"]:
+                    flat_rows.append(
+                        {
+                            "user": u["last_user"],
+                            "client": d["client_name"],
+                            "hostname": d["hostname"],
+                            "canonical_name": item["canonical_name"],
+                            "kind": item["kind"],
+                        }
+                    )
+        return csv_response(
+            flat_rows,
+            columns=[
+                ("Last logged-in user", "user"),
+                ("Client", "client"),
+                ("Device", "hostname"),
+                ("Title", "canonical_name"),
+                ("Reason kind", "kind"),
+            ],
+            filename_stem="user_risk",
+        )
+
+    return render(
+        request,
+        "software_user_risk.html",
+        {
+            "users": users[:500],
+            "user_count": len(users),
+            "total_items": sum(u["item_count"] for u in users),
+            "clients": clients,
+            "active_clients": client_slugs,
+            "active_q": q_filter,
+            "active_kind": kind_filter,
+            "software_tab": "user-risk",
+        },
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Jobs — operator-facing catalogue of every scheduled ingest / intel /
+# evaluator / notifier job with last-run status and a "Run now" button
+# that POSTs to the ingest container's /run/<slug> HTTP endpoint.
+# ─────────────────────────────────────────────────────────────────────
+
+
+_INGEST_BASE_URL = os.environ.get("INGEST_BASE_URL", "http://ingest:8090")
+
+# Static catalogue of jobs surfaced on /admin/jobs/. Each row maps to an
+# existing /run/<slug> HTTP endpoint on the ingest container. Categories
+# keep the UI groupable; last-run status is looked up per-category with
+# a small helper query (intel jobs use intel_ingest_status; everything
+# else uses run_log).
+_JOB_CATALOG: list[dict] = [
+    # Source ingest — Ninja patch cycle. status_key is a LIKE prefix
+    # against run_log.kind so any per-instance source row surfaces.
+    {"id": "patches",            "name": "Ninja source cycle",   "category": "source ingest", "endpoint": "run/patches",   "status_key": "source.Ninja",         "status_source": "run_log_like",  "description": "Full Ninja API pull: devices, activities, patches, custom fields, matviews."},
+    {"id": "agent-observations", "name": "Agent observations",   "category": "source ingest", "endpoint": "run/agents",    "status_key": "source.",              "status_source": "run_log_like",  "description": "Fetch device inventory + agent presence from every source."},
+    # Evaluators
+    {"id": "software-classify",  "name": "Software classifier (+ auto-intel)", "category": "evaluators", "endpoint": "run/software-classify", "status_key": "software_classifier", "status_source": "run_log", "description": "Run intel matcher + catalogue enrichers then the software finding classifier."},
+    {"id": "patch-classify",     "name": "Patch classifier",     "category": "evaluators", "endpoint": "run/patch-classify",    "status_key": "patch_findings",   "status_source": "run_log", "description": "Emit patch findings from the current patch inventory."},
+    {"id": "platform-evaluate",  "name": "Platform evaluator",   "category": "evaluators", "endpoint": "run/platform-evaluate", "status_key": "platform_evaluator", "status_source": "run_log", "description": "Refresh coverage, identity, and lifecycle findings."},
+    {"id": "resolver",           "name": "Identity resolver",    "category": "evaluators", "endpoint": "run/resolver",          "status_key": "identity_resolver", "status_source": "run_log", "description": "Merge candidate resolver + layered-entity write path."},
+    {"id": "parity-check",       "name": "Parity check",         "category": "evaluators", "endpoint": "run/parity-check",      "status_key": "parity_check",     "status_source": "run_log", "description": "Cross-check ingest state against derived operational reality."},
+    # Intel connectors
+    {"id": "intel-kev",          "name": "Intel: CISA KEV",           "category": "intel", "endpoint": "run/intel-kev",         "status_key": "cisa_kev",   "status_source": "intel", "description": "CISA Known Exploited Vulnerabilities feed (~1,200 CVEs)."},
+    {"id": "intel-nvd",          "name": "Intel: NVD (CVE feed)",     "category": "intel", "endpoint": "run/intel-nvd",         "status_key": "nvd",        "status_source": "intel", "description": "NIST NVD v2 CVE delta pull."},
+    {"id": "intel-cpe-dict",     "name": "Intel: CPE dictionary",     "category": "intel", "endpoint": "run/intel-cpe-dict",    "status_key": "cpe_dict",   "status_source": "intel", "description": "NIST CPE 2.3 vendor / product dictionary for CVE matching."},
+    {"id": "intel-epss",         "name": "Intel: EPSS scores",        "category": "intel", "endpoint": "run/intel-epss",        "status_key": "epss",       "status_source": "intel", "description": "FIRST.org EPSS exploit-likelihood scores."},
+    {"id": "intel-matcher",      "name": "Intel: title × CVE matcher","category": "intel", "endpoint": "run/intel-matcher",     "status_key": "matcher",    "status_source": "intel", "description": "Match installed products to CPE entries and populate cve_match."},
+    {"id": "intel-winget",       "name": "Intel: Winget enrichment",  "category": "intel", "endpoint": "run/intel-winget",      "status_key": "winget",     "status_source": "intel", "description": "Per-product tags + publisher from Windows Package Manager."},
+    {"id": "intel-chocolatey",   "name": "Intel: Chocolatey enrichment","category": "intel","endpoint": "run/intel-chocolatey", "status_key": "chocolatey", "status_source": "intel", "description": "Per-product tags from the Chocolatey community feed."},
+    {"id": "intel-otx",          "name": "Intel: AlienVault OTX",     "category": "intel", "endpoint": "run/intel-otx",         "status_key": "otx",        "status_source": "intel", "description": "Community threat-intel pulses from OTX."},
+    {"id": "intel-abusech",      "name": "Intel: abuse.ch",           "category": "intel", "endpoint": "run/intel-abusech",     "status_key": "abusech",    "status_source": "intel", "description": "MalwareBazaar + ThreatFox recent dump files."},
+    # Notifications
+    {"id": "notifications-dispatch", "name": "Notifications dispatch", "category": "notifications", "endpoint": "run/notifications/dispatch", "status_key": "notifications_dispatch", "status_source": "run_log", "description": "Deliver queued notifications."},
+    {"id": "notifications-digest",   "name": "Notifications digest",   "category": "notifications", "endpoint": "run/notifications/digest",   "status_key": "notifications_digest",   "status_source": "run_log", "description": "Send scheduled digest routes."},
+]
+
+_JOB_INDEX = {j["id"]: j for j in _JOB_CATALOG}
+
+
+@login_required
+def admin_jobs(request: HttpRequest) -> HttpResponse:
+    """List every schedulable job with last-run status and a run-now button."""
+    category_filter = (request.GET.get("category") or "").strip().lower()
+    status_filter = (request.GET.get("status") or "").strip().lower()
+
+    intel_status: dict[str, dict] = {}
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        try:
+            cur.execute(
+                "SELECT connector, last_status, last_run_at, last_success_at,"
+                " rows_touched, last_error FROM operations.intel_ingest_status"
+            )
+            for r in cur.fetchall():
+                intel_status[r[0]] = {
+                    "last_status": r[1] or "",
+                    "last_run_at": r[2],
+                    "last_success_at": r[3],
+                    "rows_touched": r[4] or 0,
+                    "last_error": (r[5] or "")[:200],
+                }
+        except Exception:
+            intel_status = {}
+
+    run_log_status: dict[str, dict] = {}
+    recent_runs: list[dict] = []
+    try:
+        with transaction.atomic(), connection.cursor() as cur:
+            cur.execute("SET LOCAL operations.tenant_id = 1")
+            cur.execute(
+                """
+                SELECT DISTINCT ON (kind) kind, ok, started_at, ended_at, rows, error
+                FROM operations.run_log
+                ORDER BY kind, started_at DESC
+                """
+            )
+            for r in cur.fetchall():
+                run_log_status[r[0]] = {
+                    "last_status": "ok" if r[1] else "failed",
+                    "last_run_at": r[2],
+                    "last_success_at": r[3] if r[1] else None,
+                    "rows_touched": r[4] or 0,
+                    "last_error": (r[5] or "")[:200],
+                }
+            # Aggregate recent activity for the panel at the bottom.
+            cur.execute(
+                """
+                SELECT kind, ok, started_at, ended_at, rows, LEFT(COALESCE(error,''), 120)
+                FROM operations.run_log
+                ORDER BY started_at DESC
+                LIMIT 25
+                """
+            )
+            recent_runs = [
+                {
+                    "kind": r[0], "ok": r[1], "started_at": r[2],
+                    "ended_at": r[3], "rows": r[4] or 0, "error": r[5],
+                    "source": "run_log",
+                }
+                for r in cur.fetchall()
+            ]
+            # And the latest intel runs alongside.
+            cur.execute(
+                """
+                SELECT connector, last_status, last_run_at, last_success_at,
+                       rows_touched, LEFT(COALESCE(last_error,''), 120)
+                FROM operations.intel_ingest_status
+                ORDER BY last_run_at DESC NULLS LAST LIMIT 15
+                """
+            )
+            for r in cur.fetchall():
+                recent_runs.append({
+                    "kind": r[0], "ok": r[1] == "ok",
+                    "started_at": r[2], "ended_at": r[3],
+                    "rows": r[4] or 0, "error": r[5],
+                    "source": "intel",
+                })
+    except Exception:
+        run_log_status = {}
+        recent_runs = []
+    recent_runs.sort(key=lambda r: r["started_at"] or now - timedelta(days=365), reverse=True)
+    recent_runs = recent_runs[:25]
+
+    def _lookup_run_log_like(prefix: str) -> dict:
+        """Return the latest run_log entry whose kind starts with prefix."""
+        best: dict = {}
+        best_at = None
+        for kind, data in run_log_status.items():
+            if kind.startswith(prefix):
+                at = data.get("last_run_at")
+                if at and (best_at is None or at > best_at):
+                    best = data
+                    best_at = at
+        return best
+
+    # Dynamic per-source-instance rows — one entry per distinct
+    # source.<Platform>[.<Instance>] kind we've ever seen. These aren't
+    # in the static catalogue because instance names come from data.
+    dynamic_source_entries: list[dict] = []
+    seen_source_kinds = [k for k in run_log_status.keys() if k.startswith("source.")]
+    for kind in seen_source_kinds:
+        instance = kind[len("source."):]
+        dynamic_source_entries.append({
+            "id": f"source-{instance.lower().replace('.', '-')}",
+            "name": f"Source: {instance}",
+            "category": "source ingest",
+            "endpoint": "run/sources/enqueue",  # opens the ingest form
+            "status_key": kind,
+            "status_source": "run_log",
+            "description": f"Ingest run history for {instance}.",
+            "no_run_now": True,  # per-instance triggers go through the /run/sources/enqueue form
+        })
+
+    now = timezone.now()
+    jobs = []
+    categories = set()
+    for entry in list(_JOB_CATALOG) + dynamic_source_entries:
+        categories.add(entry["category"])
+        source = entry["status_source"]
+        if source == "intel":
+            status = intel_status.get(entry["status_key"]) or {}
+        elif source == "run_log_like":
+            status = _lookup_run_log_like(entry["status_key"])
+        else:
+            status = run_log_status.get(entry["status_key"]) or {}
+        last_run_at = status.get("last_run_at")
+        last_success_at = status.get("last_success_at")
+        state = "never_run"
+        if status.get("last_status") == "ok":
+            state = "ok"
+        elif status.get("last_status"):
+            state = status["last_status"]
+        if last_run_at is not None:
+            age = now - last_run_at
+        else:
+            age = None
+        is_stale = last_success_at is None or (now - last_success_at) > timedelta(days=2)
+        jobs.append({
+            "id": entry["id"],
+            "name": entry["name"],
+            "category": entry["category"],
+            "description": entry["description"],
+            "state": state,
+            "last_run_at": last_run_at,
+            "last_success_at": last_success_at,
+            "age": age,
+            "rows_touched": status.get("rows_touched", 0),
+            "last_error": status.get("last_error", ""),
+            "is_stale": is_stale,
+            "no_run_now": entry.get("no_run_now", False),
+        })
+
+    if category_filter:
+        jobs = [j for j in jobs if j["category"] == category_filter]
+    if status_filter == "never_run":
+        jobs = [j for j in jobs if j["state"] == "never_run"]
+    elif status_filter == "failed":
+        jobs = [j for j in jobs if j["state"] not in ("ok", "never_run")]
+    elif status_filter == "stale":
+        jobs = [j for j in jobs if j["is_stale"] and j["state"] != "never_run"]
+    elif status_filter == "ok":
+        jobs = [j for j in jobs if j["state"] == "ok" and not j["is_stale"]]
+
+    # Group by category so the template can render sections instead of
+    # a flat list. Preserve catalogue order within each group.
+    jobs_by_category: dict[str, list[dict]] = {}
+    for j in jobs:
+        jobs_by_category.setdefault(j["category"], []).append(j)
+
+    # Ingest exposes its on-demand org/device selector forms on
+    # port 8090. Compute a browser-reachable URL for the operator by
+    # rewriting the current host's port. Overridable via the
+    # ``INGEST_PUBLIC_URL`` env var for setups where 8090 isn't the
+    # public port (e.g. behind a reverse proxy).
+    ingest_public_url = os.environ.get("INGEST_PUBLIC_URL", "").strip()
+    if not ingest_public_url:
+        host_no_port = request.get_host().split(":")[0]
+        ingest_public_url = f"{request.scheme}://{host_no_port}:8090"
+
+    return render(
+        request,
+        "admin_jobs.html",
+        {
+            "admin_group": "integrations",
+            "admin_tab": "jobs",
+            "jobs": jobs,
+            "jobs_by_category": jobs_by_category,
+            "categories": sorted(categories),
+            "active_category": category_filter,
+            "active_status": status_filter,
+            "recent_runs": recent_runs,
+            "ingest_public_url": ingest_public_url,
+        },
+    )
+
+
+@login_required
+@require_POST
+def admin_jobs_run(request: HttpRequest, job_id: str) -> HttpResponse:
+    entry = _JOB_INDEX.get(job_id)
+    if not entry:
+        messages.error(request, f"Unknown job '{job_id}'.")
+        return redirect("admin_jobs")
+    ok, note = _dispatch_job(entry)
+    (messages.success if ok else messages.error)(request, f"{entry['name']} → {note}")
+    return redirect(request.META.get("HTTP_REFERER") or reverse("admin_jobs"))
+
+
+@login_required
+@require_POST
+def admin_jobs_run_all(request: HttpRequest) -> HttpResponse:
+    """Fire every job in the catalogue, or every job in a category if
+    ``category`` is supplied on the POST body."""
+    category = (request.POST.get("category") or "").strip().lower()
+    targets = [j for j in _JOB_CATALOG if (not category or j["category"] == category)]
+    if not targets:
+        messages.warning(request, f"No jobs matched category '{category or 'all'}'.")
+        return redirect(request.META.get("HTTP_REFERER") or reverse("admin_jobs"))
+    fired = 0
+    failed = 0
+    for entry in targets:
+        ok, _note = _dispatch_job(entry)
+        if ok:
+            fired += 1
+        else:
+            failed += 1
+    scope = category or "all"
+    if failed:
+        messages.warning(
+            request,
+            f"Fired {fired} job(s) in '{scope}'; {failed} failed to dispatch — see the ingest log.",
+        )
+    else:
+        messages.success(request, f"Fired {fired} job(s) in '{scope}'.")
+    return redirect(request.META.get("HTTP_REFERER") or reverse("admin_jobs"))
+
+
+def _dispatch_job(entry: dict) -> tuple[bool, str]:
+    """POST to the ingest container's endpoint for a single job. Returns
+    (ok, note) — note is a short summary for the toast / audit."""
+    url = _INGEST_BASE_URL.rstrip("/") + "/" + entry["endpoint"]
+    try:
+        req = _urllib_request.Request(url, data=b"", method="POST")
+        with _urllib_request.urlopen(req, timeout=10) as resp:
+            body = resp.read(200).decode("utf-8", errors="replace").strip()
+        return True, f"{resp.status} {body}"
+    except HTTPError as exc:
+        return False, f"HTTP {exc.code}: {exc.reason}"
+    except URLError as exc:
+        return False, f"network error: {exc.reason}"
+
+
+# ─────────────────────────────────────────────────────────────────────
+# On-demand external lookup — VirusTotal free-tier search per canonical
+# title. Rate-limited to 10 lookups/hour/operator via title_intel_cache.
+# Results cached for 48 h so re-clicks are free.
+# ─────────────────────────────────────────────────────────────────────
+
+
+_LOOKUP_SOURCES = ("virustotal",)  # metadefender / abusech require a hash we don't yet track
+_LOOKUP_TTL = timedelta(hours=48)
+_LOOKUP_PER_HOUR_CAP = 10
+
+
+@login_required
+@require_POST
+def software_title_lookup(request: HttpRequest, name: str, source: str) -> HttpResponse:
+    canonical_name = name.strip()
+    if not canonical_name:
+        return redirect("software_page")
+    if source not in _LOOKUP_SOURCES:
+        messages.error(request, f"Unknown lookup source '{source}'.")
+        return redirect("software_detail", name=canonical_name)
+
+    now = datetime.now(timezone.utc)
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        cur.execute(
+            """
+            SELECT COUNT(*) FROM operations.title_intel_cache
+             WHERE tenant_id = 1
+               AND looked_up_by_id = %s
+               AND looked_up_at > %s
+            """,
+            (request.user.id, now - timedelta(hours=1)),
+        )
+        (used,) = cur.fetchone()
+        if used >= _LOOKUP_PER_HOUR_CAP:
+            messages.error(
+                request,
+                f"Too many lookups this hour ({used}/{_LOOKUP_PER_HOUR_CAP}). "
+                "Try again shortly — we cap this to protect the free-tier quota.",
+            )
+            return redirect("software_detail", name=canonical_name)
+
+        # Cache hit inside TTL: reuse.
+        cur.execute(
+            """
+            SELECT result_summary, looked_up_at
+              FROM operations.title_intel_cache
+             WHERE tenant_id = 1
+               AND source = %s
+               AND LOWER(canonical_name) = LOWER(%s)
+               AND looked_up_at > %s
+             ORDER BY looked_up_at DESC LIMIT 1
+            """,
+            (source, canonical_name, now - _LOOKUP_TTL),
+        )
+        cached = cur.fetchone()
+        if cached:
+            messages.info(
+                request,
+                f"Reusing cached {source} result from {cached[1]:%Y-%m-%d %H:%M}."
+                f" Summary: {cached[0]}",
+            )
+            return redirect("software_detail", name=canonical_name)
+
+    # Do the actual external call.
+    try:
+        result, summary = _do_lookup(source, canonical_name)
+    except Exception as exc:
+        messages.error(request, f"Lookup failed: {exc}")
+        return redirect("software_detail", name=canonical_name)
+
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        cur.execute(
+            """
+            INSERT INTO operations.title_intel_cache (
+                tenant_id, canonical_name, source,
+                looked_up_at, looked_up_by_id,
+                result, result_summary
+            ) VALUES (1, %s, %s, %s, %s, %s::jsonb, %s)
+            """,
+            (canonical_name, source, now, request.user.id,
+             json.dumps(result), summary[:1000]),
+        )
+    _audit(request, "software.lookup", uuid.uuid4(), {}, {
+        "canonical_name": canonical_name,
+        "source": source,
+        "summary": summary[:400],
+    })
+    messages.success(request, f"{source.title()} lookup complete: {summary}")
+    return redirect("software_detail", name=canonical_name)
+
+
+def _do_lookup(source: str, canonical_name: str) -> tuple[dict, str]:
+    if source == "virustotal":
+        return _lookup_virustotal(canonical_name)
+    raise ValueError(source)
+
+
+def _lookup_virustotal(canonical_name: str) -> tuple[dict, str]:
+    api_key = os.environ.get("VT_API_KEY", "").strip()
+    if not api_key:
+        return {"error": "VT_API_KEY not configured"}, "no API key configured on server"
+    qs = urlencode({"query": canonical_name[:120], "limit": 10})
+    req = _urllib_request.Request(
+        f"https://www.virustotal.com/api/v3/search?{qs}",
+        headers={"x-apikey": api_key, "Accept": "application/json"},
+    )
+    try:
+        with _urllib_request.urlopen(req, timeout=15) as resp:
+            body = resp.read()
+    except HTTPError as exc:
+        if exc.code == 429:
+            return {"error": "rate_limited"}, "VirusTotal rate-limited (free-tier daily cap)"
+        if exc.code == 401:
+            return {"error": "unauthorized"}, "VirusTotal rejected our key"
+        return {"error": f"http_{exc.code}"}, f"VirusTotal returned HTTP {exc.code}"
+    except URLError as exc:
+        return {"error": "network"}, f"Network error contacting VirusTotal: {exc.reason}"
+    try:
+        payload = json.loads(body.decode("utf-8", errors="replace"))
+    except ValueError:
+        return {"error": "bad_json"}, "VirusTotal returned unparseable JSON"
+    data = payload.get("data") or []
+    if not data:
+        return payload, "no matching files or domains found"
+    first = data[0]
+    attrs = first.get("attributes") or {}
+    stats = attrs.get("last_analysis_stats") or {}
+    malicious = stats.get("malicious") or 0
+    suspicious = stats.get("suspicious") or 0
+    summary = (
+        f"{len(data)} match(es); top hit "
+        f"{first.get('id','?')[:40]} — {malicious} engines flagged as malicious, "
+        f"{suspicious} suspicious"
+    )
+    return payload, summary
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Tech Checklist — per-device curated cleanup list combining active
+# software findings and reject/investigate decisions (title- or publisher-
+# scope). Answers "what should the tech clean up on this device?"
+# Optional ?client=<slug> filter for a per-client view.
+# ─────────────────────────────────────────────────────────────────────
+
+
+@login_required
+def software_tech_checklist(request: HttpRequest) -> HttpResponse:
+    client_slugs = [s for s in request.GET.getlist("client") if s]
+    q_filter = (request.GET.get("q") or "").strip()
+    role_filter = (request.GET.get("role") or "").strip().lower()
+    os_filter = (request.GET.get("os") or "").strip()
+    kind_filter = (request.GET.get("kind") or "").strip()
+    filtered_client_ids: list[str] = []
+    if client_slugs:
+        filtered_client_ids = [
+            str(cid)
+            for cid in Client.objects.filter(
+                tenant_id=1, slug__in=client_slugs, deleted_at__isnull=True
+            ).values_list("id", flat=True)
+        ]
+
+    client_where = ""
+    client_params: list = []
+    if filtered_client_ids:
+        client_where = "AND d.client_id = ANY(%s::uuid[])"
+        client_params.append(filtered_client_ids)
+    elif client_slugs:
+        client_where = "AND FALSE"
+    if role_filter in ("server", "workstation", "unknown"):
+        client_where += " AND d.device_role = %s"
+        client_params.append(role_filter)
+    if os_filter:
+        client_where += " AND d.os_group = %s"
+        client_params.append(os_filter)
+
+    findings_sql = f"""
+        SELECT d.client_id, c.slug, c.display_name,
+               d.id AS device_id, d.canonical_hostname,
+               d.device_role, d.os_group,
+               f.finding_details->>'canonical_name' AS canonical_name,
+               f.finding_details->>'publisher'      AS publisher,
+               f.finding_details->>'reason'         AS reason,
+               ft.name AS finding_type,
+               f.severity
+        FROM operations.findings f
+        JOIN operations.finding_types ft ON ft.id = f.finding_type_id
+        JOIN operations.finding_categories fc ON fc.id = ft.category_id
+        JOIN operations.devices d ON d.id = f.subject_id AND d.deleted_at IS NULL
+        JOIN operations.clients c ON c.id = d.client_id AND c.deleted_at IS NULL
+        WHERE f.tenant_id = 1
+          AND f.status IN ('open', 'acknowledged')
+          AND fc.name = 'software'
+          AND ft.name <> 'whitelist_suggestion'
+          AND f.subject_type = 'device'
+          {client_where}
+    """
+
+    # Reject / investigate decisions that hit an active install on the
+    # device (title-scope or publisher-scope). These may not have a
+    # classifier finding (e.g. reject-only) but still belong on the
+    # cleanup list.
+    decisions_sql = f"""
+        SELECT d.client_id, c.slug, c.display_name,
+               d.id AS device_id, d.canonical_hostname,
+               d.device_role, d.os_group,
+               sic.canonical_name,
+               sic.publisher,
+               CASE sd.decision
+                   WHEN 'reject' THEN 'operator rejected'
+                   WHEN 'investigate' THEN 'operator flagged for investigation'
+                   ELSE 'operator decision'
+               END AS reason,
+               ('decision_' || sd.decision) AS finding_type,
+               'medium' AS severity
+        FROM operations.software_installations_current sic
+        JOIN operations.devices d ON d.id = sic.device_id AND d.deleted_at IS NULL
+        JOIN operations.clients c ON c.id = d.client_id AND c.deleted_at IS NULL
+        JOIN operations.software_decisions sd
+          ON sd.tenant_id = sic.tenant_id
+         AND sd.decision IN ('reject', 'investigate')
+         AND (
+              (sd.canonical_name <> '' AND sd.canonical_name = sic.canonical_name)
+           OR (sd.publisher <> ''
+               AND LOWER(sd.publisher) = LOWER(COALESCE(sic.publisher, '')))
+         )
+         AND (sd.device_id IS NULL OR sd.device_id = sic.device_id)
+         AND (sd.client_id IS NULL OR sd.client_id = sic.client_id)
+        WHERE sic.tenant_id = 1
+          AND sic.deleted_at IS NULL
+          AND sic.stale_since IS NULL
+          {client_where}
+    """
+
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        cur.execute(findings_sql, client_params)
+        finding_rows = cur.fetchall()
+        cur.execute(decisions_sql, client_params)
+        decision_rows = cur.fetchall()
+
+    per_device: dict = {}
+    for row in list(finding_rows) + list(decision_rows):
+        (
+            client_id, slug, client_name, device_id, hostname,
+            device_role, os_group, canonical, publisher, reason,
+            finding_type, severity,
+        ) = row
+        entry = per_device.setdefault(
+            device_id,
+            {
+                "device_id": device_id,
+                "client_slug": slug,
+                "client_name": client_name,
+                "hostname": hostname,
+                "device_role": device_role,
+                "os_group": os_group,
+                "items": [],
+                "item_keys": set(),
+            },
+        )
+        item_key = (finding_type, (canonical or "").lower())
+        if item_key in entry["item_keys"]:
+            continue
+        entry["item_keys"].add(item_key)
+        entry["items"].append(
+            {
+                "canonical_name": canonical or "",
+                "publisher": publisher or "",
+                "reason": reason or "",
+                "finding_type": finding_type,
+                "severity": severity,
+            }
+        )
+
+    devices = []
+    for entry in per_device.values():
+        entry.pop("item_keys", None)
+        entry["item_count"] = len(entry["items"])
+        entry["items"].sort(key=lambda i: (i["finding_type"], i["canonical_name"]))
+        devices.append(entry)
+    devices.sort(
+        key=lambda e: (-e["item_count"], e["client_name"], e["hostname"] or "")
+    )
+
+    # Enrich items with category from SoftwareCatalog (canonical lookup).
+    all_canonicals = {
+        i["canonical_name"].lower()
+        for e in devices
+        for i in e["items"]
+        if i["canonical_name"]
+    }
+    catalog_cats = {
+        c.canonical_name.lower(): ", ".join(c.categories or [])
+        for c in SoftwareCatalog.objects.filter(
+            canonical_name__in=list(all_canonicals)
+        )
+    } if all_canonicals else {}
+    for entry in devices:
+        for item in entry["items"]:
+            item["category"] = catalog_cats.get((item["canonical_name"] or "").lower(), "")
+
+    clients = Client.objects.filter(
+        tenant_id=1, deleted_at__isnull=True
+    ).order_by("display_name")
+
+    if wants_csv(request):
+        flat_rows: list[dict] = []
+        for entry in devices:
+            for item in entry["items"]:
+                flat_rows.append(
+                    {
+                        "client": entry["client_name"],
+                        "hostname": entry["hostname"],
+                        "canonical_name": item["canonical_name"],
+                        "publisher": item["publisher"],
+                        "finding_type": item["finding_type"],
+                        "reason": item["reason"],
+                        "severity": item["severity"],
+                    }
+                )
+        return csv_response(
+            flat_rows,
+            columns=[
+                ("Client", "client"),
+                ("Device", "hostname"),
+                ("Title", "canonical_name"),
+                ("Publisher", "publisher"),
+                ("Reason kind", "finding_type"),
+                ("Reason", "reason"),
+                ("Severity", "severity"),
+            ],
+            filename_stem="tech_checklist",
+        )
+
+    # Post-fetch filtering for q + kind — filters that don't map
+    # cleanly to the SQL join. Small candidate set → done in Python.
+    def _match_row(entry: dict) -> bool:
+        if q_filter:
+            needle = q_filter.lower()
+            if needle not in (entry["hostname"] or "").lower() and needle not in (entry["client_name"] or "").lower():
+                if not any(
+                    needle in (i.get("canonical_name") or "").lower()
+                    or needle in (i.get("publisher") or "").lower()
+                    for i in entry["items"]
+                ):
+                    return False
+        if kind_filter:
+            if not any(kind_filter in (i.get("finding_type") or "") for i in entry["items"]):
+                return False
+        return True
+    if q_filter or kind_filter:
+        devices = [d for d in devices if _match_row(d)]
+
+    return render(
+        request,
+        "software_tech_checklist.html",
+        {
+            "devices": devices[:500],
+            "device_count": len(devices),
+            "total_items": sum(e["item_count"] for e in devices),
+            "clients": clients,
+            "active_clients": client_slugs,
+            "active_q": q_filter,
+            "active_role": role_filter,
+            "active_os": os_filter,
+            "active_kind": kind_filter,
+            "software_tab": "checklist",
         },
     )
 
@@ -2488,38 +4623,75 @@ def software_page(request: HttpRequest) -> HttpResponse:
 # scoped view.
 # ─────────────────────────────────────────────────────────────────────
 
+
 @login_required
 def devices_page(request: HttpRequest) -> HttpResponse:
+    device_policy = get_device_status_policy()
+    active_device_days = device_policy["active_device_days"]
+    source_delay_hours = device_policy["source_delay_hours"]
     q_filter = (request.GET.get("q") or "").strip()
-    os_filter = request.GET.get("os", "")           # Windows | macOS | Linux | Other
-    role_filter = request.GET.get("role", "")       # server | workstation | unknown
-    online_filter = request.GET.get("online", "")   # online | offline
-    client_filter = request.GET.get("client", "")   # slug
+    os_filter = request.GET.get("os", "")  # Windows | macOS | Linux | Other
+    role_filter = request.GET.get("role", "")  # server | workstation | unknown
+    online_filter = request.GET.get("online", "")  # online | offline
+    state_filter = request.GET.get("state", "")  # active | not-reporting
+    client_filter = request.GET.get("client", "")  # slug
 
     with transaction.atomic(), connection.cursor() as cur:
         cur.execute("SET LOCAL operations.tenant_id = 1")
 
         # Overview — reads v_device to get session state + scope in one query
         cur.execute(
-            """
+            f"""
             SELECT COUNT(*) AS total,
                    COUNT(*) FILTER (WHERE is_online_any) AS online,
                    COUNT(*) FILTER (WHERE NOT is_online_any) AS offline,
                    COUNT(*) FILTER (WHERE device_role = 'server') AS servers,
                    COUNT(*) FILTER (WHERE device_role = 'workstation') AS workstations,
                    COUNT(*) FILTER (WHERE effective_patching_scope = 'Included') AS in_patch_scope,
+                   COUNT(*) FILTER (WHERE lifecycle_status <> 'retired'
+                                     AND last_contact_at >= NOW() - INTERVAL '{active_device_days} days') AS active,
                    COUNT(*) FILTER (WHERE last_contact_at IS NULL
-                                    OR last_contact_at < NOW() - INTERVAL '7 days') AS stale
+                                    OR last_contact_at < NOW() - INTERVAL '{active_device_days} days') AS stale
             FROM operations.v_device
             WHERE tenant_id = 1
             """
         )
         row = cur.fetchone()
         overview = {
-            "total": row[0], "online": row[1], "offline": row[2],
-            "servers": row[3], "workstations": row[4],
-            "in_patch_scope": row[5], "stale": row[6],
+            "total": row[0],
+            "online": row[1],
+            "offline": row[2],
+            "servers": row[3],
+            "workstations": row[4],
+            "in_patch_scope": row[5],
+            "active": row[6],
+            "stale": row[7],
         }
+
+        cur.execute(
+            """
+            SELECT
+              COUNT(DISTINCT f.subject_id) FILTER (WHERE fc.name = 'coverage')::int,
+              COUNT(DISTINCT f.subject_id) FILTER (WHERE fc.name = 'identity')::int
+            FROM operations.findings f
+            JOIN operations.finding_types ft ON ft.id = f.finding_type_id
+            JOIN operations.finding_categories fc ON fc.id = ft.category_id
+            WHERE f.tenant_id = 1
+              AND f.status IN ('open', 'acknowledged', 'investigating')
+              AND f.subject_type = 'device'
+            """
+        )
+        coverage_issues, identity_issues = cur.fetchone()
+        cur.execute(
+            f"""
+            SELECT COUNT(*)::int
+            FROM operations.source_health_current
+            WHERE tenant_id = 1
+              AND (last_run_ok = FALSE OR last_observed_at IS NULL
+                   OR last_observed_at < NOW() - INTERVAL '{source_delay_hours} hours')
+            """
+        )
+        delayed_sources = cur.fetchone()[0]
 
         # OS group breakdown for chip strip
         cur.execute(
@@ -2534,9 +4706,7 @@ def devices_page(request: HttpRequest) -> HttpResponse:
         where = ["v.tenant_id = 1"]
         params: list = []
         if q_filter:
-            where.append(
-                "(v.canonical_hostname ILIKE %s OR v.canonical_serial ILIKE %s)"
-            )
+            where.append("(v.canonical_hostname ILIKE %s OR v.canonical_serial ILIKE %s)")
             params.extend([f"%{q_filter}%", f"%{q_filter}%"])
         if os_filter:
             where.append("v.os_group = %s")
@@ -2548,8 +4718,18 @@ def devices_page(request: HttpRequest) -> HttpResponse:
             where.append("v.is_online_any")
         elif online_filter == "offline":
             where.append("NOT v.is_online_any")
+        if state_filter == "active":
+            where.append(
+                f"v.lifecycle_status <> 'retired' AND v.last_contact_at >= NOW() - INTERVAL '{active_device_days} days'"
+            )
+        elif state_filter == "not-reporting":
+            where.append(
+                f"(v.last_contact_at IS NULL OR v.last_contact_at < NOW() - INTERVAL '{active_device_days} days')"
+            )
         if client_filter:
-            where.append("v.client_id = (SELECT id FROM operations.clients WHERE slug = %s AND tenant_id = 1)")
+            where.append(
+                "v.client_id = (SELECT id FROM operations.clients WHERE slug = %s AND tenant_id = 1)"
+            )
             params.append(client_filter)
 
         where_sql = " AND ".join(where)
@@ -2579,9 +4759,21 @@ def devices_page(request: HttpRequest) -> HttpResponse:
 
     devices = []
     for row in device_rows:
-        (did, hostname, serial, role, os_group, os_name, is_online,
-         online_sources, last_contact, scope, client_name, client_slug,
-         severe) = row
+        (
+            did,
+            hostname,
+            serial,
+            role,
+            os_group,
+            os_name,
+            is_online,
+            online_sources,
+            last_contact,
+            scope,
+            client_name,
+            client_slug,
+            severe,
+        ) = row
         # Traffic-light health per row
         if severe and severe > 0:
             health = "red"
@@ -2589,36 +4781,55 @@ def devices_page(request: HttpRequest) -> HttpResponse:
             health = "amber"
         else:
             health = "green"
-        devices.append({
-            "id": did, "hostname": hostname, "serial": serial or "",
-            "role": role, "os_group": os_group, "os_name": os_name,
-            "is_online": is_online, "online_sources": online_sources or [],
-            "last_contact": last_contact,
-            "scope": scope, "client_name": client_name,
-            "client_slug": client_slug, "severe": severe or 0,
-            "health": health,
-        })
+        if last_contact is None or last_contact < timezone.now() - timedelta(
+            days=active_device_days
+        ):
+            state_label = "Not reporting"
+        elif is_online:
+            state_label = "Online"
+        else:
+            state_label = "Offline"
+        devices.append(
+            {
+                "id": did,
+                "hostname": hostname,
+                "serial": serial or "",
+                "role": role,
+                "os_group": os_group,
+                "os_name": os_name,
+                "is_online": is_online,
+                "online_sources": online_sources or [],
+                "last_contact": last_contact,
+                "scope": scope,
+                "client_name": client_name,
+                "client_slug": client_slug,
+                "severe": severe or 0,
+                "health": health,
+                "state_label": state_label,
+            }
+        )
 
     clients = Client.objects.filter(
-        tenant_id=1, deleted_at__isnull=True,
+        tenant_id=1,
+        deleted_at__isnull=True,
     ).order_by("display_name")
 
     if wants_csv(request):
         return csv_response(
             devices,
             columns=[
-                ("Hostname",       "hostname"),
-                ("Client",         "client_name"),
-                ("Serial",         "serial"),
-                ("Role",           "role"),
-                ("OS group",       "os_group"),
-                ("OS name",        "os_name"),
-                ("Online",         lambda r: "yes" if r["is_online"] else "no"),
+                ("Hostname", "hostname"),
+                ("Client", "client_name"),
+                ("Serial", "serial"),
+                ("Role", "role"),
+                ("OS group", "os_group"),
+                ("OS name", "os_name"),
+                ("Online", lambda r: "yes" if r["is_online"] else "no"),
                 ("Online sources", "online_sources"),
-                ("Last contact",   "last_contact"),
-                ("Patch scope",    "scope"),
-                ("Severe issues",  "severe"),
-                ("Device ID",      lambda r: str(r["id"])),
+                ("Last contact", "last_contact"),
+                ("Patch scope", "scope"),
+                ("Severe issues", "severe"),
+                ("Device ID", lambda r: str(r["id"])),
             ],
             filename_stem="devices",
         )
@@ -2628,6 +4839,7 @@ def devices_page(request: HttpRequest) -> HttpResponse:
         "devices_page.html",
         {
             "overview": overview,
+            "active_device_days": active_device_days,
             "os_rows": os_rows,
             "devices": devices,
             "clients": clients,
@@ -2635,7 +4847,11 @@ def devices_page(request: HttpRequest) -> HttpResponse:
             "active_os": os_filter,
             "active_role": role_filter,
             "active_online": online_filter,
+            "active_state": state_filter,
             "active_client": client_filter,
+            "coverage_issues": coverage_issues,
+            "identity_issues": identity_issues,
+            "delayed_sources": delayed_sources,
         },
     )
 
@@ -2662,6 +4878,11 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
     5 finding-type tiles reflecting the current filter, filterable
     table.
     """
+
+    device_policy = get_device_status_policy()
+    active_device_days = device_policy["active_device_days"]
+    patch_activity_days = device_policy["patch_activity_days"]
+
     # Multi-value filters accept BOTH native repeated params
     # (`?type=X&type=Y` — how HTML multi-select submits) AND
     # comma-separated values (`?type=X,Y` — convenient for
@@ -2687,7 +4908,8 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
     filtered_client_ids: list[str] = []
     if client_filter:
         filtered_client_ids = [
-            str(cid) for cid in Client.objects.filter(
+            str(cid)
+            for cid in Client.objects.filter(
                 tenant_id=1,
                 slug__in=client_filter,
                 deleted_at__isnull=True,
@@ -2731,10 +4953,9 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
     # Per-type tile counts (respects status + client filters).
     tile_counts = {
         row["finding_type__name"]: row["cnt"]
-        for row in (
-            base_qs.values("finding_type__name").annotate(cnt=Count("id"))
-        )
+        for row in (base_qs.values("finding_type__name").annotate(cnt=Count("id")))
     }
+
     def _type_tile_href(ftname: str) -> str:
         parts = [f"type={ftname}"]
         if client_filter:
@@ -2784,41 +5005,212 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
         "in_scope": pop_row[1],
         "excluded": pop_row[2],
         "unmanaged": pop_row[3],
-        "in_scope_pct": (
-            round(100.0 * pop_row[1] / pop_row[0], 1) if pop_row[0] else 0.0
-        ),
+        "in_scope_pct": (round(100.0 * pop_row[1] / pop_row[0], 1) if pop_row[0] else 0.0),
     }
 
+    # Status overview.  Keep the three ideas deliberately separate:
+    # device freshness (active), patching policy (Included), and evidence of
+    # patch work (a recent Ninja state observation or install outcome).
+    posture_where = ["v.tenant_id = %s", "v.lifecycle_status <> 'retired'"]
+    posture_params: list = [1]
+    if filtered_client_ids:
+        posture_where.append("v.client_id = ANY(%s::uuid[])")
+        posture_params.append(filtered_client_ids)
+    elif client_filter:
+        posture_where.append("FALSE")
+    if role_filter:
+        posture_where.append("v.device_role = %s")
+        posture_params.append(role_filter)
+    posture_where_sql = " AND ".join(posture_where)
+
+    posture_cte = f"""
+        WITH scoped_devices AS (
+            SELECT v.device_id, v.client_id, v.canonical_hostname,
+                   v.device_role, v.os_group, v.last_contact_at,
+                   v.needs_reboot, v.effective_patching_scope
+            FROM operations.v_device v
+            WHERE {posture_where_sql}
+        ), ninja_links AS (
+            SELECT DISTINCT dl.device_id, dl.external_id::integer AS ninja_device_id
+            FROM operations.device_links dl
+            JOIN operations.sources s ON s.id = dl.source_id
+            WHERE dl.tenant_id = 1 AND LOWER(s.name) = 'ninja'
+              AND dl.external_id ~ '^\\d+$'
+        ), patch_signal AS (
+            SELECT nl.device_id,
+                   BOOL_OR(COALESCE(dps.ever_installed, FALSE)) AS ever_installed
+            FROM ninja_links nl
+            JOIN ninja_patches.device_patch_signal dps
+              ON dps.device_id = nl.ninja_device_id
+            GROUP BY nl.device_id
+        ), patch_activity AS (
+            -- Reads the device_patch_activity matview (sql migration 070)
+            -- rather than re-aggregating ninja_patches.patch_facts at request
+            -- time. A canonical device can be linked to multiple Ninja device
+            -- ids, so take MAX across links.
+            SELECT nl.device_id,
+                   MAX(dpa.last_patch_activity_at) AS last_patch_activity_at
+            FROM ninja_links nl
+            JOIN ninja_patches.device_patch_activity dpa
+              ON dpa.device_id = nl.ninja_device_id
+            GROUP BY nl.device_id
+        ), device_posture AS (
+            SELECT sd.*, pa.last_patch_activity_at,
+                   COALESCE(ps.ever_installed, FALSE) AS ever_installed,
+                   sd.last_contact_at >= NOW() - INTERVAL '{active_device_days} days' AS is_active,
+                   pa.last_patch_activity_at >= NOW() - INTERVAL '{patch_activity_days} days'
+                       AS has_recent_patch_activity
+            FROM scoped_devices sd
+            LEFT JOIN patch_signal ps ON ps.device_id = sd.device_id
+            LEFT JOIN patch_activity pa ON pa.device_id = sd.device_id
+        )
+    """
+    # Single query returning the fleet totals row (GROUPING sentinel = 1) and
+    # one row per client (sentinel = 0). Halves the CTE work vs. running the
+    # rollup twice.
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        cur.execute(
+            posture_cte
+            + """
+            SELECT dp.client_id, c.slug, c.display_name,
+                   COUNT(*)::int AS total,
+                   COUNT(*) FILTER (WHERE dp.is_active)::int AS active,
+                   COUNT(*) FILTER (WHERE dp.is_active
+                                     AND dp.effective_patching_scope = 'Included')::int AS active_in_scope,
+                   COUNT(*) FILTER (WHERE dp.is_active
+                                     AND dp.effective_patching_scope = 'Included'
+                                     AND dp.has_recent_patch_activity)::int AS recent_activity,
+                   COUNT(*) FILTER (WHERE dp.is_active
+                                     AND dp.effective_patching_scope = 'Included'
+                                     AND NOT dp.has_recent_patch_activity)::int AS quiet,
+                   COUNT(*) FILTER (WHERE dp.is_active
+                                     AND dp.effective_patching_scope = 'Included'
+                                     AND NOT dp.ever_installed)::int AS never_patched,
+                   COUNT(*) FILTER (WHERE dp.is_active
+                                     AND dp.effective_patching_scope = 'Included'
+                                     AND dp.needs_reboot)::int AS reboot_pending,
+                   GROUPING(dp.client_id) AS is_total
+            FROM device_posture dp
+            LEFT JOIN operations.clients c
+              ON c.id = dp.client_id AND c.deleted_at IS NULL
+            GROUP BY GROUPING SETS ((), (dp.client_id, c.slug, c.display_name))
+            ORDER BY is_total DESC,
+                     quiet DESC, never_patched DESC, reboot_pending DESC,
+                     c.display_name
+            """,
+            posture_params,
+        )
+        rollup_rows = cur.fetchall()
+
+    patch_status = {
+        "total": 0,
+        "active": 0,
+        "active_in_scope": 0,
+        "recent_patch_activity": 0,
+        "quiet_patch_data": 0,
+        "never_patched": 0,
+        "reboot_pending": 0,
+    }
+    client_posture: list[dict] = []
+    for row in rollup_rows:
+        (
+            client_id,
+            slug,
+            name,
+            total,
+            active,
+            active_in_scope,
+            recent_activity,
+            quiet,
+            never_patched,
+            reboot_pending,
+            is_total,
+        ) = row
+        if is_total == 1:
+            patch_status = {
+                "total": total,
+                "active": active,
+                "active_in_scope": active_in_scope,
+                "recent_patch_activity": recent_activity,
+                "quiet_patch_data": quiet,
+                "never_patched": never_patched,
+                "reboot_pending": reboot_pending,
+            }
+        elif slug is not None:
+            client_posture.append(
+                {
+                    "client_id": client_id,
+                    "slug": slug,
+                    "name": name,
+                    "active": active,
+                    "in_scope": active_in_scope,
+                    "recent_activity": recent_activity,
+                    "quiet": quiet,
+                    "never_patched": never_patched,
+                    "reboot_pending": reboot_pending,
+                }
+            )
     # Device population by scope (drilldown from the summary tiles).
     # Optional "scope" query param drills into a specific bucket.
     scope_filter = request.GET.get("scope", "")
+    posture_filter = request.GET.get("posture", "")
     device_rows: list = []
-    if scope_filter in ("Included", "Excluded", "Unmanaged", "Unknown"):
+    if scope_filter in ("Included", "Excluded", "Unmanaged", "Unknown") or posture_filter in (
+        "active",
+        "active-in-scope",
+        "recent-activity",
+        "quiet",
+        "never-patched",
+        "reboot-pending",
+    ):
         with transaction.atomic(), connection.cursor() as cur:
             cur.execute("SET LOCAL operations.tenant_id = 1")
-            base_where = "tenant_id = %s AND effective_patching_scope = %s"
-            params: list = [1, scope_filter]
-            if filtered_client_ids:
-                base_where += " AND client_id = ANY(%s::uuid[])"
-                params.append(filtered_client_ids)
-            elif client_filter:
-                base_where += " AND FALSE"
-            if role_filter:
-                base_where += " AND device_role = %s"
-                params.append(role_filter)
+            base_where = ["1=1"]
+            if scope_filter:
+                base_where.append("effective_patching_scope = %s")
+            if posture_filter == "active":
+                base_where.append("is_active")
+            elif posture_filter == "active-in-scope":
+                base_where.extend(("is_active", "effective_patching_scope = 'Included'"))
+            elif posture_filter == "recent-activity":
+                base_where.extend(
+                    (
+                        "is_active",
+                        "effective_patching_scope = 'Included'",
+                        "has_recent_patch_activity",
+                    )
+                )
+            elif posture_filter == "quiet":
+                base_where.extend(
+                    (
+                        "is_active",
+                        "effective_patching_scope = 'Included'",
+                        "NOT has_recent_patch_activity",
+                    )
+                )
+            elif posture_filter == "never-patched":
+                base_where.extend(
+                    ("is_active", "effective_patching_scope = 'Included'", "NOT ever_installed")
+                )
+            elif posture_filter == "reboot-pending":
+                base_where.extend(
+                    ("is_active", "effective_patching_scope = 'Included'", "needs_reboot")
+                )
             cur.execute(
-                f"""
+                posture_cte
+                + f"""
                 SELECT device_id, canonical_hostname, client_id,
                        device_role, os_group,
-                       patching_scope_reason,
-                       patching_scope_override,
-                       last_contact_at
-                FROM operations.v_device
-                WHERE {base_where}
+                       NULL::text AS patching_scope_reason,
+                       NULL::text AS patching_scope_override,
+                       last_contact_at, last_patch_activity_at
+                FROM device_posture
+                WHERE {' AND '.join(base_where)}
                 ORDER BY canonical_hostname
                 LIMIT 500
                 """,
-                params,
+                posture_params + ([scope_filter] if scope_filter else []),
             )
             device_rows = cur.fetchall()
 
@@ -2826,10 +5218,9 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
     # row (template-side lookup would iterate all clients per row —
     # bad).
     if device_rows:
-        client_slug_by_id = dict(
-            Client.objects.filter(tenant_id=1).values_list("id", "slug")
-        )
+        client_slug_by_id = dict(Client.objects.filter(tenant_id=1).values_list("id", "slug"))
         from django.urls import reverse
+
         device_rows = [
             {
                 "device_id": did,
@@ -2839,16 +5230,42 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
                 "reason": reason,
                 "override": override,
                 "last_contact": last_contact,
+                "last_patch_activity": last_patch_activity,
                 "url": (
-                    reverse("device_detail", kwargs={
-                        "org_slug": client_slug_by_id[cid],
-                        "device_id": did,
-                    })
-                    if cid in client_slug_by_id else None
+                    reverse(
+                        "device_detail",
+                        kwargs={
+                            "org_slug": client_slug_by_id[cid],
+                            "device_id": did,
+                        },
+                    )
+                    if cid in client_slug_by_id
+                    else None
+                ),
+                "activity_url": (
+                    reverse(
+                        "device_detail",
+                        kwargs={
+                            "org_slug": client_slug_by_id[cid],
+                            "device_id": did,
+                        },
+                    )
+                    + "?tab=activity"
+                    if cid in client_slug_by_id
+                    else None
                 ),
             }
-            for (did, hostname, cid, role, os_group, reason, override,
-                 last_contact) in device_rows
+            for (
+                did,
+                hostname,
+                cid,
+                role,
+                os_group,
+                reason,
+                override,
+                last_contact,
+                last_patch_activity,
+            ) in device_rows
         ]
 
     # Main table query = base_qs + type filter
@@ -2900,14 +5317,14 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
         return csv_response(
             rows,
             columns=[
-                ("Severity",      lambda r: r["f"].severity),
-                ("Type",          lambda r: r["f"].finding_type.name),
-                ("Client",        lambda r: (r["f"].client.display_name if r["f"].client else "")),
-                ("Subject",       "subject_label"),
-                ("Detail",        "detail"),
-                ("Status",        lambda r: r["f"].status),
-                ("Confidence",    lambda r: r["f"].confidence),
-                ("First seen",    lambda r: r["f"].first_seen_at),
+                ("Severity", lambda r: r["f"].severity),
+                ("Type", lambda r: r["f"].finding_type.name),
+                ("Client", lambda r: (r["f"].client.display_name if r["f"].client else "")),
+                ("Subject", "subject_label"),
+                ("Detail", "detail"),
+                ("Status", lambda r: r["f"].status),
+                ("Confidence", lambda r: r["f"].confidence),
+                ("First seen", lambda r: r["f"].first_seen_at),
                 ("Last detected", lambda r: r["f"].last_detected_at),
             ],
             filename_stem="patching",
@@ -2916,10 +5333,7 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
     paginator = Paginator(rows, 50)
     page = paginator.get_page(request.GET.get("page"))
 
-    clients = (
-        Client.objects.filter(tenant_id=1, deleted_at__isnull=True)
-        .order_by("display_name")
-    )
+    clients = Client.objects.filter(tenant_id=1, deleted_at__isnull=True).order_by("display_name")
 
     page_query = request.GET.copy()
     page_query.pop("page", None)
@@ -2943,13 +5357,14 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
         return "?" + "&".join(parts)
 
     population_tiles = [
-        {"label": "Total devices",  "value": population["total"]},
-        {"label": "In scope (Included)", "value": population["in_scope"],
-         "href": _scope_href("Included")},
-        {"label": "Excluded",       "value": population["excluded"],
-         "href": _scope_href("Excluded")},
-        {"label": "Unmanaged",      "value": population["unmanaged"],
-         "href": _scope_href("Unmanaged")},
+        {"label": "Total devices", "value": population["total"]},
+        {
+            "label": "In scope (Included)",
+            "value": population["in_scope"],
+            "href": _scope_href("Included"),
+        },
+        {"label": "Excluded", "value": population["excluded"], "href": _scope_href("Excluded")},
+        {"label": "Unmanaged", "value": population["unmanaged"], "href": _scope_href("Unmanaged")},
     ]
 
     return render(
@@ -2971,6 +5386,11 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
             "active_scope": scope_filter,
             "total_active": sum(tile_counts.values()),
             "population": population,
+            "patch_status": patch_status,
+            "client_posture": client_posture,
+            "active_device_days": active_device_days,
+            "patch_activity_days": patch_activity_days,
+            "active_posture": posture_filter,
             "filter_qs": filter_qs,
             "device_rows": device_rows,
             "page_query": page_query.urlencode(),
@@ -3032,22 +5452,22 @@ def admin_finding_acknowledge(request: HttpRequest, finding_id: str) -> HttpResp
 
 
 _PATCH_STATUS_CHOICES = [
-    ("Installed",  "Installed"),
-    ("Failed",     "Failed"),
-    ("Pending",    "Pending"),
-    ("Approved",   "Approved"),
-    ("Rejected",   "Rejected"),
-    ("Manual",     "Manual"),
-    ("Delayed",    "Delayed"),
+    ("Installed", "Installed"),
+    ("Failed", "Failed"),
+    ("Pending", "Pending"),
+    ("Approved", "Approved"),
+    ("Rejected", "Rejected"),
+    ("Manual", "Manual"),
+    ("Delayed", "Delayed"),
 ]
 
 _PATCH_SEVERITY_CHOICES = [
-    ("Critical",     "Critical"),
-    ("Important",    "Important"),
-    ("Moderate",     "Moderate"),
-    ("Low",          "Low"),
-    ("Optional",     "Optional"),
-    ("Unspecified",  "Unspecified"),
+    ("Critical", "Critical"),
+    ("Important", "Important"),
+    ("Moderate", "Moderate"),
+    ("Low", "Low"),
+    ("Optional", "Optional"),
+    ("Unspecified", "Unspecified"),
 ]
 
 
@@ -3150,11 +5570,21 @@ def patch_evidence_page(request: HttpRequest) -> HttpResponse:
         rows = cur.fetchall()
 
     columns = [
-        "device_id", "hostname", "client_slug", "client_name",
-        "device_role", "os_group", "os_name",
-        "patch_name", "kb_number", "status", "severity",
-        "installed_at", "last_observed_at",
-        "last_install_status", "last_install_at",
+        "device_id",
+        "hostname",
+        "client_slug",
+        "client_name",
+        "device_role",
+        "os_group",
+        "os_name",
+        "patch_name",
+        "kb_number",
+        "status",
+        "severity",
+        "installed_at",
+        "last_observed_at",
+        "last_install_status",
+        "last_install_at",
     ]
     patch_rows = [dict(zip(columns, r, strict=True)) for r in rows]
 
@@ -3162,19 +5592,19 @@ def patch_evidence_page(request: HttpRequest) -> HttpResponse:
         return csv_response(
             patch_rows,
             columns=[
-                ("Client",            "client_name"),
-                ("Hostname",          "hostname"),
-                ("Role",              "device_role"),
-                ("OS group",          "os_group"),
-                ("OS name",           "os_name"),
-                ("KB",                "kb_number"),
-                ("Patch",             "patch_name"),
-                ("Status",            "status"),
-                ("Severity",          "severity"),
-                ("Installed at",      "installed_at"),
-                ("Last observed",     "last_observed_at"),
+                ("Client", "client_name"),
+                ("Hostname", "hostname"),
+                ("Role", "device_role"),
+                ("OS group", "os_group"),
+                ("OS name", "os_name"),
+                ("KB", "kb_number"),
+                ("Patch", "patch_name"),
+                ("Status", "status"),
+                ("Severity", "severity"),
+                ("Installed at", "installed_at"),
+                ("Last observed", "last_observed_at"),
                 ("Last install status", "last_install_status"),
-                ("Last install at",   "last_install_at"),
+                ("Last install at", "last_install_at"),
             ],
             filename_stem="patch_evidence",
         )
@@ -3222,8 +5652,10 @@ def patch_trends_page(request: HttpRequest) -> HttpResponse:
 
     client_filter = (request.GET.get("client") or "").strip()
 
-    where = ["pf.fact_type = 'install_outcome'",
-             "pf.installed_at > NOW() - (%s::text || ' days')::interval"]
+    where = [
+        "pf.fact_type = 'install_outcome'",
+        "pf.installed_at > NOW() - (%s::text || ' days')::interval",
+    ]
     params: list = [str(days)]
     if client_filter:
         # Constrain by the client this Ninja device_id resolves to.
@@ -3261,37 +5693,36 @@ def patch_trends_page(request: HttpRequest) -> HttpResponse:
 
     trend_rows = [
         {
-            "day":              day,
-            "installs":         installs,
-            "failures":         failures,
-            "total":            total,
-            "devices_touched":  devices_touched,
-            "fail_pct":         round(100.0 * failures / total, 1) if total else 0.0,
+            "day": day,
+            "installs": installs,
+            "failures": failures,
+            "total": total,
+            "devices_touched": devices_touched,
+            "fail_pct": round(100.0 * failures / total, 1) if total else 0.0,
         }
         for day, installs, failures, total, devices_touched in rows
     ]
 
     totals = {
-        "installs":        sum(r["installs"] for r in trend_rows),
-        "failures":        sum(r["failures"] for r in trend_rows),
-        "total":           sum(r["total"] for r in trend_rows),
+        "installs": sum(r["installs"] for r in trend_rows),
+        "failures": sum(r["failures"] for r in trend_rows),
+        "total": sum(r["total"] for r in trend_rows),
         "devices_touched": sum(r["devices_touched"] for r in trend_rows),
     }
     totals["fail_pct"] = (
-        round(100.0 * totals["failures"] / totals["total"], 1)
-        if totals["total"] else 0.0
+        round(100.0 * totals["failures"] / totals["total"], 1) if totals["total"] else 0.0
     )
 
     if wants_csv(request):
         return csv_response(
             trend_rows,
             columns=[
-                ("Day",              "day"),
-                ("Installs",         "installs"),
-                ("Failures",         "failures"),
-                ("Total attempts",   "total"),
-                ("Devices touched",  "devices_touched"),
-                ("Failure %",        "fail_pct"),
+                ("Day", "day"),
+                ("Installs", "installs"),
+                ("Failures", "failures"),
+                ("Total attempts", "total"),
+                ("Devices touched", "devices_touched"),
+                ("Failure %", "fail_pct"),
             ],
             filename_stem="patch_trends",
         )
@@ -3321,8 +5752,10 @@ def patch_trends_page(request: HttpRequest) -> HttpResponse:
 
 @login_required
 def patch_activity_search_page(request: HttpRequest) -> HttpResponse:
-    """Free-text search across recent patch activity events (install
-    outcomes). Closes the Metabase "Activity Search" dashboard GAP.
+    """Free-text search across recent Ninja patch install outcomes.
+
+    Each result retains Ninja's event time, Operations collection time, and
+    source payload so an operator can inspect the evidence behind a status.
 
     Query params: `q` (patch name or KB), `days` (default 30, capped
     180), `status` (Installed/Failed/...), `client` (slug). CSV export
@@ -3363,6 +5796,10 @@ def patch_activity_search_page(request: HttpRequest) -> HttpResponse:
                 pf.severity,
                 pf.kb_number,
                 pf.name,
+                pf.fact_type,
+                pf.ninja_observed_at,
+                pf.last_observed_at,
+                pf.data,
                 d.id                     AS device_id,
                 d.canonical_hostname     AS hostname,
                 c.slug                   AS client_slug,
@@ -3384,21 +5821,84 @@ def patch_activity_search_page(request: HttpRequest) -> HttpResponse:
         )
         rows = cur.fetchall()
 
-    cols = ["installed_at", "status", "severity", "kb_number", "name",
-            "device_id", "hostname", "client_slug", "client_name"]
+        # Patch facts are structured patch evidence. Ninja's activity feed is
+        # the accompanying source event trail, so expose both in one search
+        # rather than making an operator leave Operations for the message
+        # Ninja reported.
+        ninja_activity_rows = []
+        if not status_filter:
+            activity_where = [
+                "a.activity_time > NOW() - (%s::text || ' days')::interval",
+            ]
+            activity_params: list = [str(days)]
+            if q_filter:
+                activity_where.append("(a.subject ILIKE %s OR a.message ILIKE %s)")
+                activity_params.extend([f"%{q_filter}%", f"%{q_filter}%"])
+            if client_filter:
+                activity_where.append("c.slug = %s")
+                activity_params.append(client_filter)
+            cur.execute(
+                f"""
+                SELECT a.activity_time, NULL::text AS status, a.severity,
+                       NULL::text AS kb_number, a.subject AS name,
+                       a.activity_type AS fact_type, a.activity_time AS ninja_observed_at,
+                       a.ingested_at AS last_observed_at, a.data,
+                       d.id AS device_id, d.canonical_hostname AS hostname,
+                       c.slug AS client_slug, c.display_name AS client_name
+                FROM ninja_activities.activities a
+                JOIN operations.device_links dl
+                  ON dl.external_id = a.device_id::text
+                 AND dl.tenant_id = 1
+                JOIN operations.sources s
+                  ON s.id = dl.source_id AND LOWER(s.name) = 'ninja'
+                JOIN operations.devices d
+                  ON d.id = dl.device_id AND d.deleted_at IS NULL
+                JOIN operations.clients c
+                  ON c.id = d.client_id AND c.deleted_at IS NULL
+                WHERE {' AND '.join(activity_where)}
+                ORDER BY a.activity_time DESC
+                LIMIT 500
+                """,
+                activity_params,
+            )
+            ninja_activity_rows = cur.fetchall()
+
+    cols = [
+        "installed_at",
+        "status",
+        "severity",
+        "kb_number",
+        "name",
+        "fact_type",
+        "ninja_observed_at",
+        "last_observed_at",
+        "raw_data",
+        "device_id",
+        "hostname",
+        "client_slug",
+        "client_name",
+    ]
     activity = [dict(zip(cols, r, strict=True)) for r in rows]
+    activity.extend(dict(zip(cols, r, strict=True)) for r in ninja_activity_rows)
+    for row in activity:
+        row["raw_data"] = json.dumps(row["raw_data"], indent=2, sort_keys=True, default=str)
+        row["event_at"] = row["installed_at"] or row["ninja_observed_at"] or row["last_observed_at"]
+    activity.sort(key=lambda row: row["event_at"] or timezone.now(), reverse=True)
+    activity = activity[:500]
 
     if wants_csv(request):
         return csv_response(
             activity,
             columns=[
                 ("Installed at", "installed_at"),
-                ("Status",       "status"),
-                ("Severity",     "severity"),
-                ("KB",           "kb_number"),
-                ("Patch",        "name"),
-                ("Client",       "client_name"),
-                ("Hostname",     "hostname"),
+                ("Status", "status"),
+                ("Severity", "severity"),
+                ("KB", "kb_number"),
+                ("Patch", "name"),
+                ("Ninja event time", "ninja_observed_at"),
+                ("Collected", "last_observed_at"),
+                ("Client", "client_name"),
+                ("Hostname", "hostname"),
             ],
             filename_stem="patch_activity",
         )
@@ -3426,9 +5926,7 @@ def patch_activity_search_page(request: HttpRequest) -> HttpResponse:
 
 
 def _get_client_by_slug(slug: str) -> Client:
-    return get_object_or_404(
-        Client, tenant_id=1, slug=slug, deleted_at__isnull=True
-    )
+    return get_object_or_404(Client, tenant_id=1, slug=slug, deleted_at__isnull=True)
 
 
 @login_required
@@ -3502,23 +6000,21 @@ def merge_candidates_queue(request: HttpRequest) -> HttpResponse:
     qs = qs.order_by("-confidence", "canonical_key")[:200]
 
     entity_types = (
-        MergeCandidate.objects.filter(tenant_id=1)
-        .values_list("entity_type", flat=True)
-        .distinct()
+        MergeCandidate.objects.filter(tenant_id=1).values_list("entity_type", flat=True).distinct()
     )
 
     if wants_csv(request):
         return csv_response(
             list(qs),
             columns=[
-                ("Entity type",   "entity_type"),
+                ("Entity type", "entity_type"),
                 ("Canonical key", "canonical_key"),
-                ("Client",        lambda r: (r.client.display_name if r.client else "")),
-                ("Confidence",    "confidence"),
-                ("Status",        "status"),
-                ("Created",       "created_at"),
-                ("Resolved",      "resolved_at"),
-                ("Resolved by",   "resolved_by"),
+                ("Client", lambda r: (r.client.display_name if r.client else "")),
+                ("Confidence", "confidence"),
+                ("Status", "status"),
+                ("Created", "created_at"),
+                ("Resolved", "resolved_at"),
+                ("Resolved by", "resolved_by"),
             ],
             filename_stem="merge_candidates",
         )
@@ -3641,10 +6137,7 @@ def org_software(request: HttpRequest, org_slug: str) -> HttpResponse:
                 (client.id, canonical_names),
             )
             findings_map = {name: count for name, count in cur2.fetchall()}
-    rows = [
-        row + (decisions_map.get(row[0], ""), findings_map.get(row[0], 0))
-        for row in rows
-    ]
+    rows = [row + (decisions_map.get(row[0], ""), findings_map.get(row[0], 0)) for row in rows]
 
     num_pages = max(1, (total + _SW_PAGE_SIZE - 1) // _SW_PAGE_SIZE)
 
@@ -3657,14 +6150,14 @@ def org_software(request: HttpRequest, org_slug: str) -> HttpResponse:
         return csv_response(
             rows,
             columns=[
-                ("Canonical name",  lambda r: r[0]),
-                ("Publisher",       lambda r: r[1] or ""),
-                ("Device count",    lambda r: r[2]),
+                ("Canonical name", lambda r: r[0]),
+                ("Publisher", lambda r: r[1] or ""),
+                ("Device count", lambda r: r[2]),
                 ("First installed", lambda r: r[3]),
-                ("Last seen",       lambda r: r[4]),
-                ("Locations",       lambda r: r[5] or ""),
-                ("Decision",        lambda r: r[6]),
-                ("Open findings",   lambda r: r[7]),
+                ("Last seen", lambda r: r[4]),
+                ("Locations", lambda r: r[5] or ""),
+                ("Decision", lambda r: r[6]),
+                ("Open findings", lambda r: r[7]),
             ],
             filename_stem=f"{org_slug}_software",
         )
@@ -3730,13 +6223,13 @@ def org_software_devices(request: HttpRequest, org_slug: str) -> HttpResponse:
         return csv_response(
             device_rows,
             columns=[
-                ("Device ID",     lambda r: str(r[0])),
-                ("Hostname",      lambda r: r[1]),
-                ("Serial",        lambda r: r[2] or ""),
-                ("Device type",   lambda r: r[3]),
-                ("Version",       lambda r: r[4] or ""),
-                ("Install date",  lambda r: r[5]),
-                ("Install path",  lambda r: r[6] or ""),
+                ("Device ID", lambda r: str(r[0])),
+                ("Hostname", lambda r: r[1]),
+                ("Serial", lambda r: r[2] or ""),
+                ("Device type", lambda r: r[3]),
+                ("Version", lambda r: r[4] or ""),
+                ("Install date", lambda r: r[5]),
+                ("Install path", lambda r: r[6] or ""),
                 ("Last observed", lambda r: r[7]),
             ],
             filename_stem=f"{org_slug}_{sw_name}_devices",
@@ -3759,6 +6252,7 @@ def org_software_devices(request: HttpRequest, org_slug: str) -> HttpResponse:
 def org_software_decide(request: HttpRequest, org_slug: str) -> HttpResponse:
     """Record approve/reject/investigate decision for a software entry."""
     from django.utils import timezone
+
     client = _get_client_by_slug(org_slug)
     sw_name = request.POST.get("canonical_name", "").strip()
     decision = request.POST.get("decision", "").strip()
@@ -3769,19 +6263,25 @@ def org_software_decide(request: HttpRequest, org_slug: str) -> HttpResponse:
         tenant_id=1,
         client=client,
         canonical_name=sw_name,
+        publisher="",
         defaults={
             "decision": decision,
             "decided_by": request.user,
             "decided_at": timezone.now(),
         },
     )
-    return redirect(request.POST.get("next") or request.META.get("HTTP_REFERER") or
-                    f"/orgs/{org_slug}/software/")
+    return redirect(
+        request.POST.get("next")
+        or request.META.get("HTTP_REFERER")
+        or f"/orgs/{org_slug}/software/"
+    )
 
 
 # ── Compliance / fleet coverage page ─────────────────────────────────────────
 
-_SEV_RANK = "CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END"
+_SEV_RANK = (
+    "CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END"
+)
 
 
 @login_required
@@ -3796,7 +6296,8 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             cur.execute("SET LOCAL operations.tenant_id = 1")
 
             # Active missing-required-platform findings grouped by client + platform
-            cur.execute("""
+            cur.execute(
+                """
                 SELECT
                     c.display_name,
                     c.slug,
@@ -3821,7 +6322,9 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                     COUNT(*) DESC,
                     c.display_name,
                     f.finding_details->>'platform'
-            """, {"client": client_filter, "platform": platform_filter, "confidence": conf_filter})
+            """,
+                {"client": client_filter, "platform": platform_filter, "confidence": conf_filter},
+            )
             rows = cur.fetchall()
 
             # Devices missing from Ninja per client (secondary signal)
@@ -3864,16 +6367,19 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
 
     gap_rows = [
         {
-            "client_name": r[0], "client_slug": r[1],
-            "platform": r[2], "severity": r[3],
-            "total": r[4], "confirmed": r[5], "probable": r[6],
+            "client_name": r[0],
+            "client_slug": r[1],
+            "platform": r[2],
+            "severity": r[3],
+            "total": r[4],
+            "confirmed": r[5],
+            "probable": r[6],
             "oldest_at": r[7],
         }
         for r in rows
     ]
     missing_devices = [
-        {"client_name": r[0], "client_slug": r[1], "count": r[2]}
-        for r in missing_rows
+        {"client_name": r[0], "client_slug": r[1], "count": r[2]} for r in missing_rows
     ]
 
     clients_affected = len({r["client_slug"] for r in gap_rows})
@@ -3884,31 +6390,35 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         return csv_response(
             gap_rows,
             columns=[
-                ("Client",    "client_name"),
-                ("Platform",  "platform"),
-                ("Severity",  "severity"),
-                ("Total",     "total"),
+                ("Client", "client_name"),
+                ("Platform", "platform"),
+                ("Severity", "severity"),
+                ("Total", "total"),
                 ("Confirmed", "confirmed"),
-                ("Probable",  "probable"),
+                ("Probable", "probable"),
                 ("Oldest at", "oldest_at"),
             ],
             filename_stem="fleet_coverage_gaps",
         )
 
-    return render(request, "coverage.html", {
-        "admin_group": "integrations",
-        "admin_tab": "coverage",
-        "gap_rows": gap_rows,
-        "missing_devices": missing_devices,
-        "clients_affected": clients_affected,
-        "total_gaps": total_gaps,
-        "critical_count": critical_count,
-        "platforms": platforms,
-        "filter_clients": filter_clients,
-        "client_filter": client_filter,
-        "platform_filter": platform_filter,
-        "conf_filter": conf_filter,
-    })
+    return render(
+        request,
+        "coverage.html",
+        {
+            "admin_group": "integrations",
+            "admin_tab": "coverage",
+            "gap_rows": gap_rows,
+            "missing_devices": missing_devices,
+            "clients_affected": clients_affected,
+            "total_gaps": total_gaps,
+            "critical_count": critical_count,
+            "platforms": platforms,
+            "filter_clients": filter_clients,
+            "client_filter": client_filter,
+            "platform_filter": platform_filter,
+            "conf_filter": conf_filter,
+        },
+    )
 
 
 # ── Source ingest status page ─────────────────────────────────────────────────
@@ -3955,12 +6465,12 @@ def sources_status(request: HttpRequest) -> HttpResponse:
             """)
             recent_runs = [
                 {
-                    "source":       r[0],
-                    "status":       "done" if r[1] else "failed",
-                    "started_at":   r[2],
+                    "source": r[0],
+                    "status": "done" if r[1] else "failed",
+                    "started_at": r[2],
                     "completed_at": r[3],
-                    "rows_seen":    r[4],
-                    "error":        r[5] or None,
+                    "rows_seen": r[4],
+                    "error": r[5] or None,
                 }
                 for r in cur.fetchall()
             ]
@@ -3974,46 +6484,52 @@ def sources_status(request: HttpRequest) -> HttpResponse:
         last_fail = health[1] if health and not health[0] else None
         last_error = (health[3] or None) if health and not health[0] else None
         is_stale = last_success is None or (now - last_success).total_seconds() > 8 * 3600
-        sources.append({
-            "name":          source,
-            "is_processing": bool(act and act[1] == "processing"),
-            "has_pending":   bool(act and act[1] == "pending"),
-            "last_success":  last_success,
-            "last_failure":  last_fail,
-            "last_rows":     health[5] if health else None,
-            "last_error":    last_error,
-            "last_observed": health[6] if health else None,
-            "client_count":  health[7] if health else 0,
-            "device_count":  health[8] if health else 0,
-            "is_stale":      is_stale,
-        })
+        sources.append(
+            {
+                "name": source,
+                "is_processing": bool(act and act[1] == "processing"),
+                "has_pending": bool(act and act[1] == "pending"),
+                "last_success": last_success,
+                "last_failure": last_fail,
+                "last_rows": health[5] if health else None,
+                "last_error": last_error,
+                "last_observed": health[6] if health else None,
+                "client_count": health[7] if health else 0,
+                "device_count": health[8] if health else 0,
+                "is_stale": is_stale,
+            }
+        )
 
     stale_count = sum(1 for s in sources if s["is_stale"] and not s["is_processing"])
     if wants_csv(request):
         return csv_response(
             sources,
             columns=[
-                ("Source",         "name"),
-                ("Processing",     lambda r: "yes" if r["is_processing"] else "no"),
-                ("Pending",        lambda r: "yes" if r["has_pending"] else "no"),
-                ("Stale",          lambda r: "yes" if r["is_stale"] else "no"),
-                ("Last success",   "last_success"),
-                ("Last failure",   "last_failure"),
-                ("Last rows",      "last_rows"),
-                ("Last error",     "last_error"),
-                ("Last observed",  "last_observed"),
-                ("Clients",        "client_count"),
-                ("Devices",        "device_count"),
+                ("Source", "name"),
+                ("Processing", lambda r: "yes" if r["is_processing"] else "no"),
+                ("Pending", lambda r: "yes" if r["has_pending"] else "no"),
+                ("Stale", lambda r: "yes" if r["is_stale"] else "no"),
+                ("Last success", "last_success"),
+                ("Last failure", "last_failure"),
+                ("Last rows", "last_rows"),
+                ("Last error", "last_error"),
+                ("Last observed", "last_observed"),
+                ("Clients", "client_count"),
+                ("Devices", "device_count"),
             ],
             filename_stem="sources_status",
         )
-    return render(request, "sources.html", {
-        "admin_group": "integrations",
-        "admin_tab": "sources",
-        "sources": sources,
-        "recent_runs": recent_runs,
-        "stale_count": stale_count,
-    })
+    return render(
+        request,
+        "sources.html",
+        {
+            "admin_group": "integrations",
+            "admin_tab": "sources",
+            "sources": sources,
+            "recent_runs": recent_runs,
+            "stale_count": stale_count,
+        },
+    )
 
 
 # ── Client candidates (Track C.4 evidence panel) ─────────────────────────────
@@ -4043,42 +6559,49 @@ def client_candidates_queue(request: HttpRequest) -> HttpResponse:
             seen = r.get("observed_at")
             if seen and (latest_seen is None or seen > latest_seen):
                 latest_seen = seen
-        rows.append({
-            "candidate": c,
-            "sources": sorted(by_source),
-            "source_count": len(by_source),
-            "latest_seen": latest_seen,
-        })
+        rows.append(
+            {
+                "candidate": c,
+                "sources": sorted(by_source),
+                "source_count": len(by_source),
+                "latest_seen": latest_seen,
+            }
+        )
 
     counts = {
         row["status"]: row["n"]
         for row in ClientCandidate.objects.filter(tenant_id=1)
-        .values("status").annotate(n=Count("id"))
+        .values("status")
+        .annotate(n=Count("id"))
     }
 
     if wants_csv(request):
         return csv_response(
             rows,
             columns=[
-                ("Display name",   lambda r: r["candidate"].display_name),
-                ("Status",         lambda r: r["candidate"].status),
-                ("Seen count",     lambda r: r["candidate"].seen_count),
-                ("Source count",   "source_count"),
-                ("Sources",        "sources"),
-                ("Latest seen",    "latest_seen"),
-                ("Candidate ID",   lambda r: str(r["candidate"].id)),
+                ("Display name", lambda r: r["candidate"].display_name),
+                ("Status", lambda r: r["candidate"].status),
+                ("Seen count", lambda r: r["candidate"].seen_count),
+                ("Source count", "source_count"),
+                ("Sources", "sources"),
+                ("Latest seen", "latest_seen"),
+                ("Candidate ID", lambda r: str(r["candidate"].id)),
             ],
             filename_stem="client_candidates",
         )
 
-    return render(request, "client_candidates_queue.html", {
-        "admin_group": "review",
-        "admin_tab": "clients",
-        "rows": rows,
-        "active_status": status_filter,
-        "counts": counts,
-        "status_choices": ClientCandidate.Status.choices,
-    })
+    return render(
+        request,
+        "client_candidates_queue.html",
+        {
+            "admin_group": "review",
+            "admin_tab": "clients",
+            "rows": rows,
+            "active_status": status_filter,
+            "counts": counts,
+            "status_choices": ClientCandidate.Status.choices,
+        },
+    )
 
 
 @login_required
@@ -4140,15 +6663,17 @@ def client_candidate_detail(request: HttpRequest, candidate_id) -> HttpResponse:
                 )
                 (device_count,) = cur.fetchone()
 
-                per_source.append({
-                    "source":       source_names.get(sid, "?"),
-                    "external_id":  ext_id,
-                    "external_name": ref.get("external_name") or "",
-                    "first_seen":   first_seen,
-                    "last_seen":    last_seen,
-                    "run_count":    run_count,
-                    "device_count": device_count or 0,
-                })
+                per_source.append(
+                    {
+                        "source": source_names.get(sid, "?"),
+                        "external_id": ext_id,
+                        "external_name": ref.get("external_name") or "",
+                        "first_seen": first_seen,
+                        "last_seen": last_seen,
+                        "run_count": run_count,
+                        "device_count": device_count or 0,
+                    }
+                )
 
             # Sample devices seen inside these groups AND client overlap.
             if external_ids:
@@ -4175,18 +6700,23 @@ def client_candidate_detail(request: HttpRequest, candidate_id) -> HttpResponse:
                     (external_ids,),
                 )
                 for platform, hostname, device_id, cid, cname in cur.fetchall():
-                    sample_devices.append({
-                        "platform": platform,
-                        "hostname": hostname or "—",
-                        "resolved_client_id": cid,
-                        "resolved_client_name": cname or "",
-                    })
+                    sample_devices.append(
+                        {
+                            "platform": platform,
+                            "hostname": hostname or "—",
+                            "resolved_client_id": cid,
+                            "resolved_client_name": cname or "",
+                        }
+                    )
                     if cid and cname:
-                        overlap = device_overlap.setdefault(str(cid), {
-                            "client_id": str(cid),
-                            "display_name": cname,
-                            "device_count": 0,
-                        })
+                        overlap = device_overlap.setdefault(
+                            str(cid),
+                            {
+                                "client_id": str(cid),
+                                "display_name": cname,
+                                "device_count": 0,
+                            },
+                        )
                         overlap["device_count"] += 1
 
     # Fuzzy suggestions against known client display names + aliases.
@@ -4197,32 +6727,35 @@ def client_candidate_detail(request: HttpRequest, candidate_id) -> HttpResponse:
         known_names[a.alias] = ("alias", a.client_id, a.client.display_name)
     fuzzy = []
     if candidate.display_name:
-        matches = get_close_matches(candidate.display_name, list(known_names.keys()), n=5, cutoff=0.6)
+        matches = get_close_matches(
+            candidate.display_name, list(known_names.keys()), n=5, cutoff=0.6
+        )
         for m in matches:
             kind, cid, cname = known_names[m]
             fuzzy.append({"match": m, "kind": kind, "client_id": cid, "client_name": cname})
 
     all_clients = list(
-        Client.objects.filter(tenant_id=1, deleted_at__isnull=True)
-        .order_by("display_name")
+        Client.objects.filter(tenant_id=1, deleted_at__isnull=True).order_by("display_name")
     )
     profiles = list(RequirementProfile.objects.filter(tenant_id=1).order_by("name"))
     default_profile = next((p for p in profiles if p.is_tenant_default), None)
 
-    return render(request, "client_candidate_detail.html", {
-        "admin_group": "review",
-        "admin_tab": "clients",
-        "candidate": candidate,
-        "per_source": per_source,
-        "sample_devices": sample_devices,
-        "device_overlap": sorted(
-            device_overlap.values(), key=lambda x: -x["device_count"]
-        ),
-        "fuzzy": fuzzy,
-        "all_clients": all_clients,
-        "profiles": profiles,
-        "default_profile": default_profile,
-    })
+    return render(
+        request,
+        "client_candidate_detail.html",
+        {
+            "admin_group": "review",
+            "admin_tab": "clients",
+            "candidate": candidate,
+            "per_source": per_source,
+            "sample_devices": sample_devices,
+            "device_overlap": sorted(device_overlap.values(), key=lambda x: -x["device_count"]),
+            "fuzzy": fuzzy,
+            "all_clients": all_clients,
+            "profiles": profiles,
+            "default_profile": default_profile,
+        },
+    )
 
 
 # ── Candidate actions (Track C.4) — all audited ─────────────────────────────
@@ -4245,8 +6778,12 @@ def _audit(request, action: str, entity_id, before, after) -> None:
 
 
 def _attach_group_to_client(
-    cur, source_id: int, external_id: str, external_name: str,
-    client_id, reason: str,
+    cur,
+    source_id: int,
+    external_id: str,
+    external_name: str,
+    client_id,
+    reason: str,
 ) -> None:
     """Backfill org + device observations for this group to a client,
     and mint / update the client_link. Mirrors client_resolver._attach_group."""
@@ -4303,6 +6840,7 @@ def _attach_group_to_client(
     # of this source that pointed at this external_id. The resolver
     # keys condition_key on source_binding_id, so we enumerate bindings.
     import hashlib
+
     cur.execute(
         """
         SELECT sb.id FROM operations.source_bindings sb
@@ -4333,6 +6871,7 @@ def _attach_group_to_client(
 def _resolve_finding_for_group(cur, source_binding_id, external_id: str) -> None:
     """Close any client_unattached_group admin finding for a now-attached group."""
     import hashlib
+
     raw = f"client_resolver:{source_binding_id}:{external_id}"
     condition_key = hashlib.sha256(raw.encode()).hexdigest()[:64]
     cur.execute(
@@ -4358,7 +6897,10 @@ def client_candidate_accept(request, candidate_id) -> HttpResponse:
     source group, mint an alias row, and instantiate the requirement
     profile as per-client coverage_requirements."""
     candidate = get_object_or_404(
-        ClientCandidate, id=candidate_id, tenant_id=1, status="open",
+        ClientCandidate,
+        id=candidate_id,
+        tenant_id=1,
+        status="open",
     )
     display_name = (request.POST.get("display_name") or candidate.display_name or "").strip()
     if not display_name:
@@ -4370,7 +6912,8 @@ def client_candidate_accept(request, candidate_id) -> HttpResponse:
         profile = get_object_or_404(RequirementProfile, id=profile_id, tenant_id=1)
     else:
         profile = RequirementProfile.objects.filter(
-            tenant_id=1, is_tenant_default=True,
+            tenant_id=1,
+            is_tenant_default=True,
         ).first()
 
     base_slug = slugify(display_name)[:110] or "client"
@@ -4381,13 +6924,16 @@ def client_candidate_accept(request, candidate_id) -> HttpResponse:
         slug = f"{base_slug}-{suffix}"
 
     client = Client.objects.create(
-        tenant_id=1, slug=slug, display_name=display_name,
+        tenant_id=1,
+        slug=slug,
+        display_name=display_name,
         requirement_profile=profile,
         created_reason=f"candidate.accept:{candidate.id}",
     )
 
     ClientNameAlias.objects.update_or_create(
-        tenant_id=1, normalized_name=candidate.normalized_name,
+        tenant_id=1,
+        normalized_name=candidate.normalized_name,
         defaults={
             "client": client,
             "alias": display_name,
@@ -4406,8 +6952,12 @@ def client_candidate_accept(request, candidate_id) -> HttpResponse:
             if not (sid and ext_id):
                 continue
             _attach_group_to_client(
-                cur, sid, ext_id, ref.get("external_name") or display_name,
-                client.id, "candidate.accept",
+                cur,
+                sid,
+                ext_id,
+                ref.get("external_name") or display_name,
+                client.id,
+                "candidate.accept",
             )
 
     # Profile is source of truth per BLUEPRINT C.6 — assigning
@@ -4422,7 +6972,9 @@ def client_candidate_accept(request, candidate_id) -> HttpResponse:
     candidate.save()
 
     _audit(
-        request, "client_candidate.accept", candidate.id,
+        request,
+        "client_candidate.accept",
+        candidate.id,
         {"normalized_name": candidate.normalized_name, "status": "open"},
         {
             "status": "accepted",
@@ -4441,7 +6993,10 @@ def client_candidate_accept(request, candidate_id) -> HttpResponse:
 def client_candidate_map(request, candidate_id) -> HttpResponse:
     """Map candidate's source groups to an existing client."""
     candidate = get_object_or_404(
-        ClientCandidate, id=candidate_id, tenant_id=1, status="open",
+        ClientCandidate,
+        id=candidate_id,
+        tenant_id=1,
+        status="open",
     )
     target_id = request.POST.get("client_id")
     if not target_id:
@@ -4450,7 +7005,8 @@ def client_candidate_map(request, candidate_id) -> HttpResponse:
     target = get_object_or_404(Client, id=target_id, tenant_id=1, deleted_at__isnull=True)
 
     ClientNameAlias.objects.update_or_create(
-        tenant_id=1, normalized_name=candidate.normalized_name,
+        tenant_id=1,
+        normalized_name=candidate.normalized_name,
         defaults={
             "client": target,
             "alias": candidate.display_name or candidate.normalized_name,
@@ -4469,9 +7025,12 @@ def client_candidate_map(request, candidate_id) -> HttpResponse:
             if not (sid and ext_id):
                 continue
             _attach_group_to_client(
-                cur, sid, ext_id,
+                cur,
+                sid,
+                ext_id,
                 ref.get("external_name") or target.display_name,
-                target.id, "candidate.map",
+                target.id,
+                "candidate.map",
             )
 
     candidate.status = ClientCandidate.Status.MAPPED
@@ -4482,7 +7041,9 @@ def client_candidate_map(request, candidate_id) -> HttpResponse:
     candidate.save()
 
     _audit(
-        request, "client_candidate.map", candidate.id,
+        request,
+        "client_candidate.map",
+        candidate.id,
         {"normalized_name": candidate.normalized_name, "status": "open"},
         {"status": "mapped", "client_id": str(target.id)},
     )
@@ -4496,11 +7057,15 @@ def client_candidate_map(request, candidate_id) -> HttpResponse:
 def client_candidate_exclude(request, candidate_id) -> HttpResponse:
     """Add the candidate's normalized name to client_org_excludes."""
     candidate = get_object_or_404(
-        ClientCandidate, id=candidate_id, tenant_id=1, status="open",
+        ClientCandidate,
+        id=candidate_id,
+        tenant_id=1,
+        status="open",
     )
     reason = (request.POST.get("reason") or "").strip() or "excluded from candidate view"
     ClientOrgExclude.objects.get_or_create(
-        tenant_id=1, normalized_name=candidate.normalized_name,
+        tenant_id=1,
+        normalized_name=candidate.normalized_name,
         defaults={
             "reason": reason[:240],
             "created_by": request.user.get_username(),
@@ -4514,7 +7079,9 @@ def client_candidate_exclude(request, candidate_id) -> HttpResponse:
     candidate.save()
 
     _audit(
-        request, "client_candidate.exclude", candidate.id,
+        request,
+        "client_candidate.exclude",
+        candidate.id,
         {"normalized_name": candidate.normalized_name, "status": "open"},
         {"status": "excluded", "reason": reason},
     )
@@ -4528,14 +7095,19 @@ def client_candidate_fix(request, candidate_id) -> HttpResponse:
     """Record an operator note — candidate stays open and re-resolves
     when the source is fixed."""
     candidate = get_object_or_404(
-        ClientCandidate, id=candidate_id, tenant_id=1, status="open",
+        ClientCandidate,
+        id=candidate_id,
+        tenant_id=1,
+        status="open",
     )
     note = (request.POST.get("note") or "").strip()
     if not note:
         messages.error(request, "A note is required for fix-at-source.")
         return redirect("client_candidate_detail", candidate_id=candidate.id)
     _audit(
-        request, "client_candidate.fix_at_source", candidate.id,
+        request,
+        "client_candidate.fix_at_source",
+        candidate.id,
         {"normalized_name": candidate.normalized_name, "status": "open"},
         {"status": "open", "note": note},
     )
@@ -4556,6 +7128,8 @@ def software_decisions_queue(request: HttpRequest) -> HttpResponse:
     per-client, or per-device scope.
     """
     category_filter = request.GET.get("category", "")
+    q_filter = (request.GET.get("q") or "").strip().lower()
+    decision_filter = (request.GET.get("decision") or "").strip().lower()
     with transaction.atomic():
         with connection.cursor() as cur:
             cur.execute("SET LOCAL operations.tenant_id = 1")
@@ -4563,6 +7137,7 @@ def software_decisions_queue(request: HttpRequest) -> HttpResponse:
                 """
                 SELECT
                     f.finding_details->>'canonical_name' AS canonical,
+                    COALESCE(MAX(f.finding_details->>'publisher'), '') AS publisher,
                     f.finding_details->>'category' AS category,
                     MIN(sc.categories::text) AS catalog_categories,
                     COUNT(DISTINCT f.subject_id) AS device_count,
@@ -4577,37 +7152,63 @@ def software_decisions_queue(request: HttpRequest) -> HttpResponse:
                   AND f.status IN ('open', 'acknowledged')
                   AND ft.source_module = 'platform.software_findings'
                   AND f.finding_details->>'canonical_name' IS NOT NULL
-                GROUP BY 1, 2
+                GROUP BY 1, 3
                 ORDER BY device_count DESC, canonical
                 LIMIT 500
                 """,
             )
             rows = cur.fetchall()
 
-    # Attach existing decision (global scope) to each row
+    # Attach existing decision (global scope) to each row — either a
+    # title-scope decision on the canonical, or a publisher-scope
+    # decision on the observed publisher.
     canonical_names = [r[0] for r in rows if r[0]]
-    dec_map = {
-        (d.canonical_name.lower(), d.client_id, d.device_id): d
+    publisher_names = list({r[1] for r in rows if r[1]})
+    title_dec_map = {
+        d.canonical_name.lower(): d
         for d in SoftwareDecision.objects.filter(
-            tenant_id=1,
-            canonical_name__in=canonical_names,
-            client__isnull=True,
-            device__isnull=True,
-        )
+            tenant_id=1, canonical_name__in=canonical_names,
+            client__isnull=True, device__isnull=True,
+        ).exclude(canonical_name="")
+    }
+    pub_dec_map = {
+        d.publisher.lower(): d
+        for d in SoftwareDecision.objects.filter(
+            tenant_id=1, publisher__in=publisher_names,
+            client__isnull=True, device__isnull=True,
+        ).exclude(publisher="")
     }
     display_rows = []
-    for canonical, category, catalog_cats, device_count, latest in rows:
-        dec = dec_map.get((canonical.lower(), None, None))
-        display_rows.append({
-            "canonical": canonical,
-            "category": category or (catalog_cats or ""),
-            "device_count": device_count,
-            "latest": latest,
-            "global_decision": dec.decision if dec else "",
-        })
+    for canonical, publisher, category, catalog_cats, device_count, latest in rows:
+        title_dec = title_dec_map.get(canonical.lower()) if canonical else None
+        pub_dec = pub_dec_map.get(publisher.lower()) if publisher else None
+        display_rows.append(
+            {
+                "canonical": canonical,
+                "publisher": publisher or "",
+                "category": category or (catalog_cats or ""),
+                "device_count": device_count,
+                "latest": latest,
+                "global_decision": title_dec.decision if title_dec else "",
+                "publisher_decision": pub_dec.decision if pub_dec else "",
+            }
+        )
 
     if category_filter:
         display_rows = [r for r in display_rows if category_filter in (r["category"] or "")]
+    if q_filter:
+        display_rows = [
+            r for r in display_rows
+            if q_filter in (r["canonical"] or "").lower()
+            or q_filter in (r["publisher"] or "").lower()
+        ]
+    if decision_filter == "pending":
+        display_rows = [r for r in display_rows if not r["global_decision"] and not r["publisher_decision"]]
+    elif decision_filter in ("approve", "reject", "investigate", "approve_publisher"):
+        display_rows = [
+            r for r in display_rows
+            if r["global_decision"] == decision_filter or r["publisher_decision"] == decision_filter
+        ]
 
     categories_seen = sorted({r["category"] for r in display_rows if r["category"]})
 
@@ -4615,23 +7216,201 @@ def software_decisions_queue(request: HttpRequest) -> HttpResponse:
         return csv_response(
             display_rows,
             columns=[
-                ("Canonical name",  "canonical"),
-                ("Category",        "category"),
-                ("Device count",    "device_count"),
-                ("Latest seen",     "latest"),
-                ("Global decision", "global_decision"),
+                ("Product", "canonical"),
+                ("Publisher", "publisher"),
+                ("Category", "category"),
+                ("Device count", "device_count"),
+                ("Latest seen", "latest"),
+                ("Product decision", "global_decision"),
+                ("Publisher decision", "publisher_decision"),
             ],
             filename_stem="software_decisions",
         )
 
-    return render(request, "software_decisions.html", {
-        "admin_group": "review",
-        "admin_tab": "software",
-        "rows": display_rows,
-        "categories": categories_seen,
-        "active_category": category_filter,
-        "decision_choices": SoftwareDecision.Decision.choices,
-    })
+    return render(
+        request,
+        "software_decisions.html",
+        {
+            "admin_group": "review",
+            "admin_tab": "software",
+            "rows": display_rows,
+            "categories": categories_seen,
+            "active_category": category_filter,
+            "active_q": q_filter,
+            "active_decision": decision_filter,
+            "decision_choices": SoftwareDecision.Decision.choices,
+            "software_tab": "decisions",
+        },
+    )
+
+
+@login_required
+def software_decision_log(request: HttpRequest) -> HttpResponse:
+    """Chronological log of every SoftwareDecision — the complement to
+    the pending queue. Answers "what have I decided recently?".
+    Filters: scope, decision, publisher / product substring, date."""
+    scope_filter = (request.GET.get("scope") or "").strip().lower()
+    decision_filter = (request.GET.get("decision") or "").strip().lower()
+    q_filter = (request.GET.get("q") or "").strip()
+
+    qs = SoftwareDecision.objects.filter(tenant_id=1).select_related(
+        "client", "device", "decided_by"
+    )
+    if scope_filter == "global":
+        qs = qs.filter(client__isnull=True, device__isnull=True)
+    elif scope_filter == "client":
+        qs = qs.filter(client__isnull=False, device__isnull=True)
+    elif scope_filter == "device":
+        qs = qs.filter(device__isnull=False)
+    elif scope_filter == "publisher":
+        qs = qs.exclude(publisher="")
+    elif scope_filter == "product":
+        qs = qs.exclude(canonical_name="")
+    if decision_filter in ("approve", "approve_publisher", "reject", "investigate"):
+        qs = qs.filter(decision=decision_filter)
+    if q_filter:
+        qs = qs.filter(
+            Q(canonical_name__icontains=q_filter)
+            | Q(publisher__icontains=q_filter)
+            | Q(reason__icontains=q_filter)
+        )
+    qs = qs.order_by("-decided_at", "-id")[:500]
+
+    rows = [
+        {
+            "id": d.id,
+            "decision": d.decision,
+            "canonical_name": d.canonical_name,
+            "publisher": d.publisher,
+            "scope_label": (
+                "device" if d.device_id
+                else "client" if d.client_id
+                else "global"
+            ),
+            "target_label": (
+                d.canonical_name
+                or (f"publisher: {d.publisher}" if d.publisher else "?")
+            ),
+            "client": d.client.display_name if d.client else None,
+            "device_id": d.device_id,
+            "decided_by": d.decided_by.username if d.decided_by else None,
+            "decided_at": d.decided_at,
+            "reason": (d.reason or "")[:200],
+        }
+        for d in qs
+    ]
+
+    if wants_csv(request):
+        return csv_response(
+            rows,
+            columns=[
+                ("Decided at", "decided_at"),
+                ("Decision", "decision"),
+                ("Product", "canonical_name"),
+                ("Publisher", "publisher"),
+                ("Scope", "scope_label"),
+                ("Client", "client"),
+                ("Decided by", "decided_by"),
+                ("Reason", "reason"),
+            ],
+            filename_stem="software_decision_log",
+        )
+
+    return render(
+        request,
+        "software_decision_log.html",
+        {
+            "rows": rows,
+            "active_scope": scope_filter,
+            "active_decision": decision_filter,
+            "active_q": q_filter,
+            "software_tab": "decisions",
+        },
+    )
+
+
+def _refresh_software_risk_matview() -> None:
+    """Best-effort REFRESH MATERIALIZED VIEW on ``v_software_safety``.
+    Called after any operator decision write so the software UI shows
+    the updated band immediately. Never raises to the caller — the
+    write itself is what matters; the refresh is a courtesy."""
+    try:
+        with connection.cursor() as cur:
+            cur.execute("REFRESH MATERIALIZED VIEW operations.v_software_safety")
+    except Exception:
+        pass
+
+
+@login_required
+@require_POST
+@transaction.atomic
+def software_decision_bulk(request: HttpRequest) -> HttpResponse:
+    """Apply a single decision to a set of canonical names or publishers.
+
+    Form fields:
+      * canonical_name — repeated (from checkbox list); optional
+      * publisher      — repeated; optional
+      * decision       — one of SoftwareDecision.Decision.values
+      * scope          — global | client | device (currently only global
+                          supported in the queue UI)
+      * next           — return URL
+    """
+    decision = (request.POST.get("decision") or "").strip()
+    if decision not in dict(SoftwareDecision.Decision.choices):
+        messages.error(request, "Pick a decision before applying.")
+        _refresh_software_risk_matview()
+    return redirect(_safe_next(request, "software_decisions_queue"))
+
+    canonical_names = [n for n in request.POST.getlist("canonical_name") if n.strip()]
+    publishers      = [p for p in request.POST.getlist("publisher")      if p.strip()]
+    if not canonical_names and not publishers:
+        messages.error(request, "Select at least one product or publisher.")
+        _refresh_software_risk_matview()
+    return redirect(_safe_next(request, "software_decisions_queue"))
+
+    created, updated = 0, 0
+    for name in canonical_names:
+        obj, was_created = SoftwareDecision.objects.update_or_create(
+            tenant_id=1, canonical_name=name.strip(), publisher="",
+            client=None, device=None,
+            defaults={
+                "decision": decision, "reason": "",
+                "decided_by": request.user, "decided_at": timezone.now(),
+            },
+        )
+        _audit(request, "software_decision.bulk_set", obj.id, {},
+               {"canonical_name": name.strip(), "scope": "global", "decision": decision})
+        created += int(was_created)
+        updated += int(not was_created)
+    for pub in publishers:
+        obj, was_created = SoftwareDecision.objects.update_or_create(
+            tenant_id=1, canonical_name="", publisher=pub.strip(),
+            client=None, device=None,
+            defaults={
+                "decision": decision, "reason": "",
+                "decided_by": request.user, "decided_at": timezone.now(),
+            },
+        )
+        _audit(request, "software_decision.bulk_set", obj.id, {},
+               {"publisher": pub.strip(), "scope": "global", "decision": decision})
+        created += int(was_created)
+        updated += int(not was_created)
+    messages.success(
+        request,
+        f"{decision}: {created} new, {updated} updated across "
+        f"{len(canonical_names)} product(s) + {len(publishers)} publisher(s).",
+    )
+    _refresh_software_risk_matview()
+    return redirect(_safe_next(request, "software_decisions_queue"))
+
+
+def _safe_next(request: HttpRequest, fallback_url_name: str) -> str:
+    """Return the operator-supplied ``next`` if it's a relative URL,
+    otherwise reverse ``fallback_url_name``."""
+    nxt = request.POST.get("next") or ""
+    if nxt.startswith("/") and not nxt.startswith("//"):
+        return nxt
+    return reverse(fallback_url_name)
 
 
 @login_required
@@ -4639,16 +7418,24 @@ def software_decisions_queue(request: HttpRequest) -> HttpResponse:
 @transaction.atomic
 def software_decision_create(request: HttpRequest) -> HttpResponse:
     """Create or update a SoftwareDecision at the requested scope
-    (global / per-client / per-device). Audited."""
+    (global / per-client / per-device). Match key is either a
+    canonical_name (title-scope) or a publisher (publisher-scope, applies
+    to every title from that publisher). Audited."""
     canonical_name = (request.POST.get("canonical_name") or "").strip()
+    publisher = (request.POST.get("publisher") or "").strip()
     decision = (request.POST.get("decision") or "").strip()
     scope = request.POST.get("scope") or "global"
     client_slug = request.POST.get("client_slug") or ""
     device_id_str = request.POST.get("device_id") or ""
     reason = (request.POST.get("reason") or "").strip()
 
-    if not canonical_name or decision not in dict(SoftwareDecision.Decision.choices):
-        messages.error(request, "canonical_name and a valid decision are required.")
+    if decision not in dict(SoftwareDecision.Decision.choices):
+        messages.error(request, "A valid decision is required.")
+        return redirect("software_decisions_queue")
+    if bool(canonical_name) == bool(publisher):
+        messages.error(
+            request, "Provide exactly one of canonical_name or publisher."
+        )
         return redirect("software_decisions_queue")
 
     client = None
@@ -4663,6 +7450,7 @@ def software_decision_create(request: HttpRequest) -> HttpResponse:
     obj, created = SoftwareDecision.objects.update_or_create(
         tenant_id=1,
         canonical_name=canonical_name,
+        publisher=publisher,
         client=client,
         device=device,
         defaults={
@@ -4672,11 +7460,15 @@ def software_decision_create(request: HttpRequest) -> HttpResponse:
             "decided_at": timezone.now(),
         },
     )
+    match_key = canonical_name or f"publisher:{publisher}"
     _audit(
-        request, "software_decision.set", obj.id,
+        request,
+        "software_decision.set",
+        obj.id,
         {},
         {
             "canonical_name": canonical_name,
+            "publisher": publisher,
             "scope": scope,
             "client_id": str(client.id) if client else None,
             "device_id": str(device.id) if device else None,
@@ -4685,9 +7477,14 @@ def software_decision_create(request: HttpRequest) -> HttpResponse:
     )
     messages.success(
         request,
-        f"{decision} recorded for {canonical_name} ({scope})."
+        f"{decision} recorded for {match_key} ({scope})."
         + (" Created." if created else " Updated."),
     )
+    _refresh_software_risk_matview()
+    next_url = request.POST.get("next") or ""
+    # Only follow relative URLs to avoid open-redirects.
+    if next_url.startswith("/") and not next_url.startswith("//"):
+        return redirect(next_url)
     return redirect("software_decisions_queue")
 
 
@@ -4782,12 +7579,16 @@ def device_merge(
     """
     device_a = get_object_or_404(
         Device.objects.select_related("client"),
-        tenant_id=1, id=device_id,
-        client__slug=org_slug, deleted_at__isnull=True,
+        tenant_id=1,
+        id=device_id,
+        client__slug=org_slug,
+        deleted_at__isnull=True,
     )
     device_b = get_object_or_404(
         Device.objects.select_related("client"),
-        tenant_id=1, id=target_id, deleted_at__isnull=True,
+        tenant_id=1,
+        id=target_id,
+        deleted_at__isnull=True,
     )
     if device_a.client_id != device_b.client_id:
         messages.error(
@@ -4805,8 +7606,10 @@ def device_merge(
         if survivor_id not in (str(device_a.id), str(device_b.id)):
             messages.error(request, "Pick a survivor.")
             return redirect(
-                "device_merge", org_slug=org_slug,
-                device_id=device_id, target_id=target_id,
+                "device_merge",
+                org_slug=org_slug,
+                device_id=device_id,
+                target_id=target_id,
             )
         if survivor_id == str(device_a.id):
             survivor, loser = device_a, device_b
@@ -4816,7 +7619,9 @@ def device_merge(
             cur.execute("SET LOCAL operations.tenant_id = 1")
             counts = _merge_devices(cur, survivor.id, loser.id, "operator.merged")
         _audit(
-            request, "device.merge", survivor.id,
+            request,
+            "device.merge",
+            survivor.id,
             {"survivor_id": str(survivor.id), "loser_id": str(loser.id)},
             {"counts": counts},
         )
@@ -4829,7 +7634,9 @@ def device_merge(
             f"{counts.get('findings_moved', 0)} findings.",
         )
         return redirect(
-            "device_detail", org_slug=survivor.client.slug, device_id=survivor.id,
+            "device_detail",
+            org_slug=survivor.client.slug,
+            device_id=survivor.id,
         )
 
     # GET — default-survivor rule mirrors legacy identity_candidate_confirm:
@@ -4850,11 +7657,10 @@ def device_merge(
     elif device_b.id in ninja_owners and device_a.id not in ninja_owners:
         default_survivor = device_b
     else:
-        default_survivor = (
-            device_a if device_a.created_at <= device_b.created_at else device_b
-        )
+        default_survivor = device_a if device_a.created_at <= device_b.created_at else device_b
     return render(
-        request, "device_merge.html",
+        request,
+        "device_merge.html",
         {
             "device_a": device_a,
             "device_b": device_b,
@@ -4868,6 +7674,110 @@ def device_merge(
 
 
 @login_required
+def operations_admin_overview(request: HttpRequest) -> HttpResponse:
+    """Operations Admin landing — one hub with every admin/operator
+    surface grouped by workflow area. Counts are cheap; each tile is
+    also a link."""
+    now = timezone.now()
+
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        cur.execute(
+            """
+            SELECT platform, last_observed_at, last_run_ok
+            FROM operations.source_health_current
+            WHERE tenant_id = 1
+            """
+        )
+        source_health = cur.fetchall()
+    stale_sources = sum(
+        observed_at is None or not run_ok or (now - observed_at).total_seconds() > 8 * 3600
+        for _platform, observed_at, run_ok in source_health
+    )
+
+    # Intel connector status (optional — may not be present pre-migration).
+    intel_ok = intel_failed = intel_never = 0
+    try:
+        with transaction.atomic(), connection.cursor() as cur:
+            cur.execute("SET LOCAL operations.tenant_id = 1")
+            cur.execute(
+                "SELECT last_status FROM operations.intel_ingest_status"
+            )
+            for (status,) in cur.fetchall():
+                if status == "ok":
+                    intel_ok += 1
+                elif status:
+                    intel_failed += 1
+                else:
+                    intel_never += 1
+        # Every connector we know about, minus what's recorded.
+        intel_never += max(0, 9 - (intel_ok + intel_failed + intel_never))
+    except Exception:
+        intel_ok = intel_failed = intel_never = 0
+
+    open_findings = Finding.objects.filter(
+        tenant_id=1, status__in=_FINDING_ACTIVE_STATUSES
+    ).count()
+    software_findings_open = Finding.objects.filter(
+        tenant_id=1, status__in=_FINDING_ACTIVE_STATUSES,
+        finding_type__category__name="software",
+    ).count()
+    patching_findings_open = Finding.objects.filter(
+        tenant_id=1, status__in=_FINDING_ACTIVE_STATUSES,
+        finding_type__category__name="patching",
+    ).count()
+    software_decision_count = SoftwareDecision.objects.filter(tenant_id=1).count()
+    classifier_rule_count = 0
+    try:
+        from .models import SoftwareClassifierRule
+        classifier_rule_count = SoftwareClassifierRule.objects.filter(enabled=True).count()
+    except Exception:
+        classifier_rule_count = 0
+
+    return render(
+        request,
+        "operations_admin_overview.html",
+        {
+            "admin_group": "overview",
+            # Review counts
+            "nav_pending_client_candidates": ClientCandidate.objects.filter(
+                tenant_id=1, status="open"
+            ).count(),
+            "nav_pending_merges": MergeCandidate.objects.filter(
+                tenant_id=1, status="open"
+            ).count(),
+            "nav_pending_software_decisions": Finding.objects.filter(
+                tenant_id=1,
+                status__in=_FINDING_ACTIVE_STATUSES,
+                finding_type__category__name="software",
+            ).count(),
+            "open_findings": open_findings,
+            "software_findings_open": software_findings_open,
+            "patching_findings_open": patching_findings_open,
+            # Software surface
+            "software_decision_count": software_decision_count,
+            "classifier_rule_count": classifier_rule_count,
+            # Config counts
+            "profile_count": RequirementProfile.objects.filter(tenant_id=1).count(),
+            "profiles_without_clients": RequirementProfile.objects.filter(
+                tenant_id=1, clients__isnull=True
+            ).count(),
+            "alert_rule_count": NotificationRule.objects.filter(tenant_id=1, enabled=True).count(),
+            "suppression_count": SuppressionRule.objects.filter(tenant_id=1).count(),
+            # Integrations
+            "source_count": len(source_health),
+            "stale_sources": stale_sources,
+            "admin_finding_count": AdminFinding.objects.filter(
+                tenant_id=1, status__in=("open", "acknowledged")
+            ).count(),
+            "intel_ok": intel_ok,
+            "intel_failed": intel_failed,
+            "intel_never": intel_never,
+        },
+    )
+
+
+@login_required
 def requirement_profiles_list(request: HttpRequest) -> HttpResponse:
     profiles = list(
         RequirementProfile.objects.filter(tenant_id=1)
@@ -4877,33 +7787,44 @@ def requirement_profiles_list(request: HttpRequest) -> HttpResponse:
     rows = []
     for p in profiles:
         client_count = Client.objects.filter(
-            tenant_id=1, requirement_profile=p, deleted_at__isnull=True,
+            tenant_id=1,
+            requirement_profile=p,
+            deleted_at__isnull=True,
         ).count()
-        rows.append({
-            "profile": p,
-            "items": list(p.items.all().order_by("device_scope", "entity_type", "platform")),
-            "client_count": client_count,
-        })
+        rows.append(
+            {
+                "profile": p,
+                "items": list(p.items.all().order_by("device_scope", "entity_type", "platform")),
+                "client_count": client_count,
+            }
+        )
     if wants_csv(request):
         return csv_response(
             rows,
             columns=[
-                ("Name",              lambda r: r["profile"].name),
+                ("Name", lambda r: r["profile"].name),
                 ("Is tenant default", lambda r: "yes" if r["profile"].is_tenant_default else "no"),
-                ("Client count",      "client_count"),
-                ("Item count",        lambda r: len(r["items"])),
-                ("Items",             lambda r: "; ".join(
-                    f"{i.platform or ''}:{i.entity_type or ''}:{i.device_scope or ''}"
-                    for i in r["items"]
-                )),
+                ("Client count", "client_count"),
+                ("Item count", lambda r: len(r["items"])),
+                (
+                    "Items",
+                    lambda r: "; ".join(
+                        f"{i.platform or ''}:{i.entity_type or ''}:{i.device_scope or ''}"
+                        for i in r["items"]
+                    ),
+                ),
             ],
             filename_stem="requirement_profiles",
         )
-    return render(request, "requirement_profiles.html", {
-        "admin_group": "config",
-        "admin_tab": "requirements",
-        "rows": rows,
-    })
+    return render(
+        request,
+        "requirement_profiles.html",
+        {
+            "admin_group": "config",
+            "admin_tab": "requirements",
+            "rows": rows,
+        },
+    )
 
 
 @login_required
@@ -4920,9 +7841,15 @@ def client_profile_assign(request: HttpRequest, org_slug: str) -> HttpResponse:
         client.requirement_profile = profile
     client.save(update_fields=["requirement_profile"])
     _audit(
-        request, "client.requirement_profile.assign", client.id,
+        request,
+        "client.requirement_profile.assign",
+        client.id,
         {"requirement_profile_id": str(prev_profile) if prev_profile else None},
-        {"requirement_profile_id": str(client.requirement_profile_id) if client.requirement_profile_id else None},
+        {
+            "requirement_profile_id": str(client.requirement_profile_id)
+            if client.requirement_profile_id
+            else None
+        },
     )
     messages.success(
         request,
@@ -4930,6 +7857,156 @@ def client_profile_assign(request: HttpRequest, org_slug: str) -> HttpResponse:
         f"{client.requirement_profile.name if client.requirement_profile else '— global fallback —'}.",
     )
     return redirect("org_index", org_slug=client.slug)
+
+
+def _client_service_requirement_rows(client: Client) -> list[dict]:
+    """Return profile/global baseline services plus sparse client overrides."""
+    profile_items = list(
+        client.requirement_profile.items.select_related("agent").all()
+        if client.requirement_profile_id
+        else []
+    )
+    global_rows = list(
+        CoverageRequirement.objects.filter(
+            tenant_id=1, client__isnull=True, enabled=True
+        ).select_related("agent")
+        if not client.requirement_profile_id
+        else []
+    )
+    overrides = {
+        (row.agent_id, row.device_scope): row
+        for row in CoverageRequirement.objects.filter(tenant_id=1, client=client).select_related(
+            "agent"
+        )
+    }
+    candidates: dict[tuple, dict] = {}
+    for row in [*profile_items, *global_rows]:
+        if row.agent_id is None:
+            continue
+        candidates[(row.agent_id, row.device_scope)] = {
+            "agent": row.agent,
+            "scope": row.device_scope,
+            "baseline_required": True,
+        }
+    # Make every supported service independently configurable, even when it
+    # is not part of the inherited baseline.
+    for agent in Agent.objects.all().order_by("name"):
+        candidates.setdefault(
+            (agent.id, "all"),
+            {"agent": agent, "scope": "all", "baseline_required": False},
+        )
+    for key, override in overrides.items():
+        if key not in candidates and override.agent_id is not None:
+            candidates[key] = {
+                "agent": override.agent,
+                "scope": override.device_scope,
+                "baseline_required": False,
+            }
+    rows = []
+    for key, item in candidates.items():
+        override = overrides.get(key)
+        if override is None:
+            mode = "inherited"
+            required = item["baseline_required"]
+        else:
+            mode = "required" if override.enabled else "not_required"
+            required = override.enabled
+        rows.append({**item, "mode": mode, "required": required})
+    return sorted(rows, key=lambda row: (row["agent"].name.lower(), row["scope"]))
+
+
+@login_required
+@transaction.atomic
+def client_requirements_config(request: HttpRequest, org_slug: str) -> HttpResponse:
+    """Configure an inherited service baseline and per-client exceptions."""
+    client = get_object_or_404(
+        Client.objects.select_related("requirement_profile"),
+        tenant_id=1,
+        slug=org_slug,
+        deleted_at__isnull=True,
+    )
+    if request.method == "POST":
+        action = request.POST.get("action")
+        if action == "profile":
+            profile_id = request.POST.get("profile_id") or ""
+            before = client.requirement_profile_id
+            client.requirement_profile = (
+                get_object_or_404(RequirementProfile, id=profile_id, tenant_id=1)
+                if profile_id
+                else None
+            )
+            client.save(update_fields=["requirement_profile"])
+            _audit(
+                request,
+                "client.requirement_profile.assign",
+                client.id,
+                {"requirement_profile_id": str(before) if before else None},
+                {
+                    "requirement_profile_id": str(client.requirement_profile_id)
+                    if client.requirement_profile_id
+                    else None
+                },
+            )
+            messages.success(request, "Inherited service baseline updated.")
+        elif action == "override":
+            agent = get_object_or_404(Agent, id=request.POST.get("agent_id"))
+            scope = request.POST.get("device_scope") or "all"
+            mode = request.POST.get("mode")
+            existing = CoverageRequirement.objects.filter(
+                tenant_id=1, client=client, agent=agent, device_scope=scope
+            ).first()
+            before = {
+                "mode": "required"
+                if existing and existing.enabled
+                else "not_required"
+                if existing
+                else "inherited"
+            }
+            if mode == "inherited":
+                if existing:
+                    existing.delete()
+            elif mode in {"required", "not_required"}:
+                defaults = {
+                    "entity_type": agent.entity_type,
+                    "platform": agent.name,
+                    "enabled": mode == "required",
+                }
+                if existing:
+                    for field, value in defaults.items():
+                        setattr(existing, field, value)
+                    existing.save(update_fields=[*defaults])
+                else:
+                    CoverageRequirement.objects.create(
+                        tenant_id=1,
+                        client=client,
+                        agent=agent,
+                        device_scope=scope,
+                        **defaults,
+                    )
+            else:
+                messages.error(request, "Choose Required, Not required, or Inherit.")
+                return redirect("client_requirements_config", org_slug=client.slug)
+            _audit(
+                request,
+                "client.coverage_requirement.override",
+                client.id,
+                {"agent": agent.name, "scope": scope, **before},
+                {"agent": agent.name, "scope": scope, "mode": mode},
+            )
+            messages.success(request, f"{agent.name} requirement updated.")
+        return redirect("client_requirements_config", org_slug=client.slug)
+
+    return render(
+        request,
+        "client_requirements_config.html",
+        {
+            "client": client,
+            "profiles": RequirementProfile.objects.filter(tenant_id=1).order_by(
+                "-is_tenant_default", "name"
+            ),
+            "service_rows": _client_service_requirement_rows(client),
+        },
+    )
 
 
 # ── Software classifier config (evaluator knobs, admin-editable) ────────
@@ -4947,7 +8024,8 @@ _CLASSIFIER_DEFAULTS = {
 @login_required
 def classifier_config(request: HttpRequest) -> HttpResponse:
     row, _ = EvaluatorConfig.objects.get_or_create(
-        tenant_id=1, evaluator_name="software_classifier",
+        tenant_id=1,
+        evaluator_name="software_classifier",
         defaults={"config": {}, "updated_by": request.user},
     )
     stored = row.config if isinstance(row.config, dict) else {}
@@ -4971,10 +8049,16 @@ def classifier_config(request: HttpRequest) -> HttpResponse:
         new_cfg["rare_recent_skip_categorized"] = _bool("rare_recent_skip_categorized")
         new_cfg["rare_recent_skip_decided"] = _bool("rare_recent_skip_decided")
         new_cfg["rare_recent_max_age_days"] = _int(
-            "rare_recent_max_age_days", 1, 90, 7,
+            "rare_recent_max_age_days",
+            1,
+            90,
+            7,
         )
         new_cfg["rare_recent_max_devices"] = _int(
-            "rare_recent_max_devices", 1, 100, 2,
+            "rare_recent_max_devices",
+            1,
+            100,
+            2,
         )
         sev = (request.POST.get("rare_recent_severity") or "medium").strip()
         if sev not in {"info", "low", "medium", "high", "critical"}:
@@ -4999,9 +8083,62 @@ def classifier_config(request: HttpRequest) -> HttpResponse:
             "updated_at": row.updated_at,
             "updated_by": row.updated_by,
             "severity_choices": [
-                ("info", "Info"), ("low", "Low"), ("medium", "Medium"),
-                ("high", "High"), ("critical", "Critical"),
+                ("info", "Info"),
+                ("low", "Low"),
+                ("medium", "Medium"),
+                ("high", "High"),
+                ("critical", "Critical"),
             ],
+        },
+    )
+
+
+@login_required
+def device_status_config(request: HttpRequest) -> HttpResponse:
+    """Tenant-wide thresholds for estate and patching status."""
+    row, _ = EvaluatorConfig.objects.get_or_create(
+        tenant_id=1,
+        evaluator_name=DEVICE_STATUS_POLICY_NAME,
+        defaults={"config": {}, "updated_by": request.user},
+    )
+    stored = row.config if isinstance(row.config, dict) else {}
+    effective = get_device_status_policy()
+
+    if request.method == "POST":
+        limits = {
+            "active_device_days": (1, 90),
+            "patch_activity_days": (1, 180),
+            "reboot_pending_days": (1, 90),
+            "repeated_failure_count": (1, 20),
+            "approval_backlog_count": (1, 10_000),
+            "source_delay_hours": (1, 168),
+        }
+        new_config = {}
+        for key, (minimum, maximum) in limits.items():
+            try:
+                value = int(request.POST.get(key) or DEVICE_STATUS_DEFAULTS[key])
+            except ValueError:
+                value = DEVICE_STATUS_DEFAULTS[key]
+            new_config[key] = max(minimum, min(value, maximum))
+        before = row.config
+        row.config = new_config
+        row.updated_by = request.user
+        row.save(update_fields=["config", "updated_by", "updated_at"])
+        _audit(request, "device_status.policy.update", row.id, before, new_config)
+        messages.success(request, "Device status and patching policy saved.")
+        return redirect("device_status_config")
+
+    return render(
+        request,
+        "device_status_config.html",
+        {
+            "admin_group": "config",
+            "admin_tab": "device-status",
+            "effective": effective,
+            "stored": stored,
+            "defaults": DEVICE_STATUS_DEFAULTS,
+            "updated_at": row.updated_at,
+            "updated_by": row.updated_by,
         },
     )
 
@@ -5016,33 +8153,34 @@ def notification_rules_list(request: HttpRequest) -> HttpResponse:
         .select_related("finding_type", "route", "client")
         .order_by("finding_type__name", "client__display_name")
     )
-    events = list(
-        NotificationEvent.objects.filter(tenant_id=1)
-        .order_by("-sent_at")[:50]
-    )
+    events = list(NotificationEvent.objects.filter(tenant_id=1).order_by("-sent_at")[:50])
     routes = list(NotificationRoute.objects.filter(tenant_id=1))
     if wants_csv(request):
         return csv_response(
             rules,
             columns=[
-                ("Finding type",     lambda r: r.finding_type.name),
-                ("Client",           lambda r: (r.client.display_name if r.client else "(any)")),
-                ("Route",            lambda r: (r.route.name if r.route else "")),
-                ("Enabled",          lambda r: "yes" if r.enabled else "no"),
-                ("Min severity",     "min_severity"),
-                ("Created",          "created_at"),
+                ("Finding type", lambda r: r.finding_type.name),
+                ("Client", lambda r: (r.client.display_name if r.client else "(any)")),
+                ("Route", lambda r: (r.route.name if r.route else "")),
+                ("Enabled", lambda r: "yes" if r.enabled else "no"),
+                ("Min severity", "min_severity"),
+                ("Created", "created_at"),
             ],
             filename_stem="notification_rules",
         )
-    return render(request, "notification_rules.html", {
-        "admin_group": "config",
-        "admin_tab": "alerts",
-        "rules": rules,
-        "events": events,
-        "routes": routes,
-        "enabled_count": sum(1 for r in rules if r.enabled),
-        "disabled_count": sum(1 for r in rules if not r.enabled),
-    })
+    return render(
+        request,
+        "notification_rules.html",
+        {
+            "admin_group": "config",
+            "admin_tab": "alerts",
+            "rules": rules,
+            "events": events,
+            "routes": routes,
+            "enabled_count": sum(1 for r in rules if r.enabled),
+            "disabled_count": sum(1 for r in rules if not r.enabled),
+        },
+    )
 
 
 @login_required
@@ -5054,7 +8192,9 @@ def notification_rule_toggle(request: HttpRequest, rule_id) -> HttpResponse:
     rule.enabled = not prev
     rule.save(update_fields=["enabled"])
     _audit(
-        request, "notification_rule.toggle", rule.id,
+        request,
+        "notification_rule.toggle",
+        rule.id,
         {"enabled": prev},
         {"enabled": rule.enabled},
     )
@@ -5078,16 +8218,20 @@ def notification_suppressions_list(request: HttpRequest) -> HttpResponse:
             columns=[
                 ("Finding type", lambda r: r.finding_type.name),
                 ("Subject type", "subject_type"),
-                ("Subject key",  "subject_key"),
-                ("Reason",       "reason"),
-                ("Created",      "created_at"),
-                ("Created by",   lambda r: (r.created_by.username if r.created_by else "")),
-                ("Expires",      "expires_at"),
+                ("Subject key", "subject_key"),
+                ("Reason", "reason"),
+                ("Created", "created_at"),
+                ("Created by", lambda r: (r.created_by.username if r.created_by else "")),
+                ("Expires", "expires_at"),
             ],
             filename_stem="suppressions",
         )
-    return render(request, "notification_suppressions.html", {
-        "admin_group": "config",
-        "admin_tab": "suppressions",
-        "suppressions": rows,
-    })
+    return render(
+        request,
+        "notification_suppressions.html",
+        {
+            "admin_group": "config",
+            "admin_tab": "suppressions",
+            "suppressions": rows,
+        },
+    )

@@ -17,7 +17,11 @@ enabled), then compare against Operations state as of 0.69.0.
 - `script-dev/ninja/` — active Ninja-side scripts (patching report,
   Windows deploy, SW Inventory tool).
 - `script-dev/ninja/SW Inventory/analyze_inventory.py` — the
-  PDQ-based software analyzer (3041 lines).
+  Ninja-based software analyzer (3041 lines). Reads CSV exports
+  produced by `Ninja_sw_inventory.ps1` (Ninja API) — the same data
+  Operations ingests continuously via `ingest/inventory/software.py`.
+  Earlier revisions of this audit called it "PDQ-based"; that was a
+  misreading of the analyzer's header and has been corrected.
 - `script-dev/ad/`, `script-dev/clients/{ADH,CP,UTA}/` — AD / Entra
   user-management scripts and per-client data.
 - `script-dev/sentinelone/`, `script-dev/windows/` — small utility
@@ -370,8 +374,9 @@ specific presentation or capability is still only in the script:**
   script: CVE / vulnerability enrichment, user-risk analysis (user
   ↔ installation join), publisher rollups + publisher-level
   decision surface, Whitelist Suggestions surface with
-  threshold-based auto-suggest, Tech Checklist, PDQ Inventory as
-  a distinct signal source, Excel/VBA output pipeline.
+  threshold-based auto-suggest, Tech Checklist, Excel/VBA output
+  pipeline. (The data source is Ninja, ingested continuously —
+  no separate signal source to add.)
 - `Ninja-Patching-report.ps1` — every column it produces exists in
   the Operations pipeline. What's still only in the script: the
   wide "one row per (device, patch)" composite table + CSV export.
@@ -431,17 +436,28 @@ please confirm):**
    - Patch Trends views (per-day install/failure/reboot volumes).
    - Activity Search (patch-activity free-text search).
 3. **Software-analyzer gap track** (larger, its own decision
-   record):
-   - Publisher rollups + publisher-level decision surface.
-   - Whitelist Suggestions surface (threshold-based auto-suggest of
-     unclassified software).
+   record). Sequencing reconciled against 0.82.2:
+   - UI foundation — per-title detail page, row-level decision
+     actions, sortable columns on the fleet table. Everything else
+     drills into or writes through this.
+   - Publisher rollups + publisher-level decision surface. Decision
+     type (`SoftwareDecision.APPROVE_PUBLISHER`) already exists;
+     what's missing is the rollup view and admin surface.
+   - Whitelist Suggestions surface (installs-on-≥ N unclassified
+     titles). Complements `rare_recent` (which covers the ≤ 2
+     machines side).
    - Tech Checklist as an Operations report / view.
-   - CVE enrichment (integrate NVD or equivalent).
-   - User-risk analysis (only if user ↔ installation join is
-     operationally valuable).
-   - PDQ ingestion if that source's granularity is needed.
+   - User-risk analysis — installs × device `last_user`. Now
+     unblocked by `ClientUser` + `ClientUserLink` (0.7x) and the
+     `last_user` field written by `ingest/core/devices.py`; only the
+     installation ↔ user correlation is missing.
+   - CVE enrichment (integrate NVD or equivalent) — separate ADR
+     because it introduces an external data source.
    - **Explicitly not planned:** Excel / VBA output. Operations is
      web-only.
+   - **Not applicable:** PDQ ingestion. The legacy analyzer read
+     Ninja CSVs, not PDQ (see § "Software" analyzer entry). Data
+     source parity is already achieved via continuous Ninja ingest.
 4. **Explicitly not planned:** Platform-side write actions, AD /
    Entra user management, hybrid identity reconciliation,
    OS-deployment orchestration. Scripts stay for these.

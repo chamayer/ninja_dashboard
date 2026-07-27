@@ -1,0 +1,37 @@
+{% comment %}
+Shared sub-navigation for every software-related surface.
+Include at the top of software_page / software_detail / software_publishers /
+software_publisher_detail / software_decisions / software_tech_checklist /
+software_user_risk. Set ``software_tab`` in the view context to highlight
+the active tab. Valid keys: overview | publishers | decisions | checklist |
+user-risk.
+{% endcomment %}
+<style>
+  .sw-subnav {
+    display: flex; flex-wrap: wrap; gap: 0.25rem;
+    padding: 0.4rem 0.7rem; margin-bottom: 0.9rem;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 6px; align-items: center;
+  }
+  .sw-subnav .lead {
+    font-size: 0.72rem; font-weight: 700; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--muted); padding-right: 0.5rem;
+    border-right: 1px solid var(--border); margin-right: 0.25rem;
+  }
+  .sw-subnav a {
+    padding: 0.35rem 0.75rem; text-decoration: none; color: #374151;
+    font-size: 0.85rem; border-radius: 4px;
+    display: inline-flex; align-items: center; gap: 0.35rem;
+  }
+  .sw-subnav a:hover { background: #eef2ff; color: #312e81; }
+  .sw-subnav a.active { background: #1e40af; color: #fff; font-weight: 600; }
+</style>
+<div class="sw-subnav">
+  <span class="lead">Software</span>
+  <a class="{% if software_tab == 'overview'   %}active{% endif %}" href="{% url 'software_page' %}">Overview</a>
+  <a class="{% if software_tab == 'products'   %}active{% endif %}" href="{% url 'software_products' %}">Products</a>
+  <a class="{% if software_tab == 'publishers' %}active{% endif %}" href="{% url 'software_publishers' %}">Publishers</a>
+  <a class="{% if software_tab == 'checklist'  %}active{% endif %}" href="{% url 'software_tech_checklist' %}" title="Fleet grouped by device — one row per device, cleanup items underneath">Cleanup</a>
+  <a class="{% if software_tab == 'user-risk'  %}active{% endif %}" href="{% url 'software_user_risk' %}" title="Fleet grouped by last-logged-in user — see who is exposed to risky software">User exposure</a>
+  <a class="{% if software_tab == 'log'        %}active{% endif %}" href="{% url 'software_decision_log' %}">Activity</a>
+</div>

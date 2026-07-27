@@ -15,11 +15,13 @@ from .models import (
     DeadLetterObservation,
     Device,
     DeviceLink,
-    EntityObservation,
     Finding,
     FindingType,
+    IntelMatcherHint,
     MergeCandidate,
     NotificationRoute,
+    PublisherAlias,
+    PublisherCategory,
     RunLog,
     Secret,
     SoftwareCatalog,
@@ -203,23 +205,6 @@ class SourceBindingAdmin(admin.ModelAdmin):
     search_fields = ("source_instance__source__name", "collector_instance__name", "schedule")
 
 
-@admin.register(EntityObservation)
-class EntityObservationAdmin(admin.ModelAdmin):
-    list_display = (
-        "entity_type",
-        "entity_key",
-        "platform",
-        "client",
-        "device",
-        "collector_instance",
-        "observed_at",
-        "tenant",
-    )
-    list_filter = ("tenant", "entity_type", "platform", "schema_version")
-    search_fields = ("entity_key", "platform", "subplatform", "collector_version")
-    readonly_fields = ("observation_id",)
-
-
 @admin.register(DeadLetterObservation)
 class DeadLetterObservationAdmin(admin.ModelAdmin):
     list_display = (
@@ -240,6 +225,27 @@ class SoftwareCatalogAdmin(admin.ModelAdmin):
     list_display = ("canonical_name", "tenant", "publisher_hint", "eol_date")
     list_filter = ("tenant", "eol_date")
     search_fields = ("canonical_name", "publisher_hint", "notes")
+
+
+@admin.register(PublisherAlias)
+class PublisherAliasAdmin(admin.ModelAdmin):
+    list_display = ("raw_pattern", "canonical_publisher", "enabled", "is_regex", "created_at")
+    list_filter = ("enabled", "is_regex")
+    search_fields = ("raw_pattern", "canonical_publisher", "note")
+
+
+@admin.register(PublisherCategory)
+class PublisherCategoryAdmin(admin.ModelAdmin):
+    list_display = ("publisher_pattern", "categories", "priority", "enabled", "created_at")
+    list_filter = ("enabled",)
+    search_fields = ("publisher_pattern", "note")
+
+
+@admin.register(IntelMatcherHint)
+class IntelMatcherHintAdmin(admin.ModelAdmin):
+    list_display = ("kind", "pattern", "enabled", "created_at")
+    list_filter = ("kind", "enabled")
+    search_fields = ("pattern", "note")
 
 
 @admin.register(SoftwareDecision)

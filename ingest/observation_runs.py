@@ -15,8 +15,8 @@ def begin_run(cur: Any, tenant_id: int, source_binding_id: uuid.UUID,
         """
         INSERT INTO operations.observation_snapshot_runs
           (run_id, tenant_id, source_binding_id, snapshot_scope, snapshot_at,
-           status, expected_rows)
-        VALUES (%s, %s, %s, %s, %s, 'started', %s)
+           status, expected_rows, written_rows, failed_rows, error)
+        VALUES (%s, %s, %s, %s, %s, 'started', %s, 0, 0, '')
         """,
         (run_id, tenant_id, source_binding_id, snapshot_scope, snapshot_at,
          expected_rows),

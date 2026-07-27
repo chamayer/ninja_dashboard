@@ -40,10 +40,32 @@ from ingest import db
 log = logging.getLogger(__name__)
 
 _TENANT_ID = 1
-_STALLED_DAYS = 35
-_REBOOT_PENDING_DAYS = 3
-_FAILING_RUN_COUNT = 3
-_APPROVAL_BACKLOG_THRESHOLD = 25
+_POLICY_DEFAULTS = {
+    "patch_activity_days": 35,
+    "reboot_pending_days": 3,
+    "repeated_failure_count": 3,
+    "approval_backlog_count": 25,
+}
+
+
+def _policy(cur, tenant_id: int) -> dict[str, int]:
+    """Read the tenant policy written by Operations; retain safe defaults."""
+    cur.execute(
+        """
+        SELECT config FROM operations.evaluator_config
+        WHERE tenant_id = %s AND evaluator_name = 'device_status'
+        """,
+        (tenant_id,),
+    )
+    row = cur.fetchone()
+    stored = row[0] if row and isinstance(row[0], dict) else {}
+    policy = dict(_POLICY_DEFAULTS)
+    for key, default in _POLICY_DEFAULTS.items():
+        try:
+            policy[key] = max(1, int(stored.get(key, default)))
+        except (TypeError, ValueError):
+            policy[key] = default
+    return policy
 
 
 def classify(tenant_id: int = _TENANT_ID) -> int:
@@ -54,14 +76,15 @@ def classify(tenant_id: int = _TENANT_ID) -> int:
         with db.pool.connection() as conn, conn.cursor() as cur:
             cur.execute(f"SET LOCAL operations.tenant_id = {tenant_id}")
             ft_ids = _finding_type_ids(cur)
+            policy = _policy(cur, tenant_id)
 
             emitted_keys: set[str] = set()
 
             affected += _emit_never_patched(cur, tenant_id, ft_ids, now, emitted_keys)
-            affected += _emit_patching_stalled(cur, tenant_id, ft_ids, now, emitted_keys)
-            affected += _emit_reboot_pending(cur, tenant_id, ft_ids, now, emitted_keys)
-            affected += _emit_failing_repeatedly(cur, tenant_id, ft_ids, now, emitted_keys)
-            affected += _emit_approval_backlog(cur, tenant_id, ft_ids, now, emitted_keys)
+            affected += _emit_patching_stalled(cur, tenant_id, ft_ids, now, emitted_keys, policy)
+            affected += _emit_reboot_pending(cur, tenant_id, ft_ids, now, emitted_keys, policy)
+            affected += _emit_failing_repeatedly(cur, tenant_id, ft_ids, now, emitted_keys, policy)
+            affected += _emit_approval_backlog(cur, tenant_id, ft_ids, now, emitted_keys, policy)
 
             _auto_resolve(cur, tenant_id, emitted_keys, now)
     except Exception as exc:
@@ -146,15 +169,23 @@ def _emit_never_patched(cur, tenant_id, ft_ids, now, keys) -> int:
     count = 0
     for dev_id, client_id, hostname in cur.fetchall():
         count += _upsert(
-            cur, tenant_id, ft_id, client_id, dev_id, "device",
-            "device_never_patched", "", "high", now,
+            cur,
+            tenant_id,
+            ft_id,
+            client_id,
+            dev_id,
+            "device",
+            "device_never_patched",
+            "",
+            "high",
+            now,
             {"hostname": hostname, "reason": "no INSTALLED patches on record"},
             keys,
         )
     return count
 
 
-def _emit_patching_stalled(cur, tenant_id, ft_ids, now, keys) -> int:
+def _emit_patching_stalled(cur, tenant_id, ft_ids, now, keys, policy) -> int:
     ft_id = ft_ids.get("patching_stalled")
     if not ft_id:
         return 0
@@ -171,26 +202,34 @@ def _emit_patching_stalled(cur, tenant_id, ft_ids, now, keys) -> int:
           AND v.lifecycle_status <> 'retired'
           AND pd.any_ever_installed = TRUE
           AND (pd.max_last_seen_at IS NULL
-               OR pd.max_last_seen_at < NOW() - INTERVAL '{_STALLED_DAYS} days')
+               OR pd.max_last_seen_at < NOW() - INTERVAL '{policy['patch_activity_days']} days')
         """,
         (tenant_id, tenant_id),
     )
     count = 0
     for dev_id, client_id, hostname, last_seen in cur.fetchall():
         count += _upsert(
-            cur, tenant_id, ft_id, client_id, dev_id, "device",
-            "patching_stalled", "", "medium", now,
+            cur,
+            tenant_id,
+            ft_id,
+            client_id,
+            dev_id,
+            "device",
+            "patching_stalled",
+            "",
+            "medium",
+            now,
             {
                 "hostname": hostname,
                 "last_patch_seen_at": last_seen.isoformat() if last_seen else None,
-                "threshold_days": _STALLED_DAYS,
+                "threshold_days": policy["patch_activity_days"],
             },
             keys,
         )
     return count
 
 
-def _emit_reboot_pending(cur, tenant_id, ft_ids, now, keys) -> int:
+def _emit_reboot_pending(cur, tenant_id, ft_ids, now, keys, policy) -> int:
     """5th finding type per BLUEPRINT §5.1 — device needs reboot AND
     hasn't rebooted in >3 days. Reads v_device (needs_reboot +
     last_boot_at from device_session_current).
@@ -208,26 +247,34 @@ def _emit_reboot_pending(cur, tenant_id, ft_ids, now, keys) -> int:
           AND v.lifecycle_status <> 'retired'
           AND v.needs_reboot = TRUE
           AND (v.last_boot_at IS NULL
-               OR v.last_boot_at < NOW() - INTERVAL '{_REBOOT_PENDING_DAYS} days')
+               OR v.last_boot_at < NOW() - INTERVAL '{policy['reboot_pending_days']} days')
         """,
         (tenant_id,),
     )
     count = 0
     for dev_id, client_id, hostname, last_boot in cur.fetchall():
         count += _upsert(
-            cur, tenant_id, ft_id, client_id, dev_id, "device",
-            "reboot_pending", "", "medium", now,
+            cur,
+            tenant_id,
+            ft_id,
+            client_id,
+            dev_id,
+            "device",
+            "reboot_pending",
+            "",
+            "medium",
+            now,
             {
                 "hostname": hostname,
                 "last_boot_at": last_boot.isoformat() if last_boot else None,
-                "threshold_days": _REBOOT_PENDING_DAYS,
+                "threshold_days": policy["reboot_pending_days"],
             },
             keys,
         )
     return count
 
 
-def _emit_failing_repeatedly(cur, tenant_id, ft_ids, now, keys) -> int:
+def _emit_failing_repeatedly(cur, tenant_id, ft_ids, now, keys, policy) -> int:
     """Per-KB failure count on in-scope devices. Emits ONE finding per
     device (details list all failing KBs).
     """
@@ -256,7 +303,7 @@ def _emit_failing_repeatedly(cur, tenant_id, ft_ids, now, keys) -> int:
             JOIN included i ON i.ninja_id = pf.device_id
             WHERE pf.status = 'FAILED' AND pf.kb_number IS NOT NULL
             GROUP BY i.ops_device_id, i.client_id, i.canonical_hostname, pf.kb_number
-            HAVING COUNT(*) >= {_FAILING_RUN_COUNT}
+            HAVING COUNT(*) >= {policy['repeated_failure_count']}
         )
         SELECT ops_device_id, client_id, canonical_hostname,
                jsonb_agg(jsonb_build_object('kb', kb_number, 'fail_count', fails)
@@ -271,15 +318,23 @@ def _emit_failing_repeatedly(cur, tenant_id, ft_ids, now, keys) -> int:
         # Cap at 20 KBs in the finding details.
         top_kbs = (failing_patches or [])[:20]
         count += _upsert(
-            cur, tenant_id, ft_id, client_id, dev_id, "device",
-            "patch_failing_repeatedly", "", "high", now,
+            cur,
+            tenant_id,
+            ft_id,
+            client_id,
+            dev_id,
+            "device",
+            "patch_failing_repeatedly",
+            "",
+            "high",
+            now,
             {"hostname": hostname, "failing_patches": top_kbs},
             keys,
         )
     return count
 
 
-def _emit_approval_backlog(cur, tenant_id, ft_ids, now, keys) -> int:
+def _emit_approval_backlog(cur, tenant_id, ft_ids, now, keys, policy) -> int:
     """Per-client: how many APPROVED patches are not yet installed
     across the client's IN-SCOPE devices?
     """
@@ -315,15 +370,23 @@ def _emit_approval_backlog(cur, tenant_id, ft_ids, now, keys) -> int:
           ON c.id = i.client_id AND c.deleted_at IS NULL
         WHERE a.status = 'APPROVED'
         GROUP BY i.client_id, c.display_name
-        HAVING COUNT(*) >= {_APPROVAL_BACKLOG_THRESHOLD}
+        HAVING COUNT(*) >= {policy['approval_backlog_count']}
         """,
         (tenant_id,),
     )
     count = 0
     for client_id, display_name, backlog in cur.fetchall():
         count += _upsert(
-            cur, tenant_id, ft_id, client_id, client_id, "client",
-            "patch_approval_backlog", "", "medium", now,
+            cur,
+            tenant_id,
+            ft_id,
+            client_id,
+            client_id,
+            "client",
+            "patch_approval_backlog",
+            "",
+            "medium",
+            now,
             {"client_name": display_name, "backlog_count": backlog},
             keys,
         )
@@ -335,8 +398,20 @@ def _condition_key(tenant_id, client_id, subject_id, ft_name: str, extra: str) -
     return hashlib.sha256(raw.encode()).hexdigest()[:64]
 
 
-def _upsert(cur, tenant_id, ft_id, client_id, subject_id, subject_type,
-            ft_name, extra_key, severity, now, details, emitted_keys) -> int:
+def _upsert(
+    cur,
+    tenant_id,
+    ft_id,
+    client_id,
+    subject_id,
+    subject_type,
+    ft_name,
+    extra_key,
+    severity,
+    now,
+    details,
+    emitted_keys,
+) -> int:
     ckey = _condition_key(tenant_id, client_id, subject_id, ft_name, extra_key)
     if ckey in emitted_keys:
         return 0
@@ -366,9 +441,17 @@ def _upsert(cur, tenant_id, ft_id, client_id, subject_id, subject_type,
             END
         """,
         (
-            tenant_id, ft_id, client_id,
-            subject_type, subject_id, json.dumps(details),
-            ckey, severity, now, now, now,
+            tenant_id,
+            ft_id,
+            client_id,
+            subject_type,
+            subject_id,
+            json.dumps(details),
+            ckey,
+            severity,
+            now,
+            now,
+            now,
         ),
     )
     return 1

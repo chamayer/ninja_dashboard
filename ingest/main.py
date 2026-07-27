@@ -32,7 +32,7 @@ from datetime import datetime, timedelta, timezone
 import httpx
 from apscheduler.schedulers.background import BackgroundScheduler
 
-from ingest import db, migrations
+from ingest import db, migrations, retention_observations
 from ingest.derived import refresh_after_collection
 from ingest.config import settings
 from ingest.logging_utils import install_log_safety
@@ -292,6 +292,87 @@ def run_platform_evaluate_once() -> None:
         log.exception("Platform evaluate failed")
 
 
+def run_intel_nvd_once() -> None:
+    try:
+        from ingest.intel import nvd
+        rows = nvd.run_once()
+        log.info("Intel NVD complete: rows=%d", rows)
+    except Exception:
+        log.exception("Intel NVD failed")
+
+
+def run_intel_cpe_dict_once() -> None:
+    try:
+        from ingest.intel import cpe_dict
+        rows = cpe_dict.run_once()
+        log.info("Intel CPE dict complete: rows=%d", rows)
+    except Exception:
+        log.exception("Intel CPE dict failed")
+
+
+def run_intel_kev_once() -> None:
+    try:
+        from ingest.intel import cisa_kev
+        rows = cisa_kev.run_once()
+        log.info("Intel CISA KEV complete: rows=%d", rows)
+    except Exception:
+        log.exception("Intel CISA KEV failed")
+
+
+def run_intel_epss_once() -> None:
+    try:
+        from ingest.intel import epss
+        rows = epss.run_once()
+        log.info("Intel EPSS complete: rows=%d", rows)
+    except Exception:
+        log.exception("Intel EPSS failed")
+
+
+def run_intel_matcher_once() -> None:
+    try:
+        from ingest.intel import matcher
+        rows = matcher.run_once()
+        log.info("Intel matcher complete: rows=%d", rows)
+    except Exception:
+        log.exception("Intel matcher failed")
+
+
+def run_intel_winget_once() -> None:
+    try:
+        from ingest.intel import winget
+        rows = winget.run_once()
+        log.info("Intel Winget complete: rows=%d", rows)
+    except Exception:
+        log.exception("Intel Winget failed")
+
+
+def run_intel_chocolatey_once() -> None:
+    try:
+        from ingest.intel import chocolatey
+        rows = chocolatey.run_once()
+        log.info("Intel Chocolatey complete: rows=%d", rows)
+    except Exception:
+        log.exception("Intel Chocolatey failed")
+
+
+def run_intel_otx_once() -> None:
+    try:
+        from ingest.intel import otx
+        rows = otx.run_once()
+        log.info("Intel OTX complete: rows=%d", rows)
+    except Exception:
+        log.exception("Intel OTX failed")
+
+
+def run_intel_abusech_once() -> None:
+    try:
+        from ingest.intel import abusech
+        rows = abusech.run_once()
+        log.info("Intel abuse.ch complete: rows=%d", rows)
+    except Exception:
+        log.exception("Intel abuse.ch failed")
+
+
 def run_notifications_dispatch_once() -> None:
     try:
         sent = notify_dispatch(tenant_id=1)
@@ -309,11 +390,33 @@ def run_notifications_digest_once() -> None:
 
 
 def run_software_classify_once() -> None:
+    # When intel is enabled, the intel matcher + Winget/Chocolatey
+    # enrichers run first so the classifier sees fresh cve_match rows
+    # and safety_signal rows for newly ingested products. Each intel
+    # step is best-effort and never blocks the classifier itself.
+    if settings.INTEL_ENABLED:
+        for step_name, step_fn in (
+            ("intel matcher pre-classify",     run_intel_matcher_once),
+            ("intel Winget pre-classify",      run_intel_winget_once),
+            ("intel Chocolatey pre-classify",  run_intel_chocolatey_once),
+        ):
+            try:
+                step_fn()
+            except Exception:
+                log.exception("Best-effort intel step failed: %s", step_name)
     try:
         affected = software_classify(tenant_id=1)
         log.info("Software classifier complete: affected=%d", affected)
     except Exception:
         log.exception("Software classifier failed")
+    # Refresh the software risk matview so the UI reflects fresh
+    # findings + decisions. Best-effort — never blocks the classifier.
+    try:
+        with db.pool.connection() as conn, conn.cursor() as cur:
+            cur.execute("REFRESH MATERIALIZED VIEW operations.v_software_safety")
+        log.info("Refreshed operations.v_software_safety matview")
+    except Exception:
+        log.exception("Failed to refresh v_software_safety matview")
 
 
 def run_patch_classify_once() -> None:
@@ -344,6 +447,24 @@ def run_review_digest_once() -> None:
         sent = review_digest.send_review_digest(datetime.now(timezone.utc))
         stats["alerts_sent"] = sent
     log.info("Review digest complete")
+
+
+def run_observation_history_prune_once() -> None:
+    """Delete closed history versions older than the configured retention.
+
+    Delegates to `operations.purge_closed_observation_history(cutoff)` via
+    `retention_observations.purge_all()`. The security-definer function
+    owns the "never delete an open version" guarantee (see migration 0074).
+    """
+    days = int(getattr(settings, "OBSERVATION_HISTORY_RETENTION_DAYS", 90))
+    log.info("Observation history retention starting: keep %d days", days)
+    try:
+        with run_log("retention.observation_history") as stats:
+            generic, software = retention_observations.purge_all(days=days)
+            stats["generic_deleted"] = generic
+            stats["software_deleted"] = software
+    except Exception:
+        log.exception("Observation history retention failed")
 
 
 def _safe(name: str, func, *args) -> None:
@@ -585,6 +706,60 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 return
             threading.Thread(target=run_notifications_digest_once, daemon=True).start()
             self._respond(202, b"notifications digest scheduled\n")
+        elif self.path == "/run/intel-nvd":
+            if not _READY.is_set():
+                self._respond(503, b"still starting - try again shortly\n")
+                return
+            threading.Thread(target=run_intel_nvd_once, daemon=True).start()
+            self._respond(202, b"intel NVD scheduled\n")
+        elif self.path == "/run/intel-cpe-dict":
+            if not _READY.is_set():
+                self._respond(503, b"still starting - try again shortly\n")
+                return
+            threading.Thread(target=run_intel_cpe_dict_once, daemon=True).start()
+            self._respond(202, b"intel CPE dictionary scheduled\n")
+        elif self.path == "/run/intel-kev":
+            if not _READY.is_set():
+                self._respond(503, b"still starting - try again shortly\n")
+                return
+            threading.Thread(target=run_intel_kev_once, daemon=True).start()
+            self._respond(202, b"intel CISA KEV scheduled\n")
+        elif self.path == "/run/intel-epss":
+            if not _READY.is_set():
+                self._respond(503, b"still starting - try again shortly\n")
+                return
+            threading.Thread(target=run_intel_epss_once, daemon=True).start()
+            self._respond(202, b"intel EPSS scheduled\n")
+        elif self.path == "/run/intel-matcher":
+            if not _READY.is_set():
+                self._respond(503, b"still starting - try again shortly\n")
+                return
+            threading.Thread(target=run_intel_matcher_once, daemon=True).start()
+            self._respond(202, b"intel matcher scheduled\n")
+        elif self.path == "/run/intel-winget":
+            if not _READY.is_set():
+                self._respond(503, b"still starting - try again shortly\n")
+                return
+            threading.Thread(target=run_intel_winget_once, daemon=True).start()
+            self._respond(202, b"intel Winget enrichment scheduled\n")
+        elif self.path == "/run/intel-chocolatey":
+            if not _READY.is_set():
+                self._respond(503, b"still starting - try again shortly\n")
+                return
+            threading.Thread(target=run_intel_chocolatey_once, daemon=True).start()
+            self._respond(202, b"intel Chocolatey enrichment scheduled\n")
+        elif self.path == "/run/intel-otx":
+            if not _READY.is_set():
+                self._respond(503, b"still starting - try again shortly\n")
+                return
+            threading.Thread(target=run_intel_otx_once, daemon=True).start()
+            self._respond(202, b"intel OTX scheduled\n")
+        elif self.path == "/run/intel-abusech":
+            if not _READY.is_set():
+                self._respond(503, b"still starting - try again shortly\n")
+                return
+            threading.Thread(target=run_intel_abusech_once, daemon=True).start()
+            self._respond(202, b"intel abuse.ch scheduled\n")
         elif self.path == "/run/software/enqueue" or self.path.startswith("/run/software/enqueue?"):
             self._handle_software_enqueue()
         elif self.path == "/run/software/scoped" or self.path.startswith("/run/software/scoped?"):
@@ -2055,6 +2230,16 @@ def main() -> None:
             id="notifications_digest_cycle",
             max_instances=1,
         )
+    # Nightly closed-history retention. Never touches open SCD-2 versions
+    # (guaranteed by the security-definer function in migration 0074).
+    scheduler.add_job(
+        run_observation_history_prune_once,
+        "cron",
+        hour=int(getattr(settings, "OBSERVATION_HISTORY_RETENTION_HOUR", 3)),
+        minute=0,
+        id="observation_history_retention_cycle",
+        max_instances=1,
+    )
     if settings.SOFTWARE_QUEUE_ENABLED:
         scheduler.add_job(
             enqueue_all_orgs_once,
@@ -2068,6 +2253,70 @@ def main() -> None:
             "interval",
             minutes=settings.SOFTWARE_QUEUE_POLL_MINUTES,
             id="software_queue_drain_cycle",
+            max_instances=1,
+        )
+    if settings.INTEL_ENABLED:
+        scheduler.add_job(
+            run_intel_nvd_once,
+            "interval",
+            hours=settings.INTEL_NVD_SCHEDULE_HOURS,
+            id="intel_nvd_cycle",
+            max_instances=1,
+        )
+        scheduler.add_job(
+            run_intel_cpe_dict_once,
+            "interval",
+            hours=settings.INTEL_CATALOG_SCHEDULE_HOURS,
+            id="intel_cpe_dict_cycle",
+            max_instances=1,
+        )
+        scheduler.add_job(
+            run_intel_kev_once,
+            "interval",
+            hours=settings.INTEL_KEV_SCHEDULE_HOURS,
+            id="intel_kev_cycle",
+            max_instances=1,
+        )
+        scheduler.add_job(
+            run_intel_epss_once,
+            "interval",
+            hours=settings.INTEL_EPSS_SCHEDULE_HOURS,
+            id="intel_epss_cycle",
+            max_instances=1,
+        )
+        scheduler.add_job(
+            run_intel_matcher_once,
+            "interval",
+            hours=settings.INTEL_MATCHER_SCHEDULE_HOURS,
+            id="intel_matcher_cycle",
+            max_instances=1,
+        )
+        scheduler.add_job(
+            run_intel_winget_once,
+            "interval",
+            hours=settings.INTEL_CATALOG_SCHEDULE_HOURS,
+            id="intel_winget_cycle",
+            max_instances=1,
+        )
+        scheduler.add_job(
+            run_intel_chocolatey_once,
+            "interval",
+            hours=settings.INTEL_CATALOG_SCHEDULE_HOURS,
+            id="intel_chocolatey_cycle",
+            max_instances=1,
+        )
+        scheduler.add_job(
+            run_intel_otx_once,
+            "interval",
+            hours=settings.INTEL_OSINT_SCHEDULE_HOURS,
+            id="intel_otx_cycle",
+            max_instances=1,
+        )
+        scheduler.add_job(
+            run_intel_abusech_once,
+            "interval",
+            hours=settings.INTEL_OSINT_SCHEDULE_HOURS,
+            id="intel_abusech_cycle",
             max_instances=1,
         )
     scheduler.start()
@@ -2104,6 +2353,14 @@ def main() -> None:
 
     log.info("Legacy agent compliance catch-up disabled")
 
+    # Intel catch-up on startup. Any connector with no successful run
+    # in ``operations.intel_ingest_status`` fires immediately in the
+    # background so a fresh deploy doesn't wait hours for the first
+    # scheduler tick. Each thread records its own outcome via
+    # ``ingest.intel.status.record_run``.
+    if settings.INTEL_ENABLED:
+        _intel_catchup()
+
     # Kick off Metabase bootstrap in the background — won't block
     # startup if Metabase isn't ready or creds aren't set.
     threading.Thread(target=bootstrap_metabase, daemon=True).start()
@@ -2117,6 +2374,48 @@ def main() -> None:
         threading.Event().wait()
     finally:
         httpd.shutdown()
+
+
+def _intel_catchup() -> None:
+    """Fire any intel connector that has never successfully run.
+
+    Reads ``operations.intel_ingest_status`` once, then launches a
+    background thread per connector whose ``last_success_at`` is NULL.
+    Each launch respects the connector's own ``INTEL_*_ENABLED`` flag
+    (the wrapper functions already gate on those).
+    """
+    try:
+        with db.pool.connection() as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT connector FROM operations.intel_ingest_status"
+                " WHERE last_success_at IS NOT NULL"
+            )
+            done = {row[0] for row in cur.fetchall()}
+    except Exception:
+        log.exception("Intel catch-up status probe failed")
+        done = set()
+
+    plan: list[tuple[str, object]] = [
+        ("cisa_kev",   run_intel_kev_once),
+        ("nvd",        run_intel_nvd_once),
+        ("cpe_dict",   run_intel_cpe_dict_once),
+        ("epss",       run_intel_epss_once),
+        ("winget",     run_intel_winget_once),
+        ("chocolatey", run_intel_chocolatey_once),
+        ("otx",        run_intel_otx_once),
+        ("abusech",    run_intel_abusech_once),
+        ("matcher",    run_intel_matcher_once),
+    ]
+    fired = []
+    for connector, fn in plan:
+        if connector in done:
+            continue
+        threading.Thread(target=fn, daemon=True).start()
+        fired.append(connector)
+    if fired:
+        log.info("Intel catch-up: fired %s", ", ".join(fired))
+    else:
+        log.info("Intel catch-up: all connectors already have a successful run")
 
 
 if __name__ == "__main__":

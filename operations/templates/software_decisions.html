@@ -1,98 +1,249 @@
 {% extends "base.html" %}
+{% load human_labels %}
 
 {% block title %}Software decisions{% endblock %}
 
 {% block content %}
-{% include "_admin_tabs.html" %}
+{% include "_sw_style.html" %}
+<style>
+  .bulk-bar {
+    display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center;
+    padding: 0.55rem 0.85rem; background: #eef2ff; border: 1px solid #c7d2fe;
+    border-radius: 6px; margin-bottom: 0.75rem;
+  }
+  .bulk-bar strong { color: #312e81; }
+  .bulk-bar select, .bulk-bar button {
+    padding: 0.4rem 0.7rem; border-radius: 4px; border: 1px solid var(--border);
+    font-size: 0.85rem;
+  }
+  .bulk-bar button { background: #1e40af; color: #fff; font-weight: 600; cursor: pointer; }
+  .bulk-bar .scope-label { font-size: 0.72rem; color: #4338ca; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; margin-left: 0.5rem; }
+
+  .sw-decisions-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+  .sw-decisions-table th, .sw-decisions-table td { padding: 0.45rem 0.65rem; border-bottom: 1px solid var(--border); text-align: left; vertical-align: middle; }
+  .sw-decisions-table th { color: var(--muted); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700; }
+  .sw-decisions-table .num { text-align: right; }
+  .sw-decisions-table .product { font-weight: 600; }
+  .sw-decisions-table .publisher { font-size: 0.82rem; color: var(--muted); }
+
+  .decision-pill {
+    display: inline-block; padding: 0.1rem 0.5rem; border-radius: 999px;
+    font-size: 0.72rem; font-weight: 600;
+  }
+  .decision-pill.approve, .decision-pill.approve_publisher { background: #dcfce7; color: #166534; }
+  .decision-pill.reject { background: #fee2e2; color: #991b1b; }
+  .decision-pill.investigate { background: #fef3c7; color: #92400e; }
+  .decision-pill.none { background: #f3f4f6; color: #6b7280; font-weight: 400; }
+
+  .row-actions { display: flex; gap: 0.25rem; align-items: center; justify-content: flex-end; flex-wrap: wrap; }
+  .row-actions form { margin: 0; }
+  .row-actions button { padding: 0.2rem 0.5rem; font-size: 0.75rem; font-weight: 600; border-radius: 4px; cursor: pointer; }
+  .btn-allow    { background: #dcfce7; color: #166534; border: 1px solid #bbf7d0; }
+  .btn-block    { background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }
+  .btn-review   { background: #fef3c7; color: #92400e; border: 1px solid #fde68a; }
+  .btn-trust    { background: #dbeafe; color: #1e3a8a; border: 1px solid #bfdbfe; }
+  .action-group { display: flex; flex-direction: column; gap: 0.2rem; align-items: flex-end; }
+  .action-label { font-size: 0.65rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+</style>
+
 <div class="card">
     <div style="display:flex; align-items:center; justify-content:space-between; gap:1rem;">
-        <h1 style="margin:0;">Software review</h1>
+        <h1 style="margin:0;">Software decisions</h1>
         {% include "_csv_download.html" %}
     </div>
     <p class="muted">
-        Software installations that generated a classifier finding and haven't
-        been decided yet. Ranked by fleet spread (device_count) — biggest
-        impact first. Decisions apply globally by default; use the per-client
-        or per-device form on each row for narrower scope.
+        Products awaiting review, ranked by fleet spread — biggest impact first.
+        Decisions can apply to a single product or to every product from a
+        publisher. Approve-publisher covers new products from that publisher
+        going forward automatically.
     </p>
 </div>
 
 <div class="card">
     <form action="" method="get" class="filterbar">
         <div>
+            <label>Search</label>
+            <input type="search" name="q" value="{{ active_q }}" placeholder="product or publisher…" style="min-width:200px;">
+        </div>
+        <div>
             <label>Category</label>
             <select name="category" onchange="this.form.submit()">
                 <option value="">Any</option>
                 {% for c in categories %}
-                    <option value="{{ c }}"{% if active_category == c %} selected{% endif %}>{{ c }}</option>
+                    <option value="{{ c }}"{% if active_category == c %} selected{% endif %}>{{ c|title }}</option>
                 {% endfor %}
             </select>
         </div>
+        <div>
+            <label>Decision</label>
+            <select name="decision" onchange="this.form.submit()">
+                <option value="">Any</option>
+                <option value="pending"           {% if active_decision == 'pending'           %}selected{% endif %}>No decision yet</option>
+                <option value="approve"           {% if active_decision == 'approve'           %}selected{% endif %}>Allowed</option>
+                <option value="approve_publisher" {% if active_decision == 'approve_publisher' %}selected{% endif %}>Publisher trusted</option>
+                <option value="reject"            {% if active_decision == 'reject'            %}selected{% endif %}>Blocked</option>
+                <option value="investigate"       {% if active_decision == 'investigate'       %}selected{% endif %}>Under review</option>
+            </select>
+        </div>
         <div><button type="submit">Apply</button></div>
+        {% if active_q or active_category or active_decision %}<a class="clear" href="?">Clear</a>{% endif %}
     </form>
 </div>
 
-<div class="card">
-    {% if rows %}
-    <table data-sortable class="ops-table">
-        <thead>
-            <tr>
-                <th>Canonical name</th>
-                <th>Category</th>
-                <th>Devices</th>
-                <th>Latest finding</th>
-                <th>Current global decision</th>
-                <th>Decide (global scope)</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for r in rows %}
-            <tr>
-                <td>
-                    <a href="{% url 'findings_queue' %}?category=software&amp;q={{ r.canonical|urlencode }}">
-                        <code>{{ r.canonical }}</code>
-                    </a>
-                </td>
-                <td class="muted">{{ r.category|default:"—" }}</td>
-                <td class="num">
-                    <a href="{% url 'findings_queue' %}?category=software&amp;q={{ r.canonical|urlencode }}">
-                        {{ r.device_count }}
-                    </a>
-                </td>
-                <td class="muted num">{{ r.latest|date:"Y-m-d H:i" }}</td>
-                <td>
-                    {% if r.global_decision %}
-                        <span class="badge badge-info">{{ r.global_decision }}</span>
-                    {% else %}
-                        <span class="muted">— none —</span>
-                    {% endif %}
-                </td>
-                <td>
-                    <form method="post" action="{% url 'software_decision_create' %}" style="display: flex; gap: 0.3rem; align-items: center;">
-                        {% csrf_token %}
-                        <input type="hidden" name="canonical_name" value="{{ r.canonical }}">
-                        <input type="hidden" name="scope" value="global">
-                        <select name="decision" style="padding: 0.25rem 0.5rem; font-size: 0.85rem;">
-                            {% for value, label in decision_choices %}
-                                <option value="{{ value }}">{{ label }}</option>
-                            {% endfor %}
-                        </select>
-                        <button type="submit" style="padding: 0.25rem 0.6rem; font-size: 0.8rem;">Apply</button>
-                    </form>
-                </td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-    {% else %}
-    <p class="muted">No software findings awaiting review.</p>
-    {% endif %}
-</div>
+<form method="post" action="{% url 'software_decision_bulk' %}" id="bulk-form">
+    {% csrf_token %}
+    <input type="hidden" name="next" value="{{ request.get_full_path }}">
+    <input type="hidden" name="scope" value="global">
+
+    <div class="card">
+        {% if rows %}
+        <div class="bulk-bar">
+            <label>
+                <input type="checkbox" id="bulk-select-all">
+                Select all
+            </label>
+            <strong id="bulk-count">0 selected</strong>
+            <span class="scope-label">Apply as</span>
+            <select id="bulk-scope-kind">
+                <option value="product">This product only</option>
+                <option value="publisher">This publisher (every product)</option>
+            </select>
+            <span style="flex:1;"></span>
+            <select name="decision" required>
+                <option value="">Decision…</option>
+                {% for value, label in decision_choices %}
+                    <option value="{{ value }}">{{ label }}</option>
+                {% endfor %}
+            </select>
+            <button type="submit">Apply to selected</button>
+        </div>
+
+        <table class="sw-decisions-table" data-sortable>
+            <thead>
+                <tr>
+                    <th style="width:2rem;"></th>
+                    <th>Product</th>
+                    <th>Publisher</th>
+                    <th>Category</th>
+                    <th class="num">Devices</th>
+                    <th>Latest finding</th>
+                    <th>Current decision</th>
+                    <th style="text-align:right;">Single-row</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in rows %}
+                <tr>
+                    <td>
+                        <input type="checkbox" class="bulk-cb"
+                               data-canonical="{{ r.canonical }}"
+                               data-publisher="{{ r.publisher }}">
+                    </td>
+                    <td>
+                        <div class="product">
+                            <a href="{% url 'software_detail' name=r.canonical %}">{{ r.canonical|title }}</a>
+                        </div>
+                    </td>
+                    <td>
+                        {% if r.publisher %}
+                            <a href="{% url 'software_publisher_detail' publisher=r.publisher %}">{{ r.publisher|title }}</a>
+                        {% else %}
+                            <span class="muted">—</span>
+                        {% endif %}
+                    </td>
+                    <td class="muted">{{ r.category|humanize_label|default:r.category|title|default:"—" }}</td>
+                    <td class="num">
+                        <a href="{% url 'findings_queue' %}?category=software&amp;q={{ r.canonical|urlencode }}">
+                            {{ r.device_count }}
+                        </a>
+                    </td>
+                    <td class="muted num">{{ r.latest|date:"Y-m-d H:i" }}</td>
+                    <td>
+                        {% if r.global_decision %}
+                            <span class="decision-pill {{ r.global_decision }}"
+                                  title="Product-scope decision">
+                                Product: {{ r.global_decision|humanize_label|default:r.global_decision|title }}
+                            </span><br>
+                        {% endif %}
+                        {% if r.publisher_decision %}
+                            <span class="decision-pill {{ r.publisher_decision }}"
+                                  title="Publisher-scope decision — applies to all products from this publisher">
+                                Publisher: {{ r.publisher_decision|humanize_label|default:r.publisher_decision|title }}
+                            </span>
+                        {% endif %}
+                        {% if not r.global_decision and not r.publisher_decision %}
+                            <span class="decision-pill none">no decision</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <div class="action-group">
+                            <div class="action-label">Product</div>
+                            <div class="row-actions">
+                                <form method="post" action="{% url 'software_decision_create' %}">{% csrf_token %}<input type="hidden" name="canonical_name" value="{{ r.canonical }}"><input type="hidden" name="scope" value="global"><input type="hidden" name="next" value="{{ request.get_full_path }}"><input type="hidden" name="decision" value="approve"><button type="submit" class="btn-allow" title="Allow this product">Allow</button></form>
+                                <form method="post" action="{% url 'software_decision_create' %}">{% csrf_token %}<input type="hidden" name="canonical_name" value="{{ r.canonical }}"><input type="hidden" name="scope" value="global"><input type="hidden" name="next" value="{{ request.get_full_path }}"><input type="hidden" name="decision" value="reject"><button type="submit" class="btn-block" title="Block this product">Block</button></form>
+                                <form method="post" action="{% url 'software_decision_create' %}">{% csrf_token %}<input type="hidden" name="canonical_name" value="{{ r.canonical }}"><input type="hidden" name="scope" value="global"><input type="hidden" name="next" value="{{ request.get_full_path }}"><input type="hidden" name="decision" value="investigate"><button type="submit" class="btn-review" title="Flag for review">Review</button></form>
+                            </div>
+                            {% if r.publisher %}
+                            <div class="action-label" style="margin-top:0.25rem;">Publisher</div>
+                            <div class="row-actions">
+                                <form method="post" action="{% url 'software_decision_create' %}">{% csrf_token %}<input type="hidden" name="publisher" value="{{ r.publisher }}"><input type="hidden" name="scope" value="global"><input type="hidden" name="next" value="{{ request.get_full_path }}"><input type="hidden" name="decision" value="approve_publisher"><button type="submit" class="btn-trust" title="Trust all products from this publisher">Trust pub.</button></form>
+                                <form method="post" action="{% url 'software_decision_create' %}">{% csrf_token %}<input type="hidden" name="publisher" value="{{ r.publisher }}"><input type="hidden" name="scope" value="global"><input type="hidden" name="next" value="{{ request.get_full_path }}"><input type="hidden" name="decision" value="reject"><button type="submit" class="btn-block" title="Block all products from this publisher">Block pub.</button></form>
+                            </div>
+                            {% endif %}
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p class="muted">No products awaiting review.</p>
+        {% endif %}
+    </div>
+
+    {# Hidden inputs generated by JS from selected checkboxes. #}
+    <div id="bulk-hidden-fields"></div>
+</form>
 
 <p class="muted" style="margin-top: 1rem; font-size: 0.85rem;">
-    Per-client or per-device decisions can be created via Django admin,
-    or by picking the specific finding row in the
-    <a href="{% url 'findings_queue' %}?category=software">software findings queue</a>
-    (dedicated per-row scope pickers land in a follow-up).
+    Narrower per-client or per-device decisions can be made from the
+    product detail page.
 </p>
+
+<script>
+  (function () {
+    const cbs = document.querySelectorAll('.bulk-cb');
+    const all = document.getElementById('bulk-select-all');
+    const count = document.getElementById('bulk-count');
+    const scopeKind = document.getElementById('bulk-scope-kind');
+    const hiddenHost = document.getElementById('bulk-hidden-fields');
+    function refresh() {
+      const selected = document.querySelectorAll('.bulk-cb:checked');
+      count.textContent = selected.length + ' selected';
+      hiddenHost.innerHTML = '';
+      selected.forEach(function (cb) {
+        const inp = document.createElement('input');
+        inp.type = 'hidden';
+        if (scopeKind.value === 'publisher') {
+          if (cb.dataset.publisher) {
+            inp.name = 'publisher';
+            inp.value = cb.dataset.publisher;
+            hiddenHost.appendChild(inp);
+          }
+        } else {
+          inp.name = 'canonical_name';
+          inp.value = cb.dataset.canonical;
+          hiddenHost.appendChild(inp);
+        }
+      });
+    }
+    cbs.forEach(cb => cb.addEventListener('change', refresh));
+    if (all) all.addEventListener('change', function () {
+      cbs.forEach(cb => cb.checked = all.checked);
+      refresh();
+    });
+    scopeKind.addEventListener('change', refresh);
+    refresh();
+  })();
+</script>
 {% endblock %}

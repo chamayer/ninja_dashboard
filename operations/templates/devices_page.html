@@ -5,28 +5,7 @@
 
 {% block content %}
 <style>
-  .dv-overview {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-    gap: 0.65rem; margin-bottom: 1rem;
-  }
-  .dv-tile {
-    display: block; padding: 0.75rem 1rem;
-    background: var(--surface); border: 1px solid var(--border);
-    border-radius: 6px; text-decoration: none; color: inherit;
-  }
-  .dv-tile:hover { border-color: var(--accent); }
-  .dv-tile.active { background: #eef4fb; border-color: var(--accent); }
-  .dv-tile .dv-label { font-size: 0.72rem; font-weight: 700; text-transform: uppercase;
-    letter-spacing: 0.06em; color: var(--muted); margin-bottom: 0.2rem; }
-  .dv-tile .dv-value { font-size: 1.6rem; font-weight: 700; line-height: 1.1; color: #1a1a2e; }
-  .dv-tile .dv-sub { font-size: 0.72rem; color: var(--muted); margin-top: 0.2rem; }
-  .dv-tile.alert { border-left: 3px solid #dc2626; }
-  .dv-tile.alert .dv-value { color: #dc2626; }
-  .dv-tile.online { border-left: 3px solid #16a34a; }
-  .dv-tile.online .dv-value { color: #16a34a; }
-
-  .dv-chips { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.5rem; }
+.dv-chips { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.5rem; }
   .dv-chip {
     display: inline-flex; align-items: center; gap: 0.35rem;
     padding: 0.3rem 0.7rem; border: 1px solid var(--border); border-radius: 999px;
@@ -37,8 +16,6 @@
   .dv-chip .chip-count { font-weight: 600; color: var(--muted); }
   .dv-chip.active .chip-count { color: #fecaca; }
 
-  .dv-table th, .dv-table td { padding: 0.5rem 0.75rem; vertical-align: middle; }
-  .dv-table tbody tr { border-bottom: 1px solid var(--border); }
   .health-light {
     display: inline-block; width: 10px; height: 10px; border-radius: 50%;
     vertical-align: middle;
@@ -57,40 +34,59 @@
         </h1>
         {% include "_csv_download.html" %}
     </div>
-    <p class="muted" style="margin-top:0.5rem;">Every device across every client — filter, search, drill in.</p>
+    <p class="muted" style="margin-top:0.5rem;">A current view of devices across all clients — explore, filter, and drill in.</p>
 </div>
 
-<div class="dv-overview">
-    <div class="dv-tile">
-        <div class="dv-label">Total</div>
-        <div class="dv-value">{{ overview.total }}</div>
-    </div>
-    <a class="dv-tile online" href="?online=online">
-        <div class="dv-label">Online</div>
-        <div class="dv-value">{{ overview.online }}</div>
-        <div class="dv-sub">any source in last 24h</div>
+<h2 class="section-label">Estate snapshot</h2>
+<div class="tile-grid">
+    <a class="tile" href="{% url 'devices_page' %}">
+        <div class="tile-label">Total</div>
+        <div class="tile-value">{{ overview.total }}</div>
+        <div class="tile-note">managed devices</div>
     </a>
-    <a class="dv-tile alert" href="?online=offline">
-        <div class="dv-label">Offline</div>
-        <div class="dv-value">{{ overview.offline }}</div>
-        <div class="dv-sub">no source checking in</div>
+    <a class="tile" href="?state=active">
+        <div class="tile-label">Active</div>
+        <div class="tile-value">{{ overview.active }}</div>
+        <div class="tile-note">contact within {{ active_device_days }} days</div>
     </a>
-    <a class="dv-tile" href="?role=server">
-        <div class="dv-label">Servers</div>
-        <div class="dv-value">{{ overview.servers }}</div>
+    <a class="tile tile-online" href="?online=online">
+        <div class="tile-label">Online</div>
+        <div class="tile-value">{{ overview.online }}</div>
+        <div class="tile-note">any source in last 24h</div>
     </a>
-    <a class="dv-tile" href="?role=workstation">
-        <div class="dv-label">Workstations</div>
-        <div class="dv-value">{{ overview.workstations }}</div>
+    <a class="tile tile-alert" href="?online=offline">
+        <div class="tile-label">Offline</div>
+        <div class="tile-value">{{ overview.offline }}</div>
+        <div class="tile-note">currently unreachable</div>
     </a>
-    <div class="dv-tile">
-        <div class="dv-label">In patch scope</div>
-        <div class="dv-value">{{ overview.in_patch_scope }}</div>
-    </div>
+    <a class="tile" href="?state=not-reporting">
+        <div class="tile-label">Not reporting</div>
+        <div class="tile-value">{{ overview.stale }}</div>
+        <div class="tile-note">no contact in {{ active_device_days }} days</div>
+    </a>
+    <a class="tile" href="?role=server">
+        <div class="tile-label">Servers</div>
+        <div class="tile-value">{{ overview.servers }}</div>
+    </a>
+    <a class="tile" href="?role=workstation">
+        <div class="tile-label">Workstations</div>
+        <div class="tile-value">{{ overview.workstations }}</div>
+    </a>
 </div>
+
+{% if coverage_issues or identity_issues or delayed_sources %}
+<div class="card" style="padding:1rem;">
+  <h2 class="section-label">Service and data status</h2>
+  <div class="dv-chips">
+    {% if coverage_issues %}<a class="dv-chip" href="{% url 'findings_queue' %}?category=coverage">{{ coverage_issues }} device{{ coverage_issues|pluralize }} with a service coverage gap</a>{% endif %}
+    {% if identity_issues %}<a class="dv-chip" href="{% url 'findings_queue' %}?category=identity">{{ identity_issues }} device{{ identity_issues|pluralize }} with an identity conflict</a>{% endif %}
+    {% if delayed_sources %}<a class="dv-chip" href="{% url 'sources_status' %}">{{ delayed_sources }} source{{ delayed_sources|pluralize }} delayed</a>{% endif %}
+  </div>
+</div>
+{% endif %}
 
 <div class="card">
-    <h2 style="font-size:0.95rem; margin:0 0 0.5rem 0; color:#9ca3af;">Filter by OS</h2>
+    <h2 class="section-label">Explore devices</h2>
     <div class="dv-chips">
         <a class="dv-chip {% if not active_os %}active{% endif %}" href="{% url 'devices_page' %}">
             All <span class="chip-count">{{ overview.total }}</span>
@@ -102,43 +98,58 @@
         {% endfor %}
     </div>
 
-    <form method="get" style="display:flex; gap:0.5rem; align-items:center; margin-top:0.75rem; flex-wrap:wrap;">
-        <input type="search" name="q" placeholder="Hostname or serial…"
-               value="{{ active_q|default:'' }}"
-               style="padding:0.4rem 0.7rem; border:1px solid var(--border); border-radius:4px; font-size:0.85rem; min-width:220px;">
-        <select name="client" style="padding:0.4rem 0.7rem; border:1px solid var(--border); border-radius:4px;">
-            <option value="">Any client</option>
-            {% for c in clients %}
-                <option value="{{ c.slug }}" {% if active_client == c.slug %}selected{% endif %}>{{ c.display_name }}</option>
-            {% endfor %}
-        </select>
-        <select name="role" style="padding:0.4rem 0.7rem; border:1px solid var(--border); border-radius:4px;">
-            <option value="">Any role</option>
-            <option value="server" {% if active_role == 'server' %}selected{% endif %}>Server</option>
-            <option value="workstation" {% if active_role == 'workstation' %}selected{% endif %}>Workstation</option>
-            <option value="unknown" {% if active_role == 'unknown' %}selected{% endif %}>Not determined</option>
-        </select>
-        <select name="online" style="padding:0.4rem 0.7rem; border:1px solid var(--border); border-radius:4px;">
-            <option value="">Online or offline</option>
-            <option value="online" {% if active_online == 'online' %}selected{% endif %}>Online only</option>
-            <option value="offline" {% if active_online == 'offline' %}selected{% endif %}>Offline only</option>
-        </select>
+    <form method="get" class="filterbar" style="margin-top:0.75rem;">
+        <div>
+            <label>Search</label>
+            <input type="search" name="q" placeholder="Hostname or serial…" value="{{ active_q|default:'' }}">
+        </div>
+        <div>
+            <label>Client</label>
+            <select name="client">
+                <option value="">Any client</option>
+                {% for c in clients %}
+                    <option value="{{ c.slug }}" {% if active_client == c.slug %}selected{% endif %}>{{ c.display_name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <label>Role</label>
+            <select name="role">
+                <option value="">Any role</option>
+                <option value="server" {% if active_role == 'server' %}selected{% endif %}>Server</option>
+                <option value="workstation" {% if active_role == 'workstation' %}selected{% endif %}>Workstation</option>
+                <option value="unknown" {% if active_role == 'unknown' %}selected{% endif %}>Not determined</option>
+            </select>
+        </div>
+        <div>
+            <label>Status</label>
+            <select name="online">
+                <option value="">Any</option>
+                <option value="online" {% if active_online == 'online' %}selected{% endif %}>Online only</option>
+                <option value="offline" {% if active_online == 'offline' %}selected{% endif %}>Offline only</option>
+            </select>
+        </div>
+        <div>
+            <label>Reporting</label>
+            <select name="state">
+                <option value="">Any</option>
+                <option value="not-reporting" {% if active_state == 'not-reporting' %}selected{% endif %}>Not reporting</option>
+            </select>
+        </div>
         {% if active_os %}<input type="hidden" name="os" value="{{ active_os }}">{% endif %}
-        <button type="submit">Apply</button>
-        {% if active_q or active_client or active_role or active_online %}
-            <a href="?{% if active_os %}os={{ active_os }}{% endif %}" style="font-size:0.85rem;">Clear</a>
+        <div><button type="submit">Apply</button></div>
+        {% if active_q or active_client or active_role or active_online or active_state %}
+            <div><a href="?{% if active_os %}os={{ active_os }}{% endif %}" class="reset">Clear</a></div>
         {% endif %}
     </form>
 </div>
 
 <div class="card">
-    <h2>Devices
-      <span class="muted" style="font-weight:400; font-size:0.85rem;">
-        ({{ devices|length }}{% if devices|length == 500 %}+{% endif %})
-      </span>
+    <h2 class="section-label">Devices
+      <span style="font-weight:400;">({{ devices|length }}{% if devices|length == 500 %}+{% endif %})</span>
     </h2>
     {% if devices %}
-    <table class="dv-table" data-sortable>
+    <table class="ops-table" data-sortable>
         <thead>
             <tr>
                 <th style="width:30px;"></th>
@@ -146,7 +157,7 @@
                 <th>Client</th>
                 <th>Role</th>
                 <th>OS</th>
-                <th>Online sources</th>
+                <th>Current state</th>
                 <th class="num">Last contact</th>
                 <th class="num">Severe issues</th>
             </tr>
@@ -171,13 +182,7 @@
                 </td>
                 <td class="muted">{{ d.role|humanize_label|default:"—" }}</td>
                 <td class="muted">{{ d.os_group|humanize_label|default:"—" }}</td>
-                <td class="muted">
-                    {% if d.online_sources %}
-                        {{ d.online_sources|join:", " }}
-                    {% else %}
-                        <span style="color:#dc2626;">none</span>
-                    {% endif %}
-                </td>
+                <td>{{ d.state_label }}</td>
                 <td class="muted num">{{ d.last_contact|date:"Y-m-d H:i"|default:"—" }}</td>
                 <td class="num">
                     {% if d.severe %}
