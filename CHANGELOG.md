@@ -2,6 +2,16 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.98.4] — 2026-07-27 — Client overview polish
+
+### Changed
+- **Client overview** (`org_index.html`): removed placeholder "future-note"
+  banners, added plain-language descriptions to the Recent changes and
+  Configuration snapshot sections, improved label text ("Service requirements"
+  → "Requirement profile", "Data mappings" → "Connected sources"), linked the
+  Requirement profile label directly to its config page, and updated the
+  call-to-action to "Manage requirements →".
+
 ## [0.98.3] — 2026-07-27 — Software nav: workflow verbs, retire Decisions tab
 
 ### Changed

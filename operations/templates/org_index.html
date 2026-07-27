@@ -176,22 +176,22 @@
 <div class="lower-grid">
   <section class="card" id="recent-changes">
     <h2>Recent changes</h2>
+    <p class="muted">What changed recently for this client.</p>
     <ul class="compact-list">
       <li><span>Issues opened since yesterday</span><strong>{{ new_24h }}</strong></li>
       <li><span>Open issues compared with 7 days ago</span><strong>{% if issue_trend.open_change > 0 %}+{% endif %}{{ issue_trend.open_change|default:0 }}</strong></li>
       <li><span>Software decisions available to this client</span><strong>{{ software_decisions }}</strong></li>
     </ul>
-    <div class="future-note">Full client history will be navigable from More and from this section when the history workflow is implemented.</div>
   </section>
   <aside class="card">
-    <h2>Configuration</h2>
+    <h2>Configuration snapshot</h2>
+    <p class="muted">The policy baseline and source connections currently applied to this client.</p>
     <dl class="settings-list">
-      <dt>Service requirements</dt><dd>{{ current_client.requirement_profile.name|default:"Company default" }}</dd>
-      <dt>Policies</dt><dd><a href="{% url 'org_policies' org_slug=current_client.slug %}">{{ policy_count }} configured</a></dd>
-      <dt>Data mappings</dt><dd>{{ client_links|length }} connections</dd>
+      <dt>Requirement profile</dt><dd><a href="{% url 'client_requirements_config' current_client.slug %}">{{ current_client.requirement_profile.name|default:"Tenant default" }}</a></dd>
+      <dt>Client policies</dt><dd><a href="{% url 'org_policies' org_slug=current_client.slug %}">{{ policy_count }} configured</a></dd>
+      <dt>Connected sources</dt><dd>{{ client_links|length }} source connection{{ client_links|length|pluralize }}</dd>
     </dl>
-    <p class="future-note">Configuration changes are managed separately. The overview remains read-only.</p>
-    <a href="{% url 'client_requirements_config' current_client.slug %}">Open configuration →</a>
+    <a href="{% url 'client_requirements_config' current_client.slug %}">Manage requirements →</a>
   </aside>
 </div>
 
