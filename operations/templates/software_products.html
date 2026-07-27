@@ -77,6 +77,13 @@
             <option value="pending"  {% if active_decision == 'pending'  %}selected{% endif %}>No decision</option>
         </select>
     </div>
+    <div>
+        <label>Classifier</label>
+        <label style="display:flex; align-items:center; gap:0.3rem; font-size:0.85rem;">
+            <input type="checkbox" name="flagged" value="1" {% if active_flagged %}checked{% endif %}>
+            Flagged
+        </label>
+    </div>
     {% if active_category %}<input type="hidden" name="category" value="{{ active_category }}">{% endif %}
     <button type="submit">Apply</button>
     {% if active_q or active_publisher or active_min_devices or active_safety or active_decision %}

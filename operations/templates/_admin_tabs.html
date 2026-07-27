@@ -44,7 +44,7 @@ Config / Integrations page. Views must set:
       {% if nav_pending_merges %}<span class="at-badge">{{ nav_pending_merges }}</span>{% endif %}
     </a>
     <a class="at-tab {% if admin_tab == 'software' %}active{% endif %}"
-       href="{% url 'software_decisions_queue' %}">
+       href="{% url 'software_products' %}?flagged=1">
       Software
       {% if nav_pending_software_decisions %}<span class="at-badge">{{ nav_pending_software_decisions }}</span>{% endif %}
     </a>

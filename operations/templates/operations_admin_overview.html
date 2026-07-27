@@ -87,15 +87,15 @@
         <span class="metric {% if nav_pending_merges %}warn{% else %}ok{% endif %}">{{ nav_pending_merges }} open</span>
     </a>
 
-    <a class="admin-card" href="{% url 'software_decisions_queue' %}">
+    <a class="admin-card" href="{% url 'software_products' %}?flagged=1">
         <div class="top">
             <span class="icon green">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
             </span>
-            <span class="title">Software decisions</span>
+            <span class="title">Review flagged software</span>
         </div>
-        <div class="desc">Products from classifier findings — approve, reject, or investigate.</div>
-        <span class="metric {% if nav_pending_software_decisions %}warn{% else %}ok{% endif %}">{{ nav_pending_software_decisions }} to review</span>
+        <div class="desc">Classifier flagged these products — allow, block, or send for review.</div>
+        <span class="metric {% if nav_pending_software_decisions %}warn{% else %}ok{% endif %}">{{ nav_pending_software_decisions }} waiting</span>
     </a>
 
     <a class="admin-card" href="{% url 'findings_queue' %}">

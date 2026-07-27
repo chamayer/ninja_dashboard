@@ -2609,6 +2609,7 @@ def _software_page_data(request: HttpRequest) -> dict:
     category_filter = request.GET.get("category", "")  # av|rmm|remote_access|...|uncategorized
     safety_filter = request.GET.get("safety", "")      # high|medium|low|clean
     publisher_filter = (request.GET.get("publisher") or "").strip()
+    flagged_filter = request.GET.get("flagged", "").strip().lower() in ("1", "true", "yes", "on")
     min_devices = request.GET.get("min_devices", "").strip()
     try:
         min_devices_int = int(min_devices) if min_devices else 0
@@ -2707,6 +2708,18 @@ def _software_page_data(request: HttpRequest) -> dict:
         if publisher_filter:
             where_clauses.append("sic.publisher ILIKE %s")
             params.append(f"%{publisher_filter}%")
+        if flagged_filter:
+            # Products with at least one open classifier finding — the
+            # "needs decision" set. Same signal the retired Decisions
+            # queue surfaced, now available as a filter on Products.
+            where_clauses.append(
+                "EXISTS (SELECT 1 FROM operations.findings f "
+                " JOIN operations.finding_types ft ON ft.id = f.finding_type_id "
+                " WHERE f.tenant_id = 1 "
+                "   AND f.status IN ('open', 'acknowledged') "
+                "   AND ft.source_module = 'platform.software_findings' "
+                "   AND f.finding_details->>'canonical_name' = sic.canonical_name)"
+            )
         if category_filter == "uncategorized":
             where_clauses.append(
                 "NOT EXISTS (SELECT 1 FROM operations.software_catalog cat "
@@ -3066,6 +3079,7 @@ def _software_page_data(request: HttpRequest) -> dict:
         "active_safety": safety_filter,
         "active_publisher": publisher_filter,
         "active_min_devices": min_devices_int,
+        "active_flagged": flagged_filter,
         "decision_choices": SoftwareDecision.Decision.choices,
         "risk_distribution": risk_distribution,
         "this_week": this_week,

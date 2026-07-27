@@ -2,6 +2,28 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.98.3] — 2026-07-27 — Software nav: workflow verbs, retire Decisions tab
+
+### Changed
+- **Software sub-nav uses verbs / concepts, not admin nouns.**
+  Overview / Products / Publishers / **Cleanup** (was Tech checklist)
+  / **User exposure** (was User risk) / **Activity** (was Log).
+  The standalone "Decisions" tab is retired — its list was a
+  products-filtered-for-flagged view, which is now the built-in
+  **Review flagged products** workflow tile and a `?flagged=1`
+  filter on Products. Old `/software/decisions/` URL still resolves
+  for direct bookmarks.
+- **Overview workflow tiles** re-phrased with verb-first labels:
+  "Review flagged products" (was Decisions queue), "Activity" (was
+  Decision log), "Cleanup by device" (was Tech checklist), "User
+  exposure" (was User risk).
+- **"Where you stand" summary card** replaces "Decisions summary" at
+  the bottom of the Overview. Copy switched to Allow / Block / Review
+  / Waiting.
+- **Admin overview + admin nav** point at the new
+  `Products?flagged=1` path for the software review workflow. Card
+  titled "Review flagged software".
+
 ## [0.98.2] — 2026-07-27 — Decision log, Allow/Block/Review labels, tech-checklist filters
 
 ### Added
