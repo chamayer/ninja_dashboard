@@ -4,28 +4,8 @@
 
 {% block content %}
 <style>
-    .pt-tiles {
-        display: grid; gap: 0.5rem;
-        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-        margin-bottom: 1rem;
-    }
-    .pt-tile {
-        padding: 0.75rem 0.9rem; background: var(--surface);
-        border: 1px solid var(--border); border-radius: 6px;
-    }
-    .pt-tile .lbl {
-        font-size: 0.7rem; font-weight: 700; text-transform: uppercase;
-        letter-spacing: 0.04em; color: var(--muted);
-    }
-    .pt-tile .cnt { font-size: 1.4rem; font-weight: 700; margin-top: 0.15rem; }
-    .pt-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
-    .pt-table th {
-        text-align: left; padding: 0.4rem 0.6rem; border-bottom: 2px solid var(--border);
-        font-size: 0.75rem; color: var(--muted); text-transform: uppercase;
-        letter-spacing: 0.04em; font-weight: 700;
-    }
-    .pt-table td { padding: 0.35rem 0.6rem; border-bottom: 1px solid var(--border); }
-    .pt-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+    .pt-table-installs { color: #16a34a; }
+    .pt-table-failures { color: #dc2626; }
     .pt-bar-wrap {
         display: block; height: 12px; background: #eef4fb; border-radius: 3px;
         position: relative; overflow: hidden; min-width: 120px;
@@ -54,32 +34,31 @@
         </div>
     </div>
     <p class="muted" style="margin-top:0.5rem;">
-        Per-day install / failure volumes from
-        <code>ninja_patches.patch_facts</code>. Optional client filter
-        narrows to one org.
+        Daily install and failure counts from Ninja patch data. Use the
+        client filter to narrow to a single organisation.
     </p>
 </div>
 
-<div class="pt-tiles">
-    <div class="pt-tile">
-        <div class="lbl">Installs</div>
-        <div class="cnt" style="color:#16a34a;">{{ totals.installs }}</div>
+<div class="tile-grid" style="margin-bottom:1rem;">
+    <div class="tile tile-good">
+        <div class="tile-label">Installs</div>
+        <div class="tile-value">{{ totals.installs }}</div>
     </div>
-    <div class="pt-tile">
-        <div class="lbl">Failures</div>
-        <div class="cnt" style="color:#dc2626;">{{ totals.failures }}</div>
+    <div class="tile tile-alert">
+        <div class="tile-label">Failures</div>
+        <div class="tile-value">{{ totals.failures }}</div>
     </div>
-    <div class="pt-tile">
-        <div class="lbl">Failure %</div>
-        <div class="cnt">{{ totals.fail_pct }}%</div>
+    <div class="tile">
+        <div class="tile-label">Failure rate</div>
+        <div class="tile-value">{{ totals.fail_pct }}%</div>
     </div>
-    <div class="pt-tile">
-        <div class="lbl">Total attempts</div>
-        <div class="cnt">{{ totals.total }}</div>
+    <div class="tile">
+        <div class="tile-label">Total attempts</div>
+        <div class="tile-value">{{ totals.total }}</div>
     </div>
-    <div class="pt-tile">
-        <div class="lbl">Devices touched</div>
-        <div class="cnt">{{ totals.devices_touched }}</div>
+    <div class="tile">
+        <div class="tile-label">Devices touched</div>
+        <div class="tile-value">{{ totals.devices_touched }}</div>
     </div>
 </div>
 
@@ -117,7 +96,7 @@
 
 <div class="card">
 {% if rows %}
-    <table class="pt-table" data-sortable>
+    <table class="ops-table" data-sortable>
         <thead>
             <tr>
                 <th>Day</th>
@@ -133,8 +112,8 @@
             {% for r in rows %}
             <tr>
                 <td>{{ r.day|date:"Y-m-d (D)" }}</td>
-                <td class="num" style="color:#16a34a;">{{ r.installs }}</td>
-                <td class="num" style="color:#dc2626;">{{ r.failures }}</td>
+                <td class="num pt-table-installs">{{ r.installs }}</td>
+                <td class="num pt-table-failures">{{ r.failures }}</td>
                 <td class="num">{{ r.total }}</td>
                 <td class="num
                     {% if r.fail_pct > 20 %}pt-fail-hi

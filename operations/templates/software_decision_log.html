@@ -4,7 +4,6 @@
 {% block title %}Decision log — Software{% endblock %}
 
 {% block content %}
-{% include "_software_tabs.html" %}
 {% include "_sw_style.html" %}
 
 <div class="sw-page-header">
@@ -53,7 +52,7 @@
 
 <div class="sw-table-wrap">
     {% if rows %}
-    <table class="sw-table" data-sortable>
+    <table class="ops-table" data-sortable>
         <thead>
             <tr>
                 <th>Decided at</th>

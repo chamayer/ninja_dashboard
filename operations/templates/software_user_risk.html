@@ -1,22 +1,10 @@
 {% extends "base.html" %}
 {% load human_labels %}
 
-{% block title %}User risk — Software{% endblock %}
+{% block title %}User exposure — Software{% endblock %}
 
 {% block content %}
-{% include "_software_tabs.html" %}
 <style>
-    .ur-header { padding: 1rem 1.2rem; background: var(--surface);
-                 border: 1px solid var(--border); border-radius: 6px;
-                 margin-bottom: 0.6rem; }
-    .ur-tiles { display: grid; gap: 0.65rem;
-                grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-                margin-bottom: 0.9rem; }
-    .ur-tile { background: var(--surface); border: 1px solid var(--border);
-               border-radius: 6px; padding: 0.75rem 0.9rem; }
-    .ur-tile .label { color: var(--muted); font-size: 0.75rem;
-                      text-transform: uppercase; letter-spacing: 0.04em; }
-    .ur-tile .value { font-size: 1.35rem; font-weight: 600; margin-top: 0.2rem; }
     .ur-card { background: var(--surface); border: 1px solid var(--border);
                border-radius: 6px; padding: 0.9rem 1.1rem; margin-bottom: 0.5rem; }
     .ur-card h3 { margin: 0 0 0.4rem; font-size: 0.95rem; display: flex;
@@ -31,45 +19,40 @@
                font-size: 0.82rem; }
 </style>
 
-<div class="ur-header">
-    <div style="font-size:0.8rem; color:var(--muted); margin-bottom:0.4rem;">
-        <a href="{% url 'software_page' %}">Software</a> › User risk
-    </div>
-    <h1 style="margin:0;">User risk</h1>
+<div class="card">
+    <h1 style="margin:0;">User exposure</h1>
     <p class="muted" style="margin-top:0.35rem;">
-        Per-user rollup of software checklist items on the device that
-        user last logged into. Uses Ninja's <code>lastLoggedInUser</code>
-        (latest per device); a user who logs into multiple devices is
-        aggregated across all of them.
+        Software items flagged on the last device each user logged into.
+        Users who log into multiple devices are shown across all of them.
     </p>
 </div>
 
-<div class="ur-tiles">
-    <div class="ur-tile"><div class="label">Users with items</div><div class="value">{{ user_count }}</div></div>
-    <div class="ur-tile"><div class="label">Total items</div><div class="value">{{ total_items }}</div></div>
+<div class="tile-grid">
+    <div class="tile"><div class="tile-label">Users with items</div><div class="tile-value">{{ user_count }}</div></div>
+    <div class="tile"><div class="tile-label">Total items</div><div class="tile-value">{{ total_items }}</div></div>
 </div>
 
 <div class="card">
-    <form action="" method="get" style="display:flex; gap:0.8rem; align-items:end; flex-wrap:wrap;">
+    <form action="" method="get" class="filterbar">
         <div>
-            <label style="display:block; font-size:0.78rem; color:var(--muted);">User</label>
-            <input type="search" name="q" value="{{ active_q }}" placeholder="search username…" style="padding:0.4rem 0.65rem; border:1px solid var(--border); border-radius:4px; min-width:180px;">
+            <label>User</label>
+            <input type="search" name="q" value="{{ active_q }}" placeholder="search username…">
         </div>
         <div>
-            <label style="display:block; font-size:0.78rem; color:var(--muted);">Client</label>
-            <select name="client" multiple size="1" style="min-width:180px; padding:0.4rem;">
+            <label>Client</label>
+            <select name="client" multiple size="1">
                 {% for c in clients %}
                     <option value="{{ c.slug }}" {% if c.slug in active_clients %}selected{% endif %}>{{ c.display_name }}</option>
                 {% endfor %}
             </select>
         </div>
         <div>
-            <label style="display:block; font-size:0.78rem; color:var(--muted);">Reason kind</label>
-            <input type="search" name="kind" value="{{ active_kind }}" placeholder="e.g. suspicious_name" style="padding:0.4rem 0.65rem; border:1px solid var(--border); border-radius:4px; min-width:160px;">
+            <label>Reason kind</label>
+            <input type="search" name="kind" value="{{ active_kind }}" placeholder="e.g. suspicious name">
         </div>
         <div><button type="submit">Apply</button></div>
         {% if active_q or active_clients or active_kind %}
-        <div><a href="?" style="font-size:0.85rem;">Clear</a></div>
+        <div><a href="?" class="reset">Clear</a></div>
         {% endif %}
         <div style="margin-left:auto;">
             {% include "_csv_download.html" %}

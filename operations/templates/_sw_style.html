@@ -1,8 +1,8 @@
 {% comment %}
 Shared visual language for every software surface (Products,
-Publishers, Decisions, Tech checklist, User risk). Include AFTER
-_software_tabs.html and BEFORE any page-specific CSS. Any per-page
-tweak lives inside that page's own <style> block.
+Publishers, Decisions, Tech checklist, User risk). Include BEFORE
+any page-specific CSS. Any per-page tweak lives inside that
+page's own <style> block.
 {% endcomment %}
 <style>
   /* ── Page header ───────────────────────────────────────── */
@@ -72,39 +72,23 @@ tweak lives inside that page's own <style> block.
 
   /* ── Data table ───────────────────────────────────────── */
   .sw-table-wrap { overflow-x: auto; }
-  .sw-table {
-    width: 100%; border-collapse: collapse; font-size: 0.9rem;
-  }
-  .sw-table thead th {
-    padding: 0.55rem 0.7rem; text-align: left;
-    color: var(--muted); font-size: 0.72rem; font-weight: 700;
-    text-transform: uppercase; letter-spacing: 0.05em;
-    border-bottom: 1px solid var(--border);
-    background: transparent;
-  }
-  .sw-table thead th.num { text-align: right; }
-  .sw-table thead th.actions { text-align: right; white-space: nowrap; }
-  .sw-table tbody td {
-    padding: 0.55rem 0.7rem; vertical-align: middle;
-    border-bottom: 1px solid var(--border);
-  }
-  .sw-table tbody tr:hover { background: #fafafa; }
-  .sw-table tbody td.num { text-align: right; }
-  .sw-table .primary-cell strong { font-weight: 600; color: #1a1a2e; }
-  .sw-table .primary-cell .secondary {
+  /* .ops-table from base.html is the canonical table style;
+     these extend it with software-specific column behaviour */
+  .ops-table .primary-cell strong { font-weight: 600; color: #1a1a2e; }
+  .ops-table .primary-cell .secondary {
     color: var(--muted); font-size: 0.8rem; margin-top: 0.15rem;
   }
-  .sw-table td.actions {
+  .ops-table td.actions {
     text-align: right; white-space: nowrap;
   }
-  .sw-table td.actions form { display: inline-flex; gap: 0.25rem; margin-left: 0.25rem; }
-  .sw-table td.actions select { padding: 0.2rem 0.4rem; font-size: 0.8rem; }
-  .sw-table td.actions button {
+  .ops-table td.actions form { display: inline-flex; gap: 0.25rem; margin-left: 0.25rem; }
+  .ops-table td.actions select { padding: 0.2rem 0.4rem; font-size: 0.8rem; }
+  .ops-table td.actions button {
     padding: 0.2rem 0.6rem; font-size: 0.78rem;
     border: 1px solid var(--border); background: #fff; border-radius: 4px;
     cursor: pointer;
   }
-  .sw-table td.actions button:hover { border-color: var(--accent); }
+  .ops-table td.actions button:hover { border-color: var(--accent); }
 
   /* ── Pills (Risk + Decision) ──────────────────────────── */
   .risk-pill, .decision-pill {

@@ -4,7 +4,6 @@
 {% block title %}Software{% endblock %}
 
 {% block content %}
-{% include "_software_tabs.html" %}
 <style>
   /* ── Layout ────────────────────────────────────────────── */
   .sw-hero {
@@ -22,20 +21,6 @@
   .sw-numbers { display: grid; gap: 0.65rem;
     grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   }
-  .sw-tile {
-    display: block; padding: 0.85rem 1rem;
-    background: var(--surface); border: 1px solid var(--border);
-    border-radius: 8px; text-decoration: none; color: inherit;
-    transition: box-shadow 0.15s, border-color 0.15s;
-  }
-  .sw-tile:hover { box-shadow: 0 2px 6px rgba(0,0,0,0.06); border-color: var(--accent); }
-  .sw-tile .sw-label {
-    font-size: 0.72rem; font-weight: 700; text-transform: uppercase;
-    letter-spacing: 0.05em; color: var(--muted); margin-bottom: 0.2rem;
-  }
-  .sw-tile .sw-value { font-size: 1.6rem; font-weight: 700; line-height: 1.1; color: #1a1a2e; }
-  .sw-tile .sw-sub { font-size: 0.78rem; color: var(--muted); margin-top: 0.25rem; }
-  .sw-tile.has-open .sw-value { color: #b45309; }
 
   /* ── Workflow cards ────────────────────────────────────── */
   .sw-workflows {
@@ -97,14 +82,6 @@
   /* ── This week card ────────────────────────────────────── */
   .sw-week { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
              gap: 0.65rem; }
-  .sw-week-item {
-    padding: 0.75rem 1rem; background: var(--surface);
-    border: 1px solid var(--border); border-radius: 8px;
-  }
-  .sw-week-item .k { font-size: 0.72rem; color: var(--muted); text-transform: uppercase;
-                     letter-spacing: 0.05em; font-weight: 700; }
-  .sw-week-item .v { font-size: 1.25rem; font-weight: 700; margin-top: 0.2rem; }
-  .sw-week-item .sub { font-size: 0.78rem; color: var(--muted); }
 
   /* ── Category chips + filters ──────────────────────────── */
   .cat-chips { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.6rem; }
@@ -192,30 +169,30 @@
 {# ── Overview KPIs ─────────────────────────────────────── #}
 <div class="sw-section-label">Overview</div>
 <div class="sw-numbers">
-    <div class="sw-tile">
-        <div class="sw-label">Products</div>
-        <div class="sw-value">{{ unique_titles }}</div>
-        <div class="sw-sub">unique across the fleet</div>
+    <div class="tile">
+        <div class="tile-label">Products</div>
+        <div class="tile-value">{{ unique_titles }}</div>
+        <div class="tile-note">unique across the fleet</div>
     </div>
-    <a class="sw-tile {% if uncategorized_titles %}has-open{% endif %}" href="?category=uncategorized">
-        <div class="sw-label">Unclassified</div>
-        <div class="sw-value">{{ uncategorized_titles }}</div>
-        <div class="sw-sub">not yet categorised</div>
+    <a class="tile" href="?category=uncategorized">
+        <div class="tile-label">Not categorized</div>
+        <div class="tile-value {% if uncategorized_titles %}has-open{% endif %}">{{ uncategorized_titles }}</div>
+        <div class="tile-note">no category assigned yet</div>
     </a>
-    <a class="sw-tile" href="?decision=pending">
-        <div class="sw-label">Awaiting decision</div>
-        <div class="sw-value">{{ pending_decisions }}</div>
-        <div class="sw-sub">no approve or reject yet</div>
+    <a class="tile" href="?decision=pending">
+        <div class="tile-label">Awaiting review</div>
+        <div class="tile-value {% if pending_decisions %}has-open{% endif %}">{{ pending_decisions }}</div>
+        <div class="tile-note">no allow or block decision yet</div>
     </a>
-    <a class="sw-tile {% if high_risk_titles %}has-open{% endif %}" href="?safety=high">
-        <div class="sw-label">High risk</div>
-        <div class="sw-value">{{ high_risk_titles }}</div>
-        <div class="sw-sub">actively exploited or severe</div>
+    <a class="tile tile-alert" href="?safety=high">
+        <div class="tile-label">High risk</div>
+        <div class="tile-value">{{ high_risk_titles }}</div>
+        <div class="tile-note">actively exploited or severe CVEs</div>
     </a>
-    <a class="sw-tile {% if software_issues %}has-open{% endif %}" href="{% url 'findings_queue' %}?category=software">
-        <div class="sw-label">Open issues</div>
-        <div class="sw-value">{{ software_issues }}</div>
-        <div class="sw-sub">flagged installations</div>
+    <a class="tile tile-warn" href="{% url 'findings_queue' %}?category=software">
+        <div class="tile-label">Open issues</div>
+        <div class="tile-value">{{ software_issues }}</div>
+        <div class="tile-note">active software findings</div>
     </a>
 </div>
 
@@ -282,28 +259,28 @@
 {# ── This week ─────────────────────────────────────────── #}
 <div class="sw-section-label">This week</div>
 <div class="sw-week">
-    <div class="sw-week-item">
-        <div class="k">New products</div>
-        <div class="v">{{ this_week.new_products }}</div>
-        <div class="sub">first observed in the last 7 days</div>
+    <div class="tile">
+        <div class="tile-label">New products</div>
+        <div class="tile-value">{{ this_week.new_products }}</div>
+        <div class="tile-note">first seen in the last 7 days</div>
     </div>
-    <div class="sw-week-item">
-        <div class="k">New high-risk</div>
-        <div class="v">{{ this_week.new_high_risk }}</div>
-        <div class="sub">new products already scored high</div>
+    <div class="tile tile-alert">
+        <div class="tile-label">New high-risk</div>
+        <div class="tile-value">{{ this_week.new_high_risk }}</div>
+        <div class="tile-note">new products already scored high</div>
     </div>
-    <div class="sw-week-item">
-        <div class="k">Top new product</div>
+    <div class="tile">
+        <div class="tile-label">Most-installed new product</div>
         {% if this_week.top_new_product %}
-            <div class="v" style="font-size:1rem;">
+            <div class="tile-value" style="font-size:1rem; margin-top:0.3rem;">
                 <a href="{% url 'software_detail' name=this_week.top_new_product.name %}">
                     {{ this_week.top_new_product.name|title }}
                 </a>
             </div>
-            <div class="sub">on {{ this_week.top_new_product.devices }} device{{ this_week.top_new_product.devices|pluralize }}</div>
+            <div class="tile-note">on {{ this_week.top_new_product.devices }} device{{ this_week.top_new_product.devices|pluralize }}</div>
         {% else %}
-            <div class="v muted" style="font-size:1rem;">nothing new</div>
-            <div class="sub">no new installs in the last week</div>
+            <div class="tile-value muted" style="font-size:1rem; margin-top:0.3rem;">nothing new</div>
+            <div class="tile-note">no new installs in the last week</div>
         {% endif %}
     </div>
 </div>
@@ -357,8 +334,8 @@
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3 8-8"></path><path d="M20 12v7a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h11"></path></svg>
         </span>
         <span class="wf-body">
-            <div class="wf-title">Cleanup by device</div>
-            <div class="wf-desc">per-device fix list — blocked or flagged items on each machine</div>
+            <div class="wf-title">Device cleanup queue</div>
+            <div class="wf-desc">blocked or flagged items on each machine — one list per device</div>
         </span>
         <span class="wf-count {% if not workflow_state.tech_checklist_devices %}zero{% endif %}">
             {{ workflow_state.tech_checklist_devices }}
@@ -372,7 +349,7 @@
         </span>
         <span class="wf-body">
             <div class="wf-title">User exposure</div>
-            <div class="wf-desc">who is exposed to risky software — grouped by last-logged-in user</div>
+            <div class="wf-desc">risky software grouped by the user who last logged in</div>
         </span>
         <span class="wf-count zero">
             → <small>open</small>
@@ -384,8 +361,8 @@
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l3 7h7l-5.5 4.5L18 21l-6-4-6 4 1.5-7.5L2 9h7l3-7z"></path></svg>
         </span>
         <span class="wf-body">
-            <div class="wf-title">Whitelist suggestions</div>
-            <div class="wf-desc">common products worth reviewing</div>
+            <div class="wf-title">Allow-list candidates</div>
+            <div class="wf-desc">common products worth approving</div>
         </span>
         <span class="wf-count {% if not whitelist_suggestions %}zero{% endif %}">
             {{ whitelist_suggestions }}

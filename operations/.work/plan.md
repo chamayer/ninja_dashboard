@@ -1,160 +1,173 @@
-# Active Operations work plan
+# Operations UI Redesign — All 4 Tracks
 
-Track: **Software dashboard + classification engine + legacy-analyzer parity**
+**Status:** COMPLETE — all 4 tracks done, awaiting visual smoke pass + release approval
+**Goal:** Consistent, operator-friendly UI across all sections — no jargon, uniform layout primitives, functional nav, durable enough to not need a redo
+**Scope:** Templates + context_processors.py only. No model changes, no URL changes, no view logic changes.
 
-## Status
+---
 
-- Scoping — reconciliation complete, sequencing agreed, no implementation
-  started.
+## Track 1 — CSS primitives + tile/font uniformity
 
-## Goal
+**Goal:** Every stat tile, table, and filter bar in every section uses the same base class. One spec for numbers.
 
-Turn `/software/` from a fleet-summary page into a real dashboard with
-summary → detail drill-through, and close the outstanding parity gaps
-against the legacy `analyze_inventory.py` (Ninja-CSV-based, 3041 lines).
-Reconciled against 0.82.2; earlier "PDQ" references in the parity audit
-were a misreading and have been struck.
+### Tile unified spec
 
-## Scope
+Current problem — sizes used across the codebase:
+- `.sw-tile .sw-value`: 1.6rem/700 (software overview)
+- `.patch-status-card .value`: 1.45rem/700 (patching)
+- `.tc-tile .value`, `.ur-tile .value`: 1.35rem/600
+- `.sw-week-item .v`: 1.25rem/700
+- base.html `.tile-value`: 1.6rem/**600** — fix to 700
 
-- `apps/core/views.py::software_page` and new per-title / per-publisher
-  detail views.
-- `apps/core/models.py::SoftwareClassifierRule`, `SoftwareCatalog`,
-  `SoftwareDecision`.
-- `templates/software_*.html` — new detail templates + row-action fragments.
-- New Whitelist Suggestions finding / queue.
-- Wire `Device.last_user` → `ClientUser` for installs × user correlation.
-- CVE enrichment enters via a separate ADR and stays behind a feature flag.
-- **Not in scope:** Excel/VBA output; PDQ ingestion (never was a source).
+Canonical spec (all in base.html):
+- `.tile-grid`: repeat(auto-fill, minmax(180px,1fr)), gap 0.65rem
+- `.tile`: surface bg, border, radius 6px, padding 0.85rem 1rem, block, transition
+- `.tile:hover`: border-color accent
+- `.tile-good/.tile-warn/.tile-alert`: left-border 3px (green/orange/red)
+- `.tile-label`: 0.72rem, 700, uppercase, letter-spacing 0.05em, var(--muted)
+- `.tile-value`: 1.6rem, 700, #1a1a2e, line-height 1.1, margin-top 0.2rem
+- `.tile-note`: 0.75rem, var(--muted), margin-top 0.2rem
+- `.tile-value.alert`: color #b45309 (amber for "has open items")
 
-## Decisions
+### Migration map
 
-- **Data source parity is already achieved.** `ingest/inventory/software.py`
-  ingests the same data the legacy Ninja CSV exports carried. No new
-  connector needed for parity.
-- **Classification stays split.** `SoftwareClassifierRule` produces evidence
-  (SUSPICIOUS_NAME, INSTALL_PATH_SUSPICIOUS, EOL_RUNTIME); `SoftwareDecision`
-  produces trust (APPROVE, APPROVE_PUBLISHER, REJECT, INVESTIGATE). The
-  legacy WHITELIST and TRUSTED_PUBLISHERS live as decisions, not rules.
-  Unifying them is deferred until an operator hits an actual limitation.
-- **Categories stay data-driven.** `SoftwareCatalog.categories` (jsonb) is
-  the admin-maintainable taxonomy per the "mappings live in data" rule.
-  No hardcoded category enum.
-- **User-risk unblocked.** `ClientUser` + `ClientUserLink` shipped;
-  `ingest/core/devices.py:129` writes `last_user`. Only the install ↔ user
-  join is missing.
-- **CVE is external and gets its own ADR.** Introduces a new data source,
-  rate limits, secret handling; not bundled with UI work.
-
-## Verified gap list (audit 0.69.0 → reconciled at 0.82.2)
-
-| Gap area | State @ 0.82.2 | Verdict |
+| Template | Remove classes | Replace with |
 |---|---|---|
-| CVE / vulnerability enrichment | No CVE tables/models, no NVD code | Open |
-| User-risk (software × user) | `ClientUser`/`ClientUserLink` shipped, `last_user` ingested, join missing | Partial |
-| Publisher rollups + publisher-level decisions | `APPROVE_PUBLISHER` decision exists; publisher is filter facet + column; no rollup / detail view | Partial |
-| Tech Checklist | Nothing | Open |
-| Whitelist Suggestions queue (installs ≥ N unclassified) | Rare-side (`rare_recent`) shipped; common-unclassified side missing | Open |
-| Per-title detail page + row actions + sortable columns | Nothing (fleet page is summary-only) | Open |
-| Excel/VBA output | Deliberate out-of-scope | Not doing |
-| ~~PDQ ingestion~~ | ~~n/a~~ | Struck — misreading |
+| base.html | fix `.tile-value` weight 600→700; add `.tile-note`, `.tile-good/warn/alert` | — |
+| software_page.html | `.sw-numbers`, `.sw-tile`, `.sw-label`, `.sw-value`, `.sw-sub`; `.sw-week-item .k/.v/.sub` | `.tile-grid`, `.tile`, `.tile-label`, `.tile-value`, `.tile-note` |
+| patching_queue.html | `.patch-status-grid`, `.patch-status-card`, `.label`, `.value`, `.sub`, `.good/.warn/.alert` | `.tile-grid`, `.tile.*` unified |
+| software_tech_checklist.html | `.tc-tiles`, `.tc-tile` + local label/value | `.tile-grid`, `.tile` |
+| software_user_risk.html | `.ur-tiles`, `.ur-tile` + local label/value | `.tile-grid`, `.tile` |
+| devices_page.html | `.dv-tile`, `.dv-label`, `.dv-value`, `.dv-sub` | `.tile.*` unified |
+| patch_trends.html | `.pt-tiles`, `.pt-tile` | `.tile-grid`, `.tile` |
+| patch_evidence.html | `.pe-status-tiles`, `.pe-tile` | `.tile-grid`, `.tile` |
+| coverage.html | `.cov-tiles`, `.cov-tile`, `.tl`, `.tv`, `.ts` | `.tile-grid`, `.tile` |
+| findings_queue.html | `.tile-row`, `.sev-tile`, `.sev-label`, `.sev-count` | `.tile-grid`, `.tile` |
 
-## Steps
+### Tables
 
-- [x] Batch 1 — UI foundation (0.83.0).
-  - [x] `/software/title/<name>/` detail view.
-  - [x] Row-level decision actions on the fleet + per-org tables (per-org
-        already shipped; fleet added; both link to the new detail page).
-  - [x] Sortable columns — already provided by the universal `data-sortable`
-        JS in `base.html`, no per-page work needed.
-  - [x] Functional index (migration 0078) so case-insensitive canonical
-        lookups don't seq-scan software_installations_current.
-- [x] Batch 2 — Publisher rollup + admin surface (0.84.0).
-  - [x] Migration 0079: adds `publisher` to `SoftwareDecision`, makes
-        `canonical_name` blank-able, XOR check constraint enforcing
-        exactly one of the two, six partial unique constraints.
-  - [x] `_load_decisions` / `_resolve_decision` in
-        `ingest/software_findings.py` now honour publisher-scope tiers
-        (title-scope wins; publisher-scope is fallback).
-  - [x] `/software/publishers/` list + `/software/publishers/<pub>/`
-        detail with row-level publisher-scope decisions and title
-        clickthrough.
-  - [x] `software_decision_create` accepts `publisher` and enforces the
-        XOR at the form level.
-  - [x] Fleet page `?decision=` filter now considers publisher-scope
-        approvals/rejections/pending.
-  - [x] Nav: fleet page has a Publishers tile; per-title publisher list
-        links to publisher detail; per-publisher title list links to
-        title detail.
-- [x] Batch 3 — Whitelist Suggestions (0.85.0).
-  - [x] New `whitelist_suggestion` FindingType (migration 0080), seeded
-        via `get_or_create` under the software category with
-        `source_module='platform.software_findings'`.
-  - [x] Classifier step 7 emits it for uncategorised + undecided +
-        fleet_device_count ≥ threshold. Threshold + severity + enabled
-        knobs on the software_classifier `EvaluatorConfig`
-        (`whitelist_suggestion_min_devices` default 10, `_severity`
-        default low, `_enabled` default true).
-  - [x] Separate tile on `/software/` (deduped by canonical_name) —
-        distinct from the "flagged installations" tile so suggestions
-        don't inflate the problem count.
-- [x] Batch 4 — Tech Checklist (0.86.0).
-  - [x] `/software/tech-checklist/` — per-device cleanup queue combining
-        active software findings (excluding `whitelist_suggestion`) with
-        installations that hit a title- or publisher-scope reject/
-        investigate decision. Multi-client filter, CSV export, top-500
-        cap with total counter.
-  - [x] Tile on `/software/`; each row links to the device detail
-        (Software tab).
-- [x] Batch 5 — User-risk join (0.87.0).
-  - [x] `/software/user-risk/` — per-user rollup of software checklist
-        items on the device the user last logged into. Anchored on
-        Ninja's `lastLoggedInUser` (latest snapshot per device via
-        `ninja_core.device_snapshots`), joined through `device_links`.
-        A user across multiple devices aggregates across all of them.
-  - [x] Tile on `/software/`; each card links to per-device drilldowns.
-- [ ] Batch 6 — CVE enrichment (own ADR).
+base.html `.ops-table` is the canonical class. Migrate:
+- `software_page.html` `.sw-table` → `.ops-table`
+- `patching_queue.html` `.patch-posture-table` → `.ops-table`
+- `patch_activity.html` `.pa-table` → `.ops-table`
+- `patch_trends.html` `.pt-table` → `.ops-table`
+- `patch_evidence.html` `.pe-table` → `.ops-table`
+- `_sw_style.html` `.sw-table` → `.ops-table` (affects products/publishers/decisions/log)
 
-## Validation plan
+### Filter bars
 
-- Per-batch: `python manage.py check`, template loading, targeted tests,
-  ruff, `git diff --check`.
-- Deployed-DB read-only smoke check per batch via the workspace helper.
-- Every new query that scans a large table gets an `EXPLAIN` before push.
-- Every new DB object (table, view, matview, finding_type row) gets its
-  grants matched against sibling objects before push
-  (`feedback_no_careless_mistakes` rule 8).
+base.html `.filterbar` is the canonical class. Migrate:
+- `_sw_style.html` `.sw-filterbar` → remove; templates use `.filterbar`
 
-## Validation
+---
 
-- Batch 1 (0.83.0):
-  - `python -m compileall` on changed views/urls — pass.
-  - `python manage.py check` — pass.
-  - `python manage.py sqlmigrate operations 0078` — renders cleanly.
-  - `python manage.py makemigrations --check --dry-run` — no changes.
-  - Template loading (`software_page`, `software_detail`, `org_software`,
-    `software_decisions`) — pass.
-  - `pytest apps/core/tests -q` — 23 passed.
-  - Deployed-DB dry-run (transaction + `ROLLBACK`): Google Chrome install
-    list 588 ms → 112 ms after functional index.
+## Track 2 — Terminology pass
+
+| Find (exact) | Replace with | File(s) |
+|---|---|---|
+| "Whitelist suggestions" | "Allow-list candidates" | software_page.html |
+| "Unclassified" (KPI tile label) | "Not categorized" | software_page.html |
+| `lastLoggedInUser` | "last logged-in user" | software_user_risk.html |
+| "e.g. suspicious_name" | "e.g. suspicious name" | software_tech_checklist.html, software_user_risk.html |
+| "User risk" (page title h1) | "User exposure" | software_user_risk.html |
+| "Per-user rollup of software checklist items on the device that user last logged into. Uses Ninja's `lastLoggedInUser` (latest per device); a user who logs into multiple devices is aggregated across all of them." | "Software items flagged on the last device each user logged into. Users who use multiple devices are shown across all of them." | software_user_risk.html |
+| patch_trends: "Per-day install / failure volumes from ninja_patches.patch_facts" | "Daily install and failure counts from Ninja patch data." | patch_trends.html |
+| patch_evidence: "Replaces the legacy patching CSV report and the Metabase Patch Evidence dashboard" | remove sentence | patch_evidence.html |
+| coverage page h1 "Compliance" | "Coverage" | coverage.html |
+| sources: "Ingest status per source platform" | "Connection status by data source" | sources.html |
+| sources: "stale source" chip label | "Stale" | sources.html |
+| patch activity: "Recent patch install outcomes collected from Ninja. Each row retains Ninja's event time, collection time, original evidence payload. Newest first, capped at 500 rows per query." | "Recent patch install results from Ninja, newest first." | patch_activity.html |
+| "Cleanup by device" (wf-card) | "Device cleanup queue" | software_page.html |
+| "User exposure" wf-card desc "who is exposed to risky software — grouped by last-logged-in user" | "Risky software grouped by the user who last logged in" | software_page.html |
+| software_tech_checklist desc paragraph | "Per-device software cleanup queue. Combines classifier findings with operator block/review decisions — the list a technician works through." | software_tech_checklist.html |
+
+---
+
+## Track 3 — Nav overhaul
+
+### context_processors.py — add `active_section`
+
+```python
+url_name = getattr(getattr(request, 'resolver_match', None), 'url_name', '') or ''
+if url_name == 'home':
+    section = 'home'
+elif any(x in url_name for x in ('software',)):
+    section = 'software'
+elif any(x in url_name for x in ('patch',)):
+    section = 'patching'
+elif url_name in ('devices_page', 'device_detail', 'device_merge', 'org_devices'):
+    section = 'devices'
+elif 'finding' in url_name:
+    section = 'issues'
+elif 'org' in url_name or 'client' in url_name:
+    section = 'clients'
+else:
+    section = ''
+ctx['active_section'] = section
+```
+
+Note: admin pages set `admin_group` in view context; treat `admin_group` truthiness as "admin section" in base.html (already working).
+
+### base.html primary nav — fix active states
+
+Replace fragile `request.resolver_match.url_name == 'x'` checks with `active_section`.
+
+### base.html Row 3 — section sub-nav
+
+Add elif branches:
+- `active_section == 'software'` (and no `current_client`, no `admin_group`): show software sub-tabs inline
+- `active_section == 'patching'` (and no `current_client`, no `admin_group`): show patching sub-tabs
+- Admin: extend existing `admin_group` branch to show sub-tabs for the active group inline
+
+**Software sub-tabs:** Overview | Products | Publishers | Cleanup | User exposure | Activity
+
+**Patching sub-tabs:** Summary | Evidence | Trends | Activity
+
+**Admin sub-tabs (per group):**
+- review: Clients · Merges · Software decisions
+- config: Alerts · Suppressions · Requirements · Classifier · Device status
+- integrations: Sources · Coverage · Ingest · Jobs
+
+### Templates to update
+
+- Remove `{% include "_software_tabs.html" %}` from all software templates
+- Remove inline Evidence/Trends/Activity links from patching_queue.html header
+- Remove `{% include "_admin_tabs.html" %}` from all 11 admin templates
+
+---
+
+## Track 4 — Section layout
+
+### Patching
+
+- Replace mixed card-header + inline links with consistent `.page-header` div (h1 + muted description)
+- Remove inline style attrs from h2 elements; use `class="section-label"` pattern
+
+### Devices
+
+- Add proper page-header section
+- Unify tile grid
+
+### Software sub-pages (tech checklist, user risk)
+
+- `.tc-header` / `.ur-header` → convert to `.page-header` pattern matching rest of software section
+
+### Issues / Findings
+
+- Convert `.sev-tile` tiles to unified `.tile`
+
+### Home
+
+- Rationalize: keep bespoke layout for now (it is the most complex); clean up font sizes and ensure section labels are consistent
+
+---
 
 ## Checkpoint
 
-- Batch 1 shipped as 0.83.0. Software fleet page has row-level decisions
-  and a working title detail drill-through; case-insensitive canonical
-  lookups are index-backed.
-- Next batches unstarted: publisher rollup, Whitelist Suggestions,
-  Tech Checklist, user-risk, CVE.
-
-## Next action
-
-- Software safety-intel track (Batches A–H, ADR 0008) is complete
-  through 0.95.0. The intel layer + on-demand VirusTotal lookup +
-  operator-facing Risk surfaces + two new finding types are all live.
-- Actual runtime activation is gated on `INTEL_ENABLED=true` in the
-  deploy env plus the six free API keys already added there.
-- Follow-up polish that could come next: fuzzy CPE matching with
-  publisher fallback (tune `cve_match.confidence`), abuse.ch on-demand
-  hash-lookup button (once we have hashes to look up), and a proper
-  Risk detail page enumerating each contributor to the composite
-  score. None are urgent.
+- [x] Track 1 — CSS primitives + tiles (base.html + all templates)
+- [x] Track 2 — Terminology
+- [x] Track 3 — Nav (context_processors + base.html + template include removal)
+- [x] Track 4 — Layout
+- [x] `python manage.py check` — 6 security warnings only, 0 errors
+- [ ] Template smoke pass
+- [ ] VERSION + CHANGELOG (when approved for release)

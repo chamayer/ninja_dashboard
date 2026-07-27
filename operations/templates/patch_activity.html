@@ -4,13 +4,6 @@
 
 {% block content %}
 <style>
-    .pa-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
-    .pa-table th {
-        text-align: left; padding: 0.4rem 0.6rem; border-bottom: 2px solid var(--border);
-        font-size: 0.75rem; color: var(--muted); text-transform: uppercase;
-        letter-spacing: 0.04em; font-weight: 700;
-    }
-    .pa-table td { padding: 0.35rem 0.6rem; border-bottom: 1px solid var(--border); vertical-align: top; }
     .pa-kb { font-family: monospace; font-size: 0.8rem; color: #1e40af; }
     .pa-status-Installed { color: #16a34a; font-weight: 600; }
     .pa-status-Failed { color: #dc2626; font-weight: 600; }
@@ -36,9 +29,7 @@
         </div>
     </div>
     <p class="muted" style="margin-top:0.5rem;">
-        Recent patch install outcomes collected from Ninja. Each row retains
-        Ninja's event time, our collection time, and the original evidence
-        payload. Newest first, capped at 500 rows per query.
+        Recent patch install results from Ninja, newest first.
     </p>
 </div>
 
@@ -88,7 +79,7 @@
 
 <div class="card">
 {% if rows %}
-    <table class="pa-table" data-sortable>
+    <table class="ops-table" data-sortable>
         <thead>
             <tr>
                 <th>Installed at</th>

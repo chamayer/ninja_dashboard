@@ -3,7 +3,6 @@
 {% block title %}Sources{% endblock %}
 
 {% block content %}
-{% include "_admin_tabs.html" %}
 <style>
     .source-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem; margin-bottom: 1.5rem; }
     .source-card { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 1.25rem; }
@@ -26,7 +25,7 @@
 <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:1rem;">
     <div>
         <h1 style="margin:0;">Sources</h1>
-        <p class="muted" style="margin:0.25rem 0 0;">Ingest status per source platform</p>
+        <p class="muted" style="margin:0.25rem 0 0;">Connection status by data source</p>
     </div>
     <div style="display:flex; align-items:center; gap:0.75rem;">
       {% if stale_count %}
@@ -83,42 +82,36 @@
 {% if recent_runs %}
 <div class="card">
     <h2 style="margin-top:0;">Recent Runs</h2>
-    <table data-sortable style="width:100%; border-collapse:collapse;">
+    <table class="ops-table" data-sortable>
         <thead>
-            <tr style="text-align:left; border-bottom:1px solid var(--border);">
-                <th style="padding:0.5rem 0.75rem;">Source</th>
-                <th style="padding:0.5rem 0.75rem;">Status</th>
-                <th style="padding:0.5rem 0.75rem;">Started</th>
-                <th style="padding:0.5rem 0.75rem;">Completed</th>
-                <th style="padding:0.5rem 0.75rem; text-align:right;">Rows</th>
-                <th style="padding:0.5rem 0.75rem;">Error</th>
+            <tr>
+                <th>Source</th>
+                <th>Status</th>
+                <th>Started</th>
+                <th>Completed</th>
+                <th class="num">Rows</th>
+                <th>Error</th>
             </tr>
         </thead>
         <tbody>
             {% for run in recent_runs %}
-            <tr style="border-bottom:1px solid var(--border);">
-                <td style="padding:0.45rem 0.75rem; font-weight:500;">{{ run.source }}</td>
-                <td style="padding:0.45rem 0.75rem;">
+            <tr>
+                <td style="font-weight:500;">{{ run.source }}</td>
+                <td>
                     {% if run.status == "done" %}
-                    <span class="badge badge-low">done</span>
+                    <span class="badge badge-low">Done</span>
                     {% elif run.status == "failed" %}
-                    <span class="badge badge-critical">failed</span>
+                    <span class="badge badge-critical">Failed</span>
                     {% elif run.status == "processing" %}
-                    <span class="badge badge-info">running</span>
+                    <span class="badge badge-info">Running</span>
                     {% else %}
                     <span class="badge">{{ run.status }}</span>
                     {% endif %}
                 </td>
-                <td style="padding:0.45rem 0.75rem; color:var(--muted); font-size:0.82rem;">
-                    {{ run.started_at|date:"Y-m-d H:i"|default:"—" }}
-                </td>
-                <td style="padding:0.45rem 0.75rem; color:var(--muted); font-size:0.82rem;">
-                    {{ run.completed_at|date:"Y-m-d H:i"|default:"—" }}
-                </td>
-                <td style="padding:0.45rem 0.75rem; text-align:right; color:var(--muted); font-size:0.82rem;">
-                    {{ run.rows_seen|default:"—" }}
-                </td>
-                <td style="padding:0.45rem 0.75rem; color:#c0392b; font-size:0.78rem; max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+                <td class="muted">{{ run.started_at|date:"Y-m-d H:i"|default:"—" }}</td>
+                <td class="muted">{{ run.completed_at|date:"Y-m-d H:i"|default:"—" }}</td>
+                <td class="num muted">{{ run.rows_seen|default:"—" }}</td>
+                <td style="color:#c0392b; font-size:0.78rem; max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
                     {% if run.error %}{{ run.error|truncatechars:60 }}{% endif %}
                 </td>
             </tr>

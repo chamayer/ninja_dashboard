@@ -14,6 +14,24 @@ _FINDING_ACTIVE_STATUSES = (
 )
 
 
+def _active_section(request: HttpRequest) -> str:
+    """Return the top-level nav section for the current URL."""
+    url_name = getattr(getattr(request, "resolver_match", None), "url_name", "") or ""
+    if url_name == "home":
+        return "home"
+    if any(x in url_name for x in ("software",)):
+        return "software"
+    if any(x in url_name for x in ("patch",)):
+        return "patching"
+    if url_name in ("devices_page", "device_detail", "device_merge", "org_devices"):
+        return "devices"
+    if "finding" in url_name:
+        return "issues"
+    if "org" in url_name or url_name in ("client_requirements_config", "client_policy_form"):
+        return "clients"
+    return ""
+
+
 def brand(request: HttpRequest) -> dict:
     """Expose brand, scope, and lightweight navigation context."""
     ctx = {
@@ -26,6 +44,7 @@ def brand(request: HttpRequest) -> dict:
         },
         "org_mode": getattr(request, "org_mode", "none"),
         "current_client": getattr(request, "current_client", None),
+        "active_section": _active_section(request),
         "nav_findings_count": 0,
         "nav_pending_merges": 0,
         "nav_pending_client_candidates": 0,

@@ -4,7 +4,6 @@
 {% block title %}Products — Software{% endblock %}
 
 {% block content %}
-{% include "_software_tabs.html" %}
 {% include "_sw_style.html" %}
 
 <div class="sw-page-header">
@@ -38,7 +37,7 @@
     <a class="cat-chip {% if active_category == 'uncategorized' %}active{% endif %}"
        href="?category=uncategorized"
        style="padding:0.28rem 0.65rem; border:1px solid var(--border); border-radius:999px; background:#fff; text-decoration:none; color:#374151; font-size:0.82rem;{% if active_category == 'uncategorized' %} background:#1e40af; border-color:#1e40af; color:#fff;{% endif %}">
-        Unclassified <strong>{{ uncategorized_titles }}</strong>
+        Not categorized <strong>{{ uncategorized_titles }}</strong>
     </a>
 </div>
 
@@ -95,7 +94,7 @@
 <div class="sw-section-label">Products{% if titles|length == 500 %} (first 500) {% endif %}</div>
 <div class="sw-table-wrap">
     {% if titles %}
-    <table class="sw-table" data-sortable>
+    <table class="ops-table" data-sortable>
         <thead>
             <tr>
                 <th>Product</th>
