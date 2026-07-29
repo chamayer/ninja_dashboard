@@ -28,7 +28,7 @@ log = logging.getLogger(__name__)
 _TABLE = "operations.source_run_queue"
 _LEASE_MINUTES = 30
 
-SOURCES = ("Ninja", "SentinelOne", "ScreenConnect", "LogMeIn")
+SOURCES = ("Ninja", "SentinelOne", "ScreenConnect", "LogMeIn", "Hudu")
 
 
 # ── Enqueue ─────────────────────────────────────────────────────────
@@ -137,7 +137,7 @@ def recover_stale() -> int:
 def process_entry(entry_id: int) -> None:
     """Claim and execute one demand entry. Run in a dedicated thread."""
     # Late imports to avoid circular deps at module load time.
-    from ingest.source_observations import run_source_observations
+    from ingest.source_observations import is_identity_source, run_source_observations
     from ingest.sources import load_sources
     from ingest.identity.client_resolver import drain_client_resolution
     from ingest.identity.resolver import drain_resolution
@@ -167,7 +167,7 @@ def process_entry(entry_id: int) -> None:
         if df == "Ninja":
             from ingest.main import run_ninja_observations_once
             run_ninja_observations_once()
-        elif df in ("SentinelOne", "ScreenConnect", "LogMeIn"):
+        elif df in SOURCES:
             sources = [s for s in load_sources() if s.platform == df]
             observed_at = datetime.now(timezone.utc)
             counts = run_source_observations(sources, observed_at)
@@ -177,7 +177,13 @@ def process_entry(entry_id: int) -> None:
                     drain_client_resolution()
                 except Exception:
                     log.exception("source_run_queue: client_resolver failed — continuing")
-                drain_resolution(batch_size=500, refresh_current=False)
+                # Device identity resolution only applies to identity-signal
+                # streams. Documentation sources are excluded by the resolver's
+                # allowlist regardless; skipping the drain avoids a pointless
+                # 500-row scan on a Hudu-only run. Client resolution above
+                # still matters — Hudu companies resolve to clients.
+                if any(is_identity_source(s) for s in sources):
+                    drain_resolution(batch_size=500, refresh_current=False)
             refresh_after_collection(f"on-demand {df} collection")
         else:
             raise ValueError(f"Unknown source: {df!r}")
