@@ -24,6 +24,10 @@ _KIND_ENTITY_TYPE = {
     "rmm": "agent.rmm",
     "edr": "agent.edr",
     "remote_access": "agent.remote_access",
+    # Documentation platforms observe records *about* devices rather than the
+    # devices themselves, so `doc.*` deliberately sits outside the
+    # identity-signal set and never reaches device_links.
+    "documentation": "doc.asset",
 }
 
 

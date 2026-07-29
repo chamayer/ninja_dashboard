@@ -19,6 +19,7 @@ PLATFORM_ALIASES = {
     "lmi": "LogMeIn",
     "screenconnect": "ScreenConnect",
     "sc": "ScreenConnect",
+    "hudu": "Hudu",
 }
 
 

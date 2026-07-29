@@ -37,7 +37,7 @@ from psycopg.types.json import Json
 from ingest import db
 from ingest.observations import write_current_rows
 from ingest.observation_runs import begin_run, complete_run, reconcile_complete_run
-from ingest.connectors import logmein, screenconnect, sentinelone
+from ingest.connectors import hudu, logmein, screenconnect, sentinelone
 from ingest.identity.fast_path import resolve_device_fast
 from ingest.normalize import (
     extract_macs,
@@ -56,7 +56,34 @@ _FETCHERS = {
     "SentinelOne":   sentinelone.fetch,
     "ScreenConnect": screenconnect.fetch,
     "LogMeIn":       logmein.fetch,
+    "Hudu":          hudu.fetch,
 }
+
+# Entity types that establish per-device identity. Only these run through the
+# identity resolver and may write device_links. Sources outside this set
+# (documentation platforms, software) carry no independent identity evidence:
+# they either already know their device or have none. Declared here rather
+# than branched per platform so any future non-identity source inherits it.
+_IDENTITY_ENTITY_TYPES = frozenset({
+    "agent.rmm",
+    "agent.edr",
+    "agent.remote_access",
+    "vm.host",
+    "vm.guest",
+    "network.device",
+    "monitor.target",
+})
+
+
+def is_identity_source(source: SourceConfig) -> bool:
+    """True when this source's observations establish per-device identity.
+
+    Callers use this to partition collection cadence: identity sources are
+    live agent telemetry and want a short cycle, documentation sources change
+    slowly. See `.work/backlog.md` — honouring `source_bindings.schedule` is
+    the durable replacement for cadence-by-capability.
+    """
+    return source.entity_type in _IDENTITY_ENTITY_TYPES
 
 
 def run_source_observations(
@@ -278,6 +305,13 @@ def _write_observations(
             }
             if raw.get("IsDup") is not None:
                 canonical_data["is_dup"] = bool(raw["IsDup"])
+            # Connectors may contribute source-specific canonical fields the
+            # generic projection above cannot know about (e.g. an aggregator's
+            # relay provenance). Applied last so a connector can correct a
+            # field the generic extraction guessed wrong.
+            extra = row.get("canonical_extra")
+            if isinstance(extra, dict):
+                canonical_data.update(extra)
             obs_hash = hashlib.sha256(
                 f"{entity_key}:{observed_at.isoformat()}".encode()
             ).digest()
@@ -291,13 +325,21 @@ def _write_observations(
             if client_id is None and group_id:
                 client_id = link_map.get(group_id)
 
-            device_id = resolve_device_fast(
-                cur, _TENANT_ID, source.platform, entity_key,
-                entity_type=source.entity_type,
-                serial=serial,
-                hostname=normalize_hostname(hostname) or None,
-                client_id=client_id,
-            )
+            if source.entity_type in _IDENTITY_ENTITY_TYPES:
+                device_id = resolve_device_fast(
+                    cur, _TENANT_ID, source.platform, entity_key,
+                    entity_type=source.entity_type,
+                    serial=serial,
+                    hostname=normalize_hostname(hostname) or None,
+                    client_id=client_id,
+                )
+            else:
+                # Non-identity source: the connector already knows its device
+                # (or knows it has none). Running the resolver here would let
+                # a documentation record mint or merge canonical identity.
+                device_id = row.get("resolved_device_id")
+                if client_id is None:
+                    client_id = row.get("resolved_client_id")
             # 3. Fall back to the resolved device's client.
             if client_id is None and device_id:
                 cur.execute(
