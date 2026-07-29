@@ -37,6 +37,11 @@ class Settings(BaseSettings):
     PATCH_INGEST_SCHEDULE_HOURS: int | None = Field(default=None, ge=1, le=24)
     AGENT_COMPLIANCE_ENABLED: bool = False
     AGENT_COMPLIANCE_SCHEDULE_HOURS: int = Field(default=4, ge=1, le=24)
+    # Documentation sources (Hudu) collect on their own slower cycle —
+    # they change daily at most and are request-heavy. Setting this equal to
+    # AGENT_COMPLIANCE_SCHEDULE_HOURS restores a single effective cadence
+    # without a code change. See `.work/backlog.md`.
+    DOCUMENTATION_SCHEDULE_HOURS: int = Field(default=24, ge=1, le=168)
     SOFTWARE_INGEST_SCHEDULE_HOURS: int = Field(default=24, ge=1, le=168)
     SOFTWARE_QUEUE_ENABLED: bool = False
     SOFTWARE_QUEUE_POLL_MINUTES: int = Field(default=5, ge=1, le=60)

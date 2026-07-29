@@ -1,518 +1,596 @@
 # Active root work plan
 
-Track: **Observation model redesign — content-hashed current + SCD-2 history**
+Track: **Hudu integration — new data source**
 
 ## Status
 
-- Discovery complete. ADR-0007 is v3 and Proposed. The root plan now also
-  incorporates the round-2 corrections; the ADR itself still needs to be
-  revised to match before acceptance.
-- Schema slice started: `EntityObservationCurrent` and
-  `EntityObservationHistory` models plus migrations 0063/0064 are present;
-  writer dual-write and reader migration remain pending.
-- `python manage.py check` passes. No database migration has been applied.
+- Discovery complete against the live instance (`amrose.huducloud.com`,
+  profile `hudu` in `tools.json`).
+- Full asset inventory measured: **12,180 assets across 21 layouts.**
+- **Connector implemented** (uncommitted, working tree only):
+  - NEW `ingest/connectors/hudu.py` — collector + card resolution.
+  - NEW `ingest/device_map.py` — shared source-scoped device lookup.
+  - NEW `ingest/tests/test_hudu_cards.py` — resolution regression tests.
+  - MOD `ingest/source_observations.py` — `Hudu` fetcher registered;
+    `_IDENTITY_ENTITY_TYPES` gate so non-identity sources skip
+    `resolve_device_fast` and use a connector-resolved `device_id`;
+    `canonical_extra` merge so connectors can contribute canonical fields.
+  - MOD `ingest/sources.py` — `documentation` kind → `doc.asset`.
+  - MOD `ingest/normalize.py` — `"hudu": "Hudu"` alias. Without it a config
+    value of `"hudu"` would fall through `canonical_platform` unchanged, miss
+    `_FETCHERS["Hudu"]`, and the source would be **silently skipped**.
+  - MOD `ingest/main.py`, `ingest/config.py` — **interim** cadence split:
+    documentation sources collect on `DOCUMENTATION_SCHEDULE_HOURS`
+    (default 24) via `run_documentation_observations_once`, while agent
+    sources keep the 4-hour cycle. Reason: Hudu is ~122 paginated requests,
+    changes daily at most, and `load_sources()` orders by `s.name` so `Hudu`
+    would precede and delay every agent source each cycle. Recorded in
+    `.work/backlog.md` with its revert path; honouring
+    `source_bindings.schedule` is the durable fix.
+  - MOD `.env.example` — documented `HUDU_MAIN_API_TOKEN` placeholder.
+  - All four existing sources keep identical behaviour: Ninja/S1/SC/LMI all
+    map to identity entity types and stay on the agent cycle.
+
+## Production state (applied)
+
+- Source registered: `operations.sources.id=5`, `name='Hudu'`,
+  `kind='documentation'`; shared instance (`client_id IS NULL`), enabled;
+  binding `ba4744de-d813-484f-b53e-6eb63bdce422`, enabled.
+- `HUDU_MAIN_API_TOKEN` present and non-empty in the host `.env`; name
+  matches `config.api_token_ref`.
+- **Dormant until deploy** — the running image has no `Hudu` entry in
+  `_FETCHERS`, so every cycle skips it on the platform check.
+- **Not yet runnable in production**: requires `operations.sources` /
+  `source_instances` / `source_bindings` rows and `HUDU_API_KEY` in the
+  server environment. Those are production data changes and need separate
+  explicit authorization.
+
+## Validation performed
+
+- `python -m py_compile` passes on all changed modules; `git diff --check`
+  clean.
+- Existing ingest suite: **15 passed, no regressions.**
+- `ingest/tests/test_hudu_cards.py` **skips on the workstation** (`httpx` is
+  a container dependency, not installed locally). It has not been executed
+  anywhere yet — it will run in the container image.
+- **Offline validation against real data** — the real `_resolve_cards`
+  source was AST-extracted and executed over 5,419 cached live assets plus
+  the real 5,675-row Ninja `device_links` map:
+
+  | Verdict | Connector | Independent DB measurement |
+  |---|---|---|
+  | divergent | 56 | 56 ✓ |
+  | L13 stale | 143 | 143 ✓ |
+  | L1 unlinked | 15 | 15 ✓ |
+  | L13 unlinked | 252 | 224 Auvik-only + 28 cardless ✓ |
+  | L13 `second_hand` | 224 | 1,391 any-card − 1,167 Ninja-card ✓ |
+
+  Verdict buckets sum exactly to n (4,000 / 1,419) — classification is total
+  and mutually exclusive. Invariant `device_id set ⟺ linked` held throughout.
+
+- **Not validated:** no live run; the write path has never executed with a
+  `doc.asset` entity type; findings and the unlinked surfaces are specced but
+  not built.
 
 ## Goal
 
-Replace the append-per-cycle `operations.entity_observations` table with
-two purpose-built tables — `entity_observation_current` (one row per
-canonical identity tuple, upserted every cycle, with active/withdrawn
-semantics) and `entity_observation_history` (SCD-2 with explicit effective
-intervals, appended on material or presence-state transitions) — so current-
-state reads become PK lookups and history reads scan only real change
-events.
+Ingest Hudu's documentation inventory into Operations, correlate it with
+entities Operations already knows, and classify it from authoritative source
+data rather than heuristics. No passwords, articles, procedures, or
+write-back.
 
-## Scope
+## Design — three separable layers
 
-- **In:** ADR-0007 v3; observation identity contract; writer primitive
-  extraction; new schema (tables, indexes, RLS grants, partial unique
-  constraints); absence / snapshot-run reconciliation; dual-write
-  phase; reader migration across ~20 sites in ingest + operations;
-  matview rebuilds; `identity_candidates` FK migration; `queue_registry`
-  update; cutover and legacy-table archival; retention policy on
-  `_history`; DESIGN.md + `docs/architecture.md` updates in the same
-  track.
-- **Out:** Ninja `raw_data={}` fidelity fix — ships naturally once
-  `_current` lands (raw_data on `_current` is heartbeat-refreshed by
-  design); connector contract changes; Metabase side (deprecated).
+The earlier churn in this track came from conflating these. Kept apart, each
+is independently decidable.
 
-## Files involved
+### 1. Ingest — unconditional, lossless, no decisions
 
-**ADR + planning:**
-- `operations/docs/decisions/0007-observation-model-content-hashed-current-plus-history.md` — decision record v3 (Proposed).
-- `operations/.work/plan.md` — pointer to this cross-service plan.
+Every Hudu asset becomes one observation, regardless of layout.
 
-**Writer primitive (Slice 1):**
-- `ingest/observations.py` (new) — batch-oriented
-  `write_observations(cur, obs_rows)` helper plus pure per-row identity/hash
-  normalization. Preserve today's bulk-write shape in S1.
-- `ingest/core/devices.py` — call primitive from `_write_ninja_observations`.
-- `ingest/source_observations.py` — call primitive from `run_source_observations`.
-- `ingest/inventory/software.py` — call primitive from software writer.
+- `entity_type`: one new type outside the identity-signal set (proposed
+  `doc.asset`) so it can never touch `device_links` — same posture as
+  software.
+- `entity_key`: Hudu asset id (globally unique, stable).
+- `raw_data`: full payload including `fields[]` and `cards[]`.
+- `canonical_data`: layout id/name, so per-layout decisions later are a
+  query, not a re-ingest.
+- `client_id`: from Hudu `company_id` via `client_links`, using the existing
+  org-container pattern (as SentinelOne sites / LogMeIn groups).
+- Archived assets ingested too, flag preserved — dropping them would
+  silently discard evidence.
 
-**Identity contract + hash policy (Gate 0, before schema):**
-- `ingest/observations.py` — one physical identity tuple shared by all
-  entity families, with family-specific validation; material-fields policy
-  per family; `hash_algorithm_version`; fail-closed handling for undeclared
-  entity types. Central config.
+No allowlist. An allowlist silently discards whatever is not on it, which
+conflicts with the never-drop-fetched-fields principle.
 
-**Schema (Slice 2):**
-- `operations/apps/core/migrations/NNNN_entity_observation_current.py` —
-  new table with the uniform key `(tenant_id, source_binding_id,
-  entity_type, parent_source_key, entity_key)`, where
-  `parent_source_key TEXT NOT NULL DEFAULT ''` for top-level entities;
-  `active`, `withdrawn_at`, `snapshot_scope`, `last_snapshot_run_id`,
-  `last_snapshot_at`, `last_received_at`, `raw_hash`, `hash_algorithm_version`;
-  bounded natural
-  key checks; tenant-consistent references; secondary indexes; RLS grants;
-  update-heavy table storage/autovacuum settings.
-- `operations/apps/core/migrations/NNNN_entity_observation_history.py` —
-  new SCD-2 table using the same uniform identity tuple, with
-  `effective_from`, `effective_to`, `last_seen_at`, `material_data JSONB`;
-  full `raw_data` is excluded from history by policy. Partial unique index
-  enforcing at most one open version per tuple; retention-friendly index
-  on `effective_to`.
-- `operations/apps/core/models.py` — new Django models mirroring the tables.
-- `operations/apps/core/migrations/NNNN_observation_snapshot_runs.py` —
-  durable scope-level run ledger with tenant, binding, scope, run id,
-  monotonic snapshot boundary, completeness/status, expected/written/failed
-  counts, supersession rule, and reconciliation outcome.
-- `ingest/observation_runs.py` (new) — starts/finalizes snapshot scopes and
-  atomically gates reconciliation on the latest successful complete run.
+**One explicit exclusion: the People layout** (2,393 records), on
+data-governance grounds — see the People section below. This is a deliberate,
+recorded exclusion, not an allowlist: the layout must remain visible in the
+layout inventory and in the Sources UI as *excluded by policy*, with its
+record count, so an operator can see it is being skipped and why. A silently
+absent layout would be exactly the hidden-drop failure the no-allowlist rule
+exists to prevent.
 
-**Reader migration (Slice 3) — updated inventory:**
-- `ingest/identity/resolver.py` — 9 sites: :55 (unresolved-resolution),
-  :241, :274, :581 (unresolved grouped first/latest), :920, :952, :983,
-  :1133, :1358 (30-day junk-MAC). Most → `_current` (with
-  `active=true`); the 30-day interval-overlap scan → `_history`.
-- `ingest/identity/fast_path.py:173` — identity-conflict NOT EXISTS → `_current WHERE active=true`.
-- `ingest/identity/client_resolver.py:89, :532` — org resolution → `_current`.
-  Also migrate direct legacy references at `:243, :256, :529` (device/client
-  linkage reads and updates); these are part of the runtime writer/reader
-  inventory, not historical-only code.
-- `ingest/evaluator.py` — 5 SQL statements: :236/:240 (one latest-state
-  query → `_current WHERE active=true` plus freshness predicate),
-  :351/:355 (one COUNT query → current entity count from `_current WHERE
-  active=true` plus freshness predicate), :407/:410 (one latest-state
-  query → `_current WHERE active=true` plus freshness predicate), :472/:475
-  (recent-online query → `_history`, backed by material online/offline
-  transitions), :768 (current-state → `_current`).
-- `operations/apps/core/views.py:1235` — Raw tab (0.80.0 code) → `_current`; removes the Ninja fallback join (raw_data is populated by design).
-- `operations/apps/core/views.py:4094, :4113, :4147` — client-merge preview → `_current` for latest state, `_history` for aggregates.
-  `operations/apps/core/views.py:4249, :4264` — client-merge execution updates
-  observation device/client linkage; rewrite against `_current` (and preserve
-  the approved resolver/merge semantics). `:4710-4712` — tenant maintenance
-  update; migrate or explicitly retire before legacy-table rename.
-- `operations/apps/core/migrations/0011_software_staleness.py:55, :91` — persistent function reading old table. Rewrite to read `_current`; NOT EXISTS becomes `WHERE active=false OR withdrawn_at IS NOT NULL`.
-- Derived objects: rebuild materialized views
-  `device_agent_presence_current` and `source_health_current` against
-  `_current`; rewrite the persistent
-  `refresh_software_installations_current()` function that maintains the
-  `software_installations_current` table. Consider view simplification only
-  behind Gate 2.
+### 2. Correlate — via integrator cards only, never names
 
-**Cross-schema dependencies (Slice 4):**
-- `operations/apps/core/migrations/0019_identity_candidates.py` — FK `observation_id → entity_observations`. Must migrate to the new schema or the row is retired before old table can be dropped. Per project memory (identity_candidates retirement is in backlog), preferred path is retire during this cutover.
-- `operations/apps/core/migrations/0014_platform_tables.py` — `queue_registry` row references literal `operations.entity_observations`. Update in same migration that renames the old table.
-- Fresh-install migration SQL also names the legacy table in `0016`, `0018`,
-  `0021`, `0025`, `0036`, `0044`, `0060`, and `0061`. Before cutover, classify
-  each reference as (a) rewritten to the new tables in a forward migration,
-  (b) intentionally preserved for compatibility while the legacy table exists,
-  or (c) historical-only and left untouched. Run a fresh-database migration
-  rehearsal; no migration may assume the legacy table has already been
-  renamed or dropped.
+Cards are keyed `(integrator_name, sync_id ?? sync_identifier)`. Ninja uses
+an integer `sync_id`; Auvik uses `sync_id: null` plus a string
+`sync_identifier`. Both shapes must be handled.
 
-**Docs (Slice 4):**
-- `operations/DESIGN.md` line 16 — remove "No parallel observation tables"; document the two-table split.
-- `operations/docs/architecture.md` — new section on observation identity contract, absence semantics, and the current/history split.
-- Classify remaining references in `DESIGN.md`, `BLUEPRINT.md`, `TODO.md`, and
-  `SESSIONS.md` as normative (update), migration/history (retain with a clear
-  historical marker), or obsolete (remove only with explicit approval). The
-  final grep is a reviewed inventory, not a requirement that every historical
-  changelog line be rewritten.
+**Ninja cards** — `sync_id` *is* the Ninja device id, already the
+`entity_key` of Ninja's own observations (`ingest/core/devices.py:487`):
 
-**Backfill tooling (Slice 2b):**
-- `ingest/backfill_observations.py` (new) — resumable, idempotent, bounded-batch
-  current/history backfill with durable checkpoints and dry-run reporting;
-  not a data migration executed inside Django's migration transaction.
+```
+sync_id → entity_observation_current WHERE platform='Ninja' AND entity_key=sync_id → device_id
+```
 
-## Gates (require greenlight before executing)
+Resolve every Ninja card, then cluster on resolved `device_id`:
 
-- **Gate 0 — Observation identity contract.** Per-entity-type key
-  validation locked around one uniform physical tuple before schema migration
-  is written. Software requires a non-empty source-native
-  `parent_source_key`; top-level families use `parent_source_key=''`.
-  Gate 0 inventories observed key byte lengths and locks database-enforced
-  individual/combined `octet_length` limits that fit PostgreSQL B-tree index
-  tuple limits. Oversized or undeclared identities fail closed to the existing
-  dead-letter path. This must not be redecided during S2.
-- **Gate 1 — Migration SQL.** Full column shape for both tables,
-  snapshot-run ledger, material-fields policy per family, query-derived index
-  strategy, tenant-consistent foreign-key strategy, RLS `USING`/`WITH CHECK`,
-  update-heavy storage/autovacuum settings, retention default for `_history`
-  (proposed 90 days), and migration transaction/lock strategy — all shown for
-  review before the migration is written. Also lock source-binding
-  `PROTECT`/soft-delete behavior, history material-data shape, received-time
-  skew policy, raw-data grants/redaction, and tenant-safe derived-view access.
-- **Gate 2 — Matview simplification.** Each matview removal or
-  reshape needs its own justification. Not automatic.
-- **Gate 3 — `identity_candidates` decision.** Migrate the FK or
-  retire the table. Per backlog, retirement is preferred. Confirmed
-  before S4.
-- **Gate 4 — external mutations.** Commit, push, deployment, legacy-table
-  rename/drop, and `identity_candidates` retirement each require the
-  applicable separate explicit authorization. ADR or slice acceptance does
-  not grant those permissions.
-- **Gate 5 — operational readiness.** Writer throughput/WAL/dead-tuple
-  benchmarks, resumable-backfill rehearsal, snapshot-scope failure accounting,
-  RLS/tenant-isolation tests, and an expand/contract rollback drill must pass
-  before S4.
+| Case | Outcome |
+|---|---|
+| All cards → one Device | Attach `device_id` |
+| Cards → 2+ *live* Devices | Attach nothing; finding (one page documents two machines) |
+| Some cards → withdrawn observations | Normal — superseded Ninja records; ignore for attachment |
+| No card → any live Device, asset not archived | Finding — documents a machine Ninja no longer manages |
+| No Ninja cards | Not an error; see layer 3 |
 
-## Steps (slice-by-slice)
+**Convergence is tested on resolved `device_id`, never on names.** A Hyper-V
+VM object is named independently of its guest OS, so name comparison
+produces confident wrong answers (`QB`/`QBSERVER`, `Interest`/`INTERESTJ`,
+`CP-CLD-EMP-TS`/`CP-CLD-EMP-TS1`). This is the "hostname alone never merges"
+rule from ADR-0005. **No hostname/serial fallback matching anywhere in this
+connector.**
 
-### S1 — Extract writer primitive (behavior-preserving)
+**Non-Ninja cards — retained, but graduated provenance.** Second-hand data
+is kept (discarding ~2,863 network devices would throw away real coverage),
+but is never treated as equally authoritative:
 
-- [ ] Add `ingest/observations.py::write_observations(cur, obs_rows)` —
-  initially delegates the complete batch to today's `db.insert_ignore` on
-  `entity_observations`. No dedupe logic yet; pure refactor that preserves
-  `executemany()` behavior.
-- [ ] Point all three writer sites at the new helper.
-- [ ] Validation: focused ingest run against dev DB, row counts
-  unchanged, `entity_observations` still populated as before.
-- [ ] Present the validated Slice 1 diff for review. Commit and push only
-  after their separate explicit approvals.
+- Marked with explicit provenance `second_hand` plus the originating
+  integrator.
+- Device linkage is *attempted* but **strong-evidence-only** — serial where
+  present, or IP scoped within a single client and only when unambiguous.
+  Never linked on `deviceName`, which is a generic `Device@<ip>` placeholder
+  in 67% of cases.
+- Records that do not link remain low-confidence inventory, visibly marked
+  as such rather than mixed in with first-party data.
+- One *aggregate* hint per unintegrated integrator (not per asset — 2,863
+  findings would be noise) recommending it be considered for direct
+  integration.
 
-**Reviewer-cleared as low risk. Can open in parallel with ADR round 2.**
+Measured Auvik signal quality (n=500): `deviceType` is `unknown` for **88%**;
+`serialNumber` present 3.8%; `makeModel` 11%; `deviceName` generic
+`Device@<ip>` 67%; `ipAddresses` 98%. An earlier claim in this track that
+Auvik provides authoritative classification was based on a single sample and
+is **wrong** — the corrected figure is recorded here so it is not repeated.
 
-### S2 — Schema + dual-write (behind Gates 0 and 1)
+Hudu also stores only Auvik's *summary* payload; the card links out to
+Auvik's `deviceDetail` endpoint. Direct integration would yield materially
+richer data than this brokered view — reinforcing the hint.
 
-- [ ] Lock the uniform identity tuple in `ingest/observations.py`; enforce
-  per-family requirements (`software.parent_source_key` required,
-  top-level parent key empty) and fail closed for undeclared families,
-  including an explicit policy for today's `unknown` entity type.
-- [ ] Lock material-fields policy per family + `hash_algorithm_version = 1`:
-  - `vm.*`: `power_state` and `last_boot_time_at` are material.
-  - Agent/tracking families: `is_online` transitions are material because
-    the evaluator asks whether a source saw a device online recently;
-    heartbeat/contact timestamps remain non-material.
-  - Software uses the current canonical key `location` (not
-    `install_path`).
-  - `platform_group_id` and `is_dup` receive explicit policy; `is_dup` is
-    material, and group changes remain auditable identity/client-resolution
-    evidence.
-  - `org.device_count` remains non-material in v1.
-- [ ] Lock timestamp provenance: persist `_current.last_received_at` and
-  immutable history-version `received_at` separately
-  from source/snapshot `observed_at`; reject or dead-letter observations beyond
-  the approved future-skew bound and use the run boundary for withdrawal.
-- [ ] Draft `_current` migration: one uniform composite PK, `active`,
-  `withdrawn_at`, `snapshot_scope`, `last_snapshot_run_id`,
-  `last_snapshot_at`, `last_received_at`, `raw_hash`, `hash_algorithm_version`, volatile refresh
-  columns, bounded natural-key checks, tenant-consistent references,
-  secondary indexes on `(tenant_id, device_id)` and
-  `(tenant_id, client_id)`, RLS `USING`/`WITH CHECK`, explicit grants, and
-  reviewed `fillfactor`/autovacuum settings for an update-heavy table.
-- [ ] Draft `_history` migration: `effective_from`, `effective_to`,
-  `last_seen_at`, `material_data`, `material_hash`, `hash_algorithm_version`, partial
-  unique index enforcing at most one open version per tuple, plus indexes
-  derived from the frozen tenant/device/binding/window reader shapes and
-  batched-retention predicate.
-- [ ] Draft `observation_snapshot_runs` migration and model. Run completion
-  and reconciliation outcome are durable state, not inferred from logs.
-- [ ] Make source bindings and collector/source references retention-safe:
-  observation rows use `PROTECT` or an explicit detach/archive path; deleting
-  a source configuration cannot delete observation evidence.
-- [ ] Propose all schema SQL, storage settings, grants, and forward/reverse
-  lock behavior for review (Gate 1). Schema expansion must be independently
-  deployable before any writer references the new objects.
-- [ ] Extend writer primitive to dual-write:
-  - Continues writing to old `entity_observations` (source of truth).
-  - Uses a set-based batch/staging operation for `_current` comparison and
-    history close/open; does not replace today's `executemany()` path with
-    several client/server round trips and savepoints per entity.
-  - Upserts `_current` with heartbeat refresh + out-of-order guard +
-    resolved-ID preservation. Replaces `raw_data` only when `raw_hash`
-    changes; measures canonical JSON, TOAST, WAL, and dead-tuple churn.
-  - Stores only the material projection in `_history`; never copies raw
-    payloads there without a separately approved data-governance exception.
-  - Rejects an older observation before material comparison or any history
-    close/open operation.
-  - On material hash change: transactional close/open on `_history`.
-  - Wraps each new-table batch in a database savepoint. On failure, rolls back
-    the complete `_current` + `_history` batch to that savepoint, preserves
-    the legacy write, increments attempted/succeeded/failed counters, and
-    marks the snapshot scope's new path incomplete. Current and history never
-    diverge partially.
-- [ ] Add explicit dual-write health gates:
-  - Any failed new-table batch makes that snapshot scope unhealthy and skips
-    reconciliation; failed rows can never masquerade as source absence.
-  - Legacy collection success and new-path health are reported separately.
-  - Cutover requires zero new-path failures across the full soak plus matched
-    expected/written identity counts for every complete scope.
-- [ ] Add post-snapshot reconciliation pass for complete-snapshot
-  sources (Ninja devices, S1 devices, LMI hosts, Ninja fleet software).
-  Gate 1 must verify each claimed completeness contract against its connector;
-  a paginated fetch is not treated as complete unless all pages succeeded.
-  Reconciliation runs only after a successful complete snapshot and is
-  scoped by `(tenant_id, source_binding_id, snapshot_scope)` so one stream
-  cannot withdraw sibling entity families on the same binding.
-  - Persist a monotonic snapshot boundary (`last_snapshot_at`) separately
-    from wall-clock completion time. `observation_snapshot_runs` permits
-    reconciliation only for the latest successful, complete, new-path-healthy
-    run.
-    A late older run skips reconciliation and cannot withdraw rows written by
-    a newer snapshot.
-  - Withdrawal marks unseen `_current` rows inactive, records the successful
-    run boundary as `withdrawn_at`, and closes the open history interval.
-  - Reactivation clears `withdrawn_at` and opens a new history interval even
-    when the material hash matches the pre-withdrawal state.
-  - Reconciliation and run-ledger completion commit atomically. Partial-
-    snapshot sources never reconcile absence.
-- [ ] Capture pre-change baselines for cycle duration, rows/sec, WAL bytes,
-  table/TOAST bytes, dead tuples, autovacuum activity, lock waits, and errors.
-  Gate 1 approves quantitative regression limits relative to collection
-  cadence and available capacity; no unmeasured percentage is assumed.
-- [ ] Run dual-write for long enough that every enabled snapshot scope has
-  completed multiple successful cycles, including its least-frequent
-  schedule. Verify:
-  - `_current` row count is near the expected active plus withdrawn identity
-    count; repeated cycles create no growth. Any growth is attributable to a
-    newly seen identity tuple, not heartbeat amplification.
-  - `_history` growth stays within the measured, Gate-1-approved change-event
-    budget; the initial 10K rows/day estimate is a hypothesis, not a release
-    criterion.
-  - Material-hash distribution: most tuples have exactly one open
-    hash, some have 2-3 closed historicals.
-  - Withdrawn rows appear for devices genuinely gone from source.
-  - No `_history` version has `effective_to = effective_from` (would
-    indicate mishandled churn); material_data reconstructs every history
-    reader's required fields; future-skew and received/observed-time tests
-    pass.
-- Measured cycle duration, WAL/TOAST churn, dead tuples, autovacuum, lock
-  waits, and storage remain inside the approved Gate 1 limits. Tune batch
-  size, `fillfactor`, and autovacuum before proceeding if they do not.
+### 3. Classify — from integrator taxonomy, data-driven
 
-### S2b — Seed current state and bootstrap history (before reader migration)
+Classification normalizes **(integrator, native type) → Operations
+category** in an admin-maintainable mapping table — not a layout-name
+classifier, and not a code-level enum.
 
-- [ ] Seed `_current` from the latest legacy row per uniform identity tuple.
-  Derive software `parent_source_key` from the source-native device link.
-- [ ] Do not expose seeded rows as authoritative active state until every
-  complete-snapshot scope has completed one successful reconciliation.
-  Partial-snapshot rows retain explicit unknown/recency semantics rather than
-  claiming verified presence.
-- [ ] Backfill 30 days of material history by ordering legacy rows per
-  identity tuple and run-length segmenting consecutive equal hashes; do not
-  globally group recurring A→B→A states. Construct ordered, non-overlapping
-  intervals. Online/offline transitions participate for families whose reader
-  semantics require them.
-- [ ] Validate interval-overlap behavior for the 30-day junk-MAC query; an
-  interval counts when it overlaps the requested window, not only when its
-  `effective_from` falls inside it.
-- [ ] Rehearse the backfill with bounded batches, checkpoints, restart after
-  interruption, disk/WAL headroom checks, lock/statement timeouts, and a
-  post-load `ANALYZE`; record the shadow comparison before exposure.
-- [ ] Complete S2b before any S3 reader is repointed.
+| Population | Count | Signal | Status |
+|---|---|---|---|
+| Ninja-carded | ~5,690 | `nodeClass` | Authoritative; `entity_type_for_node_class()` already maps it |
+| Auvik-carded, real `deviceType` | ~340 | `deviceType` (printer/stack/ipmi/storage/…) | Usable, but second-hand |
+| Auvik-carded, `deviceType=unknown` | ~2,520 | none — IP only | Low-confidence; unclassified by design |
+| People layout | 2,393 | Not hardware — contacts | Definitive |
+| **Manual-documentation tail** | **~1,240** | layout + patchy Vendor/Model | **Operator classification required** |
 
-### S3 — Migrate readers
+Honest coverage: roughly **69%** of the 12,180 arrive with a usable
+classification. The remainder (~2,520 Auvik-unknown plus ~1,240 manual tail)
+is genuinely unclassified and must be visibly so.
 
-- [ ] Reader-by-reader sweep using the frozen inventory above. For
-  each site:
-  - Current-state DISTINCT ON → `_current` (with `active=true`).
-  - Current-state queries with 2-7 day cutoffs → `_current` plus the same
-    `last_seen_at`/`observed_at` freshness predicate; a cutoff does not by
-    itself make a query historical.
-  - `active=true` is authoritative presence only for successfully reconciled
-    complete-snapshot scopes. Presence readers covering partial-snapshot
-    scopes must also apply an explicit freshness rule; `active` there means
-    "not known withdrawn," not proof of present state.
-  - True windowed history → `_history` using interval-overlap semantics on
-    `effective_from`/`effective_to`.
-  - EXISTS-as-presence → `_current WHERE active=true`.
-  - COUNT(*) → redefine as current-count from `_current WHERE
-    entity_type=? AND active=true`. Semantic change documented in
-    the commit.
-  - Software staleness function (migration 0011) → `WHERE active=false
-    OR withdrawn_at IS NOT NULL`.
-- [ ] Ship reader migrations as multiple small commits, one subsystem
-  at a time (resolver, evaluator, views, software-staleness function).
-- [ ] Rebuild matviews (Gate 2 per matview). Some may become plain
-  views or be removed if `_current` is fast enough.
-- [ ] For every derived view/matview, document role grants, tenant filtering,
-  security-barrier wrapper requirements, and cross-tenant tests; table RLS does
-  not protect direct reads from materialized views.
-- [ ] End-to-end run of identity resolver + evaluator against dev DB.
-  Confirm findings match old vs new within noise.
-- [ ] Raw-tab spot-check: 0.80.0 code repointed at `_current`, Ninja
-  fallback code removed. Verify common-field matrix + per-source
-  specifics render identically.
+Observed `nodeClass` distribution: `WINDOWS_WORKSTATION` 3888,
+`HYPERV_VMM_GUEST` 1399, `WINDOWS_SERVER` 824, `VMWARE_VM_GUEST` 267,
+`HYPERV_VMM_HOST` 103, `LINUX_SERVER` 8, `MAC` 8.
 
-### S4 — Cutover (behind Gates 3, 4, and 5)
+The ~1,240 tail is **known-incomplete by design** — uncarded printers (281),
+Applications (123), WAN (107), Network Devices (103), Special Role (92),
+Mobile (73), plus small layouts. Nothing in the data classifies these
+reliably. They require operator input seeded by admin-maintainable rules,
+and must be operator-visible rather than silently bucketed.
 
-- [ ] `identity_candidates` decision executed (retire or migrate FK).
-- [ ] If retired, preserve each candidate's observation evidence by replacing
-  the old FK/reference with a stable current/history tuple or snapshot-run
-  evidence reference before removing the side table.
-- [ ] Update `queue_registry` row that names `entity_observations`.
-- [ ] Update DESIGN.md + `docs/architecture.md`.
-- [ ] Document raw-data governance: allowed roles, redaction boundary, no raw
-  payloads in logs/dead letters beyond the approved envelope policy, tenant
-  offboarding/deletion procedure, and explicit exclusion of raw history.
-- [ ] After separate deployment/cutover approval, stop writing to old
-  `entity_observations`.
-- [ ] Execute the expand/contract rollout in this order: schema exists;
-  dual-write healthy; current/history seeded; readers deployed compatibly;
-  legacy writes stopped; legacy insert/update counters remain zero for the
-  observation window; then rename. Keep the rollback path deployable until
-  legacy retirement is separately approved.
-- [ ] After separate destructive approval, rename `entity_observations` →
-  `entity_observations_legacy`
-  (one-cycle safety net).
-- [ ] Run the required rollback-observation window. Verify zero legacy
-  inserts/updates and zero new legacy reads using pre-cutover baselines plus
-  `pg_stat_statements`/query telemetry; do not treat cumulative
-  `pg_stat_user_tables.seq_scan` alone as evidence.
-- [ ] After a further separate destructive approval, drop
-  `entity_observations_legacy` after at least 24 hours clean.
-- [ ] Add monitored, resumable retention on `_history`: delete bounded
-  batches using the tenant/effective-to index, only where `effective_to IS
-  NOT NULL AND effective_to < NOW() - INTERVAL '90 days'`; never touch the
-  open version. Vacuum/bloat behavior and retry/alert semantics are part of
-  the nightly host-cron or ingest-scheduler decision at S4.
+## Measured inventory
+
+| Layout | Total | Ninja-carded | Archived |
+|---|---|---|---|
+| 1 Computer Assets | 4,270 | 4,255 | 180 |
+| 23 Auvik | 2,863 | 0 | 0 |
+| 9 People | 2,393 | 0 | 45 |
+| 13 Servers | 1,419 | 1,167 | 407 |
+| 6 Printing | 294 | 13 | 1 |
+| 11 Locations | 261 | 247 | 5 |
+| 3 Applications | 123 | 0 | 3 |
+| 2 Network Devices | 107 | 4 | 2 |
+| 15 WAN | 107 | 0 | 7 |
+| 5 Special Role Devices | 93 | 1 | 0 |
+| 21 Mobile Devices | 73 | 0 | 0 |
+| remaining 10 layouts | ~207 | 0 | ~2 |
+| **Total** | **12,180** | **~5,690** | **~650** |
+
+Cards are not confined to their layout — e.g. 224 Servers-layout assets
+carry a non-Ninja card. Correlation logic is therefore per-card, never
+per-layout.
+
+Cached for local analysis (avoids re-hitting the customer instance):
+`scratchpad/hudu_layout_1.json`, `hudu_layout_13.json`,
+`hudu_layout_counts.json`.
 
 ## Decisions
 
-- **Two tables, not one.** Physical split matches reader usage.
-- **One physical identity tuple for every family.** Software requires a
-  source-native `parent_source_key`; top-level entities store the empty
-  string. Family policy validates the shared shape rather than changing the
-  database key.
-- **Absence semantics on `_current`** (`active` + `withdrawn_at` +
-  `last_snapshot_run_id`) rather than inferring absence from missing
-  rows. First-class withdrawal for verified complete-snapshot scopes; partial
-  scopes remain last-known state and require reader freshness semantics.
-- **Heartbeat refreshes volatile state on `_current` every write.**
-  `_history` changes only for material transitions or presence lifecycle
-  boundaries (withdrawal/reactivation).
-- **Presence transitions participate in history.** Withdrawal closes the
-  open version; reactivation opens a new one even when content is unchanged;
-  online/offline is material where a reader needs recent status history.
-- **Per-entity-type material policy** with `hash_algorithm_version`.
-  Not per-connector overrides.
-- **Writer primitive extracted first** — removes the three-place
-  adjacency that let the timestamp-in-hash mistake go unchallenged.
-- **No stopgap retention.** Real fix only. Accepts ~2-4 weeks of
-  continued growth (~10-15 GB) during redesign.
-- **`identity_candidates` retirement folded into S4.** Per backlog
-  preference; avoids a dead FK dragging `_legacy` around.
+- Single Hudu instance/API key for all clients.
+- Hudu never participates in identity resolution and never writes
+  `device_links`. Its identity claim is a pointer ("I am Ninja device 296"),
+  not independent evidence. Ninja stays authoritative.
+- Hudu never creates a Device. A machine documented only in Hudu is a
+  finding (coverage gap), not an asserted entity.
+- Locations (261) are ingested but never promoted — they are a Ninja mirror
+  (`sync_type: "location"`), and Ninja locations are already ingested
+  directly via `ingest/core/locations.py` → `ninja_core.locations`.
+- Auvik gets its own integration later; Hudu only emits the hint.
+- Classification mappings live in data, not code.
 
-## Reader inventory (frozen — round 2)
+## Explicitly NOT needed
 
-**A. Current-state → `_current`, with reader-specific activity semantics:**
-- Presence/identity readers use `active=true` and retain existing freshness
-  predicates: `ingest/identity/resolver.py:55, :274, :581, :920, :952,
-  :983, :1133`; `ingest/identity/client_resolver.py:89, :532`;
-  `ingest/evaluator.py:236/:240, :407/:410, :768`.
-- `operations/apps/core/views.py:1235` (Raw tab, 0.80.0) includes inactive
-  last-known rows and exposes `active` / `withdrawn_at` so source withdrawal
-  remains visible rather than silently removing a source column.
-- `operations/apps/core/views.py:4147` (client-merge preview) uses active rows;
-  first/last aggregates follow section D.
-- `device_agent_presence_current` uses active rows.
-- `source_health_current` considers active and inactive latest rows for
-  last-observed timestamps and continues to union run-log platforms, so a
-  fully withdrawn or failed source does not disappear from health reporting.
-- Persistent software refresh function/table:
-  `refresh_software_installations_current()` / `software_installations_current`
+Investigated and ruled out during discovery — recorded so they are not
+re-proposed:
 
-**B. True windowed history → `_history` with interval-overlap filter:**
-- `ingest/evaluator.py:472/:475` (recent-online; online transitions material)
-- `ingest/identity/resolver.py:1358` (30-day junk-MAC)
+- `AssetLink` table / `Asset` schema change / `Asset.source_observation` FK.
+- Changes to `AssetType` choices or ADR-0005 semantics.
+- Creating `Asset` rows with `device=NULL`.
+- A per-source side table (`hudu_assets_current`). The
+  `software_installations_current` precedent does not apply — software is a
+  per-device attribute stream, not a managed entity.
+- Any hostname/serial fuzzy matching.
 
-**C. EXISTS-as-presence → `_current WHERE active=true`:**
-- `ingest/identity/resolver.py:241`
-- `ingest/identity/fast_path.py:173`
-- `operations/apps/core/migrations/0011:91` — software staleness NOT EXISTS
-  → `WHERE active=false OR withdrawn_at IS NOT NULL`
+These all followed from trying to make the uncarded tail into first-class
+entities. Promotion to entities is deferred until the ingested data can be
+inspected in the UI and the decision made with evidence.
 
-**D. Aggregate first/last observed_at → derived from `_current` or `_history`:**
-- `operations/apps/core/views.py:4094, :4113` (client-merge queue MIN/MAX/COUNT)
+## Hudu IPAM (networks / IPs / VLANs) — measured, not first-party
 
-**E. Reclassified — COUNT(*) → fresh current entity count (semantic change):**
-- `ingest/evaluator.py:351/:355` — `_evaluate_unknown_entities`; retain the
-  two-day freshness condition. Documented in the commit.
+Hudu exposes a genuine first-party IPAM module (`/api/v1/networks`,
+`/ip_addresses`, `/vlans`, `/vlan_zones` — full CRUD per the HuduAPI
+wrapper; endpoint existence confirmed by control test against a bogus path
+returning 404 HTML vs. these returning JSON). **But the content in this
+instance is second-hand:**
 
-**Writes to migrate to primitive:**
-- `ingest/core/devices.py::_write_ninja_observations`
-- `ingest/source_observations.py::run_source_observations`
-- `ingest/inventory/software.py`
-- Resolver / client-resolver post-hoc UPDATE `device_id` / `client_id` → `_current` (identity tuple key propagates).
-- Merge paths (`views.py::_merge_devices`, `_merge_clients`) → `_current`.
-
-## Validation plan
-
-- **S1:** row counts unchanged across an ingest cycle before/after
-  primitive extraction.
-- **S2:** dual-write cycle produces `_current` row count within
-  expected range; `_history` growth stays within the Gate-1-approved
-  change-event budget; material-hash
-  distribution shows expected clustering; withdrawn rows appear when
-  devices leave source; no `effective_to = effective_from` rows; active rows
-  have exactly one open history version and withdrawn rows have none;
-  out-of-order observations cause no current or history mutation; injected
-  new-table failures roll back to the savepoint while preserving the legacy
-  write; an older complete run finishing after a newer one skips
-  reconciliation and withdraws nothing.
-- **S2b:** seeded current count matches the uniform identity tuple count;
-  complete scopes reconcile before exposure; 30-day history has ordered,
-  non-overlapping intervals; withdrawal/reactivation tests pass for unchanged
-  and changed content; an A→B→A legacy sequence produces three intervals.
-- **S3:** identity-resolver output identical (findings match by
-  tuple + severity within noise); matview refresh times before/after;
-  Raw tab spot-check; software-staleness function marks the same
-  installs stale/unstale; raw-data access and matview cross-tenant tests pass.
-- **S4:** post-rename, zero legacy inserts/updates and zero new legacy reads
-  against pre-cutover telemetry baselines for the approved observation
-  window; rollback drill remains viable; `identity_candidates` decision
-  executed; source-delete and identity-evidence preservation tests pass.
-
-## Estimated effort
-
-| Slice | v1 estimate | v3 estimate |
+| Table | Total | Provenance / coverage |
 |---|---|---|
-| S1 writer primitive | 1 day | 1 day (unchanged) |
-| S2 schema + dual-write | 2-3 days | 5-7 days (identity contract, batch writer, run ledger, health gates, absence semantics, SCD-2 correctness, out-of-order guard, reconciliation pass, performance baselines) |
-| S2b seed + 30-day backfill | — | 2-4 days (resumable rehearsal and shadow comparison; must precede reader migration) |
-| S3 reader migration | 2-3 days | 3-4 days (more readers, absence-filter propagation, matview justification) |
-| S4 cutover | 1 day | 3 days (expand/contract rollout, telemetry window, rollback drill, identity_candidates + queue_registry + docs) |
-| **Total** | **~1 week** | **~3-4 weeks** |
+| networks | 198 | **195 Auvik-synced** (`sync_identifier` set); 3 first-party; 1 has a description; covers **3 companies** |
+| ip_addresses | 9,726 | 4,615 linked to an asset; **0 fqdn, 0 notes**; covers **2 companies** |
+| vlans | 1 | archived |
 
-## Current checkpoint
+Conclusion: Hudu is **not** a first-party network source of truth — it is an
+Auvik byproduct confined to 2-3 clients. Canonical network/subnet modeling
+should therefore come from **direct Auvik integration**, not from Hudu.
+Treat Hudu IPAM under the same second-hand rule as Auvik device cards.
 
-- Discovery complete. Numbers: 4.7 GB, 3.0M rows, 300K rows/day, no
-  retention (n_tup_del=0), no pg_cron, not partitioned.
-- Reader inventory round 2 captured above. It includes the previously omitted
-  resolver sites, persistent software refresh function,
-  `identity_candidates` FK, queue-registry literal, evaluator COUNT semantic
-  change, statement-level line grouping, current-versus-history correction,
-  and reader-specific active/freshness behavior.
-- Writer inventory: three sites, all append-per-cycle, timestamp-in-
-  hash.
-- ADR-0007 v3 remains Proposed. Root plan revised after reviewer round 2 and
-  the security/data-governance review to
-  resolve the uniform physical key, withdrawal/reactivation history,
-  reconciliation scope, reader semantics, backfill ordering, savepoint, and
-  authorization-gate findings. The plan then received an SRE/DBA pass adding
-  batch/WAL controls, snapshot-scope health gates, resumable backfill,
-  expand/contract rollback, and monitored retention, followed by a
-  security/data-governance pass adding material history payloads,
-  timestamp provenance, source-retention safety, raw-data governance,
-  matview tenant boundaries, and identity-evidence preservation.
-- Awaiting ADR revision and review; Slice 1 implementation also awaits explicit
-  authorization. Commit and push remain separately gated.
+Caveat: these endpoints do not paginate and the wrapper notes "server-side
+limits may apply," so 198/9,726 are not proven complete.
+
+**Scope boundary (recorded so it is not relitigated):** networks are carried
+as *source-reported attributes* on records; a canonical Network/Subnet
+entity is deferred to direct Auvik integration. Note IP-reported subnets are
+mixed-prefix (`/24`, `/25`, `/12` observed), so a subnet can **never** be
+inferred from an IP — the source must supply it.
+
+**Decision — second-hand network data is used as a placeholder** until a
+first-hand source arrives, consistent with the same rule applied to device
+records. Conditions:
+
+1. **Attribute/observation layer only — never canonical `Network` entities.**
+   This is what keeps replacement cheap: a first-hand source supersedes the
+   attributes. Promoting placeholders to canonical rows that other objects
+   reference would turn the eventual swap into a migration with identity
+   churn.
+2. **Dedupe on the Auvik identifier.** The same Auvik network arrives by two
+   paths — Hudu `/networks.sync_identifier` and the device cards'
+   `relationships.networks[].id`. Verified same ID space: identifiers are
+   base64 `<auvikTenantId>,<entityId>` and two 52-char values matched exactly
+   across samples drawn from different Auvik tenants.
+3. **Absence must be distinguishable from non-coverage.** Networks cover 3
+   companies, IPs cover 2. A client with no network data must render as "no
+   source covers networks for this client," never as an empty list implying
+   the client has no networks.
+
+## Linkage evidence rules — validated against the live database
+
+DB read path (read-only, authorized):
+`Invoke-DevTool.ps1 am-ch-01 ssh "docker exec ninja-postgres psql -U ninja -d ninja -c '<sql>'"`
+(pattern documented in `docker-compose.yml`). Prefix tenant-scoped queries
+with `SET operations.tenant_id = 1;`.
+
+### Rule 1 — Ninja cards: direct `sync_id` lookup. Validated.
+
+Measured by joining cached Hudu cards against
+`operations.entity_observation_current` (5,734 Ninja rows):
+
+| | Computer Assets (n=4,000*) | Servers (n=1,419) |
+|---|---|---|
+| No Ninja card | 15 | 252 |
+| All cards resolve | 3,651 | 517 |
+| Some resolve (superseded) | 79 | 507 |
+| None resolve → stale | 255 | 143 |
+| **Converge on exactly 1 Device** | **3,693 (92%)** | **981 (69%)** |
+| **Diverge (2+ Devices)** | **29** | **27** |
+
+\* cache truncated at a 40-page cap; layout 1 total is 4,270.
+
+**Divergence is ~1% (56 assets)** — not the 86 the earlier name-based test
+suggested. That test was invalid; convergence is measured on resolved
+`device_id` only.
+
+Algorithm: resolve each Ninja card; **ignore non-resolving cards** (they are
+superseded Ninja records, not errors); from resolving+active cards take
+distinct `device_id`; exactly one → attach; two or more → attach nothing and
+raise a finding; none resolving and asset not archived → `hudu_asset_stale`.
+
+### Rule 2 — Second-hand (Auvik) records: strong evidence only, low yield.
+
+- **Serial: measured zero overlap.** 27 distinct Auvik serials (from 800
+  sampled records, 3.4% coverage) matched **0** rows in
+  `entity_observation_current`, `operations.assets`, and
+  `ninja_core.devices`. Auvik covers network gear Ninja does not manage.
+  Keep the rule anyway — it is free and correct when it fires — but expect
+  no yield.
+- **IP: permitted only when client-scoped AND unique within that client.**
+  Measured ambiguity across 9,288 distinct Ninja IPs: 82.7% unique to one
+  device, 13.3% on multiple devices in the same org, **4.0% (372) span
+  multiple orgs**. Unscoped IP matching would therefore link devices across
+  *different clients*. Never match on IP without client scoping, and refuse
+  when the IP resolves to more than one device in that client.
+- **Name: never.** 67% of Auvik `deviceName` values are generic
+  `Device@<ip>` placeholders.
+- **Expected outcome: most Auvik records remain unlinked.** That is correct
+  and must be presented as such, not treated as a failure.
+
+### Ninja NMS coverage gap (incidental finding)
+
+`ninja_core.devices` currently holds only 3 NMS-class records
+(`NMS_FIREWALL` 1, `NMS_OTHER` 1, `CLOUD_MONITOR_TARGET` 1). Hudu's
+printer/appliance cards reference `NMS_PRINTER`/`NMS_APPLIANCE` sync_ids
+(3688, 3691, 3640) whose `lastContact` is June 2025 — those Ninja devices no
+longer exist. Confirms `hudu_asset_stale` has real signal, and that Ninja's
+NMS-monitored inventory has largely gone away.
+
+## New asset types (websites, certificates)
+
+`Asset.asset_type` is `CharField(max_length=32, choices=[...])` with
+**Django-level choices only — no DB CHECK constraint**
+(`0050_layered_entities_schema.py:151`). Adding a type is an `AlterField`
+migration on the choices list, not a structural change. So there is room.
+
+However, per the deferred-promotion decision, websites and certificates do
+not need entity promotion to be ingested — they can land as observations now
+and be promoted once the classification design is settled. `service` would
+plausibly cover websites; certificates have no existing fit and would need a
+new value.
+
+## Aggregation is an existing platform concept — Hudu extends it by one axis
+
+`ingest/core/devices.py:424` already states: *"Ninja is an aggregator
+carrying multiple streams — entity_type comes from node_class (agent.rmm /
+vm.guest / vm.host / network.device / monitor.target). EVERY record is
+observed, linked or not; unlinked rows get device_id NULL."*
+
+The relay model is therefore already in production:
+
+| Concept | Existing implementation |
+|---|---|
+| Which stream an observation came from | `entity_type` (`agent.rmm` direct; `vm.guest` relayed via hypervisor; `monitor.target` relayed via NMS probe) |
+| Who relayed it | `canonical_data.parent_ninja_id` |
+| Operator-facing provenance | `observed_via` in finding details (`evaluator.py:902`) |
+| Unlinked relayed records | `device_id NULL`, still observed, never dropped |
+| Relay ≠ proof of management | the vm.guest coverage rule |
+
+**Hudu's delta is exactly one axis: cross-vendor aggregation.** Ninja relays
+only its own data, so `platform='Ninja'` remains true for every stream. Hudu
+relays *other vendors'* data, so collecting source (Hudu) and originating
+source (Ninja / Auvik) diverge — and the `platform` column currently
+conflates the two.
+
+Consequence: this is an extension of a named, existing concept rather than a
+new relay subsystem. The minimal change is to distinguish **collecting
+source** from **originating source** on relayed observations, reusing the
+existing `entity_type` / `observed_via` / unlinked-is-still-observed
+patterns rather than inventing parallel ones.
+
+## Observation shape — collecting vs originating source
+
+**One observation per Hudu asset. Relay data is metadata on it, never
+separate observation rows.**
+
+```
+platform    = 'Hudu'        -- collecting source, always
+subplatform = ''            -- left RESERVED and unclaimed (see below)
+entity_type = 'doc.asset'
+entity_key  = <hudu asset id>
+device_id   = resolved from the Ninja card cluster, else NULL
+```
+
+`canonical_data` carries relay detail, following the `parent_ninja_id`
+precedent (relay provenance lives in `canonical_data`, not in schema):
+
+```json
+{
+  "hudu_layout_id": 1, "hudu_layout": "Computer Assets",
+  "provenance": "first_party",
+  "relayed": [
+    {"source":"ninja","key":"2848","resolved_device_id":"…","active":true,"integrated":true},
+    {"source":"auvik","key":"MTMzODc…","resolved_device_id":null,"integrated":false}
+  ]
+}
+```
+
+`provenance` is **derived** from `relayed[]` (`second_hand` when every relay
+is from an unintegrated vendor and the asset has no first-party content),
+not a field that must be correct in advance.
+
+### Why not a scalar `subplatform` column
+
+Measured: **178 assets (L1+L13) carry cards from two distinct integrators —
+all `auvik+ninja`.** A scalar column cannot express multi-vendor provenance,
+and a filter like `WHERE subplatform='auvik'` would silently omit them.
+It would technically work for today's data (all 2,863 Auvik-layout assets
+are uniformly single-integrator, and the 178 are first-party docs that would
+get `''`), so this is a redundancy/lossiness objection rather than a
+correctness break. `subplatform` stays reserved and unclaimed — fixing a
+wrong meaning onto it would require a data migration to reverse.
+
+### Rejected: one observation row per relayed card
+
+Fits the identity tuple neatly (`entity_key`=originating key,
+`parent_source_key`=Hudu asset id) and would make each relay individually
+withdrawable and dedupable. Rejected because a relayed card is a *pointer,
+not independent evidence* — materializing it as its own observation invites
+downstream logic to read it as corroboration. That shape becomes correct if
+and when the originating vendor becomes a direct source, at which point its
+own connector produces the rows legitimately.
+
+### Measured card distribution (L1+L13, n=5,419)
+
+| Cards | Assets |
+|---|---|
+| 0 | 43 |
+| 1 | 4,336 |
+| 2-3 | 927 |
+| 4+ | 113 |
+| 2+ distinct integrators | 178 (all `auvik+ninja`) |
+
+Auvik layout (n=2,863): every asset has exactly one `auvik` card; none
+cardless; no multi-integrator cases.
+
+### Two additional findings identified
+
+- **`hudu_duplicate_documentation`** — 95 Operations devices are claimed by
+  2+ Hudu assets, near-universally the same machine filed under both
+  Computer Assets and Servers (`L1/APP || L13/APP`, `L1/UPS || L13/UPS`).
+  ~2% of the 4,569 claimed devices. Inverse of the divergence case.
+- **Cross-vendor corroboration (positive signal, not a defect)** — the 178
+  Ninja+Auvik assets are the one place second-hand Auvik data is
+  independently confirmed by a first-party source. Worth surfacing as
+  confidence, not just provenance bookkeeping.
+
+## Connector shape — settled
+
+- **Location: `ingest/connectors/hudu.py`**, same as every other source.
+  Operations is source-agnostic; giving Hudu its own package would encode
+  "Hudu is special." Instead the *framework* absorbs the variation:
+  `source_observations.py::_write_observations` skips `resolve_device_fast`
+  when the source's `entity_type` is not in the identity-signal set, and
+  honors a `device_id` the connector already resolved. `fetch()` performs the
+  Hudu-specific card resolution and returns rows with `device_id` set or
+  None. Applies to any future non-identity source, not just Hudu.
+- **`entity_type = doc.asset`**, new source `kind='documentation'` in
+  `sources.py::_KIND_ENTITY_TYPE`. Follows the existing `<family>.<specific>`
+  shape. Websites are a separate Hudu object type → `doc.website` if ingested.
+- **Shared `load_device_map(source_name)` helper**, extracted from
+  `software.py::_load_device_map` (which hardcodes `s.name='Ninja'`); software
+  passes `'Ninja'`. Hudu needs it parameterized because the set of integrated
+  integrators grows over time.
+- **Lookup target: `operations.device_links`** (not
+  `entity_observation_current`). Verified equivalent: Ninja links = 5,675 =
+  observation rows carrying a `device_id`. 5,675 links → 4,900 distinct
+  devices, confirming multiple Ninja records collapse onto one Device.
+- **Snapshot:** all-pages asset fetch is a complete snapshot →
+  `begin_run`/`complete_run`/`reconcile_complete_run`. **Any page failure ⇒
+  no reconciliation**, so a partial fetch can never withdraw rows.
+- **Counters** (resolved / diverged / stale / unlinked) logged and surfaced,
+  never silently dropped.
+
+### UI: matched records need no work
+
+The device Raw tab (`views.py:1444`) selects `platform, entity_type,
+observed_at, canonical_data, raw_data FROM entity_observation_current WHERE
+tenant_id=%s AND device_id=%s AND active` — **no platform or entity_type
+filter**. Any Hudu observation carrying a `device_id` therefore appears
+automatically alongside Ninja/SentinelOne/LogMeIn/ScreenConnect, categorized
+by the field-name-based `_RAW_FIELD_CATEGORIES` matrix.
+
+Caveats: records with `device_id IS NULL` (diverged ~56, stale ~398,
+unlinked second-hand) appear on no device page and need their own surface.
+Hudu `raw_data` embeds `cards[]` with nested integrator payloads, so the
+flattened raw view will be noisier than flat sources.
+
+## Unlinked-record surfaces
+
+The unlinked set is not one population — it splits by *why*, and the surface
+differs accordingly.
+
+| Reason | Volume | Surface |
+|---|---|---|
+| Stale (had Ninja cards, none resolve) | ~398 | Per-record finding `hudu_asset_stale` |
+| Divergent (cards → 2+ live Devices) | ~56 | Per-record finding |
+| Duplicate documentation | 95 devices | Per-device finding `hudu_duplicate_documentation` |
+| Unintegrated vendor observed | 1 per vendor | Aggregate finding |
+| Documented, unmonitored (manual tail) | ~1,240 | `/coverage/` section **+ one aggregate finding per client** |
+| Second-hand, uncorrelatable (Auvik) | ~2,863 | **Separate** network-visibility surface |
+| People | 2,393 | **Excluded from this track** (see below) |
+| Locations | 261 | Ingested, never promoted (Ninja mirror) |
+
+### Why the two browsable sections are split
+
+Goal of `/coverage/` (per its docstring, "Compliance page: active
+missing-agent findings"): **ensure things we manage are fully managed.**
+Unit = a known Device; defect = a missing agent; action = install it; high
+confidence.
+
+- **Documented but not monitored** *matches* that goal — these are things
+  deliberately written down whose management status is a real compliance
+  question. Belongs on `/coverage/`, plus one aggregate finding per client
+  ("N documented devices with no monitoring source") so it enters the
+  findings workflow at an actionable granularity rather than as 1,240 rows.
+- **Discovered but not identified** does **not** match. 88% have
+  `deviceType=unknown`, 67% are named `Device@<ip>`. Placing that beside a
+  confirmed "device missing SentinelOne" degrades the page's meaning to its
+  least trustworthy row. This is the tier-3 network-visibility surface —
+  scoped by client and source-reported network, its own route.
+
+Per-record findings are reserved for bounded, individually-actionable cases
+(~550 total). Inventory-shaped populations get browsable views, matching the
+same reasoning that made the unintegrated-source hint aggregate.
+
+Drill-through needs a route that does not exist yet (these records have no
+device page): `/coverage/unlinked/?client=&reason=&source=`, sortable and
+filterable per project table conventions.
+
+### People layout excluded — data-governance decision
+
+The 2,393 People records are **personal data** (names, and likely emails and
+phone numbers). "Ingest all assets losslessly into `raw_data`" would place
+PII at scale into `entity_observations` as a side effect of a device
+integration — while ADR-0007's raw-data governance questions (allowed roles,
+redaction boundary, tenant offboarding) remain open.
+
+**Decision: exclude the People layout from this track.** Highest privacy
+cost, zero value until a Users surface exists, and trivially reversible —
+whereas ingesting PII is not. Revisit when the Users track opens.
+
+## Open questions
+
+1. **Websites** (`/api/v1/websites`) are a separate Hudu object type, not
+   assets — Hudu-native monitoring data (uptime/SSL/WHOIS), no Ninja
+   mirroring. In this pass or later?
+2. **Managed Certificate** (9 assets) carries real expiry dates and
+   `Asset Link (Where Installed)` — a natural `hudu_cert_expiring` finding.
+   Same question.
+3. **Promotion** — which layouts (if any) should produce first-class
+   Operations entities. Recommend deferring until ingest + correlation ship.
+4. **Divergence rate** — the true count of assets whose cards resolve to 2+
+   live Devices cannot be computed from Hudu data alone; it needs a
+   read-only query against `entity_observation_current`. No sanctioned path
+   for that established yet.
 
 ## Next action
 
-- Perform another architecture review of ADR-0007 v3 and the synchronized
-  plan.
-- On explicit implementation authorization, open Slice 1 as the first
-  executable change. Seek separate approval before commit or push.
+- On implementation authorization: draft the connector shape
+  (`ingest/connectors/hudu.py`) — pagination, card extraction, the
+  `(integrator, sync_id ?? sync_identifier)` key — plus the classification
+  mapping table, for review before writing code.
+- Commit and push remain separately gated.

@@ -39,7 +39,7 @@ from ingest.logging_utils import install_log_safety
 from ingest.activities import ingest as activities_ingest
 from ingest.agent_compliance import ingest as agent_compliance_ingest
 from ingest.agent_compliance import review_digest
-from ingest.source_observations import run_source_observations
+from ingest.source_observations import is_identity_source, run_source_observations
 from ingest import source_run_queue
 from ingest.inventory.refresh import refresh_current as refresh_inventory_current
 from ingest.inventory import software as software_ingest
@@ -175,9 +175,18 @@ def run_ninja_observations_once() -> None:
 
 
 def run_agent_observations_once() -> None:
-    """Fetch S1/SC/LMI and write to entity_observations, then resolve device IDs."""
+    """Fetch S1/SC/LMI and write to entity_observations, then resolve device IDs.
+
+    INTERIM (see `.work/backlog.md` "Honour source_bindings.schedule"): the
+    source list is filtered to identity-signal sources so slow documentation
+    collectors do not delay live agent telemetry on this cycle. Reverting to
+    a single unified cycle means dropping this filter and the companion
+    `run_documentation_observations_once` job — or, without a code change,
+    setting DOCUMENTATION_SCHEDULE_HOURS equal to
+    AGENT_COMPLIANCE_SCHEDULE_HOURS.
+    """
     try:
-        sources = load_sources()
+        sources = [s for s in load_sources() if is_identity_source(s)]
         observed_at = datetime.now(timezone.utc)
         counts = run_source_observations(sources, observed_at)
         total = sum(counts.values())
@@ -187,6 +196,37 @@ def run_agent_observations_once() -> None:
         log.info("Agent observations run complete: %s total=%d", counts, total)
     except Exception:
         log.exception("Agent observations run failed")
+        raise
+
+
+def run_documentation_observations_once() -> None:
+    """Fetch documentation sources (Hudu) on their own slower cadence.
+
+    Split from the agent cycle because documentation changes daily at most,
+    while that cycle runs every 4h — Hudu alone is ~122 paginated requests,
+    and `load_sources()` orders by name so it would precede and delay every
+    agent source. Same writer and run-log semantics as the agent cycle; only
+    the schedule differs.
+
+    INTERIM alongside `run_agent_observations_once` — see that docstring and
+    the backlog entry for the revert path.
+
+    Deliberately NOT given a startup catch-up thread: Portainer restarts this
+    container on every push, and a kick would refetch the full asset set on
+    every deploy.
+    """
+    try:
+        sources = [s for s in load_sources() if not is_identity_source(s)]
+        if not sources:
+            log.info("Documentation observations: no documentation sources enabled")
+            return
+        observed_at = datetime.now(timezone.utc)
+        counts = run_source_observations(sources, observed_at)
+        total = sum(counts.values())
+        refresh_after_collection("documentation observations collection")
+        log.info("Documentation observations run complete: %s total=%d", counts, total)
+    except Exception:
+        log.exception("Documentation observations run failed")
         raise
 
 
@@ -2171,6 +2211,16 @@ def main() -> None:
         "interval",
         hours=settings.AGENT_COMPLIANCE_SCHEDULE_HOURS,
         id="agent_observations_cycle",
+        max_instances=1,
+    )
+    # INTERIM companion to agent_observations_cycle — see
+    # run_documentation_observations_once and `.work/backlog.md`. Removing
+    # this job plus the two source filters restores the single unified cycle.
+    scheduler.add_job(
+        run_documentation_observations_once,
+        "interval",
+        hours=settings.DOCUMENTATION_SCHEDULE_HOURS,
+        id="documentation_observations_cycle",
         max_instances=1,
     )
     scheduler.add_job(
