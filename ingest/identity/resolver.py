@@ -23,6 +23,7 @@ from typing import Any
 from psycopg.types.json import Json
 
 from ingest import db
+from ingest.identity import IDENTITY_ENTITY_TYPES
 from ingest.normalize import (
     is_macos_name,
     is_usable_serial,
@@ -55,11 +56,15 @@ def drain_resolution(batch_size: int = 200, *, refresh_current: bool = True) -> 
             FROM operations.entity_observation_current
             WHERE tenant_id = %s AND device_id IS NULL
               AND active = TRUE
-              AND entity_type <> 'org'  -- containers resolve to clients, not devices
+              -- Allowlist, not `<> 'org'`: only identity-signal streams may
+              -- be matched or promoted into a Device. Documentation rows
+              -- (doc.*) would otherwise be hostname-matched on an asset name
+              -- and promoted into Devices invented from a wiki page.
+              AND entity_type = ANY(%s)
             ORDER BY observed_at DESC
             LIMIT %s
             """,
-            (TENANT_ID, batch_size),
+            (TENANT_ID, sorted(IDENTITY_ENTITY_TYPES), batch_size),
         )
         rows = cur.fetchall()
 

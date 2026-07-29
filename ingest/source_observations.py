@@ -38,6 +38,7 @@ from ingest import db
 from ingest.observations import write_current_rows
 from ingest.observation_runs import begin_run, complete_run, reconcile_complete_run
 from ingest.connectors import hudu, logmein, screenconnect, sentinelone
+from ingest.identity import IDENTITY_ENTITY_TYPES
 from ingest.identity.fast_path import resolve_device_fast
 from ingest.normalize import (
     extract_macs,
@@ -59,20 +60,11 @@ _FETCHERS = {
     "Hudu":          hudu.fetch,
 }
 
-# Entity types that establish per-device identity. Only these run through the
-# identity resolver and may write device_links. Sources outside this set
-# (documentation platforms, software) carry no independent identity evidence:
-# they either already know their device or have none. Declared here rather
-# than branched per platform so any future non-identity source inherits it.
-_IDENTITY_ENTITY_TYPES = frozenset({
-    "agent.rmm",
-    "agent.edr",
-    "agent.remote_access",
-    "vm.host",
-    "vm.guest",
-    "network.device",
-    "monitor.target",
-})
+# Sources outside IDENTITY_ENTITY_TYPES carry no independent identity
+# evidence: they either already know their device or have none. Gating here
+# rather than branching per platform means any future non-identity source
+# inherits the behaviour. The set lives in ingest.identity because the
+# resolver enforces the same rule on its own read path.
 
 
 def is_identity_source(source: SourceConfig) -> bool:
@@ -83,7 +75,7 @@ def is_identity_source(source: SourceConfig) -> bool:
     slowly. See `.work/backlog.md` — honouring `source_bindings.schedule` is
     the durable replacement for cadence-by-capability.
     """
-    return source.entity_type in _IDENTITY_ENTITY_TYPES
+    return source.entity_type in IDENTITY_ENTITY_TYPES
 
 
 def run_source_observations(
@@ -325,7 +317,7 @@ def _write_observations(
             if client_id is None and group_id:
                 client_id = link_map.get(group_id)
 
-            if source.entity_type in _IDENTITY_ENTITY_TYPES:
+            if source.entity_type in IDENTITY_ENTITY_TYPES:
                 device_id = resolve_device_fast(
                     cur, _TENANT_ID, source.platform, entity_key,
                     entity_type=source.entity_type,
