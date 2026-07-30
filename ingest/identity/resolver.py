@@ -23,7 +23,7 @@ from typing import Any
 from psycopg.types.json import Json
 
 from ingest import db
-from ingest.identity import IDENTITY_ENTITY_TYPES
+from ingest.identity import identity_entity_types
 from ingest.normalize import (
     is_macos_name,
     is_usable_serial,
@@ -64,7 +64,7 @@ def drain_resolution(batch_size: int = 200, *, refresh_current: bool = True) -> 
             ORDER BY observed_at DESC
             LIMIT %s
             """,
-            (TENANT_ID, sorted(IDENTITY_ENTITY_TYPES), batch_size),
+            (TENANT_ID, sorted(identity_entity_types(cur)), batch_size),
         )
         rows = cur.fetchall()
 
@@ -597,7 +597,7 @@ def _promote_unmatched_clusters(cur) -> int:
           AND entity_type = ANY(%s)
         GROUP BY client_id, platform, entity_type, entity_key
         """,
-        (TENANT_ID, sorted(IDENTITY_ENTITY_TYPES)),
+        (TENANT_ID, sorted(identity_entity_types(cur))),
     )
     unresolved = cur.fetchall()
     if not unresolved:

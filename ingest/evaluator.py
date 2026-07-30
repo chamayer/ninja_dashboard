@@ -36,7 +36,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from ingest import db
-from ingest.identity import IDENTITY_ENTITY_TYPES
+from ingest.identity import identity_entity_types
 from ingest.normalize import normalize_hostname
 
 log = logging.getLogger(__name__)
@@ -382,7 +382,7 @@ def _sync_lifecycle_status(cur: Any, tenant_id: int) -> None:
           AND d.lifecycle_status <> 'retired'
           AND d.lifecycle_status <> t.status
         """,
-        (tenant_id, sorted(IDENTITY_ENTITY_TYPES), tenant_id),
+        (tenant_id, sorted(identity_entity_types(cur)), tenant_id),
     )
     if cur.rowcount:
         log.info("lifecycle sync: %d devices transitioned", cur.rowcount)

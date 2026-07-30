@@ -2,16 +2,28 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from datetime import datetime
 from typing import Any
+
+_log = logging.getLogger(__name__)
 
 _TRAILING_PARENS_RE = re.compile(r"\s*\(.*?\)\s*$")
 _HOST_STRIP_CHARS_RE = re.compile(r"[\s'`\u2018\u2019]")
 _HOST_LOOSE_CHARS_RE = re.compile(r"[^a-z0-9]")
 _ORG_STRIP_CHARS_RE = re.compile(r"[\s\-_.]")
 
-PLATFORM_ALIASES = {
+# Aliases live in operations.platform_aliases, alongside client_name_aliases
+# and publisher_aliases. This dict is the bootstrap fallback, used only before
+# the table has been loaded (or if loading fails) so a container starting
+# against a pre-0092 database behaves exactly as before.
+#
+# canonical_platform() keeps its no-argument signature deliberately: it has 15
+# call sites in the legacy agent-compliance loader, and threading a cursor
+# through all of them would mean editing retirement-path code for no benefit.
+# Instead load_platform_aliases() primes a process-level cache once per run.
+_BUILTIN_ALIASES = {
     "ninja": "Ninja",
     "sentinelone": "SentinelOne",
     "s1": "SentinelOne",
@@ -22,10 +34,31 @@ PLATFORM_ALIASES = {
     "hudu": "Hudu",
 }
 
+_alias_cache: dict[str, str] | None = None
+
+
+def load_platform_aliases(cur) -> None:
+    """Prime the alias cache from operations.platform_aliases.
+
+    Called once per collection run by ingest.sources.load_sources. On failure
+    the built-in map stays in effect, so a missing table degrades to previous
+    behaviour rather than breaking canonicalisation.
+    """
+    global _alias_cache
+    try:
+        cur.execute("SELECT lower(alias), canonical FROM operations.platform_aliases")
+        rows = dict(cur.fetchall())
+    except Exception:
+        _log.exception("platform_aliases load failed — using built-in aliases")
+        return
+    if rows:
+        _alias_cache = rows
+
 
 def canonical_platform(value: str) -> str:
     key = value.strip().replace(" ", "").lower()
-    return PLATFORM_ALIASES.get(key, value.strip())
+    table = _alias_cache if _alias_cache is not None else _BUILTIN_ALIASES
+    return table.get(key, value.strip())
 
 
 def normalize_hostname(name: str | None) -> str:

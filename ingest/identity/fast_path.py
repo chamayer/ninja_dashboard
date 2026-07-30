@@ -26,16 +26,17 @@ log = logging.getLogger(__name__)
 # other per-installation records) share entity_key across devices;
 # they must never produce a device_link even when fast_path resolves
 # their device_id via serial or hostname.
-_IDENTITY_ENTITY_TYPES = {
-    "vm.host", "vm.guest", "network.device", "monitor.target",
-}
+def _is_identity_signal(cur, entity_type: str) -> bool:
+    """Read from operations.entity_types rather than a local literal.
 
+    This was previously a private set here plus a `startswith('agent.')`
+    prefix test — a third independent definition of the same rule, which is
+    how the copies drift. The prefix test is gone too: `agent.*` types are
+    flagged in the table like everything else.
+    """
+    from ingest.identity import identity_entity_types
 
-def _is_identity_signal(entity_type: str) -> bool:
-    return (
-        entity_type.startswith("agent.")
-        or entity_type in _IDENTITY_ENTITY_TYPES
-    )
+    return entity_type in identity_entity_types(cur)
 
 
 def _upsert_link_for_fast_match(
@@ -137,7 +138,7 @@ def resolve_device_fast(
     # Only per-device-identity entity types produce meaningful links;
     # software (and any other per-installation records) share
     # entity_key across devices and must never generate a device_link.
-    upsert_link = _is_identity_signal(entity_type)
+    upsert_link = _is_identity_signal(cur, entity_type)
 
     # Step 2 — serial match (only when unique; BIOS placeholder serials
     # like 'None' / 'Default string' are shared junk, never a match)

@@ -1941,7 +1941,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 f'<label style="display:block;margin:6px 0">'
                 f'<input type="checkbox" name="source" value="{s}" checked> {escape(s)}'
                 f"</label>"
-                for s in source_run_queue.SOURCES
+                for s in source_run_queue.available_sources()
             )
             body = f"""<!doctype html>
 <html>
@@ -1977,7 +1977,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._respond(400, b"no source selected\n")
             return
 
-        invalid = [s for s in selected if s not in source_run_queue.SOURCES]
+        invalid = [s for s in selected if s not in source_run_queue.available_sources()]
         if invalid:
             self._respond(400, f"unknown source(s): {', '.join(invalid)}\n".encode())
             return

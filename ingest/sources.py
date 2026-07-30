@@ -13,26 +13,15 @@ source_instances.config JSONB carries the connection details:
 
 from __future__ import annotations
 
+import logging
 import os
 import uuid
 from dataclasses import dataclass
 
 from ingest import db
-from ingest.normalize import canonical_platform
+from ingest.normalize import canonical_platform, load_platform_aliases
 
-_KIND_ENTITY_TYPE = {
-    "rmm": "agent.rmm",
-    "edr": "agent.edr",
-    "remote_access": "agent.remote_access",
-    # A CMDB records assets that exist but does not observe them directly, so
-    # `cmdb.*` sits outside the identity-signal set and never reaches
-    # device_links. Named for the source class, not the vendor: a second CMDB
-    # inherits the exclusion and the slower collection cadence with no code
-    # change, exactly as agent.remote_access already serves both ScreenConnect
-    # and LogMeIn.
-    "cmdb": "cmdb.asset",
-}
-
+log = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class SourceConfig:
@@ -67,19 +56,22 @@ def _secret(ref: str | None) -> str | None:
     return os.environ.get(ref)
 
 
-def load_sources() -> list[SourceConfig]:
-    """Return one SourceConfig per enabled source binding.
+# Used only when operations.sources.entity_type does not exist yet — i.e. the
+# ingest container has restarted but ninja-operations has not yet applied
+# migration 0092. Both restart together on deploy and ingest kicks a
+# collection at startup, so without this the first run after deploy fails on
+# a missing column. Values match the migration's backfill exactly.
+_BOOTSTRAP_KIND_ENTITY_TYPE = {
+    "rmm": "agent.rmm",
+    "edr": "agent.edr",
+    "remote_access": "agent.remote_access",
+    "cmdb": "cmdb.asset",
+}
 
-    Instances whose config carries no `platform` fall back to the
-    operations.sources name (canonicalized).
-    """
-    with db.transaction() as cur:
-        cur.execute("SET LOCAL operations.tenant_id = 1")
-        cur.execute(
-            """
+_SOURCE_QUERY = """
             SELECT s.id            AS ops_source_id,
                    s.name          AS source_name_default,
-                   s.kind          AS kind,
+                   {entity_type_expr} AS entity_type,
                    si.id           AS source_instance_id,
                    si.client_id    AS client_id,
                    c.display_name  AS client_name,
@@ -93,13 +85,45 @@ def load_sources() -> list[SourceConfig]:
             WHERE si.tenant_id = 1
               AND si.enabled
             ORDER BY s.name, si.id
-            """
+"""
+
+
+def _fetch_source_rows(cur) -> list[tuple]:
+    """Read source rows, tolerating a database that predates migration 0092."""
+    try:
+        cur.execute(_SOURCE_QUERY.format(entity_type_expr="s.entity_type"))
+        return cur.fetchall()
+    except Exception:
+        cur.connection.rollback()
+        log.warning(
+            "operations.sources.entity_type not available — deriving from kind. "
+            "Expected only between an ingest restart and migration 0092."
         )
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        load_platform_aliases(cur)
+        cur.execute(_SOURCE_QUERY.format(entity_type_expr="s.kind"))
         rows = cur.fetchall()
+        return [
+            (r[0], r[1], _BOOTSTRAP_KIND_ENTITY_TYPE.get(r[2], ""), *r[3:])
+            for r in rows
+        ]
+
+
+def load_sources() -> list[SourceConfig]:
+    """Return one SourceConfig per enabled source binding.
+
+    Instances whose config carries no `platform` fall back to the
+    operations.sources name (canonicalized).
+    """
+    with db.transaction() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        # Prime the alias cache from data before canonicalising below.
+        load_platform_aliases(cur)
+        rows = _fetch_source_rows(cur)
 
     configs: list[SourceConfig] = []
     for (
-        ops_source_id, source_name_default, kind,
+        ops_source_id, source_name_default, entity_type,
         source_instance_id, client_id, client_name,
         config, source_binding_id,
     ) in rows:
@@ -124,7 +148,7 @@ def load_sources() -> list[SourceConfig]:
                 ops_source_id=ops_source_id,
                 source_instance_id=source_instance_id,
                 source_binding_id=source_binding_id,
-                entity_type=_KIND_ENTITY_TYPE.get(kind),
+                entity_type=entity_type or None,
                 client_id=client_id,
                 client_name=client_name,
                 source_id=int(cfg.get("legacy_source_id") or 0),

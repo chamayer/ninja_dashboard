@@ -47,7 +47,6 @@ STATE_PRIORITY = {
     "unavailable": 0,
 }
 SEVERITY_RANK = {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0}
-EXPECTED_SOURCES = ("Ninja", "SentinelOne", "ScreenConnect", "LogMeIn")
 
 
 def _empty_stats() -> dict:

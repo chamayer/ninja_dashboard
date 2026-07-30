@@ -28,7 +28,35 @@ log = logging.getLogger(__name__)
 _TABLE = "operations.source_run_queue"
 _LEASE_MINUTES = 30
 
-SOURCES = ("Ninja", "SentinelOne", "ScreenConnect", "LogMeIn", "Hudu")
+# Bootstrap fallback only — the real list comes from registered sources via
+# available_sources(). Kept so the trigger page still renders if the lookup
+# fails rather than offering nothing.
+_SOURCES_FALLBACK = ("Ninja", "SentinelOne", "ScreenConnect", "LogMeIn")
+
+
+def available_sources() -> tuple[str, ...]:
+    """Platforms that can be run on demand, from configuration.
+
+    'Ninja' is always included: it is collected by its own pipeline rather
+    than through a registered source binding, but is still triggerable here.
+    """
+    try:
+        with db.pool.connection() as conn, conn.cursor() as cur:
+            cur.execute("SET LOCAL operations.tenant_id = 1")
+            cur.execute(
+                """
+                SELECT DISTINCT COALESCE(NULLIF(si.config->>'platform', ''), s.name)
+                  FROM operations.sources s
+                  JOIN operations.source_instances si ON si.source_id = s.id
+                 WHERE si.tenant_id = 1 AND si.enabled
+                """
+            )
+            names = {r[0] for r in cur.fetchall() if r[0]}
+    except Exception:
+        log.exception("source list query failed — using fallback")
+        return _SOURCES_FALLBACK
+    names.add("Ninja")
+    return tuple(sorted(names)) or _SOURCES_FALLBACK
 
 
 # ── Enqueue ─────────────────────────────────────────────────────────
@@ -167,7 +195,7 @@ def process_entry(entry_id: int) -> None:
         if df == "Ninja":
             from ingest.main import run_ninja_observations_once
             run_ninja_observations_once()
-        elif df in SOURCES:
+        elif df in available_sources():
             sources = [s for s in load_sources() if s.platform == df]
             observed_at = datetime.now(timezone.utc)
             counts = run_source_observations(sources, observed_at)

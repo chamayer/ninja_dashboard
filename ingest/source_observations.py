@@ -38,7 +38,7 @@ from ingest import db
 from ingest.observations import write_current_rows
 from ingest.observation_runs import begin_run, complete_run, reconcile_complete_run
 from ingest.connectors import hudu, logmein, screenconnect, sentinelone
-from ingest.identity import IDENTITY_ENTITY_TYPES
+from ingest.identity import identity_entity_types
 from ingest.identity.fast_path import resolve_device_fast
 from ingest.normalize import (
     extract_macs,
@@ -60,7 +60,7 @@ _FETCHERS = {
     "Hudu":          hudu.fetch,
 }
 
-# Sources outside IDENTITY_ENTITY_TYPES carry no independent identity
+# Sources outside the identity-signal set carry no independent identity
 # evidence: they either already know their device or have none. Gating here
 # rather than branching per platform means any future non-identity source
 # inherits the behaviour. The set lives in ingest.identity because the
@@ -74,8 +74,14 @@ def is_identity_source(source: SourceConfig) -> bool:
     live agent telemetry and want a short cycle, documentation sources change
     slowly. See `.work/backlog.md` — honouring `source_bindings.schedule` is
     the durable replacement for cadence-by-capability.
+
+    Opens its own connection because callers partition a source list outside
+    any transaction. The underlying lookup is cached per process, so this
+    costs one query per run, not one per source.
     """
-    return source.entity_type in IDENTITY_ENTITY_TYPES
+    with db.transaction() as cur:
+        cur.execute(f"SET LOCAL operations.tenant_id = {_TENANT_ID}")
+        return source.entity_type in identity_entity_types(cur)
 
 
 def run_source_observations(
@@ -91,13 +97,32 @@ def run_source_observations(
     batch_id = uuid.uuid4()
     counts: dict[str, int] = {}
     for source in sources:
+        # A source can be registered, enabled and correctly configured in the
+        # database and still collect nothing, because the two lookups below are
+        # code-side. Both failures used to be invisible — one silent, one a log
+        # line nobody reads — so a new source looked healthy while doing
+        # nothing. Record a failed run instead: the Sources page then shows it
+        # red with the reason, which is where an operator would look.
         if source.platform not in _FETCHERS:
+            msg = (
+                f"No collector registered for platform {source.platform!r}. "
+                f"Known: {', '.join(sorted(_FETCHERS))}. Either the connector "
+                f"is missing from _FETCHERS, or config.platform does not match "
+                f"its canonical name (see normalize.PLATFORM_ALIASES)."
+            )
+            log.error("source_observations: %s — %s", source.source_name, msg)
+            _record_source_run(source, observed_at, ok=False, rows=0, error=msg)
             continue
         if not source.source_binding_id or not source.entity_type:
-            log.warning(
-                "source_observations: %s has no operations binding — skipping",
-                source.source_name,
+            missing = "source_binding" if not source.source_binding_id else "entity_type"
+            msg = (
+                f"Source cannot collect: {missing} is not set. "
+                f"entity_type is read from operations.sources.entity_type and "
+                f"must name a row in operations.entity_types; source_binding "
+                f"requires an enabled operations.source_bindings row."
             )
+            log.error("source_observations: %s — %s", source.source_name, msg)
+            _record_source_run(source, observed_at, ok=False, rows=0, error=msg)
             continue
         try:
             rows = _FETCHERS[source.platform](source, observed_at)
@@ -317,7 +342,7 @@ def _write_observations(
             if client_id is None and group_id:
                 client_id = link_map.get(group_id)
 
-            if source.entity_type in IDENTITY_ENTITY_TYPES:
+            if source.entity_type in identity_entity_types(cur):
                 device_id = resolve_device_fast(
                     cur, _TENANT_ID, source.platform, entity_key,
                     entity_type=source.entity_type,
