@@ -18,16 +18,26 @@ set -e
 # .env contain unquoted spaces — dash treats the tail of the value as
 # further commands. python-dotenv handles the full file at Django import
 # time; this loop only exists for the pre-import shell checks.
-if [ -f /app/.env ]; then
+# Directory mount first, legacy single-file mount second. Compose bind-mounts
+# the host env DIRECTORY at /app/envdir, because a single-file bind mount stays
+# pinned to the inode present at container creation and silently never sees an
+# atomic-save edit. Both paths are accepted so compose and image can deploy in
+# either order.
+ENV_FILE=/app/envdir/.env
+[ -f "$ENV_FILE" ] || ENV_FILE=/app/.env
+
+if [ -f "$ENV_FILE" ]; then
     for k in OPERATIONS_SECRET_KEY OPERATIONS_ALLOWED_HOSTS \
              OPERATIONS_DB_NAME OPERATIONS_DB_USER OPERATIONS_DB_PASSWORD \
              OPERATIONS_MIGRATE_DB_USER OPERATIONS_MIGRATE_DB_PASSWORD \
              OPERATIONS_INITIAL_ADMIN_PASSWORD; do
-        v=$(grep "^${k}=" /app/.env | head -1 | cut -d= -f2-)
+        v=$(grep "^${k}=" "$ENV_FILE" | head -1 | cut -d= -f2-)
         if [ -n "$v" ]; then
             export "${k}=${v}"
         fi
     done
+else
+    echo "[operations] WARNING: no env file at /app/envdir/.env or /app/.env" >&2
 fi
 
 runtime_db_user="${OPERATIONS_DB_USER:-operations_app}"
