@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -64,7 +65,39 @@ _FINDING_ACTIVE_STATUSES = (
     Finding.Status.INVESTIGATING,
 )
 
-_SOURCES = ("Ninja", "SentinelOne", "ScreenConnect", "LogMeIn")
+log = logging.getLogger(__name__)
+
+# Fallback only. The real list is read from operations.sources so that
+# registering a source makes it appear everywhere it should — dashboard tile,
+# staleness check, coverage drilldown — without a code change. Used verbatim
+# if that query fails, so a DB hiccup degrades the dashboard rather than
+# breaking it.
+_SOURCES_FALLBACK = ("Ninja", "SentinelOne", "ScreenConnect", "LogMeIn")
+
+
+def _registered_sources() -> tuple[str, ...]:
+    """Enabled source platform names, from configuration rather than a literal.
+
+    Reads the platform recorded on each enabled instance, falling back to the
+    source name — matching how ingest.sources.load_sources resolves it.
+    """
+    try:
+        with connection.cursor() as cur:
+            cur.execute("SET LOCAL operations.tenant_id = 1")
+            cur.execute(
+                """
+                SELECT DISTINCT COALESCE(NULLIF(si.config->>'platform', ''), s.name)
+                  FROM operations.sources s
+                  JOIN operations.source_instances si ON si.source_id = s.id
+                 WHERE si.tenant_id = 1 AND si.enabled
+                 ORDER BY 1
+                """
+            )
+            names = tuple(r[0] for r in cur.fetchall() if r[0])
+        return names or _SOURCES_FALLBACK
+    except Exception:  # pragma: no cover - dashboard must not hard-fail
+        log.exception("source list query failed — using fallback")
+        return _SOURCES_FALLBACK
 
 _DASHBOARD_DOMAIN_CATEGORIES = {
     "patching": "patching",
@@ -331,16 +364,17 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
         installed, failed = cur.fetchone()
         recent_patch_activity = {"installed": installed, "failed": failed}
 
+    registered_sources = _registered_sources()
     source_health = []
     stale_sources: list[str] = []
-    for source_name in _SOURCES:
+    for source_name in registered_sources:
         source = source_rows.get(source_name, {})
         observed_at = source.get("observed_at")
         stale = observed_at is None or observed_at < stale_before or source.get("run_ok") is False
         source_health.append({"name": source_name, "updated_at": observed_at, "stale": stale})
         if stale:
             stale_sources.append(source_name)
-    sources_ok = len(_SOURCES) - len(stale_sources)
+    sources_ok = len(registered_sources) - len(stale_sources)
     source_health_by_name = {source["name"]: source for source in source_health}
     observed_updates = [source["updated_at"] for source in source_health if source["updated_at"]]
     dashboard_updated_at = max(observed_updates, default=None)
@@ -678,7 +712,7 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
             "attention_count": priority_counts["immediate"] + priority_counts["soon"],
             "source_health": source_health,
             "sources_ok": sources_ok,
-            "sources_total": len(_SOURCES),
+            "sources_total": len(registered_sources),
             "stale_sources": stale_sources,
             "dashboard_updated_at": dashboard_updated_at,
             "recent_activity": {
@@ -1115,7 +1149,7 @@ def org_devices(request: HttpRequest, org_slug: str) -> HttpResponse:
         devices_qs = devices_qs.filter(device_role=active_role)
     else:
         active_role = ""
-    if missing_platform in _SOURCES:
+    if missing_platform in _registered_sources():
         # Coverage-gap drilldown for the requirement's entity type/platform.
         with transaction.atomic(), connection.cursor() as cur:
             cur.execute("SET LOCAL operations.tenant_id = 1")
@@ -6477,7 +6511,7 @@ def sources_status(request: HttpRequest) -> HttpResponse:
 
     now = timezone.now()
     sources = []
-    for source in _SOURCES:
+    for source in _registered_sources():
         health = source_health.get(source)
         act = active.get(source)
         last_success = health[4] if health else None

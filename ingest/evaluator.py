@@ -36,6 +36,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from ingest import db
+from ingest.identity import IDENTITY_ENTITY_TYPES
 from ingest.normalize import normalize_hostname
 
 log = logging.getLogger(__name__)
@@ -342,9 +343,11 @@ def _sync_lifecycle_status(cur: Any, tenant_id: int) -> None:
     """Advance/reset lifecycle_status from last platform contact.
 
     active <7d, offline_aging 7-30d, pending_cleanup >30d, measured from
-    the newest last_contact_at across all entity streams (falling back to
-    fetch time where the source carries no contact clock). 'retired' is an
-    operator decision — never touched here.
+    the newest last_contact_at across contact-bearing entity streams only
+    (falling back to fetch time where the source carries no contact clock).
+    CMDB streams are excluded: a documentation record is not evidence the
+    machine was reachable. 'retired' is an operator decision — never touched
+    here.
     """
     cur.execute(
         """
@@ -353,6 +356,13 @@ def _sync_lifecycle_status(cur: Any, tenant_id: int) -> None:
                    MAX(COALESCE(last_contact_at, last_observed_at)) AS last_contact
             FROM operations.device_agent_presence_current
             WHERE tenant_id = %s
+              -- Only observation kinds that represent actual contact with the
+              -- machine. device_agent_presence_current also carries CMDB
+              -- records, which say "a page describes this device", not "this
+              -- device was reachable". Counting those held 564 devices at
+              -- 'active' that no live source had seen for over a week, and
+              -- kept 394 out of pending_cleanup entirely.
+              AND entity_type = ANY(%s)
             GROUP BY device_id
         ), target AS (
             SELECT device_id,
@@ -372,7 +382,7 @@ def _sync_lifecycle_status(cur: Any, tenant_id: int) -> None:
           AND d.lifecycle_status <> 'retired'
           AND d.lifecycle_status <> t.status
         """,
-        (tenant_id, tenant_id),
+        (tenant_id, sorted(IDENTITY_ENTITY_TYPES), tenant_id),
     )
     if cur.rowcount:
         log.info("lifecycle sync: %d devices transitioned", cur.rowcount)
