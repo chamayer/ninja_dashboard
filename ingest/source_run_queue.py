@@ -185,6 +185,17 @@ def process_entry(entry_id: int) -> None:
                 if any(is_identity_source(s) for s in sources):
                     drain_resolution(batch_size=500, refresh_current=False)
             refresh_after_collection(f"on-demand {df} collection")
+            # Refresh derived findings for non-identity (CMDB) sources so an
+            # on-demand run reflects immediately rather than waiting for the
+            # next scheduled cycle. Non-fatal: derived reporting must never
+            # fail an otherwise successful collection.
+            if sources and not any(is_identity_source(s) for s in sources):
+                try:
+                    from ingest import cmdb_findings
+
+                    log.info("cmdb findings: %s", cmdb_findings.evaluate(dry_run=False))
+                except Exception:
+                    log.exception("cmdb findings evaluation failed — collection unaffected")
         else:
             raise ValueError(f"Unknown source: {df!r}")
     except Exception as exc:

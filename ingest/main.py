@@ -228,10 +228,25 @@ def run_documentation_observations_once() -> None:
         counts = run_source_observations(sources, observed_at)
         total = sum(counts.values())
         refresh_after_collection("documentation observations collection")
+        _run_cmdb_findings()
         log.info("Documentation observations run complete: %s total=%d", counts, total)
     except Exception:
         log.exception("Documentation observations run failed")
         raise
+
+
+def _run_cmdb_findings() -> None:
+    """Evaluate CMDB findings after a collection.
+
+    Isolated and non-fatal: findings are derived reporting, so a failure here
+    must never mark an otherwise successful collection as failed.
+    """
+    try:
+        from ingest import cmdb_findings
+
+        log.info("cmdb findings: %s", cmdb_findings.evaluate(dry_run=False))
+    except Exception:
+        log.exception("cmdb findings evaluation failed — collection unaffected")
 
 
 def run_agent_compliance_once() -> None:
