@@ -464,12 +464,19 @@ def _evaluate_duplicate_records(cur: Any, tenant_id: int, now: datetime) -> int:
                canonical_data ->> 'last_seen_at',
                canonical_data ->> 'serial_number'
         FROM operations.entity_observation_current
-        WHERE tenant_id = %s AND entity_type <> 'software'
+        WHERE tenant_id = %s
+          -- Allowlist, not `<> 'software'`. This finding says "each extra
+          -- record consumes a licence", which is only true of installed-agent
+          -- streams. CMDB pages consume nothing, and two pages sharing a name
+          -- is normal there (a machine legitimately has both a Computer Asset
+          -- and a Servers page). Left unfiltered this raised 572 false
+          -- "duplicate platform record" findings against Hudu.
+          AND entity_type = ANY(%s)
           AND active = TRUE
           AND observed_at > now() - INTERVAL '2 days'
         ORDER BY platform, entity_type, entity_key, observed_at DESC
         """,
-        (tenant_id,),
+        (tenant_id, sorted(identity_entity_types(cur))),
     )
     groups: dict[tuple, list[dict]] = {}
     for (
