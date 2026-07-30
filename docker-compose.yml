@@ -39,14 +39,18 @@ services:
     shm_size: "1gb"
     # Wrap the official entrypoint: source the bind-mounted env file,
     # export everything in it (`set -a`), then exec the real entrypoint.
-    # `.` fails loud if /etc/secrets.env is missing, so we don't start
-    # postgres with no password.
+    # Prefer the directory mount, fall back to the legacy single-file mount
+    # so this is safe to deploy in either order. `.` fails loud if neither
+    # exists, so we never start postgres with no password.
     entrypoint:
       - /bin/sh
       - -c
-      - "set -a; . /etc/secrets.env; set +a; exec docker-entrypoint.sh postgres"
+      - "set -a; if [ -f /etc/secretsdir/.env ]; then . /etc/secretsdir/.env; else . /etc/secrets.env; fi; set +a; exec docker-entrypoint.sh postgres"
     volumes:
-      - /amr-ch-01_data/ninja-dashboard/.env:/etc/secrets.env:ro
+      # Directory, not the file: an atomic-save editor replaces the .env
+      # inode, and a single-file bind mount stays pinned to the old one —
+      # the container then never sees the edit.
+      - /amr-ch-01_data/ninja-dashboard:/etc/secretsdir:ro
       - postgres-data:/var/lib/postgresql/data
     # No public port — Metabase and ingest reach Postgres on the
     # internal docker network. For ad-hoc psql:
@@ -74,14 +78,14 @@ services:
     entrypoint:
       - /bin/sh
       - -c
-      - "set -a; . /etc/secrets.env; set +a; exec /app/run_metabase.sh"
+      - "set -a; if [ -f /etc/secretsdir/.env ]; then . /etc/secretsdir/.env; else . /etc/secrets.env; fi; set +a; exec /app/run_metabase.sh"
     environment:
       # Static — never overridden, not in the .env file.
       MB_DB_TYPE: postgres
       MB_DB_HOST: postgres
       MB_DB_PORT: 5432
     volumes:
-      - /amr-ch-01_data/ninja-dashboard/.env:/etc/secrets.env:ro
+      - /amr-ch-01_data/ninja-dashboard:/etc/secretsdir:ro
       - metabase-data:/metabase-data
     ports:
       - "3001:3000"
@@ -110,10 +114,12 @@ services:
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
     volumes:
-      # Bind-mount the host .env into the container. config.py uses
-      # python-dotenv to load /app/.env at startup and merge into
-      # os.environ. Same trick as dmarc-manager.
-      - /amr-ch-01_data/ninja-dashboard/.env:/app/.env:ro
+      # Bind-mount the host env DIRECTORY into the container. config.py
+      # loads /app/envdir/.env at startup and merges into os.environ.
+      # Directory rather than the single file: an atomic-save editor
+      # replaces the .env inode, and a file bind mount stays pinned to the
+      # old one, so the container silently never sees the edit.
+      - /amr-ch-01_data/ninja-dashboard:/app/envdir:ro
     # Publish the operator endpoints on the host so browser links work.
     ports:
       - "8090:8090"
@@ -138,8 +144,9 @@ services:
       POSTGRES_PORT: 5432
     volumes:
       # Same env-file bind-mount pattern as ingest. python-dotenv in
-      # config/settings/base.py reads /app/.env at import time.
-      - /amr-ch-01_data/ninja-dashboard/.env:/app/.env:ro
+      # config/settings/base.py reads /app/envdir/.env at import time.
+      # Directory mount — see the ingest service for why.
+      - /amr-ch-01_data/ninja-dashboard:/app/envdir:ro
       # Brand overrides (optional): mount an on-disk theme directory
       # per §4.16 rebrand path. Default AMRose assets ship in-image;
       # this mount only matters when an appliance install overrides.

@@ -12,7 +12,15 @@ from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Load /app/.env before pydantic-settings reads os.environ.
-load_dotenv(Path("/app/.env"), override=False)
+# Directory mount first, legacy single-file mount second. A single-file bind
+# mount stays pinned to the inode present at container creation, so an
+# atomic-save editor (write temp + rename) silently leaves the container
+# reading the old file forever. Both paths are accepted so the compose and
+# code halves of that change can deploy in either order.
+for _env_path in (Path("/app/envdir/.env"), Path("/app/.env")):
+    if _env_path.is_file():
+        load_dotenv(_env_path, override=False)
+        break
 
 
 class Settings(BaseSettings):

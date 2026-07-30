@@ -16,7 +16,15 @@ BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 # Load .env from the ninja-dashboard host data root (matches BLUEPRINT §11).
 # Falls back silently in dev when the file is not present.
+#
+# /app/envdir/.env is the container path: the host env directory is bind
+# mounted as a DIRECTORY, not as a single file. A single-file bind mount
+# stays pinned to the inode present at container creation, so an atomic-save
+# editor (write temp + rename) silently leaves the container reading the old
+# file forever. The legacy /app/.env path is still accepted so the compose
+# and code halves of that change can deploy in either order.
 load_dotenv(os.environ.get("OPERATIONS_ENV_FILE", "/amr-ch-01_data/ninja-dashboard/.env"))
+load_dotenv(Path("/app/envdir/.env"), override=False)
 load_dotenv(BASE_DIR / ".env", override=False)
 
 # ---------------------------------------------------------------------------
