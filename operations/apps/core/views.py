@@ -82,7 +82,11 @@ def _registered_sources() -> tuple[str, ...]:
     source name — matching how ingest.sources.load_sources resolves it.
     """
     try:
-        with connection.cursor() as cur:
+        # transaction.atomic() is required, not stylistic: SET LOCAL only
+        # applies inside a transaction, and under autocommit the GUC stays
+        # unset — the RLS policy then casts '' to bigint and raises DataError.
+        # Same wrapping as every other raw query in this module.
+        with transaction.atomic(), connection.cursor() as cur:
             cur.execute("SET LOCAL operations.tenant_id = 1")
             cur.execute(
                 """
