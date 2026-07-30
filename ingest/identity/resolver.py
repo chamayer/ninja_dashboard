@@ -589,10 +589,15 @@ def _promote_unmatched_clusters(cur) -> int:
         FROM operations.entity_observation_current
         WHERE tenant_id = %s AND device_id IS NULL AND client_id IS NOT NULL
           AND active = TRUE
-          AND entity_type <> 'org'  -- containers resolve to clients, not devices
+          -- Allowlist, not `<> 'org'`. This query PROMOTES unmatched rows
+          -- into brand-new Devices, so anything reaching it becomes canonical
+          -- inventory. A `<> 'org'` exclusion let documentation rows through:
+          -- 4,991 Devices were minted from Hudu doc.asset records before this
+          -- was caught. Promotion must be opt-in per entity type.
+          AND entity_type = ANY(%s)
         GROUP BY client_id, platform, entity_type, entity_key
         """,
-        (TENANT_ID,),
+        (TENANT_ID, sorted(IDENTITY_ENTITY_TYPES)),
     )
     unresolved = cur.fetchall()
     if not unresolved:
