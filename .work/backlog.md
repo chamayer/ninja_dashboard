@@ -62,6 +62,32 @@ This is the proposed successor to the root-level open-work portion of
 - Trigger: a third collection cadence being needed, or any source requiring
   a schedule that differs from others of its capability.
 
+## `device_session_current` counts CMDB syncs as device contact
+
+- Reason deferred: real but currently unread. The matview aggregates
+  `MAX(last_contact_at)` / `MAX(last_observed_at)` from
+  `device_agent_presence_current` with no `entity_type` filter, so a CMDB
+  sync counts as contact with the machine. Measured 2026-07-30: **856
+  devices** have `last_contact_at` inflated by Hudu, plus 9 known only to
+  Hudu.
+- Why it is not urgent: the only application consumer
+  (`views.py:2304`) reads `online_sources`, which is unaffected — Hudu sets
+  no `is_online`, so it is filtered out of the online aggregation. Metabase
+  may read the affected columns; not audited.
+- Same defect class as the four fixed on 2026-07-30 (resolution, promotion,
+  lifecycle, duplicate-records): an exclusion guard where the platform now
+  has `operations.entity_types.is_identity_signal`.
+- Fix: recreate `operations.device_session_current` with the contact
+  aggregation joined to `operations.entity_types` and filtered to
+  `is_identity_signal`. `device_agent_presence_current` itself stays
+  unfiltered on purpose — it answers "which sources hold records on which
+  devices", which `source_health_current.device_count` needs.
+- Constraints: matview recreate, so it needs a migration and a refresh;
+  check `refresh_device_session_current()` still matches after the rewrite.
+- Trigger: anything starting to read `last_contact_at` from this matview, a
+  Metabase question depending on it, or the next matview migration in this
+  area.
+
 ## Root backlog rules
 
 - Do not duplicate Operations-only items here.

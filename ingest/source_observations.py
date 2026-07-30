@@ -97,32 +97,18 @@ def run_source_observations(
     batch_id = uuid.uuid4()
     counts: dict[str, int] = {}
     for source in sources:
-        # A source can be registered, enabled and correctly configured in the
-        # database and still collect nothing, because the two lookups below are
-        # code-side. Both failures used to be invisible — one silent, one a log
-        # line nobody reads — so a new source looked healthy while doing
-        # nothing. Record a failed run instead: the Sources page then shows it
-        # red with the reason, which is where an operator would look.
+        # Not every registered source is collected here — Ninja has its own
+        # pipeline (run_ninja_observations_once). Skipping is silent on
+        # purpose: recording it as a failed run marked Ninja red on the
+        # Sources page while it was collecting fine, and _source_failure_guard
+        # then excluded Ninja from coverage evaluation entirely.
         if source.platform not in _FETCHERS:
-            msg = (
-                f"No collector registered for platform {source.platform!r}. "
-                f"Known: {', '.join(sorted(_FETCHERS))}. Either the connector "
-                f"is missing from _FETCHERS, or config.platform does not match "
-                f"its canonical name (see normalize.PLATFORM_ALIASES)."
-            )
-            log.error("source_observations: %s — %s", source.source_name, msg)
-            _record_source_run(source, observed_at, ok=False, rows=0, error=msg)
             continue
         if not source.source_binding_id or not source.entity_type:
-            missing = "source_binding" if not source.source_binding_id else "entity_type"
-            msg = (
-                f"Source cannot collect: {missing} is not set. "
-                f"entity_type is read from operations.sources.entity_type and "
-                f"must name a row in operations.entity_types; source_binding "
-                f"requires an enabled operations.source_bindings row."
+            log.warning(
+                "source_observations: %s has no operations binding — skipping",
+                source.source_name,
             )
-            log.error("source_observations: %s — %s", source.source_name, msg)
-            _record_source_run(source, observed_at, ok=False, rows=0, error=msg)
             continue
         try:
             rows = _FETCHERS[source.platform](source, observed_at)
