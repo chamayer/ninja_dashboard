@@ -25,11 +25,18 @@ def _asset(*cards):
 
 
 def _ninja(sync_id):
-    return {"integrator_name": "ninja", "sync_id": sync_id}
+    return {"integrator_name": "ninja", "sync_id": sync_id, "sync_type": "device"}
+
+
+def _ninja_location(sync_id):
+    return {"integrator_name": "ninja", "sync_id": sync_id, "sync_type": "location"}
 
 
 def _auvik(sync_identifier):
-    return {"integrator_name": "auvik", "sync_id": None, "sync_identifier": sync_identifier}
+    return {
+        "integrator_name": "auvik", "sync_id": None,
+        "sync_identifier": sync_identifier, "sync_type": "device",
+    }
 
 
 def test_single_card_links():
@@ -84,6 +91,30 @@ def test_provenance_second_hand_only_when_every_relay_unintegrated():
     # enough to make the record first-party.
     assert _provenance([{"integrated": False}, {"integrated": True}]) == "first_party"
     assert _provenance([]) == "first_party"
+
+
+def test_location_card_never_resolves_to_a_device():
+    # Ninja location ids are a separate namespace from device ids. Resolving
+    # location 296 against the device map attached a Hudu "Main Office"
+    # record to an unrelated machine in production.
+    relayed, verdict, device_id, _ = _resolve_cards(_asset(_ninja_location(296)), NINJA_MAP)
+    assert (verdict, device_id) == ("unlinked", None)
+    assert relayed[0]["sync_type"] == "location"
+    assert relayed[0]["resolved_device_id"] is None
+
+
+def test_location_card_alongside_device_card_does_not_disturb_linking():
+    _, verdict, device_id, _ = _resolve_cards(
+        _asset(_ninja_location(999), _ninja(296)), NINJA_MAP
+    )
+    # 999 is a *location* id here; only the device card may resolve.
+    assert (verdict, device_id) == ("linked", DEV_A)
+
+
+def test_location_only_asset_is_unlinked_not_stale():
+    # Never had a device pointer, so nothing went stale.
+    _, verdict, _, _ = _resolve_cards(_asset(_ninja_location(2606)), NINJA_MAP)
+    assert verdict == "unlinked"
 
 
 def test_cardless_vendor_entries_are_skipped():

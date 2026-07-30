@@ -183,10 +183,18 @@ def _resolve_cards(
         if key is None:
             continue
         key = str(key)
+        sync_type = (card.get("sync_type") or "").strip().lower()
+        # Ninja emits location cards alongside device cards, and its location
+        # ids live in a SEPARATE namespace from device ids — location 1 and
+        # device 1 are unrelated. Resolving a non-device card against the
+        # device map silently attaches documentation to an arbitrary machine
+        # (observed: a Hudu "Main Office" record linked to device hyperv-lab).
+        # Non-device cards stay recorded as relay evidence but never resolve.
+        is_device_card = sync_type == "device"
         integrated = vendor in _INTEGRATED_VENDORS
         resolved_device = None
 
-        if integrated:
+        if integrated and is_device_card:
             saw_integrated_card = True
             hit = ninja_map.get(key) if vendor == "ninja" else None
             if hit:
@@ -196,6 +204,7 @@ def _resolve_cards(
         relayed.append({
             "source": vendor,
             "key": key,
+            "sync_type": sync_type,
             "integrated": integrated,
             "resolved_device_id": str(resolved_device) if resolved_device else None,
         })
