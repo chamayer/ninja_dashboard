@@ -24,10 +24,13 @@ _KIND_ENTITY_TYPE = {
     "rmm": "agent.rmm",
     "edr": "agent.edr",
     "remote_access": "agent.remote_access",
-    # Documentation platforms observe records *about* devices rather than the
-    # devices themselves, so `doc.*` deliberately sits outside the
-    # identity-signal set and never reaches device_links.
-    "documentation": "doc.asset",
+    # A CMDB records assets that exist but does not observe them directly, so
+    # `cmdb.*` sits outside the identity-signal set and never reaches
+    # device_links. Named for the source class, not the vendor: a second CMDB
+    # inherits the exclusion and the slower collection cadence with no code
+    # change, exactly as agent.remote_access already serves both ScreenConnect
+    # and LogMeIn.
+    "cmdb": "cmdb.asset",
 }
 
 

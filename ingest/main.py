@@ -200,9 +200,13 @@ def run_agent_observations_once() -> None:
 
 
 def run_documentation_observations_once() -> None:
-    """Fetch documentation sources (Hudu) on their own slower cadence.
+    """Fetch non-identity sources on their own slower cadence.
 
-    Split from the agent cycle because documentation changes daily at most,
+    Covers every source outside IDENTITY_ENTITY_TYPES, which today means the
+    CMDB class (Hudu, entity_type `cmdb.asset`). A second CMDB — or any future
+    non-identity source — lands here automatically with no code change.
+
+    Split from the agent cycle because such sources change daily at most,
     while that cycle runs every 4h — Hudu alone is ~122 paginated requests,
     and `load_sources()` orders by name so it would precede and delay every
     agent source. Same writer and run-log semantics as the agent cycle; only

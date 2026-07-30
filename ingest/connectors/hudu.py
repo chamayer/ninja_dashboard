@@ -1,4 +1,4 @@
-"""Hudu documentation-platform collector.
+"""Hudu CMDB collector (entity_type `cmdb.asset`, source kind `cmdb`).
 
 Hudu is a source *and* an aggregator: each asset carries `cards[]` holding
 other vendors' records verbatim (Ninja, Auvik). Ninja is already an
