@@ -77,6 +77,7 @@ def evaluate(tenant_id: int, device_id: uuid.UUID | None = None) -> int:
     when the evaluator ran and how many findings the run touched.
     """
     now = datetime.now(timezone.utc)
+    evaluator_run_id = uuid.uuid4()
     affected = 0
     error_msg: str | None = None
     skip_platforms: set[str] = set()
@@ -88,7 +89,9 @@ def evaluate(tenant_id: int, device_id: uuid.UUID | None = None) -> int:
                 skip_platforms = _source_failure_guard(cur, tenant_id, now)
                 if device_id is None:
                     affected += _sync_device_roles(cur, tenant_id, now)
-                    _sync_lifecycle_status(cur, tenant_id)
+                    affected += _sync_lifecycle_status(
+                        cur, tenant_id, now, evaluator_run_id
+                    )
                     affected += _evaluate_unknown_entities(cur, tenant_id, now)
                     affected += _evaluate_duplicate_records(cur, tenant_id, now)
                 corroborated = _load_corroborated_devices(cur, tenant_id)
@@ -113,10 +116,11 @@ def evaluate(tenant_id: int, device_id: uuid.UUID | None = None) -> int:
                     INSERT INTO operations.run_log
                         (id, tenant_id, kind, subject_ref, started_at,
                          ended_at, ok, rows, error)
-                    VALUES (gen_random_uuid(), %s, 'platform_evaluator',
+                    VALUES (%s, %s, 'platform_evaluator',
                             %s::jsonb, %s, NOW(), %s, %s, %s)
                     """,
                     (
+                        evaluator_run_id,
                         tenant_id,
                         json.dumps({"device_id": str(device_id) if device_id else None}),
                         now,
@@ -339,53 +343,434 @@ def _sync_device_roles(cur: Any, tenant_id: int, now: datetime) -> int:
 # --------------------------------------------------------------------------
 
 
-def _sync_lifecycle_status(cur: Any, tenant_id: int) -> None:
-    """Advance/reset lifecycle_status from last platform contact.
+_LIFECYCLE_POLICY_VERSION = "lifecycle-evidence-v1"
+_LIFECYCLE_DIRECT_MODES = {"direct_contact", "direct_then_reported_state"}
+_LIFECYCLE_REPORTED_MODES = {"reported_state", "direct_then_reported_state"}
+_LIFECYCLE_POSITIVE_POWER_STATES = {"poweredon"}
+_LIFECYCLE_NEGATIVE_POWER_STATES = {"poweredoff", "suspended"}
 
-    active <7d, offline_aging 7-30d, pending_cleanup >30d, measured from
-    the newest last_contact_at across contact-bearing entity streams only
-    (falling back to fetch time where the source carries no contact clock).
-    CMDB streams are excluded: a documentation record is not evidence the
-    machine was reachable. 'retired' is an operator decision — never touched
-    here.
+
+def _reported_lifecycle_state(
+    power_state: str | None,
+    has_power_state: bool,
+    reported_online: bool | None,
+    has_reported_online_state: bool,
+) -> tuple[str | None, bool]:
+    """Return (lifecycle evidence, is_unknown) for one reported state.
+
+    Power state is authoritative when present. Do not fall back to the legacy
+    ``reported_online`` projection in that case: the projection historically
+    treated every non-powered-on value as offline, including new values the
+    lifecycle policy has not approved. When power is absent, a recognized
+    online/offline report is valid evidence; an unrecognized online field is a
+    data-quality finding rather than an inferred lifecycle result.
+    """
+    if has_power_state:
+        normalized = power_state.strip().lower() if isinstance(power_state, str) else ""
+        if normalized in _LIFECYCLE_POSITIVE_POWER_STATES:
+            return "active", False
+        if normalized in _LIFECYCLE_NEGATIVE_POWER_STATES:
+            return "offline_aging", False
+        return None, True
+    if reported_online is True:
+        return "active", False
+    if reported_online is False:
+        return "offline_aging", False
+    return None, has_reported_online_state
+
+
+def _select_lifecycle_evidence(
+    rows: list[dict[str, Any]],
+) -> tuple[dict[str, Any] | None, bool]:
+    """Select newest qualified evidence, returning (evidence, conflict).
+
+    A direct contact wins only when its timestamp exactly ties the newest
+    reported-state evidence. Equally recent contradictory reported states are
+    deliberately unresolved: lifecycle remains unchanged and a finding makes
+    the conflict visible.
+    """
+    candidates: list[dict[str, Any]] = []
+    for row in rows:
+        mode = row["mode"]
+        if mode in _LIFECYCLE_DIRECT_MODES and row["last_contact_at"] is not None:
+            candidates.append(
+                {
+                    "kind": "direct_contact",
+                    "status": "active",
+                    "at": row["last_contact_at"],
+                    "entity_type": row["entity_type"],
+                    "platform": row["platform"],
+                }
+            )
+        if mode in _LIFECYCLE_REPORTED_MODES:
+            status, _ = _reported_lifecycle_state(
+                row["last_power_state"],
+                row["has_power_state"],
+                row["reported_online"],
+                row["has_reported_online_state"],
+            )
+            if status is not None:
+                candidates.append(
+                    {
+                        "kind": "reported_state",
+                        "status": status,
+                        "at": row["last_observed_at"],
+                        "entity_type": row["entity_type"],
+                        "platform": row["platform"],
+                    }
+                )
+
+    if not candidates:
+        return None, False
+
+    newest_at = max(candidate["at"] for candidate in candidates)
+    newest = [candidate for candidate in candidates if candidate["at"] == newest_at]
+    newest_direct = [
+        candidate for candidate in newest if candidate["kind"] == "direct_contact"
+    ]
+    if newest_direct:
+        return newest_direct[0], False
+
+    statuses = {candidate["status"] for candidate in newest}
+    if len(statuses) != 1:
+        return None, True
+    return newest[0], False
+
+
+def _lifecycle_target(evidence: dict[str, Any], now: datetime) -> str:
+    """Apply the deployed three-state aging rules to selected evidence."""
+    if evidence["at"] < now - timedelta(days=30):
+        return "pending_cleanup"
+    if evidence["status"] == "offline_aging" or evidence["at"] < now - timedelta(
+        days=7
+    ):
+        return "offline_aging"
+    return "active"
+
+
+def _resolve_lifecycle_findings_absent(
+    cur: Any,
+    tenant_id: int,
+    finding_type_id: int,
+    condition_keys: set[str],
+    now: datetime,
+) -> None:
+    """Resolve only lifecycle findings no longer emitted in this evaluator run."""
+    if condition_keys:
+        cur.execute(
+            """
+            UPDATE operations.findings
+               SET status = 'resolved', last_seen_at = %s
+             WHERE tenant_id = %s
+               AND finding_type_id = %s
+               AND status IN ('open', 'acknowledged', 'investigating', 'suppressed')
+               AND NOT (condition_key = ANY(%s))
+            """,
+            (now, tenant_id, finding_type_id, list(condition_keys)),
+        )
+    else:
+        cur.execute(
+            """
+            UPDATE operations.findings
+               SET status = 'resolved', last_seen_at = %s
+             WHERE tenant_id = %s
+               AND finding_type_id = %s
+               AND status IN ('open', 'acknowledged', 'investigating', 'suppressed')
+            """,
+            (now, tenant_id, finding_type_id),
+        )
+
+
+_LIFECYCLE_FINDING_ACTIVE_STATUSES = (
+    "open",
+    "acknowledged",
+    "investigating",
+    "suppressed",
+)
+
+
+def _upsert_lifecycle_finding(
+    cur: Any,
+    tenant_id: int,
+    finding_type_id: int,
+    client_id: Any,
+    device_id: uuid.UUID,
+    condition_key: str,
+    severity: str,
+    confidence: str,
+    now: datetime,
+    details: dict[str, Any],
+) -> int:
+    """Refresh one active lifecycle finding without changing operator state.
+
+    The generic finding uniqueness rule covers only ``open`` and
+    ``acknowledged`` rows. Lifecycle findings also remain active while an
+    operator is investigating or has suppressed notifications, so refresh
+    those rows explicitly before using the generic insert-or-reopen path.
+    Resolved and won't-fix findings intentionally retain their history and a
+    later recurrence opens a new row.
     """
     cur.execute(
         """
-        WITH contact AS (
-            SELECT device_id,
-                   MAX(COALESCE(last_contact_at, last_observed_at)) AS last_contact
-            FROM operations.device_agent_presence_current
-            WHERE tenant_id = %s
-              -- Only observation kinds that represent actual contact with the
-              -- machine. device_agent_presence_current also carries CMDB
-              -- records, which say "a page describes this device", not "this
-              -- device was reachable". Counting those held 564 devices at
-              -- 'active' that no live source had seen for over a week, and
-              -- kept 394 out of pending_cleanup entirely.
-              AND entity_type = ANY(%s)
-            GROUP BY device_id
-        ), target AS (
-            SELECT device_id,
-                   CASE
-                       WHEN last_contact < now() - INTERVAL '30 days' THEN 'pending_cleanup'
-                       WHEN last_contact < now() - INTERVAL '7 days'  THEN 'offline_aging'
-                       ELSE 'active'
-                   END AS status
-            FROM contact
-        )
-        UPDATE operations.devices d
-        SET lifecycle_status = t.status
-        FROM target t
-        WHERE d.id = t.device_id
-          AND d.tenant_id = %s
-          AND d.deleted_at IS NULL
-          AND d.lifecycle_status <> 'retired'
-          AND d.lifecycle_status <> t.status
+        UPDATE operations.findings
+           SET confidence = %s,
+               finding_details = %s::jsonb,
+               last_seen_at = %s,
+               last_detected_at = %s
+         WHERE tenant_id = %s
+           AND condition_key = %s
+           AND status = ANY(%s)
         """,
-        (tenant_id, sorted(identity_entity_types(cur)), tenant_id),
+        (
+            confidence,
+            json.dumps(details),
+            now,
+            now,
+            tenant_id,
+            condition_key,
+            list(_LIFECYCLE_FINDING_ACTIVE_STATUSES),
+        ),
     )
     if cur.rowcount:
-        log.info("lifecycle sync: %d devices transitioned", cur.rowcount)
+        return 1
+    return _upsert_finding(
+        cur,
+        tenant_id,
+        finding_type_id,
+        client_id,
+        device_id,
+        condition_key,
+        severity,
+        confidence,
+        now,
+        details,
+    )
+
+
+def _sync_lifecycle_status(
+    cur: Any,
+    tenant_id: int,
+    now: datetime,
+    evaluator_run_id: uuid.UUID,
+) -> int:  # noqa: PLR0912 - policy branches map to explicit approved outcomes.
+    """Apply explicit lifecycle policy and append transition audit events.
+
+    The registry supplies the only lifecycle capability. Direct contact never
+    falls back to collection time; reported state uses collection time because
+    that is the source observation time for the reported state. ``retired`` is
+    an operator decision and is never selected for an automatic update.
+    """
+    cur.execute(
+        """
+        SELECT d.id, d.client_id, d.lifecycle_status,
+               apc.entity_type, apc.platform, et.lifecycle_evidence_mode,
+               apc.last_contact_at, apc.last_observed_at,
+               apc.last_power_state, apc.reported_online,
+               COALESCE(latest.canonical_data ? 'power_state', FALSE)
+                   AS has_power_state,
+               COALESCE(
+                   latest.canonical_data ? 'is_online'
+                   OR latest.canonical_data ? 'offline',
+                   FALSE
+               ) AS has_reported_online_state
+          FROM operations.devices d
+          JOIN operations.device_agent_presence_current apc
+            ON apc.tenant_id = d.tenant_id AND apc.device_id = d.id
+          JOIN operations.entity_types et
+            ON et.name = apc.entity_type
+          LEFT JOIN LATERAL (
+              SELECT o.canonical_data
+                FROM operations.entity_observation_current o
+               WHERE o.tenant_id = apc.tenant_id
+                 AND o.device_id = apc.device_id
+                 AND o.entity_type = apc.entity_type
+                 AND o.platform = apc.platform
+                 AND o.active
+               ORDER BY o.observed_at DESC, o.observation_id DESC
+               LIMIT 1
+          ) latest ON TRUE
+         WHERE d.tenant_id = %s
+           AND d.deleted_at IS NULL
+           AND d.lifecycle_status <> 'retired'
+           AND et.lifecycle_evidence_mode <> 'none'
+        """,
+        (tenant_id,),
+    )
+    per_device: dict[uuid.UUID, dict[str, Any]] = {}
+    for row in cur.fetchall():
+        (
+            device_id,
+            client_id,
+            lifecycle_status,
+            entity_type,
+            platform,
+            mode,
+            last_contact_at,
+            last_observed_at,
+            last_power_state,
+            reported_online,
+            has_power_state,
+            has_reported_online_state,
+        ) = row
+        device = per_device.setdefault(
+            device_id,
+            {
+                "client_id": client_id,
+                "lifecycle_status": lifecycle_status,
+                "rows": [],
+            },
+        )
+        device["rows"].append(
+            {
+                "entity_type": entity_type,
+                "platform": platform,
+                "mode": mode,
+                "last_contact_at": last_contact_at,
+                "last_observed_at": last_observed_at,
+                "last_power_state": last_power_state,
+                "reported_online": reported_online,
+                "has_power_state": has_power_state,
+                "has_reported_online_state": has_reported_online_state,
+            }
+        )
+
+    affected = 0
+    unknown_keys: set[str] = set()
+    conflict_keys: set[str] = set()
+    unknown_type_id = _get_finding_type_id(cur, "lifecycle_unknown_reported_state")
+    conflict_type_id = _get_finding_type_id(cur, "lifecycle_reported_state_conflict")
+
+    for device_id, device in per_device.items():
+        for row in device["rows"]:
+            if row["mode"] not in _LIFECYCLE_REPORTED_MODES:
+                continue
+            _, is_unknown = _reported_lifecycle_state(
+                row["last_power_state"],
+                row["has_power_state"],
+                row["reported_online"],
+                row["has_reported_online_state"],
+            )
+            if not is_unknown:
+                continue
+            key = _condition_key(
+                tenant_id,
+                device["client_id"],
+                device_id,
+                "lifecycle_unknown_reported_state",
+                f"{row['entity_type']}:{row['platform']}",
+            )
+            unknown_keys.add(key)
+            if unknown_type_id is not None:
+                affected += _upsert_lifecycle_finding(
+                    cur,
+                    tenant_id,
+                    unknown_type_id,
+                    device["client_id"],
+                    device_id,
+                    key,
+                    "medium",
+                    "confirmed",
+                    now,
+                    {
+                        "reason": "unrecognized_reported_state",
+                        "evidence_mode": row["mode"],
+                        "entity_type": row["entity_type"],
+                        "platform": row["platform"],
+                        "reported_state_kind": (
+                            "power_state" if row["has_power_state"] else "online_state"
+                        ),
+                    },
+                )
+
+        evidence, has_conflict = _select_lifecycle_evidence(device["rows"])
+        if has_conflict:
+            key = _condition_key(
+                tenant_id,
+                device["client_id"],
+                device_id,
+                "lifecycle_reported_state_conflict",
+                "reported_state",
+            )
+            conflict_keys.add(key)
+            if conflict_type_id is not None:
+                affected += _upsert_lifecycle_finding(
+                    cur,
+                    tenant_id,
+                    conflict_type_id,
+                    device["client_id"],
+                    device_id,
+                    key,
+                    "medium",
+                    "confirmed",
+                    now,
+                    {"reason": "equally_recent_conflicting_reported_states"},
+                )
+            continue
+        if evidence is None:
+            continue
+
+        target = _lifecycle_target(evidence, now)
+        previous = device["lifecycle_status"]
+        if target == previous:
+            continue
+        cur.execute(
+            """
+            UPDATE operations.devices
+               SET lifecycle_status = %s
+             WHERE id = %s
+               AND tenant_id = %s
+               AND deleted_at IS NULL
+               AND lifecycle_status = %s
+               AND lifecycle_status <> 'retired'
+            RETURNING id
+            """,
+            (target, device_id, tenant_id, previous),
+        )
+        if cur.fetchone() is None:
+            continue
+        cur.execute(
+            """
+            INSERT INTO operations.audit_log (
+                audit_id, tenant_id, actor_id, actor_kind, source, action,
+                entity_type, entity_id, before_state, after_state,
+                ip_address, user_agent, occurred_at
+            ) VALUES (
+                gen_random_uuid(), %s, NULL, 'system', 'ingest',
+                'lifecycle.transition', 'device', %s, %s::jsonb, %s::jsonb,
+                NULL, '', %s
+            )
+            """,
+            (
+                tenant_id,
+                device_id,
+                json.dumps({"lifecycle_status": previous}),
+                json.dumps(
+                    {
+                        "lifecycle_status": target,
+                        "evidence_kind": evidence["kind"],
+                        "evidence_at": evidence["at"].isoformat(),
+                        "evidence_entity_type": evidence["entity_type"],
+                        "evidence_platform": evidence["platform"],
+                        "policy_version": _LIFECYCLE_POLICY_VERSION,
+                        "evaluator_run_id": str(evaluator_run_id),
+                    }
+                ),
+                now,
+            ),
+        )
+        affected += 1
+
+    if unknown_type_id is not None:
+        _resolve_lifecycle_findings_absent(
+            cur, tenant_id, unknown_type_id, unknown_keys, now
+        )
+    if conflict_type_id is not None:
+        _resolve_lifecycle_findings_absent(
+            cur, tenant_id, conflict_type_id, conflict_keys, now
+        )
+    if affected:
+        log.info("lifecycle sync: %d transitions or findings updated", affected)
+    return affected
 
 
 # --------------------------------------------------------------------------

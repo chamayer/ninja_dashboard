@@ -265,6 +265,19 @@ duplicate lifecycle plumbing. See
 - Do not store session transcripts or full production query results.
 - Move only one approved slice at a time into `operations/.work/plan.md`.
 
+## Activate Track A lifecycle evidence policy
+
+- Migration `0093_lifecycle_evidence_policy_and_audit` deliberately lands every
+  `lifecycle_evidence_mode` at safe default `none`, so schema deployment cannot
+  trigger automatic lifecycle transitions.
+- A later, separately approved activation migration must seed the reviewed
+  direct/reported modes for agents, `vm.host`, `vm.guest`, `network.device`,
+  and `monitor.target`.
+- Before activation, repeat the aggregate transition projection, verify the
+  protected pre-change backup, and obtain an explicit evaluator-activation and
+  reconciliation gate.
+- Do not bundle this activation migration into the schema-landing release.
+
 ## Review materialization of observation-derived state
 
 - Reason deferred: migration 0076 restores `device_agent_presence_current`

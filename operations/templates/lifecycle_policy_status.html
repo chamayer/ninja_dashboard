@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+
+{% block title %}Lifecycle policy{% endblock %}
+
+{% block content %}
+<style>
+  .lp-section { background:var(--surface); border:1px solid var(--border); border-radius:6px; padding:1.25rem; margin-bottom:1rem; }
+  .lp-section h1, .lp-section h2 { margin-top:0; }
+  .lp-table { width:100%; border-collapse:collapse; font-size:.85rem; }
+  .lp-table th, .lp-table td { padding:.6rem .7rem; text-align:left; border-bottom:1px solid var(--border); vertical-align:top; }
+  .lp-table th { color:var(--muted); font-size:.72rem; text-transform:uppercase; letter-spacing:.05em; }
+  .lp-mode { display:inline-block; padding:.15rem .45rem; border-radius:999px; background:#eef2ff; color:#3730a3; font-size:.75rem; font-weight:600; }
+  .lp-empty { color:var(--muted); margin:0; }
+</style>
+
+<div class="lp-section">
+  <h1>Lifecycle policy</h1>
+  <p class="muted">Read-only deployment policy used by automatic device lifecycle evaluation. New or unclassified types default to no lifecycle evidence.</p>
+  <p class="muted">Direct contact wins an exact timestamp tie. Recognized reported state is used when the policy allows it; unknown state opens a data-quality finding and does not change lifecycle.</p>
+</div>
+
+<div class="lp-section">
+  <h2>Evidence modes</h2>
+  <table class="lp-table">
+    <thead><tr><th>Entity type</th><th>Lifecycle evidence</th><th>Identity signal</th><th>Description</th></tr></thead>
+    <tbody>
+      {% for policy in policies %}
+      <tr>
+        <td><code>{{ policy.name }}</code></td>
+        <td><span class="lp-mode">{{ policy.lifecycle_evidence_mode }}</span></td>
+        <td>{% if policy.is_identity_signal %}Yes{% else %}No{% endif %}</td>
+        <td>{{ policy.description }}</td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="4" class="lp-empty">No lifecycle policy records are available.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="lp-section">
+  <h2>Recent automatic transitions</h2>
+  <table class="lp-table">
+    <thead><tr><th>When</th><th>Device ID</th><th>From</th><th>To</th><th>Evidence</th><th>Policy</th></tr></thead>
+    <tbody>
+      {% for transition in transitions %}
+      <tr>
+        <td>{{ transition.occurred_at|date:"Y-m-d H:i:s T" }}</td>
+        <td><code>{{ transition.entity_id }}</code></td>
+        <td>{{ transition.before_state.lifecycle_status }}</td>
+        <td>{{ transition.after_state.lifecycle_status }}</td>
+        <td>{{ transition.after_state.evidence_kind }} at {{ transition.after_state.evidence_at }}</td>
+        <td>{{ transition.after_state.policy_version }}</td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="6" class="lp-empty">No automatic lifecycle transitions have been recorded.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

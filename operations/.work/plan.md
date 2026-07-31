@@ -1,173 +1,284 @@
-# Operations UI Redesign — All 4 Tracks
+# Active Operations implementation plan
 
-**Status:** COMPLETE — all 4 tracks done, awaiting visual smoke pass + release approval
-**Goal:** Consistent, operator-friendly UI across all sections — no jargon, uniform layout primitives, functional nav, durable enough to not need a redo
-**Scope:** Templates + context_processors.py only. No model changes, no URL changes, no view logic changes.
+Track: **Corrective Track A — lifecycle evidence and immutable audit**
 
----
+**Status:** INERT-RELEASE REREVIEW PASSED — the user accepted the scoped
+lifecycle-status automation pause. Awaiting separate local commit approval. Do
+not execute migrations or make production, push, or deployment changes.
 
-## Track 1 — CSS primitives + tile/font uniformity
+## Goal
 
-**Goal:** Every stat tile, table, and filter bar in every section uses the same base class. One spec for numbers.
+Make lifecycle selection use explicit, fail-closed registry policy and the
+newest qualified evidence. Preserve the deployed automatic three-state model;
+keep `retired` operator-only. Record each automatic transition atomically in
+the generic audit stream and expose policy/status read-only under **Admin →
+System**.
 
-### Tile unified spec
+## Scope
 
-Current problem — sizes used across the codebase:
-- `.sw-tile .sw-value`: 1.6rem/700 (software overview)
-- `.patch-status-card .value`: 1.45rem/700 (patching)
-- `.tc-tile .value`, `.ur-tile .value`: 1.35rem/600
-- `.sw-week-item .v`: 1.25rem/700
-- base.html `.tile-value`: 1.6rem/**600** — fix to 700
+- Add `lifecycle_evidence_mode` to the existing registry objects, model them in
+  Django state, seed the approved policy, and restrict registry writes.
+- Implement deterministic direct-contact and reported-state lifecycle evidence
+  selection in the ingest evaluator.
+- Add the unknown-lifecycle-state data-quality finding path.
+- Harden `operations.audit_log` for append-only runtime access and atomic
+  evaluator audit insertion.
+- Add the bounded, read-only Admin → System policy/status and lifecycle-audit
+  surface using the existing admin shell.
+- Add focused unit and PostgreSQL integration tests where the documented
+environment supports them.
 
-Canonical spec (all in base.html):
-- `.tile-grid`: repeat(auto-fill, minmax(180px,1fr)), gap 0.65rem
-- `.tile`: surface bg, border, radius 6px, padding 0.85rem 1rem, block, transition
-- `.tile:hover`: border-color accent
-- `.tile-good/.tile-warn/.tile-alert`: left-border 3px (green/orange/red)
-- `.tile-label`: 0.72rem, 700, uppercase, letter-spacing 0.05em, var(--muted)
-- `.tile-value`: 1.6rem, 700, #1a1a2e, line-height 1.1, margin-top 0.2rem
-- `.tile-note`: 0.75rem, var(--muted), margin-top 0.2rem
-- `.tile-value.alert`: color #b45309 (amber for "has open items")
+Out of scope: executing migrations, production queries/changes, broad Admin
+navigation work, generic entity redesign, commits, pushes, deployment, and
+release cutover/rollback.
 
-### Migration map
+## Decisions
 
-| Template | Remove classes | Replace with |
-|---|---|---|
-| base.html | fix `.tile-value` weight 600→700; add `.tile-note`, `.tile-good/warn/alert` | — |
-| software_page.html | `.sw-numbers`, `.sw-tile`, `.sw-label`, `.sw-value`, `.sw-sub`; `.sw-week-item .k/.v/.sub` | `.tile-grid`, `.tile`, `.tile-label`, `.tile-value`, `.tile-note` |
-| patching_queue.html | `.patch-status-grid`, `.patch-status-card`, `.label`, `.value`, `.sub`, `.good/.warn/.alert` | `.tile-grid`, `.tile.*` unified |
-| software_tech_checklist.html | `.tc-tiles`, `.tc-tile` + local label/value | `.tile-grid`, `.tile` |
-| software_user_risk.html | `.ur-tiles`, `.ur-tile` + local label/value | `.tile-grid`, `.tile` |
-| devices_page.html | `.dv-tile`, `.dv-label`, `.dv-value`, `.dv-sub` | `.tile.*` unified |
-| patch_trends.html | `.pt-tiles`, `.pt-tile` | `.tile-grid`, `.tile` |
-| patch_evidence.html | `.pe-status-tiles`, `.pe-tile` | `.tile-grid`, `.tile` |
-| coverage.html | `.cov-tiles`, `.cov-tile`, `.tl`, `.tv`, `.ts` | `.tile-grid`, `.tile` |
-| findings_queue.html | `.tile-row`, `.sev-tile`, `.sev-label`, `.sev-count` | `.tile-grid`, `.tile` |
+- `lifecycle_evidence_mode` is the sole lifecycle capability: `none`,
+  `direct_contact`, `reported_state`, `direct_then_reported_state`; database
+  default `none`.
+- Newest qualified evidence wins. Direct contact wins an exact timestamp tie.
+  Recognized powered-off, suspended, and offline states are negative evidence;
+  recognized powered-on and online states are positive evidence. Unknown state
+  yields a finding and no transition.
+- Initial modes: agents use direct contact; `vm.host` uses direct then
+  reported state; `vm.guest`, `network.device`, and `monitor.target` use
+  reported state; all others default to none.
+- `audit_log` is the permanent generic audit landing; runtime roles are
+  append-only and the evaluator is insert-only. The future generic entity
+  anchor extends the event rather than moving lifecycle events.
+- The Track A UI is read-only under **Admin → System** and must reuse shared
+  navigation and permissions. Larger Admin UI consolidation remains deferred in
+  `operations/.work/backlog.md`.
 
-### Tables
+## Affected files
 
-base.html `.ops-table` is the canonical class. Migrate:
-- `software_page.html` `.sw-table` → `.ops-table`
-- `patching_queue.html` `.patch-posture-table` → `.ops-table`
-- `patch_activity.html` `.pa-table` → `.ops-table`
-- `patch_trends.html` `.pt-table` → `.ops-table`
-- `patch_evidence.html` `.pe-table` → `.ops-table`
-- `_sw_style.html` `.sw-table` → `.ops-table` (affects products/publishers/decisions/log)
+- `operations/apps/core/models.py` and a new migration after `0092`.
+- `ingest/evaluator.py` and focused tests under `ingest/tests/`.
+- Operations views, URLs, templates, admin navigation, and tests as required
+  for the bounded read-only surface.
+- This plan and root `.work/plan.md` coordination checkpoint.
 
-### Filter bars
+## Steps
 
-base.html `.filterbar` is the canonical class. Migrate:
-- `_sw_style.html` `.sw-filterbar` → remove; templates use `.filterbar`
+1. **Complete:** inspected the deployed-model/migration, evaluator, finding,
+   audit, and Admin shell implementation; reconciled the design with current
+   code.
+2. **Complete:** created migration `0093`, Django registry model state,
+   evaluator/audit/finding behavior, and focused tests.
+3. **Complete:** added the read-only Admin → System lifecycle policy/status
+   and transition-audit surface with tenant context set inside the request
+   transaction.
+4. **Complete:** Python compilation, Django checks,
+   migration-state check, focused tests, targeted Ruff/format checks,
+   migration-SQL review, and `git diff --check` passed. With explicit user
+   approval, the isolated PostgreSQL 16 container test passed, proving registry
+   grants, audit RLS/append-only access, and lifecycle-update/audit atomicity.
+5. **Complete:** implementation review found a fail-closed null-power-state
+   defect, lifecycle-finding deduplication ambiguity, Admin authorization and
+   audit-actionability gaps, incomplete decision-matrix coverage, and stale
+   migration documentation.
+6. **Complete:** user-approved local correction pass preserved raw power-field
+   presence, deduplicated lifecycle findings across active operator statuses,
+   used the shared admin permission and Device ID, expanded tests, and
+   corrected migration documentation.
+7. **Complete:** rereview passed after 12 lifecycle unit tests, the disposable
+   PostgreSQL test, 3 Django lifecycle permission/template tests, Django
+   checks, migration-state check, targeted Ruff/format checks, and diff check.
+8. **Complete:** authorized aggregate-only production preflight returned 343
+   projected transitions, 99 unknown reported-evidence rows, 0 equal-time
+   conflicts, and 20 eligible devices without qualified evidence; no external
+   state changed.
+9. **Complete:** user approved the narrow local correction replacing the
+   evaluator's `o.id` tie-break with `o.observation_id` and aligning the
+   disposable PostgreSQL fixture. Python compilation, targeted Ruff, 12
+   lifecycle unit tests, the disposable PostgreSQL test, and diff check passed.
+10. **Complete:** the host owner provided a private Operations backup location;
+    the corrected exported-snapshot measurement and restricted custom-format
+    backup then completed. The exact projected transition set totals 343 across
+    seven categories: 38 active→offline-aging direct, 254 active→offline-aging
+    reported, 47 active→pending-cleanup direct, 1 offline-aging→active direct,
+    1 offline-aging→pending-cleanup direct, 1 pending-cleanup→active reported,
+    and 1 pending-cleanup→offline-aging reported. No conflict devices; 18
+    eligible devices lack qualified evidence. A follow-up evaluator-equivalent
+    live aggregate reconciled unknown states to 99 rows across 99 devices, all
+    present-null `vm.host` power fields; the temporary 4,884 result was a query
+    defect. No broad service pause was used.
+11. **Complete review finding:** independent readiness review found that
+    `0093` immediately seeds active lifecycle modes while the same release ships
+    the automatically scheduled evaluator. With no lifecycle-only pause, the
+    migration and activation gates cannot be separated. Recommended correction:
+    leave all modes at default `none` in `0093` and reserve policy seeding for a
+    later activation migration/release.
+12. **Complete:** user-approved local correction removed policy seeding from
+    `0093`; the integration test now asserts the safe `none` state before its
+    isolated test-only activation. The later activation migration is recorded
+    in the Operations backlog and prohibited from the schema-landing release.
+    All focused validation passed.
+13. **Complete with approval condition:** rereview found no hidden production
+    activation and reconfirmed packaging and validation. Deploying the new
+    evaluator with all modes `none` pauses only lifecycle-status automation;
+    existing statuses and unrelated ingest/evaluator work remain unchanged.
+    Explicit acceptance of that scoped pause is required before the commit
+    gate.
+14. **Complete:** the user accepted the scoped pause. Prepare, but do not yet
+    create, one local Track A schema-landing commit; preserve unrelated dirty
+    documentation, decision records, probes, and worktree changes.
 
----
+## Validation plan
 
-## Track 2 — Terminology pass
-
-| Find (exact) | Replace with | File(s) |
-|---|---|---|
-| "Whitelist suggestions" | "Allow-list candidates" | software_page.html |
-| "Unclassified" (KPI tile label) | "Not categorized" | software_page.html |
-| `lastLoggedInUser` | "last logged-in user" | software_user_risk.html |
-| "e.g. suspicious_name" | "e.g. suspicious name" | software_tech_checklist.html, software_user_risk.html |
-| "User risk" (page title h1) | "User exposure" | software_user_risk.html |
-| "Per-user rollup of software checklist items on the device that user last logged into. Uses Ninja's `lastLoggedInUser` (latest per device); a user who logs into multiple devices is aggregated across all of them." | "Software items flagged on the last device each user logged into. Users who use multiple devices are shown across all of them." | software_user_risk.html |
-| patch_trends: "Per-day install / failure volumes from ninja_patches.patch_facts" | "Daily install and failure counts from Ninja patch data." | patch_trends.html |
-| patch_evidence: "Replaces the legacy patching CSV report and the Metabase Patch Evidence dashboard" | remove sentence | patch_evidence.html |
-| coverage page h1 "Compliance" | "Coverage" | coverage.html |
-| sources: "Ingest status per source platform" | "Connection status by data source" | sources.html |
-| sources: "stale source" chip label | "Stale" | sources.html |
-| patch activity: "Recent patch install outcomes collected from Ninja. Each row retains Ninja's event time, collection time, original evidence payload. Newest first, capped at 500 rows per query." | "Recent patch install results from Ninja, newest first." | patch_activity.html |
-| "Cleanup by device" (wf-card) | "Device cleanup queue" | software_page.html |
-| "User exposure" wf-card desc "who is exposed to risky software — grouped by last-logged-in user" | "Risky software grouped by the user who last logged in" | software_page.html |
-| software_tech_checklist desc paragraph | "Per-device software cleanup queue. Combines classifier findings with operator block/review decisions — the list a technician works through." | software_tech_checklist.html |
-
----
-
-## Track 3 — Nav overhaul
-
-### context_processors.py — add `active_section`
-
-```python
-url_name = getattr(getattr(request, 'resolver_match', None), 'url_name', '') or ''
-if url_name == 'home':
-    section = 'home'
-elif any(x in url_name for x in ('software',)):
-    section = 'software'
-elif any(x in url_name for x in ('patch',)):
-    section = 'patching'
-elif url_name in ('devices_page', 'device_detail', 'device_merge', 'org_devices'):
-    section = 'devices'
-elif 'finding' in url_name:
-    section = 'issues'
-elif 'org' in url_name or 'client' in url_name:
-    section = 'clients'
-else:
-    section = ''
-ctx['active_section'] = section
-```
-
-Note: admin pages set `admin_group` in view context; treat `admin_group` truthiness as "admin section" in base.html (already working).
-
-### base.html primary nav — fix active states
-
-Replace fragile `request.resolver_match.url_name == 'x'` checks with `active_section`.
-
-### base.html Row 3 — section sub-nav
-
-Add elif branches:
-- `active_section == 'software'` (and no `current_client`, no `admin_group`): show software sub-tabs inline
-- `active_section == 'patching'` (and no `current_client`, no `admin_group`): show patching sub-tabs
-- Admin: extend existing `admin_group` branch to show sub-tabs for the active group inline
-
-**Software sub-tabs:** Overview | Products | Publishers | Cleanup | User exposure | Activity
-
-**Patching sub-tabs:** Summary | Evidence | Trends | Activity
-
-**Admin sub-tabs (per group):**
-- review: Clients · Merges · Software decisions
-- config: Alerts · Suppressions · Requirements · Classifier · Device status
-- integrations: Sources · Coverage · Ingest · Jobs
-
-### Templates to update
-
-- Remove `{% include "_software_tabs.html" %}` from all software templates
-- Remove inline Evidence/Trends/Activity links from patching_queue.html header
-- Remove `{% include "_admin_tabs.html" %}` from all 11 admin templates
-
----
-
-## Track 4 — Section layout
-
-### Patching
-
-- Replace mixed card-header + inline links with consistent `.page-header` div (h1 + muted description)
-- Remove inline style attrs from h2 elements; use `class="section-label"` pattern
-
-### Devices
-
-- Add proper page-header section
-- Unify tile grid
-
-### Software sub-pages (tech checklist, user risk)
-
-- `.tc-header` / `.ur-header` → convert to `.page-header` pattern matching rest of software section
-
-### Issues / Findings
-
-- Convert `.sev-tile` tiles to unified `.tile`
-
-### Home
-
-- Rationalize: keep bespoke layout for now (it is the most complex); clean up font sizes and ensure section labels are consistent
-
----
+- `python manage.py check`, `python manage.py makemigrations --check`, focused
+  pytest, Ruff, template/request checks, migration-plan review, and
+  `git diff --check`.
+- PostgreSQL integration tests prove registry grants, audit append-only access,
+  RLS, and atomic lifecycle-update/audit behavior when the required local stack
+  is available.
+- No external validation or migration execution without separate authorization.
 
 ## Checkpoint
 
-- [x] Track 1 — CSS primitives + tiles (base.html + all templates)
-- [x] Track 2 — Terminology
-- [x] Track 3 — Nav (context_processors + base.html + template include removal)
-- [x] Track 4 — Layout
-- [x] `python manage.py check` — 6 security warnings only, 0 errors
-- [ ] Template smoke pass
-- [ ] VERSION + CHANGELOG (when approved for release)
+Root plan measurements and the design decision record were verified against the
+working tree before implementation. Existing uncommitted changes include
+root/Operations documentation and `.work` probe files; they remain preserved.
+The prior completed Operations UI redesign plan was replaced as required for
+this new nontrivial Operations task. Local Track A edits are limited to the
+registry model/migration, evaluator, focused tests, Admin → System lifecycle
+surface, and these plans. No migration, database, production, commit, push, or
+deployment action occurred.
+
+The 2026-07-31 approval review reverified that checkpoint against current Git
+status and files. It demonstrated that a present null VM `power_state` can be
+coerced by the existing presence projection to `reported_online = false` and
+then selected as offline evidence, contrary to the approved fail-closed rule.
+It also confirmed that lifecycle finding upserts can duplicate conditions in
+operator statuses outside `open`/`acknowledged`, the new endpoint lacks the
+shared admin permission and a Device reference in its transition rows, and the
+seven tests do not cover the complete approved decision/permission matrix.
+Migration `0092` also retains a stale comment tying lifecycle to
+`is_identity_signal`. Review changed only the root and Operations plan
+checkpoints; no implementation, migration, database, external, production,
+commit, push, or deployment action occurred.
+
+The user then approved a local-only correction pass. It preserves the approved
+safe semantics: a present null/unrecognized power field is unknown, never a
+legacy offline projection; active lifecycle findings refresh without changing
+an operator's `open`, `acknowledged`, `investigating`, or `suppressed` status;
+and the read-only audit surface uses the existing shared admin permission and
+shows the audited Device ID. Resolved and `wontfix` findings remain historical,
+so a later recurrence opens a new row. No migration execution, external
+validation, production change, commit, push, or deployment is authorized.
+
+The corrected implementation and rereview passed on 2026-07-31. The
+PostgreSQL test specifically proves that a present null power field opens a
+finding without transitioning lifecycle, that investigating/suppressed
+lifecycle findings refresh without duplication and resolve on recognized
+evidence, that retired devices remain unchanged, and that registry/audit
+permissions, RLS, and lifecycle-update/audit atomicity hold. The 12 evaluator
+unit tests, 3 Django lifecycle permission/template tests, `manage.py check`,
+`makemigrations --check`, targeted Ruff/format checks, and `git diff --check`
+also passed. Full Ruff on legacy Operations views remains pre-existing outside
+this scope. No migration, external validation, production change, commit,
+push, or deployment occurred.
+
+The authorized aggregate-only production preflight then confirmed remote
+Operations, ingest, and Postgres health and returned only aggregate lifecycle
+results. It also exposed a production-schema incompatibility: the evaluator's
+lateral raw-observation tie-break orders by `o.id`, but the deployed
+`entity_observation_current` key is `o.observation_id`. The first query failed
+before returning data; the corrected read-only projection completed and showed
+343 total projected transitions, 99 unknown reported-evidence rows, 0
+equal-time conflicts, and 20 eligible devices without qualified evidence. No
+pause, backup, migration, evaluator run, production write, commit, push, or
+deployment occurred. The evaluator query and disposable fixture must be
+corrected locally and rereviewed before any migration gate.
+
+The user approved that narrow local-only correction. It changes no behavior
+beyond matching the deployed observation primary-key name and changes no
+migration, production data, or external state.
+
+The correction and focused rereview passed on 2026-07-31. The evaluator now
+orders by the deployed `observation_id` key, and the disposable PostgreSQL
+fixture uses that same key, so the integration test exercises the production
+query shape. Python compilation, targeted Ruff, all 12 lifecycle unit tests,
+the disposable PostgreSQL test, and `git diff --check` passed. No migration,
+external action, production change, commit, push, or deployment occurred.
+
+The user then authorized a lifecycle-evaluation-only pause before a fresh
+aggregate recapture. Read-only external inspection confirmed that the healthy
+ingest container runs `python -m ingest.main` under an `unless-stopped` restart
+policy and logged one platform-evaluator completion during the preceding six
+hours. The deployed scheduler exposes the evaluator as an in-process job and a
+manual run endpoint only; it has no lifecycle-only pause switch, scheduler
+control endpoint, or documented external procedure. The only apparent runtime
+control would pause or stop the entire ingest service, which also affects
+unrelated cycles and is not covered by this authorization. No pause, recapture,
+backup, migration, evaluator activation, production data change, commit, push,
+or deployment occurred.
+
+The user accepted the cleaner cutover approach: do not pause the whole ingest
+service. When separately authorized, capture the final aggregate measurement
+and restricted pre-change backup in one short, transactionally consistent
+window. This preserves a defensible before-state without interrupting unrelated
+ingest cycles.
+
+The subsequent authorized consistent-window attempt made no schema or data
+change and retained no backup. After two local query/marker failures stopped
+before the measurement completed, the corrected read-only exported-snapshot
+measurement completed but the protected dump failed before creation: the
+root-owned `/amr-ch-01_data/ninja-dashboard/backups` directory is not writable
+by the approved SSH account, and noninteractive sudo is unavailable. The
+temporary artifact was removed, the snapshot closed, and no aggregate output
+was returned. Host access is now the sole blocker for this prechange step.
+
+The host owner provided the private Operations backup location, and the
+corrected repeat completed a restricted custom-format backup and exact
+aggregate-only projection under one exported read-only snapshot. Two protected
+backup copies are retained because the first accompanied a query duplication
+defect; the later copy is the authoritative pair. The transition categories
+total 343 as recorded in Step 10. A follow-up evaluator-equivalent live query
+reconciled unknown states to 99 rows across 99 devices, all present-null
+`vm.host` power fields. The temporary 4,884 result was a projection-query
+defect, not a production data change. No migration, evaluator activation,
+production data change, commit, push, or deployment occurred.
+
+Independent migration-readiness review reverified the dirty working tree,
+current files, prerequisite migration, and backup. Fifteen focused unit/UI
+tests, the disposable PostgreSQL test, Django checks, migration-state check,
+targeted Ruff/format checks, Python compilation, and diff check passed.
+Production is at `0092`; `operations_migrate` owns `entity_types` and
+`audit_log`; the authoritative backup checksum matches and its restore catalog
+parses. The release is nevertheless not ready for approval because `0093`
+immediately activates policy rows and the same deployed ingest image schedules
+the evaluator automatically. No lifecycle-only pause exists, so the planned
+migration and activation gates are coupled. No implementation or external
+state changed during review.
+
+The user approved the local-only cutover correction. Migration `0093` now lands
+the lifecycle capability, constraints, finding types, and grants without
+activating any entity type. The disposable PostgreSQL fixture first proves the
+post-migration `none` state, then applies policy only inside the isolated test.
+Fifteen focused unit/UI tests, the PostgreSQL integration test, Django checks,
+migration-state check, targeted Ruff/format checks, Python compilation, and
+diff check passed. Activation is recorded in the Operations backlog for a later
+separately approved migration/release. No external or production state changed.
+
+Fresh rereview confirmed that policy activation appears only in the isolated
+PostgreSQL test fixture, all runtime files are packaged, and 15 focused unit/UI
+tests, the PostgreSQL integration test, Django checks, migration-state check,
+targeted Ruff/format checks, and diff check pass. It also made the remaining
+operational consequence explicit: because the new evaluator replaces the
+legacy lifecycle sync, all policy modes at `none` pause automatic lifecycle
+status updates until the activation release. This does not pause collection,
+coverage, or other evaluator work and does not modify existing statuses. No
+implementation or external state changed during rereview.
+
+The user explicitly accepted that scoped pause. The next gate is a single local
+Track A schema-landing commit; unrelated dirty documentation, decision records,
+probes, and worktree changes remain excluded. No files were staged, committed,
+pushed, deployed, or migrated while preparing the gate.
+
+## Next action
+
+Obtain separate approval to create one local Track A schema-landing commit.
+Push/deployment, live migration verification, and policy activation/
+reconciliation remain later approval gates.

@@ -404,6 +404,10 @@
                 <a class="nav-link nav-context {% if admin_tab == 'jobs' %}active{% endif %}"
                    href="{% url 'admin_jobs' %}">Jobs</a>
                 {% endif %}
+                {% if admin_group == 'system' %}
+                <a class="nav-link nav-context {% if admin_tab == 'lifecycle' %}active{% endif %}"
+                   href="{% url 'lifecycle_policy_status' %}">Lifecycle policy</a>
+                {% endif %}
                 <div class="nav-fill"></div>
                 <a class="nav-link nav-context" href="{% url 'admin:index' %}">Django Admin ↗</a>
             </div>

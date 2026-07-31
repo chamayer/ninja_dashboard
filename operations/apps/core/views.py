@@ -23,6 +23,7 @@ from django.views.decorators.http import require_GET, require_POST
 
 from .client_workspace import build_client_directory, build_client_workspace
 from .csv_export import csv_response, wants_csv
+from .decorators import require_admin
 from .device_status import DEFAULTS as DEVICE_STATUS_DEFAULTS
 from .device_status import POLICY_NAME as DEVICE_STATUS_POLICY_NAME
 from .device_status import get_device_status_policy
@@ -41,6 +42,7 @@ from .models import (
     Device,
     DeviceOperatorDecision,
     DevicePatchingOverride,
+    EntityType,
     EvaluatorConfig,
     Finding,
     FindingCategory,
@@ -8177,6 +8179,36 @@ def device_status_config(request: HttpRequest) -> HttpResponse:
             "defaults": DEVICE_STATUS_DEFAULTS,
             "updated_at": row.updated_at,
             "updated_by": row.updated_by,
+        },
+    )
+
+
+@login_required
+@require_admin
+@require_GET
+def lifecycle_policy_status(request: HttpRequest) -> HttpResponse:
+    """Read-only lifecycle policy and transition audit under Admin → System."""
+    with transaction.atomic():
+        with connection.cursor() as cur:
+            cur.execute("SET LOCAL operations.tenant_id = 1")
+        policies = list(
+            EntityType.objects.order_by("name").values(
+                "name", "is_identity_signal", "lifecycle_evidence_mode", "description"
+            )
+        )
+        transitions = list(
+            AuditLog.objects.filter(tenant_id=1, action="lifecycle.transition")
+            .order_by("-occurred_at")
+            .values("entity_id", "occurred_at", "before_state", "after_state")[:100]
+        )
+    return render(
+        request,
+        "lifecycle_policy_status.html",
+        {
+            "admin_group": "system",
+            "admin_tab": "lifecycle",
+            "policies": policies,
+            "transitions": transitions,
         },
     )
 

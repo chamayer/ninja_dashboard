@@ -94,6 +94,7 @@ class Source(models.Model):
     id = models.SmallAutoField(primary_key=True)
     name = models.CharField(max_length=80, unique=True)
     kind = models.CharField(max_length=80)
+    entity_type = models.CharField(max_length=80, blank=True, default="")
     capabilities = models.JSONField(default=dict, blank=True)
 
     class Meta:
@@ -102,6 +103,42 @@ class Source(models.Model):
 
     def __str__(self) -> str:
         return self.name
+
+
+class EntityType(models.Model):
+    class LifecycleEvidenceMode(models.TextChoices):
+        NONE = "none", "None"
+        DIRECT_CONTACT = "direct_contact", "Direct contact"
+        REPORTED_STATE = "reported_state", "Reported state"
+        DIRECT_THEN_REPORTED_STATE = "direct_then_reported_state", "Direct then reported state"
+
+    name = models.CharField(max_length=80, primary_key=True)
+    is_identity_signal = models.BooleanField(default=False)
+    lifecycle_evidence_mode = models.CharField(
+        max_length=32,
+        choices=LifecycleEvidenceMode.choices,
+        default=LifecycleEvidenceMode.NONE,
+    )
+    description = models.TextField(blank=True, default="")
+
+    class Meta:
+        db_table = "entity_types"
+        ordering = ("name",)
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class PlatformAlias(models.Model):
+    alias = models.CharField(max_length=80, primary_key=True)
+    canonical = models.CharField(max_length=80)
+
+    class Meta:
+        db_table = "platform_aliases"
+        ordering = ("alias",)
+
+    def __str__(self) -> str:
+        return self.alias
 
 
 class Collector(models.Model):

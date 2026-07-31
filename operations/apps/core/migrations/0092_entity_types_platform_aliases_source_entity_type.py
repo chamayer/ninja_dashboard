@@ -9,9 +9,11 @@ missing any one meant the source collected nothing.
 
 * ``operations.entity_types`` — replaces the `IDENTITY_ENTITY_TYPES` frozenset.
   `is_identity_signal` decides whether an observation kind may create a Device,
-  write device_links, count as contact for lifecycle, and which collection
-  cadence it runs on. That is the most consequential rule in the platform and
-  it was a literal in a source file, changeable only by deploy.
+  write device_links, and participate in identity-driven collection behavior.
+  Lifecycle eligibility is separately controlled by
+  `lifecycle_evidence_mode` in migration 0093. That is the most consequential
+  rule in the platform and it was a literal in a source file, changeable only
+  by deploy.
 * ``operations.platform_aliases`` — replaces `normalize.PLATFORM_ALIASES`.
   Matches the existing `client_name_aliases` / `publisher_aliases` pattern.
   A missing alias meant the platform name failed to canonicalise, missed the
