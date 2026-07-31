@@ -270,6 +270,8 @@ duplicate lifecycle plumbing. See
 - Migration `0093_lifecycle_evidence_policy_and_audit` deliberately lands every
   `lifecycle_evidence_mode` at safe default `none`, so schema deployment cannot
   trigger automatic lifecycle transitions.
+- ADR-0011 is the authority for evidence selection, atomic audit, inert schema
+  landing, activation prerequisites, and the operator-only `retired` state.
 - A later, separately approved activation migration must seed the reviewed
   direct/reported modes for agents, `vm.host`, `vm.guest`, `network.device`,
   and `monitor.target`.

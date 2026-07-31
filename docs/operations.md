@@ -20,12 +20,28 @@ host values, credentials, tokens, and customer data remain outside Git.
 ## Deployment approval boundary
 
 Commit, push, redeploy, schema migration, data rebuild, destructive cleanup,
-restore, and rollback require explicit approval. Commit and push approvals are
-separate.
+restore, and rollback require explicit approval. Commit approval is separate
+from production push approval.
+
+The current GitOps path has one coupled production boundary:
+
+1. Pushing `origin` causes Portainer to rebuild/recreate the stack.
+2. Ingest startup applies pending `sql/migrations/` entries.
+3. Operations startup runs `python manage.py migrate --noinput` with the
+   migration role before switching to the runtime role.
+
+Pending migrations must therefore be reviewed, backed up as required, and
+explicitly included in the `origin` push approval. Do not approve or describe
+an `origin` push while deferring its automatic deployment or startup migrations
+to a later gate. A manual redeploy, manual migration rerun, data operation,
+rollback, or restore remains a separate approval boundary.
+
 Deployment commits must be pushed to both remotes: first `origin`
-(`chamayer/ninja_dashboard`) for GitOps, then `a-m-rose/ninja_dashboard` as
-the secondary mirror. Confirm and approve each push target rather than
-assuming one remote is sufficient.
+(`chamayer/ninja_dashboard`) under the coupled approval above, then
+`a-m-rose/ninja_dashboard` as the secondary mirror. Confirm and approve each
+push target rather than assuming one remote is sufficient. Read-only external
+post-deployment validation also requires authorization under the task's stated
+external-validation boundary.
 
 ## Pre-deployment checks
 
@@ -41,6 +57,8 @@ assuming one remote is sufficient.
 
 - `sql/migrations/` is applied by the ingest migration runner.
 - `operations/apps/*/migrations/` is applied through Django.
+- Both runners execute automatically during service startup after the GitOps
+  deployment; their pending migration sets are part of pre-push review.
 - A change spanning both systems must define dependency and deployment order.
 - PostgreSQL variable substitution inside procedural `DO` blocks requires a
   supported mechanism; do not assume ordinary `psql -v` interpolation works.

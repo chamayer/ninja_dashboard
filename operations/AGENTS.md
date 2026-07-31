@@ -33,7 +33,11 @@ Ninja Dashboard stack.
 ## Safety
 
 - Schema changes, data rebuilds, queue manipulation, RLS changes, credential
-  handling, deployment, commit, and push require explicit authorization.
+  handling, deployment, commit, and push require explicit authorization. In
+  the current GitOps path, an approved `origin` push triggers deployment and
+  the Operations entrypoint automatically applies pending Django migrations;
+  the push approval must explicitly include both effects. Manual migration or
+  redeploy remains separately authorized.
 - Never place live credentials or customer data in documentation, fixtures,
   tests, or local databases.
 - Treat ignored local databases and `.claude/settings.local.json` as

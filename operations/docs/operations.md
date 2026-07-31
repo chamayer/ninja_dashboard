@@ -27,6 +27,11 @@ The production entrypoint is responsible for the approved subset of:
 
 Bootstrap commands must not become privileged alternate ingest paths.
 
+Because this sequence always runs `migrate`, an `origin` push that triggers a
+Portainer rebuild also applies every pending Django migration before gunicorn
+starts. Pre-push approval must include the reviewed pending migration set and
+the automatic redeploy. A manual migration rerun remains separately approved.
+
 ## Health and validation
 
 After deployment:

@@ -18,8 +18,12 @@ dashboards plus the Django-based Operations application.
 - Treat a push as a production-affecting action. `origin`
   (`chamayer/ninja_dashboard`) is the deployment authority watched by
   Portainer; `a-m-rose/ninja_dashboard` is the required secondary mirror.
-  Commit, push, deployment, data rebuild, migration, and rollback actions
-  require explicit authorization.
+  An `origin` push automatically triggers a Portainer rebuild, and service
+  startup applies pending ingest and Django migrations. Approval to push
+  `origin` must therefore explicitly include that automatic redeploy and the
+  reviewed pending migrations; do not present them as later independent gates.
+  Manual redeploy, manual migration, data rebuild, rollback, and other
+  production changes still require their own explicit authorization.
 - Obtain separate approval for commit and push, keep commits to one logical
   change, push an approved deployment commit to `origin` before the secondary
   mirror, and report the short commit hash after both pushes.

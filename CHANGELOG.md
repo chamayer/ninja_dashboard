@@ -2,6 +2,37 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.98.6] — 2026-07-31 — Inert lifecycle-evidence policy and transition audit
+
+### Added
+
+- A deny-by-default `lifecycle_evidence_mode` registry capability with
+  distinct direct-contact, reported-state, and combined evidence modes.
+- Data-quality findings for unknown reported lifecycle state and equal-time
+  reported-state conflicts.
+- Atomic `lifecycle.transition` events in the generic append-only Operations
+  audit stream.
+- A tenant-scoped, read-only **Admin → System → Lifecycle policy** page showing
+  registry policy and audited transitions.
+
+### Changed
+
+- The evaluator now selects the newest qualified lifecycle evidence, preferring
+  direct agent contact only on an exact timestamp tie and treating recognized
+  VM power/reported state as valid lower-fidelity evidence.
+- Registry writes are deployment-controlled, and runtime audit roles are
+  append-only.
+
+### Operational note
+
+- Migration `0093` intentionally leaves every lifecycle evidence mode at
+  `none`. Automatic lifecycle-status updates are paused until a separately
+  approved activation release; collection, observations, coverage, and other
+  evaluator work continue, and existing lifecycle states are unchanged.
+- The `origin` push, Portainer redeploy, and startup migration are one coupled
+  production action in the current deployment model. Pending migrations must
+  be reviewed and included in the approval before pushing `origin`.
+
 ## [0.98.5] — 2026-07-27 — Software UX: clickable risk strip, action buttons, category columns, richer filters
 
 ### Changed

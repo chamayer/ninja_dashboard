@@ -2,9 +2,10 @@
 
 Track: **Corrective Track A — lifecycle evidence and immutable audit**
 
-**Status:** INERT-RELEASE REREVIEW PASSED — the user accepted the scoped
-lifecycle-status automation pause. Awaiting separate local commit approval. Do
-not execute migrations or make production, push, or deployment changes.
+**Status:** LOCAL RELEASE/DOCUMENTATION CORRECTION PREPARED — deployed inert
+schema release commit `434f24d` remains healthy, and local version `0.98.6`,
+changelog, ADR-0011, and deployment-gate documentation await review and
+separate commit approval. Policy activation remains unauthorized.
 
 ## Goal
 
@@ -277,8 +278,55 @@ Track A schema-landing commit; unrelated dirty documentation, decision records,
 probes, and worktree changes remain excluded. No files were staged, committed,
 pushed, deployed, or migrated while preparing the gate.
 
+The user separately approved the local commit. Commit `434f24d` was created
+after final staged validation (15 focused unit/UI tests, disposable PostgreSQL
+integration test, Django checks, migration-state check, and staged diff check).
+No push, deployment, migration, or production state change occurred. The root
+plan remains intentionally uncommitted because it contains unrelated mixed
+work; this committed Operations plan is the Track A continuity record.
+
+The separately approved `origin` push was confirmed on 2026-07-31: remote
+`origin/master` resolves to `434f24d`. No action was taken against the required
+`a-m-rose` secondary mirror. No deployment, migration, or production
+validation was requested or performed.
+
+The separately approved secondary-mirror push was then confirmed on
+2026-07-31: `a-m-rose/master` advanced from `0557afe` to `434f24d`, matching
+`origin/master`. No deployment observation, migration, or production validation
+was requested or performed.
+
+The user then authorized read-only deployment observation and live
+migration-readiness verification. Ingest and Operations had been rebuilt and
+were healthy; Postgres remained healthy and was not recreated. The running
+Track A migration/template artifacts matched the local commit byte-for-byte,
+and the evaluator matched after normalizing Windows CRLF to Linux LF. Django
+migration status showed both `0092` and `0093` applied.
+
+This revealed that the approval model in this plan did not match the deployed
+automation. An `origin` push triggers Portainer redeployment, and the Operations
+entrypoint applies Django migrations during startup; deployment and schema
+application therefore cannot be held as later independent gates after a push.
+The inert migration avoided policy activation, but `VERSION` is still `0.98.5`
+and `CHANGELOG.md` has no Track A entry despite the shipped runtime, schema, and
+Admin surface. No write, migration command, policy activation, or production-
+data change was performed during the read-only observation.
+
+The user approved a local-only release/documentation correction. The prepared
+correction advances the root release authority from `0.98.5` to `0.98.6`, adds
+the missing Track A changelog entry, records the durable decision in ADR-0011,
+and documents `origin` push, Portainer redeploy, and automatic startup migration
+as one production approval boundary. Version `0.98.6` is not deployed until a
+later separately approved commit and push. No implementation code, external
+state, production data, migration, commit, push, or deployment changed during
+this correction.
+Documentation validation passed: root `VERSION` matches the first changelog
+entry, ADR-0011 matches the deployed inert behavior, the active instructions
+and runbooks consistently describe the coupled GitOps boundary, scoped files
+have no trailing whitespace, and `git diff --check` reports no whitespace
+errors (line-ending warnings only).
+
 ## Next action
 
-Obtain separate approval to create one local Track A schema-landing commit.
-Push/deployment, live migration verification, and policy activation/
-reconciliation remain later approval gates.
+Review the local release/documentation correction and obtain separate commit
+approval. Finish aggregate inert-policy verification before the later,
+separately approved policy activation/reconciliation gate.
