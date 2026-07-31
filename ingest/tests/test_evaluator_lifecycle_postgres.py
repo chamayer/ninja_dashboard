@@ -34,8 +34,11 @@ def postgres_connection():
 
 
 def _prepare_track_a_schema(conn) -> None:
-    migration = importlib.import_module(
+    schema_migration = importlib.import_module(
         "operations.apps.core.migrations.0093_lifecycle_evidence_policy_and_audit"
+    )
+    activation_migration = importlib.import_module(
+        "operations.apps.core.migrations.0094_activate_lifecycle_evidence_policy"
     )
     with conn.cursor() as cur:
         cur.execute("CREATE SCHEMA operations")
@@ -138,10 +141,20 @@ def _prepare_track_a_schema(conn) -> None:
         cur.execute(
             "INSERT INTO operations.finding_categories VALUES (1, 'data_quality')"
         )
-        cur.execute(
-            "INSERT INTO operations.entity_types (name, is_identity_signal) VALUES (%s, true)",
-            ("vm.guest",),
-        )
+        cur.execute("""
+            INSERT INTO operations.entity_types (name, is_identity_signal) VALUES
+                ('agent.rmm', true),
+                ('agent.edr', true),
+                ('agent.remote_access', true),
+                ('vm.host', true),
+                ('vm.guest', true),
+                ('network.device', true),
+                ('monitor.target', true),
+                ('cmdb.asset', false),
+                ('software', false),
+                ('org', false),
+                ('unknown', false)
+        """)
         cur.execute(
             """
             GRANT USAGE ON SCHEMA operations TO operations_app, ninja_ingest;
@@ -150,20 +163,51 @@ def _prepare_track_a_schema(conn) -> None:
                    operations.audit_log TO operations_app;
             """
         )
-        cur.execute(migration.FORWARD_SQL)
+        cur.execute(schema_migration.FORWARD_SQL)
         cur.execute(
-            "SELECT lifecycle_evidence_mode FROM operations.entity_types WHERE name = 'vm.guest'"
+            "SELECT COUNT(*) FROM operations.entity_types WHERE lifecycle_evidence_mode = 'none'"
         )
-        assert cur.fetchone()[0] == "none"
-        # Test-only activation models the later, separately approved policy
-        # migration. Production migration 0093 deliberately remains inert.
+        assert cur.fetchone()[0] == 11
+        cur.execute(activation_migration.FORWARD_SQL)
         cur.execute(
             """
-            UPDATE operations.entity_types
-               SET lifecycle_evidence_mode = 'reported_state'
-             WHERE name = 'vm.guest'
+            SELECT name, lifecycle_evidence_mode
+              FROM operations.entity_types
+             ORDER BY name
             """
         )
+        assert dict(cur.fetchall()) == {
+            "agent.edr": "direct_contact",
+            "agent.remote_access": "direct_contact",
+            "agent.rmm": "direct_contact",
+            "cmdb.asset": "none",
+            "monitor.target": "reported_state",
+            "network.device": "reported_state",
+            "org": "none",
+            "software": "none",
+            "unknown": "none",
+            "vm.guest": "reported_state",
+            "vm.host": "direct_then_reported_state",
+        }
+        with pytest.raises(psycopg.errors.RaiseException):
+            cur.execute(activation_migration.FORWARD_SQL)
+
+        cur.execute(activation_migration.REVERSE_SQL)
+        cur.execute(
+            "SELECT COUNT(*) FROM operations.entity_types WHERE lifecycle_evidence_mode = 'none'"
+        )
+        assert cur.fetchone()[0] == 11
+
+        cur.execute("DELETE FROM operations.entity_types WHERE name = 'monitor.target'")
+        with pytest.raises(psycopg.errors.RaiseException):
+            cur.execute(activation_migration.FORWARD_SQL)
+        cur.execute(
+            """
+            INSERT INTO operations.entity_types (name, is_identity_signal)
+            VALUES ('monitor.target', true)
+            """
+        )
+        cur.execute(activation_migration.FORWARD_SQL)
         cur.execute("ALTER TABLE operations.audit_log ENABLE ROW LEVEL SECURITY")
         cur.execute("ALTER TABLE operations.audit_log FORCE ROW LEVEL SECURITY")
         cur.execute("""
@@ -262,7 +306,7 @@ def test_track_a_postgres_permissions_rls_and_atomic_audit(postgres_connection) 
     with postgres_connection.transaction(), postgres_connection.cursor() as cur:
         _set_app_role(cur)
         cur.execute("SELECT COUNT(*) FROM operations.entity_types")
-        assert cur.fetchone()[0] == 1
+        assert cur.fetchone()[0] == 11
         cur.execute("SELECT COUNT(*) FROM operations.platform_aliases")
         assert cur.fetchone()[0] == 0
         with pytest.raises(psycopg.errors.InsufficientPrivilege):

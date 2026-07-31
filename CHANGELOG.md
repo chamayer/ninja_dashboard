@@ -2,6 +2,25 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.98.7] — 2026-07-31 — Lifecycle-evidence policy activation
+
+### Changed
+
+- Activated direct-contact lifecycle evidence for RMM, EDR, and remote-access
+  agents; combined direct-contact/reported-state evidence for hypervisor hosts;
+  and reported-state evidence for VM guests, network devices, and monitor
+  targets.
+- Added a fail-closed activation migration that requires the reviewed entity
+  types and the previously deployed inert registry state before applying the
+  approved policy.
+
+### Operational note
+
+- Startup migration `0094` activates lifecycle automation. The first
+  controlled platform-evaluator run after deployment performs the approved
+  reconciliation and records every automatic transition in the append-only
+  audit stream.
+
 ## [0.98.6] — 2026-07-31 — Inert lifecycle-evidence policy and transition audit
 
 ### Added

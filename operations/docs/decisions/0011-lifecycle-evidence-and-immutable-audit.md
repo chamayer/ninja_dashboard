@@ -1,6 +1,6 @@
 # 0011 — Lifecycle evidence and immutable transition audit
 
-Status: Accepted; schema deployed inert, policy activation pending
+Status: Accepted; activation release prepared
 Date: 2026-07-31
 
 ## Context
@@ -83,13 +83,13 @@ The policy/status and transition history are read-only under
 **Admin → System → Lifecycle policy**, protected by the shared Admin
 authorization and tenant context.
 
-Migration `0093` deliberately lands only the schema, constraints, finding
-types, registry/audit grants, and read-only surface. Every entity type remains
-at `none`. A later, separately approved activation migration will seed active
-modes only after a fresh aggregate projection, backup verification, and an
-explicit activation/reconciliation plan. Until that activation, automatic
-lifecycle-status updates are paused; collection, observations, coverage, and
-other evaluator work continue, and existing lifecycle states are unchanged.
+Migration `0093` deliberately landed only the schema, constraints, finding
+types, registry/audit grants, and read-only surface, with every entity type at
+`none`. Activation migration `0094` requires that inert precondition and the
+presence of all seven reviewed types, then applies the approved modes. The
+activation is coupled to a fresh aggregate projection, verified restricted
+backup, and one controlled reconciliation run. Collection, observations,
+coverage, and other evaluator work remain unchanged.
 
 ## Rationale
 

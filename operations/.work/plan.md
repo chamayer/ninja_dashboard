@@ -2,10 +2,12 @@
 
 Track: **Corrective Track A — lifecycle evidence and immutable audit**
 
-**Status:** LOCAL RELEASE/DOCUMENTATION CORRECTION PREPARED — deployed inert
-schema release commit `434f24d` remains healthy, and local version `0.98.6`,
-changelog, ADR-0011, and deployment-gate documentation await review and
-separate commit approval. Policy activation remains unauthorized.
+**Status:** ACTIVATION RELEASE READY — migration `0094`, exact-policy
+integration coverage, and release `0.98.7` pass local review. A fresh
+aggregate-only projection and verified restricted backup are complete;
+production remains inert at `0.98.6`. The user authorized autonomous commit,
+GitOps deployment/startup migration, mirror push, reconciliation, repair, and
+final validation for the remainder of Track A.
 
 ## Goal
 
@@ -29,9 +31,10 @@ System**.
 - Add focused unit and PostgreSQL integration tests where the documented
 environment supports them.
 
-Out of scope: executing migrations, production queries/changes, broad Admin
-navigation work, generic entity redesign, commits, pushes, deployment, and
-release cutover/rollback.
+Out of scope: broad Admin navigation work, generic entity/ingest redesign,
+Agent Compliance, historical cleanup, and changes outside Track A. Activation
+is limited to the reviewed seven-type policy, one controlled reconciliation
+run, aggregate-only reporting, and repairs needed to complete that cutover.
 
 ## Decisions
 
@@ -54,7 +57,7 @@ release cutover/rollback.
 
 ## Affected files
 
-- `operations/apps/core/models.py` and a new migration after `0092`.
+- Activation migration `0094` after inert migration `0093`.
 - `ingest/evaluator.py` and focused tests under `ingest/tests/`.
 - Operations views, URLs, templates, admin navigation, and tests as required
   for the bounded read-only surface.
@@ -125,6 +128,18 @@ release cutover/rollback.
 14. **Complete:** the user accepted the scoped pause. Prepare, but do not yet
     create, one local Track A schema-landing commit; preserve unrelated dirty
     documentation, decision records, probes, and worktree changes.
+15. **Complete:** implemented activation migration `0094` with the exact
+    reviewed seven-type map and fail-closed checks; updated the disposable
+    PostgreSQL test, release authorities, ADR, and this plan.
+16. **Complete:** focused local validation and deliberate post-change
+    review, including migration forward/reverse behavior and request smoke
+    checks for HTTP 500 regressions, passed.
+17. **In progress:** the fresh aggregate-only production projection and
+    verified restricted backup are complete. Create one scoped activation
+    commit and push `origin` followed by `a-m-rose`.
+18. **Pending:** verify deployment/migration/health, run exactly one controlled
+    evaluator reconciliation, compare aggregate actual transitions with the
+    fresh projection, repair in scope if needed, and close Track A.
 
 ## Validation plan
 
@@ -325,8 +340,89 @@ and runbooks consistently describe the coupled GitOps boundary, scoped files
 have no trailing whitespace, and `git diff --check` reports no whitespace
 errors (line-ending warnings only).
 
+The user separately approved and local commit `18c8d05`
+(`docs(release): record Track A lifecycle release 0.98.6`) was created from
+only the nine scoped release/documentation paths. Mixed root-plan,
+generalization, audit-redesign, probe, and other unrelated changes remain
+outside the commit. No push or external/production action occurred.
+
+The authorized read-only inert-state verification then passed all immediately
+observable checks. All 11 entity types remain at mode `none` and 0 have an
+active mode; both lifecycle finding types exist; lifecycle transition audit
+count is 0; the mode column is non-null with default `none`; audit RLS is
+enabled; application registry access is SELECT-only; application audit access
+is SELECT/INSERT without UPDATE/DELETE; and ingest audit access is INSERT-only.
+Operations health returned 200, the unauthenticated lifecycle route returned
+the expected 302 authorization redirect, and ingest readiness returned 200.
+
+No `platform_evaluator` run had completed since the containers were recreated.
+The scheduler registered the four-hour job at approximately 18:17:29 UTC, so
+its first ordinary post-deployment run is due around 22:17 UTC. A manual trigger
+was not initially used because the full evaluator writes normal role/finding
+outputs outside the initial read-only authorization. Executed-inert verification
+therefore remained pending until broader approval.
+
+The user then explicitly authorized one full production platform-evaluator run
+and aggregate outcome measurement. A pre-run snapshot recorded 11/11 modes at
+`none`, lifecycle states of 4,473 `active`, 205 `offline_aging`, and 539
+`pending_cleanup`, no Track A lifecycle findings, 0 lifecycle transition audit
+events, and no prior post-deployment evaluator run. Exactly one manual run was
+scheduled; it completed successfully with 4,347 aggregate row effects across
+the evaluator's full role/finding pipeline and no failed run.
+
+The post-run Track A aggregates were identical: 11/11 modes remained `none`;
+the lifecycle distribution remained 4,473 / 205 / 539; Track A lifecycle
+findings remained absent; and lifecycle transition audit events remained 0.
+This closes executed-inert verification. The 4,347 row-effects count belongs
+to the evaluator's other normal pipelines and is not represented as 4,347
+distinct state changes. No customer-level data was returned.
+
+The user then separately approved pushing `18c8d05` to `origin`, explicitly
+including the automatic Portainer redeploy and startup migration runners; the
+reviewed pending migration set was empty. The push completed and
+`origin/master` resolves to `18c8d05`. The secondary mirror was not touched,
+and no post-deployment observation was performed under this approval.
+
+The user separately approved the required secondary-mirror push.
+`a-m-rose/master` advanced from `434f24d` to `18c8d05` and now matches
+`origin/master`. No post-deployment observation, migration command, policy
+activation, or production-data action was performed with the mirror push.
+
+The user then authorized autonomous completion of the remaining Track A
+activation, including implementation, commit, coupled `origin` GitOps deploy
+and startup migration, mirror push, one controlled evaluator reconciliation,
+aggregate validation, and in-scope repairs. Migration `0094` refuses to run
+unless all seven reviewed types exist and every registry row remains inert,
+then applies only the approved direct/reported modes. Its reverse restores the
+seven rows to `none`.
+
+Local review passed: 15 lifecycle unit/UI tests; the disposable PostgreSQL test
+covering the exact 11-row map, both activation guards, reverse behavior,
+permissions/RLS, transition/audit atomicity, findings, and retired-device
+preservation; Django system and migration-state checks; targeted Ruff/format
+and Python compilation; the Admin request smoke returning 200; and diff check.
+
+The fresh 2026-07-31 exported-snapshot checkpoint confirmed all three services
+healthy and production still at 11 `none` modes, with lifecycle counts 4,473
+`active`, 205 `offline_aging`, and 539 `pending_cleanup`; no Track A findings
+or transition audit events existed. The evaluator-equivalent aggregate
+projection returned 345 transitions: 39 `active → offline_aging` direct, 253
+reported; 47 `active → pending_cleanup` direct; 2 `offline_aging → active`
+direct; and one each for `offline_aging → pending_cleanup` direct,
+`pending_cleanup → active` direct, `pending_cleanup → active` reported, and
+`pending_cleanup → offline_aging` reported. It also returned 99 unknown rows
+across 99 devices, 0 conflicts, and 18 eligible devices without evidence.
+
+Restricted Operations-schema backup
+`track-a-activation-prechange-20260731T191242Z.dump` is retained outside the
+repository, is 128,814,793 bytes, has SHA-256
+`7dadc304620ef766f5372dfc9972d89e4fc6fb01df76212cabf5a120fdeb78dd`, and its
+`pg_restore --list` catalog parses. No migration or production data change has
+yet occurred.
+
 ## Next action
 
-Review the local release/documentation correction and obtain separate commit
-approval. Finish aggregate inert-policy verification before the later,
-separately approved policy activation/reconciliation gate.
+Create and review one scoped activation commit, push `origin` (triggering the
+authorized redeploy and startup migration) then `a-m-rose`, verify version,
+migration, policy, logs, endpoints/no-500 behavior, run exactly one controlled
+evaluator reconciliation, and compare aggregate outcomes with the projection.
