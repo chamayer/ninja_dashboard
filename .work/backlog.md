@@ -62,31 +62,29 @@ This is the proposed successor to the root-level open-work portion of
 - Trigger: a third collection cadence being needed, or any source requiring
   a schedule that differs from others of its capability.
 
-## `device_session_current` counts CMDB syncs as device contact
+## `device_session_current` counts CMDB syncs in `last_observed_at`
 
-- Reason deferred: real but currently unread. The matview aggregates
-  `MAX(last_contact_at)` / `MAX(last_observed_at)` from
-  `device_agent_presence_current` with no `entity_type` filter, so a CMDB
-  sync counts as contact with the machine. Measured 2026-07-30: **856
-  devices** have `last_contact_at` inflated by Hudu, plus 9 known only to
-  Hudu.
-- Why it is not urgent: the only application consumer
-  (`views.py:2304`) reads `online_sources`, which is unaffected — Hudu sets
-  no `is_online`, so it is filtered out of the online aggregation. Metabase
-  may read the affected columns; not audited.
-- Same defect class as the four fixed on 2026-07-30 (resolution, promotion,
-  lifecycle, duplicate-records): an exclusion guard where the platform now
-  has `operations.entity_types.is_identity_signal`.
-- Fix: recreate `operations.device_session_current` with the contact
-  aggregation joined to `operations.entity_types` and filtered to
-  `is_identity_signal`. `device_agent_presence_current` itself stays
-  unfiltered on purpose — it answers "which sources hold records on which
-  devices", which `source_health_current.device_count` needs.
-- Constraints: matview recreate, so it needs a migration and a refresh;
-  check `refresh_device_session_current()` still matches after the rewrite.
-- Trigger: anything starting to read `last_contact_at` from this matview, a
-  Metabase question depending on it, or the next matview migration in this
-  area.
+- Corrected measurement 2026-07-30: **31 devices**, of which 9 would become
+  null (known only to Hudu). An earlier note in this file said 856 — that was
+  measured with `COALESCE(last_contact_at, last_observed_at)`, which is the
+  *lifecycle* formula (already fixed in `_sync_lifecycle_status`), not what
+  this matview uses.
+- `last_contact_at` is **not** affected: CMDB rows set no `last_seen_at`, so
+  it is null for them and `max()` already ignores it. Verified: 0 devices
+  change.
+- No application code reads `last_observed_at` from this matview. The only
+  consumer (`views.py:2304`) reads `online_sources`, which is unaffected —
+  CMDB rows never set `reported_online`.
+- Deliberately not fixed: recreating a matview with 3 indexes and 4 grants in
+  production to correct 31 rows of an unread column is not worth the
+  deployment risk. A migration was written, validated, and discarded on that
+  basis.
+- Fix when touched: add `LEFT JOIN operations.entity_types` and filter the two
+  contact aggregates on `is_identity_signal`. Leave
+  `device_agent_presence_current` unfiltered — it answers "which sources hold
+  records on which devices", which `source_health_current.device_count` needs.
+- Trigger: any consumer starting to read `last_observed_at` from this matview,
+  a Metabase question depending on it, or the next migration in this area.
 
 ## Root backlog rules
 
