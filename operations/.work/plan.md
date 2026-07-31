@@ -1,428 +1,88 @@
 # Active Operations implementation plan
 
-Track: **Corrective Track A — lifecycle evidence and immutable audit**
+Track: **Resolver correctness — shared-serial finding subject UUID**
 
-**Status:** ACTIVATION RELEASE READY — migration `0094`, exact-policy
-integration coverage, and release `0.98.7` pass local review. A fresh
-aggregate-only projection and verified restricted backup are complete;
-production remains inert at `0.98.6`. The user authorized autonomous commit,
-GitOps deployment/startup migration, mirror push, reconciliation, repair, and
-final validation for the remainder of Track A.
+**Status:** IMPLEMENTATION AUTHORIZED — repair the verified, pre-existing
+resolver `DatatypeMismatch`, validate the complete resolver path, commit, push,
+deploy, and measure the live outcome. Track B identity migration/cutover and
+all unrelated work remain out of scope.
 
 ## Goal
 
-Make lifecycle selection use explicit, fail-closed registry policy and the
-newest qualified evidence. Preserve the deployed automatic three-state model;
-keep `retired` operator-only. Record each automatic transition atomically in
-the generic audit stream and expose policy/status read-only under **Admin →
-System**.
+Make the shared-serial data-quality finding use a UUID Device subject without
+changing matching, merge behavior, finding semantics, lifecycle policy, or
+source-observation identity.
 
 ## Scope
 
-- Add `lifecycle_evidence_mode` to the existing registry objects, model them in
-  Django state, seed the approved policy, and restrict registry writes.
-- Implement deterministic direct-contact and reported-state lifecycle evidence
-  selection in the ingest evaluator.
-- Add the unknown-lifecycle-state data-quality finding path.
-- Harden `operations.audit_log` for append-only runtime access and atomic
-  evaluator audit insertion.
-- Add the bounded, read-only Admin → System policy/status and lifecycle-audit
-  surface using the existing admin shell.
-- Add focused unit and PostgreSQL integration tests where the documented
-environment supports them.
+- Correct the shared-serial query in `ingest/identity/resolver.py`.
+- Add focused disposable-PostgreSQL coverage proving UUID insertion,
+  idempotent refresh, and retained JSON evidence shape.
+- Deploy through the approved GitOps path and run one controlled resolver pass
+  with aggregate-only verification.
 
-Out of scope: broad Admin navigation work, generic entity/ingest redesign,
-Agent Compliance, historical cleanup, and changes outside Track A. Activation
-is limited to the reviewed seven-type policy, one controlled reconciliation
-run, aggregate-only reporting, and repairs needed to complete that cutover.
+Out of scope: identity matching rules, duplicate-device remediation, source
+observation identity, schema migrations, Agent Compliance, and Track B.
 
-## Decisions
+## Decision
 
-- `lifecycle_evidence_mode` is the sole lifecycle capability: `none`,
-  `direct_contact`, `reported_state`, `direct_then_reported_state`; database
-  default `none`.
-- Newest qualified evidence wins. Direct contact wins an exact timestamp tie.
-  Recognized powered-off, suspended, and offline states are negative evidence;
-  recognized powered-on and online states are positive evidence. Unknown state
-  yields a finding and no transition.
-- Initial modes: agents use direct contact; `vm.host` uses direct then
-  reported state; `vm.guest`, `network.device`, and `monitor.target` use
-  reported state; all others default to none.
-- `audit_log` is the permanent generic audit landing; runtime roles are
-  append-only and the evaluator is insert-only. The future generic entity
-  anchor extends the event rather than moving lifecycle events.
-- The Track A UI is read-only under **Admin → System** and must reuse shared
-  navigation and permissions. Larger Admin UI consolidation remains deferred in
-  `operations/.work/backlog.md`.
+The primary finding subject remains the lexicographically first Device UUID,
+selected deterministically from a UUID array. The JSON evidence continues to
+contain text device IDs for compatibility. Shared serials remain a finding;
+they never merge Devices automatically.
 
 ## Affected files
 
-- Activation migration `0094` after inert migration `0093`.
-- `ingest/evaluator.py` and focused tests under `ingest/tests/`.
-- Operations views, URLs, templates, admin navigation, and tests as required
-  for the bounded read-only surface.
-- This plan and root `.work/plan.md` coordination checkpoint.
+- `ingest/identity/resolver.py`.
+- New focused PostgreSQL test under `ingest/tests/`.
+- Root `VERSION` and `CHANGELOG.md` for the approved maintenance release.
+- This plan and root coordination checkpoint.
 
 ## Steps
 
-1. **Complete:** inspected the deployed-model/migration, evaluator, finding,
-   audit, and Admin shell implementation; reconciled the design with current
-   code.
-2. **Complete:** created migration `0093`, Django registry model state,
-   evaluator/audit/finding behavior, and focused tests.
-3. **Complete:** added the read-only Admin → System lifecycle policy/status
-   and transition-audit surface with tenant context set inside the request
-   transaction.
-4. **Complete:** Python compilation, Django checks,
-   migration-state check, focused tests, targeted Ruff/format checks,
-   migration-SQL review, and `git diff --check` passed. With explicit user
-   approval, the isolated PostgreSQL 16 container test passed, proving registry
-   grants, audit RLS/append-only access, and lifecycle-update/audit atomicity.
-5. **Complete:** implementation review found a fail-closed null-power-state
-   defect, lifecycle-finding deduplication ambiguity, Admin authorization and
-   audit-actionability gaps, incomplete decision-matrix coverage, and stale
-   migration documentation.
-6. **Complete:** user-approved local correction pass preserved raw power-field
-   presence, deduplicated lifecycle findings across active operator statuses,
-   used the shared admin permission and Device ID, expanded tests, and
-   corrected migration documentation.
-7. **Complete:** rereview passed after 12 lifecycle unit tests, the disposable
-   PostgreSQL test, 3 Django lifecycle permission/template tests, Django
-   checks, migration-state check, targeted Ruff/format checks, and diff check.
-8. **Complete:** authorized aggregate-only production preflight returned 343
-   projected transitions, 99 unknown reported-evidence rows, 0 equal-time
-   conflicts, and 20 eligible devices without qualified evidence; no external
-   state changed.
-9. **Complete:** user approved the narrow local correction replacing the
-   evaluator's `o.id` tie-break with `o.observation_id` and aligning the
-   disposable PostgreSQL fixture. Python compilation, targeted Ruff, 12
-   lifecycle unit tests, the disposable PostgreSQL test, and diff check passed.
-10. **Complete:** the host owner provided a private Operations backup location;
-    the corrected exported-snapshot measurement and restricted custom-format
-    backup then completed. The exact projected transition set totals 343 across
-    seven categories: 38 active→offline-aging direct, 254 active→offline-aging
-    reported, 47 active→pending-cleanup direct, 1 offline-aging→active direct,
-    1 offline-aging→pending-cleanup direct, 1 pending-cleanup→active reported,
-    and 1 pending-cleanup→offline-aging reported. No conflict devices; 18
-    eligible devices lack qualified evidence. A follow-up evaluator-equivalent
-    live aggregate reconciled unknown states to 99 rows across 99 devices, all
-    present-null `vm.host` power fields; the temporary 4,884 result was a query
-    defect. No broad service pause was used.
-11. **Complete review finding:** independent readiness review found that
-    `0093` immediately seeds active lifecycle modes while the same release ships
-    the automatically scheduled evaluator. With no lifecycle-only pause, the
-    migration and activation gates cannot be separated. Recommended correction:
-    leave all modes at default `none` in `0093` and reserve policy seeding for a
-    later activation migration/release.
-12. **Complete:** user-approved local correction removed policy seeding from
-    `0093`; the integration test now asserts the safe `none` state before its
-    isolated test-only activation. The later activation migration is recorded
-    in the Operations backlog and prohibited from the schema-landing release.
-    All focused validation passed.
-13. **Complete with approval condition:** rereview found no hidden production
-    activation and reconfirmed packaging and validation. Deploying the new
-    evaluator with all modes `none` pauses only lifecycle-status automation;
-    existing statuses and unrelated ingest/evaluator work remain unchanged.
-    Explicit acceptance of that scoped pause is required before the commit
-    gate.
-14. **Complete:** the user accepted the scoped pause. Prepare, but do not yet
-    create, one local Track A schema-landing commit; preserve unrelated dirty
-    documentation, decision records, probes, and worktree changes.
-15. **Complete:** implemented activation migration `0094` with the exact
-    reviewed seven-type map and fail-closed checks; updated the disposable
-    PostgreSQL test, release authorities, ADR, and this plan.
-16. **Complete:** focused local validation and deliberate post-change
-    review, including migration forward/reverse behavior and request smoke
-    checks for HTTP 500 regressions, passed.
-17. **In progress:** the fresh aggregate-only production projection and
-    verified restricted backup are complete. Create one scoped activation
-    commit and push `origin` followed by `a-m-rose`.
-18. **Pending:** verify deployment/migration/health, run exactly one controlled
-    evaluator reconciliation, compare aggregate actual transitions with the
-    fresh projection, repair in scope if needed, and close Track A.
+1. **Complete:** reverified the pre-existing production `DatatypeMismatch` in
+   resolver line 1242, its code origin, architecture constraints, current
+   plans, dirty worktree, and both remotes at `94cfb2c`.
+2. **Complete:** corrected the UUID aggregation and added focused coverage.
+3. **Complete:** local lint, focused PostgreSQL integration, resolver-adjacent
+   tests, Python compilation, and diff check pass; the pre-existing
+   full-file formatter churn is documented and excluded.
+4. **In progress:** aggregate pre-deployment resolver/error/finding state is
+   captured; commit, push `origin` then `a-m-rose`, and verify the automatic
+   redeploy.
+5. **Pending:** run exactly one controlled resolver pass, verify no resolver
+   error, and report only aggregate outcome measurements.
 
 ## Validation plan
 
-- `python manage.py check`, `python manage.py makemigrations --check`, focused
-  pytest, Ruff, template/request checks, migration-plan review, and
-  `git diff --check`.
-- PostgreSQL integration tests prove registry grants, audit append-only access,
-  RLS, and atomic lifecycle-update/audit behavior when the required local stack
-  is available.
-- No external validation or migration execution without separate authorization.
+- Unit/static coverage plus a disposable PostgreSQL test that inserts a
+  two-device shared-serial group and proves `findings.subject_id` remains UUID.
+- Targeted ingest checks, Python compilation, Ruff, formatting, and diff check.
+- After deployment: container/version/endpoint health, no HTTP 500 signature,
+  resolver logs/run aggregates, and aggregate shared-serial finding counts.
 
 ## Checkpoint
 
-Root plan measurements and the design decision record were verified against the
-working tree before implementation. Existing uncommitted changes include
-root/Operations documentation and `.work` probe files; they remain preserved.
-The prior completed Operations UI redesign plan was replaced as required for
-this new nontrivial Operations task. Local Track A edits are limited to the
-registry model/migration, evaluator, focused tests, Admin → System lifecycle
-surface, and these plans. No migration, database, production, commit, push, or
-deployment action occurred.
-
-The 2026-07-31 approval review reverified that checkpoint against current Git
-status and files. It demonstrated that a present null VM `power_state` can be
-coerced by the existing presence projection to `reported_online = false` and
-then selected as offline evidence, contrary to the approved fail-closed rule.
-It also confirmed that lifecycle finding upserts can duplicate conditions in
-operator statuses outside `open`/`acknowledged`, the new endpoint lacks the
-shared admin permission and a Device reference in its transition rows, and the
-seven tests do not cover the complete approved decision/permission matrix.
-Migration `0092` also retains a stale comment tying lifecycle to
-`is_identity_signal`. Review changed only the root and Operations plan
-checkpoints; no implementation, migration, database, external, production,
-commit, push, or deployment action occurred.
-
-The user then approved a local-only correction pass. It preserves the approved
-safe semantics: a present null/unrecognized power field is unknown, never a
-legacy offline projection; active lifecycle findings refresh without changing
-an operator's `open`, `acknowledged`, `investigating`, or `suppressed` status;
-and the read-only audit surface uses the existing shared admin permission and
-shows the audited Device ID. Resolved and `wontfix` findings remain historical,
-so a later recurrence opens a new row. No migration execution, external
-validation, production change, commit, push, or deployment is authorized.
-
-The corrected implementation and rereview passed on 2026-07-31. The
-PostgreSQL test specifically proves that a present null power field opens a
-finding without transitioning lifecycle, that investigating/suppressed
-lifecycle findings refresh without duplication and resolve on recognized
-evidence, that retired devices remain unchanged, and that registry/audit
-permissions, RLS, and lifecycle-update/audit atomicity hold. The 12 evaluator
-unit tests, 3 Django lifecycle permission/template tests, `manage.py check`,
-`makemigrations --check`, targeted Ruff/format checks, and `git diff --check`
-also passed. Full Ruff on legacy Operations views remains pre-existing outside
-this scope. No migration, external validation, production change, commit,
-push, or deployment occurred.
-
-The authorized aggregate-only production preflight then confirmed remote
-Operations, ingest, and Postgres health and returned only aggregate lifecycle
-results. It also exposed a production-schema incompatibility: the evaluator's
-lateral raw-observation tie-break orders by `o.id`, but the deployed
-`entity_observation_current` key is `o.observation_id`. The first query failed
-before returning data; the corrected read-only projection completed and showed
-343 total projected transitions, 99 unknown reported-evidence rows, 0
-equal-time conflicts, and 20 eligible devices without qualified evidence. No
-pause, backup, migration, evaluator run, production write, commit, push, or
-deployment occurred. The evaluator query and disposable fixture must be
-corrected locally and rereviewed before any migration gate.
-
-The user approved that narrow local-only correction. It changes no behavior
-beyond matching the deployed observation primary-key name and changes no
-migration, production data, or external state.
-
-The correction and focused rereview passed on 2026-07-31. The evaluator now
-orders by the deployed `observation_id` key, and the disposable PostgreSQL
-fixture uses that same key, so the integration test exercises the production
-query shape. Python compilation, targeted Ruff, all 12 lifecycle unit tests,
-the disposable PostgreSQL test, and `git diff --check` passed. No migration,
-external action, production change, commit, push, or deployment occurred.
-
-The user then authorized a lifecycle-evaluation-only pause before a fresh
-aggregate recapture. Read-only external inspection confirmed that the healthy
-ingest container runs `python -m ingest.main` under an `unless-stopped` restart
-policy and logged one platform-evaluator completion during the preceding six
-hours. The deployed scheduler exposes the evaluator as an in-process job and a
-manual run endpoint only; it has no lifecycle-only pause switch, scheduler
-control endpoint, or documented external procedure. The only apparent runtime
-control would pause or stop the entire ingest service, which also affects
-unrelated cycles and is not covered by this authorization. No pause, recapture,
-backup, migration, evaluator activation, production data change, commit, push,
-or deployment occurred.
-
-The user accepted the cleaner cutover approach: do not pause the whole ingest
-service. When separately authorized, capture the final aggregate measurement
-and restricted pre-change backup in one short, transactionally consistent
-window. This preserves a defensible before-state without interrupting unrelated
-ingest cycles.
-
-The subsequent authorized consistent-window attempt made no schema or data
-change and retained no backup. After two local query/marker failures stopped
-before the measurement completed, the corrected read-only exported-snapshot
-measurement completed but the protected dump failed before creation: the
-root-owned `/amr-ch-01_data/ninja-dashboard/backups` directory is not writable
-by the approved SSH account, and noninteractive sudo is unavailable. The
-temporary artifact was removed, the snapshot closed, and no aggregate output
-was returned. Host access is now the sole blocker for this prechange step.
-
-The host owner provided the private Operations backup location, and the
-corrected repeat completed a restricted custom-format backup and exact
-aggregate-only projection under one exported read-only snapshot. Two protected
-backup copies are retained because the first accompanied a query duplication
-defect; the later copy is the authoritative pair. The transition categories
-total 343 as recorded in Step 10. A follow-up evaluator-equivalent live query
-reconciled unknown states to 99 rows across 99 devices, all present-null
-`vm.host` power fields. The temporary 4,884 result was a projection-query
-defect, not a production data change. No migration, evaluator activation,
-production data change, commit, push, or deployment occurred.
-
-Independent migration-readiness review reverified the dirty working tree,
-current files, prerequisite migration, and backup. Fifteen focused unit/UI
-tests, the disposable PostgreSQL test, Django checks, migration-state check,
-targeted Ruff/format checks, Python compilation, and diff check passed.
-Production is at `0092`; `operations_migrate` owns `entity_types` and
-`audit_log`; the authoritative backup checksum matches and its restore catalog
-parses. The release is nevertheless not ready for approval because `0093`
-immediately activates policy rows and the same deployed ingest image schedules
-the evaluator automatically. No lifecycle-only pause exists, so the planned
-migration and activation gates are coupled. No implementation or external
-state changed during review.
-
-The user approved the local-only cutover correction. Migration `0093` now lands
-the lifecycle capability, constraints, finding types, and grants without
-activating any entity type. The disposable PostgreSQL fixture first proves the
-post-migration `none` state, then applies policy only inside the isolated test.
-Fifteen focused unit/UI tests, the PostgreSQL integration test, Django checks,
-migration-state check, targeted Ruff/format checks, Python compilation, and
-diff check passed. Activation is recorded in the Operations backlog for a later
-separately approved migration/release. No external or production state changed.
-
-Fresh rereview confirmed that policy activation appears only in the isolated
-PostgreSQL test fixture, all runtime files are packaged, and 15 focused unit/UI
-tests, the PostgreSQL integration test, Django checks, migration-state check,
-targeted Ruff/format checks, and diff check pass. It also made the remaining
-operational consequence explicit: because the new evaluator replaces the
-legacy lifecycle sync, all policy modes at `none` pause automatic lifecycle
-status updates until the activation release. This does not pause collection,
-coverage, or other evaluator work and does not modify existing statuses. No
-implementation or external state changed during rereview.
-
-The user explicitly accepted that scoped pause. The next gate is a single local
-Track A schema-landing commit; unrelated dirty documentation, decision records,
-probes, and worktree changes remain excluded. No files were staged, committed,
-pushed, deployed, or migrated while preparing the gate.
-
-The user separately approved the local commit. Commit `434f24d` was created
-after final staged validation (15 focused unit/UI tests, disposable PostgreSQL
-integration test, Django checks, migration-state check, and staged diff check).
-No push, deployment, migration, or production state change occurred. The root
-plan remains intentionally uncommitted because it contains unrelated mixed
-work; this committed Operations plan is the Track A continuity record.
-
-The separately approved `origin` push was confirmed on 2026-07-31: remote
-`origin/master` resolves to `434f24d`. No action was taken against the required
-`a-m-rose` secondary mirror. No deployment, migration, or production
-validation was requested or performed.
-
-The separately approved secondary-mirror push was then confirmed on
-2026-07-31: `a-m-rose/master` advanced from `0557afe` to `434f24d`, matching
-`origin/master`. No deployment observation, migration, or production validation
-was requested or performed.
-
-The user then authorized read-only deployment observation and live
-migration-readiness verification. Ingest and Operations had been rebuilt and
-were healthy; Postgres remained healthy and was not recreated. The running
-Track A migration/template artifacts matched the local commit byte-for-byte,
-and the evaluator matched after normalizing Windows CRLF to Linux LF. Django
-migration status showed both `0092` and `0093` applied.
-
-This revealed that the approval model in this plan did not match the deployed
-automation. An `origin` push triggers Portainer redeployment, and the Operations
-entrypoint applies Django migrations during startup; deployment and schema
-application therefore cannot be held as later independent gates after a push.
-The inert migration avoided policy activation, but `VERSION` is still `0.98.5`
-and `CHANGELOG.md` has no Track A entry despite the shipped runtime, schema, and
-Admin surface. No write, migration command, policy activation, or production-
-data change was performed during the read-only observation.
-
-The user approved a local-only release/documentation correction. The prepared
-correction advances the root release authority from `0.98.5` to `0.98.6`, adds
-the missing Track A changelog entry, records the durable decision in ADR-0011,
-and documents `origin` push, Portainer redeploy, and automatic startup migration
-as one production approval boundary. Version `0.98.6` is not deployed until a
-later separately approved commit and push. No implementation code, external
-state, production data, migration, commit, push, or deployment changed during
-this correction.
-Documentation validation passed: root `VERSION` matches the first changelog
-entry, ADR-0011 matches the deployed inert behavior, the active instructions
-and runbooks consistently describe the coupled GitOps boundary, scoped files
-have no trailing whitespace, and `git diff --check` reports no whitespace
-errors (line-ending warnings only).
-
-The user separately approved and local commit `18c8d05`
-(`docs(release): record Track A lifecycle release 0.98.6`) was created from
-only the nine scoped release/documentation paths. Mixed root-plan,
-generalization, audit-redesign, probe, and other unrelated changes remain
-outside the commit. No push or external/production action occurred.
-
-The authorized read-only inert-state verification then passed all immediately
-observable checks. All 11 entity types remain at mode `none` and 0 have an
-active mode; both lifecycle finding types exist; lifecycle transition audit
-count is 0; the mode column is non-null with default `none`; audit RLS is
-enabled; application registry access is SELECT-only; application audit access
-is SELECT/INSERT without UPDATE/DELETE; and ingest audit access is INSERT-only.
-Operations health returned 200, the unauthenticated lifecycle route returned
-the expected 302 authorization redirect, and ingest readiness returned 200.
-
-No `platform_evaluator` run had completed since the containers were recreated.
-The scheduler registered the four-hour job at approximately 18:17:29 UTC, so
-its first ordinary post-deployment run is due around 22:17 UTC. A manual trigger
-was not initially used because the full evaluator writes normal role/finding
-outputs outside the initial read-only authorization. Executed-inert verification
-therefore remained pending until broader approval.
-
-The user then explicitly authorized one full production platform-evaluator run
-and aggregate outcome measurement. A pre-run snapshot recorded 11/11 modes at
-`none`, lifecycle states of 4,473 `active`, 205 `offline_aging`, and 539
-`pending_cleanup`, no Track A lifecycle findings, 0 lifecycle transition audit
-events, and no prior post-deployment evaluator run. Exactly one manual run was
-scheduled; it completed successfully with 4,347 aggregate row effects across
-the evaluator's full role/finding pipeline and no failed run.
-
-The post-run Track A aggregates were identical: 11/11 modes remained `none`;
-the lifecycle distribution remained 4,473 / 205 / 539; Track A lifecycle
-findings remained absent; and lifecycle transition audit events remained 0.
-This closes executed-inert verification. The 4,347 row-effects count belongs
-to the evaluator's other normal pipelines and is not represented as 4,347
-distinct state changes. No customer-level data was returned.
-
-The user then separately approved pushing `18c8d05` to `origin`, explicitly
-including the automatic Portainer redeploy and startup migration runners; the
-reviewed pending migration set was empty. The push completed and
-`origin/master` resolves to `18c8d05`. The secondary mirror was not touched,
-and no post-deployment observation was performed under this approval.
-
-The user separately approved the required secondary-mirror push.
-`a-m-rose/master` advanced from `434f24d` to `18c8d05` and now matches
-`origin/master`. No post-deployment observation, migration command, policy
-activation, or production-data action was performed with the mirror push.
-
-The user then authorized autonomous completion of the remaining Track A
-activation, including implementation, commit, coupled `origin` GitOps deploy
-and startup migration, mirror push, one controlled evaluator reconciliation,
-aggregate validation, and in-scope repairs. Migration `0094` refuses to run
-unless all seven reviewed types exist and every registry row remains inert,
-then applies only the approved direct/reported modes. Its reverse restores the
-seven rows to `none`.
-
-Local review passed: 15 lifecycle unit/UI tests; the disposable PostgreSQL test
-covering the exact 11-row map, both activation guards, reverse behavior,
-permissions/RLS, transition/audit atomicity, findings, and retired-device
-preservation; Django system and migration-state checks; targeted Ruff/format
-and Python compilation; the Admin request smoke returning 200; and diff check.
-
-The fresh 2026-07-31 exported-snapshot checkpoint confirmed all three services
-healthy and production still at 11 `none` modes, with lifecycle counts 4,473
-`active`, 205 `offline_aging`, and 539 `pending_cleanup`; no Track A findings
-or transition audit events existed. The evaluator-equivalent aggregate
-projection returned 345 transitions: 39 `active → offline_aging` direct, 253
-reported; 47 `active → pending_cleanup` direct; 2 `offline_aging → active`
-direct; and one each for `offline_aging → pending_cleanup` direct,
-`pending_cleanup → active` direct, `pending_cleanup → active` reported, and
-`pending_cleanup → offline_aging` reported. It also returned 99 unknown rows
-across 99 devices, 0 conflicts, and 18 eligible devices without evidence.
-
-Restricted Operations-schema backup
-`track-a-activation-prechange-20260731T191242Z.dump` is retained outside the
-repository, is 128,814,793 bytes, has SHA-256
-`7dadc304620ef766f5372dfc9972d89e4fc6fb01df76212cabf5a120fdeb78dd`, and its
-`pg_restore --list` catalog parses. No migration or production data change has
-yet occurred.
+Track A is complete at release `0.98.7` / commit `94cfb2c`; both remotes and
+the deployed stack match it. The resolver defect was introduced in `863c1e31`:
+the shared-serial subquery casts `d.id` to text before supplying
+`findings.subject_id`, which is UUID. The exception is caught around the full
+attribute-sync transaction, so that transaction rolls back while later ingest
+pipelines continue. No customer data was inspected or retained. Existing dirty
+root/Operations plans, backlog/design work, probes, and untracked ADR drafts
+remain preserved. The user authorized this repair through commit, push,
+automatic redeploy, and outcome measurement. The focused integration test
+passes against disposable PostgreSQL: it verifies a UUID `subject_id`, retained
+text `device_ids`, and idempotent refresh. Ruff lint and Python compilation
+pass. The repository's pre-existing resolver formatting is not Ruff-format-
+clean; applying its formatter would create unrelated full-file churn, so that
+formatter result is recorded as a limitation rather than included in this
+repair. Aggregate production baseline: version `0.98.7`, all relevant
+containers/health endpoints healthy, 7 caught attribute-sync
+`DatatypeMismatch` occurrences, no service 500 signatures, 1 shared-serial
+group spanning 2 Devices, and 0 corresponding findings.
 
 ## Next action
 
-Create and review one scoped activation commit, push `origin` (triggering the
-authorized redeploy and startup migration) then `a-m-rose`, verify version,
-migration, policy, logs, endpoints/no-500 behavior, run exactly one controlled
-evaluator reconciliation, and compare aggregate outcomes with the projection.
+Stage and review only the resolver repair files, then commit and push the
+approved `0.98.8` maintenance release.

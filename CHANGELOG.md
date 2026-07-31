@@ -2,6 +2,14 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.98.8] — 2026-07-31 — Shared-serial resolver correctness
+
+### Fixed
+
+- Preserved the typed Device UUID when the resolver creates or refreshes a
+  shared-serial finding, preventing the attribute-sync transaction from
+  rolling back on a UUID/text mismatch.
+
 ## [0.98.7] — 2026-07-31 — Lifecycle-evidence policy activation
 
 ### Changed

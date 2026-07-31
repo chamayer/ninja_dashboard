@@ -916,6 +916,62 @@ def _promote_entry_groups(
     return promoted
 
 
+def _upsert_shared_serial_findings(cur, finding_type_id: int) -> int:
+    """Upsert shared-serial findings with a UUID canonical subject.
+
+    JSON evidence retains text IDs for compatibility, but ``subject_id`` is a
+    typed Device UUID. Ordering by UUID text preserves the historical
+    deterministic subject selection without coercing the selected value to
+    text before insertion.
+    """
+    cur.execute(
+        """
+        INSERT INTO operations.findings (
+            id, version, tenant_id, finding_type_id, client_id,
+            subject_type, subject_id, subject_layer,
+            subject_layer_entity_id, finding_details, condition_key,
+            severity, confidence, status, first_seen_at, last_seen_at,
+            last_detected_at
+        )
+        SELECT
+            gen_random_uuid(), 1, sub.tenant_id, %s, sub.client_id,
+            'device', sub.first_device_id, '', NULL,
+            jsonb_build_object(
+                'serial',       sub.serial,
+                'device_count', sub.device_count,
+                'device_ids',   sub.device_ids,
+                'hostnames',    sub.hostnames
+            ),
+            'shared_serial:' || sub.client_id || ':' || sub.serial,
+            'high', 'confirmed', 'open',
+            NOW(), NOW(), NOW()
+        FROM (
+            SELECT
+                d.tenant_id, d.client_id,
+                d.canonical_serial AS serial,
+                COUNT(*) AS device_count,
+                (ARRAY_AGG(d.id ORDER BY d.id::text))[1] AS first_device_id,
+                ARRAY_AGG(d.id::text ORDER BY d.id::text) AS device_ids,
+                ARRAY_AGG(d.canonical_hostname ORDER BY d.id::text) AS hostnames
+            FROM operations.devices d
+            WHERE d.tenant_id = %s
+              AND d.deleted_at IS NULL
+              AND COALESCE(d.canonical_serial, '') <> ''
+            GROUP BY d.tenant_id, d.client_id, d.canonical_serial
+            HAVING COUNT(*) > 1
+        ) sub
+        ON CONFLICT (tenant_id, condition_key)
+        WHERE condition_key > '' AND status IN ('open', 'acknowledged')
+        DO UPDATE SET
+            last_seen_at = NOW(),
+            last_detected_at = NOW(),
+            finding_details = EXCLUDED.finding_details
+        """,
+        (finding_type_id, TENANT_ID),
+    )
+    return cur.rowcount
+
+
 def _sync_device_attributes(cur) -> None:
     """Recompute device_role / device_type / os_* from ALL linked observations.
 
@@ -1239,55 +1295,11 @@ def _sync_device_attributes(cur) -> None:
     # share the value. subject_id points to the alphabetically-first
     # device_id; finding_details lists all sharers.
     if ft_shared is not None:
-        cur.execute(
-            """
-            INSERT INTO operations.findings (
-                id, version, tenant_id, finding_type_id, client_id,
-                subject_type, subject_id, subject_layer,
-                subject_layer_entity_id, finding_details, condition_key,
-                severity, confidence, status, first_seen_at, last_seen_at,
-                last_detected_at
-            )
-            SELECT
-                gen_random_uuid(), 1, sub.tenant_id, %s, sub.client_id,
-                'device', sub.first_device_id, '', NULL,
-                jsonb_build_object(
-                    'serial',       sub.serial,
-                    'device_count', sub.device_count,
-                    'device_ids',   sub.device_ids,
-                    'hostnames',    sub.hostnames
-                ),
-                'shared_serial:' || sub.client_id || ':' || sub.serial,
-                'high', 'confirmed', 'open',
-                NOW(), NOW(), NOW()
-            FROM (
-                SELECT
-                    d.tenant_id, d.client_id,
-                    d.canonical_serial AS serial,
-                    COUNT(*) AS device_count,
-                    (ARRAY_AGG(d.id::text ORDER BY d.id::text))[1] AS first_device_id,
-                    ARRAY_AGG(d.id::text ORDER BY d.id::text) AS device_ids,
-                    ARRAY_AGG(d.canonical_hostname ORDER BY d.id::text) AS hostnames
-                FROM operations.devices d
-                WHERE d.tenant_id = %s
-                  AND d.deleted_at IS NULL
-                  AND COALESCE(d.canonical_serial, '') <> ''
-                GROUP BY d.tenant_id, d.client_id, d.canonical_serial
-                HAVING COUNT(*) > 1
-            ) sub
-            ON CONFLICT (tenant_id, condition_key)
-            WHERE condition_key > '' AND status IN ('open', 'acknowledged')
-            DO UPDATE SET
-                last_seen_at = NOW(),
-                last_detected_at = NOW(),
-                finding_details = EXCLUDED.finding_details
-            """,
-            (ft_shared, TENANT_ID),
-        )
-        if cur.rowcount:
+        shared_serial_count = _upsert_shared_serial_findings(cur, ft_shared)
+        if shared_serial_count:
             log.info(
                 "resolver: data-quality upserted %d shared_serial findings",
-                cur.rowcount,
+                shared_serial_count,
             )
 
     # unmatched_source_group — one finding per pending row in
