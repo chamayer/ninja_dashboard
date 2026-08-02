@@ -5,7 +5,8 @@ material hashing here ensures all writers use the same policy and hash version.
 
 Correctness contract (per ADR-0007 §Heartbeat, §SCD-2, §Absence):
 
-- Per-tuple advisory lock covers both existing and brand-new identities;
+- Existing identities serialize on their current-row lock. Brand-new
+  identities take a per-tuple advisory lock and then re-read because
   `SELECT ... FOR UPDATE` alone cannot lock a row that does not exist yet.
 - Rows whose incoming `observed_at` is not strictly newer than the currently
   stored `observed_at` are dropped BEFORE any history mutation, so an older
@@ -141,22 +142,41 @@ def _identity_tuple(row: dict[str, Any]) -> tuple:
 def _identity_lock_key(row: dict[str, Any]) -> str:
     """Deterministic string fed to pg_advisory_xact_lock via hashtextextended.
 
-    Two batches that share some — but not all — identity tuples must acquire
+    Two batches that share missing identity tuples must acquire their advisory
     locks in the same order. The caller sorts by _identity_tuple before
-    iterating, and each iteration locks on this string.
+    iterating; existing tuples serialize on their current-row locks instead.
     """
     return "|".join(str(part) for part in _identity_tuple(row))
+
+
+def _select_current_for_update(cur: Any, row: dict[str, Any]) -> tuple | None:
+    cur.execute(
+        """
+        SELECT observed_at, material_hash, active, client_id, device_id,
+               last_seen_at
+          FROM operations.entity_observation_current
+         WHERE tenant_id = %s AND source_binding_id = %s
+           AND entity_type = %s AND parent_source_key = %s
+           AND entity_key = %s
+         FOR UPDATE
+        """,
+        (row["tenant_id"], row["source_binding_id"], row["entity_type"],
+         row["parent_source_key"], row["entity_key"]),
+    )
+    return cur.fetchone()
 
 
 def write_current_rows(cur: Any, rows: Iterable[dict[str, Any]]) -> int:
     """Upsert prepared rows into the current-state table.
 
-    Per ADR-0007 hardening, each row is processed under a transaction-scoped
-    advisory lock keyed on the identity tuple, so absent-row races between
-    concurrent writers are serialized. For each locked identity:
+    Per ADR-0007 hardening, each existing row is processed under its row lock.
+    A missing identity additionally takes a transaction-scoped advisory lock
+    keyed on the identity tuple and re-reads, so absent-row races between
+    concurrent writers are serialized without retaining one advisory lock for
+    every heartbeat in a large snapshot. For each locked identity:
 
-    1. Read prior state under SELECT ... FOR UPDATE (no-op if the row does
-       not exist — the advisory lock is the guard for that case).
+    1. Read prior state under `SELECT ... FOR UPDATE`. If absent, take the
+       identity advisory lock and re-read under the lock.
     2. Out-of-order guard: drop the incoming row entirely if its observed_at
        is not strictly newer than the stored observed_at. Equal timestamps
        are treated as stale to prevent zero-length SCD-2 intervals.
@@ -187,36 +207,25 @@ def write_current_rows(cur: Any, rows: Iterable[dict[str, Any]]) -> int:
         # Normalize parent_source_key once so downstream code can rely on it.
         row["parent_source_key"] = row.get("parent_source_key") or ""
 
-        # (1) Transaction-scoped identity lock covers new tuples too.
-        cur.execute(
-            "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
-            (_identity_lock_key(row),),
-        )
+        # (1) Existing rows serialize on their row lock. Only an absent tuple
+        # needs an advisory lock; re-read after acquiring it because another
+        # writer may have inserted while this transaction was waiting.
+        prev = _select_current_for_update(cur, row)
+        if prev is None:
+            cur.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                (_identity_lock_key(row),),
+            )
+            prev = _select_current_for_update(cur, row)
 
-        # (2) Read prior state under FOR UPDATE (no-op if not present).
-        cur.execute(
-            """
-            SELECT observed_at, material_hash, active, client_id, device_id,
-                   last_seen_at
-              FROM operations.entity_observation_current
-             WHERE tenant_id = %s AND source_binding_id = %s
-               AND entity_type = %s AND parent_source_key = %s
-               AND entity_key = %s
-             FOR UPDATE
-            """,
-            (row["tenant_id"], row["source_binding_id"], row["entity_type"],
-             row["parent_source_key"], row["entity_key"]),
-        )
-        prev = cur.fetchone()
-
-        # (3) Out-of-order / equal-timestamp guard runs BEFORE any history
+        # (2) Out-of-order / equal-timestamp guard runs BEFORE any history
         # mutation so an older or duplicate snapshot cannot open a phantom
         # SCD-2 interval.
         if prev is not None and prev[0] is not None \
                 and row["observed_at"] <= prev[0]:
             continue
 
-        # (4) Material or presence transition detection.
+        # (3) Material or presence transition detection.
         is_new = prev is None
         material_changed = (
             not is_new
@@ -230,7 +239,7 @@ def write_current_rows(cur: Any, rows: Iterable[dict[str, Any]]) -> int:
             row["_prior_last_seen_at"] = None if is_new else prev[5]
             changed_for_history.append(row)
 
-        # (5) Resolved-ID preservation — mirrored in the SQL COALESCE below
+        # (4) Resolved-ID preservation — mirrored in the SQL COALESCE below
         # as defence in depth, but doing it here keeps the row shape truthful
         # before shaping / logging.
         if prev is not None:

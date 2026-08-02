@@ -1,10 +1,18 @@
 # 0007 — Observation model: content-hashed current + SCD-2 history
 
-Status: Accepted and deployed (v5 — writer hardening + retention wired)
-Date: 2026-07-21 (v1 drafted); 2026-07-21 (v2/v3 revised); 2026-07-22 (v4/v5)
+Status: Accepted and deployed (v6 — writer lock scaling)
+Date: 2026-07-21 (v1 drafted); 2026-07-21 (v2/v3 revised);
+2026-07-22 (v4/v5); 2026-08-02 (v6)
 
 ## Revision history
 
+- **v6 (2026-08-02).** Production validation of large concurrent source
+  snapshots exposed shared-lock exhaustion because v5 retained one advisory
+  lock for every heartbeat until transaction end. Existing identities now
+  serialize on `SELECT ... FOR UPDATE`; only an absent identity takes the
+  per-tuple transaction advisory lock and then re-reads under that lock. This
+  preserves the absent-row race guarantee while bounding steady-state
+  advisory-lock use to newly learned identities.
 - **v5 (2026-07-22).** Post-deployment audit against ADR intent uncovered
   four gaps in the writer primitive and the retention path. All closed:
   (1) per-tuple `pg_advisory_xact_lock` covers the absent-row race that
@@ -176,13 +184,13 @@ Every write to `_current` (regardless of material hash change):
   produce a zero-length SCD-2 interval). The bespoke SQL upsert mirrors
   the guard as defence in depth: `WHERE _current.observed_at <
   EXCLUDED.observed_at`. Older snapshots silently lose the race.
-- Absent-row race: `SELECT ... FOR UPDATE` cannot lock a row that does
-  not exist yet, so concurrent writers claiming the same new identity
-  would race. The primitive takes a transaction-scoped advisory lock
-  keyed on the identity tuple (`pg_advisory_xact_lock(hashtextextended(
-  tenant_id || source_binding_id || entity_type || parent_source_key ||
-  entity_key, 0))`) *before* the `FOR UPDATE` read, so both existing and
-  brand-new tuples are serialized.
+- Absent-row race: `SELECT ... FOR UPDATE` serializes existing identities but
+  cannot lock a row that does not exist yet. When the first read is absent,
+  the primitive takes a transaction-scoped advisory lock keyed on the identity
+  tuple (`pg_advisory_xact_lock(hashtextextended(tenant_id ||
+  source_binding_id || entity_type || parent_source_key || entity_key, 0))`)
+  and re-reads under that lock. This serializes concurrent claims for the same
+  new identity without retaining advisory locks for steady-state heartbeats.
 
 The history version-opening event stores immutable `received_at`, the ingest
 receipt time, separately from source/snapshot `observed_at`; `_current` stores

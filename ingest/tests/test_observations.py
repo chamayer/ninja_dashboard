@@ -196,7 +196,8 @@ def test_heartbeat_without_material_change_skips_history():
 
 def test_new_identity_opens_first_history_version():
     incoming = _base_row()
-    cur = _MockCursor(fetch_queue=[None])  # prev is None → new identity
+    # First read is absent; the second read occurs after the advisory lock.
+    cur = _MockCursor(fetch_queue=[None, None])
 
     observations.write_current_rows(cur, [incoming])
 
@@ -292,6 +293,42 @@ def test_batch_is_sorted_by_identity_before_locking():
     ]
     # Locks acquired in sorted order: a → b → c by entity_key.
     assert [key.rsplit("|", 1)[1] for key in lock_calls] == ["a", "b", "c"]
+
+
+def test_existing_identity_uses_row_lock_without_advisory_lock():
+    incoming = _base_row()
+    incoming_hash = material_hash(incoming["canonical_data"])
+    prior = (
+        datetime(2026, 7, 22, 11, 0, tzinfo=timezone.utc),
+        incoming_hash,
+        True,
+        None,
+        None,
+        datetime(2026, 7, 22, 11, 0, tzinfo=timezone.utc),
+    )
+    cur = _MockCursor(fetch_queue=[prior])
+
+    observations.write_current_rows(cur, [incoming])
+
+    assert not any("pg_advisory_xact_lock" in sql for sql, _ in cur.executed)
+
+
+def test_absent_identity_locks_and_rereads_before_insert():
+    incoming = _base_row()
+    cur = _MockCursor(fetch_queue=[None, None])
+
+    observations.write_current_rows(cur, [incoming])
+
+    statements = [sql for sql, _ in cur.executed]
+    first_read = next(i for i, sql in enumerate(statements) if "FOR UPDATE" in sql)
+    advisory = next(
+        i for i, sql in enumerate(statements) if "pg_advisory_xact_lock" in sql
+    )
+    second_read = next(
+        i for i, sql in enumerate(statements[advisory + 1 :], start=advisory + 1)
+        if "FOR UPDATE" in sql
+    )
+    assert first_read < advisory < second_read
 
 
 def test_volatile_fields_do_not_change_material_hash():

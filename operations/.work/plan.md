@@ -2,10 +2,11 @@
 
 Track: **Corrective Track B — stable observation identity dual-write**
 
-**Status:** RELEASE CANDIDATE LOCALLY VALIDATED — the additive expand/backfill
-release is deployed through `0.99.0` / `edc1e16`; release `0.99.1` implements
-dual-write while ADR-0007 remains the sole read/write authority. No schema
-migration or design change is included.
+**Status:** VALIDATION REPAIR LOCALLY VALIDATED — dual-write release `0.99.1` /
+`5760cd6` is deployed on `origin` but not mirrored. Production validation
+exposed the pre-existing per-heartbeat advisory-lock scaling defect; `0.99.2`
+contains the correctness-preserving repair. No schema migration or identity
+cutover is included.
 
 ## Goal
 
@@ -55,6 +56,9 @@ historical deletion, Agent Compliance, and ADR-0010 ecosystem implementation.
   deployed ADR-0007 path and is still skipped for partial sources.
 - This slice adds no constraint or cutover. Shadow comparison is a deployment
   gate for the later membership/cutover slice, not authority by itself.
+- Existing identities serialize on their row locks. Only an absent identity
+  takes the ADR-0007 per-tuple advisory lock and re-reads under it, preserving
+  the new-row race guarantee without exhausting shared locks on heartbeats.
 
 ## Steps
 
@@ -65,11 +69,13 @@ historical deletion, Agent Compliance, and ADR-0010 ecosystem implementation.
    current/history/run dual writes, including compatibility writers.
 4. **Complete:** run syntax, Ruff, Django, targeted unit/PostgreSQL, migration
    state, packaging, and diff validation; review every changed hunk.
-5. **In progress:** prepare one logical release commit and deploy under the user's
-   standing build/commit/push authorization if no new migration or design
-   decision appears.
-6. **Pending:** verify commit, health/readiness, migrations, zero HTTP 500s,
-   post-deployment shadow completeness/mapping/collisions, and mirror parity.
+5. **Complete:** commit `5760cd6`, push it to `origin`, and verify deployment,
+   health/readiness, migration state, and the first three source paths.
+6. **Complete:** diagnose Ninja/Hudu validation failure as shared-lock
+   exhaustion from retaining one advisory lock per steady-state row.
+7. **In progress:** release the row-lock/advisory-lock repair as `0.99.2`,
+   rerun Ninja then Hudu sequentially, finish aggregate shadow comparison,
+   and mirror only the verified repair commit.
 
 ## Validation plan
 
@@ -109,17 +115,32 @@ parent pairing before writes, and updates compatibility seed/backfill paths.
 The legacy advisory lock, `ON CONFLICT` target, current/history lookup,
 reconciliation, constraints, and consumers are unchanged.
 
+Release `0.99.1` / `5760cd6` deployed successfully to `origin`; the recreated
+containers, health/readiness endpoints, and migration state were healthy, with
+zero Operations HTTP 500s. Startup collections produced 8,317 current writes,
+7 material-history writes, and 3 explicitly complete runs across SentinelOne,
+ScreenConnect, and LogMeIn. Missing shadow fields, binding/instance mismatches,
+and current/open-history stable-key collisions were all zero.
+
+The separately queued Ninja and Hudu validation runs returned no queue-level
+error but created no snapshot boundary. Aggregate-safe log inspection found
+both had rolled back with PostgreSQL shared-lock exhaustion. The cause was the
+deployed ADR-0007 implementation taking and retaining an advisory lock for
+every heartbeat, magnified by running both large sources concurrently. No
+partial observation/run transaction committed. The mirror remains at verified
+`edc1e16` while the repair is validated.
+
 Local validation: changed-file Ruff passes; the two new test files pass Ruff
 format checks; Python compilation, Django system check, and Django migration
-state checks pass. The combined ingest/Operations suite passes 72 tests with
-5 expected environment-gated skips. The focused disposable PostgreSQL 16 run
-passes 19 tests, including the real dual-write current/history/run SQL. Docker
+state checks pass. The repaired combined ingest/Operations suite passes 74
+tests with 5 expected environment-gated skips. The focused disposable
+PostgreSQL 16 run passes the real dual-write current/history/run SQL. Docker
 build again reaches dependency installation but is blocked by the known local
 PyPI certificate-chain failure before application packaging; both Dockerfiles
 do copy the changed runtime directories. `git diff --check` passes.
 
 ## Next action
 
-Stage only the dual-write release files, review the cached diff, commit one
-logical `0.99.1` change, then push/deploy and perform aggregate shadow/health
-comparison before mirroring.
+Stage only the `0.99.2` lock-scaling repair and its decision/plan/release
+updates, commit and deploy it, then rerun Ninja and Hudu sequentially and
+finish aggregate verification before advancing the mirror.

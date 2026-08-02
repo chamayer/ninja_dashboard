@@ -2,6 +2,15 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.99.2] — 2026-08-02 — Observation lock scaling
+
+### Fixed
+
+- Prevented large steady-state source snapshots from exhausting PostgreSQL's
+  shared lock table: existing observations now serialize on their row locks,
+  while only absent identities take the advisory lock and re-read required to
+  close the new-row race.
+
 ## [0.99.1] — 2026-08-02 — Stable observation identity dual-write
 
 ### Changed
