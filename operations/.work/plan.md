@@ -1,121 +1,125 @@
 # Active Operations implementation plan
 
-Track: **Corrective Track B — stable observation identity review**
+Track: **Corrective Track B — stable observation identity dual-write**
 
-**Status:** RELEASE CANDIDATE AWAITING PRODUCTION MIGRATION APPROVAL —
-stronger-model review, aggregate-only production measurement, additive
-implementation, and local validation passed. Release `0.99.0` is being
-committed under the existing authorization but is not deployed.
+**Status:** RELEASE CANDIDATE LOCALLY VALIDATED — the additive expand/backfill
+release is deployed through `0.99.0` / `edc1e16`; release `0.99.1` implements
+dual-write while ADR-0007 remains the sole read/write authority. No schema
+migration or design change is included.
 
 ## Goal
 
-Turn accepted ADR-0009 into a verified, implementation-ready expand/backfill
-slice without changing the deployed ADR-0007 identity authority yet.
+Populate the ADR-0009 shadow identity and snapshot-run fields on every current
+writer, prove that new production writes remain complete and collision-free,
+and stop before stable-key cutover or reconciliation redesign.
 
 ## Scope
 
-- Reconcile ADR-0009 and the root DB2 inventory with current code and schema.
-- Measure aggregate binding topology, source/type populations, parent-scoped
-  identities, and duplicate-active risk without exposing customer data.
-- Write and review a deterministic namespace/backfill rule for every current
-  source-record family.
-- Recommend the first additive migration slice, its rollback boundary, and the
-  next approval gate.
+- Make each connector declare its stable record and container namespaces.
+- Dual-write source instance, last-seen binding, namespace, parent scope, and
+  external ID into observation current/history rows.
+- Dual-write source instance, run start, and explicit complete-snapshot state
+  into snapshot runs.
+- Keep legacy identity locks, conflict targets, history lookup, snapshot
+  membership pointer, reconciliation scope, constraints, readers, and derived
+  consumers authoritative.
+- Keep compatibility seed/backfill writers from creating empty shadow fields.
+- Add focused tests and perform aggregate-only production comparison after
+  deployment and at least one post-deployment collection.
 
-Out of scope: schema changes, migrations, backfill execution, dual writes,
-consumer cutover, contract cleanup, Agent Compliance changes, and the wider
-ADR-0010 entity/claim/admin implementation.
+Out of scope: new schema, stable-key uniqueness, per-run membership tables,
+read or write cutover, overlapping-run findings, legacy-column removal,
+historical deletion, Agent Compliance, and ADR-0010 ecosystem implementation.
 
-## Design authorities
+## Affected files
 
-- ADR-0007 v5 remains authoritative for deployed behavior.
-- Accepted ADR-0009 governs the target stable identity and reconciliation.
-- Accepted ADR-0010 constrains compatibility with the later generic source
-  record contract but is not implemented in this phase.
+- `ingest/observations.py`
+- `ingest/observation_runs.py`
+- `ingest/core/devices.py`
+- `ingest/source_observations.py`
+- Current connector modules under `ingest/connectors/`
+- `ingest/backfill_observations.py`
+- Observation seed commands and focused ingest tests
+- Root release authorities when the slice is release-ready
 
-## Affected surfaces to verify
+## Decisions
 
-- Observation models, current/history uniqueness, snapshot-run models, RLS,
-  retention, and seed/maintenance commands.
-- `ingest/observations.py`, `ingest/observation_runs.py`, all current writers,
-  identity/client resolvers, evaluator readers, dependent views/matviews, and
-  Operations read/write workflows.
-- Source/instance/binding seeds and connector external-ID semantics.
+- Connector output owns namespace selection; the shared writer validates and
+  persists supplied identity components but does not infer vendor namespaces.
+- The binding-to-instance relationship is resolved by the database when a run
+  begins, so stale process configuration cannot write a mismatched instance.
+- Top-level parents normalize to two empty strings. A partially populated
+  parent scope fails closed before any current/history mutation.
+- A successful partial source run records `is_complete_snapshot = false`; only
+  a successful full source run records true. Reconciliation remains on the
+  deployed ADR-0007 path and is still skipped for partial sources.
+- This slice adds no constraint or cutover. Shadow comparison is a deployment
+  gate for the later membership/cutover slice, not authority by itself.
 
 ## Steps
 
-1. **Complete:** reconciled the checkpoint with Git at `0c90b14`, confirmed
-   both remotes match, and reread the current instructions and ADRs.
-2. **Complete:** revalidated the affected surfaces and derived deterministic
-   namespace/parent-scope rules from connector-owned external IDs.
-3. **Complete:** measured binding topology, current/history populations,
-   parent scope, integrity, and proposed-key collision risk.
-4. **Complete:** all deployed rows map; no proposed current/open-history
-   collision or unresolved parent scope exists. ScreenConnect's synthetic
-   container uses stable identity `(source-instance, self)` rather than its
-   editable legacy label.
-5. **Complete:** implemented and locally validated additive migration `0095`;
-   ADR-0007 writes/readers remain authoritative.
-6. **In progress:** prepare the authorized release commit, then obtain explicit
-   approval for the `origin` push, automatic deployment, and startup execution
-   of migration `0095`, followed by the secondary-mirror push and aggregate
-   verification.
+1. **Complete:** reconcile the previous checkpoint with Git and production.
+   Both remotes and Portainer deploy `edc1e16`; migration `0095` is applied.
+2. **Complete:** verify aggregate backfill coverage and service health.
+3. **Complete:** implement connector-owned namespace emission and shared
+   current/history/run dual writes, including compatibility writers.
+4. **Complete:** run syntax, Ruff, Django, targeted unit/PostgreSQL, migration
+   state, packaging, and diff validation; review every changed hunk.
+5. **In progress:** prepare one logical release commit and deploy under the user's
+   standing build/commit/push authorization if no new migration or design
+   decision appears.
+6. **Pending:** verify commit, health/readiness, migrations, zero HTTP 500s,
+   post-deployment shadow completeness/mapping/collisions, and mirror parity.
 
 ## Validation plan
 
-- Repository-wide reference inventory and migration/model comparison.
-- Aggregate-only production SQL through the documented helper; no raw payload,
-  identifier, hostname, client, or customer record output.
-- Cross-check totals and collision counts under both deployed and proposed
-  identity tuples.
-- Review the recommended expand/backfill design for RLS, uniqueness,
-  concurrency, rollback, and named consumer compatibility.
+- Unit tests cover required identity parts, parent-pair normalization, the
+  accepted namespace map, current/history dual-write shaping, and complete
+  versus partial snapshot-run bookkeeping; connector emission is also checked
+  in the changed-source review.
+- Existing observation, lifecycle, resolver, retention, and Operations tests
+  remain green.
+- `python -m py_compile`, changed-file Ruff/format checks, `manage.py check`,
+  `makemigrations --check --dry-run`, Docker build where the workstation trust
+  chain permits it, and `git diff --check`.
+- Production checks use only the documented helper and return aggregate counts
+  or service metadata—never payloads, external IDs, hostnames, clients, or
+  customer records.
 
 ## Checkpoint
 
-Track A and the resolver correctness repair are complete and deployed through
-`0.98.8` / `0c90b14`. Existing unrelated dirty plans, docs, backlog work,
-probes, and untracked accepted ADR drafts are preserved. Track B review is now
-active under the user's autonomous continuation authorization. The current
-model is appropriate for the identity-migration review.
+Release `0.99.0` / `edc1e16` was pushed first to `origin`, automatically
+deployed by Portainer, then pushed to `a-m-rose`. Operations, ingest, and
+Postgres are healthy; Operations `/healthz`, ingest `/healthz`, and ingest
+`/readyz` pass. Django reports migration `0095` applied and Operations logged
+zero HTTP 500s during the deployment window.
 
-Aggregate production measurements (2026-08-02): each of Ninja, SentinelOne,
-ScreenConnect, LogMeIn, and Hudu has 1 source instance and 1 enabled binding;
-no instance has multiple bindings. Current has 24,284 rows (23,895 active),
-history has 38,879 rows (23,895 open), and snapshot runs has 607 complete rows.
-All external IDs are non-empty, all parent scopes are empty, and all bindings
-resolve to a source instance. Proposed stable namespaces cover every row and
-produce 0 current collisions, 0 open-history collisions, and 0 historical
-cross-type identity groups. Legacy current/open-history accounting has 0
-active-without-open, 0 inactive-with-open, and 0 open-without-current rows.
-The synthetic ScreenConnect container has 1 legacy key across 3 history rows
-and 1 open row, so normalizing it to external ID `self` is collision-free.
+The first aggregate production comparison found 24,291 current rows, 38,913
+history rows, and 617 snapshot runs. Missing source instances, last-seen
+bindings, namespaces, external IDs, run starts, and completeness flags were
+all zero. Binding-to-instance/run mismatches were zero, as were active-current
+and open-history stable-key collision groups. No customer-level data was
+returned. Unrelated dirty plans, docs, backlog work, probes, and the untracked
+ADR-0010 draft remain preserved.
 
-Implementation adds nullable/empty shadow identity and transport-provenance
-fields to current/history plus source-instance, run-start, and explicit
-completeness fields to snapshot runs. It backfills only those new fields;
-legacy columns, constraints, readers, writers, current/history rows, and
-canonical attachments remain unchanged. Current writers omit the new fields,
-so existing-row updates preserve their backfill and any newly learned identity
-remains safely legacy-authoritative with an empty shadow until the separately
-reviewed dual-write slice.
+The dual-write implementation makes all five current connector paths emit
+their accepted record/container namespaces, makes the database resolve a
+run's source instance from its binding, validates required identity parts and
+parent pairing before writes, and updates compatibility seed/backfill paths.
+The legacy advisory lock, `ON CONFLICT` target, current/history lookup,
+reconciliation, constraints, and consumers are unchanged.
 
-Validation: the focused backfill test passes against PostgreSQL 16 for every
-current source family; migration `0095` applies, reverses, and reapplies on a
-disposable PostgreSQL migration graph; its three sample backfills each matched
-the expected values. All 26 other Operations tests pass (the opt-in PostgreSQL
-test is the only default skip), Django reports no model-state changes and no
-system-check issues, changed-file Ruff and formatting checks pass, Python
-compilation and `git diff --check` pass. The Operations image build is locally
-blocked before application packaging by Docker's PyPI certificate-chain
-failure; no code-layer build failure occurred. Production preflight confirms
-the three tables are owned by `operations_migrate`, no shadow columns exist,
-the latest migration is `0094`, and measured row counts remain 24,284 current,
-38,879 history, and 607 runs.
+Local validation: changed-file Ruff passes; the two new test files pass Ruff
+format checks; Python compilation, Django system check, and Django migration
+state checks pass. The combined ingest/Operations suite passes 72 tests with
+5 expected environment-gated skips. The focused disposable PostgreSQL 16 run
+passes 19 tests, including the real dual-write current/history/run SQL. Docker
+build again reaches dependency installation but is blocked by the known local
+PyPI certificate-chain failure before application packaging; both Dockerfiles
+do copy the changed runtime directories. `git diff --check` passes.
 
 ## Next action
 
-Commit the authorized `0.99.0` release candidate. Then obtain explicit approval
-for the `origin` push including automatic deployment and startup execution of
-migration `0095`; if approved, deploy, measure backfill coverage,
-collisions/health/500s, then push the mirror.
+Stage only the dual-write release files, review the cached diff, commit one
+logical `0.99.1` change, then push/deploy and perform aggregate shadow/health
+comparison before mirroring.

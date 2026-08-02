@@ -250,14 +250,18 @@ def _write_observations(
     obs_rows: list[dict[str, Any]] = []
     resolved_groups: dict[str, tuple[uuid.UUID, str]] = {}  # group_id → (client, name)
     unmatched_groups: dict[str, tuple[str, int]] = {}       # group_id → (name, count)
-    all_groups: dict[str, list] = {}                        # group_id → [name, count]
+    # group_id -> [name, count, external namespace, stable external id]
+    all_groups: dict[str, list] = {}
+    container_contracts: set[tuple[str, str]] = set()
     with db.transaction() as cur:
         cur.execute(f"SET LOCAL operations.tenant_id = {_TENANT_ID}")
         snapshot_scope = source.source_key or source.source_name
-        run_id = begin_run(
+        run_id, source_instance_id = begin_run(
             cur, _TENANT_ID, source.source_binding_id, snapshot_scope,
             observed_at, expected_rows=len(rows),
         )
+        if source_instance_id != source.source_instance_id:
+            raise RuntimeError("source binding resolved to an unexpected source instance")
         link_map = _load_client_links(cur, source)
         placeholder_names = _load_placeholder_names(cur)
         for row in rows:
@@ -266,12 +270,30 @@ def _write_observations(
                 # registers the group for the org observation, no device row.
                 gid = str(row.get("platform_group_id") or "").strip()
                 gname = (row.get("platform_group_name") or "").strip()
+                container_namespace = str(
+                    row.get("container_external_namespace") or ""
+                ).strip()
+                container_external_id = str(
+                    row.get("container_external_id") or gid
+                ).strip()
+                if not container_namespace or not container_external_id:
+                    raise ValueError(
+                        "container-only rows require a stable namespace and external ID"
+                    )
+                container_contracts.add(
+                    (container_namespace, container_external_id)
+                )
                 if gid and gid not in all_groups:
-                    all_groups[gid] = [gname, 0]
+                    all_groups[gid] = [
+                        gname, 0, container_namespace, container_external_id
+                    ]
                 continue
             entity_key = str(row.get("platform_device_id") or "")
             if not entity_key:
                 continue
+            external_namespace = str(row.get("external_namespace") or "").strip()
+            if not external_namespace:
+                raise ValueError("connector row is missing external_namespace")
             hostname = row.get("hostname") or ""
             raw = row.get("raw_data") or {}
             if isinstance(raw, Json):
@@ -321,6 +343,20 @@ def _write_observations(
 
             group_id = str(row.get("platform_group_id") or "").strip()
             group_name = (row.get("platform_group_name") or "").strip()
+            container_namespace = str(
+                row.get("container_external_namespace") or ""
+            ).strip()
+            container_external_id = str(
+                row.get("container_external_id") or group_id
+            ).strip()
+            if group_id or not source.is_shared:
+                if not container_namespace or not container_external_id:
+                    raise ValueError(
+                        "connector row is missing its stable container identity"
+                    )
+                container_contracts.add(
+                    (container_namespace, container_external_id)
+                )
 
             # 1. Client-scoped instance wins.
             client_id = source.client_id
@@ -360,7 +396,12 @@ def _write_observations(
                     name, count = unmatched_groups.get(group_id, (group_name, 0))
                     unmatched_groups[group_id] = (name or group_name, count + 1)
             if group_id:
-                entry = all_groups.setdefault(group_id, [group_name, 0])
+                entry = all_groups.setdefault(
+                    group_id,
+                    [group_name, 0, container_namespace, container_external_id],
+                )
+                if entry[2:] != [container_namespace, container_external_id]:
+                    raise ValueError("connector emitted conflicting container identities")
                 entry[0] = entry[0] or group_name
                 entry[1] += 1
 
@@ -371,6 +412,12 @@ def _write_observations(
                 "device_id":             device_id,
                 "collector_instance_id": _INTERNAL_COLLECTOR_INSTANCE_ID,
                 "source_binding_id":     source.source_binding_id,
+                "source_instance_id":    source_instance_id,
+                "last_seen_binding_id":  source.source_binding_id,
+                "external_namespace":    external_namespace,
+                "parent_external_namespace": "",
+                "parent_external_id":    "",
+                "external_id":           entity_key,
                 "entity_type":           source.entity_type,
                 "entity_key":            entity_key,
                 "platform":              source.platform,
@@ -390,14 +437,24 @@ def _write_observations(
         # rungs 2-4 belong to the client resolver (C2).
         device_row_count = len(obs_rows)
         if not source.is_shared:
+            if len(container_contracts) != 1:
+                raise ValueError(
+                    "client-scoped source must emit one stable container identity"
+                )
+            container_namespace, container_external_id = next(
+                iter(container_contracts)
+            )
             org_containers = {
                 source.source_key or source.source_name: [
-                    source.source_name, device_row_count
+                    source.source_name, device_row_count,
+                    container_namespace, container_external_id,
                 ]
             }
         else:
             org_containers = all_groups
-        for gid, (gname, gcount) in org_containers.items():
+        for gid, (gname, gcount, container_namespace, container_external_id) in (
+            org_containers.items()
+        ):
             if not gid:
                 continue
             org_client_id = (
@@ -411,6 +468,12 @@ def _write_observations(
                 "device_id":             None,
                 "collector_instance_id": _INTERNAL_COLLECTOR_INSTANCE_ID,
                 "source_binding_id":     source.source_binding_id,
+                "source_instance_id":    source_instance_id,
+                "last_seen_binding_id":  source.source_binding_id,
+                "external_namespace":    container_namespace,
+                "parent_external_namespace": "",
+                "parent_external_id":    "",
+                "external_id":           container_external_id,
                 "entity_type":           "org",
                 "entity_key":            gid,
                 "platform":              source.platform,
@@ -452,8 +515,14 @@ def _write_observations(
                 ).digest()
                 current_rows.append(current)
             written = write_current_rows(cur, current_rows)
-        complete_run(cur, run_id, written)
-        if not getattr(source, "is_partial_snapshot", False):
+        is_complete_snapshot = not getattr(source, "is_partial_snapshot", False)
+        complete_run(
+            cur,
+            run_id,
+            written,
+            is_complete_snapshot=is_complete_snapshot,
+        )
+        if is_complete_snapshot:
             reconcile_complete_run(cur, run_id)
             # A group is unmatched only if NO row in the batch resolved it.
             for gid in resolved_groups:

@@ -47,6 +47,9 @@ _EXCLUDED_LAYOUTS = {"people"}
 # second-hand: kept and marked, never treated as first-party evidence.
 _INTEGRATED_VENDORS = {"ninja"}
 
+EXTERNAL_NAMESPACE = "asset"
+CONTAINER_EXTERNAL_NAMESPACE = "company"
+
 
 def fetch(source: SourceConfig, observed_at: datetime) -> list[dict]:
     if not source.base_url or not source.api_token:
@@ -86,6 +89,8 @@ def fetch(source: SourceConfig, observed_at: datetime) -> list[dict]:
         observations.append({
             "observed_at": observed_at,
             "platform": "Hudu",
+            "external_namespace": EXTERNAL_NAMESPACE,
+            "container_external_namespace": CONTAINER_EXTERNAL_NAMESPACE,
             "source_id": source.source_id,
             "source_name": source.source_name,
             "source_client_name": source.client_name,

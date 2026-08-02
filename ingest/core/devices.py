@@ -41,6 +41,8 @@ log = logging.getLogger(__name__)
 
 _TENANT_ID = 1
 NINJA_SOURCE_BINDING_ID      = uuid.UUID("00000000-0000-4000-8000-000000000011")
+NINJA_DEVICE_EXTERNAL_NAMESPACE = "device"
+NINJA_ORG_EXTERNAL_NAMESPACE = "organization"
 INTERNAL_COLLECTOR_INSTANCE_ID = uuid.UUID("00000000-0000-4000-8000-000000000001")
 
 
@@ -441,7 +443,7 @@ def _write_ninja_observations(
     try:
         with db.transaction() as cur:
             cur.execute(f"SET LOCAL operations.tenant_id = {_TENANT_ID}")
-            run_id = begin_run(
+            run_id, source_instance_id = begin_run(
                 cur, _TENANT_ID, NINJA_SOURCE_BINDING_ID, "Ninja",
                 snapshot_at, expected_rows=len(device_rows),
             )
@@ -536,6 +538,12 @@ def _write_ninja_observations(
                     "device_id":               ops_device_id,
                     "collector_instance_id":   INTERNAL_COLLECTOR_INSTANCE_ID,
                     "source_binding_id":       NINJA_SOURCE_BINDING_ID,
+                    "source_instance_id":      source_instance_id,
+                    "last_seen_binding_id":    NINJA_SOURCE_BINDING_ID,
+                    "external_namespace":      NINJA_DEVICE_EXTERNAL_NAMESPACE,
+                    "parent_external_namespace": "",
+                    "parent_external_id":      "",
+                    "external_id":             entity_key,
                     "entity_type":             entity_type,
                     "entity_key":              entity_key,
                     "platform":                "Ninja",
@@ -569,6 +577,12 @@ def _write_ninja_observations(
                     "device_id":             None,
                     "collector_instance_id": INTERNAL_COLLECTOR_INSTANCE_ID,
                     "source_binding_id":     NINJA_SOURCE_BINDING_ID,
+                    "source_instance_id":    source_instance_id,
+                    "last_seen_binding_id":  NINJA_SOURCE_BINDING_ID,
+                    "external_namespace":    NINJA_ORG_EXTERNAL_NAMESPACE,
+                    "parent_external_namespace": "",
+                    "parent_external_id":    "",
+                    "external_id":           oid,
                     "entity_type":           "org",
                     "entity_key":            oid,
                     "platform":              "Ninja",
@@ -608,7 +622,7 @@ def _write_ninja_observations(
                     ).digest()
                     current_rows.append(current)
                 written = write_current_rows(cur, current_rows)
-                complete_run(cur, run_id, written)
+                complete_run(cur, run_id, written, is_complete_snapshot=True)
                 reconcile_complete_run(cur, run_id)
             if unknown_classes:
                 # Never silently dropped — surfaced here, admin finding in E2.

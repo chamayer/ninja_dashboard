@@ -11,6 +11,10 @@ from ingest.normalize import infer_device_role, normalize_hostname, parse_dt
 from ingest.sources import SourceConfig
 
 
+EXTERNAL_NAMESPACE = "access-session"
+CONTAINER_EXTERNAL_NAMESPACE = "source-instance"
+
+
 def fetch(source: SourceConfig, observed_at: datetime) -> list[dict]:
     if not source.base_url or not source.ext_guid or not source.secret_key:
         raise RuntimeError("ScreenConnect source requires base_url, ext_guid_secret_ref, secret_key_secret_ref")
@@ -70,6 +74,9 @@ def fetch(source: SourceConfig, observed_at: datetime) -> list[dict]:
         observations.append({
             "observed_at": observed_at,
             "platform": "ScreenConnect",
+            "external_namespace": EXTERNAL_NAMESPACE,
+            "container_external_namespace": CONTAINER_EXTERNAL_NAMESPACE,
+            "container_external_id": "self",
             "source_id": source.source_id,
             "source_name": source.source_name,
             "source_client_name": source.client_name,

@@ -1,7 +1,10 @@
 import uuid
 from datetime import datetime, timezone
 
+import pytest
+
 from ingest import observations
+from ingest.backfill_observations import _stable_identity
 from ingest.observations import material_hash, material_projection
 
 
@@ -50,6 +53,12 @@ def _base_row(**overrides):
         "observation_id": uuid.uuid4(),
         "tenant_id": 1,
         "source_binding_id": uuid.UUID("00000000-0000-4000-8000-000000000011"),
+        "source_instance_id": uuid.UUID("00000000-0000-4000-8000-000000000101"),
+        "last_seen_binding_id": uuid.UUID("00000000-0000-4000-8000-000000000011"),
+        "external_namespace": "device",
+        "parent_external_namespace": "",
+        "parent_external_id": "",
+        "external_id": "42",
         "collector_instance_id": uuid.UUID(
             "00000000-0000-4000-8000-000000000001"),
         "client_id": None,
@@ -210,6 +219,63 @@ def test_new_identity_opens_first_history_version():
         if "INSERT INTO operations.entity_observation_history" in c[0]
     ]
     assert len(history_inserts) == 1
+    _, history_rows = history_inserts[0]
+    assert history_rows[0]["source_instance_id"] == incoming["source_instance_id"]
+    assert history_rows[0]["last_seen_binding_id"] == incoming["source_binding_id"]
+    assert history_rows[0]["external_namespace"] == "device"
+    assert history_rows[0]["external_id"] == "42"
+
+    current_inserts = [
+        call for call in cur.executemany_calls
+        if "INSERT INTO operations.entity_observation_current" in call[0]
+    ]
+    assert len(current_inserts) == 1
+    current_sql, current_rows = current_inserts[0]
+    assert "source_instance_id = EXCLUDED.source_instance_id" in current_sql
+    assert current_rows[0]["external_namespace"] == "device"
+    assert current_rows[0]["external_id"] == "42"
+
+
+def test_shadow_identity_requires_complete_parent_pair():
+    incoming = _base_row(
+        parent_external_namespace="device",
+        parent_external_id="",
+    )
+
+    with pytest.raises(ValueError, match="must both be empty or both be populated"):
+        observations.write_current_rows(_MockCursor(fetch_queue=[]), [incoming])
+
+
+@pytest.mark.parametrize("field", ["external_namespace", "external_id"])
+def test_shadow_identity_rejects_empty_required_parts(field):
+    incoming = _base_row(**{field: ""})
+
+    with pytest.raises(ValueError, match=field):
+        observations.write_current_rows(_MockCursor(fetch_queue=[]), [incoming])
+
+
+@pytest.mark.parametrize(
+    ("source_name", "entity_type", "expected"),
+    [
+        ("Ninja", "vm.guest", ("device", "42")),
+        ("Ninja", "org", ("organization", "42")),
+        ("SentinelOne", "agent.edr", ("agent", "42")),
+        ("SentinelOne", "org", ("site", "42")),
+        ("ScreenConnect", "agent.remote_access", ("access-session", "42")),
+        ("ScreenConnect", "org", ("source-instance", "self")),
+        ("LogMeIn", "agent.remote_access", ("host", "42")),
+        ("LogMeIn", "org", ("group", "42")),
+        ("Hudu", "cmdb.asset", ("asset", "42")),
+        ("Hudu", "org", ("company", "42")),
+    ],
+)
+def test_compatibility_namespace_contract(source_name, entity_type, expected):
+    assert _stable_identity(source_name, entity_type, "42") == expected
+
+
+def test_compatibility_namespace_contract_fails_closed_for_unknown_source():
+    with pytest.raises(ValueError, match="no stable namespace rule"):
+        _stable_identity("Unknown", "record", "42")
 
 
 def test_batch_is_sorted_by_identity_before_locking():

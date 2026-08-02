@@ -14,6 +14,9 @@ from ingest.sources import SourceConfig
 
 log = logging.getLogger(__name__)
 
+EXTERNAL_NAMESPACE = "agent"
+CONTAINER_EXTERNAL_NAMESPACE = "site"
+
 
 def fetch(source: SourceConfig, observed_at: datetime) -> list[dict]:
     if not source.base_url or not source.api_token:
@@ -39,6 +42,8 @@ def fetch(source: SourceConfig, observed_at: datetime) -> list[dict]:
                 observations.append({
                     "observed_at": observed_at,
                     "platform": "SentinelOne",
+                    "external_namespace": EXTERNAL_NAMESPACE,
+                    "container_external_namespace": CONTAINER_EXTERNAL_NAMESPACE,
                     "source_id": source.source_id,
                     "source_name": source.source_name,
                     "source_client_name": None,
@@ -87,6 +92,7 @@ def _fetch_sites(client: httpx.Client, base_url: str, headers: dict) -> list[dic
                 rows.append({
                     "_org_only": True,
                     "platform": "SentinelOne",
+                    "container_external_namespace": CONTAINER_EXTERNAL_NAMESPACE,
                     "platform_group_id": str(site_id),
                     "platform_group_name": site.get("name"),
                 })

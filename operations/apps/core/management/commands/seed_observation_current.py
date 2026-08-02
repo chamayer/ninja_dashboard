@@ -13,18 +13,40 @@ class Command(BaseCommand):
         tenant_id = options["tenant_id"]
         params = {"tenant_id": tenant_id}
         identity = "''::text"
+        external_namespace = """
+            CASE
+                WHEN s.name = 'Ninja' AND o.entity_type = 'org' THEN 'organization'
+                WHEN s.name = 'Ninja' THEN 'device'
+                WHEN s.name = 'SentinelOne' AND o.entity_type = 'org' THEN 'site'
+                WHEN s.name = 'SentinelOne' THEN 'agent'
+                WHEN s.name = 'ScreenConnect' AND o.entity_type = 'org' THEN 'source-instance'
+                WHEN s.name = 'ScreenConnect' THEN 'access-session'
+                WHEN s.name = 'LogMeIn' AND o.entity_type = 'org' THEN 'group'
+                WHEN s.name = 'LogMeIn' THEN 'host'
+                WHEN s.name = 'Hudu' AND o.entity_type = 'org' THEN 'company'
+                WHEN s.name = 'Hudu' THEN 'asset'
+                ELSE NULL
+            END
+        """
         latest = f"""
             SELECT DISTINCT ON (o.tenant_id, o.source_binding_id, o.entity_type,
                                 {identity}, o.entity_key)
                    o.*, {identity} AS parent_source_key,
+                   si.id AS source_instance_id,
+                   o.source_binding_id AS last_seen_binding_id,
+                   {external_namespace} AS external_namespace,
+                   {identity} AS parent_external_namespace,
+                   {identity} AS parent_external_id,
+                   CASE WHEN s.name = 'ScreenConnect' AND o.entity_type = 'org'
+                        THEN 'self' ELSE o.entity_key END AS external_id,
                    CASE WHEN o.entity_type = 'software' THEN 'Ninja.software'
                         ELSE COALESCE(NULLIF(si.config->>'source_key', ''),
                                       NULLIF(si.config->>'source_name', ''),
                                       s.name, o.platform) END AS snapshot_scope
               FROM operations.entity_observations o
-              LEFT JOIN operations.source_bindings sb ON sb.id = o.source_binding_id
-             LEFT JOIN operations.source_instances si ON si.id = sb.source_instance_id
-             LEFT JOIN operations.sources s ON s.id = si.source_id
+              JOIN operations.source_bindings sb ON sb.id = o.source_binding_id
+              JOIN operations.source_instances si ON si.id = sb.source_instance_id
+              JOIN operations.sources s ON s.id = si.source_id
              WHERE o.tenant_id = %(tenant_id)s
                AND o.entity_type <> 'software'
              ORDER BY o.tenant_id, o.source_binding_id, o.entity_type,
@@ -43,13 +65,19 @@ class Command(BaseCommand):
             cursor.execute(
                 f"""
                 INSERT INTO operations.entity_observation_current
-                  (observation_id, tenant_id, source_binding_id, collector_instance_id,
+                  (observation_id, tenant_id, source_binding_id, source_instance_id,
+                   last_seen_binding_id, external_namespace,
+                   parent_external_namespace, parent_external_id, external_id,
+                   collector_instance_id,
                    client_id, device_id, entity_type, parent_source_key, entity_key,
                    platform, subplatform, observed_at, last_seen_at, last_received_at,
                    active, withdrawn_at, snapshot_scope, last_snapshot_run_id,
                    raw_data, canonical_data, raw_hash, material_hash,
                    hash_algorithm_version, batch_id, collector_version, schema_version)
-                SELECT observation_id, tenant_id, source_binding_id, collector_instance_id,
+                SELECT observation_id, tenant_id, source_binding_id, source_instance_id,
+                       last_seen_binding_id, external_namespace,
+                       parent_external_namespace, parent_external_id, external_id,
+                       collector_instance_id,
                        client_id, device_id, entity_type, parent_source_key, entity_key,
                        platform, subplatform, observed_at, observed_at, clock_timestamp(),
                        TRUE, NULL, snapshot_scope, NULL,
@@ -61,6 +89,12 @@ class Command(BaseCommand):
                 ON CONFLICT (tenant_id, source_binding_id, entity_type,
                              parent_source_key, entity_key)
                 DO UPDATE SET
+                    source_instance_id = EXCLUDED.source_instance_id,
+                    last_seen_binding_id = EXCLUDED.last_seen_binding_id,
+                    external_namespace = EXCLUDED.external_namespace,
+                    parent_external_namespace = EXCLUDED.parent_external_namespace,
+                    parent_external_id = EXCLUDED.parent_external_id,
+                    external_id = EXCLUDED.external_id,
                     client_id = EXCLUDED.client_id, device_id = EXCLUDED.device_id,
                     platform = EXCLUDED.platform, subplatform = EXCLUDED.subplatform,
                     observed_at = EXCLUDED.observed_at, last_seen_at = EXCLUDED.last_seen_at,

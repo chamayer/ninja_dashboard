@@ -17,6 +17,9 @@ Correctness contract (per ADR-0007 §Heartbeat, §SCD-2, §Absence):
 - The closing `_history.last_seen_at` on a material transition is the prior
   current row's last confirmed observation time, not the incoming row's
   `last_seen_at` (which is the *new* state's confirmation).
+- ADR-0009 identity fields are dual-written and validated, but the deployed
+  ADR-0007 tuple remains the lock, lookup, conflict, and reconciliation key
+  until the separately gated cutover.
 """
 
 from __future__ import annotations
@@ -37,7 +40,9 @@ VOLATILE_FIELDS = frozenset({
 # Columns written to entity_observation_current. Kept as a module constant so
 # the bespoke upsert SQL and the row-shaping loop stay in lockstep.
 _CURRENT_COLUMNS: tuple[str, ...] = (
-    "observation_id", "tenant_id", "source_binding_id", "collector_instance_id",
+    "observation_id", "tenant_id", "source_binding_id", "source_instance_id",
+    "last_seen_binding_id", "external_namespace", "parent_external_namespace",
+    "parent_external_id", "external_id", "collector_instance_id",
     "client_id", "device_id", "entity_type", "parent_source_key", "entity_key",
     "platform", "subplatform", "observed_at", "last_seen_at", "last_received_at",
     "active", "withdrawn_at", "snapshot_scope", "last_snapshot_run_id",
@@ -52,6 +57,8 @@ _CURRENT_COLUMNS: tuple[str, ...] = (
 # collector_instance_id are intentionally excluded so per-identity primary
 # key stays stable across heartbeats (identity_candidates FK depends on it).
 _CURRENT_UPDATE_COLUMNS: tuple[str, ...] = (
+    "source_instance_id", "last_seen_binding_id", "external_namespace",
+    "parent_external_namespace", "parent_external_id", "external_id",
     "platform", "subplatform", "observed_at", "last_seen_at",
     "last_received_at", "active", "withdrawn_at", "snapshot_scope",
     "last_snapshot_run_id", "raw_data", "canonical_data", "raw_hash",
@@ -70,12 +77,38 @@ def material_hash(canonical: dict[str, Any]) -> bytes:
 
 
 def prepare_observation(row: dict[str, Any]) -> dict[str, Any]:
+    row = dict(row)
+    if row.get("source_instance_id") is None:
+        raise ValueError("source_instance_id is required for observation dual-write")
+    if row.get("source_binding_id") is None:
+        raise ValueError("source_binding_id is required for observation provenance")
+
+    external_namespace = str(row.get("external_namespace") or "").strip()
+    external_id = str(row.get("external_id") or "").strip()
+    parent_namespace = str(row.get("parent_external_namespace") or "").strip()
+    parent_id = str(row.get("parent_external_id") or "").strip()
+    if not external_namespace:
+        raise ValueError("external_namespace is required for observation dual-write")
+    if not external_id:
+        raise ValueError("external_id is required for observation dual-write")
+    if bool(parent_namespace) != bool(parent_id):
+        raise ValueError(
+            "parent_external_namespace and parent_external_id must both be empty "
+            "or both be populated"
+        )
+    row["external_namespace"] = external_namespace
+    row["external_id"] = external_id
+    row["parent_external_namespace"] = parent_namespace
+    row["parent_external_id"] = parent_id
+    row["last_seen_binding_id"] = (
+        row.get("last_seen_binding_id") or row["source_binding_id"]
+    )
+
     canonical = row.get("canonical_data") or {}
     if hasattr(canonical, "obj"):
         canonical = canonical.obj
     if not isinstance(canonical, dict):
         canonical = {}
-    row = dict(row)
     raw_data = row.get("raw_data")
     if isinstance(raw_data, dict):
         row["raw_data"] = Json(raw_data)
@@ -91,7 +124,7 @@ def prepare_batch(rows: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _identity_tuple(row: dict[str, Any]) -> tuple:
-    """Canonical 5-column identity tuple for sort and locking.
+    """Deployed ADR-0007 identity tuple used for sort and locking.
 
     parent_source_key is normalized to '' for top-level entities so tuples
     sort deterministically alongside child-entity rows.
@@ -307,6 +340,12 @@ def write_history_changes(cur: Any, rows: Iterable[dict[str, Any]]) -> int:
         "id": row["observation_id"],
         "tenant_id": row["tenant_id"],
         "source_binding_id": row["source_binding_id"],
+        "source_instance_id": row["source_instance_id"],
+        "last_seen_binding_id": row["last_seen_binding_id"],
+        "external_namespace": row["external_namespace"],
+        "parent_external_namespace": row["parent_external_namespace"],
+        "parent_external_id": row["parent_external_id"],
+        "external_id": row["external_id"],
         "collector_instance_id": row["collector_instance_id"],
         "client_id": row.get("client_id"),
         "device_id": row.get("device_id"),

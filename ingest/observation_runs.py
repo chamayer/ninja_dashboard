@@ -9,32 +9,43 @@ from typing import Any
 
 def begin_run(cur: Any, tenant_id: int, source_binding_id: uuid.UUID,
               snapshot_scope: str, snapshot_at: datetime,
-              expected_rows: int = 0) -> uuid.UUID:
+              expected_rows: int = 0) -> tuple[uuid.UUID, uuid.UUID]:
     run_id = uuid.uuid4()
     cur.execute(
         """
         INSERT INTO operations.observation_snapshot_runs
-          (run_id, tenant_id, source_binding_id, snapshot_scope, snapshot_at,
+          (run_id, tenant_id, source_binding_id, source_instance_id,
+           snapshot_scope, snapshot_at, run_started_at, is_complete_snapshot,
            status, expected_rows, written_rows, failed_rows, error)
-        VALUES (%s, %s, %s, %s, %s, 'started', %s, 0, 0, '')
+        SELECT %s, %s, sb.id, sb.source_instance_id, %s, %s, %s, NULL,
+               'started', %s, 0, 0, ''
+          FROM operations.source_bindings sb
+         WHERE sb.id = %s AND sb.tenant_id = %s
+        RETURNING source_instance_id
         """,
-        (run_id, tenant_id, source_binding_id, snapshot_scope, snapshot_at,
-         expected_rows),
+        (run_id, tenant_id, snapshot_scope, snapshot_at, snapshot_at,
+         expected_rows, source_binding_id, tenant_id),
     )
-    return run_id
+    result = cur.fetchone()
+    if result is None:
+        raise ValueError("source binding does not belong to the run tenant")
+    return run_id, result[0]
 
 
 def complete_run(cur: Any, run_id: uuid.UUID, written_rows: int,
-                 failed_rows: int = 0, error: str = "") -> None:
+                 failed_rows: int = 0, error: str = "",
+                 *, is_complete_snapshot: bool = True) -> None:
     status = "failed" if failed_rows else "complete"
+    complete_snapshot = bool(is_complete_snapshot and not failed_rows)
     cur.execute(
         """
         UPDATE operations.observation_snapshot_runs
            SET status = %s, written_rows = %s, failed_rows = %s,
-               error = %s, completed_at = clock_timestamp()
+               error = %s, completed_at = clock_timestamp(),
+               is_complete_snapshot = %s
          WHERE run_id = %s
         """,
-        (status, written_rows, failed_rows, error[:4000], run_id),
+        (status, written_rows, failed_rows, error[:4000], complete_snapshot, run_id),
     )
 
 

@@ -1,7 +1,14 @@
 # 0009 — Stable source observation identity
 
-Status: Accepted (not implemented)
+Status: Accepted (expand and dual-write implemented; cutover pending)
 Date: 2026-07-31
+
+Implementation status: release `0.99.0` deployed the additive shadow columns
+and deterministic backfill. Release `0.99.1` makes current/history and
+snapshot-run writers populate those fields while ADR-0007 remains the lock,
+conflict, reconciliation, and reader authority. Per-run membership,
+stable-key constraints, cutover, rollback rehearsal, and contract cleanup are
+not yet implemented.
 
 ## Context
 

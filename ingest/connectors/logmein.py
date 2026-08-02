@@ -13,6 +13,10 @@ from ingest.normalize import infer_device_role, normalize_hostname, parse_dt
 from ingest.sources import SourceConfig
 
 
+EXTERNAL_NAMESPACE = "host"
+CONTAINER_EXTERNAL_NAMESPACE = "group"
+
+
 def _retry_after_seconds(value: str | None) -> int:
     try:
         return int(value or 61)
@@ -101,6 +105,8 @@ def fetch(source: SourceConfig, observed_at: datetime) -> list[dict]:
         observations.append({
             "observed_at": observed_at,
             "platform": "LogMeIn",
+            "external_namespace": EXTERNAL_NAMESPACE,
+            "container_external_namespace": CONTAINER_EXTERNAL_NAMESPACE,
             "source_id": source.source_id,
             "source_name": source.source_name,
             "source_client_name": None,
@@ -123,6 +129,7 @@ def fetch(source: SourceConfig, observed_at: datetime) -> list[dict]:
         observations.append({
             "_org_only": True,
             "platform": "LogMeIn",
+            "container_external_namespace": CONTAINER_EXTERNAL_NAMESPACE,
             "platform_group_id": str(group_id),
             "platform_group_name": group_name,
         })

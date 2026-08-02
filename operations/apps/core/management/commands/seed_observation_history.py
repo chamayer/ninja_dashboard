@@ -54,12 +54,18 @@ class Command(BaseCommand):
             cursor.execute(
                 """
                 INSERT INTO operations.entity_observation_history
-                  (id, tenant_id, source_binding_id, collector_instance_id,
+                  (id, tenant_id, source_binding_id, source_instance_id,
+                   last_seen_binding_id, external_namespace,
+                   parent_external_namespace, parent_external_id, external_id,
+                   collector_instance_id,
                    client_id, device_id, entity_type, platform, parent_source_key,
                    entity_key, effective_from, effective_to, last_seen_at,
                    received_at, material_data, material_hash,
                    hash_algorithm_version, active)
                 SELECT gen_random_uuid(), c.tenant_id, c.source_binding_id,
+                       c.source_instance_id, c.last_seen_binding_id,
+                       c.external_namespace, c.parent_external_namespace,
+                       c.parent_external_id, c.external_id,
                        c.collector_instance_id, c.client_id, c.device_id,
                        c.entity_type, c.platform, c.parent_source_key, c.entity_key,
                        c.observed_at, NULL, c.last_seen_at, c.last_received_at,

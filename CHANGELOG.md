@@ -2,6 +2,19 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.99.1] — 2026-08-02 — Stable observation identity dual-write
+
+### Changed
+
+- Made Ninja, SentinelOne, ScreenConnect, LogMeIn, and Hudu observation paths
+  populate the accepted stable source-instance/namespace identity alongside
+  the still-authoritative legacy observation identity.
+- Made snapshot runs derive their source instance from the transporting
+  binding and record run start plus explicit full/partial completeness.
+- Updated compatibility seed and backfill writers to preserve shadow identity
+  coverage. Stable-key locks, uniqueness, readers, and reconciliation remain
+  unchanged pending shadow comparison and the separately gated cutover.
+
 ## [0.99.0] — 2026-08-02 — Stable observation identity expansion
 
 ### Added
