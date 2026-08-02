@@ -2,6 +2,17 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.99.0] — 2026-08-02 — Stable observation identity expansion
+
+### Added
+
+- Added nullable shadow identity and transport-provenance fields for current
+  and historical Operations observations, plus source-instance, run-start,
+  and explicit completeness fields for observation snapshot runs.
+- Backfilled the accepted stable source namespaces for all current connector
+  families without changing the deployed observation key, readers, writers,
+  reconciliation, or canonical attachments.
+
 ## [0.98.8] — 2026-07-31 — Shared-serial resolver correctness
 
 ### Fixed

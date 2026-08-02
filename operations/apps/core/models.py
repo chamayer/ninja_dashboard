@@ -1029,12 +1029,30 @@ class EntityObservationCurrent(TenantScopedModel):
 
     observation_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     source_binding = models.ForeignKey(SourceBinding, on_delete=models.PROTECT, related_name="current_observations")
+    source_instance = models.ForeignKey(
+        SourceInstance,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="stable_current_observations",
+    )
+    last_seen_binding = models.ForeignKey(
+        SourceBinding,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="stable_current_transport_observations",
+    )
     collector_instance = models.ForeignKey(CollectorInstance, on_delete=models.PROTECT, related_name="current_observations")
     client = models.ForeignKey(Client, on_delete=models.PROTECT, null=True, blank=True, related_name="current_observations")
     device = models.ForeignKey(Device, on_delete=models.PROTECT, null=True, blank=True, related_name="current_observations")
     entity_type = models.CharField(max_length=80)
     parent_source_key = models.TextField(default="")
     entity_key = models.TextField()
+    external_namespace = models.CharField(max_length=120, blank=True, default="")
+    parent_external_namespace = models.CharField(max_length=120, blank=True, default="")
+    parent_external_id = models.TextField(blank=True, default="")
+    external_id = models.TextField(blank=True, default="")
     platform = models.CharField(max_length=80)
     subplatform = models.CharField(max_length=120, blank=True)
     observed_at = models.DateTimeField()
@@ -1072,6 +1090,20 @@ class EntityObservationHistory(TenantScopedModel):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     source_binding = models.ForeignKey(SourceBinding, on_delete=models.PROTECT, related_name="history_observations")
+    source_instance = models.ForeignKey(
+        SourceInstance,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="stable_history_observations",
+    )
+    last_seen_binding = models.ForeignKey(
+        SourceBinding,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="stable_history_transport_observations",
+    )
     collector_instance = models.ForeignKey(CollectorInstance, on_delete=models.PROTECT, related_name="history_observations")
     client = models.ForeignKey(Client, on_delete=models.PROTECT, null=True, blank=True, related_name="observation_history")
     device = models.ForeignKey(Device, on_delete=models.PROTECT, null=True, blank=True, related_name="observation_history")
@@ -1079,6 +1111,10 @@ class EntityObservationHistory(TenantScopedModel):
     platform = models.CharField(max_length=80, default="")
     parent_source_key = models.TextField(default="")
     entity_key = models.TextField()
+    external_namespace = models.CharField(max_length=120, blank=True, default="")
+    parent_external_namespace = models.CharField(max_length=120, blank=True, default="")
+    parent_external_id = models.TextField(blank=True, default="")
+    external_id = models.TextField(blank=True, default="")
     effective_from = models.DateTimeField()
     effective_to = models.DateTimeField(null=True, blank=True)
     last_seen_at = models.DateTimeField()
@@ -1108,8 +1144,17 @@ class ObservationSnapshotRun(TenantScopedModel):
 
     run_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     source_binding = models.ForeignKey(SourceBinding, on_delete=models.PROTECT, related_name="observation_snapshot_runs")
+    source_instance = models.ForeignKey(
+        SourceInstance,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="observation_snapshot_runs",
+    )
     snapshot_scope = models.CharField(max_length=120)
     snapshot_at = models.DateTimeField()
+    run_started_at = models.DateTimeField(null=True, blank=True)
+    is_complete_snapshot = models.BooleanField(null=True, blank=True)
     status = models.CharField(max_length=20, default="started")
     expected_rows = models.PositiveIntegerField(default=0)
     written_rows = models.PositiveIntegerField(default=0)
