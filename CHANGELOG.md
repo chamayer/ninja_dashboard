@@ -2,6 +2,31 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.103.0] — 2026-08-03 — Generic Ninja reader cutover
+
+### Changed
+
+- Made generic Ninja device-detail and device-health observations the
+  authoritative current/raw storage path and stopped new hourly writes to the
+  two legacy raw snapshot tables.
+- Repointed current device, health, session, presence, last-user, patching, and
+  daily active-device consumers to generic current evidence and compact daily
+  rollups while retaining compatibility relation names.
+- Added a compact Software title read model so the Operations overview no
+  longer groups the full installation-current table on every request.
+
+### Fixed
+
+- Added a cross-process database single-flight guard around the complete patch
+  cycle and dependency-ordered Software read-model refresh once per completed
+  inventory batch.
+
+### Operational note
+
+- This release retains all legacy Ninja snapshot rows and tables for rollback.
+  Archival, deletion, and disk reclamation remain a separately approved phase;
+  Agent Compliance remains unchanged.
+
 ## [0.102.0] — 2026-08-03 — Inventory Metabase retirement
 
 ### Changed

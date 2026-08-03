@@ -49,13 +49,8 @@ def fetch(source: SourceConfig, observed_at: datetime) -> list[dict]:
                        ON p.id = d.policy_id
                 LEFT JOIN ninja_core.policies rp
                        ON rp.id = d.role_policy_id
-                LEFT JOIN LATERAL (
-                    SELECT offline, last_contact
-                    FROM ninja_core.device_snapshots s
-                    WHERE s.device_id = d.id
-                    ORDER BY s.snapshot_at DESC
-                    LIMIT 1
-                ) s ON true
+                LEFT JOIN operations.ninja_device_detail_current_shadow s
+                       ON s.device_id = d.id
                 WHERE d.is_current = true
                   -- PowerShell parity: only AgentDevice records count for
                   -- agent compliance. Skip Hyper-V/VMware guests

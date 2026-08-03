@@ -2704,9 +2704,8 @@ DEVICE_CARDS = [
         },
         "query": f"""
 WITH latest_snap AS (
-    SELECT DISTINCT ON (device_id) *
-    FROM ninja_core.device_snapshots
-    ORDER BY device_id, snapshot_at DESC
+    SELECT *
+    FROM operations.ninja_device_detail_current_shadow
 )
 SELECT
     d.system_name          AS "Device",
@@ -3490,9 +3489,8 @@ ORDER BY
         "query": f"""
 {_PCOV_CTE},
 latest_contact AS (
-    SELECT DISTINCT ON (device_id) device_id, last_contact
-    FROM ninja_core.device_snapshots
-    ORDER BY device_id, snapshot_at DESC
+    SELECT device_id, last_contact
+    FROM operations.ninja_device_detail_current_shadow
 )
 SELECT
     c.system_name AS device,
@@ -5231,17 +5229,17 @@ ORDER BY 1
         },
         "template_tags":  _TRENDS_TAGS,
         "param_mappings": _TRENDS_PARAM_MAPPINGS_FULL,
-        # Daily distinct device count from device_snapshots — answers
+        # Daily distinct device count from the compact generic rollup — answers
         # "how many devices were checking in on day D?". Useful for
         # spotting fleet drops (e.g. agent rollout regression).
         "query": f"""
 SELECT
-    DATE_TRUNC('day', s.snapshot_at)::date AS "Day",
+    s.rollup_day                           AS "Day",
     COUNT(DISTINCT s.device_id)            AS "Active Devices"
-FROM ninja_core.device_snapshots s
+FROM operations.ninja_device_seen_daily_shadow s
 JOIN ninja_core.v_active_devices d ON d.id = s.device_id
 JOIN ninja_core.organizations o ON o.id = d.organization_id
-WHERE s.snapshot_at > NOW() - (INTERVAL '1 day' * {{{{days}}}})
+WHERE s.rollup_day > CURRENT_DATE - {{{{days}}}}::integer
 {_TRENDS_FILTERS_DEVICE}
 GROUP BY 1
 ORDER BY 1

@@ -3,9 +3,9 @@
 Source: GET /v2/queries/device-health
 
 This endpoint gives one compact current-health row per device, including
-pending reboot reason and Ninja's summary patch counts. We store it as a
-snapshot so we can compare Ninja summary counts with our patch facts
-without replacing the existing patch-count source yet.
+pending reboot reason and Ninja's summary patch counts. Generic current raw
+evidence is authoritative; history is appended only for material/presence
+transitions.
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ NINJA_HEALTH_SNAPSHOT_SCOPE = "Ninja.device-health"
 
 
 def run(client: NinjaClient, snapshot_at: datetime) -> int:
-    """Fetch device health rows. Returns snapshots upserted."""
+    """Fetch device health rows. Returns generic observations written."""
     with run_log("core.device_health") as stats:
         known_devices = _fetch_known_devices()
         rows: list[dict[str, Any]] = []
@@ -58,31 +58,23 @@ def run(client: NinjaClient, snapshot_at: datetime) -> int:
                 "to reconcile current evidence"
             )
 
-        with db.transaction() as cur:
-            count = db.upsert(
-                cur,
-                "ninja_core.device_health_snapshots",
-                rows,
-                conflict_keys=["snapshot_at", "device_id"],
-            )
-        _refresh_latest_health_view()
         observation_count = _write_health_observations(
             rows,
             raw_by_id,
             known_devices,
             snapshot_at,
         )
+        _refresh_latest_health_view()
 
-        stats["rows_upserted"] = count
+        stats["rows_upserted"] = observation_count
         stats["rows_inserted"] = observation_count
         log.info(
-            "Upserted %d device health snapshots, wrote %d shadow observations "
-            "and ignored %d unknown devices",
-            count,
+            "Wrote %d authoritative device health observations and ignored "
+            "%d unknown devices",
             observation_count,
             unknown_count,
         )
-        return count
+        return observation_count
 
 
 def _fetch_known_devices() -> dict[int, str]:
@@ -166,7 +158,7 @@ def _write_health_observations(
     known_devices: dict[int, str],
     snapshot_at: datetime,
 ) -> int:
-    """Shadow-write health current/history; legacy remains authoritative."""
+    """Write authoritative health current/history evidence."""
     batch_id = uuid.uuid4()
     try:
         with db.transaction() as cur:
@@ -184,11 +176,10 @@ def _write_health_observations(
                 """
             )
             if not cur.fetchone()[0]:
-                log.info(
-                    "Ninja health shadow schema is not available yet; "
-                    "legacy write remains authoritative"
+                raise RuntimeError(
+                    "Ninja generic health schema is unavailable; refusing "
+                    "to write legacy snapshots"
                 )
-                return 0
 
             run_id, source_instance_id = begin_run(
                 cur,
@@ -265,13 +256,10 @@ def _write_health_observations(
                 identity_rows=current_rows,
             )
             reconcile_complete_run(cur, run_id)
-            return written
+        return written
     except Exception:
-        log.exception(
-            "Ninja health shadow observation write failed; "
-            "legacy health snapshot remains authoritative"
-        )
-        return 0
+        log.exception("Ninja authoritative health observation write failed")
+        raise
 
 
 def _refresh_latest_health_view() -> None:

@@ -17,7 +17,7 @@ Five finding types (BLUEPRINT §5.1):
     last_seen_at is >35 days old (or NULL — old installs with no
     installedAt). Mutually exclusive with never_patched.
   * `reboot_pending` — v_device.needs_reboot = TRUE AND last_boot_at
-    older than 3 days (last_boot_at from Ninja device_snapshots via
+    older than 3 days (last_boot_at from generic Ninja detail evidence via
     device_session_current).
   * `patch_failing_repeatedly` — same KB has failed >=3 times on a
     device that is in scope.

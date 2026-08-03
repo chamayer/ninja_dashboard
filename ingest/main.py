@@ -84,43 +84,54 @@ from ingest.summary_views import refresh_device_troubleshooting_signal
 
 log = logging.getLogger("ingest.main")
 _AGENT_COMPLIANCE_LOCK = threading.Lock()
+_PATCH_CYCLE_LOCK_ID = 6_803_904_731_027_441
 
 
 def run_once() -> None:
     run_patching_once()
 
 
-def run_patching_once() -> None:
+def run_patching_once() -> bool:
     """Execute one full patch/Ninja ingest cycle. Modules run in dependency order
     with per-module exception isolation: a failure in one module is
     logged with status='failed' in run_log and the rest continue.
     Shared `snapshot_at` so all rows from a single run carry the
     same first/last_observed_at."""
-    log.info("Patch ingest run starting")
-    snapshot_at = datetime.now(timezone.utc)
-    with NinjaClient(
-        base_url=settings.NINJA_BASE_URL,
-        token_url=settings.NINJA_TOKEN_URL,
-        client_id=settings.NINJA_CLIENT_ID,
-        client_secret=settings.NINJA_CLIENT_SECRET.get_secret_value(),
-        scope=settings.NINJA_SCOPE,
-    ) as client:
-        _safe("organizations",  organizations.run, client)
-        _safe("locations",      locations.run, client)
-        _safe("policies",       policies.run, client)
-        _safe("patching_enabled_policies", sync_patching_enabled_policies)
-        _safe("devices",        devices.run, client, snapshot_at)
-        _safe("device_health",  device_health.run, client, snapshot_at)
-        _safe("custom_fields",  custom_fields.run, client, snapshot_at)
-        # Patching-scope matview reads ninja_core.custom_field_values +
-        # ninja_core.policies + ops.devices; must refresh AFTER
-        # custom_fields ingest lands. Track O batch O4.
-        _safe("patching_scope_refresh", devices.refresh_patching_scope_current)
-        _safe("patches",        patches_ingest.run, client, snapshot_at)
-        _safe("activities",     activities_ingest.run, client)
-        _safe("troubleshooting_signal", refresh_device_troubleshooting_signal)
-    refresh_after_collection("Ninja patch collection")
-    log.info("Patch ingest run complete")
+    with db.pool.connection() as lock_conn, lock_conn.cursor() as lock_cur:
+        lock_cur.execute("SELECT pg_try_advisory_lock(%s)", (_PATCH_CYCLE_LOCK_ID,))
+        if not lock_cur.fetchone()[0]:
+            log.info("Patch ingest run skipped; another process holds the cycle lock")
+            return False
+        try:
+            with run_log("patch_cycle"):
+                log.info("Patch ingest run starting")
+                snapshot_at = datetime.now(timezone.utc)
+                with NinjaClient(
+                    base_url=settings.NINJA_BASE_URL,
+                    token_url=settings.NINJA_TOKEN_URL,
+                    client_id=settings.NINJA_CLIENT_ID,
+                    client_secret=settings.NINJA_CLIENT_SECRET.get_secret_value(),
+                    scope=settings.NINJA_SCOPE,
+                ) as client:
+                    _safe("organizations",  organizations.run, client)
+                    _safe("locations",      locations.run, client)
+                    _safe("policies",       policies.run, client)
+                    _safe("patching_enabled_policies", sync_patching_enabled_policies)
+                    _safe("devices",        devices.run, client, snapshot_at)
+                    _safe("device_health",  device_health.run, client, snapshot_at)
+                    _safe("custom_fields",  custom_fields.run, client, snapshot_at)
+                    # Patching-scope matview reads ninja_core.custom_field_values +
+                    # ninja_core.policies + ops.devices; must refresh AFTER
+                    # custom_fields ingest lands. Track O batch O4.
+                    _safe("patching_scope_refresh", devices.refresh_patching_scope_current)
+                    _safe("patches",        patches_ingest.run, client, snapshot_at)
+                    _safe("activities",     activities_ingest.run, client)
+                    _safe("troubleshooting_signal", refresh_device_troubleshooting_signal)
+                refresh_after_collection("Ninja patch collection")
+                log.info("Patch ingest run complete")
+            return True
+        finally:
+            lock_cur.execute("SELECT pg_advisory_unlock(%s)", (_PATCH_CYCLE_LOCK_ID,))
 
 
 def run_identity_resolver_once(*, refresh_current: bool = True) -> None:
@@ -301,6 +312,8 @@ def run_software_queue_once() -> None:
         activity, scheduled = software_queue.drain_background(
             client, settings.SOFTWARE_QUEUE_WORKER_BATCH
         )
+    if activity or scheduled:
+        software_ingest.refresh_read_models()
     log.info(
         "Software queue drain complete: activity=%d scheduled=%d",
         activity, scheduled,
@@ -316,7 +329,11 @@ def run_software_scoped(df: str) -> None:
         client_secret=settings.NINJA_CLIENT_SECRET.get_secret_value(),
         scope=settings.NINJA_SCOPE,
     ) as client:
-        _safe("software.scoped", software_ingest.run, client, df)
+        try:
+            software_ingest.run(client, df)
+            software_ingest.refresh_read_models()
+        except Exception:
+            log.exception("software.scoped ingest failed")
     log.info("Software inventory scoped run complete (df=%r)", df)
 
 

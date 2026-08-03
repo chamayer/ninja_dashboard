@@ -2816,31 +2816,18 @@ def _software_page_data(request: HttpRequest) -> dict:
         where_sql = " AND ".join(where_clauses)
         cur.execute(
             f"""
-            WITH title_rollup AS MATERIALIZED (
-                SELECT sic.tenant_id,
-                       sic.canonical_name,
-                       MAX(sic.publisher) AS publisher,
-                       COUNT(*) AS installation_count,
-                       COUNT(DISTINCT sic.device_id) AS device_count,
-                       COUNT(DISTINCT sic.client_id) AS client_count,
-                       MAX(sic.first_observed_at) AS last_install
-                FROM operations.software_installations_current sic
-                WHERE sic.tenant_id = 1
-                  AND sic.deleted_at IS NULL
-                  AND sic.stale_since IS NULL
-                GROUP BY sic.tenant_id, sic.canonical_name
-            ),
-            totals AS (
-                SELECT COALESCE(SUM(installation_count), 0)::bigint AS installations,
+            WITH totals AS (
+                SELECT COALESCE(SUM(installations), 0)::bigint AS installations,
                        COUNT(*)::bigint AS unique_titles
-                FROM title_rollup
+                FROM operations.software_title_current
+                WHERE tenant_id = 1
             ),
             filtered AS (
                 SELECT sic.canonical_name,
                        sic.publisher,
                        sic.device_count,
                        sic.client_count,
-                       sic.last_install,
+                       sic.latest_install AS last_install,
                    (SELECT array_agg(DISTINCT cat_name)
                     FROM operations.software_catalog cat,
                          jsonb_array_elements_text(cat.categories) AS cat_name
@@ -2852,7 +2839,7 @@ def _software_page_data(request: HttpRequest) -> dict:
                     WHERE sd.tenant_id = sic.tenant_id
                       AND sd.canonical_name = sic.canonical_name
                    ) AS decision
-                FROM title_rollup sic
+                FROM operations.software_title_current sic
                 WHERE {where_sql}
                   AND sic.device_count >= {min_devices_int}
                 ORDER BY sic.device_count DESC, sic.canonical_name
@@ -2924,22 +2911,21 @@ def _software_page_data(request: HttpRequest) -> dict:
             sc.execute("SET LOCAL operations.tenant_id = 1")
             sc.execute(
                 """
-                SELECT DISTINCT canonical_name
-                FROM operations.software_installations_current
-                WHERE tenant_id = 1 AND deleted_at IS NULL AND stale_since IS NULL
-                  AND first_observed_at >= NOW() - INTERVAL '7 days'
+                SELECT canonical_name
+                FROM operations.software_title_current
+                WHERE tenant_id = 1
+                  AND latest_install >= NOW() - INTERVAL '7 days'
                 """
             )
             new_products_set = {row[0] for row in sc.fetchall()}
             this_week["new_products"] = len(new_products_set)
             sc.execute(
                 """
-                SELECT canonical_name, COUNT(*)::int AS devices
-                FROM operations.software_installations_current
-                WHERE tenant_id = 1 AND deleted_at IS NULL AND stale_since IS NULL
-                  AND first_observed_at >= NOW() - INTERVAL '7 days'
-                GROUP BY canonical_name
-                ORDER BY devices DESC LIMIT 1
+                SELECT canonical_name, device_count AS devices
+                FROM operations.software_title_current
+                WHERE tenant_id = 1
+                  AND latest_install >= NOW() - INTERVAL '7 days'
+                ORDER BY device_count DESC, canonical_name LIMIT 1
                 """
             )
             row = sc.fetchone()
@@ -2962,9 +2948,8 @@ def _software_page_data(request: HttpRequest) -> dict:
             sc.execute(
                 """
                 SELECT COUNT(DISTINCT LOWER(sic.publisher))::int
-                FROM operations.software_installations_current sic
+                FROM operations.software_title_current sic
                 WHERE sic.tenant_id = 1
-                  AND sic.deleted_at IS NULL AND sic.stale_since IS NULL
                   AND COALESCE(sic.publisher, '') <> ''
                   AND NOT EXISTS (
                       SELECT 1 FROM operations.software_decisions sd
@@ -3061,8 +3046,8 @@ def _software_page_data(request: HttpRequest) -> dict:
                               )
                         )
                     ) AS investigating
-                FROM operations.software_installations_current sic
-                WHERE sic.tenant_id = 1 AND sic.deleted_at IS NULL AND sic.stale_since IS NULL
+                FROM operations.software_title_current sic
+                WHERE sic.tenant_id = 1
                 """
             )
             row = sc.fetchone() or (0, 0, 0)
@@ -3786,13 +3771,11 @@ def software_user_risk(request: HttpRequest) -> HttpResponse:
 
     sql = f"""
         WITH latest_user AS (
-            SELECT DISTINCT ON (ds.device_id)
-                ds.device_id AS ninja_device_id,
-                TRIM(ds.last_user) AS last_user,
-                ds.snapshot_at
-            FROM ninja_core.device_snapshots ds
+            SELECT ds.device_id AS ninja_device_id,
+                   TRIM(ds.last_user) AS last_user,
+                   ds.snapshot_at
+            FROM operations.ninja_device_detail_current_shadow ds
             WHERE ds.last_user IS NOT NULL AND TRIM(ds.last_user) <> ''
-            ORDER BY ds.device_id, ds.snapshot_at DESC
         ),
         device_user AS (
             SELECT DISTINCT dl.device_id AS ops_device_id, lu.last_user, lu.snapshot_at

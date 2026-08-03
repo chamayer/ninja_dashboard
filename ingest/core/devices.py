@@ -3,9 +3,10 @@
 Source: GET /v2/devices-detailed (paginate_after).
 
 Writes per device per run:
-  - ninja_core.devices            (upsert on id; slowly-changing dim)
-  - ninja_core.device_snapshots   (insert per snapshot_at; volatile state)
-  - operations.entity_observations (agent.rmm observation; idempotent via batch_id hash)
+  - ninja_core.devices (bounded current compatibility row)
+  - operations.entity_observation_current (authoritative current raw evidence)
+  - operations.entity_observation_history (material/presence transitions only)
+  - operations.source_record_seen_daily (compact daily presence)
 
 `first_seen_at` on devices is deliberately NOT in the row dict — the
 column DEFAULT now() handles the initial insert, and on conflict
@@ -62,7 +63,7 @@ def _add_vm_canonical_measurements(
 
 
 def run(client: NinjaClient, snapshot_at: datetime) -> tuple[int, int]:
-    """Returns (devices_upserted, snapshots_inserted)."""
+    """Returns (devices_upserted, generic_observations_written)."""
     try:
         result = _run(client, snapshot_at)
     except Exception as exc:
@@ -171,18 +172,11 @@ def _run(client: NinjaClient, snapshot_at: datetime) -> tuple[int, int]:
                 device_rows,
                 conflict_keys=["id"],
             )
-            snap_count = db.upsert(
-                cur,
-                "ninja_core.device_snapshots",
-                snapshot_rows,
-                conflict_keys=["snapshot_at", "device_id"],
-            )
             missing_count = _mark_missing_devices(cur, current_ids, snapshot_at)
             _sync_operations_device_links(cur, current_ids, snapshot_at)
             _sync_operations_device_roles(cur)
             _sync_operations_device_exemptions(cur)
 
-        _refresh_active_devices_view()
         obs_count = _write_ninja_observations(
             device_rows,
             snapshot_rows,
@@ -190,18 +184,18 @@ def _run(client: NinjaClient, snapshot_at: datetime) -> tuple[int, int]:
             vm_tracking,
             raw_by_id,
         )
+        _refresh_active_devices_view()
         _refresh_device_agent_presence_current()
         stats["rows_upserted"] = dev_count
-        stats["rows_inserted"] = snap_count
+        stats["rows_inserted"] = obs_count
         stats["devices_marked_missing"] = missing_count
         log.info(
-            "Upserted %d devices, inserted %d snapshots, marked %d missing, wrote %d entity observations",
+            "Upserted %d devices, marked %d missing, wrote %d authoritative entity observations",
             dev_count,
-            snap_count,
             missing_count,
             obs_count,
         )
-        return dev_count, snap_count
+        return dev_count, obs_count
 
 
 def _mark_missing_devices(
@@ -712,8 +706,8 @@ def _write_ninja_observations(
                 )
             return len(obs_rows)
     except Exception:
-        log.exception("Ninja current-observation write failed — continuing")
-        return 0
+        log.exception("Ninja authoritative current-observation write failed")
+        raise
 
 
 def _refresh_device_agent_presence_current() -> None:

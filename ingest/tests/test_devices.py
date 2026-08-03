@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import inspect
 
 import pytest
 
@@ -27,3 +28,7 @@ def test_vm_measurements_preserve_direct_os_boot_time() -> None:
         "parent_ninja_id": 7,
         "hypervisor_reported_boot_time_at": hypervisor_boot.isoformat(),
     }
+
+
+def test_normal_device_collection_does_not_write_legacy_snapshots() -> None:
+    assert "ninja_core.device_snapshots" not in inspect.getsource(devices._run)

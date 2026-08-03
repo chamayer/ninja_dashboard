@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import inspect
 from contextlib import contextmanager
 from datetime import datetime, timezone
 
@@ -74,3 +75,9 @@ def test_distinct_health_namespace_and_scope_are_not_device_scope():
     assert device_health.NINJA_HEALTH_EXTERNAL_NAMESPACE == "device-health"
     assert device_health.NINJA_HEALTH_SNAPSHOT_SCOPE == "Ninja.device-health"
     assert device_health._legacy_health_entity_key("42") == "device-health:42"
+
+
+def test_normal_health_collection_does_not_write_legacy_snapshots() -> None:
+    assert "ninja_core.device_health_snapshots" not in inspect.getsource(
+        device_health.run
+    )

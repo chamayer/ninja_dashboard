@@ -3,13 +3,14 @@
 Status: Accepted (Ninja storage expansion prepared; wider ecosystem not implemented)
 Date: 2026-07-31
 
-The first additive Ninja ingest-storage slice is prepared locally for release
-`0.101.0`: distinct device/detail and health source records, deterministic raw
-hashes, versioned material projections, material-change history, compact daily
+The first additive Ninja ingest-storage slice shipped in release `0.101.0`:
+distinct device/detail and health source records, deterministic raw hashes,
+versioned material projections, material-change history, compact daily
 presence, shadow compatibility views, and an operator-only resumable legacy
-rollup backfill. Legacy writers/readers remain authoritative; consumer cutover,
-legacy-write shutdown, cleanup, and the wider entity/claim ecosystem are not
-implemented by this slice.
+rollup backfill. Release candidate `0.103.0` promotes those generic records to
+the Ninja current/raw authority, stops new legacy snapshot appends, and moves
+the audited live consumers to generic compatibility projections. Historical
+cleanup and the wider entity/claim ecosystem remain separate work.
 
 ## Context
 
@@ -232,6 +233,29 @@ snapshot that no longer contains the source identity closes its open history
 interval and records the withdrawal; reappearance opens a new interval. A
 raw-only hash change updates current provenance but does not append another
 full raw history copy. Partial or failed collections withdraw nothing.
+
+Source-native lifecycle events are retained as immutable generic source-event
+evidence keyed to the complete stable source identity. The event contract
+preserves the vendor event ID, source event type and timestamp, source actor
+identifier and supplied actor display metadata, source/client scope, outcome,
+and a reference to the permitted raw event. Actor names and email addresses
+are customer-sensitive: they are access-controlled and must not be copied into
+finding text, aggregate validation output, or application logs.
+
+An explicit source deletion event is higher-fidelity withdrawal evidence than
+the later complete collection that first observes the record missing. When its
+identity and ordering validate, it closes source evidence at the event time
+with reason `source_deleted`; the later missing poll remains corroborating
+evidence. An absent, malformed, conflicting, or out-of-order event cannot
+weaken complete-snapshot reconciliation and instead produces an idempotent
+finding where policy requires review.
+
+Source deletion never deletes or retires the canonical entity and is not an
+Operations decommissioning approval. It may automatically confirm the
+source-removal step of a future decommissioning workflow. That workflow keeps
+its operator approval, actor, reason, and state transitions in the generic
+Operations audit stream and references the immutable source event, so the
+source actor and the Operations decision actor remain distinct.
 
 Long-term reporting reads compact, typed daily rollups rather than hourly raw
 payload copies. Rollups record only the daily facts needed by approved
@@ -461,6 +485,14 @@ the daily active-device trend moves to the compact daily rollup. Legacy Ninja
 snapshot deletion, archival, and disk reclamation are prohibited in the
 generic deployment; they are a separately approved operational phase after
 every named consumer has passed cutover verification.
+
+The compatibility projections keep their established public relation names and
+column shapes but read only exact active Ninja source-instance, namespace,
+snapshot-scope, and material-projection contracts. The device session selects
+direct RMM evidence before another Ninja record linked to the same canonical
+device on an exact observation-time tie. Collection fails the affected source
+module if its authoritative generic write fails; it never resumes legacy raw
+appends as an implicit fallback.
 
 ## Rationale
 

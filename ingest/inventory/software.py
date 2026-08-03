@@ -103,6 +103,17 @@ def run(client: NinjaClient, df: str | None = None) -> int:
         return inserted
 
 
+def refresh_read_models() -> None:
+    """Publish compact Software read models in dependency order."""
+    for relation in (
+        "operations.software_title_current",
+        "operations.v_software_safety",
+    ):
+        with db.pool.connection() as conn, conn.cursor() as cur:
+            cur.execute(f"REFRESH MATERIALIZED VIEW CONCURRENTLY {relation}")
+        log.info("Refreshed materialized view %s", relation)
+
+
 def _load_device_map() -> dict[str, tuple[uuid.UUID, uuid.UUID]]:
     with db.pool.connection() as conn, conn.cursor() as cur:
         cur.execute(_GUC)

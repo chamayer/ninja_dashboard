@@ -247,11 +247,13 @@ def process_demand_entry(entry_id: int, client: NinjaClient) -> None:
         log.warning("Demand entry %d already claimed or not found", entry_id)
         return
     df, attempts, max_attempts = row
-    _process_entry(
+    succeeded = _process_entry(
         client,
         _DEMAND_TABLE,
         {"id": entry_id, "df": df, "attempts": attempts, "max_attempts": max_attempts},
     )
+    if succeeded:
+        _sw.refresh_read_models()
 
 
 # ── Internal helpers ───────────────────────────────────────────────
@@ -303,7 +305,7 @@ def _claim_one(table: str) -> dict | None:
     return dict(zip(["id", "df", "attempts", "max_attempts"], row))
 
 
-def _process_entry(client: NinjaClient, table: str, entry: dict) -> None:
+def _process_entry(client: NinjaClient, table: str, entry: dict) -> bool:
     entry_id = entry["id"]
     df = entry["df"]
     attempts = entry["attempts"]
@@ -318,6 +320,7 @@ def _process_entry(client: NinjaClient, table: str, entry: dict) -> None:
                 (rows, entry_id),
             )
         log.info("Queue %s entry %d done: df=%r rows=%d", table, entry_id, df, rows or 0)
+        return True
     except Exception as exc:
         new_attempts = attempts + 1
         err = str(exc)[:_ERROR_MAX]
@@ -345,3 +348,4 @@ def _process_entry(client: NinjaClient, table: str, entry: dict) -> None:
                 "Queue %s entry %d permanently failed after %d attempts: %s",
                 table, entry_id, new_attempts, exc,
             )
+        return False

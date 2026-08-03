@@ -2,18 +2,17 @@
 
 Track: **Unified entity ecosystem — database, ingest, and admin surface**
 
-**Status: `0.102.0` INVENTORY METABASE RETIREMENT LOCALLY IMPLEMENTED AND
-VALIDATED — COMMIT APPROVAL GATE; READER CUTOVER BLOCKED.
+**Status: `0.102.0` INVENTORY METABASE RETIREMENT DEPLOYED AND VERIFIED;
+GENERIC NINJA CUTOVER AND NATIVE AVAILABILITY IMPLEMENTATION IN PROGRESS.
 Releases `0.101.4`/`0.101.5` and migration `0099` are deployed. The exact
 162-row pinned correction is applied, its repeated invocation is a verified
 no-op, and canonical devices, links, raw evidence, and daily rollups are
 preserved. The approved presence/session refresh completed with the measured
 325-to-283 presence-row reduction, seven devices with no remaining active
 presence, exact affected-session parity, and no lifecycle transition or audit
-event. Local candidate `0.102.0` archives only the Inventory Metabase surface
-and removes its three normal refresh triggers. No lifecycle evaluator, reader
-cutover, legacy-write shutdown, cleanup, Agent Compliance behavior change, or
-wider ecosystem work is authorized.**
+event. Deployed release `0.102.0` archives only the Inventory Metabase surface
+and removes its three normal refresh triggers. On 2026-08-03 the user
+subsequently authorized the bounded implementation slice recorded below.**
 
 Revised 2026-08-03.
 
@@ -2387,8 +2386,136 @@ placeholder settings. No SQL, migration, database data, or production service
 was changed. A local Metabase runtime was not available, so actual API archival
 and post-deployment HTTP/refresh behavior remain deployment validation.
 
-**Next approval gate:** after local implementation and validation, request the
-separate commit approval. A later push approval must explicitly include the
-automatic production deployment and recoverable Inventory archive operation.
-No database cleanup, generic reader cutover, Agent Compliance change, or other
-Metabase-domain retirement is authorized.
+Commit `45110f7` was pushed to `origin` and `a-m-rose`; both remote heads match.
+Portainer deployed the image, and production reports `0.102.0`. Ingest,
+Operations, Metabase, and PostgreSQL are healthy. Startup recorded exactly five
+Inventory dashboards, 25 cards, and one collection archived. Independent
+aggregate metadata verification found zero active and 5 archived dashboards,
+zero active and 25 archived cards, and zero active and one archived collection.
+The post-deployment window contains zero Inventory refresh executions, zero
+ingest errors/tracebacks/exceptions, and zero Operations HTTP 500 or worker-
+timeout matches. No manual full collection cycle was authorized or run.
+
+The deployment procedure is also clarified by owner direction: after every
+approved `origin` production push, invoke the configured private Portainer
+redeploy mechanism immediately instead of waiting for repository polling. That
+trigger is part of the push/deployment boundary; an unrelated standalone
+redeploy remains separately gated.
+
+**Next approval gate:** Inventory Metabase retirement is complete. No database
+cleanup, Agent Compliance change, or other Metabase-domain retirement is
+authorized by this checkpoint.
+
+## Active implementation slice — Ninja generic cutover and native availability
+
+**Status:** local candidate validated; release candidate `0.103.0` is approved
+for commit and combined production/mirror push.
+
+The user authorized this bounded slice on 2026-08-03. It does not authorize a
+commit, push, deployment, production migration, production-data change, legacy
+history cleanup, Agent Compliance redesign, or further Metabase investment.
+
+### Goal and scope
+
+- Make the already-deployed generic Ninja detail and health observations the
+  authoritative current/raw writers; stop new hourly writes to the two legacy
+  snapshot tables without deleting or rewriting historical rows.
+- Repoint compatibility projections, Ninja presence, Operations session
+  reboot/boot state, software last-user lookup, and the three remaining live
+  Patching queries to generic current evidence or the compact daily rollup.
+- Fail Ninja collection when its authoritative generic observation write
+  fails; bounded legacy device rows remain a rollback/current compatibility
+  copy, not the raw-history authority.
+- Add a database advisory-lock single-flight guard around the complete patch
+  cycle so scheduler, startup, and manual entry points cannot overlap.
+- Add a compact, tenant-scoped `operations.software_title_current` materialized
+  read model; refresh it and the software safety derivative once per completed
+  software batch, and use it for Software overview fleet-wide aggregates.
+
+### Affected files
+
+- `ingest/core/devices.py`, `ingest/core/device_health.py`,
+  `ingest/connectors/ninja_presence.py`, `ingest/main.py`, and software
+  inventory queue/refresh paths.
+- `sql/migrations/073_ninja_generic_reader_cutover.sql`.
+- `operations/apps/core/migrations/0100_generic_ninja_and_software_read_models.py`
+  and `operations/apps/core/views.py`.
+- The three bounded Patching query definitions in
+  `ingest/metabase_bootstrap.py`, focused tests, `VERSION`, and `CHANGELOG.md`.
+- Root and Operations active plans plus the already-edited deployment
+  procedure documentation.
+
+### Implementation order and decisions
+
+1. Recreate compatibility materialized views with their current public shapes,
+   owners, grants, indexes, and downstream troubleshooting signal intact.
+2. Recreate the Operations device session from the exact active Ninja detail
+   observation contract and add the software title read model without changing
+   canonical identity or tenant boundaries.
+3. Cut writers and readers over only after the generic write succeeds; retain
+   legacy tables and their data untouched for rollback.
+4. Add and test patch-cycle single-flight and batch-scoped software read-model
+   refresh ordering.
+5. Bump `VERSION`/`CHANGELOG.md`, run migration and application validation in
+   disposable PostgreSQL/Docker, review every changed hunk, and stop at the
+   separate commit approval gate.
+
+### Validation and acceptance
+
+- PostgreSQL migrations apply in deployment order and preserve relation
+  columns, indexes, owners, grants, tenant scoping, and current aggregate
+  parity.
+- Focused tests prove generic writes are mandatory, legacy snapshot inserts no
+  longer occur, all direct production readers are cut over, and daily trend
+  reads the compact rollup.
+- Competing patch-cycle entry points prove one winner and a clean skip; lock
+  release is proven on success and exception.
+- Software overview queries avoid fleet-wide aggregation of the installation
+  table, refresh ordering is once per successful batch, and focused request
+  behavior remains correct.
+- Changed Python compiles and passes Ruff/format checks, relevant ingest and
+  Operations tests pass, Docker images build, and `git diff --check` passes.
+- Deployment and production migration remain a later explicit push gate. After
+  approval they require immediate Portainer invocation, migration/version and
+  aggregate parity checks, an accelerated full cycle, service health checks,
+  and a zero-HTTP-500/worker-timeout observation window.
+
+**Current checkpoint:** Git and the deployed checkpoint were reconciled at
+`45110f7` / `0.102.0`; the reviewed local candidate is `0.103.0`. Existing
+unrelated plan/backlog/design/probe changes remain preserved. The candidate
+stops legacy detail/health snapshot appends, makes generic observations
+authoritative and fail-closed, moves the identified readers to generic current
+or daily-rollup evidence, adds patch-cycle single-flight, and adds the compact
+software-title read model.
+
+Validation completed against the candidate:
+
+- Both Docker images build. Ingest reports/imports `0.103.0`; the full ingest
+  suite passed with 90 tests and 7 opt-in skips. Operations passed 27 tests
+  with 2 opt-in skips, `manage.py check`, and migration-drift checks.
+- Focused disposable-PostgreSQL tests passed for generic snapshot expansion,
+  withdrawal, the Operations migration, and stable identity. Migrations 0100
+  and 073 applied successfully in PostgreSQL 16; their projections, indexes,
+  grants, concurrent refresh, advisory-lock release, writer fail-closed
+  behavior, and an actual Software overview request were exercised. A request
+  smoke exposed one `latest_install` alias defect; it was fixed, the image was
+  rebuilt, and the request then passed without an HTTP 500.
+- Production read-only aggregate preflight found 5,473 generic detail and
+  5,473 generic health current records. The projected active-device count is
+  4,020, equal to the current view; measured detail and health field mismatches
+  are both zero. No customer rows were returned and no production write ran.
+- The generic session projection deliberately changes 306 reboot flags and
+  307 boot timestamps under the approved direct-agent precedence. Seventeen
+  projected-missing records currently retain stale legacy reboot/boot evidence;
+  all 17 lack a current Ninja device and will correctly lose that withdrawn
+  evidence. The prior lifecycle simulation found zero lifecycle transitions.
+- The historic root migration chain still has a pre-existing fresh-install
+  failure at migration 041; the candidate migrations were therefore rehearsed
+  from the supported predecessor state. The host lacks `httpx`, so applicable
+  host PostgreSQL tests were run separately; image-based suites passed.
+
+**Approval recorded:** the user explicitly approved commit and push on
+2026-08-03. The approved release set excludes unrelated changes and probe
+files. Push `origin`, immediately invoke the private Portainer redeploy, push
+the identical commit to the secondary mirror, then verify migrations, version,
+aggregate parity, an accelerated full cycle, service health, and HTTP 500s.
