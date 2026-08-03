@@ -18,9 +18,20 @@ def refresh_after_collection(reason: str) -> None:
     """
     started = time.monotonic()
     with db.transaction() as cur:
+        cur.execute(
+            "SELECT to_regprocedure("
+            "'operations.sync_entity_source_links_from_observations()'"
+            ") IS NOT NULL"
+        )
+        if cur.fetchone()[0]:
+            cur.execute("SELECT operations.sync_entity_source_links_from_observations()")
+            entity_link_sync = cur.fetchone()[0]
+        else:
+            entity_link_sync = {"status": "migration_pending"}
         cur.execute("SELECT operations.refresh_derived()")
     log.info(
-        "Operations derived state refreshed after %s in %.2fs",
+        "Operations entity links synced (%s) and derived state refreshed after %s in %.2fs",
+        entity_link_sync,
         reason,
         time.monotonic() - started,
     )

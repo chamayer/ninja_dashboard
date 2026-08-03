@@ -105,6 +105,96 @@ class Source(models.Model):
         return self.name
 
 
+class EntityClass(models.Model):
+    """Deployment-controlled registry for canonical entity classes."""
+
+    name = models.CharField(max_length=80, primary_key=True)
+    display_name = models.CharField(max_length=120)
+    description = models.TextField(blank=True, default="")
+
+    class Meta:
+        db_table = "entity_classes"
+        ordering = ("name",)
+
+    def __str__(self) -> str:
+        return self.display_name
+
+
+class EntityClassScope(models.Model):
+    class ScopeKind(models.TextChoices):
+        TENANT = "tenant", "Tenant"
+        CLIENT = "client", "Client"
+
+    entity_class = models.ForeignKey(EntityClass, on_delete=models.CASCADE, related_name="scopes")
+    scope_kind = models.CharField(max_length=16, choices=ScopeKind.choices)
+
+    class Meta:
+        db_table = "entity_class_scopes"
+        ordering = ("entity_class", "scope_kind")
+        constraints = (
+            models.UniqueConstraint(
+                fields=("entity_class", "scope_kind"),
+                name="uq_entity_class_scopes_class_scope",
+            ),
+        )
+
+    def __str__(self) -> str:
+        return f"{self.entity_class_id}:{self.scope_kind}"
+
+
+class Entity(UUIDTenantScopedModel):
+    """Thin durable anchor shared by every canonical entity class."""
+
+    class ScopeKind(models.TextChoices):
+        TENANT = "tenant", "Tenant"
+        CLIENT = "client", "Client"
+
+    entity_class = models.ForeignKey(EntityClass, on_delete=models.PROTECT, related_name="entities")
+    scope_kind = models.CharField(max_length=16, choices=ScopeKind.choices)
+    client = models.ForeignKey(
+        "Client",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="owned_entities",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    created_reason = models.CharField(max_length=120, blank=True, default="")
+    updated_at = models.DateTimeField(auto_now=True)
+    updated_reason = models.CharField(max_length=120, blank=True, default="")
+    retired_at = models.DateTimeField(null=True, blank=True)
+    retired_reason = models.CharField(max_length=120, blank=True, default="")
+    deleted_at = models.DateTimeField(null=True, blank=True)
+    deleted_reason = models.CharField(max_length=120, blank=True, default="")
+
+    class Meta:
+        db_table = "entities"
+        ordering = ("entity_class", "id")
+        constraints = (
+            models.CheckConstraint(
+                condition=(
+                    (Q(scope_kind="tenant") & Q(client__isnull=True))
+                    | (Q(scope_kind="client") & Q(client__isnull=False))
+                ),
+                name="ck_entities_scope_owner",
+            ),
+            models.UniqueConstraint(
+                fields=("tenant", "id", "entity_class"),
+                name="uq_entities_tenant_id_class",
+            ),
+            models.UniqueConstraint(
+                fields=("tenant", "id"),
+                name="uq_entities_tenant_id",
+            ),
+        )
+        indexes = (
+            models.Index(fields=("tenant", "entity_class", "client"), name="idx_entities_class_owner"),
+        )
+
+    def __str__(self) -> str:
+        return f"{self.entity_class_id}:{self.id}"
+
+
 class EntityType(models.Model):
     class LifecycleEvidenceMode(models.TextChoices):
         NONE = "none", "None"
@@ -113,7 +203,15 @@ class EntityType(models.Model):
         DIRECT_THEN_REPORTED_STATE = "direct_then_reported_state", "Direct then reported state"
 
     name = models.CharField(max_length=80, primary_key=True)
+    entity_class = models.ForeignKey(
+        EntityClass,
+        on_delete=models.PROTECT,
+        related_name="entity_types",
+        default="unknown",
+    )
     is_identity_signal = models.BooleanField(default=False)
+    consumes_license = models.BooleanField(default=False)
+    requirement_eligible = models.BooleanField(default=False)
     lifecycle_evidence_mode = models.CharField(
         max_length=32,
         choices=LifecycleEvidenceMode.choices,
@@ -207,6 +305,13 @@ class FindingType(models.Model):
 
 
 class Client(UUIDTenantScopedModel):
+    entity = models.OneToOneField(
+        Entity,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="client_record",
+    )
     slug = models.SlugField(max_length=120)
     display_name = models.CharField(max_length=240)
     timezone = models.CharField(max_length=64, default="UTC")
@@ -470,6 +575,13 @@ class Device(UUIDTenantScopedModel):
         PENDING_CLEANUP = "pending_cleanup", "Pending cleanup"
         RETIRED = "retired", "Retired"
 
+    entity = models.OneToOneField(
+        Entity,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="device_record",
+    )
     client = models.ForeignKey(Client, on_delete=models.PROTECT, related_name="devices")
     canonical_hostname = models.CharField(max_length=255)
     canonical_serial = models.CharField(max_length=255, blank=True)
@@ -987,6 +1099,256 @@ class SourceBinding(UUIDTenantScopedModel):
 
     def __str__(self) -> str:
         return f"{self.source_instance_id}:{self.collector_instance_id}"
+
+
+class EntitySourceLink(UUIDTenantScopedModel):
+    """Current canonical attachment for one stable source identity."""
+
+    entity = models.ForeignKey(Entity, on_delete=models.PROTECT, related_name="source_links")
+    entity_class = models.ForeignKey(EntityClass, on_delete=models.PROTECT, related_name="source_links")
+    source_instance = models.ForeignKey(SourceInstance, on_delete=models.PROTECT, related_name="entity_links")
+    last_seen_binding = models.ForeignKey(
+        SourceBinding,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="last_seen_entity_links",
+    )
+    external_namespace = models.CharField(max_length=120)
+    parent_external_namespace = models.CharField(max_length=120, blank=True, default="")
+    parent_external_id = models.TextField(blank=True, default="")
+    external_id = models.TextField()
+    first_seen_at = models.DateTimeField()
+    last_seen_at = models.DateTimeField()
+    missing_since = models.DateTimeField(null=True, blank=True)
+    match_method = models.CharField(max_length=32, default="compatibility")
+    match_confidence = models.DecimalField(max_digits=4, decimal_places=3, default=1)
+    reason = models.CharField(max_length=120, blank=True, default="")
+
+    class Meta:
+        db_table = "entity_source_links"
+        constraints = (
+            models.UniqueConstraint(
+                fields=(
+                    "tenant",
+                    "source_instance",
+                    "external_namespace",
+                    "parent_external_namespace",
+                    "parent_external_id",
+                    "external_id",
+                ),
+                name="uq_entity_source_links_stable",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    ~Q(external_namespace="")
+                    & ~Q(external_id="")
+                    & (
+                        (Q(parent_external_namespace="") & Q(parent_external_id=""))
+                        | (~Q(parent_external_namespace="") & ~Q(parent_external_id=""))
+                    )
+                ),
+                name="ck_entity_source_links_stable",
+            ),
+        )
+        indexes = (
+            models.Index(fields=("tenant", "entity", "entity_class"), name="idx_entity_source_links_entity"),
+            models.Index(fields=("tenant", "missing_since"), name="idx_entity_links_missing"),
+        )
+
+    def __str__(self) -> str:
+        return f"{self.source_instance_id}:{self.external_namespace}:{self.external_id}"
+
+
+class EntitySourceLinkHistory(UUIDTenantScopedModel):
+    """SCD-2 attachment history for a stable source identity."""
+
+    entity = models.ForeignKey(Entity, on_delete=models.PROTECT, related_name="source_link_history")
+    entity_class = models.ForeignKey(EntityClass, on_delete=models.PROTECT, related_name="source_link_history")
+    source_instance = models.ForeignKey(
+        SourceInstance,
+        on_delete=models.PROTECT,
+        related_name="entity_link_history",
+    )
+    last_seen_binding = models.ForeignKey(
+        SourceBinding,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="entity_link_history",
+    )
+    external_namespace = models.CharField(max_length=120)
+    parent_external_namespace = models.CharField(max_length=120, blank=True, default="")
+    parent_external_id = models.TextField(blank=True, default="")
+    external_id = models.TextField()
+    match_method = models.CharField(max_length=32)
+    match_confidence = models.DecimalField(max_digits=4, decimal_places=3)
+    actor_kind = models.CharField(max_length=16, default="system")
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="entity_link_history_events",
+    )
+    actor_process = models.CharField(max_length=120, blank=True, default="")
+    reason = models.CharField(max_length=120)
+    evidence = models.JSONField(default=dict, blank=True)
+    effective_from = models.DateTimeField()
+    effective_to = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "entity_source_link_history"
+        constraints = (
+            models.UniqueConstraint(
+                fields=(
+                    "tenant",
+                    "source_instance",
+                    "external_namespace",
+                    "parent_external_namespace",
+                    "parent_external_id",
+                    "external_id",
+                ),
+                condition=Q(effective_to__isnull=True),
+                name="uq_entity_source_link_history_open",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    ~Q(external_namespace="")
+                    & ~Q(external_id="")
+                    & (
+                        (Q(parent_external_namespace="") & Q(parent_external_id=""))
+                        | (~Q(parent_external_namespace="") & ~Q(parent_external_id=""))
+                    )
+                ),
+                name="ck_entity_link_history_stable",
+            ),
+            models.CheckConstraint(
+                condition=Q(effective_to__isnull=True) | Q(effective_to__gt=models.F("effective_from")),
+                name="ck_entity_link_history_window",
+            ),
+        )
+        indexes = (
+            models.Index(fields=("tenant", "entity", "effective_from"), name="idx_entity_link_hist_entity"),
+            models.Index(fields=("tenant", "effective_to"), name="idx_entity_link_hist_retention"),
+        )
+
+    def __str__(self) -> str:
+        return f"{self.entity_id}:{self.effective_from}"
+
+
+class EntityCandidate(UUIDTenantScopedModel):
+    """Current generic review state for an unattached source identity."""
+
+    class Status(models.TextChoices):
+        OBSERVED_ONLY = "observed_only", "Observed only"
+        PENDING = "pending", "Pending"
+        ATTACHED = "attached", "Attached"
+        REJECTED = "rejected", "Rejected"
+
+    source_instance = models.ForeignKey(SourceInstance, on_delete=models.PROTECT, related_name="entity_candidates")
+    proposed_entity_class = models.ForeignKey(
+        EntityClass,
+        on_delete=models.PROTECT,
+        related_name="entity_candidates",
+    )
+    client = models.ForeignKey(Client, on_delete=models.PROTECT, null=True, blank=True, related_name="entity_candidates")
+    external_namespace = models.CharField(max_length=120)
+    parent_external_namespace = models.CharField(max_length=120, blank=True, default="")
+    parent_external_id = models.TextField(blank=True, default="")
+    external_id = models.TextField()
+    status = models.CharField(max_length=24, choices=Status.choices, default=Status.OBSERVED_ONLY)
+    material_hash = models.BinaryField(null=True, blank=True)
+    proposed_entity = models.ForeignKey(
+        Entity,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="proposed_candidates",
+    )
+    resolved_entity = models.ForeignKey(
+        Entity,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="resolved_candidates",
+    )
+    confidence = models.DecimalField(max_digits=4, decimal_places=3, null=True, blank=True)
+    latest_decision = models.CharField(max_length=32, blank=True, default="")
+    latest_decision_reason = models.TextField(blank=True, default="")
+    latest_decided_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="entity_candidate_decisions",
+    )
+    latest_decided_at = models.DateTimeField(null=True, blank=True)
+    first_observed_at = models.DateTimeField()
+    last_observed_at = models.DateTimeField()
+
+    class Meta:
+        db_table = "entity_candidates"
+        constraints = (
+            models.UniqueConstraint(
+                fields=(
+                    "tenant",
+                    "source_instance",
+                    "external_namespace",
+                    "parent_external_namespace",
+                    "parent_external_id",
+                    "external_id",
+                    "proposed_entity_class",
+                ),
+                name="uq_entity_candidates_stable_class",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    ~Q(external_namespace="")
+                    & ~Q(external_id="")
+                    & (
+                        (Q(parent_external_namespace="") & Q(parent_external_id=""))
+                        | (~Q(parent_external_namespace="") & ~Q(parent_external_id=""))
+                    )
+                ),
+                name="ck_entity_candidates_stable",
+            ),
+        )
+        indexes = (
+            models.Index(fields=("tenant", "status", "last_observed_at"), name="idx_entity_candidates_queue"),
+        )
+
+    def __str__(self) -> str:
+        return f"{self.source_instance_id}:{self.external_namespace}:{self.external_id}"
+
+
+class EntityCandidateEvent(UUIDTenantScopedModel):
+    """Append-only audit stream for generic candidate state changes."""
+
+    candidate = models.ForeignKey(EntityCandidate, on_delete=models.PROTECT, related_name="events")
+    action = models.CharField(max_length=32)
+    actor_kind = models.CharField(max_length=16, default="system")
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="entity_candidate_events",
+    )
+    actor_process = models.CharField(max_length=120, blank=True, default="")
+    reason = models.TextField(blank=True, default="")
+    before_state = models.JSONField(null=True, blank=True)
+    after_state = models.JSONField(null=True, blank=True)
+    occurred_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "entity_candidate_events"
+        indexes = (
+            models.Index(fields=("tenant", "candidate", "occurred_at"), name="idx_entity_candidate_events"),
+        )
+
+    def __str__(self) -> str:
+        return f"{self.candidate_id}:{self.action}:{self.occurred_at}"
 
 
 class EntityObservation(TenantScopedModel):

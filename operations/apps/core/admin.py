@@ -15,6 +15,12 @@ from .models import (
     DeadLetterObservation,
     Device,
     DeviceLink,
+    Entity,
+    EntityClass,
+    EntityClassScope,
+    EntitySourceLink,
+    EntitySourceLinkHistory,
+    EntityType,
     Finding,
     FindingType,
     IntelMatcherHint,
@@ -35,6 +41,19 @@ from .models import (
     UserGroup,
     UserPermission,
 )
+
+
+class ReadOnlyEvidenceAdmin(admin.ModelAdmin):
+    """Admin inspection without introducing a second mutation authority."""
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(Tenant)
@@ -91,6 +110,75 @@ class UserPermissionAdmin(admin.ModelAdmin):
 class SourceAdmin(admin.ModelAdmin):
     list_display = ("name", "kind")
     search_fields = ("name", "kind")
+
+
+@admin.register(EntityClass)
+class EntityClassAdmin(ReadOnlyEvidenceAdmin):
+    list_display = ("name", "display_name")
+    search_fields = ("name", "display_name", "description")
+
+
+@admin.register(EntityClassScope)
+class EntityClassScopeAdmin(ReadOnlyEvidenceAdmin):
+    list_display = ("entity_class", "scope_kind")
+    list_filter = ("scope_kind",)
+
+
+@admin.register(EntityType)
+class EntityTypeAdmin(ReadOnlyEvidenceAdmin):
+    list_display = (
+        "name",
+        "entity_class",
+        "is_identity_signal",
+        "lifecycle_evidence_mode",
+        "consumes_license",
+        "requirement_eligible",
+    )
+    list_filter = (
+        "entity_class",
+        "is_identity_signal",
+        "lifecycle_evidence_mode",
+        "consumes_license",
+        "requirement_eligible",
+    )
+    search_fields = ("name", "description")
+
+
+@admin.register(Entity)
+class EntityAdmin(ReadOnlyEvidenceAdmin):
+    list_display = ("id", "entity_class", "scope_kind", "client", "tenant", "retired_at", "deleted_at")
+    list_filter = ("tenant", "entity_class", "scope_kind", "retired_at", "deleted_at")
+    search_fields = ("id", "client__display_name")
+
+
+@admin.register(EntitySourceLink)
+class EntitySourceLinkAdmin(ReadOnlyEvidenceAdmin):
+    list_display = (
+        "entity",
+        "entity_class",
+        "source_instance",
+        "external_namespace",
+        "last_seen_at",
+        "missing_since",
+        "tenant",
+    )
+    list_filter = ("tenant", "entity_class", "external_namespace", "missing_since")
+    search_fields = ("entity__id", "external_id")
+
+
+@admin.register(EntitySourceLinkHistory)
+class EntitySourceLinkHistoryAdmin(ReadOnlyEvidenceAdmin):
+    list_display = (
+        "entity",
+        "entity_class",
+        "source_instance",
+        "external_namespace",
+        "effective_from",
+        "effective_to",
+        "tenant",
+    )
+    list_filter = ("tenant", "entity_class", "external_namespace", "actor_kind")
+    search_fields = ("entity__id", "external_id", "reason", "actor_process")
 
 
 @admin.register(Collector)

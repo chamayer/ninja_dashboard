@@ -1,65 +1,63 @@
 # Active Operations implementation plan
 
-Track: **Cross-service Ninja generic cutover and native availability slice**
+Track: **ADR-0010 generic ecosystem completion — Phase E1**
 
-**Status:** local candidate validated and approved for commit and combined
-production/mirror push; coordinated by root `.work/plan.md`.
+**Status:** implementation validated; `0.104.0` release pending.
 
-## Goal and scope
+## Goal
 
-Complete the Operations portion of the approved root implementation slice:
+Add the rollback-safe generic entity/source-link foundation without promoting
+it over existing typed Client/Device and compatibility link authorities.
 
-- source session reboot/boot state from exact active generic Ninja detail
-  observations rather than `ninja_core.device_snapshots`;
-- source Software overview fleet-wide aggregates from a compact tenant-scoped
-  materialized title model rather than grouping the full installation-current
-  table on every request;
-- preserve existing effective-view columns, tenant behavior, decisions,
-  current consumers, and rollback relations.
+## Scope and affected files
 
-Out of scope: canonical identity changes, Agent Compliance, legacy history
-deletion, unrelated Software detail queries, Metabase improvements, deployment,
-and production-data changes.
+- `apps/core/models.py`
+- `apps/core/admin.py`
+- `apps/core/migrations/0101_generic_entity_source_link_kernel.py`
+- ADR-0010, root `VERSION`/`CHANGELOG.md`, and active plans
 
-## Affected files
+## Decisions
 
-- `apps/core/migrations/0100_generic_ninja_and_software_read_models.py`
-- `apps/core/views.py`
-- focused migration and view tests
-- root `VERSION`, `CHANGELOG.md`, and root/Operations plans
+- Existing Client and Device UUIDs remain stable. Each receives one nullable,
+  unique generic entity anchor backfilled in migration; it is not required or
+  promoted in E1.
+- Entity scope is enforced by an entity-class/scope registry and client-owner
+  check. Client anchors are tenant-scoped; device anchors are client-scoped.
+- Generic source links key the complete ADR-0009 stable source identity and are
+  backfilled only from observations already carrying a resolved client/device.
+  Unresolved evidence receives no inferred attachment.
+- Candidate current/event tables are created for the later engine, but their
+  admin pages remain hidden until E4 produces real state, per the engine-first
+  UI rule.
+- Current links and history are separate. E1 is a shadow foundation; existing
+  client/device links remain compatibility authorities until later parity and
+  cutover.
+- All tenant tables receive RLS, explicit tenant policies, tenant-qualified
+  unique targets, least-privilege grants, and indexes needed for current/open
+  lookup. Registry mutation remains migration-controlled.
 
-## Decisions and steps
+## Steps
 
-1. Recreate `device_session_current` and `v_device` with their public shapes,
-   indexes, grants, and owner unchanged. Select reboot/boot evidence from the
-   exact Ninja source instance, namespace, scope, and projection version;
-   break exact observed-time ties deterministically in favor of the direct RMM
-   agent record.
-2. Add `software_title_current` at tenant/title grain with active installation,
-   device/client, publisher, and first/last-observed aggregates. Give it a
-   concurrent-refresh key and the existing trusted read-role grants.
-3. Rebuild `v_software_safety` over that compact title model without changing
-   its output contract, then update only Software overview fleet-wide queries.
-4. Refresh title then safety once per completed software ingest batch.
-5. Validate migration state/order, PostgreSQL behavior, tenant scoping,
-   focused requests, Django checks, Ruff/format, Docker packaging, and diffs.
+1. Add Django models and an additive migration with registry seed/backfill.
+2. Expose registries, entities, source links/history, and candidates/events in
+   Django admin as read-only operational evidence where appropriate.
+3. Run basic checks and one PostgreSQL 16 migration rehearsal.
+4. Release as `0.104.0`, deploy, and perform basic health/500 verification.
+5. Continue to root Phase E2 after a healthy deployment.
 
-## Current checkpoint and next gate
+## Validation
 
-The prior Track B plan is complete in Git history. Root checkpoint and dirty
-tree were reconciled at `45110f7`; unrelated local changes are preserved. The
-Operations 0100 migration, compact software-title model, device-session generic
-reader, software overview queries, and refresh path are implemented.
+- Django system and migration drift checks.
+- Disposable PostgreSQL migration/backfill/RLS/uniqueness/grant aggregates.
+- Changed-file compile/Ruff and `git diff --check`.
+- Deployed version, migration, container health, root HTTP status, and 500 log
+  count.
 
-Validation passed in the rebuilt Operations image (27 tests, 2 opt-in skips,
-Django system check, and no migration drift) and in disposable PostgreSQL 16.
-The migration preserved the public view shapes and exercised direct-agent
-tie precedence. A real Software overview request smoke caught and corrected a
-column-alias defect; the rebuilt image then returned the expected aggregate
-without an HTTP 500. Production read-only preflight confirmed the measured
-session changes are attributable to higher-fidelity direct-agent selection and
-withdrawal of stale evidence, not lifecycle transitions.
+## Checkpoint
 
-**Next action:** follow the root plan's approved push/deployment sequence, then
-verify migration 0100, the Software request surface, service health, and the
-zero-HTTP-500/worker-timeout observation window.
+E1 is implemented and passes Django checks, migration drift, focused
+compile/Ruff checks, and exact forward/backward PostgreSQL 16 rehearsal. The
+fixture verified two anchors, two current links, two open history intervals,
+all five forced RLS policies, and zero second-pass writes. Release/deploy
+`0.104.0`, verify aggregate production backfill plus basic health/500 state,
+then hand root coordination to Phase E2.

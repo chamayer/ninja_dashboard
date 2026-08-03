@@ -2,6 +2,31 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.104.0] — 2026-08-03 — Generic entity and source-link kernel
+
+### Added
+
+- Added deployment-controlled entity-class/scope registries and thin generic
+  entity anchors for canonical Clients and Devices without changing their
+  existing IDs or typed authority.
+- Added tenant-safe generic source-link current/history storage keyed by the
+  complete stable source identity, plus generic candidate current/event
+  foundations and read-only Django admin inspection.
+- Added an idempotent shadow projector that anchors new typed records and
+  synchronizes already-resolved generic observations after collection.
+
+### Changed
+
+- Expanded entity-type classification with independent entity class, license,
+  requirement, identity, and lifecycle capabilities. License authority remains
+  deny-by-default in this expansion phase.
+
+### Operational note
+
+- Migration 0101 backfills only exact existing Client/Device resolutions and
+  leaves unresolved evidence unattached. Existing typed and compatibility
+  links remain authoritative until measured parity and a later cutover.
+
 ## [0.103.0] — 2026-08-03 — Generic Ninja reader cutover
 
 ### Changed

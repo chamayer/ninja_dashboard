@@ -1,6 +1,6 @@
 # 0010 — Unified entity and source-evidence ecosystem
 
-Status: Accepted (Ninja storage expansion prepared; wider ecosystem not implemented)
+Status: Accepted (generic entity/source-link kernel implemented; claim and relationship phases pending)
 Date: 2026-07-31
 
 The first additive Ninja ingest-storage slice shipped in release `0.101.0`:
@@ -11,6 +11,13 @@ rollup backfill. Release candidate `0.103.0` promotes those generic records to
 the Ninja current/raw authority, stops new legacy snapshot appends, and moves
 the audited live consumers to generic compatibility projections. Historical
 cleanup and the wider entity/claim ecosystem remain separate work.
+
+Release `0.104.0` implements the first wider-ecosystem kernel: entity class and
+scope registries, generic entity anchors for existing Clients and Devices,
+generic source-link current/history, generic candidate/event foundations, and
+an idempotent shadow projector from already-resolved observations. Typed
+Client/Device records and compatibility links remain authoritative; this is an
+expand phase, not the source-link cutover.
 
 ## Context
 
