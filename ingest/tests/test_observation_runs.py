@@ -41,6 +41,8 @@ def test_begin_run_derives_instance_and_dual_writes_run_boundary():
     assert "source_instance_id" in sql
     assert "run_started_at" in sql
     assert "is_complete_snapshot" in sql
+    assert "observed_identity_count" in sql
+    assert "0, 0, '', 0" in sql
     assert "RETURNING source_instance_id" in sql
     assert params[-2:] == (binding_id, 1)
     lock_sql, lock_params = cur.calls[1]

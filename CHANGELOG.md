@@ -2,6 +2,14 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.100.1] — 2026-08-03 — Snapshot run-start repair
+
+### Fixed
+
+- Made the raw snapshot-run writer explicitly initialize the non-null observed
+  identity count instead of relying on Django's non-persistent migration-time
+  default, and aligned the PostgreSQL regression fixture with production.
+
 ## [0.100.0] — 2026-08-03 — Stable observation identity cutover
 
 ### Changed

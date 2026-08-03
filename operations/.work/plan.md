@@ -2,7 +2,7 @@
 
 Track: **Corrective Track B — stable identity marker cutover**
 
-**Status:** LOCAL CUTOVER VALIDATED; COMMIT APPROVED; PUSH/DEPLOYMENT APPROVAL REQUIRED —
+**Status:** CUTOVER DEPLOYED; RUN-START HOTFIX VALIDATED; COMMIT APPROVAL REQUIRED —
 stable-identity expansion and dual-write are deployed and verified through
 `0.99.2` / `fe1beda` on both remotes. Release `0.100.0` and migration `0096`
 are prepared locally. The rejected permanent per-run membership table was not
@@ -92,10 +92,14 @@ snapshot cleanup, ADR-0010 ecosystem implementation, and unrelated admin work.
    secret, remove it in the same dependency-install layer, document the local
    command, and rebuild both application images. Ordinary and production
    builds must remain independent of the local certificate.
-9. **Pending:** present the exact migration and automatic Portainer deployment
+9. **Complete:** present the exact migration and automatic Portainer deployment
    effects for explicit commit/push approval. After an approved origin push,
    verify migrations, health/readiness, aggregate comparison, and HTTP 500s
    before updating the mirror.
+10. **Complete:** repair the post-deployment raw-SQL/default mismatch.
+    `begin_run()` must explicitly insert `observed_identity_count = 0`; the
+    PostgreSQL regression fixture must omit its artificial database default so
+    future tests match Django's deployed schema.
 
 ## Validation plan
 
@@ -195,16 +199,31 @@ Validation completed:
   without supplying the secret, confirming the mount is optional. Compose's
   pre-existing warning that the root `version` attribute is obsolete remains
   unrelated to this repair.
+- Commit `fc1d482` was pushed to both approved remotes. Portainer deployed
+  release `0.100.0`; migration `0096` completed successfully after an active
+  preflight scan, and Operations, ingest, and Postgres became healthy.
+- Startup collections raced the migration and initially failed on the
+  not-yet-present cutover columns/constraints. Post-migration reruns of
+  LogMeIn, ScreenConnect, and SentinelOne then exposed a separate raw-SQL
+  contract defect: all three run inserts violated the non-null
+  `observed_identity_count` column. Django's migration-time default is not a
+  persistent database default, while the disposable PostgreSQL fixture had
+  incorrectly declared `DEFAULT 0` and masked the defect. No source run
+  committed observations from those failed attempts.
+- Release `0.100.1` now explicitly inserts zero for the run's initial observed
+  identity count and removes the artificial fixture default. Ten focused unit
+  tests, both disposable PostgreSQL integration tests under the production
+  no-default schema, focused Ruff/compilation, `git diff --check`, and the
+  secure ingest image build passed. The hotfix adds no migration and changes no
+  identity, reconciliation, or retention semantics.
 - No local deployed HTTP stack exists, so no local HTTP 500 measurement was
   possible. No production code changed and no production 500 check is due
   until an approved deployment.
 
 ## Next action
 
-Create the approved local `0.100.0` cutover commit and report its hash. Then
-obtain explicit approval to push that reviewed commit to `origin`, which will
-automatically trigger Portainer rebuild/recreation and apply Django migration
-`0096`. After deployment, verify migration state, health/readiness, all-source
+Obtain separate approval for the validated `0.100.1` hotfix commit, then obtain
+approval for one combined two-remote push operation. After deployment, rerun
+the three failed source paths and verify migration state, health/readiness,
 aggregate identity/run results, withdrawals/history integrity, scope-lock
-errors, and Operations HTTP 500s before separately approving the
-secondary-mirror push.
+errors, and Operations HTTP 500s.

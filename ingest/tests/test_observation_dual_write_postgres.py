@@ -59,7 +59,7 @@ def test_current_history_and_run_dual_write(postgres_connection) -> None:
                 failed_rows integer NOT NULL,
                 error text NOT NULL,
                 completed_at timestamptz NULL,
-                observed_identity_count integer NOT NULL DEFAULT 0,
+                observed_identity_count integer NOT NULL,
                 observed_identity_digest bytea NULL
             );
             CREATE TABLE operations.entity_observation_current (

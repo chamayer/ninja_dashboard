@@ -24,9 +24,10 @@ def begin_run(
         INSERT INTO operations.observation_snapshot_runs
           (run_id, tenant_id, source_binding_id, source_instance_id,
            snapshot_scope, snapshot_at, run_started_at, is_complete_snapshot,
-           status, expected_rows, written_rows, failed_rows, error)
+           status, expected_rows, written_rows, failed_rows, error,
+           observed_identity_count)
         SELECT %s, %s, sb.id, sb.source_instance_id, %s, %s, %s, NULL,
-               'started', %s, 0, 0, ''
+               'started', %s, 0, 0, '', 0
           FROM operations.source_bindings sb
          WHERE sb.id = %s AND sb.tenant_id = %s
         RETURNING source_instance_id
