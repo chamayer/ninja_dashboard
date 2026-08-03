@@ -2,13 +2,16 @@
 
 Track: **Unified entity ecosystem — database, ingest, and admin surface**
 
-**Status: NINJA SNAPSHOT EXPANSION LOCALLY VALIDATED; COMMIT APPROVAL GATE —
-Track A, the resolver repair, and stable-identity cutover are deployed and
-verified through `0.100.1` / `30c460c`. Release `0.101.0` and migration `0097`
-are prepared and locally validated but uncommitted and undeployed. Legacy
-Ninja snapshot writers/readers remain authoritative; backfill, cutover,
-legacy-write shutdown, cleanup, Agent Compliance, and the wider ecosystem
-remain separately gated.**
+**Status: `0.101.0` DEPLOYED; `0.101.1` HEALTH-SHADOW COMPATIBILITY-KEY
+HOTFIX LOCALLY VALIDATED; COMMIT APPROVAL GATE — Track A, the resolver repair,
+and stable-identity cutover remain verified. Release `0.101.0` / `434cf72` and
+migration `0097` are deployed on
+both remotes. Device current/history and daily rollup passed their first full-
+cycle write; health's rollback-era compatibility key collided with device
+detail under the retained legacy open-history uniqueness constraint.
+Legacy health completed and remains authoritative. Backfill, cutover, legacy-
+write shutdown, cleanup, Agent Compliance, and the wider ecosystem remain
+separately gated.**
 
 Revised 2026-08-03.
 
@@ -1571,13 +1574,50 @@ this implementation start.
   Django checks, migration-state checks, and a root HTTP smoke request passed;
   the root returned the expected `302`, not a 500. The new operator module is
   included by the ingest image's existing directory copy.
-- No production connection, customer data, production write, migration,
-  backfill, commit, push, deployment, reader cutover, or historical cleanup
-  occurred.
+- Expansion `434cf72` was pushed to both approved remotes. Portainer deployed
+  `0.101.0`, migration `0097` applied, both application containers became
+  healthy, readiness passed, and the Operations root returned its expected
+  `302` with no HTTP 500s. No historical backfill or cleanup occurred.
 
-**Next gate:** approve one logical `0.101.0` commit containing the reviewed
-expansion. A later, separate push approval must explicitly include `origin`'s
-automatic Portainer deployment and migration `0097`, followed immediately by
-the secondary mirror. After deployment, verify health/500s and shadow parity,
-then separately approve the aggregate-only backfill measurement; `--apply`,
-reader cutover, legacy-write shutdown, and cleanup remain later gates.
+### Post-deployment full-cycle finding and hotfix
+
+The user approved one normal production full ingest cycle. Device current/
+history completed, 5,461 active device records moved to projection v2, and
+exactly 5,461 unique run-backed daily rows landed. Legacy device health then
+completed for 5,461 received records, but the additive health shadow rolled
+back with `uq_obs_hist_open_identity`. Aggregate verification showed all 5,461
+legacy health rows had distinct device IDs. The actual collision was between
+device detail and device health: both used the same binding, entity type,
+parent key, and legacy `entity_key`, while the retained rollback-era constraint
+does not include the new `external_namespace`. Stable identity correctly
+distinguishes the `device` and `device-health` namespaces. No partial health
+shadow data landed, and the authoritative legacy health write remained
+successful.
+
+Release `0.101.1` namespace-qualifies only health's mutable legacy compatibility
+key as `device-health:<external ID>`. The stable namespace/ID, raw provenance,
+canonical device link, and legacy health tables remain unchanged. This lets the
+two endpoint records coexist under both legacy and stable constraints without
+dropping rollback protection. Scope is limited to
+`ingest/core/device_health.py`, focused unit/PostgreSQL regression coverage,
+`VERSION`, `CHANGELOG.md`, and this checkpoint. No migration, data repair, or
+contract change is required because the failed health shadow transaction left
+zero rows.
+
+Local validation passed: the complete ingest suite reported 73 passed with five
+expected opt-in skips; the focused disposable-PostgreSQL tests passed with both
+the retained legacy and stable current/open-history uniqueness constraints; and
+focused Ruff, formatting, compilation, and `git diff --check` passed. The
+workstation-CA build path produced the `0.101.1` ingest image, whose embedded
+version and compatibility-key assertions passed. Aggregate-only production
+follow-up confirmed the authorized `0.101.0` full cycle reached its completion
+marker, both application containers remained healthy, ingest had zero restarts,
+and Operations logged zero HTTP 500s. The one health-shadow error was the known
+rolled-back compatibility-key collision; no second production cycle was
+started before the repair is deployed.
+
+**Next gate:** obtain separate approval for one logical `0.101.1` commit. A
+later push approval must explicitly cover `origin`'s automatic ingest redeploy
+(no migration is pending) and the immediate secondary-mirror update. After
+deployment, run one normal full-cycle validation and require nonzero health
+shadow current/history parity with zero new errors before any backfill gate.

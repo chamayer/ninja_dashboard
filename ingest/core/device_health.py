@@ -155,6 +155,11 @@ def _canonical_health(row: dict[str, Any], entity_type: str) -> dict[str, Any]:
     }
 
 
+def _legacy_health_entity_key(external_id: str) -> str:
+    """Keep endpoint namespaces distinct under rollback-era constraints."""
+    return f"{NINJA_HEALTH_EXTERNAL_NAMESPACE}:{external_id}"
+
+
 def _write_health_observations(
     rows: list[dict[str, Any]],
     raw_by_id: dict[int, dict[str, Any]],
@@ -233,7 +238,7 @@ def _write_health_observations(
                         "device_id": ops_device_id,
                         "entity_type": entity_type,
                         "parent_source_key": "",
-                        "entity_key": external_id,
+                        "entity_key": _legacy_health_entity_key(external_id),
                         "platform": "Ninja",
                         "subplatform": "device-health",
                         "observed_at": snapshot_at,

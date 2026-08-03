@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 import psycopg
 import pytest
 
+from ingest.core.device_health import _legacy_health_entity_key
 from ingest.observation_runs import begin_run, complete_run, reconcile_complete_run
 from ingest.observations import write_current_rows, write_daily_presence_rows
 
@@ -96,6 +97,9 @@ def test_current_history_and_run_dual_write(postgres_connection) -> None:
                 batch_id uuid NOT NULL,
                 collector_version text NOT NULL,
                 schema_version smallint NOT NULL,
+                CONSTRAINT uq_obs_current_identity
+                    UNIQUE (tenant_id, source_binding_id, entity_type,
+                            parent_source_key, entity_key),
                 UNIQUE (tenant_id, source_instance_id, external_namespace,
                         parent_external_namespace, parent_external_id, external_id)
             );
@@ -127,6 +131,11 @@ def test_current_history_and_run_dual_write(postgres_connection) -> None:
                 active boolean NOT NULL,
                 closed_by_snapshot_run_id uuid NULL
             );
+            CREATE UNIQUE INDEX uq_obs_hist_open_identity
+                ON operations.entity_observation_history
+                   (tenant_id, source_binding_id, entity_type,
+                    parent_source_key, entity_key)
+                WHERE effective_to IS NULL;
             CREATE UNIQUE INDEX uq_test_history_stable
                 ON operations.entity_observation_history
                    (tenant_id, source_instance_id, external_namespace,
@@ -254,6 +263,55 @@ def test_current_history_and_run_dual_write(postgres_connection) -> None:
         )
         cursor.execute("SELECT COUNT(*) FROM operations.source_record_seen_daily")
         assert cursor.fetchone() == (1,)
+
+        health_run_id, _ = begin_run(
+            cursor,
+            1,
+            binding_id,
+            "Ninja.device-health",
+            observed_at,
+            expected_rows=1,
+        )
+        health_row = dict(first_row)
+        health_row.update(
+            observation_id=uuid.uuid4(),
+            external_namespace="device-health",
+            entity_key=_legacy_health_entity_key("42"),
+            subplatform="device-health",
+            snapshot_scope="Ninja.device-health",
+            last_snapshot_run_id=health_run_id,
+            batch_id=uuid.uuid4(),
+        )
+        assert write_current_rows(cursor, [health_row]) == 1
+        complete_run(
+            cursor,
+            health_run_id,
+            1,
+            is_complete_snapshot=True,
+            identity_rows=[health_row],
+        )
+        cursor.execute(
+            """
+            SELECT COUNT(*), COUNT(DISTINCT external_namespace),
+                   COUNT(DISTINCT entity_key)
+              FROM operations.entity_observation_current
+             WHERE source_instance_id = %s AND external_id = '42'
+            """,
+            (instance_id,),
+        )
+        assert cursor.fetchone() == (2, 2, 2)
+        cursor.execute(
+            """
+            SELECT COUNT(*), COUNT(DISTINCT external_namespace),
+                   COUNT(DISTINCT entity_key)
+              FROM operations.entity_observation_history
+             WHERE source_instance_id = %s AND external_id = '42'
+               AND effective_to IS NULL
+            """,
+            (instance_id,),
+        )
+        assert cursor.fetchone() == (2, 2, 2)
+
         cursor.execute(
             """
             SELECT source_instance_id, run_started_at = snapshot_at,
@@ -288,6 +346,7 @@ def test_current_history_and_run_dual_write(postgres_connection) -> None:
                 ON h.source_instance_id = c.source_instance_id
                AND h.external_namespace = c.external_namespace
                AND h.external_id = c.external_id
+             WHERE c.external_namespace = 'device'
         """)
         assert cursor.fetchone() == (
             False,

@@ -73,3 +73,4 @@ def test_zero_known_health_rows_fail_closed(monkeypatch):
 def test_distinct_health_namespace_and_scope_are_not_device_scope():
     assert device_health.NINJA_HEALTH_EXTERNAL_NAMESPACE == "device-health"
     assert device_health.NINJA_HEALTH_SNAPSHOT_SCOPE == "Ninja.device-health"
+    assert device_health._legacy_health_entity_key("42") == "device-health:42"

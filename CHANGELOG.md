@@ -2,6 +2,15 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.101.1] — 2026-08-03 — Health shadow compatibility-key repair
+
+### Fixed
+
+- Namespace-qualified Ninja device-health's rollback-era compatibility key so
+  its distinct stable source records can coexist with device-detail records
+  under both the retained legacy uniqueness constraints and the stable-
+  identity constraints.
+
 ## [0.101.0] — 2026-08-03 — Ninja snapshot storage expansion
 
 ### Added
