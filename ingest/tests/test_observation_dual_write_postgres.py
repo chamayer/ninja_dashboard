@@ -10,7 +10,7 @@ import psycopg
 import pytest
 
 from ingest.observation_runs import begin_run, complete_run, reconcile_complete_run
-from ingest.observations import write_current_rows
+from ingest.observations import write_current_rows, write_daily_presence_rows
 
 
 @pytest.fixture(scope="module")
@@ -92,6 +92,7 @@ def test_current_history_and_run_dual_write(postgres_connection) -> None:
                 raw_hash bytea NULL,
                 material_hash bytea NOT NULL,
                 hash_algorithm_version smallint NOT NULL,
+                material_projection_version smallint NOT NULL DEFAULT 1,
                 batch_id uuid NOT NULL,
                 collector_version text NOT NULL,
                 schema_version smallint NOT NULL,
@@ -122,6 +123,7 @@ def test_current_history_and_run_dual_write(postgres_connection) -> None:
                 material_data jsonb NOT NULL,
                 material_hash bytea NOT NULL,
                 hash_algorithm_version smallint NOT NULL,
+                material_projection_version smallint NOT NULL DEFAULT 1,
                 active boolean NOT NULL,
                 closed_by_snapshot_run_id uuid NULL
             );
@@ -130,6 +132,22 @@ def test_current_history_and_run_dual_write(postgres_connection) -> None:
                    (tenant_id, source_instance_id, external_namespace,
                     parent_external_namespace, parent_external_id, external_id)
                 WHERE effective_to IS NULL;
+            CREATE TABLE operations.source_record_seen_daily (
+                tenant_id bigint NOT NULL,
+                source_record_id uuid NOT NULL,
+                external_namespace text NOT NULL,
+                rollup_day date NOT NULL,
+                first_snapshot_run_id uuid,
+                backfilled_from_legacy boolean NOT NULL DEFAULT FALSE,
+                CONSTRAINT ck_seen_daily_provenance CHECK (
+                    (backfilled_from_legacy IS FALSE
+                     AND first_snapshot_run_id IS NOT NULL)
+                    OR
+                    (backfilled_from_legacy IS TRUE
+                     AND first_snapshot_run_id IS NULL)
+                ),
+                PRIMARY KEY (tenant_id, source_record_id, rollup_day)
+            );
         """)
         cursor.execute(
             "INSERT INTO operations.source_bindings VALUES (%s, 1, %s)",
@@ -182,19 +200,43 @@ def test_current_history_and_run_dual_write(postgres_connection) -> None:
             is_complete_snapshot=True,
             identity_rows=[first_row],
         )
+        assert (
+            write_daily_presence_rows(
+                cursor,
+                [first_row],
+                snapshot_run_id=run_id,
+                observed_at=observed_at,
+            )
+            == 1
+        )
+        assert (
+            write_daily_presence_rows(
+                cursor,
+                [first_row],
+                snapshot_run_id=run_id,
+                observed_at=observed_at,
+            )
+            == 0
+        )
 
-        cursor.execute("""
+        cursor.execute(
+            """
             SELECT c.source_instance_id, c.last_seen_binding_id,
                    c.external_namespace, c.parent_external_namespace,
                    c.parent_external_id, c.external_id,
                    h.source_instance_id = c.source_instance_id,
                    h.last_seen_binding_id = c.last_seen_binding_id,
                    h.external_namespace = c.external_namespace,
-                   h.external_id = c.external_id
+                   h.external_id = c.external_id,
+                   c.material_projection_version,
+                   h.material_projection_version,
+                   c.raw_hash <> %s
               FROM operations.entity_observation_current c
               JOIN operations.entity_observation_history h
                 ON h.id = c.observation_id
-        """)
+        """,
+            (b"r" * 32,),
+        )
         assert cursor.fetchone() == (
             instance_id,
             binding_id,
@@ -206,7 +248,12 @@ def test_current_history_and_run_dual_write(postgres_connection) -> None:
             True,
             True,
             True,
+            2,
+            2,
+            True,
         )
+        cursor.execute("SELECT COUNT(*) FROM operations.source_record_seen_daily")
+        assert cursor.fetchone() == (1,)
         cursor.execute(
             """
             SELECT source_instance_id, run_started_at = snapshot_at,

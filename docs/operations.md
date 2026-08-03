@@ -39,9 +39,12 @@ rollback, or restore remains a separate approval boundary.
 Deployment commits must be pushed to both remotes: first `origin`
 (`chamayer/ninja_dashboard`) under the coupled approval above, then
 `a-m-rose/ninja_dashboard` as the secondary mirror. Confirm and approve each
-push target rather than assuming one remote is sufficient. Read-only external
-post-deployment validation also requires authorization under the task's stated
-external-validation boundary.
+push target rather than assuming one remote is sufficient. One explicit push
+approval may cover both targets as a combined operation; in that case push
+`origin` first and the mirror immediately afterward, without inserting a
+validation gate between them. Perform post-deployment validation after both
+pushes. Read-only external post-deployment validation also requires
+authorization under the task's stated external-validation boundary.
 
 ## Pre-deployment checks
 
@@ -83,6 +86,28 @@ external-validation boundary.
 - Do not restore a database without confirming application/schema
   compatibility.
 - Never copy production dumps into Git or documentation staging.
+
+## Ninja daily-presence backfill
+
+The Ninja daily-presence rollup is backfilled only after its additive schema is
+deployed and a successful current Ninja device collection has populated stable
+source records. It is not a startup migration and does not delete or alter
+legacy snapshots.
+
+Measure an explicit range of completed UTC days first. Omitting `--apply` is
+the safe, read-only default and emits aggregate counts only:
+
+```sh
+docker exec operations-ingest python -m ingest.backfill_ninja_daily_rollup \
+  --start-day YYYY-MM-DD --end-day YYYY-MM-DD
+```
+
+Review and separately approve the resulting data write before adding
+`--apply`. The tool commits one day at a time, marks legacy-derived provenance
+without inventing a snapshot run, aborts on missing or ambiguous source-record
+mappings, and is idempotent when a completed range is rerun. The end day must
+be earlier than the current UTC day. Historical snapshot archival, deletion,
+and disk reclamation remain a separate post-cutover approval.
 
 ## Shared validation helper
 

@@ -28,28 +28,116 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Iterable
+from datetime import datetime, timezone
 from typing import Any
 
 from psycopg.types.json import Json
 
 MATERIAL_HASH_VERSION = 1
-VOLATILE_FIELDS = frozenset({
-    "last_seen_at", "last_contact", "is_online", "offline",
-    "hostStateChangeDate", "lastActive", "last_boot_time_at",
-    "power_state",
-})
+LEGACY_MATERIAL_PROJECTION_VERSION = 1
+VOLATILE_FIELDS = frozenset(
+    {
+        "last_seen_at",
+        "last_contact",
+        "is_online",
+        "offline",
+        "hostStateChangeDate",
+        "lastActive",
+        "last_boot_time_at",
+        "power_state",
+    }
+)
+
+# ADR-0010 record contracts. Hashing remains shared; the selected normalized
+# fields vary by stable record namespace. Existing non-Ninja records retain the
+# deployed fallback during this additive release.
+_NINJA_DEVICE_MATERIAL_FIELDS = frozenset(
+    {
+        "hostname",
+        "platform",
+        "entity_type",
+        "node_class",
+        "vm_uuid",
+        "is_vm",
+        "serial_number",
+        "macs",
+        "device_role",
+        "os_name",
+        "os_family",
+        "domain",
+        "offline",
+        "needs_reboot",
+        "needs_reboot_reasons",
+        "last_boot_time_at",
+        "maintenance_status",
+        "maintenance_start_at",
+        "maintenance_end_at",
+        "power_state",
+        "parent_ninja_id",
+    }
+)
+_NINJA_HEALTH_MATERIAL_FIELDS = frozenset(
+    {
+        "platform",
+        "entity_type",
+        "pending_reboot_reason",
+        "failed_os_patches_count",
+        "pending_os_patches_count",
+        "failed_software_patches_count",
+        "pending_software_patches_count",
+        "alert_count",
+        "active_job_count",
+        "health_status",
+        "active_threats_count",
+        "quarantined_threats_count",
+        "blocked_threats_count",
+        "critical_vulnerability_count",
+        "high_vulnerability_count",
+        "medium_vulnerability_count",
+        "low_vulnerability_count",
+        "installation_issues_count",
+        "offline",
+        "parent_offline",
+        "products_installation_statuses",
+    }
+)
 
 # Columns written to entity_observation_current. Kept as a module constant so
 # the bespoke upsert SQL and the row-shaping loop stay in lockstep.
 _CURRENT_COLUMNS: tuple[str, ...] = (
-    "observation_id", "tenant_id", "source_binding_id", "source_instance_id",
-    "last_seen_binding_id", "external_namespace", "parent_external_namespace",
-    "parent_external_id", "external_id", "collector_instance_id",
-    "client_id", "device_id", "entity_type", "parent_source_key", "entity_key",
-    "platform", "subplatform", "observed_at", "last_seen_at", "last_received_at",
-    "active", "withdrawn_at", "snapshot_scope", "last_snapshot_run_id",
-    "raw_data", "canonical_data", "raw_hash", "material_hash",
-    "hash_algorithm_version", "batch_id", "collector_version", "schema_version",
+    "observation_id",
+    "tenant_id",
+    "source_binding_id",
+    "source_instance_id",
+    "last_seen_binding_id",
+    "external_namespace",
+    "parent_external_namespace",
+    "parent_external_id",
+    "external_id",
+    "collector_instance_id",
+    "client_id",
+    "device_id",
+    "entity_type",
+    "parent_source_key",
+    "entity_key",
+    "platform",
+    "subplatform",
+    "observed_at",
+    "last_seen_at",
+    "last_received_at",
+    "active",
+    "withdrawn_at",
+    "snapshot_scope",
+    "last_snapshot_run_id",
+    "raw_data",
+    "canonical_data",
+    "raw_hash",
+    "material_hash",
+    "hash_algorithm_version",
+    "material_projection_version",
+    "batch_id",
+    "collector_version",
+    "schema_version",
 )
 
 # Columns updated with EXCLUDED.c on conflict. Stable identity columns are
@@ -57,26 +145,116 @@ _CURRENT_COLUMNS: tuple[str, ...] = (
 # resolver writes against fresh connector NULLs. observation_id remains stable
 # across heartbeats because identity_candidates depends on it.
 _CURRENT_UPDATE_COLUMNS: tuple[str, ...] = (
-    "source_binding_id", "last_seen_binding_id", "collector_instance_id",
-    "entity_type", "parent_source_key", "entity_key", "platform",
-    "subplatform", "observed_at", "last_seen_at",
-    "last_received_at", "active", "withdrawn_at", "snapshot_scope",
-    "last_snapshot_run_id", "raw_data", "canonical_data", "raw_hash",
-    "material_hash", "hash_algorithm_version", "batch_id",
-    "collector_version", "schema_version",
+    "source_binding_id",
+    "last_seen_binding_id",
+    "collector_instance_id",
+    "entity_type",
+    "parent_source_key",
+    "entity_key",
+    "platform",
+    "subplatform",
+    "observed_at",
+    "last_seen_at",
+    "last_received_at",
+    "active",
+    "withdrawn_at",
+    "snapshot_scope",
+    "last_snapshot_run_id",
+    "raw_data",
+    "canonical_data",
+    "raw_hash",
+    "material_hash",
+    "hash_algorithm_version",
+    "material_projection_version",
+    "batch_id",
+    "collector_version",
+    "schema_version",
 )
 
 
-def material_projection(canonical: dict[str, Any]) -> dict[str, Any]:
-    return {k: canonical[k] for k in sorted(canonical) if k not in VOLATILE_FIELDS}
+def _json_object(value: Any) -> dict[str, Any]:
+    if hasattr(value, "obj"):
+        value = value.obj
+    return value if isinstance(value, dict) else {}
 
 
-def material_hash(canonical: dict[str, Any]) -> bytes:
-    payload = json.dumps(material_projection(canonical), sort_keys=True, separators=(",", ":"), default=str)
+def raw_hash(raw: Any) -> bytes:
+    """Hash a deterministic representation of the complete parsed payload."""
+    payload = json.dumps(
+        _json_object(raw),
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
     return hashlib.sha256(payload.encode("utf-8")).digest()
 
 
-def prepare_observation(row: dict[str, Any]) -> dict[str, Any]:
+def material_projection(
+    canonical: dict[str, Any],
+    *,
+    platform: str = "",
+    external_namespace: str = "",
+    entity_type: str = "",
+    use_versioned_contracts: bool = True,
+) -> dict[str, Any]:
+    del entity_type  # Reserved for future entity-family refinements.
+    canonical = _json_object(canonical)
+    fields: frozenset[str] | None = None
+    if use_versioned_contracts and platform.casefold() == "ninja":
+        if external_namespace == "device":
+            fields = _NINJA_DEVICE_MATERIAL_FIELDS
+        elif external_namespace == "device-health":
+            fields = _NINJA_HEALTH_MATERIAL_FIELDS
+    if fields is None:
+        return {
+            key: canonical[key]
+            for key in sorted(canonical)
+            if key not in VOLATILE_FIELDS
+        }
+    return {key: canonical[key] for key in sorted(fields) if key in canonical}
+
+
+def material_projection_version(
+    *,
+    platform: str,
+    external_namespace: str,
+    use_versioned_contracts: bool = True,
+) -> int:
+    if not use_versioned_contracts or platform.casefold() != "ninja":
+        return LEGACY_MATERIAL_PROJECTION_VERSION
+    if external_namespace == "device":
+        return 2
+    return LEGACY_MATERIAL_PROJECTION_VERSION
+
+
+def material_hash(
+    canonical: dict[str, Any],
+    *,
+    platform: str = "",
+    external_namespace: str = "",
+    entity_type: str = "",
+    use_versioned_contracts: bool = True,
+) -> bytes:
+    payload = json.dumps(
+        material_projection(
+            canonical,
+            platform=platform,
+            external_namespace=external_namespace,
+            entity_type=entity_type,
+            use_versioned_contracts=use_versioned_contracts,
+        ),
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+    return hashlib.sha256(payload.encode("utf-8")).digest()
+
+
+def prepare_observation(
+    row: dict[str, Any],
+    *,
+    use_versioned_contracts: bool = True,
+) -> dict[str, Any]:
     row = dict(row)
     if row.get("source_instance_id") is None:
         raise ValueError("source_instance_id is required for observation dual-write")
@@ -104,23 +282,119 @@ def prepare_observation(row: dict[str, Any]) -> dict[str, Any]:
         row.get("last_seen_binding_id") or row["source_binding_id"]
     )
 
-    canonical = row.get("canonical_data") or {}
-    if hasattr(canonical, "obj"):
-        canonical = canonical.obj
-    if not isinstance(canonical, dict):
-        canonical = {}
-    raw_data = row.get("raw_data")
-    if isinstance(raw_data, dict):
-        row["raw_data"] = Json(raw_data)
+    canonical = _json_object(row.get("canonical_data"))
+    raw_data = _json_object(row.get("raw_data"))
+    row["raw_data"] = Json(raw_data)
     row["canonical_data"] = Json(canonical)
-    row["material_hash"] = material_hash(canonical)
-    row["material_data"] = Json(material_projection(canonical))
+    row["raw_hash"] = raw_hash(raw_data)
+    projection_kwargs = {
+        "platform": str(row.get("platform") or ""),
+        "external_namespace": external_namespace,
+        "entity_type": str(row.get("entity_type") or ""),
+        "use_versioned_contracts": use_versioned_contracts,
+    }
+    row["material_hash"] = material_hash(canonical, **projection_kwargs)
+    row["material_data"] = Json(material_projection(canonical, **projection_kwargs))
     row["hash_algorithm_version"] = MATERIAL_HASH_VERSION
+    row["material_projection_version"] = material_projection_version(
+        platform=projection_kwargs["platform"],
+        external_namespace=external_namespace,
+        use_versioned_contracts=use_versioned_contracts,
+    )
     return row
 
 
-def prepare_batch(rows: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [prepare_observation(row) for row in rows]
+def prepare_batch(
+    rows: Iterable[dict[str, Any]],
+    *,
+    use_versioned_contracts: bool = True,
+) -> list[dict[str, Any]]:
+    return [
+        prepare_observation(row, use_versioned_contracts=use_versioned_contracts)
+        for row in rows
+    ]
+
+
+def _supports_projection_versions(cur: Any) -> bool:
+    """Tolerate the short Operations-migration/ingest restart race."""
+    cur.execute(
+        """
+        SELECT EXISTS (
+            SELECT 1
+              FROM pg_attribute
+             WHERE attrelid = 'operations.entity_observation_current'::regclass
+               AND attname = 'material_projection_version'
+               AND NOT attisdropped
+        )
+        """
+    )
+    result = cur.fetchone()
+    return bool(result and result[0])
+
+
+def write_daily_presence_rows(
+    cur: Any,
+    rows: Iterable[dict[str, Any]],
+    *,
+    snapshot_run_id: Any,
+    observed_at: datetime,
+) -> int:
+    """Insert one compact source-record presence fact per UTC day.
+
+    The current row owns the complete stable identity. The rollup references
+    its stable observation UUID and duplicates only namespace/date provenance.
+    Repeated collections on the same day conflict to no-op.
+    """
+    identities = [
+        {
+            "tenant_id": row["tenant_id"],
+            "source_instance_id": str(row["source_instance_id"]),
+            "external_namespace": str(row["external_namespace"]),
+            "parent_external_namespace": str(
+                row.get("parent_external_namespace") or ""
+            ),
+            "parent_external_id": str(row.get("parent_external_id") or ""),
+            "external_id": str(row["external_id"]),
+        }
+        for row in rows
+    ]
+    if not identities:
+        return 0
+    cur.execute("SELECT to_regclass('operations.source_record_seen_daily')")
+    if cur.fetchone()[0] is None:
+        return 0
+    rollup_day = observed_at.astimezone(timezone.utc).date()
+    cur.execute(
+        """
+        WITH incoming AS (
+            SELECT *
+              FROM jsonb_to_recordset(%s::jsonb) AS x(
+                   tenant_id bigint,
+                   source_instance_id uuid,
+                   external_namespace text,
+                   parent_external_namespace text,
+                   parent_external_id text,
+                   external_id text
+              )
+        )
+        INSERT INTO operations.source_record_seen_daily
+          (tenant_id, source_record_id, external_namespace, rollup_day,
+           first_snapshot_run_id)
+        SELECT c.tenant_id, c.observation_id, c.external_namespace, %s, %s
+          FROM incoming i
+          JOIN operations.entity_observation_current c
+            ON c.tenant_id = i.tenant_id
+           AND c.source_instance_id = i.source_instance_id
+           AND c.external_namespace = i.external_namespace
+           AND c.parent_external_namespace = i.parent_external_namespace
+           AND c.parent_external_id = i.parent_external_id
+           AND c.external_id = i.external_id
+         WHERE c.active IS TRUE
+        ON CONFLICT (tenant_id, source_record_id, rollup_day) DO NOTHING
+        """,
+        (Json(identities), rollup_day, snapshot_run_id),
+    )
+    return cur.rowcount
 
 
 def _identity_tuple(row: dict[str, Any]) -> tuple:
@@ -189,7 +463,11 @@ def write_current_rows(cur: Any, rows: Iterable[dict[str, Any]]) -> int:
     counted). Callers that need "rows in batch" should track that
     separately from the input.
     """
-    prepared = prepare_batch(rows)
+    use_versioned_contracts = _supports_projection_versions(cur)
+    prepared = prepare_batch(
+        rows,
+        use_versioned_contracts=use_versioned_contracts,
+    )
     if not prepared:
         return 0
 
@@ -218,16 +496,13 @@ def write_current_rows(cur: Any, rows: Iterable[dict[str, Any]]) -> int:
         # (2) Out-of-order / equal-timestamp guard runs BEFORE any history
         # mutation so an older or duplicate snapshot cannot open a phantom
         # SCD-2 interval.
-        if prev is not None and prev[0] is not None \
-                and row["observed_at"] <= prev[0]:
+        if prev is not None and prev[0] is not None and row["observed_at"] <= prev[0]:
             continue
 
         # (3) Material or presence transition detection.
         is_new = prev is None
-        material_changed = (
-            not is_new
-            and (prev[1] != row["material_hash"]
-                 or prev[2] != row.get("active", True))
+        material_changed = not is_new and (
+            prev[1] != row["material_hash"] or prev[2] != row.get("active", True)
         )
         if is_new or material_changed:
             # Side-band the prior last_seen_at so write_history_changes can
@@ -251,15 +526,28 @@ def write_current_rows(cur: Any, rows: Iterable[dict[str, Any]]) -> int:
     # roll the whole caller transaction back, so we never leave overlapping
     # intervals.
     if changed_for_history:
-        write_history_changes(cur, changed_for_history)
+        write_history_changes(
+            cur,
+            changed_for_history,
+            use_versioned_contracts=use_versioned_contracts,
+        )
 
     if not to_upsert:
         return 0
 
-    return _upsert_current(cur, to_upsert)
+    return _upsert_current(
+        cur,
+        to_upsert,
+        include_projection_version=use_versioned_contracts,
+    )
 
 
-def _upsert_current(cur: Any, rows: list[dict[str, Any]]) -> int:
+def _upsert_current(
+    cur: Any,
+    rows: list[dict[str, Any]],
+    *,
+    include_projection_version: bool,
+) -> int:
     """Bespoke observation-current upsert.
 
     Diverges from `db.upsert()` in two ways required by ADR-0007 hardening:
@@ -274,9 +562,19 @@ def _upsert_current(cur: Any, rows: list[dict[str, Any]]) -> int:
     if not rows:
         return 0
 
-    shaped = [{key: row.get(key) for key in _CURRENT_COLUMNS} for row in rows]
-    cols_sql = ", ".join(_CURRENT_COLUMNS)
-    placeholders_sql = ", ".join(f"%({c})s" for c in _CURRENT_COLUMNS)
+    current_columns = tuple(
+        column
+        for column in _CURRENT_COLUMNS
+        if include_projection_version or column != "material_projection_version"
+    )
+    update_columns = tuple(
+        column
+        for column in _CURRENT_UPDATE_COLUMNS
+        if include_projection_version or column != "material_projection_version"
+    )
+    shaped = [{key: row.get(key) for key in current_columns} for row in rows]
+    cols_sql = ", ".join(current_columns)
+    placeholders_sql = ", ".join(f"%({c})s" for c in current_columns)
 
     update_pieces = [
         "client_id = COALESCE(EXCLUDED.client_id, "
@@ -284,7 +582,7 @@ def _upsert_current(cur: Any, rows: list[dict[str, Any]]) -> int:
         "device_id = COALESCE(EXCLUDED.device_id, "
         "operations.entity_observation_current.device_id)",
     ]
-    for c in _CURRENT_UPDATE_COLUMNS:
+    for c in update_columns:
         update_pieces.append(f"{c} = EXCLUDED.{c}")
     update_sql = ", ".join(update_pieces)
 
@@ -302,7 +600,12 @@ def _upsert_current(cur: Any, rows: list[dict[str, Any]]) -> int:
     return cur.rowcount
 
 
-def write_history_changes(cur: Any, rows: Iterable[dict[str, Any]]) -> int:
+def write_history_changes(
+    cur: Any,
+    rows: Iterable[dict[str, Any]],
+    *,
+    use_versioned_contracts: bool | None = None,
+) -> int:
     """Close the currently open SCD-2 version and insert a new open one.
 
     Callers pass rows already determined to be changed (new identity, or a
@@ -315,7 +618,12 @@ def write_history_changes(cur: Any, rows: Iterable[dict[str, Any]]) -> int:
     `write_current_rows`. Falling back to the incoming row's `last_seen_at`
     would attribute the closing time to the new state — semantically wrong.
     """
-    prepared = prepare_batch(rows)
+    if use_versioned_contracts is None:
+        use_versioned_contracts = _supports_projection_versions(cur)
+    prepared = prepare_batch(
+        rows,
+        use_versioned_contracts=use_versioned_contracts,
+    )
     if not prepared:
         return 0
     for row in prepared:
@@ -346,38 +654,44 @@ def write_history_changes(cur: Any, rows: Iterable[dict[str, Any]]) -> int:
                 "closed_by_snapshot_run_id": row.get("last_snapshot_run_id"),
             },
         )
-    history_rows = [{
-        "id": row["observation_id"],
-        "tenant_id": row["tenant_id"],
-        "source_binding_id": row["source_binding_id"],
-        "source_instance_id": row["source_instance_id"],
-        "last_seen_binding_id": row["last_seen_binding_id"],
-        "external_namespace": row["external_namespace"],
-        "parent_external_namespace": row["parent_external_namespace"],
-        "parent_external_id": row["parent_external_id"],
-        "external_id": row["external_id"],
-        "collector_instance_id": row["collector_instance_id"],
-        "client_id": row.get("client_id"),
-        "device_id": row.get("device_id"),
-        "entity_type": row["entity_type"],
-        "platform": row.get("platform", ""),
-        "parent_source_key": row.get("parent_source_key") or "",
-        "entity_key": row["entity_key"],
-        "effective_from": row["observed_at"],
-        "effective_to": None,
-        # New state's last_seen_at IS the new observation time — this is a
-        # different concept than the close's last_seen_at above.
-        "last_seen_at": row.get("last_seen_at") or row["observed_at"],
-        "received_at": row.get("last_received_at") or row["observed_at"],
-        "material_data": row["material_data"],
-        "material_hash": row["material_hash"],
-        "hash_algorithm_version": row["hash_algorithm_version"],
-        "active": row.get("active", True),
-        "closed_by_snapshot_run_id": None,
-    } for row in prepared]
+    history_rows = [
+        {
+            "id": row["observation_id"],
+            "tenant_id": row["tenant_id"],
+            "source_binding_id": row["source_binding_id"],
+            "source_instance_id": row["source_instance_id"],
+            "last_seen_binding_id": row["last_seen_binding_id"],
+            "external_namespace": row["external_namespace"],
+            "parent_external_namespace": row["parent_external_namespace"],
+            "parent_external_id": row["parent_external_id"],
+            "external_id": row["external_id"],
+            "collector_instance_id": row["collector_instance_id"],
+            "client_id": row.get("client_id"),
+            "device_id": row.get("device_id"),
+            "entity_type": row["entity_type"],
+            "platform": row.get("platform", ""),
+            "parent_source_key": row.get("parent_source_key") or "",
+            "entity_key": row["entity_key"],
+            "effective_from": row["observed_at"],
+            "effective_to": None,
+            # New state's last_seen_at IS the new observation time — this is a
+            # different concept than the close's last_seen_at above.
+            "last_seen_at": row.get("last_seen_at") or row["observed_at"],
+            "received_at": row.get("last_received_at") or row["observed_at"],
+            "material_data": row["material_data"],
+            "material_hash": row["material_hash"],
+            "hash_algorithm_version": row["hash_algorithm_version"],
+            "material_projection_version": row["material_projection_version"],
+            "active": row.get("active", True),
+            "closed_by_snapshot_run_id": None,
+        }
+        for row in prepared
+    ]
     # Bespoke insert with ON CONFLICT DO NOTHING on the identity partial
     # unique index. Keeps history append-only.
     cols = list(history_rows[0].keys())
+    if not use_versioned_contracts:
+        cols.remove("material_projection_version")
     cols_sql = ", ".join(cols)
     placeholders_sql = ", ".join(f"%({c})s" for c in cols)
     stmt = (

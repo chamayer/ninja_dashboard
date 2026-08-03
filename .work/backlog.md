@@ -33,6 +33,24 @@ This is the proposed successor to the root-level open-work portion of
   destructive approval.
 - Trigger: P7 cutover approval.
 
+## Legacy Ninja snapshot archival, deletion, and disk reclamation
+
+- Reason deferred: the generic ingest cutover must first prove that current,
+  change-history, compatibility, and daily-rollup consumers are correct. Disk
+  reclamation is operational cleanup, not part of the generic deployment.
+- Relevant objects: `ninja_core.device_snapshots`,
+  `ninja_core.device_health_snapshots`, their indexes and compatibility views,
+  and the storage volume that contains them.
+- Preconditions: both Ninja endpoint namespaces are authoritative through the
+  generic contract; every named current/session/health/troubleshooting/trend
+  consumer is verified; retention/archive policy is approved from aggregate
+  30/90/365-day sizing; backup and restore rehearsal pass.
+- Constraints: do not touch Agent Compliance; do not bundle historical
+  deletion, archive, table truncation, partition removal, vacuum/repack, or
+  filesystem reclamation into the generic deployment.
+- Trigger: explicit post-cutover operational approval with an exact retained,
+  archived, and deleted row/time range plus rollback and disk-reclamation plan.
+
 ## Honour `source_bindings.schedule` (replaces cadence-by-capability)
 
 - Reason deferred: `operations.source_bindings.schedule` exists and is

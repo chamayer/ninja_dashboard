@@ -2,11 +2,15 @@
 
 Track: **Corrective Track B — stable identity marker cutover**
 
-**Status:** CUTOVER DEPLOYED; RUN-START HOTFIX VALIDATED; COMMIT APPROVAL REQUIRED —
-stable-identity expansion and dual-write are deployed and verified through
-`0.99.2` / `fe1beda` on both remotes. Release `0.100.0` and migration `0096`
-are prepared locally. The rejected permanent per-run membership table was not
-implemented.
+**Status:** COMPLETE — stable identity cutover and run-start hotfix deployed and verified
+
+Both remotes and production resolve to hotfix `30c460c` / release `0.100.1`;
+migration `0096` is applied. The rejected permanent per-run membership table
+was not implemented.
+
+The current cross-service Ninja snapshot expansion is tracked exclusively in
+the root `.work/plan.md`; this completed Operations plan remains the record for
+the stable-identity cutover.
 
 ## Goal
 
@@ -216,14 +220,25 @@ Validation completed:
   no-default schema, focused Ruff/compilation, `git diff --check`, and the
   secure ingest image build passed. The hotfix adds no migration and changes no
   identity, reconciliation, or retention semantics.
-- No local deployed HTTP stack exists, so no local HTTP 500 measurement was
-  possible. No production code changed and no production 500 check is due
-  until an approved deployment.
-
+- Hotfix `30c460c` was pushed to `origin` and `a-m-rose` as one approved
+  combined operation. Portainer deployed ingest `0.100.1`; migration `0096`
+  remained applied. Ingest, Operations, and Postgres are healthy, readiness and
+  health endpoints pass, and the Operations root returns its expected redirect.
+- Post-hotfix startup collections completed for LogMeIn (3,048), ScreenConnect
+  (1,006), and SentinelOne (4,250): three complete runs, zero failed, 8,304
+  writes, 8,304 distinct observed identities, no missing digest, and no
+  count/write mismatch. Aggregate database verification returned zero
+  incomplete current/history/run identities, zero stable current/open-history/
+  run-boundary collision groups, and zero current/open-history presence
+  mismatches. All 25 post-hotfix history closures have deciding-run provenance.
+  Post-hotfix logs contain zero ingest error lines, zero Operations error lines,
+  and zero Operations HTTP 500s. No customer-level data was returned.
+- The user established a durable push policy: one explicit approval may cover
+  both remotes as a combined operation. Push `origin` first and the mirror
+  immediately afterward; perform deployment validation after both pushes.
 ## Next action
 
-Obtain separate approval for the validated `0.100.1` hotfix commit, then obtain
-approval for one combined two-remote push operation. After deployment, rerun
-the three failed source paths and verify migration state, health/readiness,
-aggregate identity/run results, withdrawals/history integrity, scope-lock
-errors, and Operations HTTP 500s.
+Corrective Track B is complete. Return to the root ecosystem plan for the next
+approved slice. Legacy observation-key cleanup, rollback-column removal,
+historical snapshot cleanup, and Agent Compliance remain outside this track
+and require their documented later gates.

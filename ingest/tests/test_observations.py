@@ -5,7 +5,12 @@ import pytest
 
 from ingest import observations
 from ingest.backfill_observations import _stable_identity
-from ingest.observations import material_hash, material_projection
+from ingest.observations import (
+    material_hash,
+    material_projection,
+    material_projection_version,
+    raw_hash,
+)
 
 # ── Hardening tests (ADR-0007 §Heartbeat, §SCD-2) ───────────────────────
 #
@@ -58,8 +63,7 @@ def _base_row(**overrides):
         "parent_external_namespace": "",
         "parent_external_id": "",
         "external_id": "42",
-        "collector_instance_id": uuid.UUID(
-            "00000000-0000-4000-8000-000000000001"),
+        "collector_instance_id": uuid.UUID("00000000-0000-4000-8000-000000000001"),
         "client_id": None,
         "device_id": None,
         "entity_type": "agent.rmm",
@@ -88,7 +92,8 @@ def _base_row(**overrides):
 def _history_close_updates(cur):
     """Return the parameter dicts passed to the SCD-2 close-UPDATE."""
     return [
-        params for sql, params in cur.executed
+        params
+        for sql, params in cur.executed
         if "UPDATE operations.entity_observation_history" in sql
     ]
 
@@ -98,7 +103,10 @@ def test_out_of_order_row_is_skipped_before_history_mutation():
     older = _base_row(observed_at=now)
     prev = (
         datetime(2026, 7, 22, 12, 1, tzinfo=timezone.utc),  # newer stored
-        b"different-hash", True, None, None,
+        b"different-hash",
+        True,
+        None,
+        None,
         datetime(2026, 7, 22, 12, 1, tzinfo=timezone.utc),
     )
     cur = _MockCursor(fetch_queue=[prev])
@@ -108,8 +116,7 @@ def test_out_of_order_row_is_skipped_before_history_mutation():
     assert written == 0
     # No history mutation of any kind — this is the point of the guard.
     assert not any(
-        "operations.entity_observation_history" in sql
-        for sql, _ in cur.executed
+        "operations.entity_observation_history" in sql for sql, _ in cur.executed
     )
     assert cur.executemany_calls == []
 
@@ -135,12 +142,13 @@ def test_resolved_ids_preserved_when_incoming_row_is_null():
     resolved_device = uuid.uuid4()
     resolved_client = uuid.uuid4()
     incoming = _base_row(
-        observed_at=new_ts, client_id=None, device_id=None,
+        observed_at=new_ts,
+        client_id=None,
+        device_id=None,
     )
     # Same material hash → heartbeat only, no history write.
     incoming_hash = material_hash(incoming["canonical_data"])
-    prev = (prior_ts, incoming_hash, True,
-            resolved_client, resolved_device, prior_ts)
+    prev = (prior_ts, incoming_hash, True, resolved_client, resolved_device, prior_ts)
     cur = _MockCursor(fetch_queue=[prev])
 
     observations.write_current_rows(cur, [incoming])
@@ -159,7 +167,8 @@ def test_material_change_queues_history_with_prior_last_seen_at():
     prior_last_seen = datetime(2026, 7, 22, 11, 30, tzinfo=timezone.utc)
     new_ts = datetime(2026, 7, 22, 12, 0, tzinfo=timezone.utc)
     incoming = _base_row(
-        observed_at=new_ts, last_seen_at=new_ts,
+        observed_at=new_ts,
+        last_seen_at=new_ts,
         canonical_data={"hostname": "host-1", "os_name": "Windows 12"},
     )
     prev = (prior_ts, b"prior-hash", True, None, None, prior_last_seen)
@@ -187,7 +196,8 @@ def test_heartbeat_without_material_change_skips_history():
     # Heartbeat: current gets a new upsert row but history is untouched.
     assert _history_close_updates(cur) == []
     history_inserts = [
-        c for c in cur.executemany_calls
+        c
+        for c in cur.executemany_calls
         if "INSERT INTO operations.entity_observation_history" in c[0]
     ]
     assert history_inserts == []
@@ -217,7 +227,8 @@ def test_new_identity_opens_first_history_version():
         },
     ]
     history_inserts = [
-        c for c in cur.executemany_calls
+        c
+        for c in cur.executemany_calls
         if "INSERT INTO operations.entity_observation_history" in c[0]
     ]
     assert len(history_inserts) == 1
@@ -229,7 +240,8 @@ def test_new_identity_opens_first_history_version():
     assert history_rows[0]["closed_by_snapshot_run_id"] is None
 
     current_inserts = [
-        call for call in cur.executemany_calls
+        call
+        for call in cur.executemany_calls
         if "INSERT INTO operations.entity_observation_current" in call[0]
     ]
     assert len(current_inserts) == 1
@@ -292,8 +304,7 @@ def test_batch_is_sorted_by_identity_before_locking():
     observations.write_current_rows(cur, [a, b, c])
 
     lock_calls = [
-        params[0] for sql, params in cur.executed
-        if "pg_advisory_xact_lock" in sql
+        params[0] for sql, params in cur.executed if "pg_advisory_xact_lock" in sql
     ]
     # Locks acquired in sorted order: a → b → c by stable external ID.
     assert [key.rsplit("|", 1)[1] for key in lock_calls] == ["a", "b", "c"]
@@ -302,20 +313,17 @@ def test_batch_is_sorted_by_identity_before_locking():
 def test_reclassification_uses_same_stable_identity_and_updates_metadata():
     incoming = _base_row(entity_type="vm.guest", entity_key="editable-legacy-key")
     prior_ts = datetime(2026, 7, 22, 11, 0, tzinfo=timezone.utc)
-    cur = _MockCursor(
-        fetch_queue=[(prior_ts, b"prior", True, None, None, prior_ts)]
-    )
+    cur = _MockCursor(fetch_queue=[(prior_ts, b"prior", True, None, None, prior_ts)])
 
     observations.write_current_rows(cur, [incoming])
 
-    select_sql = next(
-        sql for sql, _params in cur.executed if "FOR UPDATE" in sql
-    )
+    select_sql = next(sql for sql, _params in cur.executed if "FOR UPDATE" in sql)
     assert "source_instance_id = %s" in select_sql
     assert "external_namespace = %s" in select_sql
     assert "entity_type = %s" not in select_sql
     current_sql = next(
-        sql for sql, _rows in cur.executemany_calls
+        sql
+        for sql, _rows in cur.executemany_calls
         if "entity_observation_current" in sql
     )
     assert "entity_type = EXCLUDED.entity_type" in current_sql
@@ -352,7 +360,8 @@ def test_absent_identity_locks_and_rereads_before_insert():
         i for i, sql in enumerate(statements) if "pg_advisory_xact_lock" in sql
     )
     second_read = next(
-        i for i, sql in enumerate(statements[advisory + 1 :], start=advisory + 1)
+        i
+        for i, sql in enumerate(statements[advisory + 1 :], start=advisory + 1)
         if "FOR UPDATE" in sql
     )
     assert first_read < advisory < second_read
@@ -380,6 +389,77 @@ def test_material_fields_change_hash_and_projection_is_sorted():
     changed = {**base, "os_version": "2"}
     assert material_hash(base) != material_hash(changed)
     assert list(material_projection(base)) == ["hostname", "os_version"]
+
+
+def test_raw_hash_is_deterministic_for_complete_json_object():
+    first = {"deviceId": 42, "state": {"offline": False, "alerts": [2, 1]}}
+    reordered = {"state": {"alerts": [2, 1], "offline": False}, "deviceId": 42}
+    changed = {"state": {"alerts": [2, 1], "offline": True}, "deviceId": 42}
+
+    assert raw_hash(first) == raw_hash(reordered)
+    assert raw_hash(first) != raw_hash(changed)
+
+
+def test_ninja_device_contract_keeps_measurements_but_excludes_contact_noise():
+    context = {
+        "platform": "Ninja",
+        "external_namespace": "device",
+        "entity_type": "vm.guest",
+    }
+    base = {
+        "hostname": "vm-1",
+        "offline": False,
+        "power_state": "poweredon",
+        "last_boot_time_at": "2026-08-01T00:00:00+00:00",
+        "last_contact_at": "2026-08-03T12:00:00+00:00",
+        "last_user": "example\\user-a",
+    }
+    heartbeat = {
+        **base,
+        "last_contact_at": "2026-08-03T13:00:00+00:00",
+        "last_user": "example\\user-b",
+    }
+
+    assert material_hash(base, **context) == material_hash(heartbeat, **context)
+    assert material_hash(base, **context) != material_hash(
+        {**base, "power_state": "poweredoff"},
+        **context,
+    )
+    assert material_hash(base, **context) != material_hash(
+        {**base, "offline": True},
+        **context,
+    )
+    assert (
+        material_projection_version(
+            platform="Ninja",
+            external_namespace="device",
+        )
+        == 2
+    )
+
+
+def test_ninja_health_contract_records_typed_state_changes():
+    context = {
+        "platform": "Ninja",
+        "external_namespace": "device-health",
+        "entity_type": "agent.rmm",
+    }
+    base = {
+        "health_status": "GOOD",
+        "pending_os_patches_count": 2,
+        "offline": False,
+        "collection_time": "noise-a",
+    }
+    collection_only = {**base, "collection_time": "noise-b"}
+
+    assert material_hash(base, **context) == material_hash(
+        collection_only,
+        **context,
+    )
+    assert material_hash(base, **context) != material_hash(
+        {**base, "pending_os_patches_count": 3},
+        **context,
+    )
 
 
 def test_parent_scope_is_part_of_identity_contract():

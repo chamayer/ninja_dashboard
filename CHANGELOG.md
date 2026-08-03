@@ -2,6 +2,34 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.101.0] — 2026-08-03 — Ninja snapshot storage expansion
+
+### Added
+
+- Added additive, tenant-scoped daily device-presence rollups with explicit
+  snapshot-run or legacy-backfill provenance, RLS, and shadow compatibility
+  views for Ninja device detail, health, and daily trend consumers.
+- Added a dry-run-by-default, date-bounded, resumable operator tool for
+  backfilling compact daily presence from legacy device snapshots.
+
+### Changed
+
+- Centralized deterministic complete-payload hashes and versioned material
+  projections, excluding poll/contact noise while retaining meaningful Ninja
+  device and health state.
+- Expanded Ninja device current evidence with offline, reboot, boot-time,
+  maintenance, and VM state, and added a distinct `device-health` current and
+  material-history shadow write.
+
+### Operational note
+
+- Legacy Ninja snapshot writes and all current readers remain authoritative in
+  this expansion release. Backfill, read cutover, legacy-write shutdown, and
+  historical cleanup retain separate approval and verification gates.
+- Closed material history keeps the existing 90-day default. Compact daily
+  presence is initially retained without automatic deletion or partitioning;
+  the measured design is reassessed after 30 days of steady-state evidence.
+
 ## [0.100.1] — 2026-08-03 — Snapshot run-start repair
 
 ### Fixed

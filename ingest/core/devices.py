@@ -33,14 +33,14 @@ from ingest.normalize import (
     os_family,
 )
 from ingest.observation_runs import begin_run, complete_run, reconcile_complete_run
-from ingest.observations import write_current_rows
+from ingest.observations import write_current_rows, write_daily_presence_rows
 from ingest.runlog import run_log
 from ingest.util import ninja_epoch_to_dt
 
 log = logging.getLogger(__name__)
 
 _TENANT_ID = 1
-NINJA_SOURCE_BINDING_ID      = uuid.UUID("00000000-0000-4000-8000-000000000011")
+NINJA_SOURCE_BINDING_ID = uuid.UUID("00000000-0000-4000-8000-000000000011")
 NINJA_DEVICE_EXTERNAL_NAMESPACE = "device"
 NINJA_ORG_EXTERNAL_NAMESPACE = "organization"
 INTERNAL_COLLECTOR_INSTANCE_ID = uuid.UUID("00000000-0000-4000-8000-000000000001")
@@ -79,61 +79,65 @@ def _run(client: NinjaClient, snapshot_at: datetime) -> tuple[int, int]:
             nc = (d.get("nodeClass") or "").upper()
             if nc.endswith(("_VMM_GUEST", "_VM_GUEST", "_VMM_HOST", "_VM_HOST")):
                 vm_tracking[d["id"]] = {
-                    "power_state":       d.get("powerState"),
-                    "parent_device_id":  d.get("parentDeviceId"),
-                    "last_boot_time":    d.get("lastBootTime"),
+                    "power_state": d.get("powerState"),
+                    "parent_device_id": d.get("parentDeviceId"),
+                    "last_boot_time": ninja_epoch_to_dt(d.get("lastBootTime")),
                 }
 
-            device_rows.append({
-                "id":                  d["id"],
-                "uid":                 d["uid"],
-                "organization_id":     d["organizationId"],
-                "location_id":         d.get("locationId"),
-                "policy_id":           d.get("policyId"),
-                "role_policy_id":      d.get("rolePolicyId"),
-                "node_class":          d["nodeClass"],
-                "approval_status":     d.get("approvalStatus", "APPROVED"),
-                "display_name":        d.get("displayName"),
-                "system_name":         d.get("systemName"),
-                "dns_name":            d.get("dnsName"),
-                "netbios_name":        d.get("netbiosName"),
-                "os_name":             os_data.get("name"),
-                "os_architecture":     os_data.get("architecture"),
-                "os_build_number":     os_data.get("buildNumber"),
-                "os_release_id":       os_data.get("releaseId"),
-                "serial_number":       system_data.get("serialNumber"),
-                "manufacturer":        system_data.get("manufacturer"),
-                "model":               system_data.get("model"),
-                "chassis_type":        system_data.get("chassisType"),
-                "is_virtual_machine":  system_data.get("virtualMachine"),
-                "total_memory_bytes":  system_data.get("totalPhysicalMemory"),
-                "public_ip":           d.get("publicIP"),
-                "ip_addresses":        d.get("ipAddresses"),
-                "mac_addresses":       d.get("macAddresses"),
-                "tags":                d.get("tags"),
-                "created_at_ninja":    ninja_epoch_to_dt(d.get("created")),
-                "data":                Json(d),
-                "last_seen_at":        snapshot_at,
-                "is_current":          True,
-                "missing_since":       None,
-            })
+            device_rows.append(
+                {
+                    "id": d["id"],
+                    "uid": d["uid"],
+                    "organization_id": d["organizationId"],
+                    "location_id": d.get("locationId"),
+                    "policy_id": d.get("policyId"),
+                    "role_policy_id": d.get("rolePolicyId"),
+                    "node_class": d["nodeClass"],
+                    "approval_status": d.get("approvalStatus", "APPROVED"),
+                    "display_name": d.get("displayName"),
+                    "system_name": d.get("systemName"),
+                    "dns_name": d.get("dnsName"),
+                    "netbios_name": d.get("netbiosName"),
+                    "os_name": os_data.get("name"),
+                    "os_architecture": os_data.get("architecture"),
+                    "os_build_number": os_data.get("buildNumber"),
+                    "os_release_id": os_data.get("releaseId"),
+                    "serial_number": system_data.get("serialNumber"),
+                    "manufacturer": system_data.get("manufacturer"),
+                    "model": system_data.get("model"),
+                    "chassis_type": system_data.get("chassisType"),
+                    "is_virtual_machine": system_data.get("virtualMachine"),
+                    "total_memory_bytes": system_data.get("totalPhysicalMemory"),
+                    "public_ip": d.get("publicIP"),
+                    "ip_addresses": d.get("ipAddresses"),
+                    "mac_addresses": d.get("macAddresses"),
+                    "tags": d.get("tags"),
+                    "created_at_ninja": ninja_epoch_to_dt(d.get("created")),
+                    "data": Json(d),
+                    "last_seen_at": snapshot_at,
+                    "is_current": True,
+                    "missing_since": None,
+                }
+            )
 
-            snapshot_rows.append({
-                "snapshot_at":          snapshot_at,
-                "device_id":            d["id"],
-                "offline":              d.get("offline"),
-                "last_contact":         ninja_epoch_to_dt(d.get("lastContact")),
-                "last_boot":            ninja_epoch_to_dt(os_data.get("lastBootTime")),
-                "needs_reboot":         os_data.get("needsReboot"),
-                # needs_reboot_reasons is not on /devices-detailed's os{}.
-                # Will be populated from /v2/queries/device-health later.
-                "needs_reboot_reasons": None,
-                "last_user":            d.get("lastLoggedInUser"),
-                "maintenance_status":   maintenance.get("status"),
-                "maintenance_start":    ninja_epoch_to_dt(maintenance.get("start")),
-                "maintenance_end":      ninja_epoch_to_dt(maintenance.get("end")),
-                "data":                 Json(d),
-            })
+            snapshot_rows.append(
+                {
+                    "snapshot_at": snapshot_at,
+                    "device_id": d["id"],
+                    "offline": d.get("offline"),
+                    "last_contact": ninja_epoch_to_dt(d.get("lastContact")),
+                    "last_boot": ninja_epoch_to_dt(os_data.get("lastBootTime")),
+                    "needs_reboot": os_data.get("needsReboot"),
+                    # needs_reboot_reasons is not on /devices-detailed's os{}.
+                    # Will be populated from /v2/queries/device-health later.
+                    "needs_reboot_reasons": None,
+                    "last_user": d.get("lastLoggedInUser"),
+                    "maintenance_status": maintenance.get("status"),
+                    "maintenance_start": ninja_epoch_to_dt(maintenance.get("start")),
+                    "maintenance_end": ninja_epoch_to_dt(maintenance.get("end")),
+                    "data": Json(d),
+                }
+            )
 
         log.info("Fetched %d devices", len(device_rows))
         if not device_rows:
@@ -145,7 +149,10 @@ def _run(client: NinjaClient, snapshot_at: datetime) -> tuple[int, int]:
         current_ids = [row["id"] for row in device_rows]
         with db.transaction() as cur:
             dev_count = db.upsert(
-                cur, "ninja_core.devices", device_rows, conflict_keys=["id"],
+                cur,
+                "ninja_core.devices",
+                device_rows,
+                conflict_keys=["id"],
             )
             snap_count = db.upsert(
                 cur,
@@ -160,7 +167,11 @@ def _run(client: NinjaClient, snapshot_at: datetime) -> tuple[int, int]:
 
         _refresh_active_devices_view()
         obs_count = _write_ninja_observations(
-            device_rows, snapshot_rows, snapshot_at, vm_tracking, raw_by_id,
+            device_rows,
+            snapshot_rows,
+            snapshot_at,
+            vm_tracking,
+            raw_by_id,
         )
         _refresh_device_agent_presence_current()
         stats["rows_upserted"] = dev_count
@@ -168,12 +179,17 @@ def _run(client: NinjaClient, snapshot_at: datetime) -> tuple[int, int]:
         stats["devices_marked_missing"] = missing_count
         log.info(
             "Upserted %d devices, inserted %d snapshots, marked %d missing, wrote %d entity observations",
-            dev_count, snap_count, missing_count, obs_count,
+            dev_count,
+            snap_count,
+            missing_count,
+            obs_count,
         )
         return dev_count, snap_count
 
 
-def _mark_missing_devices(cur: object, current_ids: list[int], snapshot_at: datetime) -> int:
+def _mark_missing_devices(
+    cur: object, current_ids: list[int], snapshot_at: datetime
+) -> int:
     """Mark devices absent from a successful full Ninja device pull as non-current.
 
     We keep the device row and historical snapshots, but current dashboards
@@ -192,7 +208,9 @@ def _mark_missing_devices(cur: object, current_ids: list[int], snapshot_at: date
     return cur.rowcount
 
 
-def _sync_operations_device_links(cur: object, current_ids: list[int], snapshot_at: datetime) -> None:
+def _sync_operations_device_links(
+    cur: object, current_ids: list[int], snapshot_at: datetime
+) -> None:
     """Keep operations.device_links.last_seen_at and missing_since in sync with the Ninja pull."""
     cur.execute("SET LOCAL operations.tenant_id = 1")
     ids_text = [str(i) for i in current_ids]
@@ -434,9 +452,7 @@ def _write_ninja_observations(
     if not device_rows:
         return 0
 
-    presence = {
-        r["device_id"]: (r["offline"], r["last_contact"]) for r in snapshot_rows
-    }
+    snapshot_by_id = {r["device_id"]: r for r in snapshot_rows}
     ninja_ids = [str(r["id"]) for r in device_rows]
     batch_id = uuid.uuid4()
 
@@ -444,8 +460,12 @@ def _write_ninja_observations(
         with db.transaction() as cur:
             cur.execute(f"SET LOCAL operations.tenant_id = {_TENANT_ID}")
             run_id, source_instance_id = begin_run(
-                cur, _TENANT_ID, NINJA_SOURCE_BINDING_ID, "Ninja",
-                snapshot_at, expected_rows=len(device_rows),
+                cur,
+                _TENANT_ID,
+                NINJA_SOURCE_BINDING_ID,
+                "Ninja",
+                snapshot_at,
+                expected_rows=len(device_rows),
             )
             cur.execute(
                 """
@@ -490,35 +510,62 @@ def _write_ninja_observations(
                 obs_hash = hashlib.sha256(
                     f"{entity_key}:{snapshot_at.isoformat()}".encode()
                 ).digest()
-                offline, last_contact = presence.get(r["id"], (None, None))
+                snapshot = snapshot_by_id.get(r["id"], {})
+                offline = snapshot.get("offline")
+                last_contact = snapshot.get("last_contact")
+                last_boot = snapshot.get("last_boot")
                 canonical_data = {
                     "hostname": (
                         r["system_name"] or r["display_name"] or r["dns_name"]
                     ),
-                    "platform":      "Ninja",
-                    "entity_type":   entity_type,
-                    "node_class":    r["node_class"],
-                    "vm_uuid":       str(r["uid"]) if r.get("uid") else None,
-                    "is_vm":         r.get("is_virtual_machine"),
-                    "last_seen_at":  last_contact.isoformat() if last_contact else None,
-                    "is_online":     None if offline is None else not offline,
+                    "platform": "Ninja",
+                    "entity_type": entity_type,
+                    "node_class": r["node_class"],
+                    "vm_uuid": str(r["uid"]) if r.get("uid") else None,
+                    "is_vm": r.get("is_virtual_machine"),
+                    "last_seen_at": last_contact.isoformat() if last_contact else None,
+                    "last_contact_at": (
+                        last_contact.isoformat() if last_contact else None
+                    ),
+                    "is_online": None if offline is None else not offline,
+                    "offline": offline,
+                    "last_boot_time_at": (last_boot.isoformat() if last_boot else None),
+                    "needs_reboot": snapshot.get("needs_reboot"),
+                    "needs_reboot_reasons": snapshot.get("needs_reboot_reasons"),
+                    "last_user": snapshot.get("last_user"),
+                    "maintenance_status": snapshot.get("maintenance_status"),
+                    "maintenance_start_at": (
+                        snapshot["maintenance_start"].isoformat()
+                        if snapshot.get("maintenance_start")
+                        else None
+                    ),
+                    "maintenance_end_at": (
+                        snapshot["maintenance_end"].isoformat()
+                        if snapshot.get("maintenance_end")
+                        else None
+                    ),
                     "serial_number": r["serial_number"],
-                    "macs": sorted({
-                        m for m in (
-                            normalize_mac(x)
-                            for x in (r.get("mac_addresses") or [])
-                            if isinstance(x, str)
-                        ) if m
-                    }),
+                    "macs": sorted(
+                        {
+                            m
+                            for m in (
+                                normalize_mac(x)
+                                for x in (r.get("mac_addresses") or [])
+                                if isinstance(x, str)
+                            )
+                            if m
+                        }
+                    ),
                     # None when node_class/os give no explicit signal — never guessed.
-                    "device_role":   infer_device_role(r["os_name"], r["node_class"]),
-                    "os_name":       r["os_name"],
-                    "os_family":     os_family(r["os_name"]),
+                    "device_role": infer_device_role(r["os_name"], r["node_class"]),
+                    "os_name": r["os_name"],
+                    "os_family": os_family(r["os_name"]),
                     # Ninja doesn't expose AD domain directly; the DNS suffix
                     # is the closest factual equivalent.
                     "domain": (
                         r["dns_name"].split(".", 1)[1]
-                        if r["dns_name"] and "." in r["dns_name"] else None
+                        if r["dns_name"] and "." in r["dns_name"]
+                        else None
                     ),
                 }
                 # vm.guest / vm.host tracking payload — sourced from the
@@ -529,35 +576,39 @@ def _write_ninja_observations(
                     canonical_data["power_state"] = (
                         ps.lower() if isinstance(ps, str) else None
                     )
-                    canonical_data["parent_ninja_id"] = vm_extras.get("parent_device_id")
-                    canonical_data["last_boot_time_at"] = vm_extras.get("last_boot_time")
-                obs_rows.append({
-                    "observation_id":          uuid.uuid4(),
-                    "tenant_id":               _TENANT_ID,
-                    "client_id":               client_id,
-                    "device_id":               ops_device_id,
-                    "collector_instance_id":   INTERNAL_COLLECTOR_INSTANCE_ID,
-                    "source_binding_id":       NINJA_SOURCE_BINDING_ID,
-                    "source_instance_id":      source_instance_id,
-                    "last_seen_binding_id":    NINJA_SOURCE_BINDING_ID,
-                    "external_namespace":      NINJA_DEVICE_EXTERNAL_NAMESPACE,
-                    "parent_external_namespace": "",
-                    "parent_external_id":      "",
-                    "external_id":             entity_key,
-                    "entity_type":             entity_type,
-                    "entity_key":              entity_key,
-                    "platform":                "Ninja",
-                    "subplatform":             "",
-                    "observed_at":             snapshot_at,
-                    "raw_data":                Json(
-                        (raw_by_id or {}).get(r["id"]) or {}
-                    ),
-                    "canonical_data":          Json(canonical_data),
-                    "batch_id":                batch_id,
-                    "observation_hash":        obs_hash,
-                    "collector_version":       "",
-                    "schema_version":          1,
-                })
+                    canonical_data["parent_ninja_id"] = vm_extras.get(
+                        "parent_device_id"
+                    )
+                    vm_last_boot = vm_extras.get("last_boot_time")
+                    if vm_last_boot is not None:
+                        canonical_data["last_boot_time_at"] = vm_last_boot.isoformat()
+                obs_rows.append(
+                    {
+                        "observation_id": uuid.uuid4(),
+                        "tenant_id": _TENANT_ID,
+                        "client_id": client_id,
+                        "device_id": ops_device_id,
+                        "collector_instance_id": INTERNAL_COLLECTOR_INSTANCE_ID,
+                        "source_binding_id": NINJA_SOURCE_BINDING_ID,
+                        "source_instance_id": source_instance_id,
+                        "last_seen_binding_id": NINJA_SOURCE_BINDING_ID,
+                        "external_namespace": NINJA_DEVICE_EXTERNAL_NAMESPACE,
+                        "parent_external_namespace": "",
+                        "parent_external_id": "",
+                        "external_id": entity_key,
+                        "entity_type": entity_type,
+                        "entity_key": entity_key,
+                        "platform": "Ninja",
+                        "subplatform": "",
+                        "observed_at": snapshot_at,
+                        "raw_data": Json((raw_by_id or {}).get(r["id"]) or {}),
+                        "canonical_data": Json(canonical_data),
+                        "batch_id": batch_id,
+                        "observation_hash": obs_hash,
+                        "collector_version": "",
+                        "schema_version": 1,
+                    }
+                )
 
             # One `org` observation per Ninja organization per run (BLUEPRINT
             # Track C.2) — every org, including ones with zero devices.
@@ -570,41 +621,45 @@ def _write_ninja_observations(
             cur.execute("SELECT id, name, data FROM ninja_core.organizations")
             for org_id, org_name, org_data in cur.fetchall():
                 oid = str(org_id)
-                obs_rows.append({
-                    "observation_id":        uuid.uuid4(),
-                    "tenant_id":             _TENANT_ID,
-                    "client_id":             org_map.get(oid),
-                    "device_id":             None,
-                    "collector_instance_id": INTERNAL_COLLECTOR_INSTANCE_ID,
-                    "source_binding_id":     NINJA_SOURCE_BINDING_ID,
-                    "source_instance_id":    source_instance_id,
-                    "last_seen_binding_id":  NINJA_SOURCE_BINDING_ID,
-                    "external_namespace":    NINJA_ORG_EXTERNAL_NAMESPACE,
-                    "parent_external_namespace": "",
-                    "parent_external_id":    "",
-                    "external_id":           oid,
-                    "entity_type":           "org",
-                    "entity_key":            oid,
-                    "platform":              "Ninja",
-                    "subplatform":           "",
-                    "observed_at":           snapshot_at,
-                    "raw_data":              Json(org_data or {}),
-                    "canonical_data":        Json({
-                        "name":            org_name,
-                        "normalized_name": normalize_org_name(org_name),
-                        "platform":        "Ninja",
-                        "entity_type":     "org",
-                        "device_count":    org_counts.get(oid, 0),
-                    }),
-                    "batch_id":              batch_id,
-                    # entity_type prefixed so an org key can never collide
-                    # with a device key in the same batch.
-                    "observation_hash":      hashlib.sha256(
-                        f"org:{oid}:{snapshot_at.isoformat()}".encode()
-                    ).digest(),
-                    "collector_version":     "",
-                    "schema_version":        1,
-                })
+                obs_rows.append(
+                    {
+                        "observation_id": uuid.uuid4(),
+                        "tenant_id": _TENANT_ID,
+                        "client_id": org_map.get(oid),
+                        "device_id": None,
+                        "collector_instance_id": INTERNAL_COLLECTOR_INSTANCE_ID,
+                        "source_binding_id": NINJA_SOURCE_BINDING_ID,
+                        "source_instance_id": source_instance_id,
+                        "last_seen_binding_id": NINJA_SOURCE_BINDING_ID,
+                        "external_namespace": NINJA_ORG_EXTERNAL_NAMESPACE,
+                        "parent_external_namespace": "",
+                        "parent_external_id": "",
+                        "external_id": oid,
+                        "entity_type": "org",
+                        "entity_key": oid,
+                        "platform": "Ninja",
+                        "subplatform": "",
+                        "observed_at": snapshot_at,
+                        "raw_data": Json(org_data or {}),
+                        "canonical_data": Json(
+                            {
+                                "name": org_name,
+                                "normalized_name": normalize_org_name(org_name),
+                                "platform": "Ninja",
+                                "entity_type": "org",
+                                "device_count": org_counts.get(oid, 0),
+                            }
+                        ),
+                        "batch_id": batch_id,
+                        # entity_type prefixed so an org key can never collide
+                        # with a device key in the same batch.
+                        "observation_hash": hashlib.sha256(
+                            f"org:{oid}:{snapshot_at.isoformat()}".encode()
+                        ).digest(),
+                        "collector_version": "",
+                        "schema_version": 1,
+                    }
+                )
 
             current_rows = []
             written = 0
@@ -618,9 +673,6 @@ def _write_ninja_observations(
                     current["withdrawn_at"] = None
                     current["snapshot_scope"] = "Ninja"
                     current["last_snapshot_run_id"] = run_id
-                    current["raw_hash"] = hashlib.sha256(
-                        str(row["raw_data"]).encode("utf-8")
-                    ).digest()
                     current_rows.append(current)
                 written = write_current_rows(cur, current_rows)
             complete_run(
@@ -630,12 +682,25 @@ def _write_ninja_observations(
                 is_complete_snapshot=True,
                 identity_rows=current_rows,
             )
+            device_current_rows = [
+                row
+                for row in current_rows
+                if row["external_namespace"] == NINJA_DEVICE_EXTERNAL_NAMESPACE
+            ]
+            rollup_written = write_daily_presence_rows(
+                cur,
+                device_current_rows,
+                snapshot_run_id=run_id,
+                observed_at=snapshot_at,
+            )
             reconcile_complete_run(cur, run_id)
+            log.info("Inserted %d Ninja daily presence rows", rollup_written)
             if unknown_classes:
                 # Never silently dropped — surfaced here, admin finding in E2.
                 log.warning(
                     "Ninja records with unmapped node_class (observed as "
-                    "entity_type='unknown'): %s", unknown_classes,
+                    "entity_type='unknown'): %s",
+                    unknown_classes,
                 )
             return len(obs_rows)
     except Exception:
@@ -694,6 +759,5 @@ def _refresh_active_devices_view() -> None:
         log.info("Refreshed materialized view ninja_core.v_active_devices")
     except (psycopg.errors.UndefinedTable, psycopg.errors.WrongObjectType):
         log.info(
-            "ninja_core.v_active_devices is not materialized yet; "
-            "skipping refresh"
+            "ninja_core.v_active_devices is not materialized yet; " "skipping refresh"
         )

@@ -1,11 +1,22 @@
 # 0007 — Observation model: content-hashed current + SCD-2 history
 
-Status: Accepted and deployed (v6 — writer lock scaling)
+Status: Accepted (v6 deployed; v7 Ninja storage expansion prepared)
 Date: 2026-07-21 (v1 drafted); 2026-07-21 (v2/v3 revised);
-2026-07-22 (v4/v5); 2026-08-02 (v6)
+2026-07-22 (v4/v5); 2026-08-02 (v6); 2026-08-03 (v7)
 
 ## Revision history
 
+- **v7 (2026-08-03).** Centralizes deterministic complete-payload hashing and
+  introduces a material-projection version independent of the hash algorithm.
+  Ninja device detail uses projection v2 and Ninja health uses its distinct
+  namespace/projection. Poll/contact noise updates current provenance without
+  creating history; meaningful device/health state and evidence withdrawal
+  remain historical. Compact daily presence is stored without raw JSON, with
+  explicit run-backed or legacy-backfill provenance. The additive release
+  leaves legacy Ninja snapshot writers and readers authoritative. Closed
+  material history keeps the existing 90-day default; daily presence has no
+  automatic deletion and is initially unpartitioned with a BRIN date index,
+  pending a 30-day steady-state reassessment.
 - **v6 (2026-08-02).** Production validation of large concurrent source
   snapshots exposed shared-lock exhaustion because v5 retained one advisory
   lock for every heartbeat until transaction end. Existing identities now
@@ -206,9 +217,10 @@ the last time the *old* state was confirmed. Using the incoming row's
 
 ### Material-hash policy (per-entity-type family)
 
-Central config in `ingest/observations.py`. `hash_algorithm_version`
-column on both `_current` and `_history` — bumping the version triggers
-controlled rehash of affected rows.
+Central config lives in `ingest/observations.py`. `hash_algorithm_version` and
+`material_projection_version` are stored on both `_current` and `_history`.
+Algorithm and field-selection changes are therefore distinguishable and can
+trigger a controlled rehash of only the affected contracts.
 
 Initial policy (v1 of the algorithm):
 

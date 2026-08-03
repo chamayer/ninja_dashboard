@@ -1065,6 +1065,7 @@ class EntityObservationCurrent(TenantScopedModel):
     raw_hash = models.BinaryField(null=True, blank=True)
     material_hash = models.BinaryField()
     hash_algorithm_version = models.PositiveIntegerField(default=1)
+    material_projection_version = models.PositiveIntegerField(default=1)
     batch_id = models.UUIDField()
     collector_version = models.CharField(max_length=80, blank=True)
     schema_version = models.PositiveIntegerField()
@@ -1143,6 +1144,7 @@ class EntityObservationHistory(TenantScopedModel):
     material_data = models.JSONField(default=dict)
     material_hash = models.BinaryField()
     hash_algorithm_version = models.PositiveIntegerField(default=1)
+    material_projection_version = models.PositiveIntegerField(default=1)
     active = models.BooleanField(default=True)
     closed_by_snapshot_run = models.ForeignKey(
         "ObservationSnapshotRun",
