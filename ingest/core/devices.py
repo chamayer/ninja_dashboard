@@ -46,6 +46,21 @@ NINJA_ORG_EXTERNAL_NAMESPACE = "organization"
 INTERNAL_COLLECTOR_INSTANCE_ID = uuid.UUID("00000000-0000-4000-8000-000000000001")
 
 
+def _add_vm_canonical_measurements(
+    canonical_data: dict[str, object],
+    vm_extras: dict[str, object],
+) -> None:
+    """Add VM measurements without replacing the direct OS boot value."""
+    power_state = vm_extras.get("power_state")
+    canonical_data["power_state"] = (
+        power_state.lower() if isinstance(power_state, str) else None
+    )
+    canonical_data["parent_ninja_id"] = vm_extras.get("parent_device_id")
+    hypervisor_boot = vm_extras.get("hypervisor_reported_boot_time")
+    if isinstance(hypervisor_boot, datetime):
+        canonical_data["hypervisor_reported_boot_time_at"] = hypervisor_boot.isoformat()
+
+
 def run(client: NinjaClient, snapshot_at: datetime) -> tuple[int, int]:
     """Returns (devices_upserted, snapshots_inserted)."""
     try:
@@ -81,7 +96,9 @@ def _run(client: NinjaClient, snapshot_at: datetime) -> tuple[int, int]:
                 vm_tracking[d["id"]] = {
                     "power_state": d.get("powerState"),
                     "parent_device_id": d.get("parentDeviceId"),
-                    "last_boot_time": ninja_epoch_to_dt(d.get("lastBootTime")),
+                    "hypervisor_reported_boot_time": ninja_epoch_to_dt(
+                        d.get("lastBootTime")
+                    ),
                 }
 
             device_rows.append(
@@ -572,16 +589,7 @@ def _write_ninja_observations(
                 # side-band lookup populated during fetch.
                 vm_extras = (vm_tracking or {}).get(r["id"])
                 if vm_extras:
-                    ps = vm_extras.get("power_state")
-                    canonical_data["power_state"] = (
-                        ps.lower() if isinstance(ps, str) else None
-                    )
-                    canonical_data["parent_ninja_id"] = vm_extras.get(
-                        "parent_device_id"
-                    )
-                    vm_last_boot = vm_extras.get("last_boot_time")
-                    if vm_last_boot is not None:
-                        canonical_data["last_boot_time_at"] = vm_last_boot.isoformat()
+                    _add_vm_canonical_measurements(canonical_data, vm_extras)
                 obs_rows.append(
                     {
                         "observation_id": uuid.uuid4(),

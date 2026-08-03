@@ -2,13 +2,14 @@
 
 Track: **Unified entity ecosystem — database, ingest, and admin surface**
 
-**Status: `0.101.3` HISTORICAL IDENTITY RESTORATION LOCALLY VALIDATED; COMMIT
-APPROVAL GATE — Track A, the resolver repair, stable-identity cutover, Ninja
-snapshot expansion, health shadow, and derived-presence isolation are verified
-in deployed `0.101.2` / `81a67c3`. The restoration operator is locally ready;
-no production restoration or daily backfill has run. Legacy readers remain
-authoritative. Reader cutover, legacy-write shutdown, cleanup, Agent
-Compliance, and the wider ecosystem remain separately gated.**
+**Status: `0.101.4` CORRECTIVE PREPARATION LOCALLY VALIDATED — COMMIT APPROVAL
+GATE. Track A's historical restoration and daily rollup are deployed and
+verified. The approved patch separates OS and VM boot measurements, narrows
+Ninja current shadow scope, and packages a dry-run-by-default stale-scope
+withdrawal operator with tests. Legacy readers and snapshot writes remain
+authoritative. Commit, push/deployment, production data apply, reader cutover,
+legacy-write shutdown, cleanup, Agent Compliance, and the wider ecosystem
+remain separately gated.**
 
 Revised 2026-08-03.
 
@@ -1778,10 +1779,339 @@ collector provenance each resolve exactly once, with zero current-legacy,
 withdrawal-boundary, raw-evidence, canonical-link, history-evidence, or
 interval blockers. No production rows were written.
 
-**Current gate:** approve one logical `0.101.3` commit containing the operator,
-tests, runbook, release metadata, and this checkpoint. A later, separate push
-approval must explicitly include `origin`'s automatic rebuild/redeploy (there
-are no pending migrations), followed immediately by the secondary mirror.
-Production apply of the 260 identity restorations and all 335,647 daily rows
-remains a later, separately measured write gate. Canonical device creation,
-reader cutover, and cleanup remain out of scope.
+The reviewed implementation was released as `0.101.3`; production data writes
+remain outside that deployment and require the gates below.
+
+### `0.101.3` deployment verification
+
+Commit `56662bb` was pushed to `origin` and the secondary mirror. Portainer
+deployed the `0.101.3` ingest image with no pending Django or ingest schema
+migration. The ingest container is healthy and ready with zero restarts; both
+ingest health/readiness endpoints and Operations health returned `200`, and
+the Operations root returned its expected `302`. Since deployment there are
+zero traceback, exception, ERROR-level, migration-failure, or restoration-
+failure log entries and zero Operations HTTP 500s. Broad `failed`/`error` text
+matches were all INFO-level Metabase reporting labels, not failures.
+
+The packaged operator imported successfully and its production read-only
+default completed over 2026-06-02 through 2026-08-02 with `apply=false` and
+zero inserts. It measured 6,087 legacy identities, 5,827 existing generic
+identities, 260 missing/eligible identities, zero blocked identities, and zero
+counts in every individual blocker category.
+
+### Ninja deletion-event evidence refinement
+
+An authorized read-only production correlation used the API's effective
+`status=NODE_DELETED` filter and the nested
+`data.message.params.nodeId` identity. The existing connector's documented
+`statusCode` query parameter does not filter this event, and the configured
+activity allowlist does not include it. Over the restoration range, 84 delete
+events were available and 51 matched the 260 eligible historical identities
+exactly; 209 had no matching event. Every match supplied a node display name.
+The next missing-poll boundary followed deletion by a median 0.5 hours: 48 of
+51 were within two hours, with a maximum of 33.494 hours. No rows were written
+and no customer values were reported.
+
+The accepted generic contract now retains source-native deletion as immutable
+source-event evidence, including vendor event/time, stable node identity,
+source/client scope, result, and source actor identifier plus protected actor
+display metadata. Ninja supplies node ID/name, client ID/name, and deleting
+application-user ID/name/email, but not a complete device inventory. Actor
+names and email addresses are customer-sensitive and must not enter findings
+text, logs, or aggregate validation output.
+
+A validated delete event is higher-fidelity withdrawal confirmation than the
+later complete poll: the source record closes at the event time with reason
+`source_deleted`, while the missing poll remains corroboration. It may open or
+refresh an idempotent finding when deletion is unexpected or additional action
+is required. It never creates, deletes, or retires a canonical device and is
+not an Operations decommissioning approval. Future decommissioning may use it
+to auto-confirm source removal while separately auditing the source actor and
+the Operations decision actor. ADR-0010 records the durable contract; the
+connector/event implementation and full workflow are deferred in
+`.work/backlog.md`. They are not prerequisites for this restoration. The
+deployed restoration operator remains unchanged and uses the corroborated
+`missing_since` boundary for all 260 identities.
+
+### Production historical-identity restoration
+
+The separately approved production apply completed atomically for all 260
+eligible identities. Its SSH wrapper timed out before returning the operator's
+final output, but the container process completed and no database transaction
+remained active. Independent aggregate verification proved the committed
+result: all 6,087 legacy identities now have generic current evidence and zero
+remain missing.
+
+The restored set contains exactly 260 inactive current rows and 260 closed
+history rows. Every current row has a withdrawal boundary and raw/material
+hashes; every history boundary matches current `withdrawn_at`; all intervals
+are valid; and there are zero missing or open history rows. All current/history
+canonical references and snapshot-run provenance are null, and zero Ninja
+canonical source links were created. Six identities have one retained
+observation, so their valid closed interval has
+`last_seen_at = effective_from < effective_to`.
+
+The post-apply read-only operator run found 6,087 existing generic identities,
+zero missing/eligible identities, zero blockers, and zero inserts. Both
+application services remained healthy with zero restarts; ingest health and
+readiness and Operations health returned `200`, the Operations root returned
+the expected `302`, and the post-write window contained zero application error
+or HTTP-500 signals.
+
+The required full daily-rollup dry run then completed all 62 UTC days from
+2026-06-02 through 2026-08-02. All 335,647 legacy device/day facts matched
+stable generic evidence, with zero unmatched, zero ambiguous, and zero rows
+written.
+
+### Production daily-rollup backfill
+
+The separately approved production apply completed all 62 UTC days from
+2026-06-02 through 2026-08-02 using one transaction per day. It inserted
+exactly 335,647 compact source-record/day facts, matching every measured legacy
+device/day occurrence, with zero unmatched or ambiguous mappings.
+
+Independent database parity found exactly 335,647 expected and stored facts in
+the range, 62 completed days, zero missing or unexpected facts, zero duplicate
+source/day keys, and zero invalid provenance rows. All range rows are marked as
+legacy backfill with null snapshot-run provenance. The whole table contains
+341,110 rows after including 5,463 facts written by normal current collection;
+its measured heap plus indexes total 45,481,984 bytes (about 43.4 MiB).
+
+The post-write read-only full-range rerun again completed 62 days and measured
+335,647 matched facts, zero unmatched, zero ambiguous, and zero inserted rows.
+Both application services remained healthy with zero restarts; ingest health
+and readiness and Operations health returned `200`, the Operations root
+returned the expected `302`, and the validation window contained zero
+application error or HTTP-500 signals.
+
+**Next gate:** the historical restoration/backfill milestone is complete.
+Separately review and approve reader cutover before any dashboard or
+compatibility consumer treats the generic projections as authoritative.
+Legacy-write shutdown and historical snapshot archive/deletion/disk
+reclamation remain later gates after consumer parity. No deletion-event
+implementation, decommissioning workflow, cleanup, or Agent Compliance change
+is included.
+
+### Reader-cutover initial audit
+
+The user authorized the reader-cutover review after restoration and rollup
+completion. Initial static audit confirms this is a cross-service release, not
+a single dashboard query change:
+
+- `ingest/core/devices.py` still inserts every device poll into
+  `ninja_core.device_snapshots`, refreshes `ninja_core.v_active_devices`, and
+  only then writes generic `device` evidence. Cutover must stop the snapshot
+  insert and reorder generic write before compatibility refresh.
+- `ingest/core/device_health.py` likewise inserts
+  `device_health_snapshots`, refreshes `latest_device_health`, and only then
+  writes generic `device-health` evidence. Cutover must stop the legacy insert
+  and reorder the generic write before health compatibility refresh.
+- The deployed `v_active_devices` definition still reads
+  `device_snapshots`. The deployed `latest_device_health` definition still
+  reads `device_health_snapshots`; compatibility under that stable name feeds
+  troubleshooting/patch projections introduced by SQL migrations 014 through
+  018.
+- Remaining direct runtime readers are Ninja presence in
+  `ingest/connectors/ninja_presence.py`, Operations software-user risk in
+  `operations/apps/core/views.py`, and three Metabase definitions for current
+  troubleshooting context, patch-coverage contact, and daily devices seen.
+  The daily trend must use `operations.ninja_device_seen_daily_shadow`.
+- The Operations presence projection was rebuilt from generic observations by
+  migration `0098`, but deployed `device_session_current` still reads legacy
+  snapshots for reboot and boot time. Historical migration references other
+  than the latest deployed definitions are not runtime dependencies.
+- `ninja_core.devices.data` remains the approved bounded current duplicate for
+  rollback. Legacy snapshot tables stay intact; archive, deletion, and disk
+  reclamation remain prohibited in the cutover release.
+
+The next reviewer must re-read the actual deployed view definitions, enumerate
+all database dependents, and run aggregate field/filter parity before editing.
+The implementation needs one coherent migration plus writer/reader refresh
+ordering, focused PostgreSQL and Django/Metabase tests, rollback rehearsal,
+release metadata, and full image validation. No code, migration, production
+change, commit, push, or deployment has been authorized or performed for this
+cutover review.
+
+The handoff review used `gpt-5.6-sol` with high reasoning and completed the
+read-only deployed-definition, dependency, and aggregate parity audit below.
+
+### Reader-cutover deployed audit and correction gate
+
+The deployed database dependency graph is exact:
+
+- `device_snapshots` directly feeds `v_active_devices` and
+  `operations.device_session_current`; the latter feeds `operations.v_device`.
+- `device_health_snapshots` directly feeds `latest_device_health`.
+- `v_active_devices` and `latest_device_health` directly feed
+  `device_troubleshooting_signal`.
+- Ninja materialized views are owned by the ingest database owner; Operations
+  session/effective views and the three shadow views are owned by
+  `operations_migrate`. The cutover therefore requires an ingest SQL migration
+  and a separate Django migration. They must be independently forward-
+  compatible because the two services start and migrate concurrently.
+
+The latest completed production collection wrote 5,466 device records and
+5,465 health records. Against the authoritative `Ninja` device scope and
+projection v2, generic device current has exact identity, observation time,
+raw payload, offline/contact, reboot, last-user, and maintenance parity. The
+candidate active-Windows population also matches all 4,014 legacy IDs exactly.
+The previously verified 335,647 historical device/day facts are set-equal to
+the legacy distinct set; because both trend forms join the same active-device
+rows and filters, this proves parity for every current dashboard filter.
+
+Two blockers and three intentional withdrawal corrections were confirmed:
+
+1. The broad detail shadow includes 162 active projection-v1 records from the
+   retired `ninja_main` snapshot scope. All 162 source devices are legacy
+   noncurrent, have valid `missing_since` boundaries, and retain open generic
+   history. Of them, 154 rows are linked to 95 canonical devices; 88 of those
+   devices have other active evidence and seven do not. All rollup references
+   remain valid if the current rows are withdrawn. These rows must close at
+   their existing `missing_since` boundaries; canonical devices and links must
+   remain.
+2. The current shadow cannot scan all broad Ninja rows because 144 of those
+   retired-scope records contain projection-v1 epoch boot strings. Narrowing
+   the current shadow to the authoritative source instance, snapshot scope,
+   and projection version excludes them, but the stale rows still require the
+   source-withdrawal correction above.
+3. On 834 current `vm.guest` and 99 current `vm.host` records, generic
+   `last_boot_time_at` replaces the OS boot value with Ninja's top-level VM
+   boot value. Legacy and raw `os.lastBootTime` agree on every one of these 933
+   records, while generic agrees with the distinct top-level value. Preserve
+   OS boot as the compatibility/session value and retain the VM-reported value
+   under a separately named canonical field; power state remains separate and
+   unchanged.
+4. Generic health is field- and raw-payload-exact for all 5,465 active health
+   identities. One current device has a roughly two-hour-old legacy health row
+   but correctly withdrawn generic health evidence from the latest complete
+   snapshot. Promotion intentionally changes that stale health signal to null.
+   The other 615 legacy-only health rows belong to noncurrent devices and are
+   not current troubleshooting inputs.
+5. Existing session selection considers 4,932 linked canonical devices. The
+   active generic candidate has 4,866: all 66 omitted selections use a
+   noncurrent Ninja identity. Among devices with evidence on both sides, 321
+   select a different Ninja identity because multiple links share collection
+   timestamps and the legacy query has no fidelity tie-breaker. Reboot and OS
+   boot match exactly whenever the selected identity matches. Cutover must use
+   deterministic newest-evidence selection with direct-agent precedence on an
+   exact tie; deleted identities must not continue supplying session state.
+
+The Operations latest-user reader's historical fallback initially appeared to
+require retained state, but bounded aggregate measurement disproved that need:
+4,481 current records have a nonempty user, and all 985 with an empty current
+user also have no historical nonempty user. Generic current therefore preserves
+the result while eliminating a legacy query that exceeded two minutes during
+validation. Two attempted broad read-only parity queries were cancelled after
+the external wrapper timed out; the first briefly blocked one normal refresh,
+so only its exact validation backend was cancelled. The lock cleared, no
+application transaction was cancelled, and all later measurements used bounded
+indexed queries or statement timeouts.
+
+#### Proposed corrective preparation release
+
+Before reader/write cutover, prepare one bounded patch release that leaves all
+legacy readers and snapshot writes authoritative:
+
+- Fix Ninja canonical normalization so `last_boot_time_at` remains OS boot
+  time. Retain the VM top-level boot measurement under an explicit separate
+  field; do not change hypervisor power-state evidence.
+- Add a Django migration that narrows the detail and health shadow views to the
+  configured Ninja source instance and their authoritative snapshot scopes;
+  preserve the daily shadow's inactive historical identities and rollup facts.
+- Add a dry-run-by-default, fail-closed operator that selects only the 162
+  active `ninja_main` rows proven noncurrent with valid withdrawal boundaries,
+  marks current evidence inactive, and closes open history at
+  `missing_since`. It must preserve canonical devices, source links, rollups,
+  raw evidence, and operator decisions; apply remains a separate production
+  data approval.
+- Add focused unit/PostgreSQL coverage for scope isolation, boot-field
+  separation, withdrawal shape, idempotency, and derived-presence effects;
+  update release metadata and validate both images. No read promotion or
+  legacy-write shutdown belongs in this release.
+
+After deployment, require one complete device/health cycle, exact shadow
+parity, a zero-blocker operator dry run, healthy services, and zero HTTP 500s.
+Then separately approve the 162-row source-withdrawal apply and controlled
+presence/session/lifecycle refresh. Measure every projected lifecycle change
+before allowing it, and verify canonical/link/rollup preservation afterward.
+
+#### Later read/write cutover release
+
+Only after the corrective release and apply verify cleanly:
+
+- An ingest SQL migration rebuilds `v_active_devices`,
+  `latest_device_health`, and `device_troubleshooting_signal` from the promoted
+  projections while preserving names, columns, indexes, grants, and owners.
+- A Django migration rebuilds `device_session_current`, `v_device`, and its
+  dependent refresh chain from active generic detail evidence with
+  deterministic direct-agent tie precedence.
+- Collector code writes generic current first, refreshes compatibility views
+  afterward, and stops both legacy hourly snapshot inserts. Device current raw
+  compatibility remains during rollback.
+- Ninja presence, Operations software-user risk, and the three direct Metabase
+  readers move to the promoted projections. Agent Compliance logic is not
+  redesigned; only its required Ninja presence input is repointed.
+- Full-cycle parity, saved-dashboard replacement, migration/refresh ordering,
+  image packaging, rollback rehearsal, health/readiness, and HTTP-500 checks
+  must pass before the cutover is accepted. Legacy tables remain intact and
+  no archive, deletion, or disk reclamation is included.
+
+The user approved implementation of only this corrective preparation release
+on 2026-08-03. This approval does not authorize commit, push, deployment, the
+162-row production apply, reader promotion, or legacy-write shutdown.
+
+#### `0.101.4` corrective-preparation validation checkpoint
+
+The approved local implementation and review pass are complete. A final
+writer-invariant review found that a projection-only v2-to-v3 upgrade could
+otherwise update current evidence while leaving its open SCD-2 history row on
+v2. The generic writer now treats a material-projection version change as an
+explicit history boundary even when the material hash is equal. ADR-0010 and
+the changelog identify this as a contract boundary, not a source-state change.
+The first successful v3 Ninja device collection after deployment will
+therefore create one bounded history transition for each collected existing
+v2 device identity (approximately 5,466 at the last aggregate production
+measurement). The 933 measured VM identities are expected to carry the newly
+separated hypervisor boot measurement; other identities transition solely to
+keep current and open history on the same material contract. This happens once
+per identity for this projection upgrade, not on later unchanged polls.
+
+Implementation scope is confined to the Ninja device normalization and
+historical-restore canonicalization, generic material writer, migration `0099`
+shadow definitions, the retired-scope operator, focused tests, Operations
+entrypoint packaging, operator runbook, ADR-0010, `VERSION`, `CHANGELOG.md`, and
+this plan. Existing unrelated worktree changes and probe files remain
+untouched. No production query, write, migration execution, commit, push, or
+deployment occurred in this implementation phase.
+
+Confirmed local validation:
+
+- focused unit coverage passed, including boot separation, projection v3,
+  stale-scope safety, and the projection-only boundary;
+- the full ingest suite passed in disposable PostgreSQL 16 containers: 89
+  tests passed;
+- focused PostgreSQL coverage proved a v2 row with an unchanged material hash
+  becomes one closed v2 interval plus one open v3 interval while current is
+  v3;
+- all 12 changed Python files passed compilation, focused Ruff checks, and
+  Ruff formatting; `git diff --check` passed;
+- both deployment images built through the documented BuildKit workstation-CA
+  secret path; the ingest image imported the changed modules and reported
+  `0.101.4`;
+- the Operations image passed `manage.py check` and
+  `makemigrations --check --dry-run` (with the expected warning that the local
+  validation container has no `postgres` hostname), and its default entrypoint
+  executed and failed closed on missing database credentials as designed.
+
+The broader repository Ruff check remains unsuitable as a release gate because
+it reports pre-existing failures and formatting drift in unrelated Agent
+Compliance, intelligence, Metabase, and local probe files. Changed-file checks
+are clean.
+
+**Next approval gate:** request separate approval to commit this one logical
+`0.101.4` corrective-preparation change while staging only its intended hunks.
+After that commit, request a distinct combined push approval for `origin` first
+and the secondary mirror immediately afterward; that approval must explicitly
+cover automatic deployment, migration `0099`, and the one-time v3 history
+transitions. The 162-row retired-scope apply remains a later independent
+production-data approval after a post-deployment aggregate-only dry run.

@@ -203,6 +203,42 @@ def test_heartbeat_without_material_change_skips_history():
     assert history_inserts == []
 
 
+def test_projection_version_change_opens_a_new_history_version(monkeypatch):
+    prior_ts = datetime(2026, 7, 22, 11, 0, tzinfo=timezone.utc)
+    new_ts = datetime(2026, 7, 22, 12, 0, tzinfo=timezone.utc)
+    incoming = _base_row(observed_at=new_ts, last_seen_at=new_ts)
+    incoming_hash = material_hash(
+        incoming["canonical_data"],
+        platform="Ninja",
+        external_namespace="device",
+        entity_type="agent.rmm",
+    )
+    prev = (
+        prior_ts,
+        incoming_hash,
+        True,
+        None,
+        None,
+        prior_ts,
+        2,
+    )
+    cur = _MockCursor(fetch_queue=[prev])
+    monkeypatch.setattr(
+        observations, "_supports_projection_versions", lambda _cur: True
+    )
+
+    observations.write_current_rows(cur, [incoming])
+
+    assert len(_history_close_updates(cur)) == 1
+    history_inserts = [
+        call
+        for call in cur.executemany_calls
+        if "INSERT INTO operations.entity_observation_history" in call[0]
+    ]
+    assert len(history_inserts) == 1
+    assert history_inserts[0][1][0]["material_projection_version"] == 3
+
+
 def test_new_identity_opens_first_history_version():
     incoming = _base_row()
     # First read is absent; the second read occurs after the advisory lock.
@@ -411,6 +447,7 @@ def test_ninja_device_contract_keeps_measurements_but_excludes_contact_noise():
         "offline": False,
         "power_state": "poweredon",
         "last_boot_time_at": "2026-08-01T00:00:00+00:00",
+        "hypervisor_reported_boot_time_at": "2026-08-01T00:01:00+00:00",
         "last_contact_at": "2026-08-03T12:00:00+00:00",
         "last_user": "example\\user-a",
     }
@@ -429,12 +466,19 @@ def test_ninja_device_contract_keeps_measurements_but_excludes_contact_noise():
         {**base, "offline": True},
         **context,
     )
+    assert material_hash(base, **context) != material_hash(
+        {
+            **base,
+            "hypervisor_reported_boot_time_at": "2026-08-02T00:01:00+00:00",
+        },
+        **context,
+    )
     assert (
         material_projection_version(
             platform="Ninja",
             external_namespace="device",
         )
-        == 2
+        == 3
     )
 
 

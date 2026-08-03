@@ -133,6 +133,34 @@ mappings, and is idempotent when a completed range is rerun. The end day must
 be earlier than the current UTC day. Historical snapshot archival, deletion,
 and disk reclamation remain a separate post-cutover approval.
 
+## Retired Ninja-scope correction
+
+The retired `ninja_main` observation scope can be measured with the packaged
+operator after the corrective shadow-view release is deployed. Omitting
+`--apply` is the safe, read-only default. Output contains aggregate counts and
+a deterministic identity-set digest, never source identifiers or payloads:
+
+```sh
+docker exec operations-ingest python -m ingest.withdraw_ninja_stale_scope
+```
+
+Apply requires separate production-data approval for the exact reviewed count
+and digest. Both pins are mandatory, and any changed identity set, current
+legacy device, invalid withdrawal boundary, provenance mismatch, or current/
+history inconsistency fails closed:
+
+```sh
+docker exec operations-ingest python -m ingest.withdraw_ninja_stale_scope --apply --expected-count N --expected-digest SHA256
+```
+
+The atomic operation marks only the retired source evidence inactive and
+closes its existing open history interval at the retained `missing_since`
+boundary. It does not delete or rewrite canonical devices, source links,
+rollups, raw evidence, operator decisions, or legacy Ninja rows. A repeated
+apply with the same pins is a verified no-op. Refreshing derived presence,
+session, lifecycle, or findings remains a separately controlled step after the
+aggregate effect is measured.
+
 ## Shared validation helper
 
 Use the approved shared helper for repeatable external checks so credentials

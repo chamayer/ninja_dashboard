@@ -326,15 +326,13 @@ def _canonical_data(row: dict[str, Any]) -> dict[str, Any]:
     node_class = row["node_class"]
     entity_type = entity_type_for_node_class(node_class)
     offline = row["offline"]
-    last_boot = row["last_boot"]
     node_upper = (node_class or "").upper()
     is_vm_record = node_upper.endswith(
         ("_VMM_GUEST", "_VM_GUEST", "_VMM_HOST", "_VM_HOST")
     )
-    if is_vm_record:
-        vm_last_boot = ninja_epoch_to_dt(raw.get("lastBootTime"))
-        if vm_last_boot is not None:
-            last_boot = vm_last_boot
+    hypervisor_reported_boot = (
+        ninja_epoch_to_dt(raw.get("lastBootTime")) if is_vm_record else None
+    )
     canonical = {
         "hostname": row["system_name"] or row["display_name"] or row["dns_name"],
         "platform": "Ninja",
@@ -350,7 +348,9 @@ def _canonical_data(row: dict[str, Any]) -> dict[str, Any]:
         ),
         "is_online": None if offline is None else not offline,
         "offline": offline,
-        "last_boot_time_at": last_boot.isoformat() if last_boot else None,
+        "last_boot_time_at": (
+            row["last_boot"].isoformat() if row["last_boot"] else None
+        ),
         "needs_reboot": row["needs_reboot"],
         "needs_reboot_reasons": row["needs_reboot_reasons"],
         "last_user": row["last_user"],
@@ -385,6 +385,11 @@ def _canonical_data(row: dict[str, Any]) -> dict[str, Any]:
             power_state.lower() if isinstance(power_state, str) else None
         )
         canonical["parent_ninja_id"] = raw.get("parentDeviceId")
+        canonical["hypervisor_reported_boot_time_at"] = (
+            hypervisor_reported_boot.isoformat()
+            if hypervisor_reported_boot is not None
+            else None
+        )
     return canonical
 
 

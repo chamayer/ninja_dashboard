@@ -257,8 +257,8 @@ def test_current_history_and_run_dual_write(postgres_connection) -> None:
             True,
             True,
             True,
-            2,
-            2,
+            3,
+            3,
             True,
         )
         cursor.execute("SELECT COUNT(*) FROM operations.source_record_seen_daily")
@@ -416,6 +416,108 @@ def test_current_history_and_run_dual_write(postgres_connection) -> None:
             (instance_id,),
         )
         assert cursor.fetchone() == (2, 1)
+
+        # A projection-only contract upgrade is still an explicit SCD-2
+        # boundary. This keeps current and open history on the same contract
+        # without relying on the material hash to differ.
+        projection_v2_at = datetime(2026, 8, 2, 15, 0, tzinfo=timezone.utc)
+        projection_v2_run, _ = begin_run(
+            cursor,
+            1,
+            binding_id,
+            "Ninja",
+            projection_v2_at,
+            expected_rows=1,
+        )
+        projection_row = dict(first_row)
+        projection_row.update(
+            observation_id=uuid.uuid4(),
+            external_id="99",
+            entity_key="99",
+            observed_at=projection_v2_at,
+            last_seen_at=projection_v2_at,
+            last_received_at=projection_v2_at,
+            last_snapshot_run_id=projection_v2_run,
+            batch_id=uuid.uuid4(),
+        )
+        assert write_current_rows(cursor, [projection_row]) == 1
+        complete_run(
+            cursor,
+            projection_v2_run,
+            1,
+            is_complete_snapshot=True,
+            identity_rows=[projection_row],
+        )
+        cursor.execute(
+            """
+            UPDATE operations.entity_observation_current
+               SET material_projection_version = 2
+             WHERE source_instance_id = %s
+               AND external_namespace = 'device'
+               AND external_id = '99'
+            """,
+            (instance_id,),
+        )
+        cursor.execute(
+            """
+            UPDATE operations.entity_observation_history
+               SET material_projection_version = 2
+             WHERE source_instance_id = %s
+               AND external_namespace = 'device'
+               AND external_id = '99'
+               AND effective_to IS NULL
+            """,
+            (instance_id,),
+        )
+
+        projection_v3_at = datetime(2026, 8, 2, 16, 0, tzinfo=timezone.utc)
+        projection_v3_run, _ = begin_run(
+            cursor,
+            1,
+            binding_id,
+            "Ninja",
+            projection_v3_at,
+            expected_rows=1,
+        )
+        projection_v3_row = dict(projection_row)
+        projection_v3_row.update(
+            observation_id=uuid.uuid4(),
+            observed_at=projection_v3_at,
+            last_seen_at=projection_v3_at,
+            last_received_at=projection_v3_at,
+            last_snapshot_run_id=projection_v3_run,
+            batch_id=uuid.uuid4(),
+        )
+        assert write_current_rows(cursor, [projection_v3_row]) == 1
+        complete_run(
+            cursor,
+            projection_v3_run,
+            1,
+            is_complete_snapshot=True,
+            identity_rows=[projection_v3_row],
+        )
+        cursor.execute(
+            """
+            SELECT c.material_projection_version,
+                   COUNT(*) FILTER (WHERE h.material_projection_version = 2),
+                   COUNT(*) FILTER (
+                       WHERE h.material_projection_version = 3
+                         AND h.effective_to IS NULL
+                   ),
+                   COUNT(DISTINCT h.material_hash)
+              FROM operations.entity_observation_current c
+              JOIN operations.entity_observation_history h
+                ON h.source_instance_id = c.source_instance_id
+               AND h.external_namespace = c.external_namespace
+               AND h.external_id = c.external_id
+             WHERE c.source_instance_id = %s
+               AND c.external_namespace = 'device'
+               AND c.external_id = '99'
+             GROUP BY c.material_projection_version
+            """,
+            (instance_id,),
+        )
+        assert cursor.fetchone() == (3, 1, 1, 1)
 
 
 def test_begin_run_holds_one_scope_lock_for_the_source_transaction(

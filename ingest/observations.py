@@ -69,6 +69,7 @@ _NINJA_DEVICE_MATERIAL_FIELDS = frozenset(
         "needs_reboot",
         "needs_reboot_reasons",
         "last_boot_time_at",
+        "hypervisor_reported_boot_time_at",
         "maintenance_status",
         "maintenance_start_at",
         "maintenance_end_at",
@@ -223,7 +224,7 @@ def material_projection_version(
     if not use_versioned_contracts or platform.casefold() != "ninja":
         return LEGACY_MATERIAL_PROJECTION_VERSION
     if external_namespace == "device":
-        return 2
+        return 3
     return LEGACY_MATERIAL_PROJECTION_VERSION
 
 
@@ -419,11 +420,19 @@ def _identity_lock_key(row: dict[str, Any]) -> str:
     return "|".join(str(part) for part in _identity_tuple(row))
 
 
-def _select_current_for_update(cur: Any, row: dict[str, Any]) -> tuple | None:
+def _select_current_for_update(
+    cur: Any,
+    row: dict[str, Any],
+    *,
+    include_projection_version: bool,
+) -> tuple | None:
+    projection_column = (
+        ", material_projection_version" if include_projection_version else ""
+    )
     cur.execute(
-        """
+        f"""
         SELECT observed_at, material_hash, active, client_id, device_id,
-               last_seen_at
+               last_seen_at{projection_column}
           FROM operations.entity_observation_current
          WHERE tenant_id = %s AND source_instance_id = %s
            AND external_namespace = %s
@@ -485,13 +494,21 @@ def write_current_rows(cur: Any, rows: Iterable[dict[str, Any]]) -> int:
         # (1) Existing rows serialize on their row lock. Only an absent tuple
         # needs an advisory lock; re-read after acquiring it because another
         # writer may have inserted while this transaction was waiting.
-        prev = _select_current_for_update(cur, row)
+        prev = _select_current_for_update(
+            cur,
+            row,
+            include_projection_version=use_versioned_contracts,
+        )
         if prev is None:
             cur.execute(
                 "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
                 (_identity_lock_key(row),),
             )
-            prev = _select_current_for_update(cur, row)
+            prev = _select_current_for_update(
+                cur,
+                row,
+                include_projection_version=use_versioned_contracts,
+            )
 
         # (2) Out-of-order / equal-timestamp guard runs BEFORE any history
         # mutation so an older or duplicate snapshot cannot open a phantom
@@ -499,10 +516,18 @@ def write_current_rows(cur: Any, rows: Iterable[dict[str, Any]]) -> int:
         if prev is not None and prev[0] is not None and row["observed_at"] <= prev[0]:
             continue
 
-        # (3) Material or presence transition detection.
+        # (3) Material, material-contract, or presence transition detection.
+        # A projection-version boundary must also close and reopen history;
+        # otherwise current could advertise the new contract while its open
+        # SCD-2 version still advertises the old one when the hash is equal.
         is_new = prev is None
         material_changed = not is_new and (
-            prev[1] != row["material_hash"] or prev[2] != row.get("active", True)
+            prev[1] != row["material_hash"]
+            or prev[2] != row.get("active", True)
+            or (
+                use_versioned_contracts
+                and prev[6] != row["material_projection_version"]
+            )
         )
         if is_new or material_changed:
             # Side-band the prior last_seen_at so write_history_changes can

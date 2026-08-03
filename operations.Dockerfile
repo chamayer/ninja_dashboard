@@ -45,7 +45,7 @@ COPY operations/apps/      ./apps/
 COPY operations/templates/ ./templates/
 COPY operations/manage.py  ./
 COPY operations/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+RUN sed -i 's/\r$//' /entrypoint.sh && chmod +x /entrypoint.sh
 
 RUN chown -R operations:operations /app
 USER operations

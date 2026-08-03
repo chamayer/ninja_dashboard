@@ -2,6 +2,37 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.101.4] — 2026-08-03 — Ninja reader-cutover corrections
+
+### Added
+
+- Added a dry-run-by-default, aggregate-only operator for correcting retired
+  `ninja_main` source evidence. Apply mode requires a separately approved exact
+  record count and identity-set digest and preserves canonical devices, source
+  links, daily rollups, raw evidence, and operator decisions.
+
+### Changed
+
+- Separated Ninja's direct operating-system boot time from its distinct
+  hypervisor-reported boot measurement while retaining hypervisor power state.
+- Made the Ninja device projection-v3 upgrade an explicit one-time history
+  boundary so current evidence and its open history version use the same
+  material contract even when the selected material hash is unchanged.
+- Restricted current Ninja detail and health shadow views to their configured
+  source instance, authoritative snapshot scopes, and projection versions;
+  historical daily rollups remain available for inactive source records.
+
+### Fixed
+
+- Normalized the Operations entrypoint to Unix line endings during image
+  builds so Docker images built from Windows worktrees start correctly.
+
+### Operational note
+
+- Legacy snapshot readers and writes remain authoritative. Deploying this
+  release does not apply the retired-scope correction, promote generic readers,
+  stop legacy snapshot writes, or delete historical data.
+
 ## [0.101.3] — 2026-08-03 — Historical Ninja evidence restoration
 
 ### Added

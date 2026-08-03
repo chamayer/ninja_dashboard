@@ -223,7 +223,11 @@ Operations observation material-projection pattern is the implementation
 starting point.
 
 History stores the initial material version and is appended afterward only
-when the material hash changes or current evidence is withdrawn. A complete
+when the material hash changes, the material-projection contract version
+changes, or current evidence is withdrawn. A projection-contract boundary is
+identified by its stored version and must not be interpreted as a source state
+change merely because the version changed; it keeps current and open history
+on the same contract even when their material hashes are equal. A complete
 snapshot that no longer contains the source identity closes its open history
 interval and records the withdrawal; reappearance opens a new interval. A
 raw-only hash change updates current provenance but does not append another
@@ -246,6 +250,14 @@ external device ID may link both records to one canonical device, but neither
 endpoint may overwrite the other's current raw payload, hashes, timestamps, or
 withdrawal state. Agent Compliance storage and behavior are explicitly outside
 this decision's ingest-storage migration.
+
+Ninja device normalization keeps guest/host operating-system boot time and the
+top-level hypervisor-reported boot measurement as distinct claims. Direct
+`os.lastBootTime` is normalized as `last_boot_time_at` for OS session and reboot
+consumers. The top-level VM value is retained as
+`hypervisor_reported_boot_time_at`; it never overwrites the OS value.
+Hypervisor `power_state` remains a separate, valid power-dimension measurement
+under ADR-0011's evidence hierarchy.
 
 ### Attribute claims and effective values
 

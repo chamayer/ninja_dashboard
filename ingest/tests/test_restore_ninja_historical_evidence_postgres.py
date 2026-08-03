@@ -254,6 +254,8 @@ def test_restore_closed_evidence_then_backfill(postgres_connection) -> None:
                    canonical_data ->> 'entity_type',
                    canonical_data ->> 'power_state',
                    canonical_data ->> 'parent_ninja_id',
+                   canonical_data ->> 'last_boot_time_at',
+                   canonical_data ->> 'hypervisor_reported_boot_time_at',
                    material_projection_version,
                    octet_length(raw_hash), octet_length(material_hash)
               FROM operations.entity_observation_current
@@ -272,7 +274,9 @@ def test_restore_closed_evidence_then_backfill(postgres_connection) -> None:
             "vm.guest",
             "powered_on",
             "7",
-            2,
+            "2026-06-01T09:00:00+00:00",
+            "2026-08-01T13:00:00+00:00",
+            3,
             32,
             32,
         )
@@ -292,7 +296,7 @@ def test_restore_closed_evidence_then_backfill(postgres_connection) -> None:
             None,
             None,
             None,
-            2,
+            3,
         )
         assert (
             process_day(
