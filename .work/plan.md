@@ -2,16 +2,14 @@
 
 Track: **Unified entity ecosystem — database, ingest, and admin surface**
 
-**Status: `0.101.0` DEPLOYED; `0.101.1` HEALTH-SHADOW COMPATIBILITY-KEY
-HOTFIX LOCALLY VALIDATED; COMMIT APPROVAL GATE — Track A, the resolver repair,
-and stable-identity cutover remain verified. Release `0.101.0` / `434cf72` and
-migration `0097` are deployed on
-both remotes. Device current/history and daily rollup passed their first full-
-cycle write; health's rollback-era compatibility key collided with device
-detail under the retained legacy open-history uniqueness constraint.
-Legacy health completed and remains authoritative. Backfill, cutover, legacy-
-write shutdown, cleanup, Agent Compliance, and the wider ecosystem remain
-separately gated.**
+**Status: `0.101.1` DEPLOYED; `0.101.2` DERIVED-PRESENCE HOTFIX IN PROGRESS —
+Track A, the resolver repair, and stable-identity cutover remain verified.
+Release `0.101.1` / `31de068` is deployed on both remotes. Device health now
+writes current/history successfully, but the authorized full-cycle retest
+exposed a downstream presence-projection collision between the distinct
+`device` and `device-health` records linked to one canonical device. Legacy
+readers remain authoritative. Backfill, cutover, legacy-write shutdown,
+cleanup, Agent Compliance, and the wider ecosystem remain separately gated.**
 
 Revised 2026-08-03.
 
@@ -1616,8 +1614,71 @@ and Operations logged zero HTTP 500s. The one health-shadow error was the known
 rolled-back compatibility-key collision; no second production cycle was
 started before the repair is deployed.
 
-**Next gate:** obtain separate approval for one logical `0.101.1` commit. A
-later push approval must explicitly cover `origin`'s automatic ingest redeploy
-(no migration is pending) and the immediate secondary-mirror update. After
-deployment, run one normal full-cycle validation and require nonzero health
-shadow current/history parity with zero new errors before any backfill gate.
+### Post-`0.101.1` full-cycle finding
+
+Commit `31de068` was pushed to `origin` and the secondary mirror. Portainer
+deployed `0.101.1`; both application containers became healthy and the running
+ingest image passed the compatibility-key assertion. One explicitly authorized
+production full cycle then wrote 5,463 device-detail records and successfully
+wrote 5,463 legacy plus 5,463 generic device-health records with zero
+health-shadow errors.
+
+The cycle later failed before its completion marker while refreshing
+`operations.device_agent_presence_current`. That projection groups by
+`subplatform` but its required unique key is per tenant/device/entity type/
+platform. Once health evidence could land, the `device` and `device-health`
+records for the same Ninja device produced two grouped rows for one unique key.
+The refresh transaction rolled back, so the previously valid derived views
+remain in place; health current/history committed independently and remain
+available. No ingest module run was marked failed, and the application
+containers remained healthy.
+
+The approved contracts already assign Ninja presence/contact and VM power to
+the device-detail record while retaining device health for patching and
+troubleshooting. Release `0.101.2` therefore rebuilds the existing derived-view
+chain with `device-health` excluded only from the device-presence projection.
+It does not delete or unlink health evidence and does not change current,
+history, compatibility views, stable identity, or legacy health storage.
+
+Expected affected files are migration `0098`, its focused test, `VERSION`,
+`CHANGELOG.md`, and this checkpoint. Validation must include a representative
+PostgreSQL projection containing both namespaces, migration order/state,
+Django checks, focused Operations tests, image builds, and an aggregate-only
+production projection simulation. A later push gate must explicitly include
+automatic deployment and migration `0098`; after deployment, one full cycle
+must complete with health parity, derived refresh success, and zero HTTP 500s.
+
+### `0.101.2` validation checkpoint
+
+- A representative PostgreSQL 16 test applied the complete migration SQL over
+  the existing derived-view chain with linked `device` and `device-health`
+  observations for the same VM. Migration `0098` recreated presence, session,
+  effective-device, and source-health read models; the result had one presence
+  row, retained explicit online and `poweredon` evidence, and passed the
+  production unique key.
+- The full Operations core suite passed (27, with two expected opt-in skips),
+  and the focused PostgreSQL migration tests passed separately (2). Django
+  `check` and `makemigrations --check --dry-run` passed; migration order shows
+  `0098` immediately after deployed `0097`.
+- Focused Ruff, formatting, compilation, and `git diff --check` passed. Both
+  workstation-CA image builds passed; the Operations image contains and imports
+  `0098`, and the ingest image reports `0.101.2` while retaining the deployed
+  compatibility-key repair.
+- Aggregate-only production measurement found 5,456 per-platform presence-key
+  collisions with both namespaces included and zero with `device-health`
+  excluded. Health evidence itself is complete: 5,463 active current rows,
+  5,463 open history rows, 5,463 distinct external IDs, all compatibility keys
+  namespace-qualified, and the latest health snapshot run is complete at
+  5,463 expected/written. Both application containers remain healthy;
+  Operations health returns `200`, its root returns the expected `302`, and no
+  Operations HTTP 500s were logged during the validation window.
+
+**Next gate:** approve one logical `0.101.2` commit containing migration `0098`
+and its reviewed release/validation records. A separate push approval must
+explicitly include `origin`'s automatic rebuild/redeploy and automatic
+application of migration `0098`, followed immediately by the secondary mirror.
+The migration rebuilds four derived read models and may keep Operations
+starting for several minutes; it makes no production row updates or deletions.
+After deployment, run exactly one normal full cycle and require a completion
+marker, health parity, successful derived refresh, healthy services, and zero
+HTTP 500s before any backfill gate.

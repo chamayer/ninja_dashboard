@@ -2,6 +2,15 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.101.2] — 2026-08-03 — Health evidence presence isolation
+
+### Fixed
+
+- Excluded Ninja `device-health` source records from the device-presence
+  projection, preventing distinct endpoint evidence linked to the same device
+  from colliding in the per-platform presence key while retaining the health
+  evidence for patching and troubleshooting consumers.
+
 ## [0.101.1] — 2026-08-03 — Health shadow compatibility-key repair
 
 ### Fixed
