@@ -2,14 +2,16 @@
 
 Track: **Unified entity ecosystem — database, ingest, and admin surface**
 
-**Status: `0.101.4` CORRECTIVE PREPARATION LOCALLY VALIDATED — COMMIT APPROVAL
-GATE. Track A's historical restoration and daily rollup are deployed and
-verified. The approved patch separates OS and VM boot measurements, narrows
-Ninja current shadow scope, and packages a dry-run-by-default stale-scope
-withdrawal operator with tests. Legacy readers and snapshot writes remain
-authoritative. Commit, push/deployment, production data apply, reader cutover,
-legacy-write shutdown, cleanup, Agent Compliance, and the wider ecosystem
-remain separately gated.**
+**Status: `0.101.5` RETIRED-SCOPE ELIGIBILITY HOTFIX LOCALLY VALIDATED — COMMIT
+APPROVAL GATE. Release
+`0.101.4` and migration `0099` are deployed; its device and health collections,
+v3 current/history contract, boot-field separation, shadow parity, and
+post-refresh container health are verified. The dry-run operator safely
+blocked all 162 rows because it incorrectly treated late restoration receipt
+time as source evidence time. The bounded hotfix removes receipt time from the
+withdrawal-boundary comparison and adds a late-receipt regression. No
+production correction apply, reader cutover, legacy-write shutdown, cleanup,
+Agent Compliance change, or wider ecosystem work is authorized.**
 
 Revised 2026-08-03.
 
@@ -2115,3 +2117,58 @@ and the secondary mirror immediately afterward; that approval must explicitly
 cover automatic deployment, migration `0099`, and the one-time v3 history
 transitions. The 162-row retired-scope apply remains a later independent
 production-data approval after a post-deployment aggregate-only dry run.
+
+#### `0.101.4` deployment and `0.101.5` hotfix checkpoint
+
+Commit `b0c7e53` was pushed to `origin` and the secondary mirror under the
+combined approval. Portainer built and recreated the stack; ingest reports
+`0.101.4`, migration `0099_ninja_shadow_scope_correction` is applied, and both
+changed containers are healthy. An explicitly authorized normal full cycle
+completed device and health collection successfully with 5,469 rows each.
+Aggregate read-only validation found 5,469 active projection-v3 detail rows,
+5,469 open projection-v3 history rows, zero current/open-history mismatches,
+zero OS-boot mismatches against the same-cycle legacy snapshots, and exact
+detail/health shadow counts of 5,469 each. All 933 current VM records retain a
+non-null hypervisor-reported boot measurement; Ninja supplied no non-null
+`os.lastBootTime` for those VM records in this cycle, so the distinct OS claim
+correctly remains null rather than being replaced. The daily shadow contains
+341,119 retained rollup facts. No ingest error-level log, traceback, exception,
+or failed-row signal was observed.
+
+The full cycle's Inventory refresh ran from `19:51:26Z` through `20:00:08Z`
+while multiple refresh workers used substantial PostgreSQL CPU and temporary
+I/O. During that interval, the Operations Software surface produced one HTTP
+500 and two Gunicorn worker timeouts. The final Operations derived refresh and
+the full cycle subsequently completed successfully; both containers are
+healthy, and a three-minute post-refresh window contained zero further 500s or
+worker timeouts. This is not caused by projection v3 or migration `0099`, but
+it means the strict zero-500 full-cycle cutover criterion is not satisfied.
+The broader concurrent/serialized refresh correction is recorded in the root
+backlog and remains a separate design/implementation approval before reader
+cutover.
+
+The deployed dry-run operator made no changes and safely returned 162 blockers,
+all in withdrawal-boundary validation. Diagnosis confirmed a bounded defect:
+restored historical rows have `last_received_at` after their historical
+`missing_since`, because receipt is restoration provenance rather than source
+evidence time. The open-history contract already validates the correct source
+interval (`effective_from < missing_since`), but the Python blocker and final
+apply predicate additionally compared `missing_since` with receipt time.
+
+The local `0.101.5` hotfix removes `last_received_at` only from those two
+source-ordering comparisons and changes no selection scope, pinning,
+transaction, preservation, or apply behavior. Its PostgreSQL regression now
+models a receipt after `missing_since` and proves the row remains eligible and
+the pinned apply is atomic and idempotent. The full ingest suite passes 89
+tests in disposable PostgreSQL 16; focused compilation, Ruff, formatting, and
+`git diff --check` pass; and the secure workstation-CA build produces an ingest
+image that imports the operator and reports `0.101.5`.
+
+**Next approval gate:** commit the bounded `0.101.5` hotfix as one logical
+change while preserving unrelated working-tree edits. A later combined push
+approval must explicitly cover automatic redeployment. After that deployment,
+rerun the operator in dry-run mode and require exactly 162 eligible records,
+zero blockers, and a pinned aggregate identity digest before requesting the
+separate production-data apply approval. Do not approve reader cutover until
+the Inventory-refresh availability item is resolved and a full-cycle run
+records zero HTTP 500s and worker timeouts.

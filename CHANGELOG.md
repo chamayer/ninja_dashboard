@@ -2,6 +2,15 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.101.5] — 2026-08-03 — Retired Ninja correction eligibility
+
+### Fixed
+
+- Corrected the retired-scope operator to validate withdrawal ordering against
+  source observation and last-seen times, not the later collector receipt time
+  of restored historical evidence. Dry-run remains the default, and apply
+  remains separately gated by an exact count and identity-set digest.
+
 ## [0.101.4] — 2026-08-03 — Ninja reader-cutover corrections
 
 ### Added

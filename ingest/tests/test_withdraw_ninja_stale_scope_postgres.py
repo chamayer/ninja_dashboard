@@ -149,7 +149,7 @@ def test_withdrawal_is_pinned_atomic_and_idempotent(postgres_connection) -> None
             VALUES
               (%s, 1, %s, %s, %s, 'device', '', '', '42', %s, 'Ninja',
                '2026-07-20T12:00:00Z', '2026-07-20T12:00:00Z',
-               '2026-07-20T12:00:00Z', TRUE, NULL, 'ninja_main', NULL,
+               '2026-07-22T12:00:00Z', TRUE, NULL, 'ninja_main', NULL,
                '{"retained":true}', decode(repeat('01', 32), 'hex'), 1)
             """,
             (

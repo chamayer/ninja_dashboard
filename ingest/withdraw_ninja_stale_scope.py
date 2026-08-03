@@ -135,9 +135,10 @@ def _target_rows(cur: Any, *, tenant_id: int) -> list[dict[str, Any]]:
 
 def _blockers(row: dict[str, Any]) -> dict[str, bool]:
     boundary = row["missing_since"]
-    latest_evidence = max(
-        row["observed_at"], row["last_seen_at"], row["last_received_at"]
-    )
+    # Receipt time is collector provenance, not source evidence time. These
+    # rows were restored after their historical missing_since boundary, so a
+    # late receipt must not make a valid source withdrawal appear out of order.
+    latest_evidence = max(row["observed_at"], row["last_seen_at"])
     return {
         "shape": (
             str(row["platform"]).casefold() != "ninja"
@@ -360,9 +361,7 @@ def process(
            AND c.active IS TRUE
            AND c.withdrawn_at IS NULL
            AND d.is_current IS FALSE
-           AND d.missing_since > GREATEST(
-               c.observed_at, c.last_seen_at, c.last_received_at
-           )
+           AND d.missing_since > GREATEST(c.observed_at, c.last_seen_at)
         """,
         (
             eligible_ids,

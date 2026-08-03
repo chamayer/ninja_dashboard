@@ -104,6 +104,28 @@ This is the proposed successor to the root-level open-work portion of
 - Trigger: any consumer starting to read `last_observed_at` from this matview,
   a Metabase question depending on it, or the next migration in this area.
 
+## Preserve Operations availability during derived refresh
+
+- Evidence: the `0.101.4` full-cycle validation on 2026-08-03 ran Inventory
+  current-fact refresh for about 8 minutes 42 seconds with multiple concurrent
+  PostgreSQL workers. During that interval, the authenticated Software surface
+  returned one HTTP 500 and two Gunicorn workers timed out. The refresh and
+  cycle later completed, both services remained healthy, and the following
+  three-minute window had zero further 500s or worker timeouts.
+- Required outcome: normal full collection/derived refresh must not block
+  Operations readers through the 60-second Gunicorn timeout. Reconcile the
+  actual Inventory refresh path with the design requirement for dependency-
+  ordered concurrent materialized-view refreshes; also prevent redundant
+  refresh workers from running the same expensive chain concurrently.
+- Constraints: preserve transactionally coherent current facts, RLS/grants,
+  existing reader schemas, and failure visibility. Do not hide the issue by
+  merely increasing the web timeout.
+- Validation gate: a representative full cycle under normal queue activity
+  completes with zero Operations HTTP 500s and worker timeouts while the
+  Software surface remains responsive.
+- Trigger: approve this cross-service availability/performance design before
+  generic Ninja reader cutover.
+
 ## Root backlog rules
 
 - Do not duplicate Operations-only items here.
