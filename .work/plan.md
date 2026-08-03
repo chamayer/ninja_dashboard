@@ -2,16 +2,18 @@
 
 Track: **Unified entity ecosystem — database, ingest, and admin surface**
 
-**Status: `0.101.5` RETIRED-SCOPE ELIGIBILITY HOTFIX LOCALLY VALIDATED — COMMIT
-APPROVAL GATE. Release
-`0.101.4` and migration `0099` are deployed; its device and health collections,
-v3 current/history contract, boot-field separation, shadow parity, and
-post-refresh container health are verified. The dry-run operator safely
-blocked all 162 rows because it incorrectly treated late restoration receipt
-time as source evidence time. The bounded hotfix removes receipt time from the
-withdrawal-boundary comparison and adds a late-receipt regression. No
-production correction apply, reader cutover, legacy-write shutdown, cleanup,
-Agent Compliance change, or wider ecosystem work is authorized.**
+**Status: `0.102.0` INVENTORY METABASE RETIREMENT LOCALLY IMPLEMENTED AND
+VALIDATED — COMMIT APPROVAL GATE; READER CUTOVER BLOCKED.
+Releases `0.101.4`/`0.101.5` and migration `0099` are deployed. The exact
+162-row pinned correction is applied, its repeated invocation is a verified
+no-op, and canonical devices, links, raw evidence, and daily rollups are
+preserved. The approved presence/session refresh completed with the measured
+325-to-283 presence-row reduction, seven devices with no remaining active
+presence, exact affected-session parity, and no lifecycle transition or audit
+event. Local candidate `0.102.0` archives only the Inventory Metabase surface
+and removes its three normal refresh triggers. No lifecycle evaluator, reader
+cutover, legacy-write shutdown, cleanup, Agent Compliance behavior change, or
+wider ecosystem work is authorized.**
 
 Revised 2026-08-03.
 
@@ -99,6 +101,9 @@ In scope:
   performance, and compatibility work.
 - Correcting the deployed observation identity and the `vm.guest` lifecycle
   contact defect.
+- Disconnecting the Inventory-domain Metabase bootstrap and refresh calls while
+  preserving its legacy relations for rollback, and continuing generic
+  Operations capabilities independently of that accepted retirement.
 
 Out of scope:
 
@@ -107,7 +112,8 @@ Out of scope:
   read-only until a separately audited editing workflow is approved.
 - Write-back to source platforms.
 - Hudu People or other newly introduced PII-bearing layouts.
-- Retiring legacy compliance schemas or Metabase.
+- Retiring legacy compliance schemas, retiring other Metabase domains, or
+  physically deleting Inventory's legacy reporting storage.
 - Redesigning class-specific device matching, patching, software, or
   ADR-0005's layered device model.
 
@@ -115,6 +121,9 @@ Out of scope:
 
 The accepted design authorities are:
 
+- `docs/decisions/0005-operations-first-metabase-retirement.md` for the
+  Operations destination, prohibition on Metabase investment, phased domain
+  cutover, and bounded rollback contract.
 - `operations/docs/decisions/0009-stable-source-observation-identity.md` for
   stable-namespace observation identity and concurrent snapshot
   reconciliation. ADR-0007 v5 remains the deployed authority until ADR-0009
@@ -2164,11 +2173,222 @@ tests in disposable PostgreSQL 16; focused compilation, Ruff, formatting, and
 `git diff --check` pass; and the secure workstation-CA build produces an ingest
 image that imports the operator and reports `0.101.5`.
 
-**Next approval gate:** commit the bounded `0.101.5` hotfix as one logical
-change while preserving unrelated working-tree edits. A later combined push
-approval must explicitly cover automatic redeployment. After that deployment,
-rerun the operator in dry-run mode and require exactly 162 eligible records,
-zero blockers, and a pinned aggregate identity digest before requesting the
-separate production-data apply approval. Do not approve reader cutover until
-the Inventory-refresh availability item is resolved and a full-cycle run
-records zero HTTP 500s and worker timeouts.
+#### `0.101.5` deployment and dry-run checkpoint
+
+Commit `01a98c2` was pushed to `origin` and the secondary mirror under the
+combined approval. Portainer rebuilt the stack and recreated ingest; the live
+image reports `0.101.5` and is healthy. Operations remained healthy. The
+post-deployment window contained zero ingest error-level lines, zero ingest
+tracebacks, and zero Operations HTTP 500 responses.
+
+The packaged operator was run without `--apply`, inside its explicit read-only
+transaction. It changed zero current rows and closed zero history rows. Its
+aggregate result is:
+
+- active retired-scope records: 162;
+- eligible records: 162;
+- blocked records: 0 (zero shape, provenance, missing/current legacy device,
+  withdrawal-boundary, and open-history blockers);
+- already-corrected records: 0;
+- approved-selection candidate digest:
+  `b807231cbc7c5dc02af7ec0abed01ce6240a319863806a404d2c2834f2d593e3`.
+
+**Next approval gate:** a separate production-data approval may authorize one
+operator apply pinned to count 162 and digest
+`b807231cbc7c5dc02af7ec0abed01ce6240a319863806a404d2c2834f2d593e3`.
+If approved, run the atomic apply once; verify 162 current rows updated and 162
+open history rows closed, a repeated pinned invocation is a verified no-op,
+canonical devices/source links/daily rollups remain unchanged, and the shadow
+views exclude the corrected retired scope. Derived presence/session/lifecycle
+refresh and lifecycle-effect application remain separately controlled; reader
+cutover also remains blocked by the recorded Inventory-refresh availability
+item.
+
+#### Retired-scope apply and projected derived effect
+
+The separately approved operator apply ran once with exact count 162 and digest
+`b807231cbc7c5dc02af7ec0abed01ce6240a319863806a404d2c2834f2d593e3`.
+It updated exactly 162 current rows and closed exactly 162 open history rows.
+The approved repeated invocation recognized all 162 as already corrected under
+the same digest and wrote zero current/history rows.
+
+Aggregate post-apply verification confirmed all 162 current rows are inactive,
+all 162 carry the exact legacy `missing_since` withdrawal boundary, zero target
+history intervals remain open, and 162 matching historical intervals close at
+that boundary. The stable raw-record digest remained
+`eb4abe0cf1d372cd15161e67803405ed`. All 154 canonical-device references, 154
+source links covering 95 distinct canonical devices, and 1,739 target daily
+rollup facts remain unchanged. Detail/health shadows remain 5,469/5,469, the
+daily shadow remains 341,119, and no corrected retired identity appears in the
+detail shadow. Both services are healthy with zero new ingest errors,
+tracebacks, or Operations HTTP 500s. The failed first verification statement
+was a read-only syntax error and rolled back without changing data.
+
+The authorized read-only next-effect simulation compared the still-materialized
+presence/session state with the active generic evidence after correction. For
+the 95 linked canonical devices, the next presence refresh projects 325 rows
+to 283: 42 stale rows removed, zero added, and 53 retained aggregate rows
+updated. Seven devices have no remaining active presence evidence. Exactly 39
+device-session rows change. Applying the deployed lifecycle selection and
+aging policy to the projected presence produces an empty transition set: zero
+lifecycle-status changes, zero reported-state conflicts, and zero unknown-
+state findings for affected devices. Current affected lifecycle states are 60
+active, 33 offline-aging, and two pending-cleanup, all unchanged by projection.
+
+#### Controlled derived refresh checkpoint
+
+The separately approved dependency-order calls to
+`operations.refresh_device_agent_presence_current()` and
+`operations.refresh_device_session_current()` completed in independent
+transactions. Aggregate verification found 283 affected presence rows, down
+from the measured 325-row baseline: the projected 42 stale rows are removed,
+the projected 53 retained aggregates are refreshed, and seven of the 95
+affected canonical devices have no remaining active presence. All 95 affected
+devices retain a session row, with zero mismatches across the presence-derived
+session fields; this confirms the projected 39 changed session rows were
+published. The affected lifecycle-state distribution remains 60 active, 33
+offline-aging, and two pending-cleanup. No lifecycle evaluator was run, and
+zero `lifecycle.transition` audit events occurred after the session refresh.
+
+The current presence definition, including migration `0098`'s exclusion of
+device-health evidence, converged to the same 283 aggregate rows. A transient
+single-row reported-online difference observed during verification disappeared
+under the normal refresh cadence; a final aggregate check found zero presence-
+to-session mismatches. Both containers remained healthy. The 15-minute
+post-refresh window contained zero Operations HTTP 500 responses, zero
+Gunicorn worker timeouts, and zero ingest error, exception, or traceback lines.
+
+#### Availability design review (complete proposal)
+
+The user approved this read-only design review on 2026-08-03. No refresh,
+production write, code/schema change, migration, reader cutover, commit, push,
+or deployment was performed. Aggregate-only production measurements through
+the approved helper confirmed four coupled causes.
+
+1. `ninja_inventory.refresh_current()` refreshes seven materialized views
+   non-concurrently and sequentially in one transaction. This preserves atomic
+   publication but takes reader-blocking locks until the entire chain commits.
+   None of the seven views has a unique index, so PostgreSQL cannot use
+   concurrent refresh. All seven current outputs have an aggregate-unique,
+   non-null candidate key; their combined stored result is small (30,458 rows
+   and approximately 36 MiB).
+2. Migration `063` renamed the original live views, preserving their OID
+   dependencies. Dependent `_live` views therefore continue to expand earlier
+   live definitions instead of reading the newly materialized stages. The
+   final eight-row summary has an estimated plan cost of 10.67 million because
+   it recomputes much of the hierarchy. The seven current live plans total
+   26.46 million estimated cost. Rebinding each dependent stage to the prior
+   materialized stage reduces the estimated total to 4.53 million, an
+   approximately 83% reduction before any source-query improvement.
+3. The first stage still obtains 13,256 current rows from the 8.03 GiB,
+   approximately 2.76-million-row legacy Agent Compliance observation table.
+   Its wide `DISTINCT ON` sorts raw JSON. A bounded latest-ID-only measurement
+   completed in 13.13 seconds but read 315,042 shared blocks and wrote 46,194
+   temporary blocks; forcing the existing identity index exceeded the
+   30-second read-only limit and was cancelled. The physical query must first
+   select narrow latest observation IDs and only then fetch the 13,256 wide
+   rows. Agent Compliance itself remains explicitly out of scope.
+4. The Operations Software page independently groups the 1.46 GiB,
+   approximately 467,000-row installation-current table on every request. Its
+   central aggregate took 4.39 seconds while idle, read 147,685 shared blocks,
+   and wrote 13,447 temporary blocks. Concurrent Inventory I/O pushed that
+   request past Gunicorn's 60-second limit. The existing 20,559-row,
+   5.38-MiB `v_software_safety` matview already carries the same fleet title
+   counts, but its current refresh contract lags by two titles and 36 changed
+   aggregates; it cannot silently replace the live query without a dependency-
+   ordered freshness correction.
+
+The run ledger also contains two full patch-module sequences beginning about
+ten minutes apart in the incident window, plus 27 scoped software jobs.
+`run_patching_once()` has no cross-entry single-flight guard: scheduler,
+startup, and manual threads can each start it. The retained container logs do
+not cover the pre-hotfix container, and `pg_stat_statements` is not installed,
+so exact historical per-stage refresh duration and whether the two refresh
+calls waited back-to-back cannot be recovered. The code and ledger prove the
+duplicate-entry risk; the measured 8-minute-42-second second refresh and
+resource-heavy plans prove the availability failure without that missing
+detail.
+
+The 612 legacy-only and 960 generic-only identities measured across the four
+agent platforms are now an explicit generic-cutover classification set, not a
+reason to preserve or optimize the legacy Inventory authority. The user
+explicitly rejected further Metabase investment. Decision 0005 supersedes the
+old split-surface destination in decision 0002: Operations is the destination,
+and Metabase is retired by domain.
+
+The repository consumer audit confirms that all direct consumers of
+`ninja_inventory.v_*` are in `ingest/inventory/metabase_bootstrap.py`.
+Operations has no direct dependency on those views. The only normal callers of
+`ninja_inventory.refresh_current()` are the patch-ingest, Agent Compliance run,
+and Agent Compliance evaluation paths. Therefore the seven legacy Inventory
+materialized views will not receive new indexes, concurrent refresh, staging,
+query rewrites, generation coordination, or other performance work.
+
+##### Approved immediate Inventory retirement
+
+The user explicitly retired all five Inventory Metabase dashboards on
+2026-08-03 and waived them as parity gates. The bounded implementation is:
+
+1. Stop provisioning Inventory dashboards during automatic or manually
+   triggered Metabase bootstrap.
+2. On bootstrap, idempotently archive the five known Inventory dashboards,
+   their collection cards, and the Inventory collection. This is the only
+   permitted Metabase mutation and exists solely to remove the legacy surface.
+3. Remove the three normal calls to `ninja_inventory.refresh_current()` from
+   patch ingest, Agent Compliance collection, and Agent Compliance evaluation.
+4. Preserve the Inventory bootstrap source and all legacy database functions,
+   materialized views, tables, grants, and data unchanged for rollback. Their
+   physical cleanup remains a later, separately approved operational phase.
+5. Continue generic Operations Source Records and serial evidence/data-quality
+   work under decision 0010, but do not make either capability a prerequisite
+   for this explicitly accepted retirement.
+
+The implementation affects `ingest/main.py`, a bounded Inventory retirement
+helper and test, `VERSION`, `CHANGELOG.md`, and the retirement documentation.
+It adds no dependency, schema change, migration, or production-data write.
+
+Independently protect native Operations availability in later implementation:
+add a cross-process single-flight guard around the complete patch cycle, add
+the compact `operations.software_title_current` read model, and refresh that
+title model followed by safety/classifier derivatives once per software batch.
+These solve current Operations behavior and are not Metabase improvements.
+
+Agent Compliance remains untouched. Other Metabase domains follow as separate
+retirement slices after their Operations capability is accepted or explicitly
+retired; they receive no new feature or performance work.
+
+##### Validation and acceptance
+
+- Prove with focused tests that only the exact Inventory dashboards, cards,
+  and collection are archived and that repeated retirement is a safe no-op.
+- Compile changed Python, run focused ingest tests, and search every Python
+  path to prove Inventory bootstrap and all normal refresh calls are detached.
+- Build the ingest image and verify its imports/startup path. No migration is
+  present in this release.
+- After separately approved commit and push/automatic deployment, verify the
+  five dashboards and Inventory collection are archived, no Inventory refresh
+  executes during an accelerated full cycle, services remain healthy, and the
+  post-change window contains zero HTTP 500s or worker timeouts.
+
+All post-review checks found the database and three containers healthy, zero
+waiting locks, zero Operations HTTP 500s or worker timeouts, and zero ingest
+error/exception/traceback lines in the 30-minute window. The forced-index test
+was read-only, hit its explicit 30-second statement timeout, and rolled back.
+
+Local candidate `0.102.0` is implemented and reviewed. Two focused retirement
+tests pass, including exact five-dashboard scoping, unrelated-content
+preservation, card/collection archival, and the already-retired no-op. Changed
+Python compiles and passes Ruff. Repository search confirms no Inventory
+bootstrap import and no normal Inventory refresh caller; the sole remaining
+`ninja_inventory.refresh_current()` Python reference is the deliberately
+dormant rollback helper. `git diff --check` passes. The final ingest image
+build passes, contains `0.102.0`, and imports the changed runtime with inert
+placeholder settings. No SQL, migration, database data, or production service
+was changed. A local Metabase runtime was not available, so actual API archival
+and post-deployment HTTP/refresh behavior remain deployment validation.
+
+**Next approval gate:** after local implementation and validation, request the
+separate commit approval. A later push approval must explicitly include the
+automatic production deployment and recoverable Inventory archive operation.
+No database cleanup, generic reader cutover, Agent Compliance change, or other
+Metabase-domain retirement is authorized.

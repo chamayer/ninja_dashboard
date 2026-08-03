@@ -1,6 +1,6 @@
 # 0002 — Separate reporting and operator-control surfaces
 
-Status: Accepted
+Status: Superseded by 0005
 Date: Existing design; recorded 2026-07-16
 
 ## Context
@@ -23,3 +23,9 @@ tenant scope, permissions, audit, and validated writes.
 - Do not duplicate operator decisions in Metabase.
 - Do not rebuild reporting views in Operations without a workflow need.
 - Shared metrics require documented authorities.
+
+## Superseded by
+
+Decision 0005 replaces this split-surface destination with Operations-first
+reporting and phased Metabase retirement. This record remains the historical
+reason the two surfaces were originally separated.

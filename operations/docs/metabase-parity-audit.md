@@ -1,14 +1,18 @@
 # Metabase parity audit
 
 **Purpose:** Inventory of every dashboard the stack bootstraps into Metabase,
-classified against current Operations coverage, to inform the future
-Operations parity build-out before Metabase is sunset.
+classified against current Operations coverage, to support phased Metabase
+retirement under root decision 0005. This is a retirement audit, not a plan to
+improve Metabase.
 
 **Method:** Metabase content authored by this stack is defined in
 three bootstrap modules under `ingest/`. Those files are the
-authoritative "what we produce" inventory. User-authored one-off
-questions in the Metabase UI are out of scope for this audit — the
-parity goal is to reproduce what the stack itself provides.
+authoritative "what we produce" inventory. Before a domain cutover, an
+aggregate-only production audit must also enumerate operator-authored
+questions in the Metabase backing store without exposing query text, result
+data, or customer identifiers. Each required capability receives an accepted
+Operations path or an explicit retirement decision; pixel-for-pixel parity is
+not required.
 
 **Sources:**
 
@@ -62,14 +66,15 @@ Five dashboards.
 
 | Dashboard | Classification | Notes |
 |---|---|---|
-| `Inventory - Overview` | **COVERED** | Operations Home summary + Devices fleet page cover this. |
-| `Inventory - Devices` | **COVERED** | Devices fleet page (0.53.0) is the native surface. |
-| `Inventory - Identity Review` | **COVERED** | Superseded in 0.68.0 by `identity_conflict` Finding in the standard queue + `device_merge` action (0.67.0). Metabase dashboard is now the only remaining surface for this — retire it as part of Metabase sunset. |
-| `Inventory - Serial Quality` | **GAP** | Devices with placeholder serials ('None', 'Default string', 'System Serial Number', etc.) or shared serials across multiple devices. Operations has none of this today. Small Track: add a "data quality" tab or standalone report page. |
-| `Inventory - Source Records` | **GAP** | Enumeration of raw source records + unmatched source groups. Currently only visible from ingest logs or direct DB queries. Operations equivalent would be an admin surface for source-record inspection. |
+| `Inventory - Overview` | **RETIRED** | Owner accepted retirement; Operations Home and Devices already cover the useful intent. |
+| `Inventory - Devices` | **RETIRED** | Owner accepted retirement; Devices is the native Operations surface. |
+| `Inventory - Identity Review` | **RETIRED** | Owner accepted retirement; superseded by `identity_conflict` findings and `device_merge`. |
+| `Inventory - Serial Quality` | **RETIRED** | Owner accepted dashboard retirement without a parity gate. Generic serial evidence/data-quality remains forward Operations work, not a Metabase cutover prerequisite. |
+| `Inventory - Source Records` | **RETIRED** | Owner accepted dashboard retirement without a parity gate. The generic source-evidence administration surface from decision 0010 remains forward Operations work. |
 
-**Inventory gap summary:** 2 gaps — Serial Quality (small) and Source
-Records (medium admin surface).
+**Inventory retirement summary:** all five dashboards were explicitly accepted
+for retirement on 2026-08-03. Generic Serial Quality and Source Records remain
+Operations design requirements but no longer gate this Metabase disconnect.
 
 ---
 
@@ -102,7 +107,6 @@ rebuild delivered on parity for the operator-facing surfaces.
 piece):**
 
 - Ninja: Patch Evidence, Patch Trends, Activity Search
-- Inventory: Serial Quality, Source Records
 
 **PARTIAL (small Operations extension):**
 
@@ -117,14 +121,16 @@ piece):**
 
 - Ninja: Overall Patching Status, Device Patching Status (already
   retired in bootstrap)
-- Inventory: Identity Review (superseded in 0.68.0)
+- Inventory: all five dashboards (owner-accepted retirement on 2026-08-03)
 - AC: Debug
 
 ---
 
 ## Recommended sequencing
 
-Retirement can happen in phases, gated on Operations parity progress:
+Retirement happens by domain, gated on accepted Operations capability or an
+explicit retirement decision. No phase adds Metabase features or performance
+work:
 
 1. **Immediate retirement candidates** (no Operations work needed):
    AC Alerts, AC Today, Inventory Overview, Inventory Devices,
@@ -133,11 +139,17 @@ Retirement can happen in phases, gated on Operations parity progress:
 2. **Small partials** (bounded Operations extensions):
    AC Customers tabular view, Ninja Client Patch Review tab.
 3. **Bounded gaps** (single-slice Operations builds):
-   Inventory Serial Quality, Ninja Activity Search.
+   Ninja Activity Search.
 4. **Larger gaps** (their own tracks):
-   Ninja Patch Evidence, Ninja Patch Trends, Inventory Source Records.
+   Ninja Patch Evidence, Ninja Patch Trends.
 5. **Metabase itself** (final): once every operator-facing Metabase
-   surface has a native equivalent or been retired.
+   surface has an accepted Operations path or explicit retirement decision.
+
+Inventory is the first domain cutover. All five dashboards are retired by the
+owner's explicit decision. The same approved cutover stops Inventory bootstrap
+and refresh calls while leaving legacy relations unchanged for a bounded
+rollback window. Generic Serial Quality and Source Records continue outside
+the Metabase retirement gate.
 
 This doc is a working plan — update classifications as parity work
 lands.
@@ -162,8 +174,6 @@ lands.
   Metabase surface is deleted.
 - The audit is intentionally read-only — no Metabase writes, no
   Operations behavioral changes, no schema changes.
-- User-authored one-off Metabase questions outside the bootstrap
-  are out of scope for this audit — the parity goal is to reproduce
-  what the stack itself provides. A separate follow-up should
-  enumerate operator-authored questions from the Metabase backing
-  store if that matters.
+- The pre-cutover production audit enumerates operator-authored questions only
+  in aggregate. It must not disclose query text, result data, or customer
+  identifiers.

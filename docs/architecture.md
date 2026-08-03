@@ -68,11 +68,15 @@ Metabase as an upstream image.
 
 ## Read and write surfaces
 
-- Metabase is the read/exploration surface for dashboards.
-- Operations is the write-side workflow and control-plane surface.
-- Metabase should not become the authority for operator decisions.
-- Operations should not duplicate raw reporting when a read-only dashboard is
-  sufficient.
+- Operations is the destination for operational reporting, administration,
+  workflow, and operator decisions.
+- Metabase is a legacy surface being retired by domain under decision 0005;
+  do not add or optimize Metabase reporting pipelines.
+- New reporting reads generic current evidence, canonical state, findings, and
+  compact rollups through tenant-safe Operations read models.
+- A Metabase domain is disconnected only after its required Operations
+  capability is accepted or explicitly retired, and legacy storage remains
+  available for a bounded rollback window.
 
 ## Deployment boundary
 

@@ -41,7 +41,6 @@ from ingest.agent_compliance import ingest as agent_compliance_ingest
 from ingest.agent_compliance import review_digest
 from ingest.source_observations import is_identity_source, run_source_observations
 from ingest import source_run_queue
-from ingest.inventory.refresh import refresh_current as refresh_inventory_current
 from ingest.inventory import software as software_ingest
 from ingest.inventory import queue as software_queue
 from ingest.runlog import run_log
@@ -120,19 +119,8 @@ def run_patching_once() -> None:
         _safe("patches",        patches_ingest.run, client, snapshot_at)
         _safe("activities",     activities_ingest.run, client)
         _safe("troubleshooting_signal", refresh_device_troubleshooting_signal)
-        _refresh_inventory_current("patch ingest")
     refresh_after_collection("Ninja patch collection")
     log.info("Patch ingest run complete")
-
-
-def _refresh_inventory_current(reason: str) -> None:
-    if not settings.AGENT_COMPLIANCE_ENABLED:
-        return
-    try:
-        log.info("Refreshing Inventory current facts after %s", reason)
-        refresh_inventory_current()
-    except Exception:
-        log.exception("Inventory current refresh failed after %s", reason)
 
 
 def run_identity_resolver_once(*, refresh_current: bool = True) -> None:
@@ -259,7 +247,6 @@ def run_agent_compliance_once() -> None:
     log.info("Agent compliance run starting")
     try:
         agent_compliance_ingest.run()
-        _refresh_inventory_current("agent compliance run")
     finally:
         _AGENT_COMPLIANCE_LOCK.release()
     # Run resolver immediately after AC so new S1/SC/LMI observations get device_ids
@@ -277,7 +264,6 @@ def run_agent_compliance_evaluate_once() -> None:
     log.info("Agent compliance evaluate starting")
     try:
         agent_compliance_ingest.evaluate(send_alerts=True)
-        _refresh_inventory_current("agent compliance evaluate")
     finally:
         _AGENT_COMPLIANCE_LOCK.release()
     log.info("Agent compliance evaluate complete")
@@ -590,12 +576,27 @@ def bootstrap_metabase() -> None:
 
     log.info("Running Metabase dashboard bootstrap")
     try:
+        from ingest.inventory.metabase_retirement import retire_inventory_metabase
+
+        retired = retire_inventory_metabase(
+            url=url,
+            user=user,
+            password=password,
+        )
+        log.info(
+            "Inventory Metabase retirement complete: "
+            "dashboards=%d cards=%d collections=%d",
+            retired["dashboards"],
+            retired["cards"],
+            retired["collections"],
+        )
+    except Exception:
+        log.exception("Inventory Metabase retirement failed; other bootstrap continues")
+
+    try:
         from ingest.metabase_bootstrap import run_bootstrap
         from ingest.agent_compliance.metabase_bootstrap import (
             run_bootstrap as run_agent_compliance_bootstrap,
-        )
-        from ingest.inventory.metabase_bootstrap import (
-            run_bootstrap as run_inventory_bootstrap,
         )
         urls = run_bootstrap(
             url=url,
@@ -605,12 +606,6 @@ def bootstrap_metabase() -> None:
         )
         if settings.AGENT_COMPLIANCE_ENABLED:
             urls.extend(run_agent_compliance_bootstrap(
-                url=url,
-                user=user,
-                password=password,
-                db_name=settings.MB_BOOTSTRAP_DB_NAME,
-            ))
-            urls.extend(run_inventory_bootstrap(
                 url=url,
                 user=user,
                 password=password,

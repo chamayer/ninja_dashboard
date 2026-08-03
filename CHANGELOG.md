@@ -2,6 +2,20 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.102.0] — 2026-08-03 — Inventory Metabase retirement
+
+### Changed
+
+- Retired the five Inventory Metabase dashboards and their collection through
+  an idempotent, recoverable archive step instead of provisioning them.
+- Removed the legacy Inventory materialized-view refresh from patch ingest,
+  Agent Compliance collection, and Agent Compliance evaluation.
+
+### Operational note
+
+- This release does not delete Inventory database objects or history and does
+  not change the Patching or Agent Compliance Metabase surfaces.
+
 ## [0.101.5] — 2026-08-03 — Retired Ninja correction eligibility
 
 ### Fixed
