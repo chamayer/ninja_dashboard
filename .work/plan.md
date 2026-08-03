@@ -2,14 +2,13 @@
 
 Track: **Unified entity ecosystem — database, ingest, and admin surface**
 
-**Status: `0.101.1` DEPLOYED; `0.101.2` DERIVED-PRESENCE HOTFIX IN PROGRESS —
-Track A, the resolver repair, and stable-identity cutover remain verified.
-Release `0.101.1` / `31de068` is deployed on both remotes. Device health now
-writes current/history successfully, but the authorized full-cycle retest
-exposed a downstream presence-projection collision between the distinct
-`device` and `device-health` records linked to one canonical device. Legacy
-readers remain authoritative. Backfill, cutover, legacy-write shutdown,
-cleanup, Agent Compliance, and the wider ecosystem remain separately gated.**
+**Status: `0.101.3` HISTORICAL IDENTITY RESTORATION LOCALLY VALIDATED; COMMIT
+APPROVAL GATE — Track A, the resolver repair, stable-identity cutover, Ninja
+snapshot expansion, health shadow, and derived-presence isolation are verified
+in deployed `0.101.2` / `81a67c3`. The restoration operator is locally ready;
+no production restoration or daily backfill has run. Legacy readers remain
+authoritative. Reader cutover, legacy-write shutdown, cleanup, Agent
+Compliance, and the wider ecosystem remain separately gated.**
 
 Revised 2026-08-03.
 
@@ -1673,12 +1672,116 @@ must complete with health parity, derived refresh success, and zero HTTP 500s.
   Operations health returns `200`, its root returns the expected `302`, and no
   Operations HTTP 500s were logged during the validation window.
 
-**Next gate:** approve one logical `0.101.2` commit containing migration `0098`
-and its reviewed release/validation records. A separate push approval must
-explicitly include `origin`'s automatic rebuild/redeploy and automatic
-application of migration `0098`, followed immediately by the secondary mirror.
-The migration rebuilds four derived read models and may keep Operations
-starting for several minutes; it makes no production row updates or deletions.
-After deployment, run exactly one normal full cycle and require a completion
-marker, health parity, successful derived refresh, healthy services, and zero
-HTTP 500s before any backfill gate.
+### `0.101.2` deployment and full-cycle verification
+
+Commit `81a67c3` was pushed to `origin` and the secondary mirror. Portainer
+deployed `0.101.2`; migration `0098` applied once, the rebuilt presence view
+contains its health-namespace exclusion, and the production presence key has
+zero duplicates. Both services returned healthy with zero restarts;
+Operations health returned `200`, its root returned the expected `302`, and no
+Operations HTTP 500s were logged.
+
+Exactly one authorized full production cycle started and reached exactly one
+completion marker. Device detail and device health each completed at 5,463
+legacy writes and 5,463 generic writes; the latest health snapshot run is
+complete at 5,463 expected/written. Active generic current, open history, and
+legacy health all match at 5,463 distinct device IDs. The legacy latest-health
+view also retains 614 older inactive devices by design. Daily presence remained
+idempotent at 5,463 rows/distinct records for the UTC day. Patches completed at
+17,533 and activities at 2,421. The final derived coordinator completed;
+`device_session_current` contains 5,247 rows and was refreshed during the
+cycle. There were zero health-shadow errors, tracebacks, or recent failed
+module runs.
+
+### Daily-rollup backfill measurement
+
+The authorized aggregate-only dry run measured the complete available legacy
+range, 2026-06-02 through 2026-08-02. Across 62 completed UTC days it found
+335,647 distinct device/day rows: 330,134 mapped, 5,513 unmatched historical
+device/day occurrences, and zero ambiguous mappings. The gaps affect 260 unique
+historical devices across the first 41 days, ending 2026-07-12; the maximum was
+200 missing mappings in one day. No rows were inserted.
+
+A second dry run confirmed the continuous clean range from 2026-07-13 through
+2026-08-02: 21 completed days, 115,297 device/day rows, all 115,297 mapped,
+with zero unmatched or ambiguous mappings. This range is safe and idempotent
+to apply under the documented one-day-per-transaction process.
+
+### Historical identity gap audit
+
+Aggregate-only follow-up confirmed that all 260 unique gaps are historical-only
+Ninja devices: all 260 remain in `ninja_core.devices`, all are noncurrent with
+`missing_since` populated, and all retain a raw source record. None has a Ninja
+canonical device link, canonical device, or device-health observation. The gap
+is therefore not ambiguity or data loss; these devices disappeared before the
+generic current-evidence population and were never assigned a stable source
+record row.
+
+The complete repair should restore one inactive generic `device` source record
+per historical Ninja identity, without creating or linking a canonical device.
+Each restored identity must preserve raw provenance and stable namespace/ID,
+represent its observed interval as closed history, and leave current evidence
+inactive at the recorded withdrawal boundary. The full 62-day daily rollup can
+then reference those identities without weakening the foreign key or silently
+dropping history.
+
+### Historical identity restoration implementation
+
+Approved scope is a dry-run-by-default operator tool, focused PostgreSQL and
+unit coverage, the operational runbook, and this checkpoint. The tool selects
+only legacy Ninja device identities required by an explicit completed UTC-day
+range that lack generic `device` evidence. It must fail closed if any selected
+identity is still current, lacks raw evidence or a withdrawal boundary, or has
+a canonical Ninja device link. Identities with existing generic current
+evidence are measured and left unchanged; an orphaned history-only identity is
+a blocker rather than a state the tool silently repairs.
+
+Apply mode will create no source run, canonical device, client mapping, source
+link, candidate, or finding. It will restore one stable inactive current row
+per eligible identity using the retained latest raw `/devices-detailed`
+payload, the last real observation timestamp, and the recorded
+`missing_since` withdrawal boundary. It will also create one closed active
+history interval from the earliest retained observation to that withdrawal
+boundary. Both rows retain null canonical IDs and null snapshot-run provenance.
+Deterministic IDs and conflict checks make the operation idempotent without
+silently accepting a changed target.
+
+Validation must prove read-only default behavior, aggregate-only output,
+fail-closed blockers, no canonical side effects, current/history consistency,
+hash/projection parity with normal Ninja writes, idempotency, UTC range bounds,
+packaging, and a new aggregate-only full-range production dry run. No schema
+migration is expected.
+
+The `0.101.3` implementation and rereview are complete. The tool sets an
+explicit read-only transaction unless `--apply` is supplied; apply uses one
+serializable transaction and a scope advisory lock. It derives deterministic
+record IDs, rechecks eligibility under the lock, uses the shared raw/material
+hash contract, inserts inactive current plus closed active history, and masks
+unexpected database details from operator output. All blocker categories,
+including orphaned history-only evidence, are aggregate-only and fail closed.
+
+Focused unit coverage passed (3). The disposable PostgreSQL 16 test passed,
+covering zero-write measurement, apply shape and timestamps, VM power/material
+projection, raw/material hashes, null canonical/run provenance, daily-rollup
+referential use, idempotency, no source-link creation, and each fail-closed
+blocker category. The complete ingest image suite passed (76; six expected
+opt-in/dependency skips). Focused Ruff, formatting, compilation, and
+`git diff --check` passed. Both images built; the ingest image reports
+`0.101.3` and contains the operator. Django `check` and
+`makemigrations --check --dry-run` passed. There is no pending schema
+migration.
+
+The authorized aggregate-only production preflight over 2026-06-02 through
+2026-08-02 found 6,087 legacy identities, 5,827 with existing generic current
+evidence, and the same 260 missing identities. All 260 are eligible: source and
+collector provenance each resolve exactly once, with zero current-legacy,
+withdrawal-boundary, raw-evidence, canonical-link, history-evidence, or
+interval blockers. No production rows were written.
+
+**Current gate:** approve one logical `0.101.3` commit containing the operator,
+tests, runbook, release metadata, and this checkpoint. A later, separate push
+approval must explicitly include `origin`'s automatic rebuild/redeploy (there
+are no pending migrations), followed immediately by the secondary mirror.
+Production apply of the 260 identity restorations and all 335,647 daily rows
+remains a later, separately measured write gate. Canonical device creation,
+reader cutover, and cleanup remain out of scope.

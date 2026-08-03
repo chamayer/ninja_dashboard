@@ -91,8 +91,32 @@ authorization under the task's stated external-validation boundary.
 
 The Ninja daily-presence rollup is backfilled only after its additive schema is
 deployed and a successful current Ninja device collection has populated stable
-source records. It is not a startup migration and does not delete or alter
-legacy snapshots.
+source records. Historical-only devices that disappeared before generic
+population must first receive stable withdrawn source evidence through the
+separate restoration tool below. Neither tool is a startup migration, and
+neither deletes or alters legacy snapshots.
+
+Measure historical-only source evidence for the exact completed UTC-day range
+needed by the rollup. Omitting `--apply` is the read-only default and emits only
+aggregate counts:
+
+```sh
+docker exec operations-ingest \
+  python -m ingest.restore_ninja_historical_evidence \
+  --start-day YYYY-MM-DD --end-day YYYY-MM-DD
+```
+
+Review and separately approve the restoration write before adding `--apply`.
+Apply mode fails closed unless every missing identity is a withdrawn legacy
+Ninja device with retained raw evidence, a valid observed interval, no generic
+current/history evidence, and no canonical Ninja device link. It creates one
+inactive generic current record and one closed history interval per identity.
+It does not create or link canonical devices, fabricate snapshot runs, alter
+legacy rows, or write daily rollups. The operation is atomic and idempotent.
+
+After restoration, rerun the read-only daily-presence measurement over the
+complete range and require zero unmatched and zero ambiguous mappings before
+approving the rollup write.
 
 Measure an explicit range of completed UTC days first. Omitting `--apply` is
 the safe, read-only default and emits aggregate counts only:

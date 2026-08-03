@@ -2,6 +2,21 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.101.3] — 2026-08-03 — Historical Ninja evidence restoration
+
+### Added
+
+- Added a dry-run-by-default, completed-day-bounded operator tool that can
+  restore stable inactive generic evidence and closed material history for
+  withdrawn legacy Ninja devices without creating canonical devices, source
+  links, or snapshot-run provenance.
+
+### Operational note
+
+- Restoring historical evidence and backfilling compact daily presence remain
+  separately approved production data writes. Legacy snapshot deletion and
+  cleanup remain out of scope.
+
 ## [0.101.2] — 2026-08-03 — Health evidence presence isolation
 
 ### Fixed
