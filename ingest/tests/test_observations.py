@@ -7,7 +7,6 @@ from ingest import observations
 from ingest.backfill_observations import _stable_identity
 from ingest.observations import material_hash, material_projection
 
-
 # ── Hardening tests (ADR-0007 §Heartbeat, §SCD-2) ───────────────────────
 #
 # These tests exercise the write_current_rows control flow with a scripted
@@ -207,12 +206,14 @@ def test_new_identity_opens_first_history_version():
         # observation_runs reconciliation depends on this being idempotent.
         {
             "tenant_id": incoming["tenant_id"],
-            "source_binding_id": incoming["source_binding_id"],
-            "entity_type": incoming["entity_type"],
-            "parent_source_key": "",
-            "entity_key": incoming["entity_key"],
+            "source_instance_id": incoming["source_instance_id"],
+            "external_namespace": incoming["external_namespace"],
+            "parent_external_namespace": "",
+            "parent_external_id": "",
+            "external_id": incoming["external_id"],
             "effective_to": incoming["observed_at"],
             "last_seen_at": incoming["observed_at"],
+            "closed_by_snapshot_run_id": incoming["last_snapshot_run_id"],
         },
     ]
     history_inserts = [
@@ -225,6 +226,7 @@ def test_new_identity_opens_first_history_version():
     assert history_rows[0]["last_seen_binding_id"] == incoming["source_binding_id"]
     assert history_rows[0]["external_namespace"] == "device"
     assert history_rows[0]["external_id"] == "42"
+    assert history_rows[0]["closed_by_snapshot_run_id"] is None
 
     current_inserts = [
         call for call in cur.executemany_calls
@@ -232,7 +234,9 @@ def test_new_identity_opens_first_history_version():
     ]
     assert len(current_inserts) == 1
     current_sql, current_rows = current_inserts[0]
-    assert "source_instance_id = EXCLUDED.source_instance_id" in current_sql
+    assert "ON CONFLICT (tenant_id, source_instance_id" in current_sql
+    assert "source_binding_id = EXCLUDED.source_binding_id" in current_sql
+    assert "entity_type = EXCLUDED.entity_type" in current_sql
     assert current_rows[0]["external_namespace"] == "device"
     assert current_rows[0]["external_id"] == "42"
 
@@ -280,10 +284,10 @@ def test_compatibility_namespace_contract_fails_closed_for_unknown_source():
 
 
 def test_batch_is_sorted_by_identity_before_locking():
-    a = _base_row(entity_key="c")
-    b = _base_row(entity_key="a")
-    c = _base_row(entity_key="b")
-    cur = _MockCursor(fetch_queue=[None, None, None])
+    a = _base_row(entity_key="legacy-c", external_id="c")
+    b = _base_row(entity_key="legacy-a", external_id="a")
+    c = _base_row(entity_key="legacy-b", external_id="b")
+    cur = _MockCursor(fetch_queue=[None, None] * 3)
 
     observations.write_current_rows(cur, [a, b, c])
 
@@ -291,8 +295,31 @@ def test_batch_is_sorted_by_identity_before_locking():
         params[0] for sql, params in cur.executed
         if "pg_advisory_xact_lock" in sql
     ]
-    # Locks acquired in sorted order: a → b → c by entity_key.
+    # Locks acquired in sorted order: a → b → c by stable external ID.
     assert [key.rsplit("|", 1)[1] for key in lock_calls] == ["a", "b", "c"]
+
+
+def test_reclassification_uses_same_stable_identity_and_updates_metadata():
+    incoming = _base_row(entity_type="vm.guest", entity_key="editable-legacy-key")
+    prior_ts = datetime(2026, 7, 22, 11, 0, tzinfo=timezone.utc)
+    cur = _MockCursor(
+        fetch_queue=[(prior_ts, b"prior", True, None, None, prior_ts)]
+    )
+
+    observations.write_current_rows(cur, [incoming])
+
+    select_sql = next(
+        sql for sql, _params in cur.executed if "FOR UPDATE" in sql
+    )
+    assert "source_instance_id = %s" in select_sql
+    assert "external_namespace = %s" in select_sql
+    assert "entity_type = %s" not in select_sql
+    current_sql = next(
+        sql for sql, _rows in cur.executemany_calls
+        if "entity_observation_current" in sql
+    )
+    assert "entity_type = EXCLUDED.entity_type" in current_sql
+    assert "entity_key = EXCLUDED.entity_key" in current_sql
 
 
 def test_existing_identity_uses_row_lock_without_advisory_lock():

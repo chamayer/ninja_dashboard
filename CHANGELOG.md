@@ -2,6 +2,25 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.100.0] — 2026-08-03 — Stable observation identity cutover
+
+### Changed
+
+- Re-keyed generic current observations and open material history to the stable
+  source-instance/namespace identity, keeping transport binding and Operations
+  classification as mutable provenance and state.
+- Reconciled complete snapshots from the single current record's run marker
+  and run-start boundary instead of retaining one membership row per identity
+  per poll. Partial, failed, and overlapping older runs cannot falsely
+  withdraw newer evidence.
+- Added compact per-run identity counts/digests and durable deciding-run
+  provenance when source withdrawal closes a material-history interval.
+- Kept legacy identity constraints and columns for comparison and rollback;
+  destructive contract cleanup remains separately gated.
+- Added an optional BuildKit CA secret for secure local image builds behind
+  workstation HTTPS inspection; the CA is removed during the install layer and
+  is not required or retained by normal production images.
+
 ## [0.99.2] — 2026-08-02 — Observation lock scaling
 
 ### Fixed

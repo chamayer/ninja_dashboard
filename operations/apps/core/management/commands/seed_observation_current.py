@@ -29,8 +29,11 @@ class Command(BaseCommand):
             END
         """
         latest = f"""
-            SELECT DISTINCT ON (o.tenant_id, o.source_binding_id, o.entity_type,
-                                {identity}, o.entity_key)
+            SELECT DISTINCT ON (
+                   o.tenant_id, si.id, {external_namespace}, {identity},
+                   {identity},
+                   CASE WHEN s.name = 'ScreenConnect' AND o.entity_type = 'org'
+                        THEN 'self' ELSE o.entity_key END)
                    o.*, {identity} AS parent_source_key,
                    si.id AS source_instance_id,
                    o.source_binding_id AS last_seen_binding_id,
@@ -49,8 +52,11 @@ class Command(BaseCommand):
               JOIN operations.sources s ON s.id = si.source_id
              WHERE o.tenant_id = %(tenant_id)s
                AND o.entity_type <> 'software'
-             ORDER BY o.tenant_id, o.source_binding_id, o.entity_type,
-                      parent_source_key, o.entity_key, o.observed_at DESC, o.observation_id DESC
+             ORDER BY o.tenant_id, si.id, {external_namespace}, {identity},
+                      {identity},
+                      CASE WHEN s.name = 'ScreenConnect' AND o.entity_type = 'org'
+                           THEN 'self' ELSE o.entity_key END,
+                      o.observed_at DESC, o.observation_id DESC
         """
         with transaction.atomic(), connection.cursor() as cursor:
             cursor.execute("SET LOCAL operations.tenant_id = %s", [tenant_id])
@@ -86,16 +92,17 @@ class Command(BaseCommand):
                          'offline','hostStateChangeDate','lastActive','last_boot_time_at'])::text), 'hex'),
                        0, batch_id, collector_version, schema_version
                   FROM ({latest}) latest
-                ON CONFLICT (tenant_id, source_binding_id, entity_type,
-                             parent_source_key, entity_key)
+                ON CONFLICT (tenant_id, source_instance_id, external_namespace,
+                             parent_external_namespace, parent_external_id,
+                             external_id)
                 DO UPDATE SET
-                    source_instance_id = EXCLUDED.source_instance_id,
+                    source_binding_id = EXCLUDED.source_binding_id,
                     last_seen_binding_id = EXCLUDED.last_seen_binding_id,
-                    external_namespace = EXCLUDED.external_namespace,
-                    parent_external_namespace = EXCLUDED.parent_external_namespace,
-                    parent_external_id = EXCLUDED.parent_external_id,
-                    external_id = EXCLUDED.external_id,
+                    collector_instance_id = EXCLUDED.collector_instance_id,
                     client_id = EXCLUDED.client_id, device_id = EXCLUDED.device_id,
+                    entity_type = EXCLUDED.entity_type,
+                    parent_source_key = EXCLUDED.parent_source_key,
+                    entity_key = EXCLUDED.entity_key,
                     platform = EXCLUDED.platform, subplatform = EXCLUDED.subplatform,
                     observed_at = EXCLUDED.observed_at, last_seen_at = EXCLUDED.last_seen_at,
                     last_received_at = EXCLUDED.last_received_at, active = TRUE,

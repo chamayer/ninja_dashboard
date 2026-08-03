@@ -1,14 +1,15 @@
 # 0009 — Stable source observation identity
 
-Status: Accepted (expand and dual-write implemented; cutover pending)
+Status: Accepted (cutover implementation locally validated; deployment pending)
 Date: 2026-07-31
 
 Implementation status: release `0.99.0` deployed the additive shadow columns
-and deterministic backfill. Release `0.99.1` makes current/history and
-snapshot-run writers populate those fields while ADR-0007 remains the lock,
-conflict, reconciliation, and reader authority. Per-run membership,
-stable-key constraints, cutover, rollback rehearsal, and contract cleanup are
-not yet implemented.
+and deterministic backfill. Release `0.99.1` made current/history and
+snapshot-run writers populate those fields while ADR-0007 remained the lock,
+conflict, reconciliation, and reader authority. Release `0.100.0` is locally
+prepared and validated for stable-key constraints, run-marker reconciliation,
+and cutover. It has not been committed or deployed. Contract cleanup remains
+separately gated.
 
 ## Context
 
@@ -119,42 +120,47 @@ Classification changes are material history transitions under the same
 identity: close the prior SCD-2 interval and open a new interval. They do not
 withdraw and recreate the source record.
 
-### Snapshot runs and membership
+### Snapshot runs and observation markers
 
 `observation_snapshot_runs` is scoped by tenant, source instance, and snapshot
 scope. It records the transporting binding, `run_started_at`, completion
-status, and completion time.
+status, completion time, observed stable-identity count, and a deterministic
+digest of the stable identities accepted for that run.
 
-Every run records explicit membership using the full source identity rather
-than a mutable `last_snapshot_run_id` pointer or a hash as the authority:
+The current row is the collision-free membership authority. Every accepted
+observation advances that identity's `last_snapshot_run_id`, collection
+timestamps, and transport provenance. It does not append a separate membership
+row. This keeps one current row per stable source identity instead of
+recreating poll-driven snapshot growth in another table.
 
-```text
-observation_snapshot_membership(
-    tenant_id, run_id,
-    external_namespace,
-    parent_external_namespace, parent_external_id,
-    external_id
-)
-```
-
-The primary key contains all listed columns. A digest may be added as a lookup
-optimization, but never replaces the collision-free key.
+The run digest is compact audit and comparison evidence. It can prove that two
+run membership sets differ, but it cannot identify a missing member and is
+never used as reconciliation authority. Exact historical run-member replay is
+not a requirement of this system; introducing it later requires a separately
+sized and approved design.
 
 ### Reconciliation rules
 
-1. Collection may overlap, but reconciliation serializes with a transaction
-   advisory lock on `(tenant_id, source_instance_id, snapshot_scope)`.
+1. Remote API fetching may overlap, but the database application transaction
+   takes one advisory lock on
+   `(tenant_id, source_instance_id, snapshot_scope)` in `begin_run` and holds
+   it through current/history writes and reconciliation. Different source
+   scopes remain concurrent; uncommitted same-scope evidence cannot race an
+   absence decision.
 2. Only a completed, explicitly complete snapshot may withdraw evidence.
    Partial, failed, or abandoned runs withdraw nothing.
-3. Run `R` may withdraw a current row only when the identity is absent from
-   `R` and the row's `last_received_at` is earlier than `R.run_started_at`.
-   Evidence received after the run began outranks that run's absence claim.
-4. If overlapping complete runs disagree about membership, disputed rows are
-   preserved and a finding records both runs. The system does not guess.
-5. The next non-overlapping complete run may confirm or withdraw disputed rows
-   normally and automatically resolve the finding.
-6. Withdrawal records both the deciding run and the transporting binding.
-7. The existing per-identity advisory lock and out-of-order `observed_at`
+3. Run `R` may withdraw an active current row only when
+   `last_snapshot_run_id` differs from `R.run_id` and the row's
+   `last_received_at` is earlier than `R.run_started_at`. Evidence received at
+   or after the run began outranks that run's absence claim.
+4. An older fetched run therefore cannot withdraw evidence accepted by a newer
+   applied run. If it acquires the scope lock later, out-of-order observation
+   guards and the run-start boundary preserve the newer state.
+5. Withdrawal marks the current source evidence inactive; it never deletes
+   the current row or canonical entity. It closes the open material-history
+   interval and records the deciding run and transporting binding. Reappearance
+   reactivates the same current identity and opens a new history interval.
+6. The existing per-identity advisory lock and out-of-order `observed_at`
    guard remain, re-keyed to the stable tuple.
 
 ### Migration
@@ -167,7 +173,8 @@ cutover, then contract.
 - Do not guess unresolved namespaces or parent scope; retain the legacy row and
   raise a finding.
 - Rebuild unique constraints, lock keys, upserts, history close/open,
-  reconciliation, snapshot runs, retention, RLS, seeds, and dependent views.
+  reconciliation, snapshot-run summaries, retention, RLS, seeds, and
+  dependent views.
 - Retain legacy identity columns until every row is accounted for and rollback
   has been rehearsed. Contract work requires separate approval.
 
@@ -177,8 +184,10 @@ cutover, then contract.
   identity churn.
 - Source-side reclassification preserves history continuity.
 - Observation identity and generic source-link identity share one definition.
-- Explicit run membership makes absence decisions auditable and concurrency
-  safe.
+- Per-current-row run markers plus the run boundary make absence decisions
+  concurrency safe without poll-driven historical growth.
+- Compact run counts/digests and run-linked history transitions preserve the
+  audit needed to verify collections and explain withdrawals.
 - Full identity columns avoid relying on probabilistic hash uniqueness.
 
 ## Consequences
@@ -190,8 +199,8 @@ cutover, then contract.
 - Material hashes include classification, normalized claims, relays, and
   observed relationships when changes to them must open history.
 - Tests cover collector replacement, concurrent bindings, reclassification,
-  parent-scoped IDs, partial/failed snapshots, out-of-order writes, overlapping
-  disagreement, and later self-healing.
+  parent-scoped IDs, partial/failed snapshots, out-of-order writes,
+  overlapping runs, conservative preservation, and later withdrawal.
 
 **Prohibited**
 

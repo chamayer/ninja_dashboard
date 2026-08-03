@@ -21,10 +21,12 @@ class Command(BaseCommand):
                AND NOT EXISTS (
                    SELECT 1 FROM operations.entity_observation_history h
                     WHERE h.tenant_id = c.tenant_id
-                      AND h.source_binding_id = c.source_binding_id
-                      AND h.entity_type = c.entity_type
-                      AND h.parent_source_key = c.parent_source_key
-                      AND h.entity_key = c.entity_key AND h.effective_to IS NULL
+                      AND h.source_instance_id = c.source_instance_id
+                      AND h.external_namespace = c.external_namespace
+                      AND h.parent_external_namespace = c.parent_external_namespace
+                      AND h.parent_external_id = c.parent_external_id
+                      AND h.external_id = c.external_id
+                      AND h.effective_to IS NULL
                )
         """
         software_count_sql = """
@@ -78,10 +80,12 @@ class Command(BaseCommand):
                    AND NOT EXISTS (
                        SELECT 1 FROM operations.entity_observation_history h
                         WHERE h.tenant_id = c.tenant_id
-                          AND h.source_binding_id = c.source_binding_id
-                          AND h.entity_type = c.entity_type
-                          AND h.parent_source_key = c.parent_source_key
-                          AND h.entity_key = c.entity_key AND h.effective_to IS NULL
+                          AND h.source_instance_id = c.source_instance_id
+                          AND h.external_namespace = c.external_namespace
+                          AND h.parent_external_namespace = c.parent_external_namespace
+                          AND h.parent_external_id = c.parent_external_id
+                          AND h.external_id = c.external_id
+                          AND h.effective_to IS NULL
                    )
                 """,
                 params,

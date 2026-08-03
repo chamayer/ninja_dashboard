@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.7
 # =============================================================================
 # ninja-dashboard / ingest
 # Python service: pulls NinjaRMM v2 API on a schedule, writes Postgres.
@@ -11,7 +12,21 @@ WORKDIR /app
 
 # Python deps first (layer caching — rarely changes)
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN --mount=type=secret,id=workstation_ca \
+    set -eu; \
+    local_ca=/usr/local/share/ca-certificates/workstation-build-ca.crt; \
+    if [ -f /run/secrets/workstation_ca ]; then \
+        openssl x509 -in /run/secrets/workstation_ca -noout -checkend 0; \
+        openssl x509 -in /run/secrets/workstation_ca -noout -text \
+            | grep -q 'CA:TRUE'; \
+        cp /run/secrets/workstation_ca "$local_ca"; \
+        update-ca-certificates >/dev/null; \
+    fi; \
+    pip install --no-cache-dir -r requirements.txt; \
+    if [ -f "$local_ca" ]; then \
+        rm -f "$local_ca"; \
+        update-ca-certificates >/dev/null; \
+    fi
 
 # App code + SQL migrations (everything else excluded by .dockerignore)
 COPY ingest/ ./ingest/

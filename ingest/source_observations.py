@@ -35,8 +35,6 @@ from typing import Any
 from psycopg.types.json import Json
 
 from ingest import db
-from ingest.observations import write_current_rows
-from ingest.observation_runs import begin_run, complete_run, reconcile_complete_run
 from ingest.connectors import hudu, logmein, screenconnect, sentinelone
 from ingest.identity import identity_entity_types
 from ingest.identity.fast_path import resolve_device_fast
@@ -46,6 +44,8 @@ from ingest.normalize import (
     normalize_org_name,
     os_family,
 )
+from ingest.observation_runs import begin_run, complete_run, reconcile_complete_run
+from ingest.observations import write_current_rows
 from ingest.sources import SourceConfig
 
 log = logging.getLogger(__name__)
@@ -499,8 +499,8 @@ def _write_observations(
             })
 
         written = 0
+        current_rows = []
         if obs_rows:
-            current_rows = []
             for row in obs_rows:
                 current = dict(row)
                 current["parent_source_key"] = ""
@@ -521,6 +521,7 @@ def _write_observations(
             run_id,
             written,
             is_complete_snapshot=is_complete_snapshot,
+            identity_rows=current_rows,
         )
         if is_complete_snapshot:
             reconcile_complete_run(cur, run_id)

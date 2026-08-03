@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.7
 # =============================================================================
 # ninja-dashboard / operations
 # Django service: write-side operator console (decisions, merge review,
@@ -21,8 +22,22 @@ WORKDIR /app
 
 # ── Python deps (own layer — rarely changes) ─────────────────────────
 COPY operations/pyproject.toml operations/README.md ./
-RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir .
+RUN --mount=type=secret,id=workstation_ca \
+    set -eu; \
+    local_ca=/usr/local/share/ca-certificates/workstation-build-ca.crt; \
+    if [ -f /run/secrets/workstation_ca ]; then \
+        openssl x509 -in /run/secrets/workstation_ca -noout -checkend 0; \
+        openssl x509 -in /run/secrets/workstation_ca -noout -text \
+            | grep -q 'CA:TRUE'; \
+        cp /run/secrets/workstation_ca "$local_ca"; \
+        update-ca-certificates >/dev/null; \
+    fi; \
+    pip install --no-cache-dir --upgrade pip; \
+    pip install --no-cache-dir .; \
+    if [ -f "$local_ca" ]; then \
+        rm -f "$local_ca"; \
+        update-ca-certificates >/dev/null; \
+    fi
 
 # ── App source ───────────────────────────────────────────────────────
 COPY operations/config/    ./config/

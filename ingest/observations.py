@@ -3,7 +3,7 @@
 Connector-specific code supplies already-normalized row dictionaries.  Keeping
 material hashing here ensures all writers use the same policy and hash version.
 
-Correctness contract (per ADR-0007 §Heartbeat, §SCD-2, §Absence):
+Correctness contract (per ADR-0007 §Heartbeat/§SCD-2 and ADR-0009):
 
 - Existing identities serialize on their current-row lock. Brand-new
   identities take a per-tuple advisory lock and then re-read because
@@ -18,16 +18,17 @@ Correctness contract (per ADR-0007 §Heartbeat, §SCD-2, §Absence):
 - The closing `_history.last_seen_at` on a material transition is the prior
   current row's last confirmed observation time, not the incoming row's
   `last_seen_at` (which is the *new* state's confirmation).
-- ADR-0009 identity fields are dual-written and validated, but the deployed
-  ADR-0007 tuple remains the lock, lookup, conflict, and reconciliation key
-  until the separately gated cutover.
+- Locking, lookup, conflict handling, and history use ADR-0009's stable source
+  identity. Transport binding and Operations classification remain mutable
+  provenance/state.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
-from typing import Any, Iterable
+from collections.abc import Iterable
+from typing import Any
 
 from psycopg.types.json import Json
 
@@ -51,16 +52,14 @@ _CURRENT_COLUMNS: tuple[str, ...] = (
     "hash_algorithm_version", "batch_id", "collector_version", "schema_version",
 )
 
-# Columns updated with EXCLUDED.c on conflict. Matches the pre-hardening
-# update set minus (a) the 5 identity keys — carried by ON CONFLICT — and
-# (b) client_id/device_id, which use COALESCE to preserve post-hoc resolver
-# writes against fresh connector NULLs. observation_id and
-# collector_instance_id are intentionally excluded so per-identity primary
-# key stays stable across heartbeats (identity_candidates FK depends on it).
+# Columns updated with EXCLUDED.c on conflict. Stable identity columns are
+# carried by ON CONFLICT. client_id/device_id use COALESCE to preserve post-hoc
+# resolver writes against fresh connector NULLs. observation_id remains stable
+# across heartbeats because identity_candidates depends on it.
 _CURRENT_UPDATE_COLUMNS: tuple[str, ...] = (
-    "source_instance_id", "last_seen_binding_id", "external_namespace",
-    "parent_external_namespace", "parent_external_id", "external_id",
-    "platform", "subplatform", "observed_at", "last_seen_at",
+    "source_binding_id", "last_seen_binding_id", "collector_instance_id",
+    "entity_type", "parent_source_key", "entity_key", "platform",
+    "subplatform", "observed_at", "last_seen_at",
     "last_received_at", "active", "withdrawn_at", "snapshot_scope",
     "last_snapshot_run_id", "raw_data", "canonical_data", "raw_hash",
     "material_hash", "hash_algorithm_version", "batch_id",
@@ -125,17 +124,14 @@ def prepare_batch(rows: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _identity_tuple(row: dict[str, Any]) -> tuple:
-    """Deployed ADR-0007 identity tuple used for sort and locking.
-
-    parent_source_key is normalized to '' for top-level entities so tuples
-    sort deterministically alongside child-entity rows.
-    """
+    """ADR-0009 stable source identity used for sort and locking."""
     return (
         row["tenant_id"],
-        str(row["source_binding_id"]),
-        row["entity_type"],
-        row.get("parent_source_key") or "",
-        row["entity_key"],
+        str(row["source_instance_id"]),
+        row["external_namespace"],
+        row["parent_external_namespace"],
+        row["parent_external_id"],
+        row["external_id"],
     )
 
 
@@ -155,13 +151,14 @@ def _select_current_for_update(cur: Any, row: dict[str, Any]) -> tuple | None:
         SELECT observed_at, material_hash, active, client_id, device_id,
                last_seen_at
           FROM operations.entity_observation_current
-         WHERE tenant_id = %s AND source_binding_id = %s
-           AND entity_type = %s AND parent_source_key = %s
-           AND entity_key = %s
+         WHERE tenant_id = %s AND source_instance_id = %s
+           AND external_namespace = %s
+           AND parent_external_namespace = %s
+           AND parent_external_id = %s
+           AND external_id = %s
          FOR UPDATE
         """,
-        (row["tenant_id"], row["source_binding_id"], row["entity_type"],
-         row["parent_source_key"], row["entity_key"]),
+        _identity_tuple(row),
     )
     return cur.fetchone()
 
@@ -294,8 +291,9 @@ def _upsert_current(cur: Any, rows: list[dict[str, Any]]) -> int:
     stmt = (
         f"INSERT INTO operations.entity_observation_current ({cols_sql}) "
         f"VALUES ({placeholders_sql}) "
-        "ON CONFLICT (tenant_id, source_binding_id, entity_type, "
-        "parent_source_key, entity_key) DO UPDATE SET "
+        "ON CONFLICT (tenant_id, source_instance_id, external_namespace, "
+        "parent_external_namespace, parent_external_id, external_id) "
+        "DO UPDATE SET "
         f"{update_sql} "
         "WHERE operations.entity_observation_current.observed_at "
         "< EXCLUDED.observed_at"
@@ -321,28 +319,31 @@ def write_history_changes(cur: Any, rows: Iterable[dict[str, Any]]) -> int:
     if not prepared:
         return 0
     for row in prepared:
-        identity = (
-            row["tenant_id"], row["source_binding_id"], row["entity_type"],
-            row.get("parent_source_key") or "", row["entity_key"],
-        )
         prior_last_seen = row.get("_prior_last_seen_at") or row["observed_at"]
         cur.execute(
             """
             UPDATE operations.entity_observation_history
                SET effective_to = %(effective_to)s,
-                   last_seen_at = %(last_seen_at)s
+                   last_seen_at = %(last_seen_at)s,
+                   closed_by_snapshot_run_id = %(closed_by_snapshot_run_id)s
              WHERE tenant_id = %(tenant_id)s
-               AND source_binding_id = %(source_binding_id)s
-               AND entity_type = %(entity_type)s
-               AND parent_source_key = %(parent_source_key)s
-               AND entity_key = %(entity_key)s
+               AND source_instance_id = %(source_instance_id)s
+               AND external_namespace = %(external_namespace)s
+               AND parent_external_namespace = %(parent_external_namespace)s
+               AND parent_external_id = %(parent_external_id)s
+               AND external_id = %(external_id)s
                AND effective_to IS NULL
             """,
             {
-                "tenant_id": identity[0], "source_binding_id": identity[1],
-                "entity_type": identity[2], "parent_source_key": identity[3],
-                "entity_key": identity[4], "effective_to": row["observed_at"],
+                "tenant_id": row["tenant_id"],
+                "source_instance_id": row["source_instance_id"],
+                "external_namespace": row["external_namespace"],
+                "parent_external_namespace": row["parent_external_namespace"],
+                "parent_external_id": row["parent_external_id"],
+                "external_id": row["external_id"],
+                "effective_to": row["observed_at"],
                 "last_seen_at": prior_last_seen,
+                "closed_by_snapshot_run_id": row.get("last_snapshot_run_id"),
             },
         )
     history_rows = [{
@@ -372,6 +373,7 @@ def write_history_changes(cur: Any, rows: Iterable[dict[str, Any]]) -> int:
         "material_hash": row["material_hash"],
         "hash_algorithm_version": row["hash_algorithm_version"],
         "active": row.get("active", True),
+        "closed_by_snapshot_run_id": None,
     } for row in prepared]
     # Bespoke insert with ON CONFLICT DO NOTHING on the identity partial
     # unique index. Keeps history append-only.

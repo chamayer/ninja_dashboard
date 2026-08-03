@@ -1032,8 +1032,6 @@ class EntityObservationCurrent(TenantScopedModel):
     source_instance = models.ForeignKey(
         SourceInstance,
         on_delete=models.PROTECT,
-        null=True,
-        blank=True,
         related_name="stable_current_observations",
     )
     last_seen_binding = models.ForeignKey(
@@ -1078,6 +1076,31 @@ class EntityObservationCurrent(TenantScopedModel):
                 fields=("tenant", "source_binding", "entity_type", "parent_source_key", "entity_key"),
                 name="uq_obs_current_identity",
             ),
+            models.UniqueConstraint(
+                fields=(
+                    "tenant",
+                    "source_instance",
+                    "external_namespace",
+                    "parent_external_namespace",
+                    "parent_external_id",
+                    "external_id",
+                ),
+                name="uq_obs_current_stable_identity",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    ~Q(external_namespace="")
+                    & ~Q(external_id="")
+                    & (
+                        (Q(parent_external_namespace="") & Q(parent_external_id=""))
+                        | (
+                            ~Q(parent_external_namespace="")
+                            & ~Q(parent_external_id="")
+                        )
+                    )
+                ),
+                name="ck_obs_current_stable_identity",
+            ),
         )
         indexes = (
             models.Index(fields=("tenant", "active", "entity_type"), name="idx_obs_current_active"),
@@ -1093,8 +1116,6 @@ class EntityObservationHistory(TenantScopedModel):
     source_instance = models.ForeignKey(
         SourceInstance,
         on_delete=models.PROTECT,
-        null=True,
-        blank=True,
         related_name="stable_history_observations",
     )
     last_seen_binding = models.ForeignKey(
@@ -1123,6 +1144,13 @@ class EntityObservationHistory(TenantScopedModel):
     material_hash = models.BinaryField()
     hash_algorithm_version = models.PositiveIntegerField(default=1)
     active = models.BooleanField(default=True)
+    closed_by_snapshot_run = models.ForeignKey(
+        "ObservationSnapshotRun",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="closed_observation_history",
+    )
 
     class Meta:
         db_table = "entity_observation_history"
@@ -1136,6 +1164,32 @@ class EntityObservationHistory(TenantScopedModel):
                 condition=Q(effective_to__isnull=True),
                 name="uq_obs_hist_open_identity",
             ),
+            models.UniqueConstraint(
+                fields=(
+                    "tenant",
+                    "source_instance",
+                    "external_namespace",
+                    "parent_external_namespace",
+                    "parent_external_id",
+                    "external_id",
+                ),
+                condition=Q(effective_to__isnull=True),
+                name="uq_obs_hist_open_stable_identity",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    ~Q(external_namespace="")
+                    & ~Q(external_id="")
+                    & (
+                        (Q(parent_external_namespace="") & Q(parent_external_id=""))
+                        | (
+                            ~Q(parent_external_namespace="")
+                            & ~Q(parent_external_id="")
+                        )
+                    )
+                ),
+                name="ck_obs_hist_stable_identity",
+            ),
         )
 
 
@@ -1147,13 +1201,11 @@ class ObservationSnapshotRun(TenantScopedModel):
     source_instance = models.ForeignKey(
         SourceInstance,
         on_delete=models.PROTECT,
-        null=True,
-        blank=True,
         related_name="observation_snapshot_runs",
     )
     snapshot_scope = models.CharField(max_length=120)
     snapshot_at = models.DateTimeField()
-    run_started_at = models.DateTimeField(null=True, blank=True)
+    run_started_at = models.DateTimeField()
     is_complete_snapshot = models.BooleanField(null=True, blank=True)
     status = models.CharField(max_length=20, default="started")
     expected_rows = models.PositiveIntegerField(default=0)
@@ -1161,6 +1213,8 @@ class ObservationSnapshotRun(TenantScopedModel):
     failed_rows = models.PositiveIntegerField(default=0)
     error = models.TextField(blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
+    observed_identity_count = models.PositiveIntegerField(default=0)
+    observed_identity_digest = models.BinaryField(null=True, blank=True)
 
     class Meta:
         db_table = "observation_snapshot_runs"
@@ -1168,6 +1222,10 @@ class ObservationSnapshotRun(TenantScopedModel):
             models.UniqueConstraint(
                 fields=("tenant", "source_binding", "snapshot_scope", "snapshot_at"),
                 name="uq_obs_snapshot_run_boundary",
+            ),
+            models.UniqueConstraint(
+                fields=("tenant", "source_instance", "snapshot_scope", "snapshot_at"),
+                name="uq_obs_snapshot_stable_boundary",
             ),
         )
         indexes = (

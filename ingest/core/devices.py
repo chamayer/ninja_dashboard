@@ -24,8 +24,6 @@ import psycopg
 from psycopg.types.json import Json
 
 from ingest import db
-from ingest.observations import write_current_rows
-from ingest.observation_runs import begin_run, complete_run, reconcile_complete_run
 from ingest.ninja_client import NinjaClient
 from ingest.normalize import (
     entity_type_for_node_class,
@@ -34,6 +32,8 @@ from ingest.normalize import (
     normalize_org_name,
     os_family,
 )
+from ingest.observation_runs import begin_run, complete_run, reconcile_complete_run
+from ingest.observations import write_current_rows
 from ingest.runlog import run_log
 from ingest.util import ninja_epoch_to_dt
 
@@ -606,8 +606,9 @@ def _write_ninja_observations(
                     "schema_version":        1,
                 })
 
+            current_rows = []
+            written = 0
             if obs_rows:
-                current_rows = []
                 for row in obs_rows:
                     current = dict(row)
                     current["parent_source_key"] = ""
@@ -622,8 +623,14 @@ def _write_ninja_observations(
                     ).digest()
                     current_rows.append(current)
                 written = write_current_rows(cur, current_rows)
-                complete_run(cur, run_id, written, is_complete_snapshot=True)
-                reconcile_complete_run(cur, run_id)
+            complete_run(
+                cur,
+                run_id,
+                written,
+                is_complete_snapshot=True,
+                identity_rows=current_rows,
+            )
+            reconcile_complete_run(cur, run_id)
             if unknown_classes:
                 # Never silently dropped — surfaced here, admin finding in E2.
                 log.warning(
