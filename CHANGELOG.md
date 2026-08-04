@@ -2,6 +2,14 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.105.1] — 2026-08-04 — Attribute-claim migration startup fix
+
+### Fixed
+
+- Forced deferred tenant-constraint checks after authority-policy seeding and
+  before table-level RLS/ownership DDL, preventing Operations restart loops
+  while applying migration 0103.
+
 ## [0.105.0] — 2026-08-04 — Generic attribute delta claims
 
 ### Added

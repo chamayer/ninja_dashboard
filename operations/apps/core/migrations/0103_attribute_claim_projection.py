@@ -314,6 +314,11 @@ ON CONFLICT (
     tenant_id, source_instance_id, native_record_type, attribute_definition_id
 ) DO NOTHING;
 
+-- The new tenant-safe foreign keys are initially deferred. Validate their
+-- seed writes before the following table-level RLS/ownership DDL so PostgreSQL
+-- has no pending constraint-trigger events during ALTER TABLE.
+SET CONSTRAINTS ALL IMMEDIATE;
+
 ALTER TABLE operations.identity_authority_policies ENABLE ROW LEVEL SECURITY;
 ALTER TABLE operations.identity_authority_policies FORCE ROW LEVEL SECURITY;
 ALTER TABLE operations.attribute_authority_policies ENABLE ROW LEVEL SECURITY;

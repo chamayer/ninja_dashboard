@@ -2,7 +2,7 @@
 
 Track: **ADR-0010 generic ecosystem completion — Phase E2**
 
-**Status:** E1 deployed; E2 `0.105.0` release candidate ready for deployment.
+**Status:** E1 deployed; E2 `0.105.1` corrective release ready for deployment.
 
 ## Goal
 
@@ -61,12 +61,15 @@ effective readers.
 
 ## Checkpoint
 
-`0.104.0` / `5b2e873` is deployed on both remotes. E2 is implemented locally
-as the `0.105.0` release candidate: additive definitions/mappings, independent
+`0.104.0` / `5b2e873` was the last healthy deployed release. E2 is implemented:
+additive definitions/mappings, independent
 authority policies, typed current/per-member history, restricted/count-only
 unmapped classification, redacted evidence, bounded post-migration projection,
 and guarded 90-day retention. Basic Python, Django, migration-drift, retention,
 and diff checks pass; four Ruff findings are pre-existing observation models.
-The user waived further local Docker rehearsal. Next: commit/push, trigger
+The first `0.105.0` startup applied migration 0102, then 0103 rolled back when
+PostgreSQL rejected table DDL with deferred seed constraint triggers pending.
+Corrective `0.105.1` forces those checks before RLS/ownership DDL. The user
+waived further local Docker rehearsal. Next: commit/push, trigger
 Portainer immediately, and verify migrations, aggregate backfill/invariants,
 second-pass no-op, health/version, and zero HTTP 500s before starting E3.
