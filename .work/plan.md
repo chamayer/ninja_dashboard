@@ -90,7 +90,7 @@ Track: **ADR-0010 generic entity, claim, relationship, and admin completion**
   admin visibility. Apply RLS, tenant-consistent uniqueness, least-privilege
   grants, and additive rollback-safe constraints.
 
-### E2 — Attribute definitions and delta claims (`0.105.3`, corrective deployment pending)
+### E2 — Attribute definitions and delta claims (`0.105.4`, corrective deployment pending)
 
 - Add versioned attribute definitions, source-field mappings, identity/
   attribute authority policies, typed current/history claims, and withheld
@@ -180,7 +180,11 @@ accelerated projector call wrote no claims and exposed unqualified
 Corrective `0.105.2` proved that `pgcrypto` is not installed. Production
 catalog measurement confirmed PostgreSQL's built-in
 `pg_catalog.sha256(bytea)` is available; corrective `0.105.3` uses it without
-adding a dependency and replaces the projector through migration 0105.
+adding a dependency and replaces the projector through migration 0105. The
+full backfill then completed at 30,097 source records and 266,113 current/open
+claim intervals. The immediate no-op exposed avoidable full-JSON re-hashing;
+corrective `0.105.4` reuses the stored source `material_hash` plus version/link
+metadata and replaces the projector through migration 0106.
 Definitions/mappings and independent authority policy are deployment-controlled;
 unmapped fields are restricted/count-only; current claims and per-member SCD-2
 history are projected in separately committed bounded batches after migration;

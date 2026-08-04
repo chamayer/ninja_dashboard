@@ -456,40 +456,12 @@ BEGIN
                link.id AS entity_source_link_id, link.entity_id,
                COALESCE(link.entity_class_id, entity_type.entity_class_id)
                    AS classified_entity_class_id,
-               pg_catalog.sha256(convert_to(
-                   (COALESCE(o.canonical_data, '{}'::jsonb)
-                       - 'last_seen_at' - 'last_contact_at')::text
-                   || '|raw-keys:' || COALESCE((
-                       SELECT string_agg(raw_key, ',' ORDER BY raw_key)
-                       FROM jsonb_object_keys(COALESCE(o.raw_data, '{}'::jsonb))
-                           AS raw_keys(raw_key)
-                   ), '')
-                   || '|mapped-raw:' || COALESCE((
-                       SELECT jsonb_object_agg(
-                           selected.source_field,
-                           o.raw_data -> selected.source_field
-                           ORDER BY selected.source_field
-                       )::text
-                       FROM (
-                           SELECT DISTINCT ON (mapping.source_field)
-                                  mapping.source_field
-                           FROM source_field_mappings mapping
-                           WHERE mapping.enabled
-                             AND mapping.document_kind = 'raw'
-                             AND (mapping.source_id IS NULL
-                                  OR mapping.source_id = source_instance.source_id)
-                             AND (mapping.external_namespace = ''
-                                  OR mapping.external_namespace = o.external_namespace)
-                             AND (mapping.native_record_type = ''
-                                  OR mapping.native_record_type = o.entity_type)
-                           ORDER BY mapping.source_field,
-                                    (mapping.source_id IS NOT NULL) DESC,
-                                    (mapping.external_namespace <> '') DESC,
-                                    (mapping.native_record_type <> '') DESC,
-                                    mapping.mapping_version DESC, mapping.id DESC
-                       ) selected
-                       WHERE o.raw_data ? selected.source_field
-                   ), '{}')
+               pg_catalog.sha256(
+                   o.material_hash || convert_to(
+                   '|hash-algorithm:' || o.hash_algorithm_version::text
+                   || '|material-projection:'
+                   || o.material_projection_version::text
+                   || '|source-schema:' || o.schema_version::text
                    || '|active:' || o.active::text
                    || '|link:' || COALESCE(link.id::text, '')
                    || '|entity:' || COALESCE(link.entity_id::text, '')

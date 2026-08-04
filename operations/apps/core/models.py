@@ -1435,7 +1435,10 @@ class AttributeDefinition(models.Model):
 
 
 class SourceFieldMapping(models.Model):
-    """Deployment-controlled map from one source field to one definition."""
+    """Deployment-controlled map from one source field to one definition.
+
+    Raw mappings require that field in the source material-hash projection.
+    """
 
     class DocumentKind(models.TextChoices):
         CANONICAL = "canonical", "Normalized source record"

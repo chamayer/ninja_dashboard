@@ -2,6 +2,14 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.105.4] — 2026-08-04 — Fast claim no-op detection
+
+### Fixed
+
+- Reused the generic source record's stored material hash and version metadata
+  for claim projection change detection, avoiding full JSON re-hashing across
+  every source record at each collection boundary.
+
 ## [0.105.3] — 2026-08-04 — Built-in attribute hashing
 
 ### Fixed

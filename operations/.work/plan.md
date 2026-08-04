@@ -2,7 +2,7 @@
 
 Track: **ADR-0010 generic ecosystem completion — Phase E2**
 
-**Status:** E1 deployed; E2 `0.105.3` corrective release ready for deployment.
+**Status:** E1 deployed; E2 `0.105.4` corrective release ready for deployment.
 
 ## Goal
 
@@ -75,7 +75,11 @@ unqualified `pgcrypto.digest` under the restricted security-definer search
 path. Corrective `0.105.2` confirmed that `pgcrypto` is absent. Production
 catalog measurement confirmed built-in `pg_catalog.sha256(bytea)` is present;
 corrective `0.105.3` uses it without a dependency and replaces the projector in
-migration 0105. The user waived further local Docker rehearsal. Next:
+migration 0105. The full backfill completed at 30,097 source records and
+266,113 current/open claim intervals. The immediate no-op exposed avoidable
+full-JSON re-hashing; corrective `0.105.4` uses the source `material_hash` plus
+version/link metadata and replaces the projector in migration 0106. The user
+waived further local Docker rehearsal. Next:
 commit/push, trigger
 Portainer immediately, and verify migrations, aggregate backfill/invariants,
 second-pass no-op, health/version, and zero HTTP 500s before starting E3.

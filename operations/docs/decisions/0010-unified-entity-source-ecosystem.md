@@ -314,6 +314,13 @@ are per value. JSONB is permitted only for raw payloads and definitions
 explicitly marked as structured detail; it is not the canonical attribute
 store.
 
+Claim no-op detection reuses the source record's versioned `material_hash` plus
+attachment and claim-contract metadata; it does not re-hash full JSON at every
+collection boundary. A deployment-controlled mapping that deliberately reads a
+raw field is valid only when that field participates in the connector's
+material projection. Adding such a mapping therefore requires the associated
+material/claim contract version update.
+
 Operator attribute decisions are separate audited rows. Single-value decisions
 support replace/clear; set decisions support replace/add/remove. A rebuildable
 `entity_attribute_effective_current` projection is the **sole authority for
