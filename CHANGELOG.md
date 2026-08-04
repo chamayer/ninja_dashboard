@@ -2,6 +2,14 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.107.1] — 2026-08-04 — Relationship migration startup fix
+
+### Fixed
+
+- Forced the relationship-type seed's deferred entity-class constraints before
+  later ownership DDL, preventing Operations restart loops while applying
+  migration 0111.
+
 ## [0.107.0] — 2026-08-04 — Generic relationships, candidates, and source events
 
 ### Added

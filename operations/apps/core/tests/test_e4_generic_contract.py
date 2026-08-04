@@ -32,6 +32,7 @@ def test_relationship_decisions_use_generic_audit_and_forced_rls() -> None:
     assert "GRANT SELECT, INSERT, UPDATE ON operations.source_events" in migration.SECURITY_SQL
     assert "operations.source_events TO operations_app" not in migration.SECURITY_SQL
     assert "source event evidence is immutable" in migration.TRIGGER_SQL
+    assert "SET CONSTRAINTS ALL IMMEDIATE" in migration.SEED_SQL
 
 
 def test_candidate_projection_uses_complete_stable_identity_and_material_reopen() -> None:

@@ -2,7 +2,7 @@
 
 Track: **ADR-0010 generic ecosystem completion — Phase E4**
 
-**Status:** E1-E3 deployed; E4 implemented and locally validated for `0.107.0`.
+**Status:** E1-E3 deployed; E4 corrective `0.107.1` active.
 
 ## Goal
 
@@ -96,3 +96,10 @@ contract tests, and diff checks pass. Next: commit, push `origin`, immediately
 redeploy through Portainer, push the mirror, then validate migrations, aggregate
 candidate/relationship/event/RLS state, no-op behavior, version/health, and
 current HTTP-500/traceback/error counts.
+
+The first `0.107.0` deployment applied 0110, then 0111 rolled back because the
+relationship-type seed left initially deferred entity-class foreign keys
+pending before ownership DDL. No E4 data or consumer cutover occurred.
+Corrective `0.107.1` adds `SET CONSTRAINTS ALL IMMEDIATE` directly after that
+seed plus a focused regression assertion. Next: validate, commit, push/redeploy/
+mirror immediately, then complete the E4 aggregate validation.

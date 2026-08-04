@@ -238,7 +238,7 @@ Version is `0.106.1`; Postgres, ingest, Metabase, and Operations are healthy;
 root/health return 302/200; current HTTP 500, traceback, ERROR, and CRITICAL
 counts are zero. Both remotes match `7f07124`.
 
-E4 is implemented locally for release `0.107.0`: deployment-controlled
+E4 was implemented for release `0.107.0`: deployment-controlled
 relationship types and authority; unresolved relationship evidence; audited
 include/exclude decisions; dirty-key effective edges/support; generic candidate
 create/reopen/attach projection and atomic attach/reject services; immutable
@@ -255,3 +255,10 @@ Ruff, nine contract tests, and diff checks pass; no local Docker rehearsal was
 run. Next: commit the scoped E4 release, push both remotes with immediate
 Portainer redeploy, then verify migrations, bounded candidate/no-op behavior,
 aggregate relationship/event/RLS invariants, health, and current error counts.
+
+The first `0.107.0` deployment applied migration 0110, then 0111 rolled back
+because the relationship-type seed left initially deferred entity-class foreign
+keys pending before ownership DDL. No E4 data or consumer cutover occurred.
+Corrective `0.107.1` forces those constraints immediately after the seed and
+adds an explicit E4 regression assertion. Next: validate, commit, push both
+remotes with immediate redeploy, and complete the planned aggregate checks.

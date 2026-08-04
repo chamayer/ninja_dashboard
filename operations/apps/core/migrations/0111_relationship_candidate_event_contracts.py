@@ -144,6 +144,10 @@ INSERT INTO operations.relationship_types (
     'peripheral', 'device', 'one', 'many', TRUE, TRUE
 )
 ON CONFLICT (key) DO NOTHING;
+
+-- The seed touches Django's initially deferred entity-class foreign keys.
+-- Resolve those events before later function ownership and table ownership DDL.
+SET CONSTRAINTS ALL IMMEDIATE;
 """
 
 
