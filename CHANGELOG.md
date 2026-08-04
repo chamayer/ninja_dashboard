@@ -2,6 +2,13 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.105.2] — 2026-08-04 — Attribute-projector digest fix
+
+### Fixed
+
+- Qualified `pgcrypto.digest` calls in the security-definer claim projector so
+  its deliberately restricted search path can resolve hashing functions.
+
 ## [0.105.1] — 2026-08-04 — Attribute-claim migration startup fix
 
 ### Fixed

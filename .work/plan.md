@@ -90,7 +90,7 @@ Track: **ADR-0010 generic entity, claim, relationship, and admin completion**
   admin visibility. Apply RLS, tenant-consistent uniqueness, least-privilege
   grants, and additive rollback-safe constraints.
 
-### E2 — Attribute definitions and delta claims (`0.105.1`, corrective deployment pending)
+### E2 — Attribute definitions and delta claims (`0.105.2`, corrective deployment pending)
 
 - Add versioned attribute definitions, source-field mappings, identity/
   attribute authority policies, typed current/history claims, and withheld
@@ -174,7 +174,11 @@ E2 implementation is complete locally. The first `0.105.0` deployment applied
 migration 0102, then PostgreSQL rejected 0103 table DDL while its newly seeded,
 initially deferred foreign-key triggers were pending. The transaction rolled
 back cleanly. Corrective release `0.105.1` validates those deferred constraints
-before table-level RLS/ownership DDL.
+before table-level RLS/ownership DDL. Migration 0103 then applied; its first
+accelerated projector call wrote no claims and exposed unqualified
+`pgcrypto.digest` under the restricted security-definer search path.
+Corrective `0.105.2` qualifies that function and replaces the projector through
+migration 0104.
 Definitions/mappings and independent authority policy are deployment-controlled;
 unmapped fields are restricted/count-only; current claims and per-member SCD-2
 history are projected in separately committed bounded batches after migration;

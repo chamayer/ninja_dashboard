@@ -456,7 +456,7 @@ BEGIN
                link.id AS entity_source_link_id, link.entity_id,
                COALESCE(link.entity_class_id, entity_type.entity_class_id)
                    AS classified_entity_class_id,
-               digest(convert_to(
+               public.digest(convert_to(
                    (COALESCE(o.canonical_data, '{}'::jsonb)
                        - 'last_seen_at' - 'last_contact_at')::text
                    || '|raw-keys:' || COALESCE((
@@ -619,7 +619,7 @@ BEGIN
         FROM expanded
     ), valid AS (
         SELECT typed.*,
-               digest(convert_to(
+               public.digest(convert_to(
                    value_type || ':' || CASE value_type
                      WHEN 'text' THEN value_text
                      WHEN 'number' THEN value_number::text
@@ -647,11 +647,11 @@ BEGIN
     SELECT DISTINCT ON (
         valid.observation_id, valid.attribute_definition_id,
         CASE WHEN valid.cardinality = 'single'
-             THEN digest('single', 'sha256') ELSE valid.value_fingerprint END
+             THEN public.digest('single', 'sha256') ELSE valid.value_fingerprint END
     )
         valid.*,
         CASE WHEN valid.cardinality = 'single'
-             THEN digest('single', 'sha256') ELSE valid.value_fingerprint END
+             THEN public.digest('single', 'sha256') ELSE valid.value_fingerprint END
             AS member_key,
         COALESCE(policy.eligible, FALSE) AND COALESCE(policy.enabled, FALSE)
             AS authority_eligible,
@@ -676,7 +676,7 @@ BEGIN
      AND history.effective_to IS NULL
     ORDER BY valid.observation_id, valid.attribute_definition_id,
              CASE WHEN valid.cardinality = 'single'
-                  THEN digest('single', 'sha256') ELSE valid.value_fingerprint END,
+             THEN public.digest('single', 'sha256') ELSE valid.value_fingerprint END,
              valid.source_mapping_id DESC;
 
     DROP TABLE IF EXISTS pg_temp.claim_rows_to_change;

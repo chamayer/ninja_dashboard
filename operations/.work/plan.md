@@ -2,7 +2,7 @@
 
 Track: **ADR-0010 generic ecosystem completion — Phase E2**
 
-**Status:** E1 deployed; E2 `0.105.1` corrective release ready for deployment.
+**Status:** E1 deployed; E2 `0.105.2` corrective release ready for deployment.
 
 ## Goal
 
@@ -69,7 +69,11 @@ and guarded 90-day retention. Basic Python, Django, migration-drift, retention,
 and diff checks pass; four Ruff findings are pre-existing observation models.
 The first `0.105.0` startup applied migration 0102, then 0103 rolled back when
 PostgreSQL rejected table DDL with deferred seed constraint triggers pending.
-Corrective `0.105.1` forces those checks before RLS/ownership DDL. The user
-waived further local Docker rehearsal. Next: commit/push, trigger
+Corrective `0.105.1` forces those checks before RLS/ownership DDL. Migration
+0103 then applied; the first projector call wrote no claims and exposed
+unqualified `pgcrypto.digest` under the restricted security-definer search
+path. Corrective `0.105.2` qualifies the function and replaces the projector
+in migration 0104. The user waived further local Docker rehearsal. Next:
+commit/push, trigger
 Portainer immediately, and verify migrations, aggregate backfill/invariants,
 second-pass no-op, health/version, and zero HTTP 500s before starting E3.
