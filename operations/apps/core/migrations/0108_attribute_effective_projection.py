@@ -316,6 +316,11 @@ FROM operations.entity_attribute_claim_current claim
 GROUP BY claim.tenant_id, claim.entity_id, claim.entity_class_id,
          claim.attribute_definition_id
 ON CONFLICT (tenant_id, entity_id, attribute_definition_id) DO NOTHING;
+
+-- Initial dirty-key rows touch initially deferred tenant foreign keys. Resolve
+-- them before later ownership DDL in this migration, which PostgreSQL rejects
+-- while constraint-trigger events are pending.
+SET CONSTRAINTS ALL IMMEDIATE;
 """
 
 

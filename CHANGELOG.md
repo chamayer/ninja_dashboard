@@ -2,6 +2,14 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.106.1] — 2026-08-04 — Effective migration startup fix
+
+### Fixed
+
+- Forced the initial dirty-key backfill's deferred tenant constraints before
+  later table-ownership DDL, preventing Operations restart loops while applying
+  migration 0108.
+
 ## [0.106.0] — 2026-08-04 — Generic effective attribute engine
 
 ### Added

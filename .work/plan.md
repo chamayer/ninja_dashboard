@@ -219,7 +219,14 @@ Django check, migration drift, focused Ruff, four contract tests, and
 `git diff --check` pass. No local Docker rehearsal was run, per the user's
 validation limit.
 
-Next: commit the scoped E3 release, push `origin`, immediately redeploy through
-Portainer, push the same commit to the mirror, and verify migrations, bounded
-backfill/no-op, aggregate policy/conflict/support/audit/RLS invariants,
-version/health, and recent HTTP 500/error counts.
+Release `0.106.0` / `4d7485f` reached both remotes and Portainer. Migration
+0107 applied, then 0108 rolled back cleanly because its initial dirty-key seed
+left deferred tenant-constraint triggers pending before ownership DDL. Ingest
+remained healthy and no typed consumer was cut over. Corrective `0.106.1`
+forces those constraints immediately inside 0108, matching the proven E2
+migration pattern.
+
+Next: validate and commit the corrective release, push/deploy/mirror it
+immediately, then verify migrations, bounded backfill/no-op, aggregate
+policy/conflict/support/audit/RLS invariants, version/health, and recent HTTP
+500/error counts.

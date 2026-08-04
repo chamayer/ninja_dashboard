@@ -38,6 +38,7 @@ def test_decision_writes_land_in_generic_audit_and_forced_rls() -> None:
     assert "'entity_attribute_decision'" in migration.SETUP_SQL
     assert migration.SETUP_SQL.count("FORCE ROW LEVEL SECURITY") == 8
     assert migration.SETUP_SQL.count("CREATE POLICY tenant_isolation") == 8
+    assert "SET CONSTRAINTS ALL IMMEDIATE" in migration.SETUP_SQL
 
 
 def test_effective_read_model_redacts_sensitive_values() -> None:

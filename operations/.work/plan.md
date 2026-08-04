@@ -80,6 +80,10 @@ consumer promotion and the generic decision UI remain in E5. Python compile,
 Django check, migration drift, focused Ruff, four contract tests, and diff
 checks pass; no local Docker rehearsal was run per the user's validation limit.
 
-Next: commit the scoped `0.106.0` release, push/deploy/mirror it immediately,
-then drain the initial dirty-key backfill and verify aggregate selection,
-conflict, support, audit, RLS, no-op, health, version, and HTTP-error behavior.
+Release `0.106.0` / `4d7485f` reached both remotes and Portainer. Migration
+0107 applied, then 0108 rolled back cleanly because its initial dirty-key seed
+left deferred tenant-constraint triggers pending before ownership DDL. Ingest
+remained healthy and no typed consumer was cut over. Corrective `0.106.1`
+forces those constraints immediately inside 0108, matching the proven E2
+migration pattern. Next: validate, commit, push/deploy/mirror immediately, then
+drain the initial dirty queue and verify all planned aggregate invariants.
