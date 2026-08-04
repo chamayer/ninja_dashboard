@@ -510,6 +510,20 @@ function swFilter(q) {
 </div>
 
 <div class="card">
+    <h2 style="margin-top:0;">Source evidence</h2>
+    <p class="muted">
+        Collected payloads are restricted evidence. They are no longer loaded on an
+        ordinary device-page request or included in exports.
+    </p>
+    {% if can_view_entity_evidence %}
+    <p><a class="btn btn-secondary" href="{% url 'entity_admin_detail' device.entity_id %}">Open redacted entity evidence</a></p>
+    {% else %}
+    <p class="muted">An Operations administrator can review the redacted evidence summary. Raw values require a separate reveal permission and are audited.</p>
+    {% endif %}
+</div>
+
+{% if raw_identity_summary %}
+<div class="card">
     <h2 style="margin-top:0;">Combined record
         <span class="muted" style="font-weight:400; font-size:0.85rem;">
             — normalized values grouped by meaning; source names show where each value was reported.
@@ -620,6 +634,7 @@ function swFilter(q) {
     </p>
     {% endif %}
 </div>
+{% endif %}
 {% endif %}
 
 {% endblock %}

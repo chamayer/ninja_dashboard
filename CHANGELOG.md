@@ -2,6 +2,24 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.109.0] — 2026-08-04 — Audited restricted evidence reveal
+
+### Added
+
+- Added a default-denied restricted-evidence permission and POST-only reveal
+  actions for current source payloads and redacted claim/effective values.
+- Added database-enforced active-user, tenant, and permission checks; every
+  successful reveal appends metadata-only context to the existing operator
+  audit log before returning the protected value.
+
+### Security
+
+- Device identity GET requests no longer load raw observation payloads.
+- Removed runtime direct reads of observation payload columns and the protected
+  effective/conflict projection tables; named readers now use tenant-filtered,
+  redacted or metadata-only views. Revealed responses are marked private and
+  non-cacheable and remain excluded from CSV exports.
+
 ## [0.108.0] — 2026-08-04 — Generic entity administration
 
 ### Added

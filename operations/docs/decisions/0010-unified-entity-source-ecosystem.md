@@ -1,7 +1,7 @@
 # 0010 — Unified entity and source-evidence ecosystem
 
-Status: Accepted (engines implemented; generic redacted read/admin slice
-prepared; audited reveal and consumer cutover pending)
+Status: Accepted (engines and generic redacted read/admin implemented; audited
+reveal implemented; named consumer cutover pending)
 Date: 2026-07-31
 
 The first additive Ninja ingest-storage slice shipped in release `0.101.0`:
@@ -584,11 +584,18 @@ are registry/class driven and reuse the existing atomic E4 decision services.
 The Sources page now renders row-based entity-class/type counts instead of
 fixed client/device columns.
 
-This slice deliberately does not expose raw or restricted values and does not
-revoke remaining direct-table privileges that still have named consumers.
-E5.2 must first add permission-checked POST-only reveal with metadata-only
-audit events, move Device Identity & raw and any other direct readers, prove
-denial/parity, and then revoke those grants. E5.3 performs the remaining named
+E5.2 adds a default-denied restricted-evidence permission and POST-only reveal
+functions for current observation payloads and claim/effective values. The
+database verifies active operator, tenant, and permission and appends a
+metadata-only event to the existing `audit_log` before returning a protected
+value. Reveal responses are private/non-cacheable and are not exportable.
+
+Ordinary Device identity GET requests no longer load raw payloads. Legacy
+client-candidate and device-merge predicates now use a tenant-filtered
+metadata view, allowing direct observation payload reads to be revoked while
+preserving the approved write workflows. Direct application/read-only access
+to protected effective/conflict projection tables is also revoked; redacted
+views remain the default read contract. E5.3 performs the remaining named
 API/export/evaluator/finding/notification/typed-reader cutovers.
 
 ## Rationale

@@ -2,8 +2,8 @@
 
 Track: **ADR-0010 generic entity, claim, relationship, and admin completion**
 
-**Status:** full remaining plan approved; Phases E1-E4 deployed, Phase E5
-in progress.
+**Status:** full remaining plan approved; Phases E1-E4 and E5.1 deployed,
+Phase E5.2 implemented locally and under review.
 
 ## Authority and checkpoint
 
@@ -325,12 +325,19 @@ slice and measured consumer cutovers without changing incompatible typed IDs.
   reveal and direct-table privilege cutover; E5.3 measured typed consumer
   parity/cutover. APIs, exports, evaluators, findings, notifications, and typed
   domain views move only when their output contract has measured parity.
-- E5.1 is implemented locally for release `0.108.0`: seven security-barrier
-  tenant read views owned by a dedicated no-login/non-BYPASSRLS role; generic
-  entity list/detail and candidate attach/reject pages; row-based Sources
-  counts; and Admin navigation/landing integration. Default views exclude raw
-  payloads and protected source-event actors. Compile, Django check, migration
-  drift, nine focused E4/E5 tests, template loading, and diff checks pass;
-  focused Ruff passes for new files, while pre-existing warnings remain in the
-  legacy monolithic views/context modules. Next: final migration/diff review,
-  commit, push/redeploy/mirror, and aggregate production validation.
+- E5.1 release `0.108.0` / `6433f44` is deployed and mirrored. Migration 0116
+  is applied. Its seven security-barrier views have the expected no-login,
+  non-BYPASSRLS owner and exact app/read-only grants; ingest and Metabase are
+  denied. Aggregate view counts match the underlying contracts (5,348 entity
+  summaries, 24,980 source links, 168 conflicts, 4,890 candidates, 14 source
+  instance/type groups, five source-health rows, and no relationships). Six
+  authenticated read-only renders returned HTTP 200, containers were healthy,
+  root/health returned 302/200, and current error counts were zero.
+- E5.2 release `0.109.0` is implemented locally: default-denied audited reveal
+  for observation and restricted claim/effective evidence, safe observation
+  metadata for named write workflows, removal of raw Device GET reads, and
+  revocation of obsolete observation-payload and E3 protected-table reads.
+  Django check and migration drift pass; 11 focused E4/E5 contract tests and
+  template loading pass. Next: complete the migration/privilege review and
+  focused validation, commit, push/redeploy/mirror, then verify aggregate-only
+  ACL, function, audit-contract, route, migration, health, and error behavior.

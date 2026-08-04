@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+import ipaddress
+import json
 import uuid
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.core.exceptions import ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.paginator import Paginator
 from django.db import connection, transaction
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET, require_POST
 
 from .csv_export import csv_response, wants_csv
@@ -34,6 +37,44 @@ def _page_query(request: HttpRequest) -> str:
     query = request.GET.copy()
     query.pop("page", None)
     return query.urlencode()
+
+
+def _require_restricted_evidence_permission(request: HttpRequest) -> None:
+    if not request.user.has_perm("operations.view_restricted_evidence"):
+        raise PermissionDenied("Restricted evidence permission required.")
+
+
+def _request_ip(request: HttpRequest) -> str | None:
+    value = (request.META.get("REMOTE_ADDR") or "").strip()
+    try:
+        return str(ipaddress.ip_address(value))
+    except ValueError:
+        return None
+
+
+def _render_restricted_evidence(
+    request: HttpRequest,
+    *,
+    entity: dict,
+    evidence_kind: str,
+    evidence_label: str,
+    evidence: dict,
+) -> HttpResponse:
+    response = render(
+        request,
+        "entity_restricted_evidence.html",
+        {
+            "admin_group": "integrations",
+            "admin_tab": "entities",
+            "entity": entity,
+            "evidence_kind": evidence_kind,
+            "evidence_label": evidence_label,
+            "evidence": evidence,
+        },
+    )
+    response["Cache-Control"] = "no-store, private"
+    response["Pragma"] = "no-cache"
+    return response
 
 
 @login_required
@@ -210,7 +251,135 @@ def entity_admin_detail(request: HttpRequest, entity_id: uuid.UUID) -> HttpRespo
             "claims": claims,
             "conflicts": conflicts,
             "relationships": relationships,
+            "can_reveal_evidence": request.user.has_perm("operations.view_restricted_evidence"),
         },
+    )
+
+
+@login_required
+@require_admin
+@require_POST
+@never_cache
+def entity_observation_reveal(
+    request: HttpRequest, entity_id: uuid.UUID, observation_id: uuid.UUID
+) -> HttpResponse:
+    _require_restricted_evidence_permission(request)
+    tenant_id = _tenant_id(request)
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = %s", (tenant_id,))
+        cur.execute(
+            "SELECT * FROM operations.v_entity_admin_summary WHERE tenant_id = %s AND id = %s",
+            (tenant_id, entity_id),
+        )
+        entity_result = cur.fetchone()
+        if entity_result is None:
+            raise Http404("Entity not found")
+        entity_columns = [column.name for column in cur.description]
+        entity = dict(zip(entity_columns, entity_result, strict=True))
+        cur.execute(
+            """
+            SELECT 1 FROM operations.v_entity_source_evidence
+             WHERE tenant_id = %s AND entity_id = %s AND observation_id = %s
+            """,
+            (tenant_id, entity_id, observation_id),
+        )
+        if cur.fetchone() is None:
+            raise Http404("Observation evidence not found")
+        cur.execute(
+            """
+            SELECT * FROM operations.reveal_entity_observation(
+                %s, %s, %s, %s, %s, %s
+            )
+            """,
+            (
+                tenant_id,
+                request.user.id,
+                entity_id,
+                observation_id,
+                _request_ip(request),
+                request.META.get("HTTP_USER_AGENT") or "",
+            ),
+        )
+        revealed = cur.fetchone()
+        columns = [column.name for column in cur.description]
+        evidence = dict(zip(columns, revealed, strict=True))
+        evidence["raw_data"] = json.dumps(
+            evidence["raw_data"], indent=2, sort_keys=True, default=str
+        )
+        evidence["canonical_data"] = json.dumps(
+            evidence["canonical_data"], indent=2, sort_keys=True, default=str
+        )
+    return _render_restricted_evidence(
+        request,
+        entity=entity,
+        evidence_kind="observation",
+        evidence_label=f"{evidence['source_name']} · {evidence['entity_type']}",
+        evidence=evidence,
+    )
+
+
+@login_required
+@require_admin
+@require_POST
+@never_cache
+def entity_attribute_reveal(
+    request: HttpRequest,
+    entity_id: uuid.UUID,
+    record_kind: str,
+    record_id: uuid.UUID,
+) -> HttpResponse:
+    _require_restricted_evidence_permission(request)
+    if record_kind not in {"effective", "claim"}:
+        raise Http404("Attribute evidence not found")
+    tenant_id = _tenant_id(request)
+    read_view = (
+        "operations.v_entity_attribute_effective_current"
+        if record_kind == "effective"
+        else "operations.v_entity_attribute_claim_current"
+    )
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = %s", (tenant_id,))
+        cur.execute(
+            "SELECT * FROM operations.v_entity_admin_summary WHERE tenant_id = %s AND id = %s",
+            (tenant_id, entity_id),
+        )
+        entity_result = cur.fetchone()
+        if entity_result is None:
+            raise Http404("Entity not found")
+        entity_columns = [column.name for column in cur.description]
+        entity = dict(zip(entity_columns, entity_result, strict=True))
+        cur.execute(
+            f"SELECT 1 FROM {read_view} WHERE tenant_id = %s AND entity_id = %s AND id = %s",
+            (tenant_id, entity_id, record_id),
+        )
+        if cur.fetchone() is None:
+            raise Http404("Attribute evidence not found")
+        cur.execute(
+            """
+            SELECT * FROM operations.reveal_entity_attribute_value(
+                %s, %s, %s, %s, %s, %s, %s
+            )
+            """,
+            (
+                tenant_id,
+                request.user.id,
+                entity_id,
+                record_kind,
+                record_id,
+                _request_ip(request),
+                request.META.get("HTTP_USER_AGENT") or "",
+            ),
+        )
+        revealed = cur.fetchone()
+        columns = [column.name for column in cur.description]
+        evidence = dict(zip(columns, revealed, strict=True))
+        evidence["value"] = json.dumps(evidence["value"], indent=2, sort_keys=True, default=str)
+    return _render_restricted_evidence(
+        request,
+        entity=entity,
+        evidence_kind=record_kind,
+        evidence_label=evidence["attribute_display_name"],
+        evidence=evidence,
     )
 
 

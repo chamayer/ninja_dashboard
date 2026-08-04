@@ -13,10 +13,12 @@ from drf_spectacular.views import (
 from apps.core.generic_admin import (
     entity_admin_detail,
     entity_admin_list,
+    entity_attribute_reveal,
     entity_candidate_attach,
     entity_candidate_detail,
     entity_candidate_reject,
     entity_candidates_queue,
+    entity_observation_reveal,
 )
 from apps.core.views import (
     admin_finding_acknowledge,
@@ -224,6 +226,16 @@ urlpatterns = [
         "admin/entities/<uuid:entity_id>/",
         entity_admin_detail,
         name="entity_admin_detail",
+    ),
+    path(
+        "admin/entities/<uuid:entity_id>/observations/<uuid:observation_id>/reveal/",
+        entity_observation_reveal,
+        name="entity_observation_reveal",
+    ),
+    path(
+        "admin/entities/<uuid:entity_id>/attributes/<str:record_kind>/<uuid:record_id>/reveal/",
+        entity_attribute_reveal,
+        name="entity_attribute_reveal",
     ),
     path(
         "admin/entity-candidates/",

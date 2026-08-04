@@ -16,7 +16,7 @@
 <div class="card" style="margin-bottom:1rem;">
   <h2 style="margin-top:0;">Source identities</h2>
   <table class="ops-table" data-sortable>
-    <thead><tr><th>Source</th><th>Record type</th><th>Source identity</th><th>Observed</th><th>State</th><th>Protected fields</th></tr></thead>
+    <thead><tr><th>Source</th><th>Record type</th><th>Source identity</th><th>Observed</th><th>State</th><th>Protected fields</th>{% if can_reveal_evidence %}<th>Restricted evidence</th>{% endif %}</tr></thead>
     <tbody>
     {% for row in sources %}
       <tr>
@@ -26,8 +26,9 @@
         <td>{{ row.observation_last_seen_at|default:row.last_seen_at|date:"Y-m-d H:i" }}</td>
         <td>{% if row.missing_since or row.observation_active is False %}<span class="badge badge-high">Withdrawn</span>{% else %}<span class="badge badge-low">Current</span>{% endif %}</td>
         <td>{{ row.restricted_field_count }} restricted · {{ row.unmapped_field_count }} unmapped{% if row.invalid_field_count %} · {{ row.invalid_field_count }} invalid{% endif %}</td>
+        {% if can_reveal_evidence %}<td>{% if row.observation_id %}<form method="post" action="{% url 'entity_observation_reveal' entity.id row.observation_id %}">{% csrf_token %}<button type="submit" class="btn btn-secondary">Reveal and audit</button></form>{% else %}—{% endif %}</td>{% endif %}
       </tr>
-    {% empty %}<tr><td colspan="6" class="muted">No source identities.</td></tr>{% endfor %}
+    {% empty %}<tr><td colspan="{% if can_reveal_evidence %}7{% else %}6{% endif %}" class="muted">No source identities.</td></tr>{% endfor %}
     </tbody>
   </table>
 </div>
@@ -35,15 +36,16 @@
 <div class="card" style="margin-bottom:1rem;">
   <h2 style="margin-top:0;">Effective attributes</h2>
   <table class="ops-table" data-sortable>
-    <thead><tr><th>Attribute</th><th>Value</th><th>Status</th><th>Selection</th><th>Conflict</th></tr></thead>
+    <thead><tr><th>Attribute</th><th>Value</th><th>Status</th><th>Selection</th><th>Conflict</th>{% if can_reveal_evidence %}<th>Restricted evidence</th>{% endif %}</tr></thead>
     <tbody>
     {% for row in effective %}
       <tr>
         <td>{{ row.attribute_display_name }}</td><td>{{ row.value_display }}</td>
         <td>{{ row.status|humanize_label }}</td><td>{{ row.selection_reason|humanize_label }}</td>
         <td>{% if row.conflict %}<span class="badge badge-high">Conflict</span>{% else %}—{% endif %}</td>
+        {% if can_reveal_evidence %}<td>{% if row.sensitivity == "sensitive" or row.sensitivity == "restricted" %}<form method="post" action="{% url 'entity_attribute_reveal' entity.id 'effective' row.id %}">{% csrf_token %}<button type="submit" class="btn btn-secondary">Reveal and audit</button></form>{% else %}—{% endif %}</td>{% endif %}
       </tr>
-    {% empty %}<tr><td colspan="5" class="muted">No effective attributes.</td></tr>{% endfor %}
+    {% empty %}<tr><td colspan="{% if can_reveal_evidence %}6{% else %}5{% endif %}" class="muted">No effective attributes.</td></tr>{% endfor %}
     </tbody>
   </table>
 </div>
@@ -59,12 +61,12 @@
 
 <div class="card" style="margin-bottom:1rem;">
   <h2 style="margin-top:0;">Source claims</h2>
-  <p class="muted">Sensitive and restricted values remain redacted. Audited reveal lands in E5.2.</p>
+  <p class="muted">Sensitive and restricted values remain redacted by default. Authorized reveals are written to the operator audit log.</p>
   <table class="ops-table" data-sortable>
     <thead><tr><th>Attribute</th><th>Source</th><th>Value</th><th>Sensitivity</th><th>Authority</th><th>Observed</th></tr></thead>
     <tbody>
     {% for row in claims %}
-      <tr><td>{{ row.attribute_display_name }}</td><td>{{ row.source_name }}</td><td>{{ row.value_display }}</td><td>{{ row.sensitivity|humanize_label }}</td><td>{% if row.authority_eligible %}Tier {{ row.authority_tier }}{% else %}Evidence only{% endif %}</td><td>{{ row.last_observed_at|date:"Y-m-d H:i" }}</td></tr>
+      <tr><td>{{ row.attribute_display_name }}</td><td>{{ row.source_name }}</td><td>{{ row.value_display }}{% if can_reveal_evidence %}{% if row.sensitivity == "sensitive" or row.sensitivity == "restricted" %}<form method="post" action="{% url 'entity_attribute_reveal' entity.id 'claim' row.id %}" style="display:inline; margin-left:.5rem;">{% csrf_token %}<button type="submit" class="btn btn-secondary">Reveal and audit</button></form>{% endif %}{% endif %}</td><td>{{ row.sensitivity|humanize_label }}</td><td>{% if row.authority_eligible %}Tier {{ row.authority_tier }}{% else %}Evidence only{% endif %}</td><td>{{ row.last_observed_at|date:"Y-m-d H:i" }}</td></tr>
     {% empty %}<tr><td colspan="6" class="muted">No current claims.</td></tr>{% endfor %}
     </tbody>
   </table>

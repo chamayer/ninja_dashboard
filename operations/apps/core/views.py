@@ -1449,7 +1449,7 @@ def _raw_json_object(value) -> dict:
 
 
 def _build_raw_snapshot_view(device, links):
-    """Fetch and shape raw snapshots for the Identity & raw tab.
+    """Build the legacy identity shape from safe observation metadata.
 
     Returns (per_source_snapshots, canonical_by_category, source_specific).
 
@@ -1463,28 +1463,19 @@ def _build_raw_snapshot_view(device, links):
       source-native long tail. Plus the full raw JSON under a
       collapse.
 
-    Ninja fallback: `agent.rmm` raw_data is written as `{}` in the
-    currently-deployed ingest. Fixed on the writer side in the same
-    commit as this rewrite, but existing rows keep `{}` until the next
-    Ninja cycle overwrites them. During the transition we swap in
-    `ninja_core.devices.data` so the per-source specifics stay populated.
-    The canonical matrix is not affected — canonical_data is populated
-    regardless.
+    Raw and canonical payload reads moved to the audited E5 reveal route.
+    This compatibility helper now receives only explicitly safe metadata and
+    remains until the typed Device identity surface is fully retired.
     """
-    ninja_external_id = None
-    for link in links:
-        if link.source.name.lower() == "ninja":
-            ninja_external_id = link.external_id
-            break
-
     snapshots: list[dict] = []
     with transaction.atomic(), connection.cursor() as cur:
         cur.execute("SET LOCAL operations.tenant_id = 1")
         cur.execute(
             """
             SELECT platform, entity_type, observed_at,
-                   canonical_data, raw_data
-            FROM operations.entity_observation_current
+                   jsonb_build_object('hostname', canonical_hostname),
+                   '{}'::jsonb
+            FROM operations.v_entity_observation_admin_metadata
             WHERE tenant_id = %s AND device_id = %s AND active = TRUE
             ORDER BY platform, entity_type
             """,
@@ -1501,39 +1492,10 @@ def _build_raw_snapshot_view(device, links):
             for platform, entity_type, observed_at, canonical_data, raw_data in cur.fetchall()
         ]
 
-        ninja_device_row = None
-        need_ninja_fallback = ninja_external_id and any(
-            (platform or "").lower() == "ninja"
-            and (entity_type or "").lower() == "agent.rmm"
-            and (not raw_data or raw_data == {})
-            for platform, entity_type, _obs, _canon, raw_data in rows
-        )
-        if need_ninja_fallback:
-            try:
-                nid = int(ninja_external_id)
-            except (TypeError, ValueError):
-                nid = None
-            if nid is not None:
-                cur.execute(
-                    "SELECT data FROM ninja_core.devices WHERE id = %s",
-                    [nid],
-                )
-                nrow = cur.fetchone()
-                if nrow:
-                    ninja_device_row = _raw_json_object(nrow[0])
-
         for platform, entity_type, observed_at, canonical_data, raw_data in rows:
             canonical = canonical_data
             raw_payload = raw_data
             fallback_note = None
-            if (
-                ninja_device_row is not None
-                and (platform or "").lower() == "ninja"
-                and (entity_type or "").lower() == "agent.rmm"
-                and raw_payload == {}
-            ):
-                raw_payload = ninja_device_row
-                fallback_note = "from ninja_core.devices (raw observation was empty)"
             try:
                 pretty = json.dumps(raw_payload, indent=2, sort_keys=True, default=str)
             except (TypeError, ValueError):
@@ -1991,19 +1953,12 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
     activity.sort(key=lambda e: (e["at"] or timezone.now()), reverse=True)
     activity = activity[:100]
 
-    # Raw per-source snapshots — only when the Identity & raw tab is
-    # active, since raw_data payloads can be several KB per observation.
+    # Raw evidence is never fetched on GET. It is available only through the
+    # permission-checked, audited POST reveal on the generic entity surface.
     raw_snapshots: list[dict] = []
     raw_canonical_by_category: list[tuple[str, list[dict]]] = []
     raw_source_specific: list[dict] = []
     raw_identity_summary: dict = {}
-    if active_tab == "identity":
-        (
-            raw_snapshots,
-            raw_canonical_by_category,
-            raw_source_specific,
-            raw_identity_summary,
-        ) = _build_raw_snapshot_view(device, links)
 
     return render(
         request,
@@ -2026,6 +1981,13 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
             "raw_canonical_by_category": raw_canonical_by_category,
             "raw_source_specific": raw_source_specific,
             "raw_identity_summary": raw_identity_summary,
+            "can_view_entity_evidence": bool(
+                device.entity_id
+                and (
+                    request.user.is_superuser
+                    or request.user.has_perm("operations.manage_catalog")
+                )
+            ),
         },
     )
 
@@ -6744,11 +6706,11 @@ def client_candidate_detail(request: HttpRequest, candidate_id) -> HttpResponse:
                     """
                     SELECT DISTINCT ON (eo.entity_key, eo.platform)
                         eo.platform,
-                        eo.canonical_data->>'hostname' AS hostname,
+                        eo.canonical_hostname AS hostname,
                         eo.device_id,
                         d.client_id,
                         c.display_name
-                    FROM operations.entity_observation_current eo
+                    FROM operations.v_entity_observation_admin_metadata eo
                     LEFT JOIN operations.devices d
                         ON d.id = eo.device_id AND d.deleted_at IS NULL
                     LEFT JOIN operations.clients c
@@ -6756,7 +6718,7 @@ def client_candidate_detail(request: HttpRequest, candidate_id) -> HttpResponse:
                     WHERE eo.tenant_id = 1
                       AND eo.active = TRUE
                       AND eo.entity_type <> 'org'
-                      AND eo.canonical_data->>'platform_group_id' = ANY(%s)
+                      AND eo.platform_group_id = ANY(%s)
                     ORDER BY eo.entity_key, eo.platform, eo.observed_at DESC
                     LIMIT 25
                     """,
@@ -6865,14 +6827,16 @@ def _attach_group_to_client(
         """
         UPDATE operations.entity_observation_current eo
         SET client_id = %s
-        FROM operations.source_bindings sb, operations.source_instances si
-        WHERE eo.source_binding_id = sb.id
+        FROM operations.v_entity_observation_admin_metadata observation,
+             operations.source_bindings sb, operations.source_instances si
+        WHERE eo.observation_id = observation.observation_id
+          AND observation.source_binding_id = sb.id
           AND sb.source_instance_id = si.id
           AND si.source_id = %s
-          AND eo.tenant_id = 1
-          AND eo.entity_type = 'org'
-          AND eo.entity_key = %s
-          AND eo.client_id IS NULL
+          AND observation.tenant_id = 1
+          AND observation.entity_type = 'org'
+          AND observation.entity_key = %s
+          AND observation.client_id IS NULL
         """,
         (client_id, source_id, external_id),
     )
@@ -6880,14 +6844,16 @@ def _attach_group_to_client(
         """
         UPDATE operations.entity_observation_current eo
         SET client_id = %s
-        FROM operations.source_bindings sb, operations.source_instances si
-        WHERE eo.source_binding_id = sb.id
+        FROM operations.v_entity_observation_admin_metadata observation,
+             operations.source_bindings sb, operations.source_instances si
+        WHERE eo.observation_id = observation.observation_id
+          AND observation.source_binding_id = sb.id
           AND sb.source_instance_id = si.id
           AND si.source_id = %s
-          AND eo.tenant_id = 1
-          AND eo.entity_type <> 'org'
-          AND eo.client_id IS NULL
-          AND eo.canonical_data ->> 'platform_group_id' = %s
+          AND observation.tenant_id = 1
+          AND observation.entity_type <> 'org'
+          AND observation.client_id IS NULL
+          AND observation.platform_group_id = %s
         """,
         (client_id, source_id, external_id),
     )
@@ -7586,7 +7552,14 @@ def _merge_devices(cur, survivor_id, loser_id: str, reason: str) -> dict:
 
     # 2. entity_observations
     cur.execute(
-        "UPDATE operations.entity_observation_current SET device_id=%s WHERE tenant_id=1 AND device_id=%s",
+        """
+        UPDATE operations.entity_observation_current observation
+           SET device_id = %s
+          FROM operations.v_entity_observation_admin_metadata metadata
+         WHERE observation.observation_id = metadata.observation_id
+           AND metadata.tenant_id = 1
+           AND metadata.device_id = %s
+        """,
         (survivor_id, loser_id),
     )
     counts["observations_moved"] = cur.rowcount

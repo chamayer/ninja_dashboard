@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+
+{% block title %}Restricted evidence · {{ entity.display_label }}{% endblock %}
+
+{% block content %}
+<p><a href="{% url 'entity_admin_detail' entity.id %}">← {{ entity.display_label }}</a></p>
+<div class="card">
+  <h1 style="margin-top:0;">Restricted evidence</h1>
+  <p><strong>{{ evidence_label }}</strong></p>
+  <p class="muted">
+    This one-time view is permission-gated, was recorded in the operator audit log,
+    and is not available through GET or CSV export.
+  </p>
+
+  {% if evidence_kind == "observation" %}
+    <dl>
+      <dt>Source identity</dt>
+      <dd>{{ evidence.source_name }} · {{ evidence.external_namespace }} · {{ evidence.external_id }}</dd>
+      <dt>Observed</dt>
+      <dd>{{ evidence.observed_at|date:"Y-m-d H:i:s" }}</dd>
+    </dl>
+    <h2>Canonical payload</h2>
+    <pre style="white-space:pre-wrap; overflow-wrap:anywhere; max-height:30rem; overflow:auto;">{{ evidence.canonical_data }}</pre>
+    <h2>Raw payload</h2>
+    <pre style="white-space:pre-wrap; overflow-wrap:anywhere; max-height:30rem; overflow:auto;">{{ evidence.raw_data }}</pre>
+  {% else %}
+    <dl>
+      <dt>Attribute</dt><dd>{{ evidence.attribute_key }}</dd>
+      <dt>Sensitivity</dt><dd>{{ evidence.sensitivity }}</dd>
+      {% if evidence.source_name %}<dt>Source</dt><dd>{{ evidence.source_name }}</dd>{% endif %}
+    </dl>
+    <h2>Value</h2>
+    <pre style="white-space:pre-wrap; overflow-wrap:anywhere; max-height:30rem; overflow:auto;">{{ evidence.value }}</pre>
+  {% endif %}
+</div>
+{% endblock %}

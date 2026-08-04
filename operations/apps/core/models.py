@@ -63,6 +63,7 @@ class User(AbstractUser):
             ("manage_users", "Can manage Operations users"),
             ("manage_taxonomy", "Can manage reference taxonomy"),
             ("run_queries", "Can run saved queries"),
+            ("view_restricted_evidence", "Can view restricted source evidence"),
         )
 
     def __str__(self) -> str:

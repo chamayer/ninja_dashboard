@@ -2,8 +2,8 @@
 
 Track: **ADR-0010 generic ecosystem completion — Phase E5**
 
-**Status:** E1-E4 deployed; E5.1 release `0.108.0` implemented locally and
-pending final review/deployment.
+**Status:** E1-E4 and E5.1 deployed; E5.2 release `0.109.0` implemented locally
+and under final review.
 
 ## Goal
 
@@ -100,16 +100,32 @@ E4 corrective `0.107.3` / `47bb68b` is deployed and mirrored with migration
 services, and zero current errors. Unrelated backlog, instruction, DESIGN, and
 probe-file changes remain outside this plan and release staging.
 
-E5.1 now includes seven security-barrier tenant read views owned by the
+E5.1 release `0.108.0` / `6433f44` is deployed and mirrored. It includes seven
+security-barrier tenant read views owned by the
 dedicated no-login/non-BYPASSRLS view role; generic entity list/detail and
 candidate attach/reject pages; row-based source-instance/type counts; and
 Admin navigation/landing integration. Default views exclude raw payloads and
 protected source-event actor data. Compile, Django check, migration drift,
-nine focused E4/E5 tests, template loading, and diff checks pass. Focused Ruff
-passes for new modules/tests and URL wiring; the large legacy views/context
-files retain pre-existing whole-file findings.
+nine focused E4/E5 tests, template loading, and diff checks passed. Production
+view counts and ACL/owner/tenant checks match the intended contract; six
+authenticated read-only renders returned HTTP 200, all containers were
+healthy, root/health returned 302/200, and current error counts were zero.
 
-Next: perform the final migration/diff/staging review, commit `0.108.0`, push
-`origin`, immediately redeploy, push the mirror, and validate aggregate view
-parity, ACL/owner/tenant behavior, authenticated route health, version,
-migration, containers, and current error counts.
+E5.2 release `0.109.0` is implemented locally. A new permission defaults
+denied; reveal endpoints are POST-only and non-cacheable; database functions
+verify active user, tenant, and direct/group/superuser permission, append a
+metadata-only event to the existing audit log, and only then return the
+requested current observation or attribute value. Device identity GET no
+longer loads raw payloads. Client-candidate and device-merge reads use a safe
+observation metadata view, permitting observation payload and E3 protected
+table grants to be revoked while retaining the required update path. Django
+check and migration drift pass; 11 focused E4/E5 contract tests and template
+loading pass. The pre-existing four observation-model DJ008 warnings remain
+outside this change.
+
+Next: finish focused lint/diff/migration review, commit `0.109.0`, push
+`origin`, immediately redeploy, push the mirror, then verify migration 0117,
+exact ACLs, permission/function/audit metadata contracts without revealing
+values or fabricating an audit event, authenticated GET/denial route behavior,
+containers, version, health, and current error counts. Then begin E5.3 named
+consumer inventory/parity and cutover.
