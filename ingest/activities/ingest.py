@@ -44,6 +44,7 @@ from ingest import db
 from ingest.config import settings
 from ingest.ninja_client import NinjaClient
 from ingest.runlog import run_log
+from ingest.source_events import capture_ninja_events
 from ingest.util import ninja_epoch_to_dt
 from ingest.inventory.queue import SOFTWARE_ACTIVITY_TYPES, enqueue_activity
 
@@ -71,7 +72,12 @@ def run(client: NinjaClient) -> int:
             return _first_run(client)
         last_id = int(last_id_str)
 
-        statuscode_allowlist = settings.activity_types_include
+        statuscode_allowlist = set(settings.activity_types_include)
+        # Deletion evidence is a required source-event contract, not an
+        # optional legacy dashboard filter. Preserve the source-filter fallback
+        # when no explicit allowlist is configured.
+        if statuscode_allowlist:
+            statuscode_allowlist.add("NODE_DELETED")
         sources = settings.activity_sources
         known_device_ids = _fetch_known_device_ids()
         all_rows: list[dict[str, Any]] = []
@@ -101,19 +107,42 @@ def run(client: NinjaClient) -> int:
                     last_id, max_id, known_device_ids, all_rows,
                 )
                 total_fetched += fetched
+            fetched, max_id = _pull_one(
+                client,
+                {"statusCode": "NODE_DELETED"},
+                "NODE_DELETED",
+                last_id,
+                max_id,
+                known_device_ids,
+                all_rows,
+            )
+            total_fetched += fetched
         else:
             log.warning(
                 "Neither INGEST_ACTIVITY_TYPES_INCLUDE nor "
-                "INGEST_ACTIVITY_SOURCES is set — skipping activities"
+                "INGEST_ACTIVITY_SOURCES is set — collecting only required "
+                "NODE_DELETED source events"
             )
+            fetched, max_id = _pull_one(
+                client,
+                {"statusCode": "NODE_DELETED"},
+                "NODE_DELETED",
+                last_id,
+                max_id,
+                known_device_ids,
+                all_rows,
+            )
+            total_fetched += fetched
 
         inserted = 0
+        source_events: dict[str, int | str] = {"status": "not_run"}
         if all_rows:
             with db.transaction() as cur:
                 inserted = db.insert_ignore(
                     cur, "ninja_activities.activities", all_rows,
                     conflict_keys=["id"],
                 )
+                source_events = capture_ninja_events(cur, all_rows)
 
         if max_id > last_id:
             _set_last_id(max_id)
@@ -124,8 +153,9 @@ def run(client: NinjaClient) -> int:
         _refresh_activity_summary_views()
         stats["rows_inserted"] = inserted
         log.info(
-            "activities: fetched %d total, kept %d, inserted %d, cursor %d → %d",
-            total_fetched, len(all_rows), inserted, last_id, max_id,
+            "activities: fetched %d total, kept %d, inserted %d, "
+            "generic_events=%s, cursor %d → %d",
+            total_fetched, len(all_rows), inserted, source_events, last_id, max_id,
         )
         return inserted
 

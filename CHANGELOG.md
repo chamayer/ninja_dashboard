@@ -2,6 +2,33 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.107.0] — 2026-08-04 — Generic relationships, candidates, and source events
+
+### Added
+
+- Added tenant-safe relationship type and authority registries, unresolved
+  source evidence with change/presence history, audited include/exclude
+  decisions, a changed-edge queue, deterministic effective edges, and
+  supporting-evidence references.
+- Activated the generic candidate/current-event projector over unattached
+  stable source identities, including material-change reopen and authoritative
+  source-link attachment handling.
+- Added immutable generic source-event storage with protected actor metadata
+  and exact-identity deletion-withdrawal confirmation.
+
+### Changed
+
+- Ninja activity collection now always requests `NODE_DELETED` and writes new
+  immutable activities through the generic source-event contract alongside the
+  temporary legacy activity compatibility write.
+
+### Safety note
+
+- Current measured Ninja deletion events contain an actor ID but no stable
+  device ID. They are retained as unresolved evidence; message or hostname text
+  is never guessed into identity, and no source or canonical record is deleted.
+  Historical generic-event backfill remains a separate operational action.
+
 ## [0.106.1] — 2026-08-04 — Effective migration startup fix
 
 ### Fixed

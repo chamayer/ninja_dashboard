@@ -2,7 +2,7 @@
 
 Track: **ADR-0010 generic entity, claim, relationship, and admin completion**
 
-**Status:** full remaining plan approved; Phases E1-E2 deployed, Phase E3 active.
+**Status:** full remaining plan approved; Phases E1-E3 deployed, Phase E4 implemented locally.
 
 ## Authority and checkpoint
 
@@ -142,21 +142,28 @@ Track: **ADR-0010 generic entity, claim, relationship, and admin completion**
   approvals. Audit/event retention and fleet-wide audit UI remain their defined
   follow-up tracks where not completed by E4/E5.
 
-## Active E3 affected files
+## Next E4 scope
 
-- `operations/apps/core/models.py`, `operations/apps/core/admin.py`, additive
-  E3 migrations, the shared effective-value projector/service, and focused
-  policy/audit tests.
-- Root/Operations plans, ADR-0010 progress, `VERSION`, and `CHANGELOG.md`.
+- Add deployment-controlled relationship types and authority policy, unresolved
+  source relationship evidence, canonical/effective edges and support, and
+  audited include/exclude decisions.
+- Activate the existing generic candidate/event foundation as the review
+  authority while preserving current typed workflows until their measured
+  compatibility cutover.
+- Add immutable generic source events and route Ninja `NODE_DELETED` through
+  the common event/withdrawal contract without retiring canonical entities or
+  exposing protected source-actor metadata.
+- Update root/Operations plans, ADR-0010 progress, `VERSION`, and
+  `CHANGELOG.md` with the implemented E4 contract.
 
 ## Basic validation and deployment
 
 - `python manage.py check`, `makemigrations --check --dry-run`, targeted Python
-  compile/Ruff on changed files, and `git diff --check`.
-- Verify aggregate effective/conflict/support counts, RLS/policies,
-  uniqueness, audit immutability, deterministic conflict behavior, and an
-  immediate second-pass no-op on the deployed PostgreSQL environment.
-- Commit only E3 release files, push `origin`, immediately trigger Portainer,
+  compile/Ruff/tests on changed files, and `git diff --check`.
+- Verify aggregate relationship/candidate/event counts, RLS/policies,
+  uniqueness and tenant consistency, decision audit triggers, idempotent event
+  capture, and safe deletion-event withdrawal behavior.
+- Commit only E4 release files, push `origin`, immediately trigger Portainer,
   push the identical commit to the mirror, then verify its version, migration
   application, service health, expected root status, and zero HTTP 500s.
 
@@ -209,24 +216,42 @@ tenant policy. Version is `0.105.4`; Postgres, ingest, and Operations are
 healthy; root/health return 302/200; recent HTTP 500, traceback, and ingest
 error counts are zero.
 
-E3 is implemented locally for release `0.106.0`: typed single/set decision
-current state; database-enforced tenant/class/type/cardinality/member rules;
-redacted atomic events in the generic `audit_log`; a durable changed-key queue;
-deterministic conflict/effective/member/support projection; a bounded ingest
-orchestrator; and a redacted tenant read/admin model. Existing typed consumers
-remain authoritative and the E5 workflow UI is not included. Python compile,
-Django check, migration drift, focused Ruff, four contract tests, and
-`git diff --check` pass. No local Docker rehearsal was run, per the user's
-validation limit.
+E3 is deployed as corrective release `0.106.1` / `7f07124` on both remotes.
+The initial `0.106.0` deployment applied 0107, then PostgreSQL rejected 0108
+because its initial dirty-key seed left deferred tenant constraints pending
+before ownership DDL; the transaction rolled back and no typed consumer had
+been cut over. Corrective 0108 forces the constraints before that DDL, and
+migrations 0107-0109 are now applied.
 
-Release `0.106.0` / `4d7485f` reached both remotes and Portainer. Migration
-0107 applied, then 0108 rolled back cleanly because its initial dirty-key seed
-left deferred tenant-constraint triggers pending before ownership DDL. Ingest
-remained healthy and no typed consumer was cut over. Corrective `0.106.1`
-forces those constraints immediately inside 0108, matching the proven E2
-migration pattern.
+The bounded initial projection completed in 363 transactions over 181,239
+entity/attribute keys, producing 181,239 effective headers, 5,640 set members,
+163,304 effective support rows, 168 visible conflicts, and 662 conflict-support
+rows. The durable queue is empty; an immediate pass completed in 0.126 seconds
+with zero processed records or writes. Duplicate, tenant/class/type/cardinality,
+support, typed-value, set-status, and conflict-flag mismatch counts are all
+zero. All eight E3 tenant tables have forced RLS and one tenant policy; the
+tenant-scoped redacted view has exact 181,239-row parity. No operator decisions
+exist yet, so production audit triggers were verified from the enabled catalog
+contract without fabricating a customer-affecting decision.
 
-Next: validate and commit the corrective release, push/deploy/mirror it
-immediately, then verify migrations, bounded backfill/no-op, aggregate
-policy/conflict/support/audit/RLS invariants, version/health, and recent HTTP
-500/error counts.
+Version is `0.106.1`; Postgres, ingest, Metabase, and Operations are healthy;
+root/health return 302/200; current HTTP 500, traceback, ERROR, and CRITICAL
+counts are zero. Both remotes match `7f07124`.
+
+E4 is implemented locally for release `0.107.0`: deployment-controlled
+relationship types and authority; unresolved relationship evidence; audited
+include/exclude decisions; dirty-key effective edges/support; generic candidate
+create/reopen/attach projection and atomic attach/reject services; immutable
+restricted source events; and going-forward Ninja `NODE_DELETED` capture. A
+read-only production measurement found 4,918 currently unattached source
+identities (4,842 asset observed-only, 10 client observed-only, and 66 device
+pending) for the bounded initial candidate projection. It also found 228
+retained deletion events, all with actor IDs but none with a stable device ID;
+the nested payload contains only a message. The deployment does not backfill
+those historical events and never parses message/hostname text into identity.
+Future deletion events withdraw evidence only when an exact stable device ID is
+supplied and in order. Python compile, Django check, migration drift, focused
+Ruff, nine contract tests, and diff checks pass; no local Docker rehearsal was
+run. Next: commit the scoped E4 release, push both remotes with immediate
+Portainer redeploy, then verify migrations, bounded candidate/no-op behavior,
+aggregate relationship/event/RLS invariants, health, and current error counts.

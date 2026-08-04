@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import time
 
-from ingest import attribute_claims, db, effective_attributes
+from ingest import attribute_claims, db, effective_attributes, entity_candidates, relationships
 
 log = logging.getLogger(__name__)
 
@@ -41,15 +41,28 @@ def refresh_after_collection(reason: str) -> None:
         # E3 remains a shadow projection until typed consumers pass E5 parity.
         effective_sync = {"status": "failed"}
         log.exception("Operations effective attribute projection failed — continuing")
+    try:
+        candidate_sync = entity_candidates.project_all()
+    except Exception:
+        candidate_sync = {"status": "failed"}
+        log.exception("Operations generic candidate projection failed — continuing")
+    try:
+        relationship_sync = relationships.project_all()
+    except Exception:
+        relationship_sync = {"status": "failed"}
+        log.exception("Operations generic relationship projection failed — continuing")
     with db.transaction() as cur:
         cur.execute("SELECT operations.refresh_derived()")
     log.info(
         "Operations entity links synced (%s), attribute claims synced (%s), "
-        "effective attributes synced (%s), and derived state refreshed after "
+        "effective attributes synced (%s), generic candidates synced (%s), "
+        "relationships synced (%s), and derived state refreshed after "
         "%s in %.2fs",
         entity_link_sync,
         claim_sync,
         effective_sync,
+        candidate_sync,
+        relationship_sync,
         reason,
         time.monotonic() - started,
     )

@@ -1,6 +1,6 @@
 # 0010 — Unified entity and source-evidence ecosystem
 
-Status: Accepted (entity/source-link and delta-claim foundations implemented; effective-value and relationship phases pending)
+Status: Accepted (entity, claim, effective-value, relationship, candidate, and source-event engines implemented; read/admin cutover pending)
 Date: 2026-07-31
 
 The first additive Ninja ingest-storage slice shipped in release `0.101.0`:
@@ -536,6 +536,41 @@ Effective scalar/set rows, supporting-claim references, and equal-authority
 conflicts are rebuildable projections. The initial release exposes a redacted
 tenant-scoped read model but leaves typed consumers authoritative until their
 separately measured cutover.
+
+### Implemented relationship, candidate, and source-event contract
+
+Relationship types and source authority are deployment-controlled. Current
+relationship evidence retains both complete source-native endpoint references,
+including unresolved or partially resolved endpoints. Exact source-link
+resolution is the only automatic attachment path. Change-driven SCD-2 history
+retains material and presence intervals without writing heartbeat copies. A
+durable changed-edge queue feeds one deterministic effective projector; audited
+operator include/exclude decisions take precedence, and selected source
+evidence retains support rows.
+
+The generic candidate projector considers the complete stable source identity
+and proposed entity class. It creates review state only for unattached current
+evidence, reopens a rejection only when the material hash changes, and marks a
+candidate attached when the authoritative source link exists. Operator attach
+and reject services write candidate events and the existing generic audit log;
+typed compatibility workflows remain until the generic E5 surface passes
+parity.
+
+Generic source events are immutable and idempotent by tenant, source instance,
+and vendor event ID. Raw event and source-actor evidence is restricted from the
+application role. A deletion event may withdraw current evidence only when it
+supplies an exact stable subject ID and is not older than current source
+evidence. It closes the matching open history interval and marks the source
+link missing while retaining the canonical entity.
+
+The aggregate production measurement preceding this contract found 228
+retained Ninja `NODE_DELETED` events. All contained a source actor ID, none
+contained a stable device ID, and the nested event object contained only a
+message. Message or hostname parsing is not accepted as identity evidence.
+Historical generic-event backfill remains a separately controlled operation;
+if performed, these events remain unresolved. Future events automatically
+confirm withdrawal only if Ninja supplies a stable subject ID; otherwise they
+remain available for review and future decommissioning workflow evidence.
 
 ## Rationale
 

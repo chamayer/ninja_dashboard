@@ -2328,6 +2328,532 @@ class EntityAttributeConflictClaimSupport(TenantScopedModel):
         return f"{self.conflict_id}:{self.claim_id}"
 
 
+class RelationshipType(models.Model):
+    """Deployment-controlled contract for one canonical edge type."""
+
+    class Cardinality(models.TextChoices):
+        ONE = "one", "One"
+        MANY = "many", "Many"
+
+    key = models.CharField(max_length=120, primary_key=True)
+    display_name = models.CharField(max_length=160)
+    description = models.TextField(blank=True, default="")
+    source_entity_class = models.ForeignKey(
+        EntityClass,
+        on_delete=models.PROTECT,
+        related_name="outgoing_relationship_types",
+    )
+    target_entity_class = models.ForeignKey(
+        EntityClass,
+        on_delete=models.PROTECT,
+        related_name="incoming_relationship_types",
+    )
+    source_cardinality = models.CharField(
+        max_length=8,
+        choices=Cardinality.choices,
+        default=Cardinality.MANY,
+    )
+    target_cardinality = models.CharField(
+        max_length=8,
+        choices=Cardinality.choices,
+        default=Cardinality.MANY,
+    )
+    directed = models.BooleanField(default=True)
+    enabled = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = "relationship_types"
+        ordering = ("key",)
+
+    def __str__(self) -> str:
+        return self.key
+
+
+class RelationshipAuthorityPolicy(UUIDTenantScopedModel):
+    """Deny-by-default authority for a source-native relationship type."""
+
+    source_instance = models.ForeignKey(
+        SourceInstance,
+        on_delete=models.PROTECT,
+        related_name="relationship_authority_policies",
+    )
+    native_record_type = models.CharField(max_length=80)
+    relationship_type = models.ForeignKey(
+        RelationshipType,
+        on_delete=models.PROTECT,
+        related_name="authority_policies",
+    )
+    eligible = models.BooleanField(default=False)
+    authority_tier = models.PositiveSmallIntegerField(default=0)
+    priority = models.PositiveSmallIntegerField(default=0)
+    enabled = models.BooleanField(default=True)
+    reason = models.CharField(max_length=160, blank=True, default="")
+
+    class Meta:
+        db_table = "relationship_authority_policies"
+        constraints = (
+            models.UniqueConstraint(
+                fields=(
+                    "tenant",
+                    "source_instance",
+                    "native_record_type",
+                    "relationship_type",
+                ),
+                name="uq_relationship_authority_policy",
+            ),
+        )
+
+    def __str__(self) -> str:
+        return f"{self.source_instance_id}:{self.native_record_type}:{self.relationship_type_id}"
+
+
+class EntityRelationshipEvidenceCurrent(UUIDTenantScopedModel):
+    """Current source assertion for a relationship, resolved or unresolved."""
+
+    class ResolutionStatus(models.TextChoices):
+        UNRESOLVED = "unresolved", "Unresolved"
+        PARTIAL = "partial", "Partially resolved"
+        RESOLVED = "resolved", "Resolved"
+        INVALID = "invalid", "Invalid source reference"
+
+    source_instance = models.ForeignKey(
+        SourceInstance,
+        on_delete=models.PROTECT,
+        related_name="relationship_evidence",
+    )
+    native_record_type = models.CharField(max_length=80)
+    external_relationship_id = models.TextField()
+    relationship_type = models.ForeignKey(
+        RelationshipType,
+        on_delete=models.PROTECT,
+        related_name="current_evidence",
+    )
+    source_endpoint_source_instance = models.ForeignKey(
+        SourceInstance,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="relationship_source_endpoints",
+    )
+    source_endpoint_source_hint = models.CharField(max_length=120, blank=True, default="")
+    source_external_namespace = models.CharField(max_length=120, blank=True, default="")
+    source_parent_external_namespace = models.CharField(max_length=120, blank=True, default="")
+    source_parent_external_id = models.TextField(blank=True, default="")
+    source_external_id = models.TextField()
+    target_endpoint_source_instance = models.ForeignKey(
+        SourceInstance,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="relationship_target_endpoints",
+    )
+    target_endpoint_source_hint = models.CharField(max_length=120, blank=True, default="")
+    target_external_namespace = models.CharField(max_length=120, blank=True, default="")
+    target_parent_external_namespace = models.CharField(max_length=120, blank=True, default="")
+    target_parent_external_id = models.TextField(blank=True, default="")
+    target_external_id = models.TextField()
+    source_entity = models.ForeignKey(
+        Entity,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="outgoing_relationship_evidence",
+    )
+    target_entity = models.ForeignKey(
+        Entity,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="incoming_relationship_evidence",
+    )
+    resolution_status = models.CharField(
+        max_length=16,
+        choices=ResolutionStatus.choices,
+        default=ResolutionStatus.UNRESOLVED,
+    )
+    authority_eligible = models.BooleanField(default=False)
+    authority_tier = models.PositiveSmallIntegerField(default=0)
+    authority_priority = models.PositiveSmallIntegerField(default=0)
+    material_hash = models.BinaryField()
+    active = models.BooleanField(default=True)
+    first_observed_at = models.DateTimeField()
+    last_observed_at = models.DateTimeField()
+    withdrawn_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "entity_relationship_evidence_current"
+        constraints = (
+            models.UniqueConstraint(
+                fields=("tenant", "source_instance", "external_relationship_id"),
+                name="uq_relationship_evidence_source_id",
+            ),
+            models.UniqueConstraint(
+                fields=("tenant", "id"),
+                name="uq_relationship_evidence_tenant_id",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    ~Q(source_external_id="")
+                    & ~Q(target_external_id="")
+                    & (
+                        (
+                            Q(source_parent_external_namespace="")
+                            & Q(source_parent_external_id="")
+                        )
+                        | (
+                            ~Q(source_parent_external_namespace="")
+                            & ~Q(source_parent_external_id="")
+                        )
+                    )
+                    & (
+                        (
+                            Q(target_parent_external_namespace="")
+                            & Q(target_parent_external_id="")
+                        )
+                        | (
+                            ~Q(target_parent_external_namespace="")
+                            & ~Q(target_parent_external_id="")
+                        )
+                    )
+                ),
+                name="ck_relationship_evidence_endpoints",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    (Q(active=True) & Q(withdrawn_at__isnull=True))
+                    | (Q(active=False) & Q(withdrawn_at__isnull=False))
+                ),
+                name="ck_relationship_evidence_presence",
+            ),
+        )
+        indexes = (
+            models.Index(
+                fields=("tenant", "relationship_type", "resolution_status", "active"),
+                name="idx_rel_evidence_state",
+            ),
+        )
+
+    def __str__(self) -> str:
+        return f"{self.source_instance_id}:{self.external_relationship_id}"
+
+
+class EntityRelationshipEvidenceHistory(TenantScopedModel):
+    """SCD-2 material and presence history for relationship evidence."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    evidence_current = models.ForeignKey(
+        EntityRelationshipEvidenceCurrent,
+        on_delete=models.PROTECT,
+        related_name="history",
+    )
+    relationship_type = models.ForeignKey(
+        RelationshipType,
+        on_delete=models.PROTECT,
+        related_name="evidence_history",
+    )
+    source_entity = models.ForeignKey(
+        Entity,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="outgoing_relationship_evidence_history",
+    )
+    target_entity = models.ForeignKey(
+        Entity,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="incoming_relationship_evidence_history",
+    )
+    endpoint_identity = models.JSONField()
+    resolution_status = models.CharField(
+        max_length=16,
+        choices=EntityRelationshipEvidenceCurrent.ResolutionStatus.choices,
+    )
+    authority_eligible = models.BooleanField(default=False)
+    authority_tier = models.PositiveSmallIntegerField(default=0)
+    authority_priority = models.PositiveSmallIntegerField(default=0)
+    material_hash = models.BinaryField()
+    effective_from = models.DateTimeField()
+    effective_to = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "entity_relationship_evidence_history"
+        constraints = (
+            models.UniqueConstraint(
+                fields=("tenant", "evidence_current"),
+                condition=Q(effective_to__isnull=True),
+                name="uq_relationship_evidence_history_open",
+            ),
+            models.CheckConstraint(
+                condition=Q(effective_to__isnull=True)
+                | Q(effective_to__gt=models.F("effective_from")),
+                name="ck_relationship_evidence_history_window",
+            ),
+        )
+        indexes = (
+            models.Index(
+                fields=("tenant", "effective_from"),
+                name="idx_rel_evidence_hist_from",
+            ),
+            models.Index(
+                fields=("tenant", "effective_to"),
+                name="idx_rel_evidence_hist_to",
+            ),
+        )
+
+    def __str__(self) -> str:
+        return f"{self.evidence_current_id}:{self.effective_from}"
+
+
+class EntityRelationshipDecisionCurrent(UUIDTenantScopedModel):
+    """Audited operator include/exclude decision for a canonical edge."""
+
+    class Operation(models.TextChoices):
+        INCLUDE = "include", "Include"
+        EXCLUDE = "exclude", "Exclude"
+
+    relationship_type = models.ForeignKey(
+        RelationshipType,
+        on_delete=models.PROTECT,
+        related_name="operator_decisions",
+    )
+    source_entity = models.ForeignKey(
+        Entity,
+        on_delete=models.PROTECT,
+        related_name="outgoing_relationship_decisions",
+    )
+    target_entity = models.ForeignKey(
+        Entity,
+        on_delete=models.PROTECT,
+        related_name="incoming_relationship_decisions",
+    )
+    operation = models.CharField(max_length=12, choices=Operation.choices)
+    active = models.BooleanField(default=True)
+    reason = models.TextField()
+    decided_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="relationship_decisions",
+    )
+    decided_at = models.DateTimeField()
+    updated_at = models.DateTimeField()
+
+    class Meta:
+        db_table = "entity_relationship_decision_current"
+        constraints = (
+            models.UniqueConstraint(
+                fields=("tenant", "relationship_type", "source_entity", "target_entity"),
+                name="uq_relationship_decision_current",
+            ),
+            models.UniqueConstraint(
+                fields=("tenant", "id"),
+                name="uq_relationship_decision_tenant_id",
+            ),
+        )
+
+    def __str__(self) -> str:
+        return f"{self.relationship_type_id}:{self.source_entity_id}:{self.target_entity_id}"
+
+
+class EntityRelationshipDirty(UUIDTenantScopedModel):
+    """Changed canonical endpoint tuple awaiting effective projection."""
+
+    relationship_type = models.ForeignKey(
+        RelationshipType,
+        on_delete=models.CASCADE,
+        related_name="dirty_edges",
+    )
+    source_entity = models.ForeignKey(
+        Entity,
+        on_delete=models.CASCADE,
+        related_name="dirty_outgoing_relationships",
+    )
+    target_entity = models.ForeignKey(
+        Entity,
+        on_delete=models.CASCADE,
+        related_name="dirty_incoming_relationships",
+    )
+    queued_at = models.DateTimeField()
+    reason = models.CharField(max_length=40)
+
+    class Meta:
+        db_table = "entity_relationship_dirty"
+        constraints = (
+            models.UniqueConstraint(
+                fields=("tenant", "relationship_type", "source_entity", "target_entity"),
+                name="uq_entity_relationship_dirty",
+            ),
+        )
+        indexes = (
+            models.Index(fields=("queued_at", "id"), name="idx_relationship_dirty_queue"),
+        )
+
+    def __str__(self) -> str:
+        return f"{self.relationship_type_id}:{self.source_entity_id}:{self.target_entity_id}"
+
+
+class EntityRelationshipCurrent(UUIDTenantScopedModel):
+    """Rebuildable effective canonical relationship edge."""
+
+    class Status(models.TextChoices):
+        ACTIVE = "active", "Active"
+        SUPPRESSED = "suppressed", "Suppressed"
+        NO_EVIDENCE = "no_evidence", "No eligible evidence"
+
+    relationship_type = models.ForeignKey(
+        RelationshipType,
+        on_delete=models.PROTECT,
+        related_name="effective_edges",
+    )
+    source_entity = models.ForeignKey(
+        Entity,
+        on_delete=models.PROTECT,
+        related_name="effective_outgoing_relationships",
+    )
+    target_entity = models.ForeignKey(
+        Entity,
+        on_delete=models.PROTECT,
+        related_name="effective_incoming_relationships",
+    )
+    status = models.CharField(max_length=16, choices=Status.choices)
+    selection_reason = models.CharField(max_length=40)
+    selected_authority_tier = models.PositiveSmallIntegerField(null=True, blank=True)
+    selected_authority_priority = models.PositiveSmallIntegerField(null=True, blank=True)
+    input_hash = models.BinaryField()
+    projected_at = models.DateTimeField()
+
+    class Meta:
+        db_table = "entity_relationships"
+        constraints = (
+            models.UniqueConstraint(
+                fields=("tenant", "relationship_type", "source_entity", "target_entity"),
+                name="uq_entity_relationship_current",
+            ),
+            models.UniqueConstraint(
+                fields=("tenant", "id"),
+                name="uq_entity_relationship_tenant_id",
+            ),
+        )
+        indexes = (
+            models.Index(
+                fields=("tenant", "relationship_type", "status"),
+                name="idx_entity_relationship_state",
+            ),
+        )
+
+    def __str__(self) -> str:
+        return f"{self.relationship_type_id}:{self.source_entity_id}:{self.target_entity_id}"
+
+
+class EntityRelationshipEvidenceSupport(TenantScopedModel):
+    """Eligible source evidence supporting one effective relationship."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    relationship = models.ForeignKey(
+        EntityRelationshipCurrent,
+        on_delete=models.CASCADE,
+        related_name="evidence_support",
+    )
+    evidence = models.ForeignKey(
+        EntityRelationshipEvidenceCurrent,
+        on_delete=models.PROTECT,
+        related_name="effective_support",
+    )
+
+    class Meta:
+        db_table = "entity_relationship_evidence_support"
+        constraints = (
+            models.UniqueConstraint(
+                fields=("tenant", "relationship", "evidence"),
+                name="uq_relationship_evidence_support",
+            ),
+        )
+
+    def __str__(self) -> str:
+        return f"{self.relationship_id}:{self.evidence_id}"
+
+
+class SourceEvent(UUIDTenantScopedModel):
+    """Immutable source-native event with protected raw and actor evidence."""
+
+    class ProcessingStatus(models.TextChoices):
+        RECORDED = "recorded", "Recorded"
+        CONFIRMED = "confirmed", "Confirmed withdrawal"
+        UNRESOLVED = "unresolved", "Unresolved subject"
+        OUT_OF_ORDER = "out_of_order", "Out of order"
+        INVALID = "invalid", "Invalid"
+
+    source_instance = models.ForeignKey(
+        SourceInstance,
+        on_delete=models.PROTECT,
+        related_name="source_events",
+    )
+    source_binding = models.ForeignKey(
+        SourceBinding,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="source_events",
+    )
+    external_event_id = models.TextField()
+    event_type = models.CharField(max_length=120)
+    event_at = models.DateTimeField()
+    received_at = models.DateTimeField()
+    subject_external_namespace = models.CharField(max_length=120, blank=True, default="")
+    subject_parent_external_namespace = models.CharField(max_length=120, blank=True, default="")
+    subject_parent_external_id = models.TextField(blank=True, default="")
+    subject_external_id = models.TextField(blank=True, default="")
+    source_actor_id = models.TextField(blank=True, default="")
+    source_actor_display = models.JSONField(default=dict, blank=True)
+    outcome = models.CharField(max_length=80, blank=True, default="")
+    raw_event = models.JSONField()
+    raw_hash = models.BinaryField()
+    processing_status = models.CharField(
+        max_length=20,
+        choices=ProcessingStatus.choices,
+        default=ProcessingStatus.RECORDED,
+    )
+    processing_reason = models.CharField(max_length=120, blank=True, default="")
+    processed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "source_events"
+        constraints = (
+            models.UniqueConstraint(
+                fields=("tenant", "source_instance", "external_event_id"),
+                name="uq_source_events_external_id",
+            ),
+            models.UniqueConstraint(
+                fields=("tenant", "id"),
+                name="uq_source_events_tenant_id",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    (Q(subject_parent_external_namespace="") & Q(subject_parent_external_id=""))
+                    | (
+                        ~Q(subject_parent_external_namespace="")
+                        & ~Q(subject_parent_external_id="")
+                    )
+                ),
+                name="ck_source_event_parent_identity",
+            ),
+        )
+        indexes = (
+            models.Index(
+                fields=("tenant", "source_instance", "event_type", "event_at"),
+                name="idx_source_events_type_time",
+            ),
+            models.Index(
+                fields=("tenant", "processing_status", "event_at"),
+                name="idx_source_events_processing",
+            ),
+        )
+
+    def __str__(self) -> str:
+        return f"{self.source_instance_id}:{self.event_type}:{self.external_event_id}"
+
+
 class EntityAttributeEffectiveEvidence(models.Model):
     """Redacted tenant-scoped effective-value read model."""
 
@@ -2589,6 +3115,13 @@ class EntityObservationHistory(TenantScopedModel):
     active = models.BooleanField(default=True)
     closed_by_snapshot_run = models.ForeignKey(
         "ObservationSnapshotRun",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="closed_observation_history",
+    )
+    closed_by_source_event = models.ForeignKey(
+        SourceEvent,
         on_delete=models.PROTECT,
         null=True,
         blank=True,
