@@ -456,7 +456,7 @@ BEGIN
                link.id AS entity_source_link_id, link.entity_id,
                COALESCE(link.entity_class_id, entity_type.entity_class_id)
                    AS classified_entity_class_id,
-               public.digest(convert_to(
+               pg_catalog.sha256(convert_to(
                    (COALESCE(o.canonical_data, '{}'::jsonb)
                        - 'last_seen_at' - 'last_contact_at')::text
                    || '|raw-keys:' || COALESCE((
@@ -499,7 +499,7 @@ BEGIN
                    )
                    || '|contract:' || projection_contract::text,
                    'UTF8'
-               ), 'sha256') AS projection_hash
+               )) AS projection_hash
         FROM entity_observation_current o
         JOIN source_instances source_instance
           ON source_instance.id = o.source_instance_id
@@ -619,7 +619,7 @@ BEGIN
         FROM expanded
     ), valid AS (
         SELECT typed.*,
-               public.digest(convert_to(
+               pg_catalog.sha256(convert_to(
                    value_type || ':' || CASE value_type
                      WHEN 'text' THEN value_text
                      WHEN 'number' THEN value_number::text
@@ -629,7 +629,7 @@ BEGIN
                      WHEN 'structured' THEN value_json::text
                    END,
                    'UTF8'
-               ), 'sha256') AS value_fingerprint
+               )) AS value_fingerprint
         FROM typed
         WHERE CASE value_type
           WHEN 'text' THEN value_text IS NOT NULL
@@ -647,11 +647,13 @@ BEGIN
     SELECT DISTINCT ON (
         valid.observation_id, valid.attribute_definition_id,
         CASE WHEN valid.cardinality = 'single'
-             THEN public.digest('single', 'sha256') ELSE valid.value_fingerprint END
+             THEN pg_catalog.sha256(convert_to('single', 'UTF8'))
+             ELSE valid.value_fingerprint END
     )
         valid.*,
         CASE WHEN valid.cardinality = 'single'
-             THEN public.digest('single', 'sha256') ELSE valid.value_fingerprint END
+             THEN pg_catalog.sha256(convert_to('single', 'UTF8'))
+             ELSE valid.value_fingerprint END
             AS member_key,
         COALESCE(policy.eligible, FALSE) AND COALESCE(policy.enabled, FALSE)
             AS authority_eligible,
@@ -676,7 +678,8 @@ BEGIN
      AND history.effective_to IS NULL
     ORDER BY valid.observation_id, valid.attribute_definition_id,
              CASE WHEN valid.cardinality = 'single'
-             THEN public.digest('single', 'sha256') ELSE valid.value_fingerprint END,
+                  THEN pg_catalog.sha256(convert_to('single', 'UTF8'))
+                  ELSE valid.value_fingerprint END,
              valid.source_mapping_id DESC;
 
     DROP TABLE IF EXISTS pg_temp.claim_rows_to_change;

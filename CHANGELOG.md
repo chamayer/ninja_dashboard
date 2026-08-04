@@ -2,6 +2,13 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.105.3] — 2026-08-04 — Built-in attribute hashing
+
+### Fixed
+
+- Replaced the unavailable `pgcrypto.digest` dependency with PostgreSQL 16's
+  built-in `pg_catalog.sha256(bytea)` for claim and projection fingerprints.
+
 ## [0.105.2] — 2026-08-04 — Attribute-projector digest fix
 
 ### Fixed
