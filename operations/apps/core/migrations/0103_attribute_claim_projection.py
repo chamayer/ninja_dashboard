@@ -435,6 +435,7 @@ DECLARE
     inserted_history integer := 0;
     closed_history integer := 0;
     withheld_writes integer := 0;
+    effective_dirty_writes integer := 0;
 BEGIN
     IF batch_size < 1 OR batch_size > 10000 THEN
         RAISE EXCEPTION 'batch_size must be between 1 and 10000';
@@ -505,7 +506,7 @@ BEGIN
             'status', 'complete', 'processed', 0, 'inserted_claims', 0,
             'updated_claims', 0, 'withdrawn_claims', 0,
             'inserted_history', 0, 'closed_history', 0,
-            'withheld_writes', 0
+            'withheld_writes', 0, 'effective_dirty_writes', 0
         );
     END IF;
 
@@ -692,6 +693,24 @@ BEGIN
               desired.authority_tier, desired.authority_priority)
       );
 
+    DROP TABLE IF EXISTS pg_temp.effective_groups_to_queue;
+    CREATE TEMP TABLE effective_groups_to_queue ON COMMIT DROP AS
+    SELECT current.tenant_id, current.entity_id, current.entity_class_id,
+           current.attribute_definition_id
+    FROM entity_attribute_claim_current current
+    JOIN claim_rows_to_change changed ON changed.id = current.id
+    UNION
+    SELECT desired.tenant_id, desired.entity_id, desired.entity_class_id,
+           desired.attribute_definition_id
+    FROM desired_claims desired
+    LEFT JOIN entity_attribute_claim_current current
+      ON current.tenant_id = desired.tenant_id
+     AND current.observation_id = desired.observation_id
+     AND current.attribute_definition_id = desired.attribute_definition_id
+     AND current.member_key = desired.member_key
+    LEFT JOIN claim_rows_to_change changed ON changed.id = current.id
+    WHERE current.id IS NULL OR changed.id IS NOT NULL;
+
     UPDATE entity_attribute_claim_history history
        SET effective_to = projected_at,
            closed_reason = changed.close_reason
@@ -839,6 +858,21 @@ BEGIN
     WHERE current.active AND history.id IS NULL;
     GET DIAGNOSTICS inserted_history = ROW_COUNT;
 
+    INSERT INTO entity_attribute_effective_dirty (
+        id, tenant_id, version, entity_id, entity_class_id,
+        attribute_definition_id, queued_at, reason
+    )
+    SELECT gen_random_uuid(), queued.tenant_id, 1, queued.entity_id,
+           queued.entity_class_id, queued.attribute_definition_id,
+           projected_at, 'claim_delta'
+    FROM effective_groups_to_queue queued
+    ON CONFLICT (tenant_id, entity_id, attribute_definition_id) DO UPDATE SET
+        entity_class_id = EXCLUDED.entity_class_id,
+        queued_at = EXCLUDED.queued_at,
+        reason = EXCLUDED.reason,
+        version = entity_attribute_effective_dirty.version + 1;
+    GET DIAGNOSTICS effective_dirty_writes = ROW_COUNT;
+
     WITH field_inventory AS (
         SELECT batch.observation_id, batch.tenant_id, batch.source_instance_id,
                batch.active, 'canonical'::text AS document_kind, field.key
@@ -958,7 +992,8 @@ BEGIN
         'withdrawn_claims', withdrawn_claims,
         'inserted_history', inserted_history,
         'closed_history', closed_history,
-        'withheld_writes', withheld_writes
+        'withheld_writes', withheld_writes,
+        'effective_dirty_writes', effective_dirty_writes
     );
 END;
 $function$;

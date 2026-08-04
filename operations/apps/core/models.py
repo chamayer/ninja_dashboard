@@ -188,7 +188,9 @@ class Entity(UUIDTenantScopedModel):
             ),
         )
         indexes = (
-            models.Index(fields=("tenant", "entity_class", "client"), name="idx_entities_class_owner"),
+            models.Index(
+                fields=("tenant", "entity_class", "client"), name="idx_entities_class_owner"
+            ),
         )
 
     def __str__(self) -> str:
@@ -285,10 +287,17 @@ class FindingType(models.Model):
 
     id = models.SmallAutoField(primary_key=True)
     name = models.CharField(max_length=120, unique=True)
-    default_severity = models.CharField(max_length=16, choices=Severity.choices, default=Severity.MEDIUM)
-    finding_class = models.CharField(max_length=16, choices=FindingClass.choices, default=FindingClass.ENTITY)
+    default_severity = models.CharField(
+        max_length=16, choices=Severity.choices, default=Severity.MEDIUM
+    )
+    finding_class = models.CharField(
+        max_length=16, choices=FindingClass.choices, default=FindingClass.ENTITY
+    )
     category = models.ForeignKey(
-        FindingCategory, on_delete=models.PROTECT, null=True, blank=True,
+        FindingCategory,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
         related_name="finding_types",
     )
     source_module = models.CharField(max_length=80, blank=True, default="")
@@ -318,7 +327,8 @@ class Client(UUIDTenantScopedModel):
     requirement_profile = models.ForeignKey(
         "RequirementProfile",
         on_delete=models.PROTECT,
-        null=True, blank=True,
+        null=True,
+        blank=True,
         related_name="clients",
     )
     created_at = models.DateTimeField(auto_now_add=True)
@@ -393,7 +403,10 @@ class ClientNameAlias(UUIDTenantScopedModel):
 
 class ClientOrgExclude(UUIDTenantScopedModel):
     source = models.ForeignKey(
-        Source, on_delete=models.PROTECT, null=True, blank=True,
+        Source,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
         related_name="org_excludes",
     )
     external_id = models.CharField(max_length=240, blank=True, default="")
@@ -450,7 +463,10 @@ class ClientCandidate(UUIDTenantScopedModel):
     last_seen_at = models.DateTimeField(auto_now=True)
     source_refs = models.JSONField(default=list, blank=True)
     resolved_client = models.ForeignKey(
-        Client, on_delete=models.SET_NULL, null=True, blank=True,
+        Client,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
         related_name="resolved_candidates",
     )
     resolved_at = models.DateTimeField(null=True, blank=True)
@@ -709,7 +725,10 @@ class Asset(UUIDTenantScopedModel):
         default=AssetType.ENDPOINT_HARDWARE,
     )
     device = models.ForeignKey(
-        Device, on_delete=models.CASCADE, null=True, blank=True,
+        Device,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
         related_name="assets",
     )
     form_factor = models.CharField(
@@ -726,11 +745,17 @@ class Asset(UUIDTenantScopedModel):
     first_seen_at = models.DateTimeField()
     last_seen_at = models.DateTimeField()
     first_observed_source = models.ForeignKey(
-        Source, on_delete=models.PROTECT, null=True, blank=True,
+        Source,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
         related_name="first_observed_assets",
     )
     last_observed_source = models.ForeignKey(
-        Source, on_delete=models.PROTECT, null=True, blank=True,
+        Source,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
         related_name="last_observed_assets",
     )
     created_at = models.DateTimeField(auto_now_add=True)
@@ -780,11 +805,17 @@ class OSInstance(UUIDTenantScopedModel):
     first_seen_at = models.DateTimeField()
     last_seen_at = models.DateTimeField()
     first_observed_source = models.ForeignKey(
-        Source, on_delete=models.PROTECT, null=True, blank=True,
+        Source,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
         related_name="first_observed_os_instances",
     )
     last_observed_source = models.ForeignKey(
-        Source, on_delete=models.PROTECT, null=True, blank=True,
+        Source,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
         related_name="last_observed_os_instances",
     )
     created_at = models.DateTimeField(auto_now_add=True)
@@ -828,11 +859,17 @@ class AgentInstance(UUIDTenantScopedModel):
     first_seen_at = models.DateTimeField()
     last_seen_at = models.DateTimeField()
     first_observed_source = models.ForeignKey(
-        Source, on_delete=models.PROTECT, null=True, blank=True,
+        Source,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
         related_name="first_observed_agent_instances",
     )
     last_observed_source = models.ForeignKey(
-        Source, on_delete=models.PROTECT, null=True, blank=True,
+        Source,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
         related_name="last_observed_agent_instances",
     )
     created_at = models.DateTimeField(auto_now_add=True)
@@ -872,7 +909,10 @@ class LayerFieldHistory(UUIDTenantScopedModel):
     new_value = models.JSONField(null=True, blank=True)
     changed_at = models.DateTimeField(auto_now_add=True)
     change_source = models.ForeignKey(
-        Source, on_delete=models.PROTECT, null=True, blank=True,
+        Source,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
     )
     change_reason = models.CharField(max_length=120, blank=True, default="")
 
@@ -1016,7 +1056,9 @@ class DevicePatchingOverride(UUIDTenantScopedModel):
 
 
 class ClientUser(UUIDTenantScopedModel):
-    client = models.ForeignKey(Client, on_delete=models.PROTECT, null=True, blank=True, related_name="client_users")
+    client = models.ForeignKey(
+        Client, on_delete=models.PROTECT, null=True, blank=True, related_name="client_users"
+    )
     canonical_email = models.EmailField(blank=True)
     canonical_username = models.CharField(max_length=255, blank=True)
     display_name = models.CharField(max_length=240)
@@ -1051,7 +1093,9 @@ class ClientUserLink(UUIDTenantScopedModel):
 
 class SourceInstance(TenantScopedModel):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    client = models.ForeignKey(Client, on_delete=models.PROTECT, null=True, blank=True, related_name="source_instances")
+    client = models.ForeignKey(
+        Client, on_delete=models.PROTECT, null=True, blank=True, related_name="source_instances"
+    )
     source = models.ForeignKey(Source, on_delete=models.PROTECT, related_name="instances")
     config = models.JSONField(default=dict, blank=True)
     enabled = models.BooleanField(default=True)
@@ -1075,7 +1119,9 @@ class CollectorInstance(UUIDTenantScopedModel):
         db_table = "collector_instances"
         ordering = ("name",)
         constraints = (
-            models.UniqueConstraint(fields=("tenant", "name"), name="uq_collector_instances_tenant_name"),
+            models.UniqueConstraint(
+                fields=("tenant", "name"), name="uq_collector_instances_tenant_name"
+            ),
         )
 
     def __str__(self) -> str:
@@ -1083,8 +1129,12 @@ class CollectorInstance(UUIDTenantScopedModel):
 
 
 class SourceBinding(UUIDTenantScopedModel):
-    source_instance = models.ForeignKey(SourceInstance, on_delete=models.CASCADE, related_name="bindings")
-    collector_instance = models.ForeignKey(CollectorInstance, on_delete=models.CASCADE, related_name="source_bindings")
+    source_instance = models.ForeignKey(
+        SourceInstance, on_delete=models.CASCADE, related_name="bindings"
+    )
+    collector_instance = models.ForeignKey(
+        CollectorInstance, on_delete=models.CASCADE, related_name="source_bindings"
+    )
     schedule = models.CharField(max_length=120, blank=True)
     enabled = models.BooleanField(default=True)
 
@@ -1105,8 +1155,12 @@ class EntitySourceLink(UUIDTenantScopedModel):
     """Current canonical attachment for one stable source identity."""
 
     entity = models.ForeignKey(Entity, on_delete=models.PROTECT, related_name="source_links")
-    entity_class = models.ForeignKey(EntityClass, on_delete=models.PROTECT, related_name="source_links")
-    source_instance = models.ForeignKey(SourceInstance, on_delete=models.PROTECT, related_name="entity_links")
+    entity_class = models.ForeignKey(
+        EntityClass, on_delete=models.PROTECT, related_name="source_links"
+    )
+    source_instance = models.ForeignKey(
+        SourceInstance, on_delete=models.PROTECT, related_name="entity_links"
+    )
     last_seen_binding = models.ForeignKey(
         SourceBinding,
         on_delete=models.SET_NULL,
@@ -1152,7 +1206,9 @@ class EntitySourceLink(UUIDTenantScopedModel):
             ),
         )
         indexes = (
-            models.Index(fields=("tenant", "entity", "entity_class"), name="idx_entity_source_links_entity"),
+            models.Index(
+                fields=("tenant", "entity", "entity_class"), name="idx_entity_source_links_entity"
+            ),
             models.Index(fields=("tenant", "missing_since"), name="idx_entity_links_missing"),
         )
 
@@ -1164,7 +1220,9 @@ class EntitySourceLinkHistory(UUIDTenantScopedModel):
     """SCD-2 attachment history for a stable source identity."""
 
     entity = models.ForeignKey(Entity, on_delete=models.PROTECT, related_name="source_link_history")
-    entity_class = models.ForeignKey(EntityClass, on_delete=models.PROTECT, related_name="source_link_history")
+    entity_class = models.ForeignKey(
+        EntityClass, on_delete=models.PROTECT, related_name="source_link_history"
+    )
     source_instance = models.ForeignKey(
         SourceInstance,
         on_delete=models.PROTECT,
@@ -1224,12 +1282,15 @@ class EntitySourceLinkHistory(UUIDTenantScopedModel):
                 name="ck_entity_link_history_stable",
             ),
             models.CheckConstraint(
-                condition=Q(effective_to__isnull=True) | Q(effective_to__gt=models.F("effective_from")),
+                condition=Q(effective_to__isnull=True)
+                | Q(effective_to__gt=models.F("effective_from")),
                 name="ck_entity_link_history_window",
             ),
         )
         indexes = (
-            models.Index(fields=("tenant", "entity", "effective_from"), name="idx_entity_link_hist_entity"),
+            models.Index(
+                fields=("tenant", "entity", "effective_from"), name="idx_entity_link_hist_entity"
+            ),
             models.Index(fields=("tenant", "effective_to"), name="idx_entity_link_hist_retention"),
         )
 
@@ -1246,13 +1307,17 @@ class EntityCandidate(UUIDTenantScopedModel):
         ATTACHED = "attached", "Attached"
         REJECTED = "rejected", "Rejected"
 
-    source_instance = models.ForeignKey(SourceInstance, on_delete=models.PROTECT, related_name="entity_candidates")
+    source_instance = models.ForeignKey(
+        SourceInstance, on_delete=models.PROTECT, related_name="entity_candidates"
+    )
     proposed_entity_class = models.ForeignKey(
         EntityClass,
         on_delete=models.PROTECT,
         related_name="entity_candidates",
     )
-    client = models.ForeignKey(Client, on_delete=models.PROTECT, null=True, blank=True, related_name="entity_candidates")
+    client = models.ForeignKey(
+        Client, on_delete=models.PROTECT, null=True, blank=True, related_name="entity_candidates"
+    )
     external_namespace = models.CharField(max_length=120)
     parent_external_namespace = models.CharField(max_length=120, blank=True, default="")
     parent_external_id = models.TextField(blank=True, default="")
@@ -1315,7 +1380,9 @@ class EntityCandidate(UUIDTenantScopedModel):
             ),
         )
         indexes = (
-            models.Index(fields=("tenant", "status", "last_observed_at"), name="idx_entity_candidates_queue"),
+            models.Index(
+                fields=("tenant", "status", "last_observed_at"), name="idx_entity_candidates_queue"
+            ),
         )
 
     def __str__(self) -> str:
@@ -1344,7 +1411,9 @@ class EntityCandidateEvent(UUIDTenantScopedModel):
     class Meta:
         db_table = "entity_candidate_events"
         indexes = (
-            models.Index(fields=("tenant", "candidate", "occurred_at"), name="idx_entity_candidate_events"),
+            models.Index(
+                fields=("tenant", "candidate", "occurred_at"), name="idx_entity_candidate_events"
+            ),
         )
 
     def __str__(self) -> str:
@@ -1572,7 +1641,10 @@ class AttributeAuthorityPolicy(UUIDTenantScopedModel):
         )
 
     def __str__(self) -> str:
-        return f"{self.source_instance_id}:{self.native_record_type}:" f"{self.attribute_definition_id}"
+        return (
+            f"{self.source_instance_id}:{self.native_record_type}:"
+            f"{self.attribute_definition_id}"
+        )
 
 
 def _typed_claim_value_condition() -> Q:
@@ -1597,15 +1669,23 @@ class EntityAttributeClaimCurrent(UUIDTenantScopedModel):
     """Current typed source assertion; heartbeat receipt stays on its observation."""
 
     entity = models.ForeignKey(Entity, on_delete=models.PROTECT, related_name="attribute_claims")
-    entity_class = models.ForeignKey(EntityClass, on_delete=models.PROTECT, related_name="attribute_claims")
+    entity_class = models.ForeignKey(
+        EntityClass, on_delete=models.PROTECT, related_name="attribute_claims"
+    )
     observation = models.ForeignKey(
         "EntityObservationCurrent",
         on_delete=models.PROTECT,
         related_name="attribute_claims",
     )
-    source_instance = models.ForeignKey(SourceInstance, on_delete=models.PROTECT, related_name="attribute_claims")
-    attribute_definition = models.ForeignKey(AttributeDefinition, on_delete=models.PROTECT, related_name="current_claims")
-    source_mapping = models.ForeignKey(SourceFieldMapping, on_delete=models.PROTECT, related_name="current_claims")
+    source_instance = models.ForeignKey(
+        SourceInstance, on_delete=models.PROTECT, related_name="attribute_claims"
+    )
+    attribute_definition = models.ForeignKey(
+        AttributeDefinition, on_delete=models.PROTECT, related_name="current_claims"
+    )
+    source_mapping = models.ForeignKey(
+        SourceFieldMapping, on_delete=models.PROTECT, related_name="current_claims"
+    )
     value_type = models.CharField(max_length=24, choices=AttributeDefinition.ValueType.choices)
     cardinality = models.CharField(max_length=12, choices=AttributeDefinition.Cardinality.choices)
     value_text = models.TextField(null=True, blank=True)  # noqa: DJ001 -- typed union
@@ -1638,10 +1718,17 @@ class EntityAttributeClaimCurrent(UUIDTenantScopedModel):
                 fields=("tenant", "observation", "attribute_definition", "member_key"),
                 name="uq_attr_claim_current_member",
             ),
-            models.UniqueConstraint(fields=("tenant", "id"), name="uq_attr_claim_current_tenant_id"),
-            models.CheckConstraint(condition=_typed_claim_value_condition(), name="ck_attr_claim_current_typed_value"),
+            models.UniqueConstraint(
+                fields=("tenant", "id"), name="uq_attr_claim_current_tenant_id"
+            ),
             models.CheckConstraint(
-                condition=((Q(active=True) & Q(withdrawn_at__isnull=True)) | (Q(active=False) & Q(withdrawn_at__isnull=False))),
+                condition=_typed_claim_value_condition(), name="ck_attr_claim_current_typed_value"
+            ),
+            models.CheckConstraint(
+                condition=(
+                    (Q(active=True) & Q(withdrawn_at__isnull=True))
+                    | (Q(active=False) & Q(withdrawn_at__isnull=False))
+                ),
                 name="ck_attr_claim_current_presence",
             ),
         )
@@ -1650,7 +1737,9 @@ class EntityAttributeClaimCurrent(UUIDTenantScopedModel):
                 fields=("tenant", "entity", "attribute_definition", "active"),
                 name="idx_attr_claim_current_entity",
             ),
-            models.Index(fields=("tenant", "observation", "active"), name="idx_attr_claim_current_obs"),
+            models.Index(
+                fields=("tenant", "observation", "active"), name="idx_attr_claim_current_obs"
+            ),
         )
 
     def __str__(self) -> str:
@@ -1661,17 +1750,29 @@ class EntityAttributeClaimHistory(TenantScopedModel):
     """SCD-2 history for value, support, authority, and withdrawal deltas."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    current_claim = models.ForeignKey(EntityAttributeClaimCurrent, on_delete=models.PROTECT, related_name="history")
-    entity = models.ForeignKey(Entity, on_delete=models.PROTECT, related_name="attribute_claim_history")
-    entity_class = models.ForeignKey(EntityClass, on_delete=models.PROTECT, related_name="attribute_claim_history")
+    current_claim = models.ForeignKey(
+        EntityAttributeClaimCurrent, on_delete=models.PROTECT, related_name="history"
+    )
+    entity = models.ForeignKey(
+        Entity, on_delete=models.PROTECT, related_name="attribute_claim_history"
+    )
+    entity_class = models.ForeignKey(
+        EntityClass, on_delete=models.PROTECT, related_name="attribute_claim_history"
+    )
     observation = models.ForeignKey(
         "EntityObservationCurrent",
         on_delete=models.PROTECT,
         related_name="attribute_claim_history",
     )
-    source_instance = models.ForeignKey(SourceInstance, on_delete=models.PROTECT, related_name="attribute_claim_history")
-    attribute_definition = models.ForeignKey(AttributeDefinition, on_delete=models.PROTECT, related_name="claim_history")
-    source_mapping = models.ForeignKey(SourceFieldMapping, on_delete=models.PROTECT, related_name="claim_history")
+    source_instance = models.ForeignKey(
+        SourceInstance, on_delete=models.PROTECT, related_name="attribute_claim_history"
+    )
+    attribute_definition = models.ForeignKey(
+        AttributeDefinition, on_delete=models.PROTECT, related_name="claim_history"
+    )
+    source_mapping = models.ForeignKey(
+        SourceFieldMapping, on_delete=models.PROTECT, related_name="claim_history"
+    )
     value_type = models.CharField(max_length=24, choices=AttributeDefinition.ValueType.choices)
     cardinality = models.CharField(max_length=12, choices=AttributeDefinition.Cardinality.choices)
     value_text = models.TextField(null=True, blank=True)  # noqa: DJ001 -- typed union
@@ -1704,7 +1805,9 @@ class EntityAttributeClaimHistory(TenantScopedModel):
                 condition=Q(effective_to__isnull=True),
                 name="uq_attr_claim_history_open",
             ),
-            models.CheckConstraint(condition=_typed_claim_value_condition(), name="ck_attr_claim_history_typed_value"),
+            models.CheckConstraint(
+                condition=_typed_claim_value_condition(), name="ck_attr_claim_history_typed_value"
+            ),
         )
         indexes = (
             models.Index(
@@ -1727,7 +1830,9 @@ class EntityAttributeWithheldCurrent(TenantScopedModel):
         on_delete=models.PROTECT,
         related_name="attribute_withheld_counts",
     )
-    source_instance = models.ForeignKey(SourceInstance, on_delete=models.PROTECT, related_name="attribute_withheld_counts")
+    source_instance = models.ForeignKey(
+        SourceInstance, on_delete=models.PROTECT, related_name="attribute_withheld_counts"
+    )
     observed_field_count = models.PositiveIntegerField(default=0)
     mapped_field_count = models.PositiveIntegerField(default=0)
     unmapped_field_count = models.PositiveIntegerField(default=0)
@@ -1740,7 +1845,11 @@ class EntityAttributeWithheldCurrent(TenantScopedModel):
 
     class Meta:
         db_table = "entity_attribute_withheld_current"
-        constraints = (models.UniqueConstraint(fields=("tenant", "observation"), name="uq_attr_withheld_tenant_obs"),)
+        constraints = (
+            models.UniqueConstraint(
+                fields=("tenant", "observation"), name="uq_attr_withheld_tenant_obs"
+            ),
+        )
         indexes = (
             models.Index(
                 fields=("tenant", "active", "unmapped_field_count"),
@@ -1761,7 +1870,9 @@ class EntityAttributeProjectionState(TenantScopedModel):
         on_delete=models.PROTECT,
         related_name="attribute_projection_state",
     )
-    source_instance = models.ForeignKey(SourceInstance, on_delete=models.PROTECT, related_name="attribute_projection_states")
+    source_instance = models.ForeignKey(
+        SourceInstance, on_delete=models.PROTECT, related_name="attribute_projection_states"
+    )
     entity_source_link = models.ForeignKey(
         EntitySourceLink,
         on_delete=models.PROTECT,
@@ -1783,7 +1894,11 @@ class EntityAttributeProjectionState(TenantScopedModel):
 
     class Meta:
         db_table = "entity_attribute_projection_state"
-        constraints = (models.UniqueConstraint(fields=("tenant", "observation"), name="uq_attr_projection_tenant_obs"),)
+        constraints = (
+            models.UniqueConstraint(
+                fields=("tenant", "observation"), name="uq_attr_projection_tenant_obs"
+            ),
+        )
         indexes = (
             models.Index(
                 fields=("tenant", "source_instance", "observation_active"),
@@ -1793,6 +1908,449 @@ class EntityAttributeProjectionState(TenantScopedModel):
 
     def __str__(self) -> str:
         return f"{self.observation_id}:{self.projected_at}"
+
+
+def _typed_value_is_null_condition() -> Q:
+    return (
+        Q(value_text__isnull=True)
+        & Q(value_number__isnull=True)
+        & Q(value_boolean__isnull=True)
+        & Q(value_timestamp__isnull=True)
+        & Q(value_entity__isnull=True)
+        & Q(value_json__isnull=True)
+    )
+
+
+class EntityAttributeDecisionCurrent(UUIDTenantScopedModel):
+    """Validated operator intent, separate from source evidence and projections."""
+
+    class Operation(models.TextChoices):
+        REPLACE = "replace", "Replace"
+        CLEAR = "clear", "Clear"
+        MODIFY = "modify", "Modify set"
+
+    entity = models.ForeignKey(Entity, on_delete=models.PROTECT, related_name="attribute_decisions")
+    entity_class = models.ForeignKey(
+        EntityClass, on_delete=models.PROTECT, related_name="attribute_decisions"
+    )
+    attribute_definition = models.ForeignKey(
+        AttributeDefinition,
+        on_delete=models.PROTECT,
+        related_name="operator_decisions",
+    )
+    operation = models.CharField(max_length=16, choices=Operation.choices)
+    value_type = models.CharField(max_length=24, choices=AttributeDefinition.ValueType.choices)
+    cardinality = models.CharField(max_length=12, choices=AttributeDefinition.Cardinality.choices)
+    value_text = models.TextField(null=True, blank=True)  # noqa: DJ001 -- typed union
+    value_number = models.DecimalField(max_digits=38, decimal_places=10, null=True, blank=True)
+    value_boolean = models.BooleanField(null=True, blank=True)
+    value_timestamp = models.DateTimeField(null=True, blank=True)
+    value_entity = models.ForeignKey(
+        Entity,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="referenced_attribute_decisions",
+    )
+    value_json = models.JSONField(null=True, blank=True)
+    value_fingerprint = models.BinaryField(null=True, blank=True)
+    active = models.BooleanField(default=True)
+    reason = models.TextField()
+    decided_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="attribute_decisions",
+    )
+    decided_at = models.DateTimeField()
+    updated_at = models.DateTimeField()
+
+    class Meta:
+        db_table = "entity_attribute_decision_current"
+        constraints = (
+            models.UniqueConstraint(
+                fields=("tenant", "entity", "attribute_definition"),
+                name="uq_attr_decision_current",
+            ),
+            models.UniqueConstraint(
+                fields=("tenant", "id"),
+                name="uq_attr_decision_tenant_id",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    (
+                        Q(
+                            cardinality="single",
+                            operation="replace",
+                            value_fingerprint__isnull=False,
+                        )
+                        & _typed_claim_value_condition()
+                    )
+                    | (
+                        Q(cardinality="single", operation="clear", value_fingerprint__isnull=True)
+                        & _typed_value_is_null_condition()
+                    )
+                    | (
+                        Q(
+                            cardinality="set",
+                            operation__in=("replace", "modify"),
+                            value_fingerprint__isnull=True,
+                        )
+                        & _typed_value_is_null_condition()
+                    )
+                ),
+                name="ck_attr_decision_shape",
+            ),
+        )
+        indexes = (
+            models.Index(
+                fields=("tenant", "entity", "attribute_definition", "active"),
+                name="idx_attr_decision_entity",
+            ),
+        )
+
+    def __str__(self) -> str:
+        return f"{self.entity_id}:{self.attribute_definition_id}:{self.operation}"
+
+
+class EntityAttributeDecisionMemberCurrent(UUIDTenantScopedModel):
+    """Typed include/remove member for a set-valued operator decision."""
+
+    class Action(models.TextChoices):
+        ADD = "add", "Add"
+        REMOVE = "remove", "Remove"
+
+    decision = models.ForeignKey(
+        EntityAttributeDecisionCurrent,
+        on_delete=models.CASCADE,
+        related_name="members",
+    )
+    action = models.CharField(max_length=12, choices=Action.choices)
+    value_type = models.CharField(max_length=24, choices=AttributeDefinition.ValueType.choices)
+    value_text = models.TextField(null=True, blank=True)  # noqa: DJ001 -- typed union
+    value_number = models.DecimalField(max_digits=38, decimal_places=10, null=True, blank=True)
+    value_boolean = models.BooleanField(null=True, blank=True)
+    value_timestamp = models.DateTimeField(null=True, blank=True)
+    value_entity = models.ForeignKey(
+        Entity,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="referenced_attribute_decision_members",
+    )
+    value_json = models.JSONField(null=True, blank=True)
+    value_fingerprint = models.BinaryField()
+    member_key = models.BinaryField()
+
+    class Meta:
+        db_table = "entity_attribute_decision_member_current"
+        constraints = (
+            models.UniqueConstraint(
+                fields=("tenant", "decision", "member_key"),
+                name="uq_attr_decision_member",
+            ),
+            models.CheckConstraint(
+                condition=_typed_claim_value_condition(),
+                name="ck_attr_decision_member_typed_value",
+            ),
+        )
+
+    def __str__(self) -> str:
+        return f"{self.decision_id}:{self.action}"
+
+
+class EntityAttributeEffectiveDirty(UUIDTenantScopedModel):
+    """Durable changed-group queue for bounded effective-value projection."""
+
+    entity = models.ForeignKey(
+        Entity, on_delete=models.CASCADE, related_name="dirty_effective_attributes"
+    )
+    entity_class = models.ForeignKey(
+        EntityClass,
+        on_delete=models.PROTECT,
+        related_name="dirty_effective_attributes",
+    )
+    attribute_definition = models.ForeignKey(
+        AttributeDefinition,
+        on_delete=models.CASCADE,
+        related_name="dirty_effective_values",
+    )
+    queued_at = models.DateTimeField()
+    reason = models.CharField(max_length=40)
+
+    class Meta:
+        db_table = "entity_attribute_effective_dirty"
+        constraints = (
+            models.UniqueConstraint(
+                fields=("tenant", "entity", "attribute_definition"),
+                name="uq_attr_effective_dirty",
+            ),
+        )
+        indexes = (models.Index(fields=("queued_at", "id"), name="idx_attr_effective_dirty_queue"),)
+
+    def __str__(self) -> str:
+        return f"{self.entity_id}:{self.attribute_definition_id}"
+
+
+class EntityAttributeEffectiveCurrent(UUIDTenantScopedModel):
+    """Rebuildable effective-value header for one entity attribute."""
+
+    class Status(models.TextChoices):
+        SELECTED = "selected", "Selected"
+        CLEARED = "cleared", "Cleared by operator"
+        EMPTY = "empty", "Empty set"
+        UNKNOWN = "unknown", "Unknown due to conflict"
+        NO_EVIDENCE = "no_evidence", "No eligible evidence"
+
+    entity = models.ForeignKey(
+        Entity, on_delete=models.PROTECT, related_name="effective_attributes"
+    )
+    entity_class = models.ForeignKey(
+        EntityClass, on_delete=models.PROTECT, related_name="effective_attributes"
+    )
+    attribute_definition = models.ForeignKey(
+        AttributeDefinition,
+        on_delete=models.PROTECT,
+        related_name="effective_values",
+    )
+    value_type = models.CharField(max_length=24, choices=AttributeDefinition.ValueType.choices)
+    cardinality = models.CharField(max_length=12, choices=AttributeDefinition.Cardinality.choices)
+    status = models.CharField(max_length=20, choices=Status.choices)
+    selection_reason = models.CharField(max_length=40)
+    value_text = models.TextField(null=True, blank=True)  # noqa: DJ001 -- typed union
+    value_number = models.DecimalField(max_digits=38, decimal_places=10, null=True, blank=True)
+    value_boolean = models.BooleanField(null=True, blank=True)
+    value_timestamp = models.DateTimeField(null=True, blank=True)
+    value_entity = models.ForeignKey(
+        Entity,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="referenced_effective_attributes",
+    )
+    value_json = models.JSONField(null=True, blank=True)
+    value_fingerprint = models.BinaryField(null=True, blank=True)
+    selected_authority_tier = models.PositiveSmallIntegerField(null=True, blank=True)
+    selected_authority_priority = models.PositiveSmallIntegerField(null=True, blank=True)
+    conflict = models.BooleanField(default=False)
+    input_hash = models.BinaryField()
+    projected_at = models.DateTimeField()
+
+    class Meta:
+        db_table = "entity_attribute_effective_current"
+        constraints = (
+            models.UniqueConstraint(
+                fields=("tenant", "entity", "attribute_definition"),
+                name="uq_attr_effective_current",
+            ),
+            models.UniqueConstraint(
+                fields=("tenant", "id"),
+                name="uq_attr_effective_tenant_id",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    (
+                        Q(cardinality="single", status="selected", value_fingerprint__isnull=False)
+                        & _typed_claim_value_condition()
+                    )
+                    | (
+                        ~Q(cardinality="single", status="selected")
+                        & Q(value_fingerprint__isnull=True)
+                        & _typed_value_is_null_condition()
+                    )
+                ),
+                name="ck_attr_effective_shape",
+            ),
+        )
+        indexes = (
+            models.Index(
+                fields=("tenant", "entity", "attribute_definition", "status"),
+                name="idx_attr_effective_entity",
+            ),
+        )
+
+    def __str__(self) -> str:
+        return f"{self.entity_id}:{self.attribute_definition_id}:{self.status}"
+
+
+class EntityAttributeEffectiveMemberCurrent(UUIDTenantScopedModel):
+    """One typed member of an effective set-valued attribute."""
+
+    effective = models.ForeignKey(
+        EntityAttributeEffectiveCurrent,
+        on_delete=models.CASCADE,
+        related_name="members",
+    )
+    value_type = models.CharField(max_length=24, choices=AttributeDefinition.ValueType.choices)
+    value_text = models.TextField(null=True, blank=True)  # noqa: DJ001 -- typed union
+    value_number = models.DecimalField(max_digits=38, decimal_places=10, null=True, blank=True)
+    value_boolean = models.BooleanField(null=True, blank=True)
+    value_timestamp = models.DateTimeField(null=True, blank=True)
+    value_entity = models.ForeignKey(
+        Entity,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="referenced_effective_attribute_members",
+    )
+    value_json = models.JSONField(null=True, blank=True)
+    value_fingerprint = models.BinaryField()
+    member_key = models.BinaryField()
+    selection_reason = models.CharField(max_length=40)
+
+    class Meta:
+        db_table = "entity_attribute_effective_member_current"
+        constraints = (
+            models.UniqueConstraint(
+                fields=("tenant", "effective", "member_key"),
+                name="uq_attr_effective_member",
+            ),
+            models.UniqueConstraint(
+                fields=("tenant", "id"),
+                name="uq_attr_effective_member_tenant_id",
+            ),
+            models.CheckConstraint(
+                condition=_typed_claim_value_condition(),
+                name="ck_attr_effective_member_typed_value",
+            ),
+        )
+
+    def __str__(self) -> str:
+        return f"{self.effective_id}:{self.selection_reason}"
+
+
+class EntityAttributeEffectiveClaimSupport(TenantScopedModel):
+    """Current source-claim support for an effective scalar or set member."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    effective = models.ForeignKey(
+        EntityAttributeEffectiveCurrent,
+        on_delete=models.CASCADE,
+        related_name="claim_support",
+    )
+    effective_member = models.ForeignKey(
+        EntityAttributeEffectiveMemberCurrent,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="claim_support",
+    )
+    claim = models.ForeignKey(
+        EntityAttributeClaimCurrent,
+        on_delete=models.PROTECT,
+        related_name="effective_support",
+    )
+
+    class Meta:
+        db_table = "entity_attribute_effective_claim_support"
+        constraints = (
+            models.UniqueConstraint(
+                fields=("tenant", "effective", "effective_member", "claim"),
+                nulls_distinct=False,
+                name="uq_attr_effective_claim_support",
+            ),
+        )
+
+    def __str__(self) -> str:
+        return f"{self.effective_id}:{self.claim_id}"
+
+
+class EntityAttributeConflictCurrent(UUIDTenantScopedModel):
+    """Visible equal-authority disagreement for a single-valued attribute."""
+
+    entity = models.ForeignKey(Entity, on_delete=models.PROTECT, related_name="attribute_conflicts")
+    entity_class = models.ForeignKey(
+        EntityClass, on_delete=models.PROTECT, related_name="attribute_conflicts"
+    )
+    attribute_definition = models.ForeignKey(
+        AttributeDefinition,
+        on_delete=models.PROTECT,
+        related_name="current_conflicts",
+    )
+    conflict_kind = models.CharField(max_length=40, default="equal_authority")
+    authority_tier = models.PositiveSmallIntegerField()
+    authority_priority = models.PositiveSmallIntegerField()
+    conflicting_value_count = models.PositiveIntegerField()
+    first_detected_at = models.DateTimeField()
+    last_detected_at = models.DateTimeField()
+
+    class Meta:
+        db_table = "entity_attribute_conflict_current"
+        constraints = (
+            models.UniqueConstraint(
+                fields=("tenant", "entity", "attribute_definition"),
+                name="uq_attr_conflict_current",
+            ),
+            models.UniqueConstraint(
+                fields=("tenant", "id"),
+                name="uq_attr_conflict_tenant_id",
+            ),
+            models.CheckConstraint(
+                condition=Q(conflicting_value_count__gte=2),
+                name="ck_attr_conflict_multiple_values",
+            ),
+        )
+        indexes = (
+            models.Index(
+                fields=("tenant", "entity", "attribute_definition"),
+                name="idx_attr_conflict_entity",
+            ),
+        )
+
+    def __str__(self) -> str:
+        return f"{self.entity_id}:{self.attribute_definition_id}"
+
+
+class EntityAttributeConflictClaimSupport(TenantScopedModel):
+    """All top-authority claims participating in a current conflict."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    conflict = models.ForeignKey(
+        EntityAttributeConflictCurrent,
+        on_delete=models.CASCADE,
+        related_name="claim_support",
+    )
+    claim = models.ForeignKey(
+        EntityAttributeClaimCurrent,
+        on_delete=models.PROTECT,
+        related_name="conflict_support",
+    )
+
+    class Meta:
+        db_table = "entity_attribute_conflict_claim_support"
+        constraints = (
+            models.UniqueConstraint(
+                fields=("tenant", "conflict", "claim"),
+                name="uq_attr_conflict_claim_support",
+            ),
+        )
+
+    def __str__(self) -> str:
+        return f"{self.conflict_id}:{self.claim_id}"
+
+
+class EntityAttributeEffectiveEvidence(models.Model):
+    """Redacted tenant-scoped effective-value read model."""
+
+    id = models.UUIDField(primary_key=True)
+    tenant = models.ForeignKey(Tenant, on_delete=models.DO_NOTHING)
+    entity_id = models.UUIDField()
+    entity_class = models.CharField(max_length=80)
+    attribute_key = models.CharField(max_length=120)
+    attribute_display_name = models.CharField(max_length=160)
+    sensitivity = models.CharField(max_length=16)
+    cardinality = models.CharField(max_length=12)
+    status = models.CharField(max_length=20)
+    selection_reason = models.CharField(max_length=40)
+    value_display = models.TextField()
+    conflict = models.BooleanField()
+    projected_at = models.DateTimeField()
+
+    class Meta:
+        managed = False
+        db_table = "v_entity_attribute_effective_current"
+
+    def __str__(self) -> str:
+        return f"{self.entity_id}:{self.attribute_key}:{self.status}"
 
 
 class EntityAttributeClaimEvidence(models.Model):
@@ -1841,15 +2399,22 @@ class EntityAttributeClaimStorageStatus(models.Model):
         return str(self.tenant_id)
 
 
-
 class EntityObservation(TenantScopedModel):
     """Empty compatibility model retained until dependent views are rebuilt."""
 
     observation_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    client = models.ForeignKey(Client, on_delete=models.PROTECT, null=True, blank=True, related_name="observations")
-    device = models.ForeignKey(Device, on_delete=models.PROTECT, null=True, blank=True, related_name="observations")
-    collector_instance = models.ForeignKey(CollectorInstance, on_delete=models.PROTECT, related_name="entity_observations")
-    source_binding = models.ForeignKey(SourceBinding, on_delete=models.PROTECT, related_name="entity_observations")
+    client = models.ForeignKey(
+        Client, on_delete=models.PROTECT, null=True, blank=True, related_name="observations"
+    )
+    device = models.ForeignKey(
+        Device, on_delete=models.PROTECT, null=True, blank=True, related_name="observations"
+    )
+    collector_instance = models.ForeignKey(
+        CollectorInstance, on_delete=models.PROTECT, related_name="entity_observations"
+    )
+    source_binding = models.ForeignKey(
+        SourceBinding, on_delete=models.PROTECT, related_name="entity_observations"
+    )
     entity_type = models.CharField(max_length=80)
     entity_key = models.TextField()
     platform = models.CharField(max_length=80)
@@ -1865,8 +2430,12 @@ class EntityObservation(TenantScopedModel):
     class Meta:
         db_table = "entity_observations"
         indexes = (
-            models.Index(fields=("tenant", "entity_type", "entity_key"), name="idx_entity_obs_entity_key"),
-            models.Index(fields=("tenant", "client", "device"), name="idx_entity_obs_client_device"),
+            models.Index(
+                fields=("tenant", "entity_type", "entity_key"), name="idx_entity_obs_entity_key"
+            ),
+            models.Index(
+                fields=("tenant", "client", "device"), name="idx_entity_obs_client_device"
+            ),
             models.Index(fields=("tenant", "observed_at"), name="idx_entity_obs_observed_at"),
         )
         constraints = (
@@ -1881,7 +2450,9 @@ class EntityObservationCurrent(TenantScopedModel):
     """Latest accepted observation for one source-scoped identity tuple."""
 
     observation_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    source_binding = models.ForeignKey(SourceBinding, on_delete=models.PROTECT, related_name="current_observations")
+    source_binding = models.ForeignKey(
+        SourceBinding, on_delete=models.PROTECT, related_name="current_observations"
+    )
     source_instance = models.ForeignKey(
         SourceInstance,
         on_delete=models.PROTECT,
@@ -1894,9 +2465,15 @@ class EntityObservationCurrent(TenantScopedModel):
         blank=True,
         related_name="stable_current_transport_observations",
     )
-    collector_instance = models.ForeignKey(CollectorInstance, on_delete=models.PROTECT, related_name="current_observations")
-    client = models.ForeignKey(Client, on_delete=models.PROTECT, null=True, blank=True, related_name="current_observations")
-    device = models.ForeignKey(Device, on_delete=models.PROTECT, null=True, blank=True, related_name="current_observations")
+    collector_instance = models.ForeignKey(
+        CollectorInstance, on_delete=models.PROTECT, related_name="current_observations"
+    )
+    client = models.ForeignKey(
+        Client, on_delete=models.PROTECT, null=True, blank=True, related_name="current_observations"
+    )
+    device = models.ForeignKey(
+        Device, on_delete=models.PROTECT, null=True, blank=True, related_name="current_observations"
+    )
     entity_type = models.CharField(max_length=80)
     parent_source_key = models.TextField(default="")
     entity_key = models.TextField()
@@ -1927,7 +2504,13 @@ class EntityObservationCurrent(TenantScopedModel):
         db_table = "entity_observation_current"
         constraints = (
             models.UniqueConstraint(
-                fields=("tenant", "source_binding", "entity_type", "parent_source_key", "entity_key"),
+                fields=(
+                    "tenant",
+                    "source_binding",
+                    "entity_type",
+                    "parent_source_key",
+                    "entity_key",
+                ),
                 name="uq_obs_current_identity",
             ),
             models.UniqueConstraint(
@@ -1947,10 +2530,7 @@ class EntityObservationCurrent(TenantScopedModel):
                     & ~Q(external_id="")
                     & (
                         (Q(parent_external_namespace="") & Q(parent_external_id=""))
-                        | (
-                            ~Q(parent_external_namespace="")
-                            & ~Q(parent_external_id="")
-                        )
+                        | (~Q(parent_external_namespace="") & ~Q(parent_external_id=""))
                     )
                 ),
                 name="ck_obs_current_stable_identity",
@@ -1966,7 +2546,9 @@ class EntityObservationHistory(TenantScopedModel):
     """SCD-2 material state and presence transitions."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    source_binding = models.ForeignKey(SourceBinding, on_delete=models.PROTECT, related_name="history_observations")
+    source_binding = models.ForeignKey(
+        SourceBinding, on_delete=models.PROTECT, related_name="history_observations"
+    )
     source_instance = models.ForeignKey(
         SourceInstance,
         on_delete=models.PROTECT,
@@ -1979,9 +2561,15 @@ class EntityObservationHistory(TenantScopedModel):
         blank=True,
         related_name="stable_history_transport_observations",
     )
-    collector_instance = models.ForeignKey(CollectorInstance, on_delete=models.PROTECT, related_name="history_observations")
-    client = models.ForeignKey(Client, on_delete=models.PROTECT, null=True, blank=True, related_name="observation_history")
-    device = models.ForeignKey(Device, on_delete=models.PROTECT, null=True, blank=True, related_name="observation_history")
+    collector_instance = models.ForeignKey(
+        CollectorInstance, on_delete=models.PROTECT, related_name="history_observations"
+    )
+    client = models.ForeignKey(
+        Client, on_delete=models.PROTECT, null=True, blank=True, related_name="observation_history"
+    )
+    device = models.ForeignKey(
+        Device, on_delete=models.PROTECT, null=True, blank=True, related_name="observation_history"
+    )
     entity_type = models.CharField(max_length=80)
     platform = models.CharField(max_length=80, default="")
     parent_source_key = models.TextField(default="")
@@ -2015,7 +2603,13 @@ class EntityObservationHistory(TenantScopedModel):
         )
         constraints = (
             models.UniqueConstraint(
-                fields=("tenant", "source_binding", "entity_type", "parent_source_key", "entity_key"),
+                fields=(
+                    "tenant",
+                    "source_binding",
+                    "entity_type",
+                    "parent_source_key",
+                    "entity_key",
+                ),
                 condition=Q(effective_to__isnull=True),
                 name="uq_obs_hist_open_identity",
             ),
@@ -2037,10 +2631,7 @@ class EntityObservationHistory(TenantScopedModel):
                     & ~Q(external_id="")
                     & (
                         (Q(parent_external_namespace="") & Q(parent_external_id=""))
-                        | (
-                            ~Q(parent_external_namespace="")
-                            & ~Q(parent_external_id="")
-                        )
+                        | (~Q(parent_external_namespace="") & ~Q(parent_external_id=""))
                     )
                 ),
                 name="ck_obs_hist_stable_identity",
@@ -2052,7 +2643,9 @@ class ObservationSnapshotRun(TenantScopedModel):
     """Durable completeness/health record for one source snapshot scope."""
 
     run_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    source_binding = models.ForeignKey(SourceBinding, on_delete=models.PROTECT, related_name="observation_snapshot_runs")
+    source_binding = models.ForeignKey(
+        SourceBinding, on_delete=models.PROTECT, related_name="observation_snapshot_runs"
+    )
     source_instance = models.ForeignKey(
         SourceInstance,
         on_delete=models.PROTECT,
@@ -2084,7 +2677,10 @@ class ObservationSnapshotRun(TenantScopedModel):
             ),
         )
         indexes = (
-            models.Index(fields=("tenant", "source_binding", "snapshot_scope", "snapshot_at"), name="idx_obs_snapshot_latest"),
+            models.Index(
+                fields=("tenant", "source_binding", "snapshot_scope", "snapshot_at"),
+                name="idx_obs_snapshot_latest",
+            ),
             models.Index(fields=("tenant", "status"), name="idx_obs_snapshot_status"),
         )
 
@@ -2167,13 +2763,17 @@ class SoftwareDecision(UUIDTenantScopedModel):
     #   (client set, device NULL) → per-client
     #   (client NULL, device NULL) → global (all tenant clients)
     client = models.ForeignKey(
-        Client, on_delete=models.PROTECT,
-        null=True, blank=True,
+        Client,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
         related_name="software_decisions",
     )
     device = models.ForeignKey(
-        Device, on_delete=models.CASCADE,
-        null=True, blank=True,
+        Device,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
         related_name="software_decisions",
     )
     # Match key — exactly one of these is set on any row (enforced by
@@ -2248,11 +2848,15 @@ class PublisherAlias(models.Model):
     still surface the raw ingested string; the alias is used for the
     aggregation aggregate — no publisher name is ever hidden.
     """
+
     id = models.SmallAutoField(primary_key=True)
-    raw_pattern = models.CharField(max_length=255, help_text=(
-        "SQL ILIKE pattern (use %% wildcards) OR exact string. Matched "
-        "case-insensitively against operations.software_installations_current.publisher."
-    ))
+    raw_pattern = models.CharField(
+        max_length=255,
+        help_text=(
+            "SQL ILIKE pattern (use %% wildcards) OR exact string. Matched "
+            "case-insensitively against operations.software_installations_current.publisher."
+        ),
+    )
     canonical_publisher = models.CharField(max_length=255)
     is_regex = models.BooleanField(default=False)
     enabled = models.BooleanField(default=True)
@@ -2280,27 +2884,38 @@ class PublisherCategory(models.Model):
     without a deploy. Applied on top of, not instead of, the per-title
     catalogue rows in ``SoftwareCatalog.categories``.
     """
+
     id = models.SmallAutoField(primary_key=True)
-    publisher_pattern = models.CharField(max_length=255, help_text=(
-        "SQL ILIKE pattern; matched against the canonical publisher "
-        "after PublisherAlias normalisation."
-    ))
-    categories = models.JSONField(default=list, blank=True, help_text=(
-        "List of category tokens from the canonical MSP taxonomy: "
-        "system, driver, security, av, edr, browser, productivity, "
-        "communication, media, development, runtime, remote-access, "
-        "management, rmm, backup, virtualization, storage, networking, "
-        "database, engineering, utility. Free-form tokens are allowed "
-        "but the built-in category chip strip only surfaces tokens "
-        "operators have historically used, so a stable token wins."
-    ))
+    publisher_pattern = models.CharField(
+        max_length=255,
+        help_text=(
+            "SQL ILIKE pattern; matched against the canonical publisher "
+            "after PublisherAlias normalisation."
+        ),
+    )
+    categories = models.JSONField(
+        default=list,
+        blank=True,
+        help_text=(
+            "List of category tokens from the canonical MSP taxonomy: "
+            "system, driver, security, av, edr, browser, productivity, "
+            "communication, media, development, runtime, remote-access, "
+            "management, rmm, backup, virtualization, storage, networking, "
+            "database, engineering, utility. Free-form tokens are allowed "
+            "but the built-in category chip strip only surfaces tokens "
+            "operators have historically used, so a stable token wins."
+        ),
+    )
     is_regex = models.BooleanField(default=False)
     enabled = models.BooleanField(default=True)
     note = models.CharField(max_length=240, blank=True, default="")
-    priority = models.SmallIntegerField(default=0, help_text=(
-        "Higher priority wins when multiple patterns match the same "
-        "publisher. Ties broken by id."
-    ))
+    priority = models.SmallIntegerField(
+        default=0,
+        help_text=(
+            "Higher priority wins when multiple patterns match the same "
+            "publisher. Ties broken by id."
+        ),
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -2328,17 +2943,21 @@ class IntelMatcherHint(models.Model):
 
     Every rule is admin-maintainable; nothing hardcoded in Python.
     """
+
     class Kind(models.TextChoices):
         REQUIRE_THIRD_TOKEN = "require_third_token", "Require third token"
         IGNORE_SUB_COMPONENT = "ignore_sub_component", "Ignore sub-component"
 
     id = models.SmallAutoField(primary_key=True)
     kind = models.CharField(max_length=32, choices=Kind.choices)
-    pattern = models.CharField(max_length=255, help_text=(
-        "For require_third_token: the vendor token (lowercase, e.g. "
-        "'microsoft'). For ignore_sub_component: a Python regex "
-        "matched case-insensitively against the canonical name."
-    ))
+    pattern = models.CharField(
+        max_length=255,
+        help_text=(
+            "For require_third_token: the vendor token (lowercase, e.g. "
+            "'microsoft'). For ignore_sub_component: a Python regex "
+            "matched case-insensitively against the canonical name."
+        ),
+    )
     enabled = models.BooleanField(default=True)
     note = models.CharField(max_length=240, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
@@ -2399,7 +3018,9 @@ class MergeCandidate(UUIDTenantScopedModel):
         SPLIT = "split", "Split"
         REJECTED = "rejected", "Rejected"
 
-    client = models.ForeignKey(Client, on_delete=models.PROTECT, null=True, blank=True, related_name="merge_candidates")
+    client = models.ForeignKey(
+        Client, on_delete=models.PROTECT, null=True, blank=True, related_name="merge_candidates"
+    )
     entity_type = models.CharField(max_length=80)
     canonical_key = models.TextField()
     member_snapshots = models.JSONField(default=list)
@@ -2411,7 +3032,10 @@ class MergeCandidate(UUIDTenantScopedModel):
     class Meta:
         db_table = "merge_candidates"
         indexes = (
-            models.Index(fields=("tenant", "client", "entity_type", "status"), name="idx_merge_candidates_scope"),
+            models.Index(
+                fields=("tenant", "client", "entity_type", "status"),
+                name="idx_merge_candidates_scope",
+            ),
         )
 
     def __str__(self) -> str:
@@ -2450,12 +3074,15 @@ class Finding(UUIDTenantScopedModel):
         """Layer-entity back-reference. See ADR-0005. Blank when the finding
         is not layer-scoped (e.g., subject_type='client'), or when the
         finding predates the layered model."""
+
         ASSET = "asset", "Asset"
         OS = "os", "OS instance"
         AGENT = "agent", "Agent instance"
 
     finding_type = models.ForeignKey(FindingType, on_delete=models.PROTECT, related_name="findings")
-    client = models.ForeignKey("Client", on_delete=models.PROTECT, null=True, blank=True, related_name="findings")
+    client = models.ForeignKey(
+        "Client", on_delete=models.PROTECT, null=True, blank=True, related_name="findings"
+    )
     subject_type = models.CharField(max_length=32, choices=SubjectType.choices)
     subject_id = models.UUIDField()
     # Layer-entity back-reference (ADR-0005). Populated when the finding
@@ -2463,7 +3090,10 @@ class Finding(UUIDTenantScopedModel):
     # AgentInstance). Enables retroactive per-layer-entity queries such
     # as "was OSInstance A patched during its active window."
     subject_layer = models.CharField(
-        max_length=16, choices=SubjectLayer.choices, blank=True, default="",
+        max_length=16,
+        choices=SubjectLayer.choices,
+        blank=True,
+        default="",
     )
     subject_layer_entity_id = models.UUIDField(null=True, blank=True)
     finding_details = models.JSONField(default=dict, blank=True)
@@ -2496,8 +3126,12 @@ class Finding(UUIDTenantScopedModel):
     class Meta:
         db_table = "findings"
         indexes = (
-            models.Index(fields=("tenant", "status", "severity"), name="idx_findings_status_severity"),
-            models.Index(fields=("tenant", "subject_type", "subject_id"), name="idx_findings_subject"),
+            models.Index(
+                fields=("tenant", "status", "severity"), name="idx_findings_status_severity"
+            ),
+            models.Index(
+                fields=("tenant", "subject_type", "subject_id"), name="idx_findings_subject"
+            ),
             models.Index(fields=("tenant", "snoozed_until"), name="idx_findings_snoozed_until"),
             models.Index(fields=("tenant", "closed_at"), name="idx_findings_closed_at"),
             models.Index(
@@ -2608,11 +3242,12 @@ class RequirementProfileItem(UUIDTenantScopedModel):
     groups per item.
     """
 
-    profile = models.ForeignKey(
-        RequirementProfile, on_delete=models.CASCADE, related_name="items"
-    )
+    profile = models.ForeignKey(RequirementProfile, on_delete=models.CASCADE, related_name="items")
     agent = models.ForeignKey(
-        Agent, on_delete=models.PROTECT, null=True, blank=True,
+        Agent,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
         related_name="profile_items",
     )
     # Deprecated pair — retained through migration transition, will be
@@ -2647,11 +3282,17 @@ class CoverageRequirement(VersionedTenantScopedModel):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     client = models.ForeignKey(
-        "Client", on_delete=models.PROTECT, null=True, blank=True,
+        "Client",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
         related_name="coverage_requirements",
     )
     agent = models.ForeignKey(
-        Agent, on_delete=models.PROTECT, null=True, blank=True,
+        Agent,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
         related_name="coverage_requirements",
     )
     # Deprecated pair — retained through migration transition.
@@ -2740,7 +3381,10 @@ class NotificationRule(VersionedTenantScopedModel):
     min_severity = models.CharField(max_length=16, blank=True, default="")
     min_confidence = models.CharField(max_length=16, blank=True, default="")
     client = models.ForeignKey(
-        "Client", on_delete=models.PROTECT, null=True, blank=True,
+        "Client",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
         related_name="notification_rules",
     )
     match_criteria = models.JSONField(default=dict)
@@ -2786,7 +3430,10 @@ class NotificationEvent(TenantScopedModel):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     rule = models.ForeignKey(
-        NotificationRule, on_delete=models.PROTECT, null=True, blank=True,
+        NotificationRule,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
         related_name="events",
     )
     fingerprint = models.CharField(max_length=255)
@@ -2798,9 +3445,7 @@ class NotificationEvent(TenantScopedModel):
 
     class Meta:
         db_table = "notification_events"
-        indexes = (
-            models.Index(fields=("tenant", "sent_at"), name="idx_notif_events_sent_at"),
-        )
+        indexes = (models.Index(fields=("tenant", "sent_at"), name="idx_notif_events_sent_at"),)
 
     def __str__(self) -> str:
         return f"{self.channel}:{self.status}:{self.fingerprint[:32]}"
@@ -2820,7 +3465,8 @@ class EvaluatorConfig(TenantScopedModel):
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
         related_name="evaluator_configs",
-        null=True, blank=True,
+        null=True,
+        blank=True,
     )
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -2839,7 +3485,9 @@ class EvaluatorConfig(TenantScopedModel):
 
 class SuppressionRule(TenantScopedModel):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    finding_type = models.ForeignKey(FindingType, on_delete=models.PROTECT, related_name="suppression_rules")
+    finding_type = models.ForeignKey(
+        FindingType, on_delete=models.PROTECT, related_name="suppression_rules"
+    )
     subject_match = models.JSONField(default=dict)
     reason = models.TextField()
     expires_at = models.DateTimeField(null=True, blank=True)
@@ -2880,8 +3528,16 @@ class NotificationRoute(TenantScopedModel):
         DIGEST = "digest", "Digest"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    client = models.ForeignKey(Client, on_delete=models.PROTECT, null=True, blank=True, related_name="notification_routes")
-    finding_type = models.ForeignKey(FindingType, on_delete=models.PROTECT, null=True, blank=True, related_name="notification_routes")
+    client = models.ForeignKey(
+        Client, on_delete=models.PROTECT, null=True, blank=True, related_name="notification_routes"
+    )
+    finding_type = models.ForeignKey(
+        FindingType,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="notification_routes",
+    )
     severity_min = models.CharField(max_length=16, choices=Severity.choices)
     channel = models.CharField(max_length=16, choices=Channel.choices)
     target = models.TextField()
@@ -2952,7 +3608,9 @@ class AuditLog(TenantScopedModel):
         db_table = "audit_log"
         indexes = (
             models.Index(fields=("tenant", "occurred_at"), name="idx_audit_log_occurred_at"),
-            models.Index(fields=("tenant", "entity_type", "entity_id"), name="idx_audit_log_entity"),
+            models.Index(
+                fields=("tenant", "entity_type", "entity_id"), name="idx_audit_log_entity"
+            ),
         )
 
     def __str__(self) -> str:
@@ -2986,7 +3644,9 @@ class UserGroup(TenantScopedModel):
     class Meta:
         db_table = "user_groups"
         constraints = (
-            models.UniqueConstraint(fields=["tenant", "user", "group"], name="uq_user_groups_tenant_user_group"),
+            models.UniqueConstraint(
+                fields=["tenant", "user", "group"], name="uq_user_groups_tenant_user_group"
+            ),
         )
 
     def __str__(self) -> str:

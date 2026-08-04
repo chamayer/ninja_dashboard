@@ -516,6 +516,27 @@ device on an exact observation-time tie. Collection fails the affected source
 module if its authoritative generic write fails; it never resumes legacy raw
 appends as an implicit fallback.
 
+### Implemented effective-value projection contract
+
+The effective-value engine uses a durable dirty-key queue keyed by tenant,
+entity, and attribute definition. Claim projection enqueues a key only when a
+claim is inserted, changed, or withdrawn; an operator decision transaction
+enqueues the same key. The effective projector therefore recomputes bounded
+changed groups and an empty queue is an immediate no-op rather than a scan of
+all current claims.
+
+Operator decision headers and typed set members remain separate from source
+claims. Database constraints enforce entity class, definition type,
+cardinality, tenant, and set-operation compatibility. Database triggers append
+redacted decision metadata to the existing generic `audit_log` and enqueue the
+affected key in the same transaction, so this feature does not create a second
+audit mechanism.
+
+Effective scalar/set rows, supporting-claim references, and equal-authority
+conflicts are rebuildable projections. The initial release exposes a redacted
+tenant-scoped read model but leaves typed consumers authoritative until their
+separately measured cutover.
+
 ## Rationale
 
 - The generic kernel captures what sources and entity classes truly share

@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import time
 
-from ingest import attribute_claims, db
+from ingest import attribute_claims, db, effective_attributes
 
 log = logging.getLogger(__name__)
 
@@ -35,13 +35,21 @@ def refresh_after_collection(reason: str) -> None:
         # block the still-authoritative typed consumers before E3 promotion.
         claim_sync = {"status": "failed"}
         log.exception("Operations attribute claim projection failed — continuing")
+    try:
+        effective_sync = effective_attributes.project_all()
+    except Exception:
+        # E3 remains a shadow projection until typed consumers pass E5 parity.
+        effective_sync = {"status": "failed"}
+        log.exception("Operations effective attribute projection failed — continuing")
     with db.transaction() as cur:
         cur.execute("SELECT operations.refresh_derived()")
     log.info(
         "Operations entity links synced (%s), attribute claims synced (%s), "
-        "and derived state refreshed after %s in %.2fs",
+        "effective attributes synced (%s), and derived state refreshed after "
+        "%s in %.2fs",
         entity_link_sync,
         claim_sync,
+        effective_sync,
         reason,
         time.monotonic() - started,
     )

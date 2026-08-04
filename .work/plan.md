@@ -2,7 +2,7 @@
 
 Track: **ADR-0010 generic entity, claim, relationship, and admin completion**
 
-**Status:** full remaining plan approved; Phase E1 deployed, Phase E2 corrective release deploying.
+**Status:** full remaining plan approved; Phases E1-E2 deployed, Phase E3 active.
 
 ## Authority and checkpoint
 
@@ -90,7 +90,7 @@ Track: **ADR-0010 generic entity, claim, relationship, and admin completion**
   admin visibility. Apply RLS, tenant-consistent uniqueness, least-privilege
   grants, and additive rollback-safe constraints.
 
-### E2 — Attribute definitions and delta claims (`0.105.4`, corrective deployment pending)
+### E2 — Attribute definitions and delta claims (`0.105.4`, complete)
 
 - Add versioned attribute definitions, source-field mappings, identity/
   attribute authority policies, typed current/history claims, and withheld
@@ -142,20 +142,21 @@ Track: **ADR-0010 generic entity, claim, relationship, and admin completion**
   approvals. Audit/event retention and fleet-wide audit UI remain their defined
   follow-up tracks where not completed by E4/E5.
 
-## Active E2 affected files
+## Active E3 affected files
 
-- `operations/apps/core/models.py`, `operations/apps/core/admin.py`, a new E2
-  additive migration, and the shared claim projector.
-- Focused schema test if needed, root/Operations plans, ADR-0010 progress,
-  `VERSION`, and `CHANGELOG.md`.
+- `operations/apps/core/models.py`, `operations/apps/core/admin.py`, additive
+  E3 migrations, the shared effective-value projector/service, and focused
+  policy/audit tests.
+- Root/Operations plans, ADR-0010 progress, `VERSION`, and `CHANGELOG.md`.
 
 ## Basic validation and deployment
 
 - `python manage.py check`, `makemigrations --check --dry-run`, targeted Python
   compile/Ruff on changed files, and `git diff --check`.
-- Verify aggregate backfill counts, RLS/policies, uniqueness, grants, and an
+- Verify aggregate effective/conflict/support counts, RLS/policies,
+  uniqueness, audit immutability, deterministic conflict behavior, and an
   immediate second-pass no-op on the deployed PostgreSQL environment.
-- Commit only E2 release files, push `origin`, immediately trigger Portainer,
+- Commit only E3 release files, push `origin`, immediately trigger Portainer,
   push the identical commit to the mirror, then verify its version, migration
   application, service health, expected root status, and zero HTTP 500s.
 
@@ -170,7 +171,7 @@ return 302/200, and there are zero HTTP 500 or ingest error markers. The first
 Operations start deadlocked during 0101; its normal restart applied the
 migration successfully and no recurring error remains.
 
-E2 implementation is complete locally. The first `0.105.0` deployment applied
+E2 is deployed. The first `0.105.0` deployment applied
 migration 0102, then PostgreSQL rejected 0103 table DDL while its newly seeded,
 initially deferred foreign-key triggers were pending. The transaction rolled
 back cleanly. Corrective release `0.105.1` validates those deferred constraints
@@ -189,10 +190,36 @@ Definitions/mappings and independent authority policy are deployment-controlled;
 unmapped fields are restricted/count-only; current claims and per-member SCD-2
 history are projected in separately committed bounded batches after migration;
 heartbeat/contact timestamps remain on source current and do not create claim
-writes. Basic Python, Django, migration-drift, retention, and diff checks pass;
-the only Ruff findings are four pre-existing observation models outside E2.
+writes. Basic Python, Django, migration-drift, retention, and diff checks
+passed; the only Ruff findings were four pre-existing observation models
+outside E2.
 
-Next: commit and push the E2 corrective release, immediately trigger Portainer, then verify
-the applied migrations, aggregate backfill/invariants, second-pass no-op,
-service health, version, and zero HTTP 500s. After successful verification,
-advance to E3 effective values and audited operator decisions.
+Corrective `0.105.4` / `032dc07` is on both remotes and deployed. Migrations
+0104-0106 are applied and the one-time projection-hash refresh completed in
+seven bounded transactions across 30,152 processed records. It recorded only
+real intervening deltas: 71 inserted, 737 updated, and 36 withdrawn claims;
+808 history intervals opened and 773 closed. The immediate steady-state pass
+completed in 0.431 seconds with zero processed records or writes. Production
+now has 30,103 source-current/projection/withheld rows, 266,184 current claims
+(266,148 active and 36 withdrawn), and 266,921 history rows (266,148 open and
+773 closed). There are zero duplicate current members, duplicate open
+intervals, active/open-presence mismatches, tenant mismatches, or definition
+type/cardinality mismatches. All five E2 tenant tables have forced RLS and one
+tenant policy. Version is `0.105.4`; Postgres, ingest, and Operations are
+healthy; root/health return 302/200; recent HTTP 500, traceback, and ingest
+error counts are zero.
+
+E3 is implemented locally for release `0.106.0`: typed single/set decision
+current state; database-enforced tenant/class/type/cardinality/member rules;
+redacted atomic events in the generic `audit_log`; a durable changed-key queue;
+deterministic conflict/effective/member/support projection; a bounded ingest
+orchestrator; and a redacted tenant read/admin model. Existing typed consumers
+remain authoritative and the E5 workflow UI is not included. Python compile,
+Django check, migration drift, focused Ruff, four contract tests, and
+`git diff --check` pass. No local Docker rehearsal was run, per the user's
+validation limit.
+
+Next: commit the scoped E3 release, push `origin`, immediately redeploy through
+Portainer, push the same commit to the mirror, and verify migrations, bounded
+backfill/no-op, aggregate policy/conflict/support/audit/RLS invariants,
+version/health, and recent HTTP 500/error counts.

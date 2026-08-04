@@ -2,6 +2,31 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.106.0] — 2026-08-04 — Generic effective attribute engine
+
+### Added
+
+- Added tenant-safe typed operator decisions for single replace/clear and set
+  replace/add/remove semantics, with database-enforced validation and atomic
+  redacted audit events in the existing generic audit log.
+- Added deterministic effective current values, set members, supporting-claim
+  references, and visible equal-authority conflict state using explicit
+  authority, conflict, and merge policies.
+- Added a redacted tenant-scoped effective-value read model and read-only
+  Operations admin inspection.
+
+### Changed
+
+- Claim changes and operator decisions now enqueue only affected
+  entity/attribute keys. The bounded effective projector drains that durable
+  queue instead of rescanning all claims at every collection boundary.
+
+### Operational note
+
+- Effective values remain an additive shadow projection. Existing typed
+  consumers stay authoritative until E5 parity and cutover; this release does
+  not add the decision workflow UI or alter existing reader contracts.
+
 ## [0.105.4] — 2026-08-04 — Fast claim no-op detection
 
 ### Fixed

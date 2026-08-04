@@ -1,85 +1,85 @@
 # Active Operations implementation plan
 
-Track: **ADR-0010 generic ecosystem completion — Phase E2**
+Track: **ADR-0010 generic ecosystem completion — Phase E3**
 
-**Status:** E1 deployed; E2 `0.105.4` corrective release ready for deployment.
+**Status:** E1-E2 deployed; E3 `0.106.0` implemented and locally validated.
 
 ## Goal
 
-Add deployment-controlled attribute definitions/mappings and typed,
-delta-only claim current/history without promoting them over existing typed
-effective readers.
+Add audited single/set operator decisions and a rebuildable, deterministic
+effective-value projection over E2 claims without promoting existing typed
+consumers yet.
 
 ## Scope and affected files
 
-- `apps/core/models.py`
-- `apps/core/admin.py`
-- new additive E2 migration and shared claim projector
+- `apps/core/models.py` and `apps/core/admin.py`
+- additive E3 migrations and one shared effective-value projector/service
+- focused policy, conflict, audit, and schema tests
 - ADR-0010, root `VERSION`/`CHANGELOG.md`, and active plans
 
 ## Decisions
 
-- Existing Client and Device UUIDs remain stable. Each receives one nullable,
-  unique generic entity anchor backfilled in migration; it is not required or
-  promoted in E1.
-- Entity scope is enforced by an entity-class/scope registry and client-owner
-  check. Client anchors are tenant-scoped; device anchors are client-scoped.
-- Generic source links key the complete ADR-0009 stable source identity and are
-  backfilled only from observations already carrying a resolved client/device.
-  Unresolved evidence receives no inferred attachment.
-- Candidate current/event tables are created for the later engine, but their
-  admin pages remain hidden until E4 produces real state, per the engine-first
-  UI rule.
-- Current links and history are separate. E1 is a shadow foundation; existing
-  client/device links remain compatibility authorities until later parity and
-  cutover.
-- All tenant tables receive RLS, explicit tenant policies, tenant-qualified
-  unique targets, least-privilege grants, and indexes needed for current/open
-  lookup. Registry mutation remains migration-controlled.
+- Precedence is explicit: active operator decision, then eligible claims at
+  the highest authority tier and priority. Recency is never a hidden
+  tie-breaker.
+- Single-value equal-authority disagreement creates visible conflict state and
+  follows the definition's `retain_last_uncontested` or `unknown` policy.
+- Set values use `highest_authority_union` or `all_eligible_union`; operator
+  replace establishes the base set and add/remove applies per member.
+- Effective current and its supporting-claim references are rebuildable
+  projections. Source claims and operator decisions remain independent facts.
+- Decision writes are validated, reasoned, and atomically recorded in the
+  existing generic `audit_log`; E3 must not create a separate audit silo.
+- Existing typed caches/readers remain authorities until a later measured E5
+  cutover. Connectors and resolvers do not gain direct effective-value writes.
+- All new tenant tables receive forced RLS, tenant policies, tenant-consistent
+  constraints, least-privilege grants, and indexes required by the projector.
 
 ## Steps
 
-1. Add definition, mapping, authority-policy, typed claim current/history, and
-   withheld-count contracts with tenant-safe constraints and RLS.
-2. Seed only approved normalized attributes; unmapped raw fields remain
-   restricted and contribute counts, never effective values.
-3. Backfill/project claims in bounded batches and append history only when a
-   value/support/authority/withdrawal changes. Heartbeat-only collection must
-   produce zero claim writes.
-4. Expose populated definition/claim evidence read-only, run basic checks, then
-   deploy and verify aggregate behavior on the deployed PostgreSQL environment.
-5. Serialize migration/backfill against active ingest, or split those
-   boundaries, to avoid repeating the recovered 0101 first-start deadlock.
+1. Add typed operator-decision current/event contracts, conflict current,
+   effective current, and effective-support tables.
+2. Implement one deterministic, bounded projector from active E2 claims and
+   decisions, including single/set semantics and conflict policy.
+3. Add a validated atomic decision-write service that appends the existing
+   generic audit log and triggers or queues projection without exposing values
+   in logs.
+4. Backfill effective state, expose populated engine tables read-only in admin,
+   and add aggregate parity/status reporting. Do not add the E5 workflow UI or
+   cut over typed consumers.
+5. Run basic checks, release, deploy, and verify aggregate invariants,
+   deterministic rebuild/no-op behavior, audit/RLS, health, and zero HTTP 500s.
 
 ## Validation
 
-- Django system and migration drift checks.
-- Disposable PostgreSQL migration/backfill/RLS/uniqueness/grant aggregates.
+- Django system and migration drift checks; focused policy/audit tests.
 - Changed-file compile/Ruff and `git diff --check`.
-- Deployed version, migration, container health, root HTTP status, and 500 log
-  count.
+- Deployed aggregate effective/conflict/support counts, RLS/uniqueness, audit
+  immutability, deterministic rebuild and immediate no-op behavior.
+- Deployed version, migration, container health, root/health status, and recent
+  HTTP-500/traceback/error counts.
 
-## Checkpoint
+## Checkpoint and next action
 
-`0.104.0` / `5b2e873` was the last healthy deployed release. E2 is implemented:
-additive definitions/mappings, independent
-authority policies, typed current/per-member history, restricted/count-only
-unmapped classification, redacted evidence, bounded post-migration projection,
-and guarded 90-day retention. Basic Python, Django, migration-drift, retention,
-and diff checks pass; four Ruff findings are pre-existing observation models.
-The first `0.105.0` startup applied migration 0102, then 0103 rolled back when
-PostgreSQL rejected table DDL with deferred seed constraint triggers pending.
-Corrective `0.105.1` forces those checks before RLS/ownership DDL. Migration
-0103 then applied; the first projector call wrote no claims and exposed
-unqualified `pgcrypto.digest` under the restricted security-definer search
-path. Corrective `0.105.2` confirmed that `pgcrypto` is absent. Production
-catalog measurement confirmed built-in `pg_catalog.sha256(bytea)` is present;
-corrective `0.105.3` uses it without a dependency and replaces the projector in
-migration 0105. The full backfill completed at 30,097 source records and
-266,113 current/open claim intervals. The immediate no-op exposed avoidable
-full-JSON re-hashing; corrective `0.105.4` uses the source `material_hash` plus
-version/link metadata and replaces the projector in migration 0106. The user
-waived further local Docker rehearsal. Next:
-commit/push, trigger
-Portainer immediately, and verify migrations, aggregate backfill/invariants,
-second-pass no-op, health/version, and zero HTTP 500s before starting E3.
+`0.105.4` / `032dc07` is deployed on both remotes with migrations through 0106.
+The one-time state-hash refresh processed 30,152 records in seven bounded
+transactions and recorded only intervening material deltas. Its immediate
+second pass completed in 0.431 seconds with zero processed records or writes.
+Production has 30,103 source-current/projection/withheld rows, 266,184 current
+claims (266,148 active), and 266,921 history rows (266,148 open). Duplicate,
+open-presence, tenant, and definition-shape mismatches are all zero. All five
+E2 tenant tables have forced RLS and policies. Version/health/root checks pass
+and recent HTTP 500, traceback, and ingest-error counts are zero. The user
+waived further local Docker rehearsal.
+
+E3 is implemented locally with typed decision headers/members, database
+validation and generic audit triggers, a claim/decision dirty-key queue,
+deterministic effective/conflict/member/support projection, a bounded ingest
+orchestrator, and a redacted effective-value read/admin model. Existing typed
+consumer promotion and the generic decision UI remain in E5. Python compile,
+Django check, migration drift, focused Ruff, four contract tests, and diff
+checks pass; no local Docker rehearsal was run per the user's validation limit.
+
+Next: commit the scoped `0.106.0` release, push/deploy/mirror it immediately,
+then drain the initial dirty-key backfill and verify aggregate selection,
+conflict, support, audit, RLS, no-op, health, version, and HTTP-error behavior.

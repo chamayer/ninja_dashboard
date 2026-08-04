@@ -20,6 +20,7 @@ from .models import (
     Entity,
     EntityAttributeClaimEvidence,
     EntityAttributeClaimStorageStatus,
+    EntityAttributeEffectiveEvidence,
     EntityAttributeProjectionState,
     EntityAttributeWithheldCurrent,
     EntityClass,
@@ -154,7 +155,15 @@ class EntityTypeAdmin(ReadOnlyEvidenceAdmin):
 
 @admin.register(Entity)
 class EntityAdmin(ReadOnlyEvidenceAdmin):
-    list_display = ("id", "entity_class", "scope_kind", "client", "tenant", "retired_at", "deleted_at")
+    list_display = (
+        "id",
+        "entity_class",
+        "scope_kind",
+        "client",
+        "tenant",
+        "retired_at",
+        "deleted_at",
+    )
     list_filter = ("tenant", "entity_class", "scope_kind", "retired_at", "deleted_at")
     search_fields = ("id", "client__display_name")
 
@@ -314,6 +323,29 @@ class EntityAttributeClaimStorageStatusAdmin(ReadOnlyEvidenceAdmin):
     list_filter = ("partition_review_required",)
 
 
+@admin.register(EntityAttributeEffectiveEvidence)
+class EntityAttributeEffectiveEvidenceAdmin(ReadOnlyEvidenceAdmin):
+    list_display = (
+        "entity_id",
+        "entity_class",
+        "attribute_key",
+        "value_display",
+        "status",
+        "selection_reason",
+        "conflict",
+        "projected_at",
+        "tenant",
+    )
+    list_filter = (
+        "tenant",
+        "entity_class",
+        "sensitivity",
+        "status",
+        "selection_reason",
+        "conflict",
+    )
+    search_fields = ("entity_id", "attribute_key", "attribute_display_name")
+
 
 @admin.register(Collector)
 class CollectorAdmin(admin.ModelAdmin):
@@ -367,7 +399,14 @@ class DeviceLinkInline(admin.TabularInline):
 
 @admin.register(Device)
 class DeviceAdmin(admin.ModelAdmin):
-    list_display = ("canonical_hostname", "client", "device_type", "tenant", "deleted_at", "version")
+    list_display = (
+        "canonical_hostname",
+        "client",
+        "device_type",
+        "tenant",
+        "deleted_at",
+        "version",
+    )
     list_filter = ("tenant", "device_type", "deleted_at")
     search_fields = ("canonical_hostname", "canonical_serial", "canonical_vm_uuid")
     inlines = (DeviceLinkInline,)
@@ -387,7 +426,14 @@ class ClientUserLinkInline(admin.TabularInline):
 
 @admin.register(ClientUser)
 class ClientUserAdmin(admin.ModelAdmin):
-    list_display = ("display_name", "client", "canonical_email", "canonical_username", "tenant", "version")
+    list_display = (
+        "display_name",
+        "client",
+        "canonical_email",
+        "canonical_username",
+        "tenant",
+        "version",
+    )
     list_filter = ("tenant", "client", "deleted_at")
     search_fields = ("display_name", "canonical_email", "canonical_username")
     inlines = (ClientUserLinkInline,)
@@ -422,7 +468,14 @@ class CollectorInstanceAdmin(admin.ModelAdmin):
 
 @admin.register(SourceBinding)
 class SourceBindingAdmin(admin.ModelAdmin):
-    list_display = ("source_instance", "collector_instance", "schedule", "enabled", "tenant", "version")
+    list_display = (
+        "source_instance",
+        "collector_instance",
+        "schedule",
+        "enabled",
+        "tenant",
+        "version",
+    )
     list_filter = ("tenant", "enabled")
     search_fields = ("source_instance__source__name", "collector_instance__name", "schedule")
 
@@ -472,14 +525,30 @@ class IntelMatcherHintAdmin(admin.ModelAdmin):
 
 @admin.register(SoftwareDecision)
 class SoftwareDecisionAdmin(admin.ModelAdmin):
-    list_display = ("client", "canonical_name", "decision", "decided_by", "decided_at", "tenant", "version")
+    list_display = (
+        "client",
+        "canonical_name",
+        "decision",
+        "decided_by",
+        "decided_at",
+        "tenant",
+        "version",
+    )
     list_filter = ("tenant", "decision", "decided_at")
     search_fields = ("client__display_name", "canonical_name", "reason")
 
 
 @admin.register(MergeCandidate)
 class MergeCandidateAdmin(admin.ModelAdmin):
-    list_display = ("entity_type", "canonical_key", "client", "status", "confidence", "tenant", "version")
+    list_display = (
+        "entity_type",
+        "canonical_key",
+        "client",
+        "status",
+        "confidence",
+        "tenant",
+        "version",
+    )
     list_filter = ("tenant", "entity_type", "status")
     search_fields = ("canonical_key", "match_reason")
 
@@ -526,7 +595,15 @@ class SecretAdmin(admin.ModelAdmin):
 
 @admin.register(AuditLog)
 class AuditLogAdmin(admin.ModelAdmin):
-    list_display = ("action", "entity_type", "entity_id", "actor_kind", "source", "occurred_at", "tenant")
+    list_display = (
+        "action",
+        "entity_type",
+        "entity_id",
+        "actor_kind",
+        "source",
+        "occurred_at",
+        "tenant",
+    )
     list_filter = ("tenant", "actor_kind", "source", "entity_type", "occurred_at")
     search_fields = ("action", "entity_type", "entity_id", "user_agent")
     readonly_fields = ("audit_id", "occurred_at")
