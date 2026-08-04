@@ -2,6 +2,15 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.107.3] — 2026-08-04 — E4 runtime privilege correction
+
+### Fixed
+
+- Explicitly revoked schema-default runtime grants before applying the E4
+  least-privilege matrix. Raw relationship evidence/history and protected
+  source-event payload/actor data are now ingest-only; Operations reads only
+  registries, decisions, and effective relationship projections.
+
 ## [0.107.2] — 2026-08-04 — Candidate projector defaults fix
 
 ### Fixed

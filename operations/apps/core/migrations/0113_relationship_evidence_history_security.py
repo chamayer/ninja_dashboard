@@ -27,6 +27,8 @@ CREATE POLICY tenant_isolation
     WITH CHECK (tenant_id = operations.current_tenant_id());
 
 REVOKE ALL ON operations.entity_relationship_evidence_history FROM PUBLIC;
+REVOKE ALL ON operations.entity_relationship_evidence_history
+    FROM operations_app, ninja_ingest, operations_readonly, metabase_ro;
 GRANT SELECT, INSERT, UPDATE
     ON operations.entity_relationship_evidence_history TO ninja_ingest;
 ALTER TABLE operations.entity_relationship_evidence_history

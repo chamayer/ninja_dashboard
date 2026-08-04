@@ -2,7 +2,8 @@
 
 Track: **ADR-0010 generic entity, claim, relationship, and admin completion**
 
-**Status:** full remaining plan approved; Phases E1-E3 deployed, Phase E4 implemented locally.
+**Status:** full remaining plan approved; Phases E1-E3 deployed, Phase E4
+corrective `0.107.3` pending validation and deployment.
 
 ## Authority and checkpoint
 
@@ -268,5 +269,22 @@ became healthy. The first manual bounded candidate transaction failed closed
 before inserting rows because the SQL insert omitted the non-null
 `latest_decision` and `latest_decision_reason` fields whose empty defaults are
 Django-side only. Corrective `0.107.2` supplies both values for fresh installs
-and migration 0114 replaces the already-deployed projector. Next: validate,
-commit, push/redeploy/mirror, then rerun the bounded projection and invariants.
+and migration 0114 replaces the already-deployed projector.
+
+`0.107.2` / `6656385` is deployed on both remotes with migration 0114 applied.
+The initial candidate projection created 4,890 candidates/events in 4.105
+seconds: 4,842 asset observed-only, 10 client observed-only, and 38 device
+pending. The immediate pass completed in 0.517 seconds with zero changes; the
+relationship pass completed in 0.144 seconds with zero writes. Candidate
+duplicate, observation, link/status, create-event, and tenant invariants are
+all zero, and no eligible unmatched identity remains unprojected. E4 RLS and
+trigger checks pass.
+
+The runtime privilege check found schema-default named-role grants surviving
+the original PUBLIC-only revoke, including protected `source_events` access by
+`operations_app`. Corrective `0.107.3` adds migration 0115 and fresh-install
+SQL that explicitly revoke all E4 table privileges from known runtime roles,
+then reapply the documented least-privilege matrix. Next: run basic validation,
+commit, push `origin`, immediately redeploy, push the mirror, and verify the
+privilege matrix, no-op projectors, aggregate invariants, version, migrations,
+health, and current error counts.

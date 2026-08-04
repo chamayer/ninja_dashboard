@@ -738,6 +738,15 @@ REVOKE ALL ON operations.relationship_types,
     operations.entity_relationships,
     operations.entity_relationship_evidence_support,
     operations.source_events FROM PUBLIC;
+REVOKE ALL ON operations.relationship_types,
+    operations.relationship_authority_policies,
+    operations.entity_relationship_evidence_current,
+    operations.entity_relationship_dirty,
+    operations.entity_relationship_decision_current,
+    operations.entity_relationships,
+    operations.entity_relationship_evidence_support,
+    operations.source_events
+FROM operations_app, ninja_ingest, operations_readonly, metabase_ro;
 
 GRANT SELECT ON operations.relationship_types
     TO operations_app, ninja_ingest, operations_readonly, metabase_ro;

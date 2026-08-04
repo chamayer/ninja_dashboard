@@ -30,6 +30,9 @@ def test_relationship_decisions_use_generic_audit_and_forced_rls() -> None:
     assert migration.RLS_SQL.count("FORCE ROW LEVEL SECURITY") == 7
     assert migration.RLS_SQL.count("CREATE POLICY tenant_isolation") == 7
     assert "GRANT SELECT, INSERT, UPDATE ON operations.source_events" in migration.SECURITY_SQL
+    assert "FROM operations_app, ninja_ingest, operations_readonly, metabase_ro" in (
+        migration.SECURITY_SQL
+    )
     assert "operations.source_events TO operations_app" not in migration.SECURITY_SQL
     assert "source event evidence is immutable" in migration.TRIGGER_SQL
     assert "SET CONSTRAINTS ALL IMMEDIATE" in migration.SEED_SQL
@@ -80,3 +83,16 @@ def test_relationship_evidence_history_is_change_driven_and_tenant_protected() -
     assert "FORCE ROW LEVEL SECURITY" in security.FORWARD_SQL
     assert "TO ninja_ingest" in security.FORWARD_SQL
     assert "TO operations_app" not in security.FORWARD_SQL
+
+
+def test_e4_runtime_privileges_are_reset_before_least_privilege_grants() -> None:
+    migration = importlib.import_module(
+        "apps.core.migrations.0115_restrict_e4_runtime_privileges"
+    )
+    sql = migration.FORWARD_SQL
+
+    assert "FROM operations_app, ninja_ingest, operations_readonly, metabase_ro" in sql
+    assert "operations.source_events TO ninja_ingest" in sql
+    assert "operations.source_events TO operations_app" not in sql
+    assert "operations.entity_relationship_evidence_history TO ninja_ingest" in sql
+    assert "DELETE" not in sql

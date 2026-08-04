@@ -2,7 +2,8 @@
 
 Track: **ADR-0010 generic ecosystem completion — Phase E4**
 
-**Status:** E1-E3 deployed; E4 corrective `0.107.1` active.
+**Status:** E1-E3 deployed; E4 corrective `0.107.3` pending validation and
+deployment.
 
 ## Goal
 
@@ -109,4 +110,21 @@ healthy. The first manual candidate projection then failed closed before any
 insert because its raw SQL omitted the non-null empty decision metadata that
 Django model defaults do not create at the database level. Corrective
 `0.107.2` adds those explicit values and migration 0114 replaces the deployed
-function. Next: validate, commit, push/redeploy/mirror, and rerun projection.
+function.
+
+`0.107.2` / `6656385` is deployed on both remotes and migration 0114 is
+applied. The bounded candidate projection created 4,890 candidates/events in
+4.105 seconds: 4,842 asset observed-only, 10 client observed-only, and 38
+device pending. Its immediate pass completed in 0.517 seconds with zero
+changes; the relationship pass completed in 0.144 seconds with zero writes.
+Candidate invariants are all zero, no eligible unmatched source identity
+remains unprojected, and E4 RLS/trigger checks pass.
+
+The runtime privilege matrix exposed inherited named-role grants that a
+PUBLIC-only revoke did not remove, including `operations_app` access to
+protected source-event data. Corrective `0.107.3` explicitly revokes all E4
+table privileges from known runtime roles before granting only the intended
+least-privilege matrix, both for fresh installs and through migration 0115.
+Next: run basic validation, commit, push `origin`, redeploy immediately, push
+the mirror, then verify privileges, aggregate invariants, projector no-op
+behavior, version/migrations, health, and current error counts.
