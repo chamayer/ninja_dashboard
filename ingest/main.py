@@ -523,8 +523,10 @@ def run_observation_history_prune_once() -> None:
     try:
         with run_log("retention.observation_history") as stats:
             generic, software = retention_observations.purge_all(days=days)
+            claims = retention_observations.purge_claim_history(days=days)
             stats["generic_deleted"] = generic
             stats["software_deleted"] = software
+            stats["attribute_claims_deleted"] = claims
     except Exception:
         log.exception("Observation history retention failed")
 

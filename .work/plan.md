@@ -2,15 +2,15 @@
 
 Track: **ADR-0010 generic entity, claim, relationship, and admin completion**
 
-**Status:** full remaining plan approved; Phase E1 validated and release pending.
+**Status:** full remaining plan approved; Phase E1 deployed, Phase E2 release candidate ready.
 
 ## Authority and checkpoint
 
 - The user authorized autonomous implementation, commits, both pushes, and
   their coupled Portainer deployments. Validation should remain basic and
-  proportional: syntax/static checks, migration consistency, one disposable
-  PostgreSQL rehearsal for schema changes, and basic deployed
-  version/health/HTTP-500 checks.
+  proportional: syntax/static checks, migration consistency, and basic
+  deployed version/health/HTTP-500 and aggregate behavior checks. The user
+  explicitly waived further local Docker rehearsal for this phase.
 - Release `0.103.0`, commit `0f32922`, is deployed on both remotes. All enabled
   collector families use the generic source-record current/change-history
   contract. The verified cycle wrote zero legacy Ninja detail/health snapshots.
@@ -76,7 +76,7 @@ Track: **ADR-0010 generic entity, claim, relationship, and admin completion**
 
 ## Delivery phases
 
-### E1 — Generic entity and source-link kernel (`0.104.0`, active)
+### E1 — Generic entity and source-link kernel (`0.104.0`, complete)
 
 - Add entity-class/scope registries and the tenant-scoped generic entity anchor.
 - Add nullable unique entity anchors to Client and Device, backfill them while
@@ -90,7 +90,7 @@ Track: **ADR-0010 generic entity, claim, relationship, and admin completion**
   admin visibility. Apply RLS, tenant-consistent uniqueness, least-privilege
   grants, and additive rollback-safe constraints.
 
-### E2 — Attribute definitions and delta claims
+### E2 — Attribute definitions and delta claims (`0.105.0`, deployment pending)
 
 - Add versioned attribute definitions, source-field mappings, identity/
   attribute authority policies, typed current/history claims, and withheld
@@ -142,34 +142,43 @@ Track: **ADR-0010 generic entity, claim, relationship, and admin completion**
   approvals. Audit/event retention and fleet-wide audit UI remain their defined
   follow-up tracks where not completed by E4/E5.
 
-## Active E1 affected files
+## Active E2 affected files
 
-- `operations/apps/core/models.py`, `operations/apps/core/admin.py`, and new
-  migration `0101_generic_entity_source_link_kernel.py`.
-- Focused schema test if needed, root/Operations plans, ADR-0010 status,
+- `operations/apps/core/models.py`, `operations/apps/core/admin.py`, a new E2
+  additive migration, and the shared claim projector.
+- Focused schema test if needed, root/Operations plans, ADR-0010 progress,
   `VERSION`, and `CHANGELOG.md`.
 
 ## Basic validation and deployment
 
 - `python manage.py check`, `makemigrations --check --dry-run`, targeted Python
   compile/Ruff on changed files, and `git diff --check`.
-- Apply migration 0101 once in disposable PostgreSQL 16; verify aggregate
-  backfill counts, RLS/policies, uniqueness, grants, and reverse-order safety.
-- Commit only E1 release files, push `origin`, immediately trigger Portainer,
-  push the identical commit to the mirror, then verify `0.104.0`, migration
+- Verify aggregate backfill counts, RLS/policies, uniqueness, grants, and an
+  immediate second-pass no-op on the deployed PostgreSQL environment.
+- Commit only E2 release files, push `origin`, immediately trigger Portainer,
+  push the identical commit to the mirror, then verify its version, migration
   application, service health, expected root status, and zero HTTP 500s.
 
 ## Current checkpoint and next action
 
-Phase E1 is implemented as release `0.104.0`. Django checks and migration-drift
-checks pass; changed Python files compile and pass focused Ruff checks. An
-exact forward/backward rehearsal on disposable PostgreSQL 16 produced two
-anchors, two current links, two open link-history intervals, all five forced
-RLS policies, and zero writes on an immediate idempotence rerun. The known
-fresh-database bootstrap dependency on the retired Agent Compliance schema at
-migration 0017 remains pre-existing and outside this phase; the focused 0101
-rehearsal used the deployed pre-0101 contract.
+Phase E1 is deployed as `0.104.0` / `5b2e873` on both remotes. Migration 0101
+is recorded; production has 5,336 anchors, 24,924 current links and the same
+number of open attachment intervals, with zero unanchored typed records,
+duplicate stable links, or tenant/class mismatches. All five tables have
+forced RLS and policies. Operations/ingest/Postgres are healthy, root/health
+return 302/200, and there are zero HTTP 500 or ingest error markers. The first
+Operations start deadlocked during 0101; its normal restart applied the
+migration successfully and no recurring error remains.
 
-Next: commit and push `0.104.0`, immediately deploy through Portainer, verify
-the migration/backfill and basic health/500 state using aggregate-only checks,
-then begin E2 if deployment is healthy.
+E2 implementation is complete locally as the `0.105.0` release candidate.
+Definitions/mappings and independent authority policy are deployment-controlled;
+unmapped fields are restricted/count-only; current claims and per-member SCD-2
+history are projected in separately committed bounded batches after migration;
+heartbeat/contact timestamps remain on source current and do not create claim
+writes. Basic Python, Django, migration-drift, retention, and diff checks pass;
+the only Ruff findings are four pre-existing observation models outside E2.
+
+Next: commit and push the E2 release, immediately trigger Portainer, then verify
+the applied migrations, aggregate backfill/invariants, second-pass no-op,
+service health, version, and zero HTTP 500s. After successful verification,
+advance to E3 effective values and audited operator decisions.

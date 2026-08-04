@@ -43,3 +43,34 @@ def purge_all(days: int = 90) -> tuple[int, int]:
         generic, software, cutoff.isoformat(), days,
     )
     return generic, software
+
+
+def purge_claim_history(days: int = 90, batch_size: int = 10_000) -> int:
+    """Delete closed claim intervals through the guarded bounded function."""
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    total = 0
+    while True:
+        with db.transaction() as cur:
+            cur.execute(
+                "SELECT to_regprocedure("
+                "'operations.purge_closed_attribute_claim_history("
+                "timestamp with time zone,integer)'"
+                ") IS NOT NULL"
+            )
+            if not cur.fetchone()[0]:
+                return 0
+            cur.execute(
+                "SELECT operations.purge_closed_attribute_claim_history(%s, %s)",
+                (cutoff, batch_size),
+            )
+            deleted = int(cur.fetchone()[0] or 0)
+        total += deleted
+        if deleted < batch_size:
+            break
+    log.info(
+        "Attribute claim history retention: deleted=%d cutoff=%s (%d days)",
+        total,
+        cutoff.isoformat(),
+        days,
+    )
+    return total

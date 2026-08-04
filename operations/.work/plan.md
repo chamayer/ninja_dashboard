@@ -1,19 +1,20 @@
 # Active Operations implementation plan
 
-Track: **ADR-0010 generic ecosystem completion — Phase E1**
+Track: **ADR-0010 generic ecosystem completion — Phase E2**
 
-**Status:** implementation validated; `0.104.0` release pending.
+**Status:** E1 deployed; E2 `0.105.0` release candidate ready for deployment.
 
 ## Goal
 
-Add the rollback-safe generic entity/source-link foundation without promoting
-it over existing typed Client/Device and compatibility link authorities.
+Add deployment-controlled attribute definitions/mappings and typed,
+delta-only claim current/history without promoting them over existing typed
+effective readers.
 
 ## Scope and affected files
 
 - `apps/core/models.py`
 - `apps/core/admin.py`
-- `apps/core/migrations/0101_generic_entity_source_link_kernel.py`
+- new additive E2 migration and shared claim projector
 - ADR-0010, root `VERSION`/`CHANGELOG.md`, and active plans
 
 ## Decisions
@@ -38,12 +39,17 @@ it over existing typed Client/Device and compatibility link authorities.
 
 ## Steps
 
-1. Add Django models and an additive migration with registry seed/backfill.
-2. Expose registries, entities, source links/history, and candidates/events in
-   Django admin as read-only operational evidence where appropriate.
-3. Run basic checks and one PostgreSQL 16 migration rehearsal.
-4. Release as `0.104.0`, deploy, and perform basic health/500 verification.
-5. Continue to root Phase E2 after a healthy deployment.
+1. Add definition, mapping, authority-policy, typed claim current/history, and
+   withheld-count contracts with tenant-safe constraints and RLS.
+2. Seed only approved normalized attributes; unmapped raw fields remain
+   restricted and contribute counts, never effective values.
+3. Backfill/project claims in bounded batches and append history only when a
+   value/support/authority/withdrawal changes. Heartbeat-only collection must
+   produce zero claim writes.
+4. Expose populated definition/claim evidence read-only, run basic checks, then
+   deploy and verify aggregate behavior on the deployed PostgreSQL environment.
+5. Serialize migration/backfill against active ingest, or split those
+   boundaries, to avoid repeating the recovered 0101 first-start deadlock.
 
 ## Validation
 
@@ -55,9 +61,12 @@ it over existing typed Client/Device and compatibility link authorities.
 
 ## Checkpoint
 
-E1 is implemented and passes Django checks, migration drift, focused
-compile/Ruff checks, and exact forward/backward PostgreSQL 16 rehearsal. The
-fixture verified two anchors, two current links, two open history intervals,
-all five forced RLS policies, and zero second-pass writes. Release/deploy
-`0.104.0`, verify aggregate production backfill plus basic health/500 state,
-then hand root coordination to Phase E2.
+`0.104.0` / `5b2e873` is deployed on both remotes. E2 is implemented locally
+as the `0.105.0` release candidate: additive definitions/mappings, independent
+authority policies, typed current/per-member history, restricted/count-only
+unmapped classification, redacted evidence, bounded post-migration projection,
+and guarded 90-day retention. Basic Python, Django, migration-drift, retention,
+and diff checks pass; four Ruff findings are pre-existing observation models.
+The user waived further local Docker rehearsal. Next: commit/push, trigger
+Portainer immediately, and verify migrations, aggregate backfill/invariants,
+second-pass no-op, health/version, and zero HTTP 500s before starting E3.

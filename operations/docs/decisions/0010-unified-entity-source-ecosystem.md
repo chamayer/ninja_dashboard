@@ -1,6 +1,6 @@
 # 0010 — Unified entity and source-evidence ecosystem
 
-Status: Accepted (generic entity/source-link kernel implemented; claim and relationship phases pending)
+Status: Accepted (entity/source-link and delta-claim foundations implemented; effective-value and relationship phases pending)
 Date: 2026-07-31
 
 The first additive Ninja ingest-storage slice shipped in release `0.101.0`:
@@ -18,6 +18,14 @@ generic source-link current/history, generic candidate/event foundations, and
 an idempotent shadow projector from already-resolved observations. Typed
 Client/Device records and compatibility links remain authoritative; this is an
 expand phase, not the source-link cutover.
+
+Release `0.105.0` implements the additive attribute-claim foundation:
+deployment-controlled typed definitions and mappings, independent identity and
+attribute authority policies, typed current claims with per-member SCD-2
+history, restricted/count-only handling for unmapped fields, redacted evidence
+views, and bounded projection/retention. Receipt and contact timestamps remain
+on source current records and never create claim deltas. Existing typed readers
+remain authoritative until the later effective-value and parity cutover.
 
 ## Context
 

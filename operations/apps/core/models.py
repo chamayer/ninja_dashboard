@@ -1351,6 +1351,494 @@ class EntityCandidateEvent(UUIDTenantScopedModel):
         return f"{self.candidate_id}:{self.action}:{self.occurred_at}"
 
 
+class AttributeDefinition(models.Model):
+    """Versioned deployment-controlled normalized attribute contract."""
+
+    class ValueType(models.TextChoices):
+        TEXT = "text", "Text"
+        NUMBER = "number", "Number"
+        BOOLEAN = "boolean", "Boolean"
+        TIMESTAMP = "timestamp", "Timestamp"
+        ENTITY_REFERENCE = "entity_reference", "Entity reference"
+        STRUCTURED = "structured", "Structured detail"
+
+    class Cardinality(models.TextChoices):
+        SINGLE = "single", "Single"
+        SET = "set", "Set"
+
+    class Sensitivity(models.TextChoices):
+        PUBLIC = "public", "Public"
+        INTERNAL = "internal", "Internal"
+        SENSITIVE = "sensitive", "Sensitive"
+        RESTRICTED = "restricted", "Restricted"
+
+    class SingleConflictPolicy(models.TextChoices):
+        RETAIN_LAST_UNCONTESTED = "retain_last_uncontested", "Retain last uncontested"
+        UNKNOWN = "unknown", "Unknown"
+
+    class SetMergePolicy(models.TextChoices):
+        HIGHEST_AUTHORITY_UNION = "highest_authority_union", "Highest-authority union"
+        ALL_ELIGIBLE_UNION = "all_eligible_union", "All-eligible union"
+
+    id = models.BigAutoField(primary_key=True)
+    entity_class = models.ForeignKey(
+        EntityClass,
+        on_delete=models.PROTECT,
+        related_name="attribute_definitions",
+    )
+    key = models.CharField(max_length=120)
+    display_name = models.CharField(max_length=160)
+    description = models.TextField(blank=True, default="")
+    value_type = models.CharField(max_length=24, choices=ValueType.choices)
+    cardinality = models.CharField(max_length=12, choices=Cardinality.choices)
+    sensitivity = models.CharField(
+        max_length=16,
+        choices=Sensitivity.choices,
+        default=Sensitivity.RESTRICTED,
+    )
+    validation = models.JSONField(default=dict, blank=True)
+    canonical_projection_eligible = models.BooleanField(default=False)
+    single_value_conflict_policy = models.CharField(
+        max_length=32,
+        choices=SingleConflictPolicy.choices,
+        default=SingleConflictPolicy.UNKNOWN,
+    )
+    set_merge_policy = models.CharField(
+        max_length=32,
+        choices=SetMergePolicy.choices,
+        default=SetMergePolicy.HIGHEST_AUTHORITY_UNION,
+    )
+    definition_version = models.PositiveIntegerField(default=1)
+    enabled = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = "attribute_definitions"
+        ordering = ("entity_class", "key", "-definition_version")
+        constraints = (
+            models.UniqueConstraint(
+                fields=("entity_class", "key", "definition_version"),
+                name="uq_attr_defs_class_key_version",
+            ),
+            models.UniqueConstraint(
+                fields=("entity_class", "key"),
+                condition=Q(enabled=True),
+                name="uq_attr_defs_enabled_key",
+            ),
+            models.UniqueConstraint(
+                fields=("id", "value_type", "cardinality"),
+                name="uq_attr_defs_typed_id",
+            ),
+        )
+
+    def __str__(self) -> str:
+        return f"{self.entity_class_id}.{self.key}@{self.definition_version}"
+
+
+class SourceFieldMapping(models.Model):
+    """Deployment-controlled map from one source field to one definition."""
+
+    class DocumentKind(models.TextChoices):
+        CANONICAL = "canonical", "Normalized source record"
+        RAW = "raw", "Raw source record"
+
+    id = models.BigAutoField(primary_key=True)
+    source = models.ForeignKey(
+        Source,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="attribute_field_mappings",
+    )
+    external_namespace = models.CharField(max_length=120, blank=True, default="")
+    native_record_type = models.CharField(max_length=80, blank=True, default="")
+    document_kind = models.CharField(
+        max_length=16,
+        choices=DocumentKind.choices,
+        default=DocumentKind.CANONICAL,
+    )
+    source_field = models.CharField(max_length=160)
+    attribute_definition = models.ForeignKey(
+        AttributeDefinition,
+        on_delete=models.PROTECT,
+        related_name="source_mappings",
+    )
+    mapping_version = models.PositiveIntegerField(default=1)
+    enabled = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = "source_field_mappings"
+        ordering = (
+            "source",
+            "external_namespace",
+            "native_record_type",
+            "document_kind",
+            "source_field",
+            "-mapping_version",
+        )
+        constraints = (
+            models.UniqueConstraint(
+                fields=(
+                    "source",
+                    "external_namespace",
+                    "native_record_type",
+                    "document_kind",
+                    "source_field",
+                    "mapping_version",
+                ),
+                nulls_distinct=False,
+                name="uq_source_field_mapping_version",
+            ),
+        )
+
+    def __str__(self) -> str:
+        source = self.source_id or "*"
+        namespace = self.external_namespace or "*"
+        record_type = self.native_record_type or "*"
+        return f"{source}:{namespace}:{record_type}:{self.source_field}"
+
+
+class IdentityAuthorityPolicy(UUIDTenantScopedModel):
+    """Independent deny-by-default identity authority for one source type."""
+
+    source_instance = models.ForeignKey(
+        SourceInstance,
+        on_delete=models.PROTECT,
+        related_name="identity_authority_policies",
+    )
+    native_record_type = models.CharField(max_length=80)
+    resulting_entity_type = models.ForeignKey(
+        EntityType,
+        on_delete=models.PROTECT,
+        related_name="identity_authority_policies",
+    )
+    may_establish_identity = models.BooleanField(default=False)
+    may_create_canonical = models.BooleanField(default=False)
+    enabled = models.BooleanField(default=True)
+    reason = models.CharField(max_length=160, blank=True, default="")
+
+    class Meta:
+        db_table = "identity_authority_policies"
+        constraints = (
+            models.UniqueConstraint(
+                fields=(
+                    "tenant",
+                    "source_instance",
+                    "native_record_type",
+                    "resulting_entity_type",
+                ),
+                name="uq_identity_authority_policy",
+            ),
+        )
+
+    def __str__(self) -> str:
+        return f"{self.source_instance_id}:{self.native_record_type}"
+
+
+class AttributeAuthorityPolicy(UUIDTenantScopedModel):
+    """Independent effective-value eligibility and authority rank."""
+
+    source_instance = models.ForeignKey(
+        SourceInstance,
+        on_delete=models.PROTECT,
+        related_name="attribute_authority_policies",
+    )
+    native_record_type = models.CharField(max_length=80)
+    attribute_definition = models.ForeignKey(
+        AttributeDefinition,
+        on_delete=models.PROTECT,
+        related_name="authority_policies",
+    )
+    eligible = models.BooleanField(default=False)
+    authority_tier = models.PositiveSmallIntegerField(default=0)
+    priority = models.PositiveSmallIntegerField(default=0)
+    enabled = models.BooleanField(default=True)
+    reason = models.CharField(max_length=160, blank=True, default="")
+
+    class Meta:
+        db_table = "attribute_authority_policies"
+        constraints = (
+            models.UniqueConstraint(
+                fields=(
+                    "tenant",
+                    "source_instance",
+                    "native_record_type",
+                    "attribute_definition",
+                ),
+                name="uq_attribute_authority_policy",
+            ),
+        )
+
+    def __str__(self) -> str:
+        return f"{self.source_instance_id}:{self.native_record_type}:" f"{self.attribute_definition_id}"
+
+
+def _typed_claim_value_condition() -> Q:
+    value_fields = {
+        "text": "value_text",
+        "number": "value_number",
+        "boolean": "value_boolean",
+        "timestamp": "value_timestamp",
+        "entity_reference": "value_entity",
+        "structured": "value_json",
+    }
+    condition = Q(pk__isnull=True)
+    for value_type, populated_field in value_fields.items():
+        branch = Q(value_type=value_type)
+        for field in value_fields.values():
+            branch &= Q(**{f"{field}__isnull": field != populated_field})
+        condition |= branch
+    return condition
+
+
+class EntityAttributeClaimCurrent(UUIDTenantScopedModel):
+    """Current typed source assertion; heartbeat receipt stays on its observation."""
+
+    entity = models.ForeignKey(Entity, on_delete=models.PROTECT, related_name="attribute_claims")
+    entity_class = models.ForeignKey(EntityClass, on_delete=models.PROTECT, related_name="attribute_claims")
+    observation = models.ForeignKey(
+        "EntityObservationCurrent",
+        on_delete=models.PROTECT,
+        related_name="attribute_claims",
+    )
+    source_instance = models.ForeignKey(SourceInstance, on_delete=models.PROTECT, related_name="attribute_claims")
+    attribute_definition = models.ForeignKey(AttributeDefinition, on_delete=models.PROTECT, related_name="current_claims")
+    source_mapping = models.ForeignKey(SourceFieldMapping, on_delete=models.PROTECT, related_name="current_claims")
+    value_type = models.CharField(max_length=24, choices=AttributeDefinition.ValueType.choices)
+    cardinality = models.CharField(max_length=12, choices=AttributeDefinition.Cardinality.choices)
+    value_text = models.TextField(null=True, blank=True)  # noqa: DJ001 -- typed union
+    value_number = models.DecimalField(max_digits=38, decimal_places=10, null=True, blank=True)
+    value_boolean = models.BooleanField(null=True, blank=True)
+    value_timestamp = models.DateTimeField(null=True, blank=True)
+    value_entity = models.ForeignKey(
+        Entity,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="referenced_attribute_claims",
+    )
+    value_json = models.JSONField(null=True, blank=True)
+    value_fingerprint = models.BinaryField()
+    member_key = models.BinaryField()
+    mapping_version = models.PositiveIntegerField()
+    authority_eligible = models.BooleanField(default=False)
+    authority_tier = models.PositiveSmallIntegerField(default=0)
+    authority_priority = models.PositiveSmallIntegerField(default=0)
+    first_observed_at = models.DateTimeField()
+    last_observed_at = models.DateTimeField()
+    active = models.BooleanField(default=True)
+    withdrawn_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "entity_attribute_claim_current"
+        constraints = (
+            models.UniqueConstraint(
+                fields=("tenant", "observation", "attribute_definition", "member_key"),
+                name="uq_attr_claim_current_member",
+            ),
+            models.UniqueConstraint(fields=("tenant", "id"), name="uq_attr_claim_current_tenant_id"),
+            models.CheckConstraint(condition=_typed_claim_value_condition(), name="ck_attr_claim_current_typed_value"),
+            models.CheckConstraint(
+                condition=((Q(active=True) & Q(withdrawn_at__isnull=True)) | (Q(active=False) & Q(withdrawn_at__isnull=False))),
+                name="ck_attr_claim_current_presence",
+            ),
+        )
+        indexes = (
+            models.Index(
+                fields=("tenant", "entity", "attribute_definition", "active"),
+                name="idx_attr_claim_current_entity",
+            ),
+            models.Index(fields=("tenant", "observation", "active"), name="idx_attr_claim_current_obs"),
+        )
+
+    def __str__(self) -> str:
+        return f"{self.entity_id}:{self.attribute_definition_id}"
+
+
+class EntityAttributeClaimHistory(TenantScopedModel):
+    """SCD-2 history for value, support, authority, and withdrawal deltas."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    current_claim = models.ForeignKey(EntityAttributeClaimCurrent, on_delete=models.PROTECT, related_name="history")
+    entity = models.ForeignKey(Entity, on_delete=models.PROTECT, related_name="attribute_claim_history")
+    entity_class = models.ForeignKey(EntityClass, on_delete=models.PROTECT, related_name="attribute_claim_history")
+    observation = models.ForeignKey(
+        "EntityObservationCurrent",
+        on_delete=models.PROTECT,
+        related_name="attribute_claim_history",
+    )
+    source_instance = models.ForeignKey(SourceInstance, on_delete=models.PROTECT, related_name="attribute_claim_history")
+    attribute_definition = models.ForeignKey(AttributeDefinition, on_delete=models.PROTECT, related_name="claim_history")
+    source_mapping = models.ForeignKey(SourceFieldMapping, on_delete=models.PROTECT, related_name="claim_history")
+    value_type = models.CharField(max_length=24, choices=AttributeDefinition.ValueType.choices)
+    cardinality = models.CharField(max_length=12, choices=AttributeDefinition.Cardinality.choices)
+    value_text = models.TextField(null=True, blank=True)  # noqa: DJ001 -- typed union
+    value_number = models.DecimalField(max_digits=38, decimal_places=10, null=True, blank=True)
+    value_boolean = models.BooleanField(null=True, blank=True)
+    value_timestamp = models.DateTimeField(null=True, blank=True)
+    value_entity = models.ForeignKey(
+        Entity,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="referenced_attribute_claim_history",
+    )
+    value_json = models.JSONField(null=True, blank=True)
+    value_fingerprint = models.BinaryField()
+    member_key = models.BinaryField()
+    mapping_version = models.PositiveIntegerField()
+    authority_eligible = models.BooleanField(default=False)
+    authority_tier = models.PositiveSmallIntegerField(default=0)
+    authority_priority = models.PositiveSmallIntegerField(default=0)
+    effective_from = models.DateTimeField()
+    effective_to = models.DateTimeField(null=True, blank=True)
+    closed_reason = models.CharField(max_length=40, blank=True, default="")
+
+    class Meta:
+        db_table = "entity_attribute_claim_history"
+        constraints = (
+            models.UniqueConstraint(
+                fields=("tenant", "current_claim"),
+                condition=Q(effective_to__isnull=True),
+                name="uq_attr_claim_history_open",
+            ),
+            models.CheckConstraint(condition=_typed_claim_value_condition(), name="ck_attr_claim_history_typed_value"),
+        )
+        indexes = (
+            models.Index(
+                fields=("tenant", "entity", "attribute_definition", "effective_from"),
+                name="idx_attr_claim_history_entity",
+            ),
+            models.Index(fields=("tenant", "effective_to"), name="idx_attr_claim_hist_retention"),
+        )
+
+    def __str__(self) -> str:
+        return f"{self.current_claim_id}:{self.effective_from}"
+
+
+class EntityAttributeWithheldCurrent(TenantScopedModel):
+    """Safe aggregate classification state without field names or values."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    observation = models.OneToOneField(
+        "EntityObservationCurrent",
+        on_delete=models.PROTECT,
+        related_name="attribute_withheld_counts",
+    )
+    source_instance = models.ForeignKey(SourceInstance, on_delete=models.PROTECT, related_name="attribute_withheld_counts")
+    observed_field_count = models.PositiveIntegerField(default=0)
+    mapped_field_count = models.PositiveIntegerField(default=0)
+    unmapped_field_count = models.PositiveIntegerField(default=0)
+    restricted_field_count = models.PositiveIntegerField(default=0)
+    invalid_field_count = models.PositiveIntegerField(default=0)
+    projected_claim_count = models.PositiveIntegerField(default=0)
+    active = models.BooleanField(default=True)
+    projection_contract_version = models.PositiveIntegerField(default=1)
+    measured_at = models.DateTimeField()
+
+    class Meta:
+        db_table = "entity_attribute_withheld_current"
+        constraints = (models.UniqueConstraint(fields=("tenant", "observation"), name="uq_attr_withheld_tenant_obs"),)
+        indexes = (
+            models.Index(
+                fields=("tenant", "active", "unmapped_field_count"),
+                name="idx_attr_withheld_unmapped",
+            ),
+        )
+
+    def __str__(self) -> str:
+        return f"{self.observation_id}:{self.projected_claim_count}"
+
+
+class EntityAttributeProjectionState(TenantScopedModel):
+    """Change detector and resumable cursor for bounded claim projection."""
+
+    observation = models.OneToOneField(
+        "EntityObservationCurrent",
+        primary_key=True,
+        on_delete=models.PROTECT,
+        related_name="attribute_projection_state",
+    )
+    source_instance = models.ForeignKey(SourceInstance, on_delete=models.PROTECT, related_name="attribute_projection_states")
+    entity_source_link = models.ForeignKey(
+        EntitySourceLink,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="attribute_projection_states",
+    )
+    entity = models.ForeignKey(
+        Entity,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="attribute_projection_states",
+    )
+    projection_hash = models.BinaryField()
+    observation_active = models.BooleanField()
+    projection_contract_version = models.PositiveIntegerField(default=1)
+    projected_at = models.DateTimeField()
+
+    class Meta:
+        db_table = "entity_attribute_projection_state"
+        constraints = (models.UniqueConstraint(fields=("tenant", "observation"), name="uq_attr_projection_tenant_obs"),)
+        indexes = (
+            models.Index(
+                fields=("tenant", "source_instance", "observation_active"),
+                name="idx_attr_projection_source",
+            ),
+        )
+
+    def __str__(self) -> str:
+        return f"{self.observation_id}:{self.projected_at}"
+
+
+class EntityAttributeClaimEvidence(models.Model):
+    """Redacted tenant-scoped current-claim read model."""
+
+    id = models.UUIDField(primary_key=True)
+    tenant = models.ForeignKey(Tenant, on_delete=models.DO_NOTHING)
+    entity_id = models.UUIDField()
+    entity_class = models.CharField(max_length=80)
+    observation_id = models.UUIDField()
+    source_instance_id = models.UUIDField()
+    attribute_key = models.CharField(max_length=120)
+    attribute_display_name = models.CharField(max_length=160)
+    sensitivity = models.CharField(max_length=16)
+    cardinality = models.CharField(max_length=12)
+    value_display = models.TextField()
+    authority_eligible = models.BooleanField()
+    authority_tier = models.PositiveSmallIntegerField()
+    authority_priority = models.PositiveSmallIntegerField()
+    first_observed_at = models.DateTimeField()
+    last_observed_at = models.DateTimeField()
+
+    class Meta:
+        managed = False
+        db_table = "v_entity_attribute_claim_current"
+
+    def __str__(self) -> str:
+        return f"{self.entity_id}:{self.attribute_key}"
+
+
+class EntityAttributeClaimStorageStatus(models.Model):
+    """Tenant-safe aggregate claim sizing and partition-review signal."""
+
+    tenant = models.OneToOneField(Tenant, primary_key=True, on_delete=models.DO_NOTHING)
+    current_claim_rows = models.BigIntegerField()
+    active_claim_rows = models.BigIntegerField()
+    history_claim_rows = models.BigIntegerField()
+    changed_members_1d = models.BigIntegerField()
+    partition_review_required = models.BooleanField()
+
+    class Meta:
+        managed = False
+        db_table = "v_entity_attribute_claim_storage_status"
+
+    def __str__(self) -> str:
+        return str(self.tenant_id)
+
+
+
 class EntityObservation(TenantScopedModel):
     """Empty compatibility model retained until dependent views are rebuilt."""
 

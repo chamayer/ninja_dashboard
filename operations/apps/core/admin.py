@@ -4,6 +4,8 @@ from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
 
 from .models import (
+    AttributeAuthorityPolicy,
+    AttributeDefinition,
     AuditLog,
     Client,
     ClientLink,
@@ -16,6 +18,10 @@ from .models import (
     Device,
     DeviceLink,
     Entity,
+    EntityAttributeClaimEvidence,
+    EntityAttributeClaimStorageStatus,
+    EntityAttributeProjectionState,
+    EntityAttributeWithheldCurrent,
     EntityClass,
     EntityClassScope,
     EntitySourceLink,
@@ -23,6 +29,7 @@ from .models import (
     EntityType,
     Finding,
     FindingType,
+    IdentityAuthorityPolicy,
     IntelMatcherHint,
     MergeCandidate,
     NotificationRoute,
@@ -34,6 +41,7 @@ from .models import (
     SoftwareDecision,
     Source,
     SourceBinding,
+    SourceFieldMapping,
     SourceInstance,
     SuppressionRule,
     Tenant,
@@ -179,6 +187,132 @@ class EntitySourceLinkHistoryAdmin(ReadOnlyEvidenceAdmin):
     )
     list_filter = ("tenant", "entity_class", "external_namespace", "actor_kind")
     search_fields = ("entity__id", "external_id", "reason", "actor_process")
+
+
+@admin.register(AttributeDefinition)
+class AttributeDefinitionAdmin(ReadOnlyEvidenceAdmin):
+    list_display = (
+        "key",
+        "entity_class",
+        "value_type",
+        "cardinality",
+        "sensitivity",
+        "definition_version",
+        "enabled",
+    )
+    list_filter = ("entity_class", "value_type", "cardinality", "sensitivity", "enabled")
+    search_fields = ("key", "display_name", "description")
+
+
+@admin.register(SourceFieldMapping)
+class SourceFieldMappingAdmin(ReadOnlyEvidenceAdmin):
+    list_display = (
+        "source",
+        "external_namespace",
+        "native_record_type",
+        "document_kind",
+        "source_field",
+        "attribute_definition",
+        "mapping_version",
+        "enabled",
+    )
+    list_filter = ("source", "document_kind", "enabled")
+    search_fields = ("source_field", "external_namespace", "native_record_type")
+
+
+@admin.register(IdentityAuthorityPolicy)
+class IdentityAuthorityPolicyAdmin(ReadOnlyEvidenceAdmin):
+    list_display = (
+        "source_instance",
+        "native_record_type",
+        "resulting_entity_type",
+        "may_establish_identity",
+        "may_create_canonical",
+        "enabled",
+        "tenant",
+    )
+    list_filter = ("tenant", "may_establish_identity", "may_create_canonical", "enabled")
+    search_fields = ("native_record_type", "reason")
+
+
+@admin.register(AttributeAuthorityPolicy)
+class AttributeAuthorityPolicyAdmin(ReadOnlyEvidenceAdmin):
+    list_display = (
+        "source_instance",
+        "native_record_type",
+        "attribute_definition",
+        "eligible",
+        "authority_tier",
+        "priority",
+        "enabled",
+        "tenant",
+    )
+    list_filter = ("tenant", "eligible", "authority_tier", "enabled")
+    search_fields = ("native_record_type", "attribute_definition__key", "reason")
+
+
+@admin.register(EntityAttributeClaimEvidence)
+class EntityAttributeClaimEvidenceAdmin(ReadOnlyEvidenceAdmin):
+    list_display = (
+        "entity_id",
+        "entity_class",
+        "attribute_key",
+        "value_display",
+        "sensitivity",
+        "authority_eligible",
+        "authority_tier",
+        "last_observed_at",
+        "tenant",
+    )
+    list_filter = ("tenant", "entity_class", "sensitivity", "authority_eligible")
+    search_fields = ("entity_id", "attribute_key", "value_display")
+
+
+@admin.register(EntityAttributeWithheldCurrent)
+class EntityAttributeWithheldCurrentAdmin(ReadOnlyEvidenceAdmin):
+    list_display = (
+        "observation",
+        "source_instance",
+        "observed_field_count",
+        "mapped_field_count",
+        "unmapped_field_count",
+        "restricted_field_count",
+        "invalid_field_count",
+        "projected_claim_count",
+        "active",
+        "tenant",
+    )
+    list_filter = ("tenant", "active")
+    search_fields = ("observation__observation_id",)
+
+
+@admin.register(EntityAttributeProjectionState)
+class EntityAttributeProjectionStateAdmin(ReadOnlyEvidenceAdmin):
+    list_display = (
+        "observation",
+        "source_instance",
+        "entity",
+        "observation_active",
+        "projection_contract_version",
+        "projected_at",
+        "tenant",
+    )
+    list_filter = ("tenant", "observation_active", "projection_contract_version")
+    search_fields = ("observation__observation_id", "entity__id")
+
+
+@admin.register(EntityAttributeClaimStorageStatus)
+class EntityAttributeClaimStorageStatusAdmin(ReadOnlyEvidenceAdmin):
+    list_display = (
+        "tenant",
+        "current_claim_rows",
+        "active_claim_rows",
+        "history_claim_rows",
+        "changed_members_1d",
+        "partition_review_required",
+    )
+    list_filter = ("partition_review_required",)
+
 
 
 @admin.register(Collector)

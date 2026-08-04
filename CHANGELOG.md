@@ -2,6 +2,32 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.105.0] — 2026-08-04 — Generic attribute delta claims
+
+### Added
+
+- Added deployment-controlled attribute definitions, source-field mappings,
+  independent identity and attribute authority policies, and tenant-safe typed
+  current claims with SCD-2 change history.
+- Added bounded, resumable claim projection from generic source records,
+  aggregate withheld/unmapped-field counts, redacted claim evidence, and
+  read-only Operations admin inspection.
+- Added guarded 90-day closed-claim-history retention and an aggregate storage
+  signal that calls for partition review at 10 million retained rows or 25,000
+  changed members per day.
+
+### Changed
+
+- Collection boundaries now project attribute claims after source-link sync in
+  separately committed batches. Heartbeat/contact timestamps remain on source
+  current records and do not create claim writes.
+
+### Operational note
+
+- Claims remain an additive shadow path in this release; existing typed readers
+  stay authoritative until effective-value selection and measured reader
+  cutover. Unmapped raw fields default to restricted/count-only handling.
+
 ## [0.104.0] — 2026-08-03 — Generic entity and source-link kernel
 
 ### Added
