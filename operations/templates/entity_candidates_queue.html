@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% load human_labels %}
+
+{% block title %}Entity candidates{% endblock %}
+
+{% block content %}
+<div style="display:flex; justify-content:space-between; align-items:baseline; gap:1rem; margin-bottom:1rem;">
+  <div><h1 style="margin:0;">Entity candidates</h1><p class="muted" style="margin:0.25rem 0 0;">Unattached source identities and their current review state.</p></div>
+</div>
+<div class="card" style="margin-bottom:1rem;">
+  <form method="get" style="display:flex; gap:0.7rem; align-items:end; flex-wrap:wrap;">
+    <label>Status<br><select name="status">
+      <option value="pending" {% if status_filter == "pending" %}selected{% endif %}>Pending ({{ status_counts.pending|default:0 }})</option>
+      <option value="observed_only" {% if status_filter == "observed_only" %}selected{% endif %}>Observed only ({{ status_counts.observed_only|default:0 }})</option>
+      <option value="rejected" {% if status_filter == "rejected" %}selected{% endif %}>Rejected ({{ status_counts.rejected|default:0 }})</option>
+      <option value="attached" {% if status_filter == "attached" %}selected{% endif %}>Attached ({{ status_counts.attached|default:0 }})</option>
+      <option value="all" {% if status_filter == "all" %}selected{% endif %}>All</option>
+    </select></label>
+    <label>Class<br><input name="class" value="{{ entity_class_filter }}" placeholder="All classes"></label>
+    <button type="submit">Apply</button>
+  </form>
+</div>
+<div class="card">
+  <table class="ops-table" data-sortable><thead><tr><th>Source</th><th>Record type</th><th>Source identity</th><th>Class</th><th>Client</th><th>Status</th><th>Last observed</th></tr></thead><tbody>
+  {% for row in page %}
+    <tr><td>{{ row.source_name }}</td><td>{{ row.external_namespace|humanize_label }}</td><td><a href="{% url 'entity_candidate_detail' row.id %}">{{ row.external_id }}</a></td><td>{{ row.entity_class_display }}</td><td>{{ row.client_display_name|default:"—" }}</td><td>{{ row.status|humanize_label }}</td><td>{{ row.last_observed_at|date:"Y-m-d H:i" }}</td></tr>
+  {% empty %}<tr><td colspan="7" class="muted">No candidates match this filter.</td></tr>{% endfor %}
+  </tbody></table>
+</div>
+{% include "_pagination.html" with page_obj=page page_query=page_query page_size=100 %}
+{% endblock %}

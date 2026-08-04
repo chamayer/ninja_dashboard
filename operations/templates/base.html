@@ -375,6 +375,8 @@
                    href="{% url 'operations_admin_overview' %}">Overview</a>
                 <span class="nav-sep"></span>
                 {% if admin_group == 'review' or admin_group == 'overview' %}
+                <a class="nav-link nav-context {% if admin_tab == 'entities' %}active{% endif %}"
+                   href="{% url 'entity_candidates_queue' %}">Entities{% if nav_pending_entity_candidates %} <span class="nav-badge">{{ nav_pending_entity_candidates }}</span>{% endif %}</a>
                 <a class="nav-link nav-context {% if admin_tab == 'clients' %}active{% endif %}"
                    href="{% url 'client_candidates_queue' %}">Clients{% if nav_pending_client_candidates %} <span class="nav-badge">{{ nav_pending_client_candidates }}</span>{% endif %}</a>
                 <a class="nav-link nav-context {% if admin_tab == 'merges' %}active{% endif %}"
@@ -395,6 +397,8 @@
                    href="{% url 'device_status_config' %}">Device status</a>
                 {% endif %}
                 {% if admin_group == 'integrations' %}
+                <a class="nav-link nav-context {% if admin_tab == 'entities' %}active{% endif %}"
+                   href="{% url 'entity_admin_list' %}">Entities</a>
                 <a class="nav-link nav-context {% if admin_tab == 'sources' %}active{% endif %}"
                    href="{% url 'sources_status' %}">Sources</a>
                 <a class="nav-link nav-context {% if admin_tab == 'coverage' %}active{% endif %}"

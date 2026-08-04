@@ -2,8 +2,8 @@
 
 Track: **ADR-0010 generic entity, claim, relationship, and admin completion**
 
-**Status:** full remaining plan approved; Phases E1-E3 deployed, Phase E4
-corrective `0.107.3` pending validation and deployment.
+**Status:** full remaining plan approved; Phases E1-E4 deployed, Phase E5
+in progress.
 
 ## Authority and checkpoint
 
@@ -284,7 +284,53 @@ The runtime privilege check found schema-default named-role grants surviving
 the original PUBLIC-only revoke, including protected `source_events` access by
 `operations_app`. Corrective `0.107.3` adds migration 0115 and fresh-install
 SQL that explicitly revoke all E4 table privileges from known runtime roles,
-then reapply the documented least-privilege matrix. Next: run basic validation,
-commit, push `origin`, immediately redeploy, push the mirror, and verify the
-privilege matrix, no-op projectors, aggregate invariants, version, migrations,
-health, and current error counts.
+then reapply the documented least-privilege matrix.
+
+Corrective `0.107.3` / `47bb68b` is deployed and mirrored. Migration 0115 is
+applied and its deployed artifact matches the committed file. The exact ACL
+matrix now passes: raw relationship evidence/history and protected source
+events are ingest-only; Operations has only registry, decision, and effective
+relationship access; no runtime role has DELETE. Both projectors are immediate
+no-ops (candidates 0/0/0 in 0.375 seconds; relationships all zero in 0.012
+seconds). Production holds 4,890 current candidates and 4,891 lifecycle
+events; all six candidate invariants remain zero. All eight tenant tables have
+forced RLS and one policy, and all seven E4 triggers are enabled. Both remotes
+match, Portainer is active, every container is healthy, root/health return
+302/200, and current HTTP 500, traceback, ERROR, and CRITICAL counts are zero.
+
+Next: begin E5 by inventorying existing generic read models, Operations admin
+surfaces, restricted-value permissions, and typed consumers against the E5
+acceptance contract; then implement the smallest complete generic read/admin
+slice and measured consumer cutovers without changing incompatible typed IDs.
+
+## E5 checkpoint
+
+- Production has 5,348 canonical entity anchors (76 clients and 5,272
+  devices), five source instances, 24,980 current generic source links, 30,164
+  current observations, 266,594 current claims, 181,380 effective values, 168
+  conflicts, 4,890 candidates, and no current relationships. Fourteen active
+  source-instance/type groups are sufficient for a row-based generic health
+  surface; fixed per-class columns are not required.
+- Existing attribute claim/effective views redact sensitive and restricted
+  values, but the custom Operations UI has no generic entity/candidate/
+  relationship surface. Source health is platform-keyed with fixed client and
+  device columns, and Device Identity & raw reads observation JSON on ordinary
+  GET.
+- `operations_app` cannot read raw claim/history or E4 protected evidence, but
+  still has direct `SELECT` on observation raw JSON and the underlying E3
+  effective/conflict tables. Those grants cannot be revoked before named
+  readers move to redacted views and an audited permission-checked reveal path.
+- E5 will ship in reversible slices: E5.1 generic redacted read/admin and
+  candidate workflow plus row-based source counts; E5.2 audited restricted/raw
+  reveal and direct-table privilege cutover; E5.3 measured typed consumer
+  parity/cutover. APIs, exports, evaluators, findings, notifications, and typed
+  domain views move only when their output contract has measured parity.
+- E5.1 is implemented locally for release `0.108.0`: seven security-barrier
+  tenant read views owned by a dedicated no-login/non-BYPASSRLS role; generic
+  entity list/detail and candidate attach/reject pages; row-based Sources
+  counts; and Admin navigation/landing integration. Default views exclude raw
+  payloads and protected source-event actors. Compile, Django check, migration
+  drift, nine focused E4/E5 tests, template loading, and diff checks pass;
+  focused Ruff passes for new files, while pre-existing warnings remain in the
+  legacy monolithic views/context modules. Next: final migration/diff review,
+  commit, push/redeploy/mirror, and aggregate production validation.

@@ -2,6 +2,25 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.108.0] — 2026-08-04 — Generic entity administration
+
+### Added
+
+- Added tenant-filtered, registry-driven read models and Operations Admin
+  surfaces for canonical entities, source identities, redacted claims and
+  effective values, conflicts, relationships, and generic candidates.
+- Added generic candidate attach/reject workflows through the existing atomic
+  source-link, history, candidate-event, and audit services.
+- Replaced fixed source class counts on the Sources page with source-instance
+  rows and per-entity-type active/withdrawn counts.
+
+### Security
+
+- New generic read views are security-barrier views owned by a no-login,
+  non-BYPASSRLS view role and exclude raw payloads and protected source-event
+  actor data. Audited restricted/raw reveal and remaining direct-table grant
+  removal stay in the next E5 slice.
+
 ## [0.107.3] — 2026-08-04 — E4 runtime privilege correction
 
 ### Fixed

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load human_labels %}
 
 {% block title %}Sources{% endblock %}
 
@@ -25,7 +26,7 @@
 <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:1rem;">
     <div>
         <h1 style="margin:0;">Sources</h1>
-        <p class="muted" style="margin:0.25rem 0 0;">Connection status by data source</p>
+        <p class="muted" style="margin:0.25rem 0 0;">Connection status and current record types by source instance</p>
     </div>
     <div style="display:flex; align-items:center; gap:0.75rem;">
       {% if stale_count %}
@@ -50,7 +51,7 @@
         {% else %}
         <span class="status-dot dot-stale"></span>
         {% endif %}
-        {{ s.name }}
+        {{ s.name }}{% if s.client_name %} · {{ s.client_name }}{% endif %}
     </div>
     {% if s.is_processing %}
     <div class="source-stat" style="color:#2563eb;">Running now…</div>
@@ -68,7 +69,15 @@
     {% if s.last_rows is not None %}
     <div class="source-stat">Records: <strong>{{ s.last_rows }}</strong></div>
     {% endif %}
-    <div class="source-stat">Clients: <strong>{{ s.client_count }}</strong> &middot; Devices: <strong>{{ s.device_count }}</strong></div>
+    <div class="source-stat">Source records: <strong>{{ s.active_record_count }}</strong> active &middot; {{ s.current_record_count }} total</div>
+    {% for count in s.entity_counts %}
+    <div class="source-stat">
+        {{ count.entity_class|humanize_label }} · {{ count.entity_type|humanize_label }}:
+        <strong>{{ count.active_count }}</strong> active{% if count.withdrawn_count %} · {{ count.withdrawn_count }} withdrawn{% endif %}
+    </div>
+    {% empty %}
+    <div class="source-stat">No current records</div>
+    {% endfor %}
     {% if s.last_observed %}
     <div class="source-stat">Last observation: <strong>{{ s.last_observed|date:"Y-m-d H:i" }}</strong></div>
     {% endif %}

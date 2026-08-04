@@ -10,8 +10,19 @@ from drf_spectacular.views import (
     SpectacularSwaggerView,
 )
 
+from apps.core.generic_admin import (
+    entity_admin_detail,
+    entity_admin_list,
+    entity_candidate_attach,
+    entity_candidate_detail,
+    entity_candidate_reject,
+    entity_candidates_queue,
+)
 from apps.core.views import (
     admin_finding_acknowledge,
+    admin_jobs,
+    admin_jobs_run,
+    admin_jobs_run_all,
     classifier_config,
     client_candidate_accept,
     client_candidate_detail,
@@ -32,7 +43,6 @@ from apps.core.views import (
     device_patch_scope_clear,
     device_patch_scope_set,
     device_status_config,
-    lifecycle_policy_status,
     devices_page,
     finding_acknowledge,
     finding_resolve,
@@ -44,6 +54,7 @@ from apps.core.views import (
     fleet_coverage,
     healthz,
     home,
+    lifecycle_policy_status,
     merge_candidates_queue,
     notification_rule_toggle,
     notification_rules_list,
@@ -61,11 +72,8 @@ from apps.core.views import (
     patching_queue,
     requirement_profiles_list,
     search,
-    admin_jobs,
-    admin_jobs_run,
-    admin_jobs_run_all,
-    software_decision_create,
     software_decision_bulk,
+    software_decision_create,
     software_decision_log,
     software_decisions_queue,
     software_detail,
@@ -211,6 +219,32 @@ urlpatterns = [
         "admin/requirement-profiles/", requirement_profiles_list, name="requirement_profiles_list"
     ),
     path("admin/overview/", operations_admin_overview, name="operations_admin_overview"),
+    path("admin/entities/", entity_admin_list, name="entity_admin_list"),
+    path(
+        "admin/entities/<uuid:entity_id>/",
+        entity_admin_detail,
+        name="entity_admin_detail",
+    ),
+    path(
+        "admin/entity-candidates/",
+        entity_candidates_queue,
+        name="entity_candidates_queue",
+    ),
+    path(
+        "admin/entity-candidates/<uuid:candidate_id>/",
+        entity_candidate_detail,
+        name="entity_candidate_detail",
+    ),
+    path(
+        "admin/entity-candidates/<uuid:candidate_id>/attach/",
+        entity_candidate_attach,
+        name="entity_candidate_attach",
+    ),
+    path(
+        "admin/entity-candidates/<uuid:candidate_id>/reject/",
+        entity_candidate_reject,
+        name="entity_candidate_reject",
+    ),
     path("admin/classifier/", classifier_config, name="classifier_config"),
     path("admin/device-status/", device_status_config, name="device_status_config"),
     path("admin/lifecycle/", lifecycle_policy_status, name="lifecycle_policy_status"),

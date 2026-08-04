@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% load human_labels %}
+
+{% block title %}Entity candidate{% endblock %}
+
+{% block content %}
+<p><a href="{% url 'entity_candidates_queue' %}">← Entity candidates</a></p>
+<h1>Entity candidate</h1>
+<div class="card" style="margin-bottom:1rem;">
+  <dl style="display:grid; grid-template-columns:max-content 1fr; gap:0.4rem 1rem;">
+    <dt>Source</dt><dd>{{ candidate.source_instance.source.name }}</dd>
+    <dt>Record type</dt><dd>{{ candidate.external_namespace|humanize_label }}</dd>
+    <dt>Source identity</dt><dd>{{ candidate.external_id }}</dd>
+    <dt>Proposed class</dt><dd>{{ candidate.proposed_entity_class.display_name }}</dd>
+    <dt>Client</dt><dd>{{ candidate.client.display_name|default:"—" }}</dd>
+    <dt>Status</dt><dd>{{ candidate.status|humanize_label }}</dd>
+    <dt>Last observed</dt><dd>{{ candidate.last_observed_at|date:"Y-m-d H:i" }}</dd>
+    <dt>Latest decision</dt><dd>{{ candidate.latest_decision|default:"—"|humanize_label }}</dd>
+  </dl>
+</div>
+
+{% if can_decide and candidate.status != "attached" %}
+<div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:1rem; margin-bottom:1rem;">
+  <div class="card">
+    <h2 style="margin-top:0;">Attach to an entity</h2>
+    <form method="get" style="margin-bottom:0.8rem;"><label>Find target<br><input name="q" value="{{ target_search }}"></label> <button type="submit">Search</button></form>
+    <form method="post" action="{% url 'entity_candidate_attach' candidate.id %}">{% csrf_token %}
+      <label>Target entity<br><select name="entity_id" required>
+        <option value="">Select an entity</option>
+        {% for entity in target_entities %}<option value="{{ entity.id }}">{{ entity.display_label }}{% if entity.client_display_name %} · {{ entity.client_display_name }}{% endif %}</option>{% endfor %}
+      </select></label><br>
+      <label>Reason<br><textarea name="reason" required></textarea></label><br>
+      <button type="submit">Attach</button>
+    </form>
+  </div>
+  <div class="card">
+    <h2 style="margin-top:0;">Reject this evidence</h2>
+    <p class="muted">The source record remains visible. A material source change may reopen it.</p>
+    <form method="post" action="{% url 'entity_candidate_reject' candidate.id %}">{% csrf_token %}
+      <label>Reason<br><textarea name="reason" required></textarea></label><br>
+      <button type="submit">Reject</button>
+    </form>
+  </div>
+</div>
+{% endif %}
+
+<div class="card"><h2 style="margin-top:0;">Decision history</h2>
+  <table class="ops-table"><thead><tr><th>When</th><th>Action</th><th>Actor</th><th>Reason</th></tr></thead><tbody>
+  {% for event in events %}<tr><td>{{ event.occurred_at|date:"Y-m-d H:i" }}</td><td>{{ event.action|humanize_label }}</td><td>{{ event.actor.username|default:event.actor_process|default:event.actor_kind }}</td><td>{{ event.reason }}</td></tr>
+  {% empty %}<tr><td colspan="4" class="muted">No events.</td></tr>{% endfor %}
+  </tbody></table>
+</div>
+{% endblock %}

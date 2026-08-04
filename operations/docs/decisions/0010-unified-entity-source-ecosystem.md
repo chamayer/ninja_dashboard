@@ -1,6 +1,7 @@
 # 0010 — Unified entity and source-evidence ecosystem
 
-Status: Accepted (entity, claim, effective-value, relationship, candidate, and source-event engines implemented; read/admin cutover pending)
+Status: Accepted (engines implemented; generic redacted read/admin slice
+prepared; audited reveal and consumer cutover pending)
 Date: 2026-07-31
 
 The first additive Ninja ingest-storage slice shipped in release `0.101.0`:
@@ -571,6 +572,24 @@ Historical generic-event backfill remains a separately controlled operation;
 if performed, these events remain unresolved. Future events automatically
 confirm withdrawal only if Ninja supplies a stable subject ID; otherwise they
 remain available for review and future decommissioning workflow evidence.
+
+### Implemented generic read/admin slice
+
+E5.1 adds security-barrier, tenant-filtered read models for entity summary,
+source identities, redacted conflicts/effective values, relationships,
+candidates, and source-instance/type health. The views are owned by a
+dedicated no-login, non-BYPASSRLS role and granted only to Operations and its
+read-only role. The Operations Admin entity list/detail and candidate workflow
+are registry/class driven and reuse the existing atomic E4 decision services.
+The Sources page now renders row-based entity-class/type counts instead of
+fixed client/device columns.
+
+This slice deliberately does not expose raw or restricted values and does not
+revoke remaining direct-table privileges that still have named consumers.
+E5.2 must first add permission-checked POST-only reveal with metadata-only
+audit events, move Device Identity & raw and any other direct readers, prove
+denial/parity, and then revoke those grants. E5.3 performs the remaining named
+API/export/evaluator/finding/notification/typed-reader cutovers.
 
 ## Rationale
 

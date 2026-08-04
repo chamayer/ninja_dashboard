@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% load human_labels %}
+
+{% block title %}Entity evidence{% endblock %}
+
+{% block content %}
+<div style="display:flex; justify-content:space-between; align-items:baseline; gap:1rem; margin-bottom:1rem;">
+  <div>
+    <h1 style="margin:0;">Entity evidence</h1>
+    <p class="muted" style="margin:0.25rem 0 0;">Canonical entities with source, effective-value, conflict, and relationship status.</p>
+  </div>
+  {% include "_csv_download.html" %}
+</div>
+
+<div class="card" style="margin-bottom:1rem;">
+  <form method="get" style="display:flex; flex-wrap:wrap; gap:0.7rem; align-items:end;">
+    <label>Search<br><input type="search" name="q" value="{{ search }}" placeholder="Entity name"></label>
+    <label>Class<br>
+      <select name="class">
+        <option value="">All classes</option>
+        {% for item in class_counts %}
+        <option value="{{ item.entity_class }}" {% if entity_class_filter == item.entity_class %}selected{% endif %}>{{ item.entity_class_display }} ({{ item.count }})</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>State<br>
+      <select name="state">
+        <option value="current" {% if state_filter == "current" %}selected{% endif %}>Current</option>
+        <option value="retired" {% if state_filter == "retired" %}selected{% endif %}>Retired</option>
+        <option value="deleted" {% if state_filter == "deleted" %}selected{% endif %}>Deleted</option>
+        <option value="all" {% if state_filter == "all" %}selected{% endif %}>All</option>
+      </select>
+    </label>
+    <button type="submit">Apply</button>
+  </form>
+</div>
+
+<div class="card">
+  <table class="ops-table" data-sortable>
+    <thead><tr>
+      <th>Entity</th><th>Class</th><th>Client</th><th class="num">Sources</th>
+      <th class="num">Attributes</th><th class="num">Conflicts</th><th class="num">Relationships</th><th>State</th>
+    </tr></thead>
+    <tbody>
+    {% for row in page %}
+      <tr>
+        <td><a href="{% url 'entity_admin_detail' row.id %}">{{ row.display_label }}</a></td>
+        <td>{{ row.entity_class_display }}</td>
+        <td>{{ row.client_display_name|default:"—" }}</td>
+        <td class="num">{{ row.active_source_count }}{% if row.missing_source_count %} <span class="badge badge-high">{{ row.missing_source_count }} missing</span>{% endif %}</td>
+        <td class="num">{{ row.effective_attribute_count }}</td>
+        <td class="num">{% if row.conflict_count %}<span class="badge badge-high">{{ row.conflict_count }}</span>{% else %}0{% endif %}</td>
+        <td class="num">{{ row.outgoing_relationship_count|add:row.incoming_relationship_count }}</td>
+        <td>{% if row.deleted_at %}Deleted{% elif row.retired_at %}Retired{% else %}Current{% endif %}</td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="8" class="muted">No entities match these filters.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% include "_pagination.html" with page_obj=page page_query=page_query page_size=100 %}
+{% endblock %}

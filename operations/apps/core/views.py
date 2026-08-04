@@ -6449,43 +6449,64 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
 
 @login_required
 def sources_status(request: HttpRequest) -> HttpResponse:
-    """Source ingest run status and last observation timestamps.
-
-    Run status comes from operations.run_log (kind 'source.<platform>[...]'),
-    which records every source run — scheduled and manual. The demand queue
-    is only consulted for pending/processing indicators.
-    """
-    with transaction.atomic():
+    """Registry-driven source-instance health and row-based entity counts."""
+    tenant_id = int(getattr(request, "tenant_id", 1))
+    with transaction.atomic():  # noqa: SIM117 -- matches existing transaction/GUC pattern
         with connection.cursor() as cur:
-            cur.execute("SET LOCAL operations.tenant_id = 1")
-
-            # Current source health is derived once per refresh cycle. Queue
-            # state and the recent run history below remain live workflow data.
-            cur.execute("""
-                SELECT platform, last_run_ok, last_run_ended_at,
-                       last_run_rows, last_run_error, last_success_at,
-                       last_success_rows, last_agent_observed_at,
-                       client_count, device_count
-                FROM operations.source_health_current
-                WHERE tenant_id = 1
-            """)
-            source_health = {r[0]: r[1:] for r in cur.fetchall()}
+            cur.execute("SET LOCAL operations.tenant_id = %s", (tenant_id,))
+            cur.execute(
+                """
+                SELECT id, source_name, client_display_name, enabled, run_platform,
+                       last_observed_at, current_record_count, active_record_count,
+                       last_run_ok, last_run_ended_at, last_run_rows,
+                       last_run_error, last_success_at, last_success_rows
+                  FROM operations.v_source_instance_health
+                 WHERE tenant_id = %s
+                 ORDER BY source_name, client_display_name NULLS FIRST, id
+                """,
+                (tenant_id,),
+            )
+            health_rows = cur.fetchall()
+            cur.execute(
+                """
+                SELECT source_instance_id, entity_type, entity_class,
+                       current_count, active_count, withdrawn_count, last_seen_at
+                  FROM operations.v_source_instance_entity_counts
+                 WHERE tenant_id = %s
+                 ORDER BY source_instance_id, entity_class, entity_type
+                """,
+                (tenant_id,),
+            )
+            counts_by_instance: dict = {}
+            for row in cur.fetchall():
+                counts_by_instance.setdefault(row[0], []).append(
+                    {
+                        "entity_type": row[1],
+                        "entity_class": row[2],
+                        "current_count": row[3],
+                        "active_count": row[4],
+                        "withdrawn_count": row[5],
+                        "last_seen_at": row[6],
+                    }
+                )
 
             # Currently pending or processing (manual demand queue)
-            cur.execute("""
+            cur.execute(
+                """
                 SELECT df, status, queued_at, started_at
-                FROM operations.source_run_queue
-                WHERE status IN ('pending', 'processing')
-            """)
+                  FROM operations.source_run_queue
+                 WHERE status IN ('pending', 'processing')
+                """
+            )
             active = {r[0]: r for r in cur.fetchall()}
 
             # Recent run history — every recorded source run
             cur.execute("""
                 SELECT substring(kind FROM 8), ok, started_at, ended_at, rows, error
                 FROM operations.run_log
-                WHERE kind LIKE 'source.%%'
+                WHERE tenant_id = %s AND kind LIKE 'source.%%'
                 ORDER BY started_at DESC LIMIT 30
-            """)
+            """, (tenant_id,))
             recent_runs = [
                 {
                     "source": r[0],
@@ -6500,25 +6521,44 @@ def sources_status(request: HttpRequest) -> HttpResponse:
 
     now = timezone.now()
     sources = []
-    for source in _registered_sources():
-        health = source_health.get(source)
-        act = active.get(source)
-        last_success = health[4] if health else None
-        last_fail = health[1] if health and not health[0] else None
-        last_error = (health[3] or None) if health and not health[0] else None
+    for row in health_rows:
+        (
+            source_instance_id,
+            source_name,
+            client_display_name,
+            enabled,
+            run_platform,
+            last_observed,
+            current_record_count,
+            active_record_count,
+            last_run_ok,
+            last_run_ended_at,
+            last_run_rows,
+            last_run_error,
+            last_success,
+            last_success_rows,
+        ) = row
+        act = active.get(run_platform)
+        last_fail = last_run_ended_at if last_run_ok is False else None
+        last_error = (last_run_error or None) if last_run_ok is False else None
         is_stale = last_success is None or (now - last_success).total_seconds() > 8 * 3600
         sources.append(
             {
-                "name": source,
+                "id": source_instance_id,
+                "name": source_name,
+                "client_name": client_display_name,
+                "enabled": enabled,
+                "run_platform": run_platform,
                 "is_processing": bool(act and act[1] == "processing"),
                 "has_pending": bool(act and act[1] == "pending"),
                 "last_success": last_success,
                 "last_failure": last_fail,
-                "last_rows": health[5] if health else None,
+                "last_rows": last_success_rows if last_success_rows is not None else last_run_rows,
                 "last_error": last_error,
-                "last_observed": health[6] if health else None,
-                "client_count": health[7] if health else 0,
-                "device_count": health[8] if health else 0,
+                "last_observed": last_observed,
+                "current_record_count": current_record_count,
+                "active_record_count": active_record_count,
+                "entity_counts": counts_by_instance.get(source_instance_id, []),
                 "is_stale": is_stale,
             }
         )
@@ -6537,8 +6577,8 @@ def sources_status(request: HttpRequest) -> HttpResponse:
                 ("Last rows", "last_rows"),
                 ("Last error", "last_error"),
                 ("Last observed", "last_observed"),
-                ("Clients", "client_count"),
-                ("Devices", "device_count"),
+                ("Current source records", "current_record_count"),
+                ("Active source records", "active_record_count"),
             ],
             filename_stem="sources_status",
         )
@@ -7713,6 +7753,27 @@ def operations_admin_overview(request: HttpRequest) -> HttpResponse:
             """
         )
         source_health = cur.fetchall()
+        cur.execute(
+            """
+            SELECT count(*)::integer, COALESCE(sum(conflict_count), 0)::integer
+              FROM operations.v_entity_admin_summary
+             WHERE tenant_id = 1 AND deleted_at IS NULL
+            """
+        )
+        generic_entity_count, generic_conflict_count = cur.fetchone()
+        cur.execute(
+            """
+            SELECT count(*) FILTER (WHERE status = 'pending')::integer,
+                   count(*) FILTER (WHERE status = 'observed_only')::integer
+              FROM operations.v_entity_candidate_admin
+             WHERE tenant_id = 1
+            """
+        )
+        generic_pending_candidates, generic_observed_candidates = cur.fetchone()
+        cur.execute(
+            "SELECT count(*)::integer FROM operations.v_source_instance_health WHERE tenant_id = 1"
+        )
+        generic_source_instance_count = cur.fetchone()[0]
     stale_sources = sum(
         observed_at is None or not run_ok or (now - observed_at).total_seconds() > 8 * 3600
         for _platform, observed_at, run_ok in source_health
@@ -7766,6 +7827,7 @@ def operations_admin_overview(request: HttpRequest) -> HttpResponse:
             "nav_pending_client_candidates": ClientCandidate.objects.filter(
                 tenant_id=1, status="open"
             ).count(),
+            "nav_pending_entity_candidates": generic_pending_candidates,
             "nav_pending_merges": MergeCandidate.objects.filter(
                 tenant_id=1, status="open"
             ).count(),
@@ -7788,8 +7850,11 @@ def operations_admin_overview(request: HttpRequest) -> HttpResponse:
             "alert_rule_count": NotificationRule.objects.filter(tenant_id=1, enabled=True).count(),
             "suppression_count": SuppressionRule.objects.filter(tenant_id=1).count(),
             # Integrations
-            "source_count": len(source_health),
+            "source_count": generic_source_instance_count,
             "stale_sources": stale_sources,
+            "generic_entity_count": generic_entity_count,
+            "generic_conflict_count": generic_conflict_count,
+            "generic_observed_candidates": generic_observed_candidates,
             "admin_finding_count": AdminFinding.objects.filter(
                 tenant_id=1, status__in=("open", "acknowledged")
             ).count(),

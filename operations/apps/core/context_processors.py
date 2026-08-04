@@ -5,7 +5,7 @@ from __future__ import annotations
 from django.conf import settings
 from django.http import HttpRequest
 
-from .models import Client, ClientCandidate, Finding, MergeCandidate
+from .models import Client, ClientCandidate, EntityCandidate, Finding, MergeCandidate
 
 _FINDING_ACTIVE_STATUSES = (
     Finding.Status.OPEN,
@@ -48,6 +48,7 @@ def brand(request: HttpRequest) -> dict:
         "nav_findings_count": 0,
         "nav_pending_merges": 0,
         "nav_pending_client_candidates": 0,
+        "nav_pending_entity_candidates": 0,
         # Software-decision counts are intentionally not calculated here.
         # The former fleet-wide anti-join took several seconds on production
         # data and ran for every authenticated page render. Reintroduce this
@@ -78,6 +79,10 @@ def brand(request: HttpRequest) -> dict:
             ctx["nav_pending_client_candidates"] = ClientCandidate.objects.filter(
                 tenant_id=tenant_id,
                 status=ClientCandidate.Status.OPEN,
+            ).count()
+            ctx["nav_pending_entity_candidates"] = EntityCandidate.objects.filter(
+                tenant_id=tenant_id,
+                status=EntityCandidate.Status.PENDING,
             ).count()
         ctx["nav_patching_open"] = Finding.objects.filter(
             tenant_id=tenant_id,

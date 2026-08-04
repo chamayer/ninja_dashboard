@@ -65,6 +65,15 @@
 {# ─── Review queues ─────────────────────────────────────── #}
 <div class="admin-section-label">Review queues — items needing an operator decision</div>
 <div class="admin-cards">
+    <a class="admin-card" href="{% url 'entity_candidates_queue' %}">
+        <div class="top">
+            <span class="icon teal">◎</span>
+            <span class="title">Entity candidates</span>
+        </div>
+        <div class="desc">Generic source records awaiting attachment or retained as observed-only evidence.</div>
+        <span class="metric {% if nav_pending_entity_candidates %}warn{% else %}ok{% endif %}">{{ nav_pending_entity_candidates }} pending · {{ generic_observed_candidates }} observed only</span>
+    </a>
+
     <a class="admin-card" href="{% url 'client_candidates_queue' %}">
         <div class="top">
             <span class="icon blue">
@@ -216,6 +225,15 @@
 {# ─── Data & integrations ───────────────────────────────── #}
 <div class="admin-section-label">Data &amp; integrations</div>
 <div class="admin-cards">
+    <a class="admin-card" href="{% url 'entity_admin_list' %}">
+        <div class="top">
+            <span class="icon violet">◇</span>
+            <span class="title">Entity evidence</span>
+        </div>
+        <div class="desc">Canonical entities, source identities, redacted claims, effective values, conflicts, and relationships.</div>
+        <span class="metric {% if generic_conflict_count %}warn{% else %}ok{% endif %}">{{ generic_entity_count }} entities · {{ generic_conflict_count }} conflicts</span>
+    </a>
+
     <a class="admin-card" href="{% url 'sources_status' %}">
         <div class="top">
             <span class="icon blue">

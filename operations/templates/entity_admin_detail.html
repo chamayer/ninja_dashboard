@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% load human_labels %}
+
+{% block title %}{{ entity.display_label }} · Entity evidence{% endblock %}
+
+{% block content %}
+<p><a href="{% url 'entity_admin_list' %}">← Entity evidence</a></p>
+<div style="display:flex; justify-content:space-between; align-items:baseline; gap:1rem;">
+  <div>
+    <h1 style="margin:0;">{{ entity.display_label }}</h1>
+    <p class="muted" style="margin:0.25rem 0 1rem;">{{ entity.entity_class_display }}{% if entity.client_display_name %} · {{ entity.client_display_name }}{% endif %}</p>
+  </div>
+  {% if entity.conflict_count %}<span class="badge badge-high">{{ entity.conflict_count }} conflict{{ entity.conflict_count|pluralize }}</span>{% endif %}
+</div>
+
+<div class="card" style="margin-bottom:1rem;">
+  <h2 style="margin-top:0;">Source identities</h2>
+  <table class="ops-table" data-sortable>
+    <thead><tr><th>Source</th><th>Record type</th><th>Source identity</th><th>Observed</th><th>State</th><th>Protected fields</th></tr></thead>
+    <tbody>
+    {% for row in sources %}
+      <tr>
+        <td>{{ row.source_name }}</td>
+        <td>{{ row.entity_type|default:row.external_namespace|humanize_label }}</td>
+        <td>{{ row.external_namespace }} · {{ row.external_id }}</td>
+        <td>{{ row.observation_last_seen_at|default:row.last_seen_at|date:"Y-m-d H:i" }}</td>
+        <td>{% if row.missing_since or row.observation_active is False %}<span class="badge badge-high">Withdrawn</span>{% else %}<span class="badge badge-low">Current</span>{% endif %}</td>
+        <td>{{ row.restricted_field_count }} restricted · {{ row.unmapped_field_count }} unmapped{% if row.invalid_field_count %} · {{ row.invalid_field_count }} invalid{% endif %}</td>
+      </tr>
+    {% empty %}<tr><td colspan="6" class="muted">No source identities.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="card" style="margin-bottom:1rem;">
+  <h2 style="margin-top:0;">Effective attributes</h2>
+  <table class="ops-table" data-sortable>
+    <thead><tr><th>Attribute</th><th>Value</th><th>Status</th><th>Selection</th><th>Conflict</th></tr></thead>
+    <tbody>
+    {% for row in effective %}
+      <tr>
+        <td>{{ row.attribute_display_name }}</td><td>{{ row.value_display }}</td>
+        <td>{{ row.status|humanize_label }}</td><td>{{ row.selection_reason|humanize_label }}</td>
+        <td>{% if row.conflict %}<span class="badge badge-high">Conflict</span>{% else %}—{% endif %}</td>
+      </tr>
+    {% empty %}<tr><td colspan="5" class="muted">No effective attributes.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% if conflicts %}
+<div class="card" style="margin-bottom:1rem;">
+  <h2 style="margin-top:0;">Conflicts</h2>
+  <table class="ops-table"><thead><tr><th>Attribute</th><th>Kind</th><th>Values</th><th>Last detected</th></tr></thead><tbody>
+  {% for row in conflicts %}<tr><td>{{ row.attribute_display_name }}</td><td>{{ row.conflict_kind|humanize_label }}</td><td>{{ row.conflicting_value_count }}</td><td>{{ row.last_detected_at|date:"Y-m-d H:i" }}</td></tr>{% endfor %}
+  </tbody></table>
+</div>
+{% endif %}
+
+<div class="card" style="margin-bottom:1rem;">
+  <h2 style="margin-top:0;">Source claims</h2>
+  <p class="muted">Sensitive and restricted values remain redacted. Audited reveal lands in E5.2.</p>
+  <table class="ops-table" data-sortable>
+    <thead><tr><th>Attribute</th><th>Source</th><th>Value</th><th>Sensitivity</th><th>Authority</th><th>Observed</th></tr></thead>
+    <tbody>
+    {% for row in claims %}
+      <tr><td>{{ row.attribute_display_name }}</td><td>{{ row.source_name }}</td><td>{{ row.value_display }}</td><td>{{ row.sensitivity|humanize_label }}</td><td>{% if row.authority_eligible %}Tier {{ row.authority_tier }}{% else %}Evidence only{% endif %}</td><td>{{ row.last_observed_at|date:"Y-m-d H:i" }}</td></tr>
+    {% empty %}<tr><td colspan="6" class="muted">No current claims.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="card">
+  <h2 style="margin-top:0;">Relationships</h2>
+  <table class="ops-table"><thead><tr><th>Relationship</th><th>Direction</th><th>Other entity</th><th>Selection</th><th>Support</th></tr></thead><tbody>
+  {% for row in relationships %}
+    <tr><td>{{ row.relationship_display_name }}</td><td>{{ row.direction|humanize_label }}</td><td><a href="{% url 'entity_admin_detail' row.other_entity_id %}">{{ row.other_entity_label }}</a></td><td>{{ row.selection_reason|humanize_label }}</td><td>{{ row.supporting_evidence_count }}</td></tr>
+  {% empty %}<tr><td colspan="5" class="muted">No current relationships.</td></tr>{% endfor %}
+  </tbody></table>
+</div>
+{% endblock %}
