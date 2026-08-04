@@ -50,6 +50,8 @@ def test_candidate_projection_uses_complete_stable_identity_and_material_reopen(
     ):
         assert field in sql
     assert "candidate.material_hash IS DISTINCT FROM observation.material_hash" in sql
+    assert "latest_decision, latest_decision_reason" in sql
+    assert "'', ''," in sql
     assert "'reopen'" in sql
     assert "'attach'" in sql
 

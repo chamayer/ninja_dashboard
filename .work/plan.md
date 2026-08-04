@@ -262,3 +262,11 @@ keys pending before ownership DDL. No E4 data or consumer cutover occurred.
 Corrective `0.107.1` forces those constraints immediately after the seed and
 adds an explicit E4 regression assertion. Next: validate, commit, push both
 remotes with immediate redeploy, and complete the planned aggregate checks.
+
+`0.107.1` then applied migrations 0111-0113 and both application containers
+became healthy. The first manual bounded candidate transaction failed closed
+before inserting rows because the SQL insert omitted the non-null
+`latest_decision` and `latest_decision_reason` fields whose empty defaults are
+Django-side only. Corrective `0.107.2` supplies both values for fresh installs
+and migration 0114 replaces the already-deployed projector. Next: validate,
+commit, push/redeploy/mirror, then rerun the bounded projection and invariants.

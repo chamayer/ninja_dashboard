@@ -103,3 +103,10 @@ pending before ownership DDL. No E4 data or consumer cutover occurred.
 Corrective `0.107.1` adds `SET CONSTRAINTS ALL IMMEDIATE` directly after that
 seed plus a focused regression assertion. Next: validate, commit, push/redeploy/
 mirror immediately, then complete the E4 aggregate validation.
+
+`0.107.1` applied 0111-0113 successfully and both application containers are
+healthy. The first manual candidate projection then failed closed before any
+insert because its raw SQL omitted the non-null empty decision metadata that
+Django model defaults do not create at the database level. Corrective
+`0.107.2` adds those explicit values and migration 0114 replaces the deployed
+function. Next: validate, commit, push/redeploy/mirror, and rerun projection.

@@ -609,6 +609,7 @@ BEGIN
             id, tenant_id, version, source_instance_id, proposed_entity_class_id,
             client_id, external_namespace, parent_external_namespace,
             parent_external_id, external_id, status, material_hash,
+            latest_decision, latest_decision_reason,
             first_observed_at, last_observed_at
         )
         SELECT gen_random_uuid(), eligible.tenant_id, 1, eligible.source_instance_id,
@@ -616,6 +617,7 @@ BEGIN
                eligible.external_namespace, eligible.parent_external_namespace,
                eligible.parent_external_id, eligible.external_id,
                eligible.desired_status, eligible.material_hash,
+               '', '',
                eligible.observed_at, eligible.last_seen_at
           FROM eligible
         ON CONFLICT (tenant_id, source_instance_id, external_namespace,

@@ -2,6 +2,14 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.107.2] — 2026-08-04 — Candidate projector defaults fix
+
+### Fixed
+
+- Supplied the database-required empty decision metadata when the generic
+  projector creates a candidate, and replaced the deployed projector through
+  migration 0114. The failed first projection transaction inserted no rows.
+
 ## [0.107.1] — 2026-08-04 — Relationship migration startup fix
 
 ### Fixed
