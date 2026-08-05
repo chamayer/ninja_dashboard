@@ -25,6 +25,7 @@ from psycopg.types.json import Json
 from ingest import db, device_cache_projector
 from ingest.identity import identity_entity_types
 from ingest.normalize import (
+    form_factor_for_node_class,
     is_macos_name,
     is_usable_serial,
     normalize_hostname,
@@ -1351,18 +1352,23 @@ def _infer_form_factor(entries: list[tuple]) -> str:
     form factor away from unknown.
     """
     values = [e[5] or {} for e in entries]
-    node_classes = {(cd.get("node_class") or "").upper() for cd in values}
     entity_types = {e[1] for e in entries}
-    if any(et == "network.device" for et in entity_types) or any(
-        nc.startswith("NMS_") for nc in node_classes
-    ):
+    # node_class markers come from operations.node_class_mappings (0119)
+    # rather than inline prefix/suffix tests. `form_factor_for_node_class`
+    # returns None for every agent.* class, so agent presence still cannot
+    # upgrade form factor.
+    node_class_factors = {
+        form_factor_for_node_class(cd.get("node_class")) for cd in values
+    } - {None}
+
+    if "network.device" in entity_types or "network-device" in node_class_factors:
         return "network-device"
-    if any(et == "vm.host" for et in entity_types) or any(
-        nc.endswith("_VM_HOST") or nc.endswith("_VMM_HOST") for nc in node_classes
-    ):
+    if "vm.host" in entity_types or "hypervisor-host" in node_class_factors:
         return "hypervisor-host"
-    if any(et == "vm.guest" for et in entity_types) or any(
-        bool(cd.get("is_vm")) for cd in values
+    if (
+        "vm.guest" in entity_types
+        or "vm" in node_class_factors
+        or any(bool(cd.get("is_vm")) for cd in values)
     ):
         return "vm"
     # No asset-nature evidence — form factor stays unknown regardless of

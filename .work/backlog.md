@@ -180,6 +180,26 @@ This is the proposed successor to the root-level open-work portion of
   bulk report on the findings surface rather than an actionable queue.
 - Trigger: explicit approval; the collapse is destructive.
 
+## 33 devices carry a form factor with no supporting evidence
+
+- Surfaced by the first live run of `device_cache_projector` (2026-08-05,
+  commit `7e57ba3`), which reported `device_type_evidence_missing = 379`. That
+  number was wrong: the counter demanded a selected `is_virtual_machine` claim
+  and ignored the fact that a `vm.guest` / `vm.host` / `network.device`
+  observation is *also* evidence of form factor. Measured split: **346 of the
+  379 were evidenced by entity type** and only **33 genuinely unevidenced**.
+  The counter is corrected to require the absence of both.
+- Remaining real gap: 33 devices have a known `device_type` with neither an
+  asset-nature observation nor a selected `is_virtual_machine` claim. Their
+  values are retained rather than downgraded to `unknown`, because a mapping
+  gap is not evidence of absence.
+- Work: find why `is_virtual_machine` is unselected for these 33. Likely a
+  claim-projection gap rather than missing source data — `device_type` was
+  correct for all of them (zero projector changes on that column).
+- Lesson worth keeping: the metric was invisible until the projector ran, and
+  it was wrong in the direction of alarm. A counter that overstates a gap by
+  10x trains operators to ignore it.
+
 ## Source disagreement is resolved silently (`conflict = false`)
 
 - Measured 2026-08-05 on `os_name`. Of 21 devices where the cache and the

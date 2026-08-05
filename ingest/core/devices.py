@@ -28,6 +28,7 @@ from ingest import db
 from ingest.ninja_client import NinjaClient
 from ingest.normalize import (
     entity_type_for_node_class,
+    form_factor_for_node_class,
     infer_device_role,
     normalize_mac,
     normalize_org_name,
@@ -93,7 +94,11 @@ def _run(client: NinjaClient, snapshot_at: datetime) -> tuple[int, int]:
             system_data = d.get("system") or {}
             maintenance = d.get("maintenance") or {}
             nc = (d.get("nodeClass") or "").upper()
-            if nc.endswith(("_VMM_GUEST", "_VM_GUEST", "_VMM_HOST", "_VM_HOST")):
+            # Virtualization-related classes carry hypervisor tracking fields.
+            # Sourced from operations.node_class_mappings (0119) rather than an
+            # inline suffix tuple — 'vm' covers the guest classes and
+            # 'hypervisor-host' the host classes.
+            if form_factor_for_node_class(nc) in ("vm", "hypervisor-host"):
                 vm_tracking[d["id"]] = {
                     "power_state": d.get("powerState"),
                     "parent_device_id": d.get("parentDeviceId"),

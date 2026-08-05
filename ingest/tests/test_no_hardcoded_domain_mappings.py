@@ -70,7 +70,11 @@ KNOWN: dict[str, str] = {
     "TRENDS_CARDS": "BASELINE 2026-08-05 - not individually reviewed",
     "UTILITY_CARDS": "BASELINE 2026-08-05 - not individually reviewed",
     "VOLATILE_FIELDS": "MIGRATE defines which fields skip re-projection - drives the last_user lag",
-    "_AGENT_NODE_CLASSES": "MIGRATE node class -> agent semantics",
+    "_BUILTIN_NODE_CLASS_PATTERNS": (
+        "EXEMPT bootstrap fallback for operations.node_class_mappings (0119); "
+        "load_node_class_mappings() overrides it once per run, and it stays in "
+        "effect if that query fails so the taxonomy never goes empty"
+    ),
     "_ALERTS_FILTER_TAGS": "EXEMPT UI/dashboard definition",
     "_BACKGROUND_QUEUES": "BASELINE 2026-08-05 - not individually reviewed",
     "_BOOL_OPTIONS": "EXEMPT UI/dashboard definition",

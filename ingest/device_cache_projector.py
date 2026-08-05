@@ -73,7 +73,16 @@ pivot AS (
            max(value_text) FILTER (WHERE key = 'os_family')   AS os_family,
            max(value_text) FILTER (WHERE key = 'device_role') AS device_role,
            upper(max(value_text) FILTER (WHERE key = 'node_class')) AS node_class,
-           bool_or(value_boolean) FILTER (WHERE key = 'is_virtual_machine') AS is_vm
+           bool_or(value_boolean) FILTER (WHERE key = 'is_virtual_machine') AS is_vm,
+           -- ADR-0012 section 6: the node_class taxonomy is data, not inline
+           -- left()/right() tests. NULL where the class implies no form
+           -- factor, which is every agent.* class (ADR-0005).
+           (SELECT NULLIF(m.form_factor, '')
+              FROM operations.node_class_mappings m
+             WHERE upper(max(value_text) FILTER (WHERE key = 'node_class'))
+                   LIKE m.pattern
+             ORDER BY m.priority, m.id
+             LIMIT 1) AS node_class_form_factor
       FROM eff
      GROUP BY entity_id
 ),
@@ -107,24 +116,30 @@ SELECT d.id AS device_id,
        COALESCE(p.device_role, d.device_role, 'unknown') AS device_role,
        CASE
            WHEN COALESCE(t.has_network, false)
-             OR left(COALESCE(p.node_class, ''), 4) = 'NMS_'
+             OR p.node_class_form_factor = 'network-device'
                THEN 'network-device'
            WHEN COALESCE(t.has_vm_host, false)
-             OR right(COALESCE(p.node_class, ''), 8) = '_VM_HOST'
-             OR right(COALESCE(p.node_class, ''), 9) = '_VMM_HOST'
+             OR p.node_class_form_factor = 'hypervisor-host'
                THEN 'hypervisor-host'
            WHEN COALESCE(t.has_vm_guest, false)
+             OR p.node_class_form_factor = 'vm'
              OR COALESCE(p.is_vm, false)
                THEN 'vm'
            -- Retain a known form factor when no asset-nature evidence is
-           -- currently selected. Measured 2026-08-05: 30 devices carry a raw
-           -- is_vm signal that has no selected effective claim, so projecting
+           -- currently selected. Measured 2026-08-05 against production: 33
+           -- devices have a known device_type with neither an asset-nature
+           -- observation nor a selected is_virtual_machine claim, so projecting
            -- 'unknown' would downgrade them on a mapping gap rather than on
            -- evidence. The gap is reported as device_type_evidence_missing.
            WHEN COALESCE(d.device_type, 'unknown') <> 'unknown'
                THEN d.device_type
            ELSE 'unknown'
-       END AS device_type
+       END AS device_type,
+       -- Exposed so the evidence-gap counter can tell "form factor is backed
+       -- by an entity type" from "form factor is backed by nothing".
+       COALESCE(t.has_network, false)
+         OR COALESCE(t.has_vm_host, false)
+         OR COALESCE(t.has_vm_guest, false) AS has_asset_nature
   FROM operations.devices d
   LEFT JOIN pivot p ON p.entity_id = d.entity_id
   LEFT JOIN types t ON t.entity_id = d.entity_id
@@ -163,6 +178,12 @@ def project(*, dry_run: bool = True, tenant_id: int = TENANT_ID) -> dict[str, in
                 count(*) FILTER (WHERE t.device_type IS DISTINCT FROM d.device_type),
                 count(*) FILTER (
                     WHERE d.device_type <> 'unknown' AND t.device_type = d.device_type
+                      -- A form factor backed by a vm.guest / vm.host /
+                      -- network.device observation IS evidenced; it just is not
+                      -- evidenced by an is_virtual_machine claim. Without this
+                      -- the counter reported 379 where the real gap was 33,
+                      -- and 346 correctly-evidenced devices looked broken.
+                      AND NOT t.has_asset_nature
                       AND NOT EXISTS (
                           SELECT 1 FROM operations.entity_attribute_effective_current e2
                           JOIN operations.attribute_definitions a2

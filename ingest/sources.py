@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from ingest import db
 from ingest.normalize import (
     canonical_platform,
+    load_node_class_mappings,
     load_os_family_mappings,
     load_platform_aliases,
 )
@@ -106,6 +107,7 @@ def _fetch_source_rows(cur) -> list[tuple]:
         cur.execute("SET LOCAL operations.tenant_id = 1")
         load_platform_aliases(cur)
         load_os_family_mappings(cur)
+        load_node_class_mappings(cur)
         cur.execute(_SOURCE_QUERY.format(entity_type_expr="s.kind"))
         rows = cur.fetchall()
         return [
@@ -125,6 +127,7 @@ def load_sources() -> list[SourceConfig]:
         # Prime the alias cache from data before canonicalising below.
         load_platform_aliases(cur)
         load_os_family_mappings(cur)
+        load_node_class_mappings(cur)
         rows = _fetch_source_rows(cur)
 
     configs: list[SourceConfig] = []

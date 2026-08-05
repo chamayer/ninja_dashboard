@@ -19,6 +19,7 @@ from typing import Any
 from ingest import db
 from ingest.normalize import (
     entity_type_for_node_class,
+    form_factor_for_node_class,
     infer_device_role,
     normalize_mac,
     os_family,
@@ -326,10 +327,9 @@ def _canonical_data(row: dict[str, Any]) -> dict[str, Any]:
     node_class = row["node_class"]
     entity_type = entity_type_for_node_class(node_class)
     offline = row["offline"]
-    node_upper = (node_class or "").upper()
-    is_vm_record = node_upper.endswith(
-        ("_VMM_GUEST", "_VM_GUEST", "_VMM_HOST", "_VM_HOST")
-    )
+    # Virtualization classes carry hypervisor tracking fields. Sourced from
+    # operations.node_class_mappings (0119) rather than an inline suffix tuple.
+    is_vm_record = form_factor_for_node_class(node_class) in ("vm", "hypervisor-host")
     hypervisor_reported_boot = (
         ninja_epoch_to_dt(raw.get("lastBootTime")) if is_vm_record else None
     )

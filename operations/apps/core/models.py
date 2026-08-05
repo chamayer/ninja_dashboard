@@ -3793,6 +3793,42 @@ class OsFamilyMapping(models.Model):
         return f"{self.pattern} → {self.os_family}"
 
 
+class NodeClassMapping(models.Model):
+    """Maps a Ninja `node_class` to its observation stream and form factor.
+
+    Data-driven per ADR-0012 section 6. This taxonomy was hardcoded in five
+    places — `normalize.entity_type_for_node_class`,
+    `resolver._infer_form_factor`, the device cache projector's SQL,
+    `core/devices.py`, and the historical restore script — with three different
+    matching styles (set membership, prefix/suffix tests, and `left()`/`right()`
+    in SQL).
+
+    `entity_type` is the observation stream the record belongs to; a `vm.guest`
+    record proves the VM exists, not that an agent runs on it.
+
+    `form_factor` is set only where the node_class itself is evidence of one.
+    An `agent.*` class leaves it NULL: agent presence is not evidence of form
+    factor (ADR-0005), and that rule is why this column is nullable rather than
+    defaulting to 'physical'.
+
+    `pattern` is a case-insensitive SQL LIKE pattern. First match wins by
+    ascending `priority`.
+    """
+
+    id = models.SmallAutoField(primary_key=True)
+    pattern = models.CharField(max_length=80)
+    entity_type = models.CharField(max_length=32)
+    form_factor = models.CharField(max_length=24, blank=True, default="")
+    priority = models.PositiveIntegerField(default=100)
+
+    class Meta:
+        db_table = "node_class_mappings"
+        ordering = ("priority", "pattern")
+
+    def __str__(self) -> str:
+        return f"{self.pattern} → {self.entity_type}"
+
+
 class RequirementProfileItem(UUIDTenantScopedModel):
     """One row within a profile — 'this client requires this agent for
     this device scope.'

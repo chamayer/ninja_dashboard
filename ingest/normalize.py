@@ -184,14 +184,66 @@ def parse_dt(value: Any) -> datetime | None:
 # Ninja is an aggregation agent carrying multiple observation streams;
 # node_class tells us which stream a record belongs to. A vm.guest
 # record proves the VM exists — NOT that an agent is on it.
-_AGENT_NODE_CLASSES = {
-    "WINDOWS_WORKSTATION",
-    "WINDOWS_SERVER",
-    "LINUX_WORKSTATION",
-    "LINUX_SERVER",
-    "MAC",
-    "MAC_SERVER",
-}
+#
+# Authoritative source is operations.node_class_mappings (migration 0119).
+# This is the bootstrap fallback only, used before the first
+# load_node_class_mappings() call and if that query fails. Do not add patterns
+# here; add rows to the table.
+#
+# form_factor is empty for the agent classes on purpose: agent presence is not
+# evidence of form factor (ADR-0005).
+_BUILTIN_NODE_CLASS_PATTERNS: tuple[tuple[str, str, str], ...] = (
+    ("WINDOWS_WORKSTATION", "agent.rmm", ""),
+    ("WINDOWS_SERVER", "agent.rmm", ""),
+    ("LINUX_WORKSTATION", "agent.rmm", ""),
+    ("LINUX_SERVER", "agent.rmm", ""),
+    ("MAC", "agent.rmm", ""),
+    ("MAC_SERVER", "agent.rmm", ""),
+    ("%\\_VMM\\_GUEST", "vm.guest", "vm"),
+    ("%\\_VM\\_GUEST", "vm.guest", "vm"),
+    ("%\\_VMM\\_HOST", "vm.host", "hypervisor-host"),
+    ("%\\_VM\\_HOST", "vm.host", "hypervisor-host"),
+    ("NMS\\_%", "network.device", "network-device"),
+    ("CLOUD_MONITOR_TARGET", "monitor.target", ""),
+)
+
+# [(compiled pattern, entity_type, form_factor)] in priority order.
+_node_class_cache: list[tuple[re.Pattern[str], str, str]] | None = None
+
+
+def _compiled_node_class_rules() -> list[tuple[re.Pattern[str], str, str]]:
+    if _node_class_cache is not None:
+        return _node_class_cache
+    return [
+        (_like_to_regex(pattern), entity_type, form_factor)
+        for pattern, entity_type, form_factor in _BUILTIN_NODE_CLASS_PATTERNS
+    ]
+
+
+def load_node_class_mappings(cur) -> None:
+    """Load operations.node_class_mappings into the process cache.
+
+    Same contract as load_platform_aliases and load_os_family_mappings: called
+    once per collection run, and on failure the built-in patterns stay in
+    effect rather than the taxonomy going empty.
+    """
+    global _node_class_cache
+    try:
+        cur.execute(
+            "SELECT pattern, entity_type, COALESCE(form_factor, '') "
+            "FROM operations.node_class_mappings ORDER BY priority, id"
+        )
+        rows = cur.fetchall()
+    except Exception:
+        _log.exception("node_class_mappings load failed — using built-in patterns")
+        return
+    if not rows:
+        _log.warning("node_class_mappings is empty — using built-in patterns")
+        return
+    _node_class_cache = [
+        (_like_to_regex(pattern), entity_type, form_factor or "")
+        for pattern, entity_type, form_factor in rows
+    ]
 
 
 def entity_type_for_node_class(node_class: str | None) -> str:
@@ -201,17 +253,27 @@ def entity_type_for_node_class(node_class: str | None) -> str:
     (admin finding / warning), never silently drop them.
     """
     nc = (node_class or "").upper()
-    if nc in _AGENT_NODE_CLASSES:
-        return "agent.rmm"
-    if nc.endswith("_VMM_GUEST") or nc.endswith("_VM_GUEST"):
-        return "vm.guest"
-    if nc.endswith("_VMM_HOST") or nc.endswith("_VM_HOST"):
-        return "vm.host"
-    if nc.startswith("NMS_"):
-        return "network.device"
-    if nc == "CLOUD_MONITOR_TARGET":
-        return "monitor.target"
+    if not nc:
+        return "unknown"
+    for rx, entity_type, _form_factor in _compiled_node_class_rules():
+        if rx.match(nc):
+            return entity_type
     return "unknown"
+
+
+def form_factor_for_node_class(node_class: str | None) -> str | None:
+    """Form factor implied by a node_class, or None when it implies nothing.
+
+    None is the honest answer for every `agent.*` class — see ADR-0005. Callers
+    must not substitute 'physical'.
+    """
+    nc = (node_class or "").upper()
+    if not nc:
+        return None
+    for rx, _entity_type, form_factor in _compiled_node_class_rules():
+        if rx.match(nc):
+            return form_factor or None
+    return None
 
 
 def infer_device_type(os_name: str | None, ninja_node_class: str | None = None) -> str:
@@ -302,16 +364,33 @@ def _like_to_regex(pattern: str) -> re.Pattern[str]:
 
     Kept faithful to LIKE rather than assuming `%foo%`, so an operator adding
     a prefix or suffix pattern to the table gets SQL semantics in Python too.
+
+    LIKE matches the *whole* string, so the result is anchored. That makes
+    `.search()` and `.match()` both behave as a full match, which is why the
+    existing `os_family` call site needs no change: its patterns are all
+    `%...%`, which anchor out to the same substring test.
+
+    Backslash escapes are honoured — `\\_` is a literal underscore, not the
+    single-character wildcard. `node_class` patterns such as `NMS\\_%` depend on
+    this; without it the underscore would match any character.
     """
     out = []
+    escaped = False
     for ch in pattern:
-        if ch == "%":
+        if escaped:
+            out.append(re.escape(ch))
+            escaped = False
+        elif ch == "\\":
+            escaped = True
+        elif ch == "%":
             out.append(".*")
         elif ch == "_":
             out.append(".")
         else:
             out.append(re.escape(ch))
-    return re.compile("".join(out), re.IGNORECASE)
+    if escaped:  # trailing lone backslash — treat as a literal
+        out.append(re.escape("\\"))
+    return re.compile(r"\A" + "".join(out) + r"\Z", re.IGNORECASE)
 
 
 def load_os_family_mappings(cur) -> None:
