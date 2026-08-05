@@ -180,6 +180,54 @@ This is the proposed successor to the root-level open-work portion of
   bulk report on the findings surface rather than an actionable queue.
 - Trigger: explicit approval; the collapse is destructive.
 
+## Layer tables are write-only; `agent_instance_field_history` never populated
+
+- Measured 2026-08-05. `operations.assets` (5,293), `os_instances` (5,275) and
+  `agent_instances` (~12,800) are written every resolver cycle and read by
+  **nothing** — no view, matview, Python query, template or Metabase card. The
+  only references are the writes in `resolver.py` plus Django `related_name`
+  declarations.
+- Cause, not neglect: ADR-0005 built them to answer retroactive per-layer
+  questions, and `v_device_current` was meant to expose them. **That view was
+  never built**, so the tables filled and the consumer never arrived.
+- `agent_instance_field_history` has **0 rows** despite ~12,800
+  `agent_instances` rows and code that claims to maintain the audit trail. A
+  silent no-op. This is the one concrete defect here — the others are
+  unfinished work, this is a mechanism that does not work.
+- The capability is served better elsewhere. Attribute claim history vs layer
+  field history on the same fields: `os_name` 9,790 vs 3,881; `os_family`
+  18,671 vs 15; and claim history additionally covers `device_role` (9,781),
+  `node_class` (5,537) and `is_virtual_machine` (4,562), which the layer tables
+  never tracked. Claim history also records the asserting source;
+  `os_instance_field_history.change_reason` is the constant `'trigger.audit'`.
+- **Do not drop these tables yet.** ADR-0013 permits it "once consumers move to
+  the effective contract **or to `v_device_current`**" and that view does not
+  exist, so the precondition is half-met. Time depth of the two histories has
+  not been compared, only row counts. Dropping is destructive, needs a backup
+  and its own approval, and the tables are cheap to leave in place.
+- Correct sequence: build `v_device_current` (owed by both ADR-0005 and
+  ADR-0013), then revisit.
+- Not an E6 blocker: E6 needs populated anchors, single-writer cache columns
+  with measured parity, and no breaking consumers. All three hold.
+
+## Deviation from ADR-0013 in the E5.3 cutover
+
+- ADR-0013's first consequence reads: "The device cache projector computes form
+  factor once and writes `device_hardware.form_factor` and `devices.device_type`
+  together, so the copy step in `resolver.py:1078+` is deleted rather than
+  repointed."
+- `7e57ba3` did the opposite: the copy step was **kept and reordered** to run
+  after the projector. The data is correct and consistent (measured: 5,293 open
+  assets, 0 out of sync with `device_type`), but this is deferred work, not
+  completed work, and it was reported at the time as a simplification.
+- Also outstanding from ADR-0013: rename `operations.assets` to
+  `device_hardware`; narrow `asset_type` to hardware-descriptive values;
+  promote peripherals/licences to their own entity classes; give the 4,842
+  unanchored CMDB records the `asset` class; migrate agent instances to
+  relationships.
+- Resolve together with the item above — if `v_device_current` lands and the
+  typed tables retire, the copy step disappears rather than being rewritten.
+
 ## Unscoped (universal) entities — nullable tenant, third scope_kind
 
 - ADR-0012 section 4: ownership determines scope. Software, software+version,
