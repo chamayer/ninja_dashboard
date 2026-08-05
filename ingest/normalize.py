@@ -255,9 +255,11 @@ def infer_device_role(
     return None
 
 
-# Ordered: first match wins. Ported from legacy matview taxonomy
-# (sql/migrations/051_agent_compliance_unresolved_and_macos.sql).
-_OS_FAMILY_PATTERNS: tuple[tuple[str, str], ...] = (
+# Authoritative source is operations.os_family_mappings (migration 0118).
+# This is the bootstrap fallback only, used before load_os_family_mappings()
+# has primed the cache or if that load fails — exactly the contract
+# _BUILTIN_ALIASES has above. Do not add patterns here; add rows to the table.
+_BUILTIN_OS_FAMILY_PATTERNS: tuple[tuple[str, str], ...] = (
     ("windows server 2025", "Windows Server 2025"),
     ("windows server 2022", "Windows Server 2022"),
     ("windows server 2019", "Windows Server 2019"),
@@ -290,12 +292,66 @@ _OS_FAMILY_PATTERNS: tuple[tuple[str, str], ...] = (
     ("red hat", "Linux"),
 )
 
+# Populated by load_os_family_mappings(); list of (compiled pattern, family)
+# in priority order. None means "table not loaded — use the fallback above".
+_os_family_cache: list[tuple[re.Pattern[str], str]] | None = None
 
-def os_family(os_name: str | None) -> str:
-    if not os_name:
-        return "Unknown"
+
+def _like_to_regex(pattern: str) -> re.Pattern[str]:
+    """Compile a SQL LIKE pattern to an equivalent case-insensitive regex.
+
+    Kept faithful to LIKE rather than assuming `%foo%`, so an operator adding
+    a prefix or suffix pattern to the table gets SQL semantics in Python too.
+    """
+    out = []
+    for ch in pattern:
+        if ch == "%":
+            out.append(".*")
+        elif ch == "_":
+            out.append(".")
+        else:
+            out.append(re.escape(ch))
+    return re.compile("".join(out), re.IGNORECASE)
+
+
+def load_os_family_mappings(cur) -> None:
+    """Prime the os_family cache from operations.os_family_mappings.
+
+    Same contract as load_platform_aliases: called once per collection run,
+    and on failure the built-in patterns stay in effect so a container
+    starting against a pre-0118 database behaves exactly as before.
+    """
+    global _os_family_cache
+    try:
+        cur.execute(
+            "SELECT pattern, os_family FROM operations.os_family_mappings "
+            "ORDER BY priority, id"
+        )
+        rows = [(_like_to_regex(p), f) for p, f in cur.fetchall()]
+    except Exception:
+        _log.exception("os_family_mappings load failed — using built-in patterns")
+        return
+    if rows:
+        _os_family_cache = rows
+
+
+def os_family(os_name: str | None) -> str | None:
+    """Map an OS name to its family.
+
+    Returns None — not "Unknown" — when there is no OS name. "Unknown" was a
+    fallback presented as a value; once it reached the claim layer it won
+    authority for 488 devices whose family was actually known. A caller with
+    no OS name must record no family. See ADR-0012.
+    """
+    if not os_name or not os_name.strip():
+        return None
+    if _os_family_cache is not None:
+        for rx, family in _os_family_cache:
+            if rx.search(os_name):
+                return family
+        return "Other"
     value = os_name.lower()
-    for needle, family in _OS_FAMILY_PATTERNS:
+    for needle, family in _BUILTIN_OS_FAMILY_PATTERNS:
         if needle in value:
             return family
     return "Other"

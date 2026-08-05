@@ -325,7 +325,12 @@ def _write_observations(
                 # None when the source gives no explicit signal — never guessed.
                 "device_role":   row.get("device_type"),
                 "os_name":       os_name,
-                "os_family":     os_family(os_name),
+                # os_family() returns "Unknown" for a null os_name. Calling it
+                # unconditionally turned that fallback into a source claim:
+                # 7,920 claims of "Unknown" across two sources, winning
+                # authority for 488 devices whose real family was known.
+                # A source that states no OS asserts nothing about its family.
+                "os_family":     os_family(os_name) if os_name else None,
                 "domain":        row.get("domain_name"),
             }
             if raw.get("IsDup") is not None:

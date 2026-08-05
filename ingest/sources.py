@@ -19,7 +19,11 @@ import uuid
 from dataclasses import dataclass
 
 from ingest import db
-from ingest.normalize import canonical_platform, load_platform_aliases
+from ingest.normalize import (
+    canonical_platform,
+    load_os_family_mappings,
+    load_platform_aliases,
+)
 
 log = logging.getLogger(__name__)
 
@@ -101,6 +105,7 @@ def _fetch_source_rows(cur) -> list[tuple]:
         )
         cur.execute("SET LOCAL operations.tenant_id = 1")
         load_platform_aliases(cur)
+        load_os_family_mappings(cur)
         cur.execute(_SOURCE_QUERY.format(entity_type_expr="s.kind"))
         rows = cur.fetchall()
         return [
@@ -119,6 +124,7 @@ def load_sources() -> list[SourceConfig]:
         cur.execute("SET LOCAL operations.tenant_id = 1")
         # Prime the alias cache from data before canonicalising below.
         load_platform_aliases(cur)
+        load_os_family_mappings(cur)
         rows = _fetch_source_rows(cur)
 
     configs: list[SourceConfig] = []

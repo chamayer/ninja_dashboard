@@ -3767,6 +3767,32 @@ class OsGroupMapping(models.Model):
         return f"{self.pattern} → {self.os_group}"
 
 
+class OsFamilyMapping(models.Model):
+    """Maps os_name patterns to an os_family.
+
+    Data-driven per ADR-0012 §6. This taxonomy was previously hardcoded twice —
+    `_OS_FAMILY_PATTERNS` in `ingest/normalize.py` and a CASE ladder in SQL
+    migration 0023 — and the two copies had already drifted: SQL matched macOS
+    versions by prefix where Python matched by substring, and SQL was missing
+    the `darwin` pattern entirely.
+
+    `pattern` is a case-insensitive SQL LIKE pattern (e.g. `%windows 11%`).
+    First match wins by ascending `priority`, mirroring OsGroupMapping.
+    """
+
+    id = models.SmallAutoField(primary_key=True)
+    pattern = models.CharField(max_length=120)
+    os_family = models.CharField(max_length=40)
+    priority = models.PositiveIntegerField(default=100)
+
+    class Meta:
+        db_table = "os_family_mappings"
+        ordering = ("priority", "pattern")
+
+    def __str__(self) -> str:
+        return f"{self.pattern} → {self.os_family}"
+
+
 class RequirementProfileItem(UUIDTenantScopedModel):
     """One row within a profile — 'this client requires this agent for
     this device scope.'

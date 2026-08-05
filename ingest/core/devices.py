@@ -288,12 +288,18 @@ def _sync_operations_device_roles(cur: object) -> None:
             END,
             os_name   = COALESCE(nd.os_name, d.os_name),
             os_family = CASE
-                WHEN nd.os_name IS NULL THEN d.os_family
+                -- operations.os_family() returns NULL for a blank os_name as
+                -- well as a NULL one (migration 0118, replacing the 'Unknown'
+                -- fallback). This column is NOT NULL, so the guard has to
+                -- cover blank too or a whitespace-only os_name would abort
+                -- the run. Zero such rows today; the constraint is what
+                -- makes it worth guarding rather than counting.
+                WHEN COALESCE(btrim(nd.os_name), '') = '' THEN d.os_family
                 ELSE operations.os_family(nd.os_name)
             END,
             os_group = COALESCE(
                 (SELECT m.os_group FROM operations.os_group_mappings m
-                 WHERE (CASE WHEN nd.os_name IS NULL THEN d.os_family
+                 WHERE (CASE WHEN COALESCE(btrim(nd.os_name), '') = '' THEN d.os_family
                              ELSE operations.os_family(nd.os_name) END) LIKE m.pattern
                  ORDER BY m.priority ASC LIMIT 1),
                 'Unknown'
@@ -570,6 +576,8 @@ def _write_ninja_observations(
                     # None when node_class/os give no explicit signal — never guessed.
                     "device_role": infer_device_role(r["os_name"], r["node_class"]),
                     "os_name": r["os_name"],
+                    # os_family() returns None for an absent os_name — a source
+                    # that states no OS asserts nothing about its family.
                     "os_family": os_family(r["os_name"]),
                     # Ninja doesn't expose AD domain directly; the DNS suffix
                     # is the closest factual equivalent.
