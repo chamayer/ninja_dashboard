@@ -180,6 +180,56 @@ This is the proposed successor to the root-level open-work portion of
   bulk report on the findings surface rather than an actionable queue.
 - Trigger: explicit approval; the collapse is destructive.
 
+## Retire `device_links` — mapping verified, ready to execute (E6)
+
+- `device_links` is the competing attachment authority E6 names. It is not
+  merely redundant, it is **wrong**: `_sync_operations_device_links` in
+  `ingest/core/devices.py` filters `WHERE s.name = 'Ninja'`, so
+  `missing_since` is only ever maintained for Ninja. SentinelOne, LogMeIn and
+  ScreenConnect links are inserted and never marked missing.
+- Measured 2026-08-05: **209 links claim to be live** (`missing_since IS NULL`)
+  with `last_seen_at` 6-23 days stale. Breakdown SentinelOne 137, LogMeIn 65,
+  ScreenConnect 7, Ninja 0 — matching the Ninja-only filter exactly. All 209
+  are present in `entity_source_links` **with `missing_since` correctly set**;
+  none are absent. `evaluator.py:1730` resolves `device_missing_from_source`
+  from this column, so those findings cannot resolve correctly for three of
+  four sources.
+- **Exact replacement rule, verified against production:**
+
+  ```sql
+  SELECT DISTINCT entity_id AS device_id, si.source_id, external_id, ...
+    FROM operations.entity_source_links l
+    JOIN operations.source_instances si ON si.id = l.source_instance_id
+   WHERE l.entity_class_id = 'device' AND l.external_namespace <> 'asset'
+  ```
+
+  Produces 13,685 rows against `device_links`' 13,894: **0 gained, 209 lost**,
+  and the 209 are exactly the stale rows. Namespaces `device`, `device-health`,
+  `agent`, `host` and `access-session` match `device_links` 100%; `asset`
+  matches 0% because those are Hudu CMDB links `device_links` never carried.
+  `DISTINCT` is required — `entity_source_links` records one row per namespace,
+  so a naive view fans joins out about 1.7x.
+- `external_name` is **write-only** — every reference is an INSERT or
+  ON CONFLICT clause in `resolver.py` and `fast_path.py`, nothing reads it.
+  It can be dropped rather than mapped.
+- Scope: ~20 SQL sites across 15 files plus the
+  `operations.device_patching_scope_current` matview and
+  `templates/device_merge.html`. Readers: `core/device_health.py`,
+  `device_map.py`, `evaluator.py` (x2), `inventory/software.py`,
+  `patch_findings.py` (x3), `views.py` (x4). Writers to remove:
+  `resolver.py:378/826/938`, `fast_path.py:62`, and
+  `_sync_operations_device_links`.
+- Suggested shape: replace the table with a compatibility view using the rule
+  above so all readers keep working and are immediately correct, delete the
+  writers in the same change, then rewrite readers natively at leisure. The
+  writers are the actual "competing authority" — once removed, observations to
+  `sync_entity_source_links_from_observations()` is the sole attachment path,
+  which the 0-gained result shows already covers everything.
+- Risk to watch: removing the resolver writes means a newly promoted device has
+  no link until the sync runs later in the cycle — the same ordering the entity
+  anchor had before `322d2a4`. Verify whether the link is needed within the
+  promotion transaction before relying on that.
+
 ## Layer tables are write-only; `agent_instance_field_history` never populated
 
 - Measured 2026-08-05. `operations.assets` (5,293), `os_instances` (5,275) and
