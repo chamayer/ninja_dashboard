@@ -165,6 +165,36 @@ This is the proposed successor to the genuinely open portion of
 
 Each item needs a focused active plan before implementation.
 
+## Generic audit coverage and immutable event redesign
+
+- Candidate scope: make `operations.audit_log` the permanent generic event
+  stream for system and operator mutations across canonical entities,
+  lifecycle, merges/splits, source-link reassignment, registry changes,
+  operator decisions, and sensitive/restricted access. Inventory every current
+  mutation path and classify it as generic audit event, reconstructable domain
+  history, run telemetry, or intentionally non-audited noise.
+- Final identity: events remain tenant-scoped and attach to the future generic
+  `operations.entities.id` while retaining typed compatibility identity during
+  migration. Add explicit actor/process, correlation/run ID, reason, policy or
+  schema version, evidence references, before/after state, and event time as
+  required by the approved physical design.
+- Enforcement: append-only runtime grants, RLS, transactional writes with the
+  mutation, read-only admin/API surfaces, sensitivity/redaction rules,
+  retention/partitioning, export rules, and tests proving events cannot be
+  changed or deleted by application/ingest roles.
+- Boundary: generic audit events record who/what/why; they do not replace
+  observation SCD-2 history, source-link history, claim history, candidate
+  events, notification delivery events, or run logs when those domain records
+  are needed to reconstruct state.
+- Track A dependency: the lifecycle correction is the first hardened
+  system-written use of the existing generic audit table. Do not broaden Track
+  A into a repository-wide mutation retrofit.
+- Revisit criteria: open this redesign before generic entity read/write cutover
+  or before adding another system-managed canonical transition. Start with an
+  aggregate inventory and access/grant review; do not backfill unverifiable
+  historical events.
+- Trigger: explicit approval for an audit architecture and coverage phase.
+
 ## Cleanup
 
 ### Remove Device Detail Raw tab Ninja fallback

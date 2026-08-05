@@ -2,8 +2,9 @@
 
 Track: **ADR-0010 generic entity, claim, relationship, and admin completion**
 
-**Status:** full remaining plan approved; Phases E1-E4 and E5.1 deployed,
-Phase E5.2 implemented locally and under review.
+**Status:** full remaining plan approved; Phases E1-E5.2 deployed. E5.3 scope
+restated 2026-08-05 against measured evidence; the former decision gate is
+closed. ADR-0012 now states the governing rule.
 
 ## Authority and checkpoint
 
@@ -341,3 +342,55 @@ slice and measured consumer cutovers without changing incompatible typed IDs.
   template loading pass. Next: complete the migration/privilege review and
   focused validation, commit, push/redeploy/mirror, then verify aggregate-only
   ACL, function, audit-contract, route, migration, health, and error behavior.
+
+- E5.2 release `0.109.0` / `6d180bc` is deployed and mirrored with migration
+  0117 applied and an exact artifact hash match. The reveal permission exists
+  with zero direct/group assignments. Raw/canonical observation columns are
+  denied to Operations, read-only, and Metabase; ingest retains them. E3
+  protected tables are denied to runtime readers; only Operations can execute
+  the two reveal functions. Device identity and generic entity GETs returned
+  200 with zero raw observation SELECTs; reveal GET returned 405 with zero
+  audit delta. No reveal was invoked. All stack containers are healthy,
+  version is 0.109.0, root/health return 302/200, and current ERROR,
+  traceback, critical, HTTP-500, privilege, and E5-table error counts are zero.
+- E5.3 inventory confirms there is no data API beyond schema documentation;
+  the generic entity CSV is redacted. Device presence/session/patch/software
+  stores remain intentionally typed. Three independent legacy writers still
+  select source precedence for Device role/OS caches (Ninja device ingest,
+  resolver attribute sync, and evaluator role sync), and some older findings
+  still embed sensitive serial/CMDB URL detail; those must be removed during
+  E5.3 rather than treated as effective-contract consumers.
+### E5.3 restated (2026-08-05, evidence-based)
+
+The earlier parity table mixed two different kinds of column and the decision
+gate rested on that conflation. Corrected:
+
+- **Anchors need no work and the gate is closed.** `canonical_hostname`,
+  `canonical_serial` and `canonical_vm_uuid` are written once at promotion
+  (`resolver.py:733`, `:845`) and never updated: zero
+  `UPDATE ... SET canonical_*` repo-wide, and zero `serial` / `vm_uuid` rows in
+  `asset_field_history` across 5,273 assets despite an enabled trigger watching
+  both fields. "Retain identity on withdrawal" is already the behaviour, so
+  there is nothing to decide or build. The alarming hostname figure
+  (28/5,186 exact) compared a write-once anchor against a live selection — a
+  category error, not a blocker.
+- **The work is five cache columns**: `os_name`, `os_family`, `os_group`,
+  `device_role`, `device_type`. These are rewritten every resolver run, which
+  ADR-0012 forbids. Their parity is strong and is the parity that matters:
+  role 4,708/4,708, OS name 4,682/4,706, virtual flag 4,533/4,545.
+- **Writer inventory, corrected.** In scope: `resolver.py:996` (device_role),
+  `:1028` (device_type), `:1068` (os_name/os_family), `evaluator.py:316`
+  (device_role, with `dev_claims.get("Ninja")` source precedence in Python),
+  and `resolver.py:1078+` — the facet propagation that writes `assets` /
+  `os_instances` **from** the cache columns. That last writer is absent from
+  the original three-writer inventory; deleting the others without repointing
+  it silently freezes 5,273 assets and 5,255 os_instances.
+  Out of scope: `evaluator.py:718` writes `lifecycle_status`, which is
+  ADR-0011's audited lifecycle contract, not a source-derived cache.
+- **Target**: one projector reads `entity_attribute_effective_current` and
+  writes the five cache columns; the four producer writes are deleted; facet
+  propagation reads the effective contract instead of the cache. Enforced by
+  revoking `UPDATE` on those columns from the ingest role once the projector
+  owns them, so a producer write becomes impossible rather than forbidden.
+- Also in scope, unchanged: sanitize findings embedding serial / CMDB-URL
+  detail; run aggregate consumer parity before E6 constraints.

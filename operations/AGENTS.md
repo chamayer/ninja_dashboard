@@ -25,6 +25,19 @@ Ninja Dashboard stack.
   effective views have distinct responsibilities; do not collapse them without
   an approved architecture decision.
 - Source-specific collectors must not become platform-wide authorities.
+- ADR-0012 states the entity model these rules derive from. Non-negotiable:
+  a source assertion is evidence, never state; no evidence producer
+  (connector, resolver, evaluator, UI action) writes a source-derived value
+  directly — only the shared projector does, however rarely it changes;
+  a relationship may carry its own attributes, with no volume exemption;
+  ownership determines scope, and an unscoped entity never references a
+  scoped one.
+- State a rule with its enforcement mechanism or not at all. Prose without a
+  privilege, constraint, registry row, or test is a description, and this
+  repository has repeatedly shipped inert ones.
+- Use `docs/glossary.md` vocabulary. "Layer", "canonical", "effective",
+  "asset", "authority" and "type" each mean several things historically; the
+  glossary records which.
 - Do not reintroduce dependencies on legacy agent-compliance code or schemas
   when a native Operations path exists.
 - Canonical entities are not automatically deleted because a source stops
@@ -99,6 +112,10 @@ validation when the required services or dependencies are unavailable.
 ## Documentation routing
 
 - Read `README.md` for module entry points and setup.
+- Read `docs/decisions/0012-entity-model-foundations.md` and
+  `docs/glossary.md` before any entity, attribute, relationship, or scope
+  work — they are short and prevent the terminology collisions that have
+  repeatedly cost time.
 - Read `docs/architecture.md` first for data model, identity, queue, finding,
   or platform changes, then consult `DESIGN.md` for detailed rules.
 - Read `docs/requirements.md` for parity and acceptance questions.

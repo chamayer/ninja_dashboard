@@ -2,8 +2,9 @@
 
 Track: **ADR-0010 generic ecosystem completion — Phase E5**
 
-**Status:** E1-E4 and E5.1 deployed; E5.2 release `0.109.0` implemented locally
-and under final review.
+**Status:** E1-E5.2 deployed. E5.3 scope restated 2026-08-05 against measured
+evidence; the typed-identity decision gate is closed. ADR-0012 states the
+governing rule; see `.work/plan.md` for the full restatement.
 
 ## Goal
 
@@ -123,9 +124,53 @@ check and migration drift pass; 11 focused E4/E5 contract tests and template
 loading pass. The pre-existing four observation-model DJ008 warnings remain
 outside this change.
 
-Next: finish focused lint/diff/migration review, commit `0.109.0`, push
-`origin`, immediately redeploy, push the mirror, then verify migration 0117,
-exact ACLs, permission/function/audit metadata contracts without revealing
-values or fabricating an audit event, authenticated GET/denial route behavior,
-containers, version, health, and current error counts. Then begin E5.3 named
-consumer inventory/parity and cutover.
+E5.2 release `0.109.0` / `6d180bc` is deployed and mirrored. Migration 0117
+and its artifact hash match; the permission defaults to zero assignments;
+function/view ownership and exact ACLs pass. Device identity and generic entity
+GETs returned 200 with no raw observation SELECT, reveal GET returned 405 with
+no audit delta, and no reveal was invoked. All containers are healthy and
+current error/500/privilege counts are zero.
+
+E5.3 inventory found no data API beyond schema documentation and confirmed the
+generic entity CSV is redacted. Typed presence/session/patch/software remain
+approved device-domain contracts. Ninja collection, resolver attribute sync,
+and evaluator role sync still independently write Device role/OS cache values;
+older duplicate/CMDB findings also retain sensitive serial/URL details and must
+be sanitized in this phase.
+
+Aggregate parity across 5,272 current devices found exact selected-effective
+matches of 4,708/4,708 role, 28/5,186 hostname (4,982 case/trim and 5,073
+alphanumeric-equivalent), 4,682/4,706 OS name, 4,704/5,189 OS family, 4,410/
+4,697 serial, 3,949/4,885 VM UUID, and 4,533/4,545 virtual flag. Typed blanks
+account for 466 OS-family, 253 serial, and 913 VM-UUID mismatches, so generic
+selection improves completeness but is not byte-for-byte cache parity.
+
+**Decision gate closed 2026-08-05.** It rested on a conflation in the parity
+table above: hostname, serial and VM UUID are write-once anchors set at
+promotion, while role/OS/type are continuously refreshed caches. Comparing an
+anchor captured months ago against a live selection will diverge by
+construction, and that divergence is not a cutover signal.
+
+Measured: zero `UPDATE ... SET canonical_*` statements exist repo-wide, and
+`asset_field_history` holds zero `serial` and zero `vm_uuid` rows across 5,273
+assets despite an enabled trigger watching both. Nothing clears identity today
+and nothing planned would start, so "retain on withdrawal" needs no decision.
+
+Restated E5.3 work:
+
+1. One projector writes `os_name`, `os_family`, `os_group`, `device_role`,
+   `device_type` from `entity_attribute_effective_current`.
+2. Delete the four producer writes: `resolver.py:996`, `:1028`, `:1068`, and
+   `evaluator.py:316`. Per ADR-0012 no evidence producer may write state.
+3. Repoint facet propagation (`resolver.py:1078+`), which currently writes
+   `assets` / `os_instances` **from** the cache columns, to read the effective
+   contract. This writer is missing from the original three-writer inventory;
+   removing the others without it silently freezes 5,273 assets and 5,255
+   os_instances.
+4. Sanitize findings embedding serial / CMDB-URL detail.
+5. Enforce by revoking `UPDATE` on the five columns from the ingest role once
+   the projector owns them.
+
+Out of scope: `evaluator.py:718` writes `lifecycle_status` under ADR-0011's
+audited lifecycle contract, not as a source-derived cache. Anchors are
+untouched.

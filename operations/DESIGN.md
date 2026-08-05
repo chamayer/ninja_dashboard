@@ -208,10 +208,13 @@ layers give every field one writer and one meaning.
 
 1. **Canonical** — `operations.<entity>` (e.g. `operations.devices`).
    Identity, resolver decisions, lifecycle, audit stamps. One writer:
-   the resolver. Slow-changing derived attributes MAY stay here when
-   they rarely change and share the resolver's writer (e.g. `os_name`,
-   `device_role`, `device_type` on `operations.devices` — sync-refreshed
-   during identity work, low churn, no dedicated matview needed).
+   the resolver. Source-derived attributes do NOT belong here with the
+   resolver as writer. Per ADR-0012 no evidence producer writes state;
+   a source-derived value is written only by the shared projector,
+   however rarely it changes. Low churn is a performance argument, not
+   an ownership argument. (This clause previously carved out `os_name`,
+   `device_role` and `device_type` on that basis; that exception is
+   removed.)
 2. **Derived** — per-domain matviews (`operations.<entity>_<domain>_current`
    or aggregate rollups like `device_session_current`). Refreshed from
    raw source + per-domain config. Every matview carries `computed_at`
@@ -306,12 +309,15 @@ new domain.
 
 - `exemptions` JSONB moves to `device_operator_decisions` (polymorphic,
   standalone decision).
-- `lifecycle_status` stays on canonical but is documented as
-  operator-preferring: sync only downgrades to `offline_aging`
-  automatically; other transitions are operator-only.
-- `os_name`, `os_family`, `os_group`, `device_role`, `device_type` stay
-  on canonical. Refreshed by the resolver / role sync; rare-change,
-  single-writer.
+- `lifecycle_status` stays on canonical. Policy-derived sync may move a device
+  among `active`, `offline_aging`, and `pending_cleanup`; every transition is
+  atomically audited with its policy version and selected evidence. `retired`
+  remains operator-only and is never changed by sync.
+- `os_name`, `os_family`, `os_group`, `device_role`, `device_type` remain
+  on canonical as compatibility caches, but are written by the shared
+  effective-value projector — not by the resolver or role sync. Per
+  ADR-0012 these are source-derived values and no evidence producer may
+  write them.
 - No session-state columns on canonical (`last_observed_at` /
   `last_contact_at` already live in `device_agent_presence_current`; new
   device-grain rollup lives in `device_session_current`).

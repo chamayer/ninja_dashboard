@@ -25,7 +25,9 @@ from production push approval.
 
 The current GitOps path has one coupled production boundary:
 
-1. Pushing `origin` causes Portainer to rebuild/recreate the stack.
+1. Push `origin`, then immediately invoke the configured private Portainer
+   redeploy mechanism; do not wait for repository polling. That immediate
+   redeploy is included in the approved production push boundary.
 2. Ingest startup applies pending `sql/migrations/` entries.
 3. Operations startup runs `python manage.py migrate --noinput` with the
    migration role before switching to the runtime role.
@@ -33,8 +35,9 @@ The current GitOps path has one coupled production boundary:
 Pending migrations must therefore be reviewed, backed up as required, and
 explicitly included in the `origin` push approval. Do not approve or describe
 an `origin` push while deferring its automatic deployment or startup migrations
-to a later gate. A manual redeploy, manual migration rerun, data operation,
-rollback, or restore remains a separate approval boundary.
+to a later gate. A standalone redeploy not coupled to an approved push, manual
+migration rerun, data operation, rollback, or restore remains a separate
+approval boundary.
 
 Deployment commits must be pushed to both remotes: first `origin`
 (`chamayer/ninja_dashboard`) under the coupled approval above, then

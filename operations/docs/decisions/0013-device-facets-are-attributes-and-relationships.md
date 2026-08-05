@@ -1,0 +1,159 @@
+# 0013 — Device facets are attributes and relationships, not entities
+
+Status: Accepted
+Date: 2026-08-05
+Accepted: 2026-08-05
+
+## Context
+
+ADR-0005 introduced `Asset`, `OSInstance` and `AgentInstance` as first-class
+entities beneath `Device`. ADR-0006 then refined them from lifecycle-window
+entities into attribute buckets. Both records treat the three as one kind of
+thing.
+
+They are not. Applying the ADR-0012 identity test — does this need an identity
+of its own; can it exist detached, move between parents, be counted, or be
+referenced by something else? — separates them cleanly:
+
+- **Hardware** cannot. A hardware refresh produces a *new Device* by ADR-0005's
+  own corroboration rule, so hardware never outlives or moves between devices,
+  and nothing references a device's hardware independently.
+- **An OS install** cannot. ADR-0006 already established it as one bucket per
+  device mutating in place, with reimage recorded as field changes.
+- **Agent presence** is inherently about a *pair*: one row per
+  (Device, Agent product), carrying version and heartbeat. That is a
+  relationship with attributes, not an entity.
+
+Treating all three as entities produced concrete, measured problems:
+
+- Form factor lives in both `devices.device_type` and `assets.form_factor`,
+  with the *cache* upstream of the supposedly source-authoritative layer
+  (`ingest/identity/resolver.py:1078+` copies Device → Asset). Both hold
+  identical values; neither is meaningfully the fact.
+- `v_device_current`, named a required deliverable by ADR-0005, was never
+  built, so the flat Device columns stayed load-bearing.
+- The word "asset" now denotes four different things: the `operations.assets`
+  facet table, the `asset` entity class, the `cmdb.asset` entity type, and the
+  `assets.asset_type` enum — whose `peripheral`, `license` and `service` values
+  duplicate registered entity classes.
+- The `asset` entity class has zero entities while 4,842 non-device CMDB
+  records sit unanchored, because "asset" appeared to be taken.
+
+## Options considered
+
+- **Keep three layer entities, fix only the write direction.** Rejected: it
+  preserves the conflation that produced the collisions, and leaves hardware
+  modelled as an entity that can never have an independent identity.
+- **Collapse all three into attributes.** Rejected: agent presence genuinely
+  describes a pair, and flattening it onto the device loses which agent
+  product a version belongs to.
+- **Decompose by the ADR-0012 identity test.** Selected.
+
+## Decision
+
+### Hardware and OS are attributes of the device entity
+
+Form factor, serial, vm_uuid, chassis, virtualization, os_name, os_family and
+os_version are **attributes of the Device entity**, carried by the generic
+claim and effective-value contract. Most already are: `serial_number`,
+`vm_uuid`, `is_virtual_machine`, `node_class`, `os_name` and `os_family` are
+existing attribute definitions.
+
+### Agent presence is a relationship
+
+Agent presence is a **relationship** between a Device entity and an agent
+product from the `agents` catalogue, carrying version, heartbeat and coverage
+state as relationship attributes. The agent catalogue is unscoped reference
+data per ADR-0012.
+
+Measured 2026-08-05, `operations.agent_instances` does **not** currently hold
+those attributes: 12,828 rows across 4 agents, `agent_version` populated on
+**zero** of them, and zero rows ever updated after insert. Its audit trigger is
+enabled but has never fired, because the only field it watches is never
+written. The substantive presence data lives in
+`device_agent_presence_current`.
+
+So `agent_instances` is today a near-empty (Device, Agent) membership record
+duplicating a matview. That reinforces the structural conclusion — it is a pair,
+not an entity — while showing the migration target is the relationship plus
+attributes sourced from presence, not a repackaging of this table.
+
+### Form factor is derived and owned by no table
+
+No source states form factor. It is computed from asset-nature signals —
+`network.device` / `vm.host` / `vm.guest` entity types, `node_class` markers,
+and `is_virtual_machine` — with agent presence explicitly excluded. `unknown`
+remains legitimate and positive evidence is required to leave it.
+
+Because it is derived, it is not an attribute definition and must never be
+recorded as a source claim: mapping `node_class` to a `form_factor` attribute
+would record our interpretation as if the source had asserted it.
+
+### The typed tables become compatibility projections
+
+`operations.assets`, `operations.os_instances` and `operations.agent_instances`
+hold the same status as `devices.os_name`: typed caches written **only** by the
+shared projector, never by a producer. They are droppable once consumers move
+to the effective contract or to `v_device_current`.
+
+### The `asset` entity class means a top-level tracked thing
+
+`asset` is reserved for things the MSP tracks that are not devices — the
+unanchored CMDB records, peripherals, licences. `operations.assets` is renamed
+to `device_hardware` so the word stops denoting both a device facet and a
+top-level class. `asset_type` values duplicating registered entity classes
+(`peripheral`, `service`, `network_appliance`, `license`) are retired in favour
+of those classes.
+
+### What ADR-0005 keeps
+
+Unchanged and still authoritative: Device as a thin, *learned* identity anchor;
+no source authoritative for Device identity; hostname alone never merges;
+contested corroboration surfaces a finding; `unknown` legitimate at every
+layer; **agent presence is not evidence of form factor**; per-field history.
+Field history moves to the attribute claim history that already exists, which
+records source and reason — unlike `asset_field_history`, whose `change_reason`
+is the constant `'trigger.audit'` and whose `change_source` is never written.
+
+## Rationale
+
+- The identity test is a single rule that produces the decomposition, rather
+  than three special cases decided per table.
+- It removes the ownership question entirely. Neither Device nor Asset owns
+  form factor; the effective contract does, and both tables are caches with
+  one writer.
+- Measured today: `assets.form_factor` and `devices.device_type` have identical
+  distributions and zero mismatches, because one is copied from the other.
+  Nothing is lost by treating both as projections.
+- It frees the `asset` class for the 4,842 records that currently have nowhere
+  to go, without inverting `Device` or migrating anything structural.
+- Agent-as-relationship is the first real use of relationship attributes,
+  which ADR-0012 requires and the E4 engine already has the surrounding
+  machinery for.
+
+## Consequences
+
+- **Projector writes both.** The device cache projector computes form factor
+  once and writes `device_hardware.form_factor` and `devices.device_type`
+  together, so the copy step in `resolver.py:1078+` is deleted rather than
+  repointed.
+- **Rename `operations.assets` → `device_hardware`**, with
+  `asset_field_history` following. Mechanical but wide: resolver, models,
+  migrations, triggers.
+- **`v_device_current` remains owed** — it is what finally allows the flat
+  Device columns to be dropped.
+- **Agent instances migrate to relationships.** Larger work; the typed table
+  remains a projection until consumers move.
+- **`asset_type` narrows** to hardware-descriptive values. Peripherals and
+  licences become entities of their own class.
+- No migration is required to *start*: the projector and the rename can land
+  independently, and the entity-class work is unblocked immediately.
+
+## Supersedes or superseded by
+
+Supersedes ADR-0005's decision to model `Asset`, `OSInstance` and
+`AgentInstance` as entities, and supersedes ADR-0006 entirely — its
+attribute-bucket refinement was correcting the lifecycle framing of a
+decomposition that was itself wrong. ADR-0005 remains authoritative for the
+learned identity anchor, the corroboration rule, and the never-infer rule for
+form factor. Applies ADR-0012.

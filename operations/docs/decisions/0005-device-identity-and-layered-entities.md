@@ -1,6 +1,6 @@
 # 0005 — Device is a learned identity anchor with layered entities
 
-Status: Accepted
+Status: Partially superseded by ADR-0013 (2026-08-05)
 Date: 2026-07-19
 Accepted: 2026-07-20 (v1 execution — collapsed matview stays as primary consumer surface; flat Device attribute columns retained as denormalized cache in v1)
 
@@ -131,3 +131,16 @@ directly.
 
 Extends 0002 (durable canonical entities) and 0003 (four-layer domain
 storage). Does not supersede either.
+
+**Partially superseded by ADR-0013 (2026-08-05).** The decision to model
+`Asset`, `OSInstance` and `AgentInstance` as entities is superseded: under the
+ADR-0012 identity test, hardware and OS are attributes of the Device entity and
+agent presence is a relationship to an agent product. The three typed tables
+remain as projector-written compatibility caches.
+
+**Still authoritative here:** Device as a thin *learned* identity anchor; no
+source authoritative for Device identity; hostname alone never merges;
+contested corroboration surfaces an identity-conflict finding; `unknown` is a
+legitimate value; and **agent presence is not evidence of form factor** — the
+rule this record exists to enforce, and which ADR-0013 carries forward
+unchanged.

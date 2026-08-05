@@ -51,6 +51,31 @@ This is the proposed successor to the root-level open-work portion of
 - Trigger: explicit post-cutover operational approval with an exact retained,
   archived, and deleted row/time range plus rollback and disk-reclamation plan.
 
+## Source-confirmed device decommissioning workflow
+
+- Reason deferred: the confirmed Ninja deletion-event design and its generic
+  ingest implementation are deliberately parked so the approved historical
+  evidence restoration and daily-rollup track can finish unchanged. Canonical
+  retirement remains an operator-owned decision, and the end-to-end
+  decommissioning workflow is outside that track.
+- Relevant areas: generic source-event evidence, source-record withdrawal,
+  the Ninja activities connector and backfill, Operations findings,
+  `operations.audit_log`, entity detail/admin surfaces, and future
+  decommissioning approvals.
+- Required behavior: an exact source deletion event may automatically confirm
+  the source-removal step, retain the source actor identifier and protected
+  display metadata, and open or refresh an idempotent finding when deletion is
+  unexpected or other workflow requirements remain. It must not delete or
+  retire the canonical entity by itself. The source actor and the Operations
+  decision actor remain separately attributable. Correct Ninja filtering to
+  use `status=NODE_DELETED`, retain/backfill events idempotently, and use exact
+  stable-identity matching. The 2026-08-03 read-only measurement found 51 of
+  260 historical restoration identities with exact deletion evidence; the
+  active restoration intentionally continues to use `missing_since` for all
+  260 until this deferred work is approved.
+- Trigger: explicit approval to implement generic source-event ingestion, or
+  to design the full cross-source decommissioning workflow.
+
 ## Honour `source_bindings.schedule` (replaces cadence-by-capability)
 
 - Reason deferred: `operations.source_bindings.schedule` exists and is
@@ -104,27 +129,56 @@ This is the proposed successor to the root-level open-work portion of
 - Trigger: any consumer starting to read `last_observed_at` from this matview,
   a Metabase question depending on it, or the next migration in this area.
 
-## Preserve Operations availability during derived refresh
+## Admin Jobs catalog — scheduled work with no operator surface
 
-- Evidence: the `0.101.4` full-cycle validation on 2026-08-03 ran Inventory
-  current-fact refresh for about 8 minutes 42 seconds with multiple concurrent
-  PostgreSQL workers. During that interval, the authenticated Software surface
-  returned one HTTP 500 and two Gunicorn workers timed out. The refresh and
-  cycle later completed, both services remained healthy, and the following
-  three-minute window had zero further 500s or worker timeouts.
-- Required outcome: normal full collection/derived refresh must not block
-  Operations readers through the 60-second Gunicorn timeout. Reconcile the
-  actual Inventory refresh path with the design requirement for dependency-
-  ordered concurrent materialized-view refreshes; also prevent redundant
-  refresh workers from running the same expensive chain concurrently.
-- Constraints: preserve transactionally coherent current facts, RLS/grants,
-  existing reader schemas, and failure visibility. Do not hide the issue by
-  merely increasing the web timeout.
-- Validation gate: a representative full cycle under normal queue activity
-  completes with zero Operations HTTP 500s and worker timeouts while the
-  Software surface remains responsive.
-- Trigger: approve this cross-service availability/performance design before
-  generic Ninja reader cutover.
+- Principle: an operator should be able to see and run every scheduled job.
+  Several run on a schedule with no entry in `_JOB_CATALOG`
+  (`operations/apps/core/views.py`), so they can neither be observed nor
+  triggered from the Jobs page.
+- Missing entries: `activities` (only runnable as part of the whole Ninja
+  source cycle), `platform_health_findings`, `run_log_stale_reaper`,
+  `observation_history_retention_cycle`, CMDB findings
+  (`_run_cmdb_findings`), and documentation/Hudu observations.
+- Two of these need an ingest HTTP endpoint before a catalog entry is
+  possible — there is no `/run/activities` and no `/run/platform-findings`.
+  The catalog rows themselves are cheap.
+- Note: `platform_health_findings` was added in 0.110.0 without a catalog
+  entry — the same "built but invisible" pattern this item exists to close.
+- Trigger: next Jobs-page or ingest-endpoint work; or sooner if an operator
+  needs to run activities without a full Ninja cycle.
+
+## Findings: one row per condition with a recurrence counter
+
+- Today a resolved finding cannot be reopened: `uq_findings_active_condition_key`
+  is partial on `status IN ('open','acknowledged')`, so a recurring condition
+  inserts a new row instead of matching. The reopen branch inside `_upsert`
+  (`status = CASE WHEN findings.status = 'resolved' THEN 'open' ...`) is
+  unreachable dead code.
+- Scale: 256,382 rows for 159,594 conditions. Concentrated in
+  `stale_required_platform` — 98,515 rows for 1,828 conditions (avg 53.9
+  episodes, max 96), 38% of the table. Every other type is 1.0-1.1x.
+- Verified: no condition_key has more than one OPEN row, so the
+  no-duplicate-open rule is enforced. The growth is resolved-episode history.
+- Agreed direction: `recurrence_count` + `last_resolved_at`, unique index
+  dropped to `(tenant_id, condition_key) WHERE condition_key > ''` so the
+  reopen path becomes reachable, and a collapse migration (1,792 keys,
+  96,788 rows removed, 256,382 -> 159,594).
+- Payoff beyond storage: `recurrence_count` makes flapping actionable data —
+  a notification rule can gate on it, and an operator sees "recurred 96
+  times" rather than one indistinguishable instance.
+- PREREQUISITE: audit every writer of `operations.findings` before touching
+  the index. Known sites — `cmdb_findings._upsert`,
+  `evaluator._upsert_finding`, `identity/resolver.py` raw INSERT
+  (`unmatched_source_group`), `identity/client_resolver.py:406`, and
+  `platform_findings` (inherits from cmdb_findings). A missed `ON CONFLICT`
+  predicate starts raising on every run.
+- Open decision: is `recurrence_count` sufficient, or is per-episode history
+  needed (separate `finding_occurrences` table)? Zero operator state exists
+  on any finding today (0 acknowledged / owned / reviewed / snoozed), so the
+  collapse destroys nothing a human did.
+- Related, separate: `whitelist_suggestion` holds 131,073 OPEN findings — a
+  bulk report on the findings surface rather than an actionable queue.
+- Trigger: explicit approval; the collapse is destructive.
 
 ## Root backlog rules
 

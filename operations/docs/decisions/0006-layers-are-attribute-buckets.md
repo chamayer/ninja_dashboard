@@ -1,6 +1,6 @@
 ## 0006 — Layer entities are attribute buckets, not lifecycle-window entities
 
-Status: Accepted
+Status: Superseded by ADR-0013 (2026-08-05)
 Date: 2026-07-20
 
 ## Context
@@ -106,3 +106,11 @@ Clarifies and partially supersedes ADR-0005 §Decision (specifically
 the "effective windows" and "layer transitions" language). ADR-0005
 remains the authority for the identity anchor + layered entities
 model overall.
+
+**Superseded by ADR-0013 (2026-08-05).** The observations here were correct —
+install-lifetime boundaries are not a question the platform has, and the
+operational questions resolve to current value plus a change timeline. But
+this record refined the *lifecycle framing* of a decomposition that was itself
+wrong: `Asset` and `OSInstance` are attributes of the Device entity, not
+buckets, and `AgentInstance` is a relationship to an agent product. The
+"attribute bucket" concept is therefore retired rather than corrected.
