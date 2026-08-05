@@ -94,7 +94,9 @@ would record our interpretation as if the source had asserted it.
 `operations.assets`, `operations.os_instances` and `operations.agent_instances`
 hold the same status as `devices.os_name`: typed caches written **only** by the
 shared projector, never by a producer. They are droppable once consumers move
-to the effective contract or to `v_device_current`.
+to the effective contract or to `v_device_current`. **See the amendment below:
+`v_device_current` is retracted, and the typed tables are no longer under
+pressure to retire on its account.**
 
 ### The `asset` entity class means a top-level tracked thing
 
@@ -140,8 +142,9 @@ is the constant `'trigger.audit'` and whose `change_source` is never written.
 - **Rename `operations.assets` → `device_hardware`**, with
   `asset_field_history` following. Mechanical but wide: resolver, models,
   migrations, triggers.
-- **`v_device_current` remains owed** — it is what finally allows the flat
-  Device columns to be dropped.
+- ~~**`v_device_current` remains owed** — it is what finally allows the flat
+  Device columns to be dropped.~~ **Retracted 2026-08-05, see the amendment
+  below.** Nothing is owed and dropping the flat columns was never the intent.
 - **Agent instances migrate to relationships.** Larger work; the typed table
   remains a projection until consumers move.
 - **`asset_type` narrows** to hardware-descriptive values. Peripherals and
@@ -157,3 +160,59 @@ attribute-bucket refinement was correcting the lifecycle framing of a
 decomposition that was itself wrong. ADR-0005 remains authoritative for the
 learned identity anchor, the corroboration rule, and the never-infer rule for
 form factor. Applies ADR-0012.
+
+## Amendment — 2026-08-05: `v_device_current` retracted
+
+This record originally listed `v_device_current` as still owed, on the grounds
+that it "is what finally allows the flat Device columns to be dropped." Both
+halves of that are wrong, and the evidence disproving them was available when
+this record was written. It was not consulted.
+
+**Nothing was ever owed to consumers.** `v_device_current` appears only in
+ADR-0005 and in this record. It is absent from `CHANGELOG.md` and from all
+code. It was never built, so it never had consumers, so there was no migration
+to complete. `operations.v_device` is not its replacement — it *predates*
+ADR-0005 and has been the device read surface throughout, serving the home
+view, patching population, `os_group` counts and the device drilldown.
+
+**Dropping the flat columns was never the intent.** Release 0.64.0 — the
+release that created the layer entities under ADR-0005 — states it explicitly:
+"The existing collapsed `v_device` surface is unchanged; flat `Device`
+attribute columns stay as a denormalized cache." `v_device_current` was scoped
+as an *additional* surface for consumers wanting layer detail, not as a
+replacement for the cache.
+
+**And dropping them would be a performance defect.** Measured against
+production, 5,294 devices:
+
+| read path | time |
+| --- | --- |
+| five cache columns from `operations.devices` | 5.5 ms |
+| three of them pivoted from `entity_attribute_effective_current` | 383.6 ms |
+
+Roughly 70x slower for fewer attributes, scanning 182,320 effective rows. This
+is not an indexing gap — ten indexes already exist on that table, including on
+`entity_id`. A fleet-wide pivot must touch every row, so the sequential scan is
+the correct plan; an index only helps single-device lookups. Eight consumers
+read those columns, four of them materialized views.
+
+### Amended position
+
+- **`v_device_current` is retracted as a deliverable.** ADR-0005's effective
+  read surface is satisfied by `operations.v_device`.
+- **The flat Device columns are permanent**, as a single-writer projection.
+  ADR-0012 permits a cache; its requirement is one writer, which `7e57ba3`
+  established. The defect was never that the cache existed — it was that nine
+  producers wrote it.
+- **The typed layer tables are no longer under pressure to retire** on
+  `v_device_current`'s account. They stay as they are. Their real defect —
+  `agent_instance_field_history` holding 0 rows against ~12,800
+  `agent_instances` — is tracked in `.work/backlog.md` on its own merits.
+
+### Why this is recorded rather than quietly edited
+
+The original line was written on the same day as this amendment, from the two
+ADRs alone, without reading the changelog entry for the release that executed
+ADR-0005. That is the same failure this record was created to prevent: taking a
+document's framing as the history rather than checking what was actually built
+and decided. Leaving the retraction visible is more useful than a clean text.
