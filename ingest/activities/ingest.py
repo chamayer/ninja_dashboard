@@ -10,15 +10,21 @@ probe_activities):
   - Walk forward: `after=<id>` / `newer=<id>` / `newerThan=<id>` all
     work; we use `after` for incremental cursor.
 
-Filter:
-  - Server-side: `type=<source>` where source ∈ INGEST_ACTIVITY_SOURCES
-    (e.g. PATCH_MANAGEMENT, SYSTEM). Despite the field on records being
-    `activityType`, the query param is just `type`. Don't ask why.
-    `activityType=...` param exists but is silently ignored.
-  - Client-side: optional `statusCode` allowlist from
-    INGEST_ACTIVITY_TYPES_INCLUDE (these are statusCode values like
-    PATCH_MANAGEMENT_APPLY_PATCH_COMPLETED, not "activity types" per se,
-    but the env-var name predates this knowledge).
+Filter (all server-side; re-verified against the live API 2026-08-04):
+  - `type=<source>` where source ∈ INGEST_ACTIVITY_SOURCES (e.g.
+    PATCH_MANAGEMENT). Despite the field on records being `activityType`,
+    the query param is just `type`. `activityType=...` is silently ignored.
+  - `status=<code>` where code ∈ INGEST_ACTIVITY_TYPES_INCLUDE. NOTE the
+    asymmetry: the RESPONSE field is `statusCode`, but the QUERY PARAM is
+    `status`. Sending `statusCode=` is silently ignored and returns the
+    full unfiltered stream. That is what shipped in 0.7.1 and it went
+    unnoticed until 2026-08-04 — do not "correct" this back.
+  - `class=SYSTEM|DEVICE|USER|ALL` also filters. Unused here.
+
+  Comma-separated multi-value on `status` returns HTTP 500, so it is one
+  call per code. Records that carry no `statusCode` at all (NINJA_REMOTE
+  sessions, SentinelOne text messages, "OS Patching Information") can
+  never match a `status=` filter and are reachable only via `type=`.
 
 Target: ninja_activities.activities — insert-once, dedup on Ninja's
 stable activity id (PK).
@@ -91,7 +97,7 @@ def run(client: NinjaClient) -> int:
             )
             for code in sorted(statuscode_allowlist):
                 fetched, max_id = _pull_one(
-                    client, {"statusCode": code}, code,
+                    client, {"status": code}, code,
                     last_id, max_id, known_device_ids, all_rows,
                 )
                 total_fetched += fetched
@@ -109,7 +115,7 @@ def run(client: NinjaClient) -> int:
                 total_fetched += fetched
             fetched, max_id = _pull_one(
                 client,
-                {"statusCode": "NODE_DELETED"},
+                {"status": "NODE_DELETED"},
                 "NODE_DELETED",
                 last_id,
                 max_id,
@@ -125,7 +131,7 @@ def run(client: NinjaClient) -> int:
             )
             fetched, max_id = _pull_one(
                 client,
-                {"statusCode": "NODE_DELETED"},
+                {"status": "NODE_DELETED"},
                 "NODE_DELETED",
                 last_id,
                 max_id,
@@ -134,14 +140,27 @@ def run(client: NinjaClient) -> int:
             )
             total_fetched += fetched
 
+        # SOFTWARE_* activities are triggers, not records. Their only job is
+        # to enqueue an inventory rescan (_enqueue_software_activities below
+        # reads `all_rows` in memory, never this table). The durable record
+        # is the software_installations_current row plus its SCD-2 history,
+        # so storing the event as well is duplication — ~1M rows historically.
+        # Collect, consume, discard. Discard count is logged, never silent.
+        storable = [
+            r for r in all_rows
+            if r.get("activity_type") not in SOFTWARE_ACTIVITY_TYPES
+        ]
+        discarded = len(all_rows) - len(storable)
+
         inserted = 0
         source_events: dict[str, int | str] = {"status": "not_run"}
         if all_rows:
             with db.transaction() as cur:
-                inserted = db.insert_ignore(
-                    cur, "ninja_activities.activities", all_rows,
-                    conflict_keys=["id"],
-                )
+                if storable:
+                    inserted = db.insert_ignore(
+                        cur, "ninja_activities.activities", storable,
+                        conflict_keys=["id"],
+                    )
                 source_events = capture_ninja_events(cur, all_rows)
 
         if max_id > last_id:
@@ -153,9 +172,10 @@ def run(client: NinjaClient) -> int:
         _refresh_activity_summary_views()
         stats["rows_inserted"] = inserted
         log.info(
-            "activities: fetched %d total, kept %d, inserted %d, "
-            "generic_events=%s, cursor %d → %d",
-            total_fetched, len(all_rows), inserted, source_events, last_id, max_id,
+            "activities: fetched %d total, kept %d, stored %d, inserted %d, "
+            "trigger_only_discarded %d, generic_events=%s, cursor %d → %d",
+            total_fetched, len(all_rows), len(storable), inserted,
+            discarded, source_events, last_id, max_id,
         )
         return inserted
 

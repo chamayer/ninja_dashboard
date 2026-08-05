@@ -32,7 +32,7 @@ from datetime import datetime, timedelta, timezone
 import httpx
 from apscheduler.schedulers.background import BackgroundScheduler
 
-from ingest import db, migrations, retention_observations
+from ingest import db, migrations, retention_observations, runlog
 from ingest.derived import refresh_after_collection
 from ingest.config import settings
 from ingest.logging_utils import install_log_safety
@@ -232,6 +232,20 @@ def run_documentation_observations_once() -> None:
     except Exception:
         log.exception("Documentation observations run failed")
         raise
+
+
+def _run_platform_findings() -> None:
+    """Evaluate platform-health findings.
+
+    Isolated and non-fatal for the same reason as `_run_cmdb_findings`:
+    findings are derived reporting and must never take down a cycle.
+    """
+    try:
+        from ingest import platform_findings
+
+        log.info("platform findings: %s", platform_findings.evaluate(dry_run=False))
+    except Exception:
+        log.exception("platform findings evaluation failed — ingest unaffected")
 
 
 def _run_cmdb_findings() -> None:
@@ -2232,6 +2246,11 @@ def main() -> None:
     log.info("Applying pending migrations")
     migrations.apply_pending()
 
+    # Any run_log row still 'running' belongs to a process that no longer
+    # exists — nothing survives a restart. Left alone these accumulate
+    # forever and make "is this domain healthy?" unanswerable.
+    runlog.reap_orphaned()
+
     scheduler = BackgroundScheduler()
     scheduler.add_job(
         run_patching_once,
@@ -2261,6 +2280,24 @@ def main() -> None:
         "interval",
         minutes=15,
         id="source_run_queue_stale_recovery",
+    )
+    # Catches hangs the startup reaper cannot: process alive, work stuck.
+    scheduler.add_job(
+        runlog.reap_stale,
+        "interval",
+        minutes=30,
+        id="run_log_stale_reaper",
+        max_instances=1,
+    )
+    # Ingest failures and queue-threshold breaches were being recorded in
+    # run_log / queue_registry and read by nobody. This raises them as
+    # admin-class findings on the Operations health page.
+    scheduler.add_job(
+        _run_platform_findings,
+        "interval",
+        minutes=30,
+        id="platform_health_findings",
+        max_instances=1,
     )
     # Legacy AC — re-enabled as a bridge while operators transition to
     # Operations-native surfaces. Both jobs are internally gated by

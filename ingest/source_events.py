@@ -39,7 +39,17 @@ def capture_ninja_events(cur, rows: list[dict[str, Any]]) -> dict[str, int | str
         "unresolved": 0,
         "out_of_order": 0,
     }
-    cur.execute("SET LOCAL operations.tenant_id = %s", (_TENANT_ID,))
+    # SET LOCAL cannot take a bind parameter. ingest/ uses raw psycopg3,
+    # which binds server-side, so %s arrives as $1 and Postgres raises
+    # `syntax error at or near "$1"`. set_config() is the parameterisable
+    # equivalent. NOTE: the same pattern in operations/ is fine — Django's
+    # backend uses client-side binding (ClientCursor), so %s is already
+    # interpolated by the time Postgres sees it. Do not "fix" those.
+    # This broke the activities ingest for ~21h after 0.107.0.
+    cur.execute(
+        "SELECT set_config('operations.tenant_id', %s, true)",
+        (str(_TENANT_ID),),
+    )
     cur.execute("SELECT to_regclass('operations.source_events') IS NOT NULL")
     if not cur.fetchone()[0]:
         totals["status"] = "migration_pending"

@@ -243,7 +243,7 @@ def main() -> int:
                 if _INTERRUPTED:
                     break
                 f, i = _walk_back(
-                    client, {"statusCode": code}, code,
+                    client, {"status": code}, code,
                     oldest, cutoff, args.max_pages, known_device_ids,
                 )
                 total_fetched += f

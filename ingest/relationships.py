@@ -32,7 +32,12 @@ def write_current_evidence(
         raise ValueError("Relationship evidence requires a stable external ID.")
     if not source_endpoint.get("external_id") or not target_endpoint.get("external_id"):
         raise ValueError("Relationship evidence requires both supplied endpoint IDs.")
-    cur.execute("SET LOCAL operations.tenant_id = %s", (tenant_id,))
+    # SET LOCAL cannot take a bind parameter; set_config() is the
+    # parameterisable equivalent. See ingest/source_events.py.
+    cur.execute(
+        "SELECT set_config('operations.tenant_id', %s, true)",
+        (str(tenant_id),),
+    )
     cur.execute(
         """
         SELECT id, relationship_type_id, material_hash, active,
@@ -225,7 +230,12 @@ def withdraw_current_evidence(
     """Withdraw only the reporting source's missing relationship evidence."""
     if not external_relationship_ids:
         return 0
-    cur.execute("SET LOCAL operations.tenant_id = %s", (tenant_id,))
+    # SET LOCAL cannot take a bind parameter; set_config() is the
+    # parameterisable equivalent. See ingest/source_events.py.
+    cur.execute(
+        "SELECT set_config('operations.tenant_id', %s, true)",
+        (str(tenant_id),),
+    )
     cur.execute(
         """
         UPDATE operations.entity_relationship_evidence_current

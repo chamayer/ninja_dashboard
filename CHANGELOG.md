@@ -2,6 +2,56 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.110.0] — 2026-08-05 — Activities filter repair and platform-health findings
+
+### Fixed
+
+- **Activities ingest was collecting unfiltered since 0.7.1 (2026-06-03).** The
+  `/v2/activities` query parameter is `status`, not `statusCode` — `statusCode`
+  is not a recognised parameter and was silently dropped, so every call returned
+  the full stream. Because 0.7.1 also removed client-side rejection, the
+  configured `INGEST_ACTIVITY_TYPES_INCLUDE` allowlist has been inert for two
+  months: 163 activity types were arriving against an allowlist of 16.
+  Verified against the live API — `status=SYSTEM_REBOOTED` now returns only
+  that code, while `statusCode=SYSTEM_REBOOTED` is indistinguishable from no
+  filter at all.
+- **Activities ingest had been failing hourly since 2026-08-04 16:34.**
+  `capture_ninja_events()` issued `SET LOCAL operations.tenant_id = %s`;
+  psycopg binds server-side, so Postgres received `$1` and raised
+  `syntax error at or near "$1"`. The whole insert transaction rolled back, no
+  rows were stored, and the cursor never advanced — meaning `NODE_DELETED`
+  source events were also not captured. Now uses `set_config()`. Same fix in
+  `ingest/relationships.py`. The identical pattern in `operations/` is correct
+  and untouched: Django's backend binds client-side.
+
+### Changed
+
+- `SOFTWARE_ADDED` / `SOFTWARE_REMOVED` / `SOFTWARE_UPDATED` activities are now
+  collected as inventory-rescan triggers but no longer stored. The durable
+  record is `software_installations_current` plus its SCD-2 history; storing the
+  event as well was ~1M rows of duplication. The per-run discard count is
+  logged as `trigger_only_discarded`.
+- `.env.example` records the `status`/`statusCode` parameter asymmetry, that an
+  unrecognised code returns HTTP 500 and aborts the run while a valid but
+  never-emitted code correctly returns zero rows, and that some codes match
+  loosely rather than exactly.
+
+### Added
+
+- **Platform-health findings** (`ingest/platform_findings.py`). `source_failure`
+  and `software_queue_stalled` were registered as `finding_class='admin'` types
+  but nothing ever emitted them, while `activities` had failed 20 times in 7
+  days, `agent_compliance` 11 times, and `software.activity` sat at four times
+  its registered `max_depth`. Both now evaluate every 30 minutes and appear on
+  the existing Operations admin health page without UI changes. A registered
+  queue whose table cannot be measured is logged, not skipped silently.
+- **Orphaned run reaping** (`ingest/runlog.py`). A killed process — SIGKILL,
+  OOM, container stop — left its `run_log` row at `running` permanently; 96 had
+  accumulated since 2026-06-03. `reap_orphaned()` runs at startup, where
+  nothing from a previous process can still be running; `reap_stale()` runs
+  every 30 minutes for hangs where the process lives but the work does not.
+  Both record a distinguishable reason so a restart is not mistaken for a fault.
+
 ## [0.109.0] — 2026-08-04 — Audited restricted evidence reveal
 
 ### Added
