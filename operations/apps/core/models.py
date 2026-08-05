@@ -318,8 +318,6 @@ class Client(UUIDTenantScopedModel):
     entity = models.OneToOneField(
         Entity,
         on_delete=models.PROTECT,
-        null=True,
-        blank=True,
         related_name="client_record",
     )
     slug = models.SlugField(max_length=120)
@@ -595,8 +593,6 @@ class Device(UUIDTenantScopedModel):
     entity = models.OneToOneField(
         Entity,
         on_delete=models.PROTECT,
-        null=True,
-        blank=True,
         related_name="device_record",
     )
     client = models.ForeignKey(Client, on_delete=models.PROTECT, related_name="devices")

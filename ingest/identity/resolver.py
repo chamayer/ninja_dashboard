@@ -571,6 +571,35 @@ def _collapse_prefix_variants(
     return clusters
 
 
+def _create_device_anchor(cur, device_id, client_id, created_reason: str) -> None:
+    """Create the generic entity anchor for a device being promoted.
+
+    ADR-0005 makes Device a learned identity anchor, so a device row without
+    its `entities` row is the inversion ADR-0013 objects to. Until now the
+    anchor was created after the fact by
+    `operations.sync_entity_source_links_from_observations()`, which runs in a
+    later transaction (`ingest/derived.py`). That left every freshly promoted
+    device with a NULL `entity_id` for part of a cycle and made
+    `entity_id NOT NULL` -- the first E6 constraint -- impossible to apply.
+
+    The anchor reuses the device UUID, matching the backfill in migration 0101,
+    so `entities.id = devices.id` continues to hold. `ON CONFLICT DO NOTHING`
+    keeps the sync function idempotent alongside this.
+    """
+    cur.execute(
+        """
+        INSERT INTO operations.entities
+            (id, tenant_id, entity_class_id, scope_kind, client_id, version,
+             created_at, created_reason, updated_at, updated_reason,
+             retired_at, retired_reason, deleted_at, deleted_reason)
+        VALUES (%s, %s, 'device', 'client', %s, 1,
+                NOW(), %s, NOW(), %s, NULL, '', NULL, '')
+        ON CONFLICT (id) DO NOTHING
+        """,
+        (device_id, TENANT_ID, client_id, created_reason[:120], created_reason[:120]),
+    )
+
+
 def _promote_unmatched_clusters(cur) -> int:
     """Create devices for unresolved (client, hostname) clusters.
 
@@ -738,6 +767,8 @@ def _promote_unmatched_clusters(cur) -> int:
         )
         platforms = sorted({e[0] for e in primary})
         device_id = uuid.uuid4()
+        promote_reason = f"auto-promoted from {', '.join(platforms)}"
+        _create_device_anchor(cur, device_id, client_id, promote_reason)
         cur.execute(
             """
             -- ADR-0012: promotion creates the identity anchor only. The five
@@ -748,19 +779,19 @@ def _promote_unmatched_clusters(cur) -> int:
             -- hardcoded os_group='Unknown' is exactly how 17 devices ended up
             -- stuck on a sentinel nothing ever revisited.
             INSERT INTO operations.devices
-                (id, version, tenant_id, client_id, canonical_hostname,
+                (id, version, tenant_id, client_id, entity_id, canonical_hostname,
                  canonical_serial, canonical_vm_uuid, device_type, device_role,
                  lifecycle_status, os_name, os_family, os_group,
                  created_at, created_reason, updated_at, updated_reason,
                  stale_reason, deleted_reason)
-            VALUES (%s, 1, %s, %s, %s, %s, %s, 'unknown', 'unknown',
+            VALUES (%s, 1, %s, %s, %s, %s, %s, %s, 'unknown', 'unknown',
                     'active', '', '', 'Unknown',
                     NOW(), %s, NOW(), '', '', '')
             """,
             (
-                device_id, TENANT_ID, client_id, norm, serial or "",
+                device_id, TENANT_ID, client_id, device_id, norm, serial or "",
                 latest_cd.get("vm_uuid") or "",
-                f"auto-promoted from {', '.join(platforms)}"[:120],
+                promote_reason[:120],
             ),
         )
         _first_seen = min((e[3] for e in primary if e[3]), default=None)
@@ -856,23 +887,24 @@ def _promote_entry_groups(
             if len(group) == 1
             else f"{platform} {entity_type} duplicate agents on one machine ({len(group)} records)"
         )
+        _create_device_anchor(cur, device_id, client_id, reason)
         cur.execute(
             """
             -- ADR-0012: neutral placeholders only. See the sibling INSERT in
             -- _promote_unmatched_clusters; device_cache_projector fills these
             -- later in the same cycle.
             INSERT INTO operations.devices
-                (id, version, tenant_id, client_id, canonical_hostname,
+                (id, version, tenant_id, client_id, entity_id, canonical_hostname,
                  canonical_serial, canonical_vm_uuid, device_type, device_role,
                  lifecycle_status, os_name, os_family, os_group,
                  created_at, created_reason, updated_at, updated_reason,
                  stale_reason, deleted_reason)
-            VALUES (%s, 1, %s, %s, %s, %s, %s, 'unknown', 'unknown',
+            VALUES (%s, 1, %s, %s, %s, %s, %s, %s, 'unknown', 'unknown',
                     'active', '', '', 'Unknown',
                     NOW(), %s, NOW(), '', '', '')
             """,
             (
-                device_id, TENANT_ID, client_id, norm, serial or "",
+                device_id, TENANT_ID, client_id, device_id, norm, serial or "",
                 cd.get("vm_uuid") or "",
                 reason[:120],
             ),
