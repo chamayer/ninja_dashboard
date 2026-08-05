@@ -426,8 +426,24 @@ gate rested on that conflation. Corrected:
   projection anyway — these are rebuildable cache columns and the blast radius
   of a violation is one cycle. Enforce with a ratchet test in the shape of
   `ingest/tests/test_no_hardcoded_domain_mappings.py`.
-- Also in scope, unchanged: sanitize findings embedding serial / CMDB-URL
-  detail; run aggregate consumer parity before E6 constraints.
+- **Findings sanitization: closed, no change required.** Measured 2026-08-05.
+  139 findings match `serial` or a URL, and they are three different things:
+  43 are false positives where the URL sits inside a software *publisher*
+  string ("The Wireshark developer community, https://www.wireshark.org") and
+  stripping it would corrupt the publisher name; 95 are Hudu deep links
+  (`https://<tenant>.huducloud.com/a/...`) which are the operator clickthrough
+  to the source record, so removing them makes `cmdb_asset_stale` and
+  `cmdb_link_incorrect` non-actionable; 16 are real device serials, across 14
+  findings, and in `shared_serial` the serial *is* the finding.
+  No exposure path exists to sanitize: there is no finding-detail route (only
+  the queue plus ack/resolve/snooze), `_detail_string` has no branch for either
+  type so the queue renders nothing for them, there is no data API, and
+  `operations.findings` grants SELECT only to `metabase_ro` and
+  `operations_readonly` under enabled-and-forced RLS.
+  An audited-reveal wrapper was considered and rejected: it would add a reveal
+  surface for data that no screen displays.
+- Also in scope, unchanged: run aggregate consumer parity before E6
+  constraints.
 
 #### E5.3 implementation checkpoint (2026-08-05, local, not deployed)
 
@@ -472,15 +488,9 @@ the real 33.
 Still open in E5.3: sanitize findings embedding serial / CMDB-URL detail, and
 aggregate consumer parity before E6.
 
-Adjacent and not E5.3: unscoped entities (nullable `entities.tenant_id`, a
-third `scope_kind`, RLS policy replacement). Investigated 2026-08-05 and it is
-more entangled than the one-line description suggests: `tenant_id` is inherited
-from the `TenantScopedModel` abstract base shared by many models, so Entity
-must override the field rather than the column simply being altered; and the
-`tenant_isolation` policy is `FOR ALL` with both USING and WITH CHECK on
-`tenant_id = current_setting(...)`, on a table with FORCE ROW LEVEL SECURITY.
-A NULL tenant is invisible to every role including the owner until that policy
-is replaced. Do not treat this as a small migration.
+Unscoped entities moved to `.work/backlog.md` — investigated 2026-08-05 and
+confirmed **not** an E6 gate, since E6 covers the tenant-scoped Client and
+Device anchors and both are already fully populated.
 
 #### Projector verified against production (2026-08-05, read-only dry run)
 

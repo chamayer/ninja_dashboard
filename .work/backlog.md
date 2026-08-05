@@ -180,6 +180,43 @@ This is the proposed successor to the root-level open-work portion of
   bulk report on the findings surface rather than an actionable queue.
 - Trigger: explicit approval; the collapse is destructive.
 
+## Unscoped (universal) entities — nullable tenant, third scope_kind
+
+- ADR-0012 section 4: ownership determines scope. Software, software+version,
+  CVE and publisher are universal, not tenant property, so they should not
+  carry a tenant. Today `operations.entities.tenant_id` is NOT NULL and
+  `scope_kind` allows only `tenant` / `client`.
+- **Not a blocker for E6.** Verified 2026-08-05: E6 concerns Client and Device
+  anchors, both tenant-scoped, and both are already fully populated (0 NULL
+  `entity_id` across 5,293 devices and 76 clients). This is parallel work.
+- Measured state: `scope_kind` tenant 76 / client 5,293; PostgreSQL 16.14;
+  `ck_entities_scope_owner` pairs scope_kind with client_id presence.
+- **It is bigger than "make the column nullable".** Two findings from the
+  2026-08-05 investigation:
+  1. `tenant_id` is inherited from the `TenantScopedModel` abstract base shared
+     by many models. `Entity` has to override the field; the column cannot
+     simply be altered in isolation.
+  2. `operations.entities` has **FORCE ROW LEVEL SECURITY**, and the
+     `tenant_isolation` policy is `FOR ALL` with `tenant_id =
+     current_setting('operations.tenant_id', true)::bigint` in **both** USING
+     and WITH CHECK. A NULL tenant evaluates to NULL, so a global row would be
+     invisible to every role including the table owner. The policy must be
+     replaced in the same migration or the entities silently vanish — the exact
+     failure class ADR-0012's "nothing hidden" rule exists to prevent.
+- Shape that survived review: `USING (tenant_id IS NULL OR tenant_id =
+  current_setting(...))`. Checked and clean: the unique indexes
+  `(tenant_id, id)` and `(tenant_id, id, entity_class_id)` stay sound with a
+  NULL tenant because `id` is already the primary key, so no
+  `NULLS NOT DISTINCT` is required. Nullable `tenant_id` is also consistent
+  with the MATCH SIMPLE composite-FK decision already taken.
+- Open decision: the WITH CHECK half. Either any tenant's ingest may create a
+  global entity (simplest, and software/CVE ingest is already tenant-agnostic,
+  but one tenant then defines a universal record) or a dedicated role may,
+  which does not exist yet. Default leaning is the former.
+- Trigger: explicit approval. This is an RLS change on a forced-RLS table and
+  deserves its own commit and its own deploy, separate from anything else in
+  flight.
+
 ## 33 devices carry a form factor with no supporting evidence
 
 - Surfaced by the first live run of `device_cache_projector` (2026-08-05,
