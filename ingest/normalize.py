@@ -37,6 +37,33 @@ _BUILTIN_ALIASES = {
 _alias_cache: dict[str, str] | None = None
 
 
+def _load_mapping_rows(cur, sql: str, label: str) -> list | None:
+    """Run a mapping-table query that is allowed to fail, without poisoning
+    the caller's transaction.
+
+    A bare try/except is not enough. In PostgreSQL a failed statement aborts
+    the whole transaction, so every later statement raises
+    `InFailedSqlTransaction` even though the exception here was swallowed.
+    That is not hypothetical: 0119 shipped without this and the ingest
+    container, which starts in parallel with the Operations migrate step,
+    queried `node_class_mappings` before the table existed. The loader
+    "degraded gracefully" and then took two collector threads down with it.
+
+    A SAVEPOINT scopes the rollback to this statement, so a missing table
+    genuinely degrades to the built-in patterns.
+    """
+    cur.execute(f"SAVEPOINT {label}")
+    try:
+        cur.execute(sql)
+        rows = cur.fetchall()
+    except Exception:
+        cur.execute(f"ROLLBACK TO SAVEPOINT {label}")
+        _log.exception("%s load failed — using built-in patterns", label)
+        return None
+    cur.execute(f"RELEASE SAVEPOINT {label}")
+    return rows
+
+
 def load_platform_aliases(cur) -> None:
     """Prime the alias cache from operations.platform_aliases.
 
@@ -45,14 +72,13 @@ def load_platform_aliases(cur) -> None:
     behaviour rather than breaking canonicalisation.
     """
     global _alias_cache
-    try:
-        cur.execute("SELECT lower(alias), canonical FROM operations.platform_aliases")
-        rows = dict(cur.fetchall())
-    except Exception:
-        _log.exception("platform_aliases load failed — using built-in aliases")
-        return
+    rows = _load_mapping_rows(
+        cur,
+        "SELECT lower(alias), canonical FROM operations.platform_aliases",
+        "platform_aliases",
+    )
     if rows:
-        _alias_cache = rows
+        _alias_cache = dict(rows)
 
 
 def canonical_platform(value: str) -> str:
@@ -228,14 +254,13 @@ def load_node_class_mappings(cur) -> None:
     effect rather than the taxonomy going empty.
     """
     global _node_class_cache
-    try:
-        cur.execute(
-            "SELECT pattern, entity_type, COALESCE(form_factor, '') "
-            "FROM operations.node_class_mappings ORDER BY priority, id"
-        )
-        rows = cur.fetchall()
-    except Exception:
-        _log.exception("node_class_mappings load failed — using built-in patterns")
+    rows = _load_mapping_rows(
+        cur,
+        "SELECT pattern, entity_type, COALESCE(form_factor, '') "
+        "FROM operations.node_class_mappings ORDER BY priority, id",
+        "node_class_mappings",
+    )
+    if rows is None:
         return
     if not rows:
         _log.warning("node_class_mappings is empty — using built-in patterns")
@@ -401,17 +426,14 @@ def load_os_family_mappings(cur) -> None:
     starting against a pre-0118 database behaves exactly as before.
     """
     global _os_family_cache
-    try:
-        cur.execute(
-            "SELECT pattern, os_family FROM operations.os_family_mappings "
-            "ORDER BY priority, id"
-        )
-        rows = [(_like_to_regex(p), f) for p, f in cur.fetchall()]
-    except Exception:
-        _log.exception("os_family_mappings load failed — using built-in patterns")
-        return
+    rows = _load_mapping_rows(
+        cur,
+        "SELECT pattern, os_family FROM operations.os_family_mappings "
+        "ORDER BY priority, id",
+        "os_family_mappings",
+    )
     if rows:
-        _os_family_cache = rows
+        _os_family_cache = [(_like_to_regex(p), f) for p, f in rows]
 
 
 def os_family(os_name: str | None) -> str | None:
