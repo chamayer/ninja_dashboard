@@ -2,6 +2,18 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.110.1] — 2026-08-05 — Fix run-log reaper integer overflow
+
+### Fixed
+
+- `runlog._reap()` computed `duration_ms` from wall-clock elapsed, which
+  overflowed the `integer` column for long-orphaned rows — the oldest stuck
+  run dated from 2026-06-03 and computed to ~5.4e9 ms against an int4 ceiling
+  of 2.1e9. `reap_orphaned()` runs at ingest startup, so this crash-looped the
+  ingest container in 0.110.0 and stopped all collection. Reaped rows now
+  record `duration_ms = NULL`, which is also the truthful value: the process
+  was killed, so elapsed wall-clock is not the run's duration.
+
 ## [0.110.0] — 2026-08-05 — Activities filter repair and platform-health findings
 
 ### Fixed

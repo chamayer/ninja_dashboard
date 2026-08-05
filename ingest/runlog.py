@@ -75,9 +75,11 @@ def _reap(where_sql: str, params: tuple, reason: str, label: str) -> int:
             UPDATE ninja_core.run_log
                SET status      = 'failed',
                    finished_at = now(),
-                   duration_ms = GREATEST(
-                       0, (EXTRACT(EPOCH FROM (now() - started_at)) * 1000)::bigint
-                   ),
+                   -- Deliberately NULL: the process was killed, so wall-clock
+                   -- elapsed is not the run's duration. It would also overflow
+                   -- the int4 column for long-orphaned rows (a row stuck since
+                   -- 2026-06-03 computes to ~5.4e9 ms vs an int4 max of 2.1e9).
+                   duration_ms = NULL,
                    error_text  = %s
              WHERE status = 'running' AND {where_sql}
             """,
