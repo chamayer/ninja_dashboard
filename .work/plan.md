@@ -2,9 +2,48 @@
 
 Track: **ADR-0010 generic entity, claim, relationship, and admin completion**
 
-**Status:** full remaining plan approved; Phases E1-E5.2 deployed. E5.3 scope
-restated 2026-08-05 against measured evidence; the former decision gate is
-closed. ADR-0012 now states the governing rule.
+**Status (2026-08-05, end of session):** E1-E5.3 complete and deployed. E6 step
+one (entity anchors required) deployed and verified. Deployed head `3c7d9a1` on
+both remotes; all containers healthy; working tree clean.
+
+**Next task: retire `device_links`.** The replacement rule is verified against
+production and recorded in `.work/backlog.md` under "Retire `device_links` —
+mapping verified, ready to execute (E6)". It needs execution, not discovery.
+
+### Deployed this session
+
+| commit | change | verified |
+| --- | --- | --- |
+| `c3dcd9d` | os_name to os_family becomes data (migration 0118); os_family returns NULL not 'Unknown' | 123/123 os_name values identical; 13,716 stale `Unknown` claims cleared to 0 |
+| `7e57ba3` | device cache projector is sole writer of five columns; nine producer writes removed | live run matched dry run exactly; all five columns 0 changes after convergence |
+| `803417d` | node_class taxonomy becomes data (migration 0119); evidence counter corrected 379 to 33 | `device_type` 0 changes live, so table-driven derivation is behaviour-preserving |
+| `79f4462` | mapping-table loads contained in a SAVEPOINT | fixes a defect 803417d shipped; clean startup, no `InFailedSqlTransaction` |
+| `322d2a4` | Client/Device entity anchors required (migration 0120) | both columns NOT NULL; promotion path proven by a rolled-back transaction |
+| `e52eb20` `aa500f7` `d8243b6` `3c7d9a1` | records: findings sanitization closed, backlog findings, ADR-0013 amendment, device_links rule | docs only |
+
+### Decisions closed this session
+
+- **Findings sanitization: no code required.** Of 139 matching findings, 43 are
+  publisher strings containing vendor URLs, 95 are Hudu clickthrough links, 16
+  are real serials across 14 findings. No exposure path exists — no
+  finding-detail route, no API, and `operations.findings` grants SELECT only to
+  `metabase_ro` and `operations_readonly` under forced RLS.
+- **`v_device_current` retracted** (ADR-0013 amendment). It was never built so
+  never had consumers; `v_device` predates ADR-0005 and is the read surface;
+  release 0.64.0 recorded that the flat columns stay as a cache; and pivoting
+  from the effective contract is ~70x slower (5.5 ms vs 383.6 ms).
+- **The flat Device columns are permanent** as a single-writer projection. The
+  defect was nine producers, not the cache.
+- **The typed layer tables stay.** No retirement pressure now that
+  `v_device_current` is retracted.
+
+### Deferred, with reasons recorded in `.work/backlog.md`
+
+Unscoped entities (not an E6 gate; needs an RLS policy replacement on a
+forced-RLS table); write-only layer tables and
+`agent_instance_field_history` at 0 rows; silent `conflict = false` on genuine
+source disagreement; the 33 unevidenced form factors; the remaining hardcoded
+mapping tail.
 
 ## Authority and checkpoint
 
