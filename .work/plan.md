@@ -456,11 +456,31 @@ It reads `operations.devices` — the projector's output — so it is a
 cache-to-facet copy, not a second producer. It needed ordering, not a rewrite,
 which removes the step that risked freezing 5,273 assets.
 
-Remaining: `node_class` to data (smaller now — most occurrences were inside the
-deleted producers; what survives is `normalize.entity_type_for_node_class`,
-`resolver._infer_form_factor`, the projector's SQL, `core/devices.py:96`, and
-the restore script), then deploy and verify the projector's Python actually
-runs, which it never has.
+Deployed and verified (`7e57ba3`): the projector's first live run reported
+`os_name 21, os_family 0, os_group 17, device_role 0, device_type 0,
+rows_written 38` — identical to the dry run. Re-running the parity query after
+it returned 0 changes on all five columns. 5,293 open assets, 0 out of sync
+with `device_type`, and `os_instances.updated_at` matching the projection
+timestamp, which confirms the ordering fix.
+
+`node_class` to data is done in `803417d` (migration 0119, **not yet
+deployed**). It also fixed `_like_to_regex`, which silently mishandled
+backslash escapes and used unanchored `.search()` instead of LIKE's whole-string
+semantics, and corrected `device_type_evidence_missing` from a spurious 379 to
+the real 33.
+
+Still open in E5.3: sanitize findings embedding serial / CMDB-URL detail, and
+aggregate consumer parity before E6.
+
+Adjacent and not E5.3: unscoped entities (nullable `entities.tenant_id`, a
+third `scope_kind`, RLS policy replacement). Investigated 2026-08-05 and it is
+more entangled than the one-line description suggests: `tenant_id` is inherited
+from the `TenantScopedModel` abstract base shared by many models, so Entity
+must override the field rather than the column simply being altered; and the
+`tenant_isolation` policy is `FOR ALL` with both USING and WITH CHECK on
+`tenant_id = current_setting(...)`, on a table with FORCE ROW LEVEL SECURITY.
+A NULL tenant is invisible to every role including the owner until that policy
+is replaced. Do not treat this as a small migration.
 
 #### Projector verified against production (2026-08-05, read-only dry run)
 
