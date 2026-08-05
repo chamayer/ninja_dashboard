@@ -374,23 +374,122 @@ gate rested on that conflation. Corrected:
   there is nothing to decide or build. The alarming hostname figure
   (28/5,186 exact) compared a write-once anchor against a live selection — a
   category error, not a blocker.
+  Qualification (2026-08-05): the "zero `UPDATE ... SET canonical_*` repo-wide"
+  half of this claim was a raw-SQL grep and missed
+  `bootstrap_devices_from_ninja.py:169`, which updates `canonical_serial` and
+  `canonical_vm_uuid` through the ORM. The gate still holds, but on the *other*
+  half of the evidence: `asset_field_history` carries zero `serial` / `vm_uuid`
+  rows across 5,273 assets under an enabled trigger, which is data evidence and
+  independent of how many code paths exist. The command is manual-invocation
+  only. Do not restate the code half without re-deriving it.
 - **The work is five cache columns**: `os_name`, `os_family`, `os_group`,
   `device_role`, `device_type`. These are rewritten every resolver run, which
   ADR-0012 forbids. Their parity is strong and is the parity that matters:
   role 4,708/4,708, OS name 4,682/4,706, virtual flag 4,533/4,545.
-- **Writer inventory, corrected.** In scope: `resolver.py:996` (device_role),
-  `:1028` (device_type), `:1068` (os_name/os_family), `evaluator.py:316`
-  (device_role, with `dev_claims.get("Ninja")` source precedence in Python),
-  and `resolver.py:1078+` — the facet propagation that writes `assets` /
-  `os_instances` **from** the cache columns. That last writer is absent from
-  the original three-writer inventory; deleting the others without repointing
-  it silently freezes 5,273 assets and 5,255 os_instances.
-  Out of scope: `evaluator.py:718` writes `lifecycle_status`, which is
-  ADR-0011's audited lifecycle contract, not a source-derived cache.
-- **Target**: one projector reads `entity_attribute_effective_current` and
-  writes the five cache columns; the four producer writes are deleted; facet
-  propagation reads the effective contract instead of the cache. Enforced by
-  revoking `UPDATE` on those columns from the ingest role once the projector
-  owns them, so a producer write becomes impossible rather than forbidden.
+- **Writer inventory: nine sites, not five.** The five-site list was derived by
+  grepping raw SQL only. Re-derived 2026-08-05 by four methods — raw SQL, Django
+  ORM, `pg_trigger`, and `pg_get_functiondef` — which found four more. Triggers
+  and DB functions came back empty, so there is no database-side writer.
+  1. `resolver.py:733` INSERT (promotion) — all five, `os_group` hardcoded
+     `'Unknown'`
+  2. `resolver.py:845` INSERT (promotion) — all five, same hardcoded `'Unknown'`
+  3. `core/devices.py:278` `_sync_operations_device_roles` — device_role,
+     os_name, os_family, os_group. Called from `devices.py:177` on the live
+     Ninja collection path; arguably the primary producer
+  4. `bootstrap_devices_from_ninja.py:169` — device_type, via the ORM
+  5. `resolver.py:996` — device_role
+  6. `resolver.py:1028` — device_type
+  7. `resolver.py:1068` — os_name, os_family
+  8. `evaluator.py:316` — device_role, `dev_claims.get("Ninja")` precedence
+  9. `resolver.py:1078+` — facet propagation, writes `assets` / `os_instances`
+     **from** the cache columns. Repoint, do not delete: removing the others
+     without it freezes 5,273 assets and 5,255 os_instances.
+
+  The two promotion INSERTs matter beyond the count: revoking `UPDATE` does not
+  block `INSERT`, so a privilege-based cutover would have left both still
+  stamping all five columns and looked like it worked.
+  Out of scope: `evaluator.py:718` writes `lifecycle_status` (ADR-0011);
+  `views.py:7590` writes `deleted_at`.
+- **`os_group` and `device_type` have no effective-contract source.** Measured
+  5,289/5,289 NULL for both. The projector derives them instead — `os_group`
+  from `os_family` via `os_group_mappings`, `device_type` from entity type plus
+  node_class — so the original "projector reads the effective contract for five
+  columns" target was never achievable as written.
+- **Target**: one projector reads the effective contract for `os_name`,
+  `os_family` and `device_role`, derives `os_group` and `device_type`, and
+  preserves the existing value where no claim is selected. The eight producer
+  writes are deleted and facet propagation is repointed.
+- **Enforcement is a test, not a privilege.** The projector runs on the shared
+  `ingest.db` pool as the ingest role, so revoking `UPDATE` from that role would
+  disable the projector along with the producers. A revoke would only add
+  protection against ad-hoc `psql` writes, which self-heal on the next
+  projection anyway — these are rebuildable cache columns and the blast radius
+  of a violation is one cycle. Enforce with a ratchet test in the shape of
+  `ingest/tests/test_no_hardcoded_domain_mappings.py`.
 - Also in scope, unchanged: sanitize findings embedding serial / CMDB-URL
   detail; run aggregate consumer parity before E6 constraints.
+
+#### E5.3 implementation checkpoint (2026-08-05, local, not deployed)
+
+Done:
+
+- Producer writes removed: `resolver._sync_device_attributes` lost its three
+  derivation blocks (94 lines), `evaluator.py:316` lost its `device_role`
+  UPDATE but kept the `device_role_conflict` finding, and
+  `core/devices._sync_operations_device_roles` is deleted with its call site.
+- Both promotion INSERTs now write neutral literals (`'unknown'`, `''`) instead
+  of source-derived values. They must still name the columns because all five
+  are NOT NULL; the projector fills them later in the same cycle.
+- `bootstrap_devices_from_ninja` retired — orphaned since E3 per
+  `SESSIONS.md:480`, docstring falsely claimed it ran from `entrypoint.sh`, and
+  it carried a third form-factor classifier that returned `PHYSICAL` by
+  default, the exact ADR-0005 bug.
+- Projector wired into `resolve_all()` **before** `_sync_device_attributes`.
+- `ingest/tests/test_device_cache_sole_writer.py` added. It parses INSERT
+  column/VALUES lists positionally, so it flags a cache column only when it
+  receives a bound parameter, not merely when a NOT NULL column is named.
+  Verified by reintroducing one `%s` and confirming it reported exactly
+  `device_type` at that line.
+
+Correction to the target above: **facet propagation does not need repointing.**
+It reads `operations.devices` — the projector's output — so it is a
+cache-to-facet copy, not a second producer. It needed ordering, not a rewrite,
+which removes the step that risked freezing 5,273 assets.
+
+Remaining: `node_class` to data (smaller now — most occurrences were inside the
+deleted producers; what survives is `normalize.entity_type_for_node_class`,
+`resolver._infer_form_factor`, the projector's SQL, `core/devices.py:96`, and
+the restore script), then deploy and verify the projector's Python actually
+runs, which it never has.
+
+#### Projector verified against production (2026-08-05, read-only dry run)
+
+The projector's target SQL was run read-only against production before and
+after an approved on-demand run of all five sources. Change counts, 5,293
+devices considered:
+
+| column | before | after | direction |
+| --- | --- | --- | --- |
+| `os_name` | 21 | 21 | trailing whitespace and `Microsoft ` prefix; effective is cleaner |
+| `os_family` | 146 | **0** | all 146 were regressions to `Unknown`; cleared by withdrawal |
+| `os_group` | 14 | 17 | all fixes, `Unknown` -> `Windows`, `os_family` already correct |
+| `device_role` | 0 | 0 | — |
+| `device_type` | 0 | 0 | — |
+
+- **The `device_type` derivation is correct.** Zero changes across every device,
+  including the hardcoded `NMS_` / `_VM_HOST` patterns. Those patterns are an
+  ADR-0012 section 6 maintainability violation, not a correctness defect — the
+  distinction matters, because the projector was previously described as unsafe
+  to deploy.
+- **The withdrawal path works.** All 13,716 `Unknown` `os_family` claims cleared
+  to zero after the source runs, which is what took `os_family` from 146 to 0.
+  This was the cutover gate and it is now closed by measurement, not by design
+  argument.
+- **The `os_group` fixes trace to writers 1 and 2** — devices stuck at
+  `'Unknown'` because promotion hardcodes it and nothing revisits it.
+- Net: the projector now produces 21 `os_name` improvements, 17 `os_group`
+  fixes, and zero regressions on any column.
+- Not yet verified: the projector's Python has never executed (the dry run
+  transcribed its SQL into `psql`), steps 4-6 are untested, no test covers it,
+  and the 30 devices counted by `device_type_evidence_missing` remain a mapping
+  gap to close.

@@ -174,7 +174,6 @@ def _run(client: NinjaClient, snapshot_at: datetime) -> tuple[int, int]:
             )
             missing_count = _mark_missing_devices(cur, current_ids, snapshot_at)
             _sync_operations_device_links(cur, current_ids, snapshot_at)
-            _sync_operations_device_roles(cur)
             _sync_operations_device_exemptions(cur)
 
         obs_count = _write_ninja_observations(
@@ -258,58 +257,6 @@ def _sync_operations_device_links(
           AND dl.missing_since IS NOT NULL
         """,
         params,
-    )
-
-
-def _sync_operations_device_roles(cur: object) -> None:
-    """Refresh device_role, os_name/os_family, os_group from the Ninja pull.
-
-    device_role is set from explicit signals only (node_class, server OS,
-    client OS) — devices with no signal keep their current role, never a
-    guessed default.
-
-    The NO-AV exemption from the Ninja marker is synced separately by
-    `_sync_operations_device_exemptions()` — Track O batch O3 moved
-    exemptions off `devices.exemptions` into the polymorphic
-    `device_operator_decisions` table (dimension='exemptions').
-    """
-    cur.execute(
-        """
-        UPDATE operations.devices d
-        SET device_role = CASE
-                WHEN UPPER(nd.node_class) LIKE '%%SERVER%%' THEN 'server'
-                WHEN UPPER(nd.node_class) LIKE '%%WORKSTATION%%' THEN 'workstation'
-                WHEN UPPER(nd.node_class) = 'MAC' THEN 'workstation'
-                WHEN LOWER(COALESCE(nd.os_name, '')) LIKE '%%server%%' THEN 'server'
-                WHEN LOWER(COALESCE(nd.os_name, '')) LIKE '%%windows%%' THEN 'workstation'
-                WHEN LOWER(COALESCE(nd.os_name, '')) LIKE '%%macos%%'
-                  OR LOWER(COALESCE(nd.os_name, '')) LIKE '%%os x%%' THEN 'workstation'
-                ELSE d.device_role
-            END,
-            os_name   = COALESCE(nd.os_name, d.os_name),
-            os_family = CASE
-                -- operations.os_family() returns NULL for a blank os_name as
-                -- well as a NULL one (migration 0118, replacing the 'Unknown'
-                -- fallback). This column is NOT NULL, so the guard has to
-                -- cover blank too or a whitespace-only os_name would abort
-                -- the run. Zero such rows today; the constraint is what
-                -- makes it worth guarding rather than counting.
-                WHEN COALESCE(btrim(nd.os_name), '') = '' THEN d.os_family
-                ELSE operations.os_family(nd.os_name)
-            END,
-            os_group = COALESCE(
-                (SELECT m.os_group FROM operations.os_group_mappings m
-                 WHERE (CASE WHEN COALESCE(btrim(nd.os_name), '') = '' THEN d.os_family
-                             ELSE operations.os_family(nd.os_name) END) LIKE m.pattern
-                 ORDER BY m.priority ASC LIMIT 1),
-                'Unknown'
-            )
-        FROM operations.device_links dl
-        JOIN operations.sources s ON s.id = dl.source_id AND s.name = 'Ninja'
-        JOIN ninja_core.devices nd ON nd.id::text = dl.external_id
-        WHERE dl.device_id = d.id
-          AND dl.tenant_id = d.tenant_id
-        """
     )
 
 
@@ -748,9 +695,9 @@ def refresh_patching_scope_current() -> None:
 
     Called from main.py after custom_fields ingest so the matview
     sees fresh Ninja custom_field_values + policies. Depends on
-    operations.devices.os_group/device_role too — those are set by
-    `_sync_operations_device_roles` (already run earlier in the
-    devices pipeline). Public (no leading underscore) so main.py can
+    operations.devices.os_group/device_role too — those are written by
+    `ingest.device_cache_projector` (ADR-0012), which runs in the resolver
+    cycle, not in this pipeline. Public (no leading underscore) so main.py can
     schedule it directly. Track O batch O4.
     """
     try:

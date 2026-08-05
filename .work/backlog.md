@@ -180,6 +180,54 @@ This is the proposed successor to the root-level open-work portion of
   bulk report on the findings surface rather than an actionable queue.
 - Trigger: explicit approval; the collapse is destructive.
 
+## Source disagreement is resolved silently (`conflict = false`)
+
+- Measured 2026-08-05 on `os_name`. Of 21 devices where the cache and the
+  effective value differ, five have **two sources asserting different strings**
+  for the same attribute — e.g. ScreenConnect `Microsoft Windows 11 Pro` versus
+  SentinelOne `Windows 11 Pro`. Authority picks one and
+  `entity_attribute_effective_current.conflict` is set to **`false`** on every
+  one of them; `selection_reason` records `source_authority`.
+- The defect: `selection_reason` records *how* the winner was chosen, never
+  *that there was anything to choose between*. A disagreement with a clean
+  authority ordering is still a disagreement, and today it leaves no
+  operator-visible trace. This is the "nothing hidden or silently ignored"
+  rule, and the effective layer is currently violating it.
+- These particular five are cosmetic (a `Microsoft ` prefix). The mechanism is
+  not: the same code path resolves any attribute, including ones where the
+  sources genuinely disagree about fact rather than formatting.
+- Direction: set `conflict = true` whenever the selected value differs from any
+  other active claim, independent of whether authority resolved it cleanly.
+  Then decide separately whether a persistent conflict warrants a FindingType
+  or only a surface on the existing conflicts view (168 rows today, so the
+  volume of a corrected flag needs measuring before wiring alerts).
+- Distinguish from the other 16 of the 21, which are **stale cache** — one
+  source claims, the cache holds an older value no source asserts anymore
+  (e.g. `Windows 11 Business` where SentinelOne now reports `Windows 11 Pro`).
+  Those are fixed by the E5.3 projector and are not a conflict problem.
+- Not an E5.3 blocker. The projector moves every value toward what sources
+  actually claim.
+
+## Remaining hardcoded domain mappings (ADR-0012 section 6)
+
+- Status: deferred. The ratchet test
+  `ingest/tests/test_no_hardcoded_domain_mappings.py` blocks *new* module-level
+  domain mappings in `ingest/` and `operations/apps/`, so this backlog no
+  longer grows on its own. That is what makes deferral safe.
+- Baseline at 2026-08-05: 128 candidates — 20 marked MIGRATE, 48 EXEMPT, 58
+  recorded as not individually reviewed. `_OS_FAMILY_PATTERNS` (done, c3dcd9d)
+  and the node_class taxonomy (in progress) come off the MIGRATE list.
+- Largest remaining item is `_BUILTIN_ALIASES` in `ingest/normalize.py`. It
+  already has the right shape — a documented bootstrap fallback behind
+  `load_platform_aliases()` reading `operations.platform_aliases` — so the work
+  is auditing the built-in list against the table, not building a mechanism.
+- Also outstanding: `_JUNK_SERIALS` / `_JUNK_MACS`, `VOLATILE_FIELDS`,
+  `_EXCLUDED_LAYOUTS`, `_INTEGRATED_VENDORS`.
+- Note on the 58 unreviewed entries: the ratchet certifies nothing about them.
+  Reviewing that tail is its own task and should not be assumed done.
+- Trigger: pick up when the MIGRATE list is otherwise clear, or when a
+  specific mapping needs an operator to change it without a deploy.
+
 ## Root backlog rules
 
 - Do not duplicate Operations-only items here.

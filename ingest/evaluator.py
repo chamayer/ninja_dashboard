@@ -310,12 +310,11 @@ def _sync_device_roles(cur: Any, tenant_id: int, now: datetime) -> int:
             continue
         client_id, hostname, current_role = info
         distinct = set(dev_claims.values())
-        target = dev_claims.get("Ninja") or (next(iter(distinct)) if len(distinct) == 1 else None)
-        if target and target != current_role:
-            cur.execute(
-                "UPDATE operations.devices SET device_role = %s WHERE id = %s",
-                (target, dev_id),
-            )
+        # ADR-0012: the evaluator no longer writes device_role. Source
+        # precedence belongs in the effective attribute contract, not in a
+        # Python `dev_claims.get("Ninja")`, and the cache column is owned by
+        # `ingest.device_cache_projector`. Detecting the conflict below is
+        # still this evaluator's job — that is the operator-visible surface.
         if len(distinct) > 1:
             conflict_ids.append(dev_id)
             if ft_id:

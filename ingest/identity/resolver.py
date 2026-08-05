@@ -22,7 +22,7 @@ from typing import Any
 
 from psycopg.types.json import Json
 
-from ingest import db
+from ingest import db, device_cache_projector
 from ingest.identity import identity_entity_types
 from ingest.normalize import (
     is_macos_name,
@@ -142,12 +142,22 @@ def drain_resolution(batch_size: int = 200, *, refresh_current: bool = True) -> 
     except Exception:
         log.exception("resolver: device promotion failed — continuing")
 
+    # ADR-0012: the projector is the sole writer of the five device cache
+    # columns. It must run before _sync_device_attributes, which copies that
+    # cache into the layer entities — otherwise the facets propagate the
+    # previous cycle's values.
+    try:
+        counts = device_cache_projector.project(dry_run=False, tenant_id=TENANT_ID)
+        log.info("resolver: device cache projection %s", counts)
+    except Exception:
+        log.exception("resolver: device cache projection failed — continuing")
+
     try:
         with db.transaction() as cur:
             cur.execute(f"SET LOCAL operations.tenant_id = {TENANT_ID}")
             _sync_device_attributes(cur)
     except Exception:
-        log.exception("resolver: device attribute sync failed — continuing")
+        log.exception("resolver: layer propagation failed — continuing")
 
     if (resolved_count or promoted_count) and refresh_current:
         # Refresh derived presence matviews in dependency order:
@@ -715,11 +725,10 @@ def _promote_unmatched_clusters(cur) -> int:
             continue
 
         display_name = latest_cd.get("hostname") or norm
-        roles = {
-            e[5].get("device_role") or e[5].get("device_type")
-            for e in primary
-        } - {None, ""}
-        device_role = roles.pop() if len(roles) == 1 else "unknown"
+        # device_role is no longer derived here — the projector owns it. The
+        # layer entities below still need a form factor at creation time; the
+        # facet propagation reconciles it against the projector-owned cache on
+        # the next cycle.
         device_type = _infer_form_factor(primary)
         os_name = next(
             (e[5].get("os_name") for e in sorted(primary, key=lambda e: e[4], reverse=True)
@@ -730,20 +739,26 @@ def _promote_unmatched_clusters(cur) -> int:
         device_id = uuid.uuid4()
         cur.execute(
             """
+            -- ADR-0012: promotion creates the identity anchor only. The five
+            -- cache columns are NOT NULL, so they get neutral placeholders
+            -- here and `device_cache_projector` fills them later in this same
+            -- resolver cycle. Stamping the promoting observation's values
+            -- would make promotion a second producer, and the previous
+            -- hardcoded os_group='Unknown' is exactly how 17 devices ended up
+            -- stuck on a sentinel nothing ever revisited.
             INSERT INTO operations.devices
                 (id, version, tenant_id, client_id, canonical_hostname,
                  canonical_serial, canonical_vm_uuid, device_type, device_role,
                  lifecycle_status, os_name, os_family, os_group,
                  created_at, created_reason, updated_at, updated_reason,
                  stale_reason, deleted_reason)
-            VALUES (%s, 1, %s, %s, %s, %s, %s, %s, %s,
-                    'active', %s, %s, 'Unknown',
+            VALUES (%s, 1, %s, %s, %s, %s, %s, 'unknown', 'unknown',
+                    'active', '', '', 'Unknown',
                     NOW(), %s, NOW(), '', '', '')
             """,
             (
                 device_id, TENANT_ID, client_id, norm, serial or "",
-                latest_cd.get("vm_uuid") or "", device_type, device_role, os_name or "",
-                os_family(os_name) if os_name else "",
+                latest_cd.get("vm_uuid") or "",
                 f"auto-promoted from {', '.join(platforms)}"[:120],
             ),
         )
@@ -842,22 +857,22 @@ def _promote_entry_groups(
         )
         cur.execute(
             """
+            -- ADR-0012: neutral placeholders only. See the sibling INSERT in
+            -- _promote_unmatched_clusters; device_cache_projector fills these
+            -- later in the same cycle.
             INSERT INTO operations.devices
                 (id, version, tenant_id, client_id, canonical_hostname,
                  canonical_serial, canonical_vm_uuid, device_type, device_role,
                  lifecycle_status, os_name, os_family, os_group,
                  created_at, created_reason, updated_at, updated_reason,
                  stale_reason, deleted_reason)
-            VALUES (%s, 1, %s, %s, %s, %s, %s, %s, %s,
-                    'active', %s, %s, 'Unknown',
+            VALUES (%s, 1, %s, %s, %s, %s, %s, 'unknown', 'unknown',
+                    'active', '', '', 'Unknown',
                     NOW(), %s, NOW(), '', '', '')
             """,
             (
                 device_id, TENANT_ID, client_id, norm, serial or "",
                 cd.get("vm_uuid") or "",
-                _infer_form_factor(group),
-                cd.get("device_role") or "unknown",
-                os_name or "", os_family(os_name) if os_name else "",
                 reason[:120],
             ),
         )
@@ -973,107 +988,19 @@ def _upsert_shared_serial_findings(cur, finding_type_id: int) -> int:
 
 
 def _sync_device_attributes(cur) -> None:
-    """Recompute device_role / device_type / os_* from ALL linked observations.
+    """Propagate the projector-owned device cache into the layer entities.
 
-    Devices are created from whichever observation group resolves first, so
-    a device promoted from an LMI-only cluster gets role 'unknown' even
-    though the Ninja record that attaches later carries node_class=SERVER.
-    Set-based and idempotent — attribute truth is order-independent.
+    Formerly this also derived `device_role`, `device_type`, `os_name` and
+    `os_family` from observations. Per ADR-0012 an evidence producer does not
+    write a source-derived value: those five cache columns are now written
+    only by `ingest.device_cache_projector`, which reads the effective
+    attribute contract.
+
+    What remains reads `operations.devices` — the projector's output — and is
+    therefore a cache-to-facet copy, not a second producer. It must run *after*
+    the projector in the cycle, which is why `run_projection()` is invoked
+    ahead of this in `resolve_all()`.
     """
-    # Role: fill 'unknown' only when linked observations agree on exactly
-    # one explicit role. Conflicts stay 'unknown' (visible), never guessed.
-    cur.execute(
-        """
-        WITH sig AS (
-            SELECT device_id,
-                   ARRAY_AGG(DISTINCT canonical_data->>'device_role')
-                       FILTER (WHERE COALESCE(canonical_data->>'device_role', '') <> '') AS roles
-            FROM operations.entity_observation_current
-            WHERE tenant_id = %s AND device_id IS NOT NULL
-              AND active = TRUE
-            GROUP BY device_id
-        )
-        UPDATE operations.devices d
-        SET device_role = sig.roles[1],
-            updated_at = NOW(),
-            updated_reason = 'attribute sync from observations'
-        FROM sig
-        WHERE d.id = sig.device_id
-          AND COALESCE(d.device_role, 'unknown') IN ('unknown', '')
-          AND cardinality(sig.roles) = 1
-        """,
-        (TENANT_ID,),
-    )
-    if cur.rowcount:
-        log.info("resolver: attribute sync set device_role on %d devices", cur.rowcount)
-
-    # Form factor: same precedence as _infer_form_factor, over all streams.
-    cur.execute(
-        """
-        WITH ft AS (
-            SELECT eo.device_id,
-                   BOOL_OR(eo.entity_type = 'network.device'
-                           OR COALESCE(eo.canonical_data->>'node_class', '') ~ '^NMS_') AS is_net,
-                   BOOL_OR(eo.entity_type = 'vm.host'
-                           OR COALESCE(eo.canonical_data->>'node_class', '') ~ '(_VMM_HOST|_VM_HOST)$') AS is_host,
-                   BOOL_OR(eo.entity_type = 'vm.guest'
-                           OR COALESCE(eo.canonical_data->>'node_class', '') ~ '(_VMM_GUEST|_VM_GUEST)$'
-                           OR COALESCE(eo.canonical_data->>'is_vm', '') IN ('true', 'True', '1')) AS is_vm,
-                   BOOL_OR(eo.entity_type LIKE 'agent.%%') AS is_agent
-            FROM operations.entity_observation_current eo
-            WHERE eo.tenant_id = %s AND eo.device_id IS NOT NULL
-              AND eo.active = TRUE
-            GROUP BY eo.device_id
-        )
-        UPDATE operations.devices d
-        SET device_type = t.target,
-            updated_at = NOW(),
-            updated_reason = 'attribute sync from observations'
-        FROM (
-            SELECT device_id,
-                   -- ADR-0005: agent presence is not evidence of form
-                   -- factor. Only asset-nature signals upgrade away
-                   -- from 'unknown'.
-                   CASE WHEN is_net THEN 'network-device'
-                        WHEN is_host THEN 'hypervisor-host'
-                        WHEN is_vm THEN 'vm'
-                        ELSE 'unknown' END AS target
-            FROM ft
-        ) t
-        WHERE d.id = t.device_id AND d.device_type IS DISTINCT FROM t.target
-        """,
-        (TENANT_ID,),
-    )
-    if cur.rowcount:
-        log.info("resolver: attribute sync set device_type on %d devices", cur.rowcount)
-
-    # OS: backfill devices with no os_name from the newest observation
-    # that carries one (os_family derives in Python, so update per row).
-    cur.execute(
-        """
-        SELECT DISTINCT ON (eo.device_id) eo.device_id, eo.canonical_data->>'os_name'
-        FROM operations.entity_observation_current eo
-        JOIN operations.devices d ON d.id = eo.device_id
-        WHERE eo.tenant_id = %s AND COALESCE(d.os_name, '') = ''
-          AND eo.active = TRUE
-          AND COALESCE(eo.canonical_data->>'os_name', '') <> ''
-        ORDER BY eo.device_id, eo.observed_at DESC
-        """,
-        (TENANT_ID,),
-    )
-    os_rows = cur.fetchall()
-    for device_id, os_name in os_rows:
-        cur.execute(
-            """
-            UPDATE operations.devices
-            SET os_name = %s, os_family = %s,
-                updated_at = NOW(), updated_reason = 'attribute sync from observations'
-            WHERE id = %s
-            """,
-            (os_name, os_family(os_name), device_id),
-        )
-    if os_rows:
-        log.info("resolver: attribute sync set os_name on %d devices", len(os_rows))
 
     # ── Layer-entity propagation (ADR-0005 slice 2) ───────────────────
     # Keep the open-window Asset.form_factor in sync with the flat
