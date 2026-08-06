@@ -6037,7 +6037,14 @@ def client_policy_delete(request: HttpRequest, org_slug: str, policy_id: str) ->
 
 @login_required
 def merge_candidates_queue(request: HttpRequest) -> HttpResponse:
-    """Cross-source merge candidate review queue. Empty until multi-source ingest lands."""
+    """Cross-source merge candidate review queue.
+
+    The docstring here used to read "Empty until multi-source ingest lands."
+    Multi-source ingest landed long ago; what was missing was a producer, so
+    the queue stayed empty and nobody questioned it. `resolver`'s
+    `project_merge_candidates` now reconciles proposals against current device
+    collisions each cycle.
+    """
     status_filter = request.GET.get("status", MergeCandidate.Status.OPEN)
     entity_filter = request.GET.get("entity", "")
 
@@ -6057,15 +6064,19 @@ def merge_candidates_queue(request: HttpRequest) -> HttpResponse:
     if wants_csv(request):
         return csv_response(
             list(qs),
+            # `created_at`, `resolved_at` and `resolved_by` were listed here
+            # but are not fields on MergeCandidate. `csv_export._resolve`
+            # defaults missing attributes to "", so they did not raise — they
+            # emitted three permanently blank columns. Invisible while the
+            # queue was empty; wrong as soon as it held rows.
             columns=[
                 ("Entity type", "entity_type"),
                 ("Canonical key", "canonical_key"),
                 ("Client", lambda r: (r.client.display_name if r.client else "")),
+                ("Members", lambda r: len(r.member_snapshots or [])),
+                ("Match reason", "match_reason"),
                 ("Confidence", "confidence"),
                 ("Status", "status"),
-                ("Created", "created_at"),
-                ("Resolved", "resolved_at"),
-                ("Resolved by", "resolved_by"),
             ],
             filename_stem="merge_candidates",
         )
