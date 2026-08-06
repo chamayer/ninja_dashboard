@@ -210,8 +210,28 @@ touch the proposal. Decide whether the finding should auto-resolve on merge or
 whether both should simply reconcile on the next cycle — the latter is already
 true for the candidate, which closes when its collision stops holding.
 
-`client_user_links` remains: 0 rows, no writer, admin-only. Establish what it
-was for before doing anything with it — it is not a removal candidate.
+`client_user_links` is covered separately below — it is not compatibility debt.
+
+## Users capability: designed, ingested, never built
+
+- `operations.client_users` and `operations.client_user_links` hold **0 rows**
+  and have no producer. They are the canonical person entity and its
+  source-identity attachment — the same shape as the device and client link
+  tables, for people.
+- **The input data is already flowing.** 4,522 device rows carry a
+  last-logged-in user, across 3,405 distinct users, available through
+  `ninja_device_detail_current_shadow.last_user`.
+- Meanwhile the user-risk page derives its users ad hoc from that raw field
+  rather than from the canonical entity, so there is no stable person identity
+  to attach anything to — no cross-source correlation, no lifecycle, no
+  findings.
+- Memory records Users as an intentional nav stub in the client context, so
+  this is unbuilt rather than abandoned. Under the fix-don't-remove rule the
+  tables stay; the work is the producer.
+- Not an E6 item: this is a feature whose storage landed before its engine,
+  not compatibility debt. Sizeable — canonical identity for people needs the
+  same care as devices (what makes two logins the same person across sources)
+  and should not be improvised.
 
 ## Continuous check that read models stay read-only
 
