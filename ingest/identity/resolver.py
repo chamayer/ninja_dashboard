@@ -69,7 +69,6 @@ def drain_resolution(batch_size: int = 200, *, refresh_current: bool = True) -> 
         )
         rows = cur.fetchall()
 
-        source_ids = _load_source_ids(cur)
         identity_conflict_ft_id = _load_finding_type_id(cur, "identity_conflict")
 
         for obs_id, entity_type, entity_key, platform, client_id, observed_at, canonical_data in rows:
@@ -88,10 +87,7 @@ def drain_resolution(batch_size: int = 200, *, refresh_current: bool = True) -> 
             if is_usable_serial(serial):
                 device_id = _resolve_by_serial(cur, serial, client_id)
                 if device_id is not None:
-                    _attach_observation(
-                        cur, source_ids, obs_id, device_id, platform, entity_key,
-                        cd, observed_at, "serial", 0.980,
-                    )
+                    _attach_observation(cur, obs_id, device_id)
                     resolved_count += 1
                     log.debug("resolver: serial match %s → device %s", entity_key, device_id)
                     continue
@@ -100,10 +96,7 @@ def drain_resolution(batch_size: int = 200, *, refresh_current: bool = True) -> 
             if vm_uuid:
                 device_id = _resolve_by_vm_uuid(cur, vm_uuid, client_id)
                 if device_id is not None:
-                    _attach_observation(
-                        cur, source_ids, obs_id, device_id, platform, entity_key,
-                        cd, observed_at, "vm_uuid", 0.950,
-                    )
+                    _attach_observation(cur, obs_id, device_id)
                     resolved_count += 1
                     log.debug("resolver: vm_uuid match %s → device %s", entity_key, device_id)
                     continue
@@ -121,10 +114,7 @@ def drain_resolution(batch_size: int = 200, *, refresh_current: bool = True) -> 
                 not _same_stream_conflict(cur, device_id, platform, entity_type, entity_key)
                 or _same_machine_on_device(cur, device_id, platform, entity_type, entity_key, cd)
             ):
-                _attach_observation(
-                    cur, source_ids, obs_id, device_id, platform, entity_key,
-                    cd, observed_at, "hostname_strict", 0.900,
-                )
+                _attach_observation(cur, obs_id, device_id)
                 resolved_count += 1
                 log.debug("resolver: hostname match %s → device %s", entity_key, device_id)
             elif device_id is None:
@@ -180,11 +170,6 @@ def drain_resolution(batch_size: int = 200, *, refresh_current: bool = True) -> 
                 log.exception("resolver: device_session_current refresh failed — continuing")
 
     return resolved_count
-
-
-def _load_source_ids(cur) -> dict[str, int]:
-    cur.execute("SELECT name, id FROM operations.sources")
-    return {row[0]: row[1] for row in cur.fetchall()}
 
 
 def _load_agent_ids(cur) -> dict[str, int]:
@@ -324,19 +309,6 @@ def _group_same_machine(stream_entries: list[tuple]) -> list[list[tuple]]:
     return groups
 
 
-def _proof_match_method(cd_a: dict, cd_b: dict) -> tuple[str, float]:
-    sa, sb = cd_a.get("serial_number"), cd_b.get("serial_number")
-    if (
-        is_usable_serial(sa) and is_usable_serial(sb)
-        and sa.strip().lower() == sb.strip().lower()
-    ):
-        return "serial", 0.980
-    ua, ub = cd_a.get("vm_uuid"), cd_b.get("vm_uuid")
-    if ua and ub and str(ua).lower() == str(ub).lower():
-        return "vm_uuid", 0.950
-    return "mac", 0.960
-
-
 def _resolve_by_hostname(cur, norm: str, client_id: uuid.UUID | None) -> uuid.UUID | None:
     if client_id is None:
         return None
@@ -354,49 +326,17 @@ def _resolve_by_hostname(cur, norm: str, client_id: uuid.UUID | None) -> uuid.UU
     return None
 
 
-def _attach_observation(
-    cur,
-    source_ids: dict[str, int],
-    obs_id: uuid.UUID | None,
-    device_id: uuid.UUID,
-    platform: str,
-    entity_key: str,
-    canonical_data: dict,
-    observed_at,
-    match_method: str,
-    match_confidence: float,
-) -> None:
-    display_name = (
-        canonical_data.get("hostname")
-        or canonical_data.get("guest_name")
-        or entity_key
-    )
-    source_id = source_ids.get(platform)
-    if source_id is not None:
-        cur.execute(
-            """
-            INSERT INTO operations.device_links
-                (id, version, tenant_id, device_id, source_id, external_id,
-                 external_name, first_seen_at, last_seen_at,
-                 match_method, match_confidence)
-            VALUES (gen_random_uuid(), 1, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            ON CONFLICT (tenant_id, source_id, external_id)
-            DO UPDATE SET
-                device_id = EXCLUDED.device_id,
-                external_name = COALESCE(NULLIF(EXCLUDED.external_name, ''),
-                                         operations.device_links.external_name),
-                last_seen_at = GREATEST(
-                    COALESCE(operations.device_links.last_seen_at, EXCLUDED.last_seen_at),
-                    EXCLUDED.last_seen_at
-                ),
-                match_method = EXCLUDED.match_method,
-                match_confidence = EXCLUDED.match_confidence
-            """,
-            (
-                TENANT_ID, device_id, source_id, entity_key, display_name,
-                observed_at, observed_at, match_method, match_confidence,
-            ),
-        )
+def _attach_observation(cur, obs_id: uuid.UUID | None, device_id: uuid.UUID) -> None:
+    """Attach one observation to a device.
+
+    This used to also upsert `operations.device_links`, carrying the match
+    method, confidence, display name and observed timestamps needed for that
+    row. Migration 0121 retires both that write and the table — attachment
+    authority is observations ->
+    sync_entity_source_links_from_observations() — so the only remaining
+    responsibility is the device_id, and the parameters that existed solely to
+    populate the link are gone rather than left unused.
+    """
     if obs_id is not None:
         cur.execute(
             "UPDATE operations.entity_observation_current SET device_id = %s WHERE observation_id = %s",
@@ -618,7 +558,6 @@ def _promote_unmatched_clusters(cur) -> int:
     cur.execute(
         "SELECT pg_advisory_xact_lock(hashtext('operations.resolver_promotion'))"
     )
-    source_ids = _load_source_ids(cur)
     agent_ids = _load_agent_ids(cur)
 
     cur.execute(
@@ -651,30 +590,46 @@ def _promote_unmatched_clusters(cur) -> int:
         norm = normalize_hostname(hostname)
         if not norm:
             continue
-        # A record that already carries a device_link was resolved in an
-        # earlier pass — these stale NULL observations just backfill; a new
-        # device for them would be an empty orphan row.
-        source_id = source_ids.get(platform)
-        if source_id is not None:
+        # A record already attached to a device was resolved in an earlier
+        # pass — these stale NULL observations just backfill; a new device for
+        # them would be an empty orphan row.
+        #
+        # This guard used to read `operations.device_links`, which was written
+        # a few lines below in this same transaction. Migration 0121 retires
+        # that write, and the replacement `entity_source_links` is only
+        # derived later in the cycle by
+        # sync_entity_source_links_from_observations(). Reading the derived
+        # table here would leave the guard blind to anything attached during
+        # the current run and mint a duplicate device for it — the same
+        # ordering trap the entity anchor had before 322d2a4.
+        #
+        # The sibling observation is the correct source: every attachment,
+        # whether by fast path, by this resolver or by promotion, sets
+        # `entity_observation_current.device_id` in the transaction that makes
+        # it. Verified against production before the cutover: across all four
+        # sources, zero (source, external_id) keys disagreed between the link
+        # table and the observation's device_id.
+        cur.execute(
+            """
+            SELECT device_id FROM operations.entity_observation_current
+            WHERE tenant_id = %s AND platform = %s AND entity_key = %s
+              AND entity_type = %s AND device_id IS NOT NULL
+            LIMIT 1
+            """,
+            (TENANT_ID, platform, entity_key, entity_type),
+        )
+        linked = cur.fetchone()
+        if linked:
             cur.execute(
                 """
-                SELECT device_id FROM operations.device_links
-                WHERE tenant_id = %s AND source_id = %s AND external_id = %s
+                UPDATE operations.entity_observation_current
+                SET device_id = %s
+                WHERE tenant_id = %s AND platform = %s AND entity_key = %s
+                  AND device_id IS NULL
                 """,
-                (TENANT_ID, source_id, entity_key),
+                (linked[0], TENANT_ID, platform, entity_key),
             )
-            linked = cur.fetchone()
-            if linked:
-                cur.execute(
-                    """
-                    UPDATE operations.entity_observation_current
-                    SET device_id = %s
-                    WHERE tenant_id = %s AND platform = %s AND entity_key = %s
-                      AND device_id IS NULL
-                    """,
-                    (linked[0], TENANT_ID, platform, entity_key),
-                )
-                continue
+            continue
         clusters.setdefault((client_id, norm), []).append(
             (platform, entity_type, entity_key, first_seen, last_seen, cd)
         )
@@ -730,16 +685,12 @@ def _promote_unmatched_clusters(cur) -> int:
                 ):
                     extra_groups.append(group)
                     continue
-                for i, entry in enumerate(group):
-                    platform, entity_type, entity_key, _first_seen, e_last, e_cd = entry
-                    method, conf = (
-                        ("hostname_strict", 0.900) if i == 0
-                        else _proof_match_method(e_cd, head[5])
-                    )
-                    _attach_observation(
-                        cur, source_ids, None, existing_device_id, platform,
-                        entity_key, e_cd, e_last, method, conf,
-                    )
+                # The `_attach_observation` call that stood here passed
+                # obs_id=None, so its only effect was the source-link upsert
+                # retired by migration 0121. The observation UPDATE below was
+                # already doing the attaching.
+                for entry in group:
+                    platform, entity_type, entity_key = entry[0], entry[1], entry[2]
                     cur.execute(
                         """
                         UPDATE operations.entity_observation_current
@@ -750,11 +701,10 @@ def _promote_unmatched_clusters(cur) -> int:
                         (existing_device_id, TENANT_ID, platform, entity_key),
                     )
             promoted += _promote_entry_groups(
-                cur, source_ids, agent_ids, client_id, norm, extra_groups
+                cur, agent_ids, client_id, norm, extra_groups
             )
             continue
 
-        display_name = latest_cd.get("hostname") or norm
         # device_role is no longer derived here — the projector owns it. The
         # layer entities below still need a form factor at creation time; the
         # facet propagation reconciles it against the projector-owned cache on
@@ -810,30 +760,13 @@ def _promote_unmatched_clusters(cur) -> int:
             entries=primary,
             agent_ids=agent_ids,
         )
+        # Attach every record in the promoted groups. The paired
+        # source-link INSERT is retired with migration 0121; the observation
+        # update below is now the whole attachment, and
+        # sync_entity_source_links_from_observations() derives the link.
         for group in primary_groups:
-            head = group[0]
-            for i, entry in enumerate(group):
-                platform, _entity_type, entity_key, _first, e_last, e_cd = entry
-                source_id = source_ids.get(platform)
-                if source_id is None:
-                    continue
-                method, conf = (
-                    ("promoted", 0.850) if i == 0
-                    else _proof_match_method(e_cd, head[5])
-                )
-                cur.execute(
-                    """
-                    INSERT INTO operations.device_links
-                        (id, version, tenant_id, device_id, source_id,
-                         external_id, external_name, first_seen_at, last_seen_at,
-                         match_method, match_confidence)
-                    VALUES (gen_random_uuid(), 1, %s, %s, %s, %s, %s, %s, %s,
-                            %s, %s)
-                    ON CONFLICT (tenant_id, source_id, external_id) DO NOTHING
-                    """,
-                    (TENANT_ID, device_id, source_id, entity_key, display_name,
-                     _first, e_last, method, conf),
-                )
+            for entry in group:
+                platform, _entity_type, entity_key = entry[0], entry[1], entry[2]
                 cur.execute(
                     """
                     UPDATE operations.entity_observation_current
@@ -849,7 +782,7 @@ def _promote_unmatched_clusters(cur) -> int:
             device_id, norm, client_id, platforms,
         )
         promoted += _promote_entry_groups(
-            cur, source_ids, agent_ids, client_id, norm, extra_groups
+            cur, agent_ids, client_id, norm, extra_groups
         )
 
     if promoted:
@@ -859,7 +792,6 @@ def _promote_unmatched_clusters(cur) -> int:
 
 def _promote_entry_groups(
     cur,
-    source_ids: dict[str, int],
     agent_ids: dict[str, int],
     client_id,
     norm: str,
@@ -925,28 +857,10 @@ def _promote_entry_groups(
             entries=group,
             agent_ids=agent_ids,
         )
-        for i, entry in enumerate(group):
-            platform, entity_type, entity_key, first_seen, last_seen, e_cd = entry
-            source_id = source_ids.get(platform)
-            if source_id is not None:
-                method, conf = (
-                    ("promoted", 0.850) if i == 0
-                    else _proof_match_method(e_cd, cd)
-                )
-                cur.execute(
-                    """
-                    INSERT INTO operations.device_links
-                        (id, version, tenant_id, device_id, source_id,
-                         external_id, external_name, first_seen_at, last_seen_at,
-                         match_method, match_confidence)
-                    VALUES (gen_random_uuid(), 1, %s, %s, %s, %s, %s, %s, %s,
-                            %s, %s)
-                    ON CONFLICT (tenant_id, source_id, external_id) DO NOTHING
-                    """,
-                    (TENANT_ID, device_id, source_id, entity_key,
-                     e_cd.get("hostname") or norm, first_seen, last_seen,
-                     method, conf),
-                )
+        # As above: the source-link INSERT that paired with this update is
+        # retired with migration 0121.
+        for entry in group:
+            platform, entity_type, entity_key = entry[0], entry[1], entry[2]
             cur.execute(
                 """
                 UPDATE operations.entity_observation_current

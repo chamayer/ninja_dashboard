@@ -137,7 +137,7 @@ _INSCOPE_SIGNAL_CTE = """
             BOOL_OR(COALESCE(dps.ever_installed, FALSE))       AS any_ever_installed,
             MAX(dps.last_seen_at)                              AS max_last_seen_at,
             COUNT(*) FILTER (WHERE dps.device_id IS NOT NULL)  AS signal_rows
-        FROM operations.device_links dl
+        FROM operations.v_device_source_link dl
         JOIN operations.sources s
           ON s.id = dl.source_id AND s.name = 'Ninja'
         LEFT JOIN ninja_patches.device_patch_signal dps
@@ -288,7 +288,7 @@ def _emit_failing_repeatedly(cur, tenant_id, ft_ids, now, keys, policy) -> int:
                    dl.external_id::int AS ninja_id,
                    v.client_id, v.canonical_hostname
             FROM operations.v_device v
-            JOIN operations.device_links dl
+            JOIN operations.v_device_source_link dl
               ON dl.device_id = v.device_id AND dl.tenant_id = v.tenant_id
             JOIN operations.sources s
               ON s.id = dl.source_id AND s.name = 'Ninja'
@@ -348,7 +348,7 @@ def _emit_approval_backlog(cur, tenant_id, ft_ids, now, keys, policy) -> int:
                    dl.external_id::int AS ninja_id,
                    v.client_id
             FROM operations.v_device v
-            JOIN operations.device_links dl
+            JOIN operations.v_device_source_link dl
               ON dl.device_id = v.device_id AND dl.tenant_id = v.tenant_id
             JOIN operations.sources s
               ON s.id = dl.source_id AND s.name = 'Ninja'

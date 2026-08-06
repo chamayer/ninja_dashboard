@@ -2,6 +2,47 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.111.0] — 2026-08-06 — Retire device_links; source links follow observations
+
+### Fixed
+
+- **Agent presence was wrong for three of four sources.**
+  `_sync_operations_device_links` maintained `device_links.last_seen_at` and
+  `missing_since` under a `WHERE s.name = 'Ninja'` filter, so those columns
+  were only ever kept current for Ninja. Measured against production: 209
+  links reported an agent present that had stopped reporting 6-23 days earlier
+  (SentinelOne 137, LogMeIn 65, ScreenConnect 7, Ninja 0), and `last_seen_at`
+  was frozen far more widely — 3,026/3,031 LogMeIn, 1,013/1,013 ScreenConnect
+  and 4,346/4,351 SentinelOne links disagreed with the observation-derived
+  value, against 0/5,884 Ninja. 8,316 links claimed present with `last_seen_at`
+  at least three days stale. `device_missing_from_source` resolves from
+  `missing_since`, so that finding could not resolve correctly outside Ninja.
+  After the cutover, stale-but-live links are 0 across all four sources.
+
+### Changed
+
+- **`operations.device_links` is retired (migration 0121)**, replaced by
+  `operations.v_device_source_link` over `entity_source_links`, which
+  `sync_entity_source_links_from_observations()` maintains from observation
+  evidence for every source. This closes the last "competing attachment
+  authority" named by E6: six code paths wrote the table directly, and all six
+  are removed. Attachment is now derived from evidence, per ADR-0012.
+- All readers move to the new relation in this release; no compatibility alias
+  is left behind. The `DeviceLink` model becomes the unmanaged, read-only
+  `DeviceSourceLink`, and its admin surfaces are read-only. `operations_app`
+  holds SELECT only, so the write path is closed by privilege.
+- Device merge no longer repoints source links directly. It moves the
+  observations, and the links follow on the next sync with their history
+  intervals correctly closed — writing the derived table directly would have
+  orphaned the open `entity_source_link_history` row.
+
+### Removed
+
+- `match_method`, `match_confidence` and `external_name` as maintained by the
+  identity writers. The first two are now the `entity_source_links` values;
+  `external_name` was write-only and is dropped. No reader consumed any of
+  them.
+
 ## [0.110.1] — 2026-08-05 — Fix run-log reaper integer overflow
 
 ### Fixed

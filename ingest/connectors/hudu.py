@@ -9,7 +9,7 @@ Consequences, all measured (see `.work/plan.md`):
 
 * Hudu contributes no independent identity evidence. A card is a *pointer*
   ("I am Ninja device 296"), so device attachment is a direct lookup and this
-  connector never participates in identity resolution or `device_links`.
+  connector never participates in identity resolution or device attachment.
 * Cards are resolved and clustered on the resulting `device_id`, never on
   names: a Hyper-V VM object is named independently of its guest OS
   (`QB`/`QBSERVER`), so name comparison yields confident wrong answers.

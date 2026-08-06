@@ -55,7 +55,10 @@ def test_restore_closed_evidence_then_backfill(postgres_connection) -> None:
                 source_instance_id uuid NOT NULL,
                 collector_instance_id uuid NOT NULL
             );
-            CREATE TABLE operations.device_links (
+            -- Stand-in for the operations.v_device_source_link view. A
+            -- plain table is sufficient here: the code under test only reads
+            -- it, and the fixture needs no RLS or namespace filtering.
+            CREATE TABLE operations.v_device_source_link (
                 tenant_id bigint NOT NULL,
                 source_id bigint NOT NULL,
                 external_id text NOT NULL,
@@ -320,7 +323,7 @@ def test_restore_closed_evidence_then_backfill(postgres_connection) -> None:
             repeated.inserted_current_rows,
             repeated.inserted_history_rows,
         ) == (1, 0, 0, 0)
-        cursor.execute("SELECT COUNT(*) FROM operations.device_links")
+        cursor.execute("SELECT COUNT(*) FROM operations.v_device_source_link")
         assert cursor.fetchone() == (0,)
 
         cursor.executemany(
@@ -397,7 +400,7 @@ def test_restore_closed_evidence_then_backfill(postgres_connection) -> None:
         )
         cursor.execute(
             """
-            INSERT INTO operations.device_links
+            INSERT INTO operations.v_device_source_link
             VALUES (1, 1, '45', %s)
             """,
             (uuid.uuid4(),),

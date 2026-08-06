@@ -134,7 +134,7 @@ def measure_range(
                        OR d.data = '{}'::jsonb AS lacks_raw,
                    EXISTS (
                        SELECT 1
-                         FROM operations.device_links dl
+                         FROM operations.v_device_source_link dl
                          JOIN operations.sources ls ON ls.id = dl.source_id
                         WHERE dl.tenant_id = %s
                           AND lower(ls.name) = 'ninja'
@@ -286,7 +286,7 @@ def _eligible_rows(
            AND GREATEST(d.last_seen_at, ss.last_snapshot_at) < d.missing_since
            AND NOT EXISTS (
                SELECT 1
-                 FROM operations.device_links dl
+                 FROM operations.v_device_source_link dl
                  JOIN operations.sources s ON s.id = dl.source_id
                 WHERE dl.tenant_id = %s
                   AND lower(s.name) = 'ninja'

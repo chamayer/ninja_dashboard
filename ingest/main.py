@@ -152,7 +152,7 @@ def run_ninja_observations_once() -> None:
     """Sync Ninja orgs + devices into Operations without the full patch cycle.
 
     Runs org/location/device sync only — populates operations.devices,
-    device_links, and entity_observations (agent.rmm), then refreshes
+    source links, and entity_observations (agent.rmm), then refreshes
     device_agent_presence_current. Skips device-health, patches, activities,
     and custom fields, so it completes in seconds instead of minutes.
     Used by the source run queue demand trigger.

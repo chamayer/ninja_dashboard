@@ -193,7 +193,7 @@ def _write_health_observations(
             cur.execute(
                 """
                 SELECT dl.external_id, dl.device_id, d.client_id
-                  FROM operations.device_links dl
+                  FROM operations.v_device_source_link dl
                   JOIN operations.devices d
                     ON d.id = dl.device_id AND d.tenant_id = dl.tenant_id
                   JOIN operations.sources s

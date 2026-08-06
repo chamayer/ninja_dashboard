@@ -30,7 +30,7 @@ def load_device_map(source_name: str) -> dict[str, tuple[uuid.UUID, uuid.UUID | 
         cur.execute(
             """
             SELECT dl.external_id, dl.device_id, d.client_id
-              FROM operations.device_links dl
+              FROM operations.v_device_source_link dl
               JOIN operations.devices d ON d.id = dl.device_id
               JOIN operations.sources s ON s.id = dl.source_id AND s.name = %s
              WHERE dl.tenant_id = %s AND d.deleted_at IS NULL

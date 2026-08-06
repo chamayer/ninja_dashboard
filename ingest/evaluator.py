@@ -1350,7 +1350,7 @@ def _evaluate_device_lifecycle(
             """
             SELECT DISTINCT d.id, d.client_id, d.canonical_hostname
             FROM operations.devices d
-            JOIN operations.device_links dl ON dl.device_id = d.id AND dl.tenant_id = d.tenant_id
+            JOIN operations.v_device_source_link dl ON dl.device_id = d.id AND dl.tenant_id = d.tenant_id
             JOIN operations.sources s ON s.id = dl.source_id
             WHERE d.tenant_id = %s
               AND d.deleted_at IS NULL
@@ -1727,7 +1727,9 @@ def _auto_resolve(
         )
         count += cur.rowcount or 0
 
-    # Resolve device_missing_from_source if device_links.missing_since cleared
+    # Resolve device_missing_from_source once the source link's
+    # missing_since clears. Maintained for every source since migration 0121;
+    # it was previously Ninja-only, so this could not resolve for the rest.
     missing_ft_id = _get_finding_type_id(cur, "device_missing_from_source")
     if missing_ft_id:
         cur.execute(
@@ -1740,7 +1742,7 @@ def _auto_resolve(
               AND f.status IN ('open', 'acknowledged')
               AND (%s::uuid IS NULL OR f.subject_id = %s)
               AND NOT EXISTS (
-                  SELECT 1 FROM operations.device_links dl
+                  SELECT 1 FROM operations.v_device_source_link dl
                   WHERE dl.device_id = f.subject_id
                     AND dl.tenant_id = f.tenant_id
                     AND dl.missing_since IS NOT NULL

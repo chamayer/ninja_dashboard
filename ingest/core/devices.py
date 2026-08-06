@@ -178,7 +178,6 @@ def _run(client: NinjaClient, snapshot_at: datetime) -> tuple[int, int]:
                 conflict_keys=["id"],
             )
             missing_count = _mark_missing_devices(cur, current_ids, snapshot_at)
-            _sync_operations_device_links(cur, current_ids, snapshot_at)
             _sync_operations_device_exemptions(cur)
 
         obs_count = _write_ninja_observations(
@@ -223,46 +222,19 @@ def _mark_missing_devices(
     return cur.rowcount
 
 
-def _sync_operations_device_links(
-    cur: object, current_ids: list[int], snapshot_at: datetime
-) -> None:
-    """Keep operations.device_links.last_seen_at and missing_since in sync with the Ninja pull."""
-    cur.execute("SET LOCAL operations.tenant_id = 1")
-    ids_text = [str(i) for i in current_ids]
-    params = {"snapshot_at": snapshot_at, "ids": ids_text}
-    cur.execute(
-        """
-        UPDATE operations.device_links dl
-        SET last_seen_at = %(snapshot_at)s
-        FROM operations.sources s
-        WHERE dl.source_id = s.id AND s.name = 'Ninja'
-          AND dl.external_id = ANY(%(ids)s)
-          AND dl.missing_since IS NULL
-        """,
-        params,
-    )
-    cur.execute(
-        """
-        UPDATE operations.device_links dl
-        SET missing_since = %(snapshot_at)s
-        FROM operations.sources s
-        WHERE dl.source_id = s.id AND s.name = 'Ninja'
-          AND NOT (dl.external_id = ANY(%(ids)s))
-          AND dl.missing_since IS NULL
-        """,
-        params,
-    )
-    cur.execute(
-        """
-        UPDATE operations.device_links dl
-        SET missing_since = NULL
-        FROM operations.sources s
-        WHERE dl.source_id = s.id AND s.name = 'Ninja'
-          AND dl.external_id = ANY(%(ids)s)
-          AND dl.missing_since IS NOT NULL
-        """,
-        params,
-    )
+# `_sync_operations_device_links` stood here. It maintained
+# `operations.v_device_source_link.last_seen_at` and `missing_since` from the Ninja
+# pull, filtered `WHERE s.name = 'Ninja'`, which meant those two columns were
+# only ever maintained for one of four sources. Measured before removal: 209
+# links reported an agent present that had stopped reporting 6-23 days earlier
+# (SentinelOne 137, LogMeIn 65, ScreenConnect 7, Ninja 0), and `last_seen_at`
+# was frozen on essentially every non-Ninja link.
+#
+# Migration 0121 retires the table in favour of a view over
+# `entity_source_links`, which
+# `operations.sync_entity_source_links_from_observations()` maintains from
+# observation evidence for every source. `_write_ninja_observations` below
+# already emits that evidence, so this function has no replacement here.
 
 
 def _sync_operations_device_exemptions(cur: object) -> None:
@@ -282,7 +254,7 @@ def _sync_operations_device_exemptions(cur: object) -> None:
         """
         WITH ninja_state AS (
             -- One row per OPS device — collapse across multiple Ninja
-            -- device_links per device (legal per BLUEPRINT E.3). If ANY
+            -- source links per device (legal per BLUEPRINT E.3). If ANY
             -- Ninja link on the device carries the marker, treat it as
             -- present.
             SELECT dl.tenant_id, dl.device_id AS ops_device_id,
@@ -291,7 +263,7 @@ def _sync_operations_device_exemptions(cur: object) -> None:
                      OR COALESCE(p.name, '')  ILIKE '%%no av%%'
                      OR COALESCE(rp.name, '') ILIKE '%%no av%%'
                    ) AS marker_present
-            FROM operations.device_links dl
+            FROM operations.v_device_source_link dl
             JOIN operations.sources s ON s.id = dl.source_id AND s.name = 'Ninja'
             JOIN ninja_core.devices nd ON nd.id::text = dl.external_id
             LEFT JOIN ninja_core.policies p  ON p.id  = nd.policy_id
@@ -337,7 +309,7 @@ def _sync_operations_device_exemptions(cur: object) -> None:
         """
         WITH ninja_state AS (
             -- One row per OPS device — collapse across multiple Ninja
-            -- device_links per device (legal per BLUEPRINT E.3). If ANY
+            -- source links per device (legal per BLUEPRINT E.3). If ANY
             -- Ninja link on the device carries the marker, treat it as
             -- present.
             SELECT dl.tenant_id, dl.device_id AS ops_device_id,
@@ -346,7 +318,7 @@ def _sync_operations_device_exemptions(cur: object) -> None:
                      OR COALESCE(p.name, '')  ILIKE '%%no av%%'
                      OR COALESCE(rp.name, '') ILIKE '%%no av%%'
                    ) AS marker_present
-            FROM operations.device_links dl
+            FROM operations.v_device_source_link dl
             JOIN operations.sources s ON s.id = dl.source_id AND s.name = 'Ninja'
             JOIN ninja_core.devices nd ON nd.id::text = dl.external_id
             LEFT JOIN ninja_core.policies p  ON p.id  = nd.policy_id
@@ -439,7 +411,7 @@ def _write_ninja_observations(
             cur.execute(
                 """
                 SELECT dl.external_id, dl.device_id, d.client_id
-                FROM operations.device_links dl
+                FROM operations.v_device_source_link dl
                 JOIN operations.devices d
                      ON d.id = dl.device_id AND d.tenant_id = dl.tenant_id
                 JOIN operations.sources s

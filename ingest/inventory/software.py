@@ -31,7 +31,7 @@ def run(client: NinjaClient, df: str | None = None) -> int:
         batch_id = uuid.uuid4()
         device_map = _load_device_map()
         if not device_map:
-            log.warning("inventory.software: no devices in operations.device_links — skipping")
+            log.warning("inventory.software: no devices in operations.v_device_source_link — skipping")
             stats["rows_upserted"] = 0
             return 0
 
@@ -120,7 +120,7 @@ def _load_device_map() -> dict[str, tuple[uuid.UUID, uuid.UUID]]:
         cur.execute(
             """
             SELECT dl.external_id, dl.device_id, d.client_id
-              FROM operations.device_links dl
+              FROM operations.v_device_source_link dl
               JOIN operations.devices d ON d.id = dl.device_id
               JOIN operations.sources s ON s.id = dl.source_id AND s.name = 'Ninja'
              WHERE dl.tenant_id = %s AND d.deleted_at IS NULL

@@ -16,7 +16,7 @@ from .models import (
     CollectorInstance,
     DeadLetterObservation,
     Device,
-    DeviceLink,
+    DeviceSourceLink,
     Entity,
     EntityAttributeClaimEvidence,
     EntityAttributeClaimStorageStatus,
@@ -392,9 +392,26 @@ class ClientPolicyAdmin(admin.ModelAdmin):
     search_fields = ("client__display_name", "category")
 
 
-class DeviceLinkInline(admin.TabularInline):
-    model = DeviceLink
+# `v_device_source_link` is a read-only view over `entity_source_links`
+# (migration 0121), so both admin surfaces below are read-only. Postgres would
+# reject a write anyway; declaring it here means the admin renders without
+# add/change/delete controls instead of offering forms that fail on save.
+class DeviceSourceLinkInline(admin.TabularInline):
+    model = DeviceSourceLink
     extra = 0
+    can_delete = False
+    fields = (
+        "source", "external_id", "external_namespace",
+        "first_seen_at", "last_seen_at", "missing_since",
+        "match_method", "match_confidence",
+    )
+    readonly_fields = fields
+
+    def has_add_permission(self, request, obj=None) -> bool:
+        return False
+
+    def has_change_permission(self, request, obj=None) -> bool:
+        return False
 
 
 @admin.register(Device)
@@ -409,14 +426,26 @@ class DeviceAdmin(admin.ModelAdmin):
     )
     list_filter = ("tenant", "device_type", "deleted_at")
     search_fields = ("canonical_hostname", "canonical_serial", "canonical_vm_uuid")
-    inlines = (DeviceLinkInline,)
+    inlines = (DeviceSourceLinkInline,)
 
 
-@admin.register(DeviceLink)
-class DeviceLinkAdmin(admin.ModelAdmin):
-    list_display = ("device", "source", "external_id", "external_name", "tenant", "version")
-    list_filter = ("tenant", "source")
-    search_fields = ("device__canonical_hostname", "external_id", "external_name")
+@admin.register(DeviceSourceLink)
+class DeviceSourceLinkAdmin(admin.ModelAdmin):
+    list_display = (
+        "device", "source", "external_id", "external_namespace",
+        "last_seen_at", "missing_since",
+    )
+    list_filter = ("source", "external_namespace")
+    search_fields = ("device__canonical_hostname", "external_id")
+
+    def has_add_permission(self, request) -> bool:
+        return False
+
+    def has_change_permission(self, request, obj=None) -> bool:
+        return False
+
+    def has_delete_permission(self, request, obj=None) -> bool:
+        return False
 
 
 class ClientUserLinkInline(admin.TabularInline):

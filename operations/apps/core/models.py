@@ -646,38 +646,42 @@ class Device(UUIDTenantScopedModel):
         return self.canonical_hostname
 
 
-class DeviceLink(UUIDTenantScopedModel):
-    class MatchMethod(models.TextChoices):
-        SERIAL = "serial", "Serial"
-        VM_UUID = "vm_uuid", "VM UUID"
-        HOSTNAME_STRICT = "hostname_strict", "Hostname strict"
-        HOSTNAME_LOOSE = "hostname_loose", "Hostname loose"
-        MANUAL = "manual", "Manual"
-        PROMOTED = "promoted", "Promoted"
-        BOOTSTRAP = "bootstrap", "Bootstrap"
+class DeviceSourceLink(models.Model):
+    """Read-only view of the device rows of ``entity_source_links``.
 
-    device = models.ForeignKey(Device, on_delete=models.CASCADE, related_name="links")
-    source = models.ForeignKey(Source, on_delete=models.PROTECT, related_name="device_links")
+    Replaces the retired ``DeviceLink``/``device_links`` table (migration
+    0121). Attachment is derived from observation evidence by
+    ``operations.sync_entity_source_links_from_observations()``, so there is
+    nothing here to write: ``managed = False`` keeps Django out of the schema,
+    and Postgres refuses writes anyway because the underlying relation is a
+    view the app has only SELECT on.
+
+    ``id``, ``match_method`` and ``match_confidence`` are the real underlying
+    ``entity_source_links`` values rather than the placeholders an aggregating
+    compatibility layer would have had to invent.
+    """
+
+    id = models.UUIDField(primary_key=True)
+    tenant = models.ForeignKey(
+        "Tenant", on_delete=models.DO_NOTHING, db_column="tenant_id", related_name="+"
+    )
+    device = models.ForeignKey(
+        Device, on_delete=models.DO_NOTHING, db_column="device_id", related_name="source_links"
+    )
+    source = models.ForeignKey(
+        Source, on_delete=models.DO_NOTHING, db_column="source_id", related_name="source_links"
+    )
     external_id = models.CharField(max_length=240)
-    external_name = models.CharField(max_length=240, blank=True)
+    external_namespace = models.CharField(max_length=120)
     first_seen_at = models.DateTimeField(null=True, blank=True)
     last_seen_at = models.DateTimeField(null=True, blank=True)
     missing_since = models.DateTimeField(null=True, blank=True)
-    match_method = models.CharField(
-        max_length=32,
-        choices=MatchMethod.choices,
-        default=MatchMethod.BOOTSTRAP,
-    )
-    match_confidence = models.DecimalField(max_digits=4, decimal_places=3, default=1)
+    match_method = models.CharField(max_length=32)
+    match_confidence = models.DecimalField(max_digits=4, decimal_places=3)
 
     class Meta:
-        db_table = "device_links"
-        constraints = (
-            models.UniqueConstraint(
-                fields=("tenant", "source", "external_id"),
-                name="uq_device_links_tenant_source_external_id",
-            ),
-        )
+        managed = False
+        db_table = "v_device_source_link"
 
     def __str__(self) -> str:
         return f"{self.source_id}:{self.external_id}"

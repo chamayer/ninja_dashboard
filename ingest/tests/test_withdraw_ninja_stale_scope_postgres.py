@@ -58,12 +58,6 @@ def test_withdrawal_is_pinned_atomic_and_idempotent(postgres_connection) -> None
                 id uuid PRIMARY KEY,
                 tenant_id bigint NOT NULL
             );
-            CREATE TABLE operations.device_links (
-                tenant_id bigint NOT NULL,
-                source_id bigint NOT NULL,
-                external_id text NOT NULL,
-                device_id uuid NOT NULL
-            );
             CREATE TABLE ninja_core.devices (
                 id integer PRIMARY KEY,
                 is_current boolean NOT NULL,
@@ -127,10 +121,6 @@ def test_withdrawal_is_pinned_atomic_and_idempotent(postgres_connection) -> None
         )
         cursor.execute(
             "INSERT INTO operations.devices VALUES (%s, 1)",
-            (canonical_device_id,),
-        )
-        cursor.execute(
-            "INSERT INTO operations.device_links VALUES (1, 1, '42', %s)",
             (canonical_device_id,),
         )
         cursor.execute(
@@ -238,12 +228,15 @@ def test_withdrawal_is_pinned_atomic_and_idempotent(postgres_connection) -> None
         )
         cursor.execute(
             """
+            -- The source-link stand-in and its count were dropped with
+            -- migration 0121. withdraw_ninja_stale_scope never referenced
+            -- that relation, so the assertion was vacuous rather than a
+            -- guarantee about attachment.
             SELECT (SELECT COUNT(*) FROM operations.devices),
-                   (SELECT COUNT(*) FROM operations.device_links),
                    (SELECT COUNT(*) FROM operations.source_record_seen_daily)
             """
         )
-        assert cursor.fetchone() == (1, 1, 1)
+        assert cursor.fetchone() == (1, 1)
 
         repeated = process(
             cursor,

@@ -1616,7 +1616,7 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
         client__slug=org_slug,
         deleted_at__isnull=True,
     )
-    links = list(device.links.select_related("source").order_by("source__name"))
+    links = list(device.source_links.select_related("source").order_by("source__name"))
 
     active_findings = list(
         Finding.objects.filter(
@@ -1664,7 +1664,7 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
 
             # Patching context: effective scope + session state from
             # v_device (Track O), plus per-device patch signal from
-            # ninja_patches.device_patch_signal joined via device_links.
+            # ninja_patches.device_patch_signal joined via the source link.
             cur.execute(
                 """
                 SELECT effective_patching_scope,
@@ -1705,7 +1705,7 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
                     SELECT dps.ever_installed,
                            dps.last_seen_at,
                            dps.install_attempts
-                    FROM operations.device_links dl
+                    FROM operations.v_device_source_link dl
                     JOIN operations.sources s
                       ON s.id = dl.source_id AND s.name = 'Ninja'
                     JOIN ninja_patches.device_patch_signal dps
@@ -3705,7 +3705,7 @@ def software_publisher_detail(request: HttpRequest, publisher: str) -> HttpRespo
 # User-risk view — per-user rollup of software checklist items on the
 # device that user last logged into. Anchored on Ninja's
 # lastLoggedInUser field, resolved via device_snapshots latest-per-device
-# and canonical device_links. Read-only.
+# and canonical source links. Read-only.
 # ─────────────────────────────────────────────────────────────────────
 
 
@@ -3742,7 +3742,7 @@ def software_user_risk(request: HttpRequest) -> HttpResponse:
         device_user AS (
             SELECT DISTINCT dl.device_id AS ops_device_id, lu.last_user, lu.snapshot_at
             FROM latest_user lu
-            JOIN operations.device_links dl
+            JOIN operations.v_device_source_link dl
               ON dl.external_id ~ '^\\d+$'
              AND dl.external_id::integer = lu.ninja_device_id
             JOIN operations.sources s ON s.id = dl.source_id
@@ -5017,7 +5017,7 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
             WHERE {posture_where_sql}
         ), ninja_links AS (
             SELECT DISTINCT dl.device_id, dl.external_id::integer AS ninja_device_id
-            FROM operations.device_links dl
+            FROM operations.v_device_source_link dl
             JOIN operations.sources s ON s.id = dl.source_id
             WHERE dl.tenant_id = 1 AND LOWER(s.name) = 'ninja'
               AND dl.external_id ~ '^\\d+$'
@@ -5524,7 +5524,7 @@ def patch_evidence_page(request: HttpRequest) -> HttpResponse:
                 lio.status                 AS last_install_status,
                 lio.installed_at           AS last_install_at
             FROM ninja_patches.current_patch_state cps
-            JOIN operations.device_links dl
+            JOIN operations.v_device_source_link dl
               ON dl.external_id = cps.device_id::text
              AND dl.source_id = (SELECT id FROM operations.sources WHERE name = 'Ninja' LIMIT 1)
              AND dl.tenant_id = 1
@@ -5645,7 +5645,7 @@ def patch_trends_page(request: HttpRequest) -> HttpResponse:
     if client_filter:
         # Constrain by the client this Ninja device_id resolves to.
         where.append(
-            "EXISTS (SELECT 1 FROM operations.device_links dl "
+            "EXISTS (SELECT 1 FROM operations.v_device_source_link dl "
             "JOIN operations.devices d ON d.id = dl.device_id "
             "JOIN operations.clients c ON c.id = d.client_id "
             "WHERE dl.tenant_id = 1 "
@@ -5790,7 +5790,7 @@ def patch_activity_search_page(request: HttpRequest) -> HttpResponse:
                 c.slug                   AS client_slug,
                 c.display_name           AS client_name
             FROM ninja_patches.patch_facts pf
-            JOIN operations.device_links dl
+            JOIN operations.v_device_source_link dl
               ON dl.external_id = pf.device_id::text
              AND dl.source_id = (SELECT id FROM operations.sources WHERE name='Ninja' LIMIT 1)
              AND dl.tenant_id = 1
@@ -5831,7 +5831,7 @@ def patch_activity_search_page(request: HttpRequest) -> HttpResponse:
                        d.id AS device_id, d.canonical_hostname AS hostname,
                        c.slug AS client_slug, c.display_name AS client_name
                 FROM ninja_activities.activities a
-                JOIN operations.device_links dl
+                JOIN operations.v_device_source_link dl
                   ON dl.external_id = a.device_id::text
                  AND dl.tenant_id = 1
                 JOIN operations.sources s
@@ -7524,31 +7524,25 @@ def _merge_devices(cur, survivor_id, loser_id: str, reason: str) -> dict:
     """Cascade merge: re-point every reference from loser → survivor,
     tombstone loser. Returns a summary dict of what was moved."""
     counts = {}
-    # 1. device_links — repoint if the survivor doesn't already have a
-    #    link with the same (source, external_id). If it does, tombstone
-    #    the loser's link.
-    cur.execute(
-        """
-        UPDATE operations.device_links dl
-        SET device_id = %s
-        WHERE dl.tenant_id = 1
-          AND dl.device_id = %s
-          AND NOT EXISTS(
-              SELECT 1 FROM operations.device_links dl2
-              WHERE dl2.tenant_id = dl.tenant_id
-                AND dl2.source_id = dl.source_id
-                AND dl2.external_id = dl.external_id
-                AND dl2.device_id = %s
-          )
-        """,
-        (survivor_id, loser_id, survivor_id),
-    )
-    counts["device_links_moved"] = cur.rowcount
-    cur.execute(
-        "DELETE FROM operations.device_links WHERE tenant_id=1 AND device_id=%s",
-        (loser_id,),
-    )
-    counts["device_links_deleted_dupes"] = cur.rowcount
+    # 1. Source links are no longer repointed here.
+    #
+    #    This step used to UPDATE and DELETE `operations.device_links`, which
+    #    migration 0121 retired. Writing `entity_source_links` in its place was
+    #    considered and rejected: that table is derived state, maintained by
+    #    sync_entity_source_links_from_observations(), which also closes and
+    #    reopens the matching `entity_source_link_history` interval. A bare
+    #    entity_id UPDATE here would repoint the current row and leave the open
+    #    history interval attributing the link to the tombstoned device, losing
+    #    the record of when and why attachment moved. Reproducing that SCD-2
+    #    handling here would be a second copy of the logic, and calling the sync
+    #    function directly would mean granting the web app EXECUTE on a
+    #    SECURITY DEFINER function owned by a superuser.
+    #
+    #    Moving the observations in step 2 is the authoritative action: the
+    #    links are derived from exactly that evidence, so the next sync
+    #    repoints them with correct history. This is the ADR-0012 rule the whole
+    #    retirement enforces — a producer moves evidence, derived state follows.
+    counts["source_links_converge_on_next_sync"] = True
 
     # 2. entity_observations
     cur.execute(
@@ -7665,9 +7659,10 @@ def device_merge(
             request,
             f"Merged {loser.canonical_hostname} into "
             f"{survivor.canonical_hostname}. "
-            f"Moved {counts.get('device_links_moved', 0)} links, "
-            f"{counts.get('observations_moved', 0)} observations, "
-            f"{counts.get('findings_moved', 0)} findings.",
+            f"Moved {counts.get('observations_moved', 0)} observations and "
+            f"{counts.get('findings_moved', 0)} findings. "
+            "Source links follow the observations and update on the next "
+            "collection cycle.",
         )
         return redirect(
             "device_detail",
@@ -7681,7 +7676,7 @@ def device_merge(
         cur.execute("SET LOCAL operations.tenant_id = 1")
         cur.execute(
             """
-            SELECT dl.device_id FROM operations.device_links dl
+            SELECT dl.device_id FROM operations.v_device_source_link dl
             JOIN operations.sources s ON s.id = dl.source_id AND s.name = 'Ninja'
             WHERE dl.tenant_id = 1 AND dl.device_id IN (%s, %s)
             """,

@@ -52,9 +52,10 @@
     </div>
     <h1 class="dm-title">Merge devices</h1>
     <p class="dm-lede">
-        Pick the survivor. All device_links, entity_observations, and
-        findings from the loser transfer to the survivor. The loser is
-        tombstoned (soft-deleted, still queryable).
+        Pick the survivor. The loser's observations and findings transfer to
+        the survivor, and the loser is tombstoned (soft-deleted, still
+        queryable). Source links are derived from the observations, so they
+        move with them on the next collection cycle.
     </p>
 
     <form method="post" id="dm-form">
@@ -77,7 +78,7 @@
                 <div class="dm-attr"><span class="lbl">Lifecycle</span><span class="val">{{ dev.get_lifecycle_status_display }}</span></div>
                 <div class="dm-attr"><span class="lbl">Created</span><span class="val">{{ dev.created_at|date:"Y-m-d H:i" }}</span></div>
                 <div class="dm-attr"><span class="lbl">Sources</span><span class="val dm-src-badges">
-                    {% for link in dev.links.all %}<span class="dm-src-badge">{{ link.source.name }}</span>{% empty %}<span class="lbl">—</span>{% endfor %}
+                    {% for link in dev.source_links.all %}<span class="dm-src-badge">{{ link.source.name }}</span>{% empty %}<span class="lbl">—</span>{% endfor %}
                 </span></div>
                 <div class="dm-attr" style="margin-top:0.5rem;">
                     <a href="{% url 'device_detail' org_slug=dev.client.slug device_id=dev.id %}" style="font-size:0.8rem;">Open device detail →</a>

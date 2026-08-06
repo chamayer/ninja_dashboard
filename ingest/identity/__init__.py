@@ -3,7 +3,7 @@
 Owns the definition of which observation streams constitute per-device
 identity evidence — now read from `operations.entity_types`, not hardcoded.
 
-Only these may be matched, linked into device_links, or promoted into a new
+Only these may be matched, attached to a device, or promoted into a new
 Device. Documentation streams (`cmdb.*`) carry no independent identity: a CMDB
 card is a pointer to another vendor's record and its asset name is
 documentation, not a hostname. Letting such rows reach the resolver would

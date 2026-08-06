@@ -6,9 +6,61 @@ Track: **ADR-0010 generic entity, claim, relationship, and admin completion**
 one (entity anchors required) deployed and verified. Deployed head `3c7d9a1` on
 both remotes; all containers healthy; working tree clean.
 
-**Next task: retire `device_links`.** The replacement rule is verified against
-production and recorded in `.work/backlog.md` under "Retire `device_links` —
-mapping verified, ready to execute (E6)". It needs execution, not discovery.
+**Complete (local, not yet deployed): retire `device_links` (E6).**
+Release `0.111.0`. Validated end to end against production in rolled-back
+transactions; awaiting commit and push approval.
+
+### device_links retirement (E6) — done
+
+`operations.device_links` is gone. `operations.v_device_source_link` over
+`entity_source_links` replaces it, maintained for every source by
+`sync_entity_source_links_from_observations()`. Attachment authority is
+observations, per ADR-0012. No compatibility alias remains — all readers moved
+in the same release.
+
+**Six writers removed**, not the five the backlog listed. The sixth was
+`views._merge_devices`, which did `UPDATE` + `DELETE`. It now moves only the
+observations; the links follow on the next sync with history intervals
+correctly closed. Writing `entity_source_links` directly would have orphaned
+the open `entity_source_link_history` row.
+
+**The ordering trap was in two places**, not one: the resolver promotion guard
+and `fast_path` step 1 both read the table inside the transaction that wrote
+it. Both now read `entity_observation_current.device_id`, which the same
+transaction writes — zero disagreements across all four sources in production.
+Both also gained an `entity_type` filter the old unique key could not express.
+
+**A compatibility view was built first and rejected.** It required inventing
+`match_method` / `match_confidence` / `external_name` constants and a synthetic
+primary key, and it was a ~365x performance regression: building
+`device_patching_scope_current` took 247 ms against the original table, >90 s
+through the aggregating view, and 278 ms through the flat view that shipped.
+The aggregate planned *identically* to the fast form — same nodes, same cost
+estimate — so only execution against production exposed it.
+
+The aggregate turned out to be unnecessary. Ninja is the only source with two
+namespaces, and `device-health` is the health-poll companion of the same
+records (already excluded from presence by migration 0098). Excluding it gives
+exactly one row per key: verified identical row sets (14,286 each, zero either
+side), zero duplicate keys, zero disagreement on `missing_since` presence and
+`last_seen_at`.
+
+Defect fixed, measured after cutover: stale-but-live links are **0 across all
+four sources** (was 8,316), and `missing_since` is maintained everywhere —
+LogMeIn 65, Ninja 392, ScreenConnect 7, SentinelOne 138.
+
+Validation: `manage.py check` clean, `makemigrations --check` clean, 74 ingest
+tests + 42 Operations tests pass, Ruff unchanged at 67 findings (zero
+introduced). Full migration dry-run against production completed in **567 ms**
+with its parity gate reporting `5298 rows, 0 differences`; `device_links`
+absent, `v_device`/matview restored with exact owners, options and ACLs, and
+`operations_app` holding SELECT only on the new view.
+
+Operational note for deploy: the migration holds ACCESS EXCLUSIVE on the
+dropped relations for ~0.6 s. Run any production dry-run with server-side
+`statement_timeout` **and** `idle_in_transaction_session_timeout` — a killed
+client does not stop the server-side transaction, and one such orphan blocked
+ingest for ~3 minutes during this session until it was cancelled.
 
 ### Deployed this session
 
