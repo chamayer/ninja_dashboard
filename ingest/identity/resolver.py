@@ -354,12 +354,16 @@ def _maybe_create_candidate(
 ) -> None:
     """If multiple devices match the hostname, record the conflict.
 
-    ADR-0005 slice 3: the operator-visible surface is a standard
-    `identity_conflict` Finding in `operations.findings`. The legacy
-    `operations.identity_candidates` row is written during the
-    transition (its admin UI has live consumers); retirement of the
-    side table is a separate destructive track — see
-    `operations/.work/backlog.md`.
+    Two artefacts, deliberately: an `identity_conflict` Finding is the
+    *notification* that a collision exists (ADR-0005 slice 3), and a
+    `merge_candidates` row is the *reviewable proposal* carrying the member
+    snapshots, match reason and confidence an operator needs to decide.
+
+    The proposal half had never been written. `operations.merge_candidates`
+    sat at 0 rows with a fully built review surface behind it — queue page,
+    navigation entry, admin tab badge, admin overview metric and
+    client-directory column — none of which could ever show anything. The
+    missing piece was only this producer.
     """
     cur.execute(
         """
@@ -415,6 +419,67 @@ def _maybe_create_candidate(
                 f"identity_conflict:{norm}",
             ),
         )
+
+    # The reviewable proposal. `canonical_key` matches the finding's
+    # condition_key so the two surfaces address the same collision, and the
+    # unique index on it makes repeat observations refresh rather than
+    # duplicate. Members are recorded as snapshots so the queue can render the
+    # comparison without re-deriving it from live rows that may since have
+    # changed.
+    cur.execute(
+        """
+        SELECT id, canonical_hostname, canonical_serial, canonical_vm_uuid,
+               device_type, device_role, os_name, client_id, created_at
+        FROM operations.devices
+        WHERE tenant_id = %s AND id = ANY(%s)
+        ORDER BY created_at
+        """,
+        (TENANT_ID, candidate_ids),
+    )
+    members = [
+        {
+            "device_id": str(row[0]),
+            "hostname": row[1],
+            "serial": row[2] or "",
+            "vm_uuid": row[3] or "",
+            "device_type": row[4],
+            "device_role": row[5],
+            "os_name": row[6] or "",
+            "created_at": row[8].isoformat() if row[8] else None,
+        }
+        for row in cur.fetchall()
+    ]
+    if not members:
+        return
+
+    cur.execute(
+        """
+        INSERT INTO operations.merge_candidates
+            (id, version, tenant_id, client_id, entity_type, canonical_key,
+             member_snapshots, member_observation_ids, match_reason,
+             confidence, status)
+        VALUES (gen_random_uuid(), 1, %s, %s, 'device', %s, %s, %s, %s, %s,
+                'open')
+        ON CONFLICT (tenant_id, canonical_key)
+        WHERE status = 'open'
+        DO UPDATE SET
+            member_snapshots = EXCLUDED.member_snapshots,
+            member_observation_ids = EXCLUDED.member_observation_ids,
+            match_reason = EXCLUDED.match_reason
+        """,
+        (
+            TENANT_ID,
+            client_id,
+            f"identity_conflict:{norm}",
+            Json(members),
+            Json([str(obs_id)]),
+            (
+                f"{len(members)} devices share the normalized hostname "
+                f"'{norm}' within one client"
+            ),
+            0.9000,
+        ),
+    )
 
 
 def _collapse_mac_variants(

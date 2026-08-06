@@ -3583,6 +3583,16 @@ class MergeCandidate(UUIDTenantScopedModel):
 
     class Meta:
         db_table = "merge_candidates"
+        constraints = (
+            # One open proposal per collision. The resolver upserts on this,
+            # so repeat detections refresh the snapshots rather than piling up
+            # duplicate rows for the same hostname clash.
+            models.UniqueConstraint(
+                fields=("tenant", "canonical_key"),
+                condition=Q(status="open"),
+                name="uq_merge_candidates_open_canonical_key",
+            ),
+        )
         indexes = (
             models.Index(
                 fields=("tenant", "client", "entity_type", "status"),

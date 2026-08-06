@@ -2,6 +2,28 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.114.0] — 2026-08-06 — Merge proposals are produced
+
+### Added
+
+- **`operations.merge_candidates` finally has a producer.** The review surface
+  was fully built — queue page, navigation entry, admin tab badge, admin
+  overview metric, client-directory column and Django admin — but nothing ever
+  wrote a row, so all of it was permanently empty.
+  `resolver._maybe_create_candidate` now writes the proposal alongside the
+  `identity_conflict` finding it already emitted, carrying member snapshots,
+  match reason and confidence. The finding remains the notification that a
+  collision exists; the candidate is the reviewable decision.
+- Migration 0125 adds a partial unique index on
+  `(tenant_id, canonical_key) WHERE status = 'open'`, so repeat detections of
+  the same hostname collision refresh one proposal rather than accumulating
+  duplicates. `canonical_key` matches the finding's `condition_key`, so both
+  surfaces address the same collision.
+- Measured against production: 38 hostname collisions exist across 8 clients,
+  which is the ceiling. The resolver emits while processing unresolved
+  observations, so the queue fills toward that figure rather than arriving at
+  it at once.
+
 ## [0.113.0] — 2026-08-06 — Client renames become actionable
 
 ### Added
