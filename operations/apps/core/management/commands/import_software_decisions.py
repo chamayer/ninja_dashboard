@@ -26,6 +26,10 @@ straight into the container over ssh without ever landing on the host:
 
 Dry run by default: it reports exactly what would change and writes nothing.
 
+Sets the tenant GUC before it queries: `operations.users` and
+`software_decisions` carry forced RLS, and a management command runs outside
+the request cycle where middleware would normally set it.
+
 Idempotent and non-destructive. Global-scope uniqueness is
 `(tenant, canonical_name)` and `(tenant, publisher)`, so a re-run updates
 rather than duplicates. A row an operator has since changed in the UI is never
@@ -42,7 +46,7 @@ from pathlib import Path
 
 from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand, CommandError
-from django.db import transaction
+from django.db import connection, transaction
 from django.utils import timezone
 
 from apps.core.models import SoftwareDecision
@@ -83,8 +87,14 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options) -> None:
         text = self._read(options["file"])
-        actor = self._actor()
         tenant_id = options["tenant"]
+        # operations.users and software_decisions both carry forced RLS with a
+        # tenant policy. A management command runs outside the request cycle,
+        # so nothing has set the GUC and every query returns zero rows — which
+        # surfaces as "no user exists to attribute the decisions to" rather
+        # than as a permission error.
+        self._set_tenant(tenant_id)
+        actor = self._actor()
 
         parsed, unmapped = self._parse(text)
         plan = self._plan(parsed, tenant_id)
@@ -114,6 +124,10 @@ class Command(BaseCommand):
                 f"untouched={plan['unchanged'] + plan['operator_owned']}"
             )
         )
+
+    def _set_tenant(self, tenant_id: int) -> None:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT set_config('operations.tenant_id', %s, false)", [str(tenant_id)])
 
     def _read(self, source: str) -> str:
         if source == "-":
