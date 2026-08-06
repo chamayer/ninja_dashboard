@@ -196,3 +196,53 @@ written down.
 States the principle underlying ADR-0002, ADR-0005, ADR-0006, ADR-0010 and
 ADR-0011; supersedes none of them. Supersedes the `DESIGN.md` low-churn
 exception for source-derived attributes on canonical tables.
+
+## Amendment — 2026-08-06: merging is not a universal entity operation
+
+Making the entity model generic invites the assumption that every operation on
+it generalises too. Merging does not, and the reason is a property of the
+identity model rather than of the abstraction.
+
+**Merge decomposes into three layers, and only the middle one generalises.**
+
+*Detection* is class-specific and shares no predicate: devices duplicate on a
+normalized hostname within a client, software titles on title plus publisher,
+users on email. There is nothing to abstract.
+
+*Review and decision* is genuinely generic — a proposal listing members, the
+evidence and confidence behind it, a status, an operator decision, an audit
+trail. `merge_candidates` carries `entity_type` and `canonical_key` for exactly
+this. It is also the layer currently **not** unified: device merges live in
+`operations.merge_candidates` while software merges live in
+`ninja_inventory.v_merge_candidates_current`, a different schema with different
+operator actions. One decision, two surfaces, neither authoritative.
+
+*Execution* is class-specific and asymmetric. Merging two devices repoints
+observations, findings and software rows. Merging two clients would repoint
+**20+ referencing tables including `devices` itself**, so it cascades into
+every device beneath the client. Nothing about those cascades is shared.
+
+**Whether merge is needed at all depends on how identity is established.**
+
+- **Learned** identities need it. The resolver mints devices from observations,
+  so two records for one machine is a normal outcome — 38 open collisions
+  measured 2026-08-06.
+- **Accepted** identities largely do not. Track C forbids auto-minting clients:
+  every new name becomes a candidate an operator must accept, and the
+  candidate queue's *map* action attaches a differently-named source group to
+  an existing client before a second client can exist. Measured 2026-08-06:
+  **zero** duplicate clients across 76.
+
+So `merge_candidates` being device-only in practice is a consequence, not an
+oversight, and the generic `entity_type` column is correct rather than
+aspirational — software belongs in it, clients rarely will.
+
+### Position
+
+- Generalise the **review contract**; keep detection and execution per class.
+- Do not build merge for an entity class before a duplicate exists in it.
+  Client merging is parked on this basis: the preventive workflow is working,
+  and a remedial cascade across 20+ tables is the riskiest change in the schema
+  to build against a hypothetical.
+- Consolidating software merge proposals into `merge_candidates` is the
+  outstanding item in this area, not client merging.

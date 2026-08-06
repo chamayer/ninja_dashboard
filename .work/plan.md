@@ -177,7 +177,7 @@ enforcement, not an interim one.
 | relation | rows | code readers | note |
 | --- | --- | --- | --- |
 | `client_links` | 320 | 12 | **exact twin of the retired `device_links`.** `entity_source_links` holds 320 `client` rows — 1:1. |
-| `client_candidates` | 9 (8 open) | 6 | **not a swap.** Name-keyed: 8 normalized names awaiting acceptance. `entity_candidates` for class `client` is identity-keyed: 10 `observed_only` rows (7 LogMeIn groups, 3 SentinelOne sites). Retiring it moves the operator from accepting a name once to accepting each source identity, so it needs a queue that groups generic candidates by observed name — UI work, not a repoint. |
+| `client_candidates` | 9 (8 open) | 6 | **keep — not debt.** The preventive workflow that makes client merging unnecessary: its *map* action attaches a differently-named source group to an existing client before a duplicate can be created. Zero duplicate clients across 76 confirms it works. See the ADR-0012 amendment. |
 | `merge_candidates` | 0 | 3 | **surface with no producer** — nav badge, workspace section and admin, but nothing writes it. See backlog; decide whether the feature is wanted before dropping. |
 | `source_bindings` | 5 | 28 | duplicates `source_instances` (also 5); most readers, least urgent |
 | `ninja_device_detail_current_shadow` | 5,499 | 6 | **keep — not debt.** Adapts `entity_observation_current.canonical_data` JSON into a typed columnar contract, which is the same pattern as `v_device_source_link`. Retiring it would push the JSON extraction into 6 readers. |
@@ -187,11 +187,18 @@ enforcement, not an interim one.
 | `source_health_current_legacy` | 4 | 0 | dead matview, superseded by `source_health_current` (5 rows) — dropped in 0124 |
 | `client_user_links` | 0 | 2 | **not an E6 table.** Data structure for the unbuilt Users capability — see below. |
 
-**E6's table list resolves to two items, not eight.** `device_links` and
+**E6's table list is closed — none of the eight was compatibility debt to
+retire beyond the two link tables and two dead matviews already done.** `device_links` and
 `client_links` are retired; the two dead matviews are dropped;
 `merge_candidates` was a missing producer, now fixed; the three shadow views
-and `client_user_links` are not compatibility debt at all. What genuinely
-remains is `client_candidates` and `source_bindings`.
+and `client_user_links` are not compatibility debt at all. `client_candidates` and `source_bindings` both stay: the
+first is the preventive client workflow (ADR-0012 amendment), the second
+carries the collector and schedule dimension that `source_instances` does not.
+
+**E6 is complete.** Entity anchors required (`322d2a4`), competing attachment
+authority retired (`device_links` 0.111.0, `client_links` 0.112.0),
+compatibility columns closed by ratified decision, and the compatibility table
+list resolved.
 
 **Why the shadow views stay.** They were listed for retirement because the
 name implies a temporary duplicate. They are not: each adapts the generic
