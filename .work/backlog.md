@@ -251,37 +251,44 @@ true for the candidate, which closes when its collision stops holding.
 
 ## Software ecosystem — work defined by ADR-0015
 
-Ordered; each step depends on the one before.
+Ordered; each step depends on the one before. ADR-0015 applies ADR-0012 §5
+(`publisher -> product -> software+version`, installation as a relationship)
+and the glossary's identity test to the software domain.
 
 1. **Import the legacy decision corpus.** 418 decisions in
    `inventory-scripts/SW Inventory/output/decisions_global.csv` — 303
-   title-scope, 115 publisher-scope — against 3 in production. Measured: this
-   decides **814 of 1,867** open `whitelist_suggestion` (title, publisher)
-   pairs, 44%, with publisher decisions carrying 740 of them.
-   `SoftwareDecision` already models every value and scope; this is an import,
-   not a schema change. Note the corpus has two spellings for publisher
-   approval — `Approve` and `Approve Publisher`, both with `Type=publisher` —
-   which both map to `approve_publisher`.
+   title-scope, 115 publisher-scope — against 3 in production. Measured: decides
+   **814 of 1,867** open `whitelist_suggestion` (title, publisher) pairs, 44%,
+   publisher decisions carrying 740 of them. Forward-compatible with §1, since
+   title and publisher scopes map onto `product` and `publisher`. The corpus has
+   two spellings for publisher approval — `Approve` and `Approve Publisher`,
+   both `Type=publisher` — mapping to `approve_publisher`.
 2. **Split trust out of `categories`.** Move the 5 `whitelist` and 7
-   `trusted_publisher` entries into `software_decisions` as approvals, and
-   change the suppression conditions to test *decided* rather than *labelled*.
-   Functional categories (`av`, `remote_access`, `rmm`) stay as the coverage
-   mechanism.
-3. **Move title facts to a title subject.** Five of nine types —
-   `whitelist_suggestion`, `vulnerable_software`, `eol_runtime`,
-   `suspicious_name`, `known_malicious_hint` — collapse 137,534 rows to 1,782.
-   `install_path_suspicious` stays per-installation;
-   `unauthorized_remote_access` and `unauthorized_av` stay per-device.
-   Existing rows must be closed and re-emitted: operator-visible, own approval.
-4. **Resolve `software_catalog.eol_date`.** Populated on 0 of 52 rows while
-   `eol_runtime` runs off 9 regex rules. Populate it or drop it.
-5. **Schedule the classifier.** It has run three times ever, last 2026-07-27,
-   and has never had a scheduled job. Must come last: scheduling before step 3
-   regenerates 134,861+ rows and undoes 0.115.0's page-load work.
+   `trusted_publisher` entries into `software_decisions` as approvals; change
+   suppression to test *decided* rather than *labelled*. Functional categories
+   (`av`, `remote_access`, `rmm`) stay as the coverage mechanism.
+3. **Move findings onto their real subjects.** Five types to software+version,
+   `install_path_suspicious` to the installation relationship, the two
+   `unauthorized_*` types unchanged. 137,534 rows collapse to 1,782. Existing
+   rows closed and re-emitted: operator-visible, own approval.
+4. **Populate `cve_match.version_range`** and match against the installed
+   version. All 2,636 rows currently have it empty, so `vulnerable_software`
+   flags patched devices identically to unpatched ones. Until then the finding
+   must state on its face that it is product-level. See the ADR-0008 amendment.
+5. **Resolve `software_catalog.eol_date`.** Populated on 0 of 52 rows while
+   `eol_runtime` runs off 9 regex rules. Populate or drop.
+6. **Schedule the classifier.** Run three times ever, last 2026-07-27, never
+   scheduled. Must come last: scheduling before step 3 regenerates 134,861+
+   rows and undoes 0.115.0's page-load work.
 
-Open question, not decided: `whitelist_suggestion` (>=10 devices) and
-`rare_recent` (<=2 devices) are the same question at opposite prevalence ends.
-Possibly one finding with a prevalence attribute rather than two types.
+Larger, not scheduled: **instantiate `publisher` and `product` entities**. The
+raw material exists — 4,789 publishers, 39,321 title+version pairs. Until then
+`software_decisions`' title and publisher scopes are the hierarchy in flat
+form, and `software_catalog` stands in for both levels.
+
+Open, not decided: `whitelist_suggestion` (>=10 devices) and `rare_recent`
+(<=2 devices) are the same question at opposite prevalence ends, possibly one
+finding with a prevalence attribute.
 
 ## Continuous check that read models stay read-only
 

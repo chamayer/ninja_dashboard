@@ -108,3 +108,28 @@ the scorer can weight down fuzzy matches later without re-encoding.
 
 None. Sits alongside the finding-single-surface rule and the
 data-driven categorization decisions.
+
+## Amendment — 2026-08-06: version-dropped matching is superseded in intent
+
+This record specifies `cpe_exact` matching on "vendor + product name only,
+drop version", and a per-title safety panel. ADR-0012 §5, accepted later,
+binds CVEs, EOL dates and safety scores to the **software+version** entity.
+Both were Accepted and neither cited the other; ADR-0015 raises the conflict
+and resolves it in favour of ADR-0012 §5.
+
+The effect of dropping version is measurable. As of 2026-08-06 all 2,636
+`operations.cve_match` rows carry an **empty `version_range`** — a column that
+exists for this purpose — and `vulnerable_software` covers **22 titles across
+1,389 devices**. Every device running any version of a matched product is
+flagged identically, including patched ones, so the finding currently reports
+*product-level suspicion* rather than per-device vulnerability.
+
+This is not a reversal of the original reasoning. This record framed the
+conservatism as temporary — "so the scorer can weight down fuzzy matches
+later" — and the ensemble, schema separation and findings-first surfacing
+decisions all stand. What changes is that the target is now named: populate
+`version_range` and match against the installed version, at which point the
+safety panel becomes per software+version rather than per title.
+
+Until then `vulnerable_software` must state on its face that it is
+product-level, so an operator does not read it as "this device is vulnerable".
