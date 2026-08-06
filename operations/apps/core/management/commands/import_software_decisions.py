@@ -15,7 +15,14 @@ put domain data in code where nobody can see or correct it. See ADR-0015 and
 Usage::
 
     python manage.py import_software_decisions --file /path/decisions_global.csv
-    python manage.py import_software_decisions --file ... --apply
+    cat decisions_global.csv | python manage.py import_software_decisions --file -
+
+Pass ``--file -`` to read the CSV from stdin, which lets the corpus be piped
+straight into the container over ssh without ever landing on the host:
+
+    Get-Content corpus.csv | <helper> ssh
+        'docker exec -i ninja-operations python manage.py
+         import_software_decisions --file - --apply'
 
 Dry run by default: it reports exactly what would change and writes nothing.
 
@@ -29,6 +36,8 @@ overwritten — the import only touches rows it created itself, identified by
 from __future__ import annotations
 
 import csv
+import io
+import sys
 from pathlib import Path
 
 from django.contrib.auth import get_user_model
@@ -60,7 +69,11 @@ class Command(BaseCommand):
     help = "Import software decisions from a legacy decisions CSV (dry run by default)."
 
     def add_arguments(self, parser) -> None:
-        parser.add_argument("--file", required=True, help="Path to decisions_*.csv")
+        parser.add_argument(
+            "--file",
+            required=True,
+            help="Path to decisions_*.csv, or '-' to read the CSV from stdin.",
+        )
         parser.add_argument(
             "--apply",
             action="store_true",
@@ -69,51 +82,82 @@ class Command(BaseCommand):
         parser.add_argument("--tenant", type=int, default=1)
 
     def handle(self, *args, **options) -> None:
-        path = Path(options["file"])
-        if not path.is_file():
-            raise CommandError(f"no such file: {path}")
-
-        actor = (
-            get_user_model().objects.filter(is_superuser=True).order_by("id").first()
-            or get_user_model().objects.order_by("id").first()
-        )
-        if actor is None:
-            raise CommandError("no user exists to attribute the decisions to")
-
+        text = self._read(options["file"])
+        actor = self._actor()
         tenant_id = options["tenant"]
-        parsed, unmapped = self._parse(path)
 
-        create, update, skip_operator, unchanged = [], [], [], []
-        for canonical_name, publisher, decision in parsed:
-            lookup = {"tenant_id": tenant_id, "client_id": None, "device_id": None}
-            if canonical_name:
-                lookup["canonical_name"] = canonical_name
-            else:
-                lookup["publisher"] = publisher
-            existing = SoftwareDecision.objects.filter(**lookup).first()
-            if existing is None:
-                create.append((canonical_name, publisher, decision))
-            elif existing.reason != IMPORT_REASON:
-                skip_operator.append((canonical_name or publisher, existing.decision))
-            elif existing.decision != decision:
-                update.append((existing, decision))
-            else:
-                unchanged.append(existing)
+        parsed, unmapped = self._parse(text)
+        plan = self._plan(parsed, tenant_id)
 
         self.stdout.write(
             f"corpus rows parsed : {len(parsed)}  (unmapped skipped: {len(unmapped)})"
         )
-        self.stdout.write(f"  to create        : {len(create)}")
-        self.stdout.write(f"  to update        : {len(update)}")
-        self.stdout.write(f"  already correct  : {len(unchanged)}")
-        self.stdout.write(f"  operator-owned   : {len(skip_operator)}  (never overwritten)")
+        self.stdout.write(f"  to create        : {len(plan['create'])}")
+        self.stdout.write(f"  to update        : {len(plan['update'])}")
+        self.stdout.write(f"  already correct  : {plan['unchanged']}")
+        self.stdout.write(
+            f"  operator-owned   : {plan['operator_owned']}  (never overwritten)"
+        )
         for name, value in unmapped[:10]:
             self.stdout.write(self.style.WARNING(f"  unmapped: {name!r} -> {value!r}"))
 
         if not options["apply"]:
-            self.stdout.write(self.style.WARNING("dry run — nothing written. Re-run with --apply."))
+            self.stdout.write(
+                self.style.WARNING("dry run — nothing written. Re-run with --apply.")
+            )
             return
 
+        self._write(plan, tenant_id, actor)
+        self.stdout.write(
+            self.style.SUCCESS(
+                f"applied: created={len(plan['create'])} updated={len(plan['update'])} "
+                f"untouched={plan['unchanged'] + plan['operator_owned']}"
+            )
+        )
+
+    def _read(self, source: str) -> str:
+        if source == "-":
+            text = sys.stdin.read()
+            if not text.strip():
+                raise CommandError("no CSV received on stdin")
+            return text
+        path = Path(source)
+        if not path.is_file():
+            raise CommandError(f"no such file: {path}")
+        return path.read_text(encoding="utf-8-sig")
+
+    def _actor(self):
+        users = get_user_model().objects
+        actor = users.filter(is_superuser=True).order_by("id").first() or users.order_by("id").first()
+        if actor is None:
+            raise CommandError("no user exists to attribute the decisions to")
+        return actor
+
+    def _plan(self, parsed, tenant_id: int) -> dict:
+        """Classify each corpus row against what is already stored."""
+        create, update, unchanged, operator_owned = [], [], 0, 0
+        for canonical_name, publisher, decision in parsed:
+            lookup = {"tenant_id": tenant_id, "client_id": None, "device_id": None}
+            lookup["canonical_name" if canonical_name else "publisher"] = (
+                canonical_name or publisher
+            )
+            existing = SoftwareDecision.objects.filter(**lookup).first()
+            if existing is None:
+                create.append((canonical_name, publisher, decision))
+            elif existing.reason != IMPORT_REASON:
+                operator_owned += 1          # never overwrite a human's own edit
+            elif existing.decision != decision:
+                update.append((existing, decision))
+            else:
+                unchanged += 1
+        return {
+            "create": create,
+            "update": update,
+            "unchanged": unchanged,
+            "operator_owned": operator_owned,
+        }
+
+    def _write(self, plan: dict, tenant_id: int, actor) -> None:
         now = timezone.now()
         with transaction.atomic():
             SoftwareDecision.objects.bulk_create(
@@ -129,52 +173,36 @@ class Command(BaseCommand):
                         decided_by=actor,
                         decided_at=now,
                     )
-                    for canonical_name, publisher, decision in create
+                    for canonical_name, publisher, decision in plan["create"]
                 ]
             )
-            for existing, decision in update:
+            for existing, decision in plan["update"]:
                 existing.decision = decision
                 existing.save(update_fields=["decision"])
 
-        self.stdout.write(
-            self.style.SUCCESS(
-                f"applied: created={len(create)} updated={len(update)} "
-                f"untouched={len(unchanged) + len(skip_operator)}"
-            )
-        )
-
-    def _parse(self, path: Path) -> tuple[list[tuple[str, str, str]], list[tuple[str, str]]]:
+    def _parse(self, text: str) -> tuple[list[tuple[str, str, str]], list[tuple[str, str]]]:
         """Return (rows, unmapped). First occurrence wins on duplicate keys."""
         rows: list[tuple[str, str, str]] = []
         unmapped: list[tuple[str, str]] = []
-        seen_titles: set[str] = set()
-        seen_publishers: set[str] = set()
+        seen: dict[str, set[str]] = {"publisher": set(), "title": set()}
 
-        with path.open(encoding="utf-8-sig", newline="") as handle:
-            for raw in csv.DictReader(handle):
-                name = (raw.get("Name") or "").strip()
-                decision = (raw.get("Decision") or "").strip()
-                kind = (raw.get("Type") or "").strip().lower()
-                if not name or not decision:
-                    continue
-                if kind == "publisher":
-                    mapped = _PUBLISHER_DECISIONS.get(decision.lower())
-                    if mapped is None:
-                        unmapped.append((name, decision))
-                        continue
-                    key = name.lower()
-                    if key in seen_publishers:
-                        continue
-                    seen_publishers.add(key)
-                    rows.append(("", name, mapped))
-                else:
-                    mapped = _TITLE_DECISIONS.get(decision.lower())
-                    if mapped is None:
-                        unmapped.append((name, decision))
-                        continue
-                    key = name.lower()
-                    if key in seen_titles:
-                        continue
-                    seen_titles.add(key)
-                    rows.append((name, "", mapped))
+        for raw in csv.DictReader(io.StringIO(text.lstrip("﻿"))):
+            name = (raw.get("Name") or "").strip()
+            decision = (raw.get("Decision") or "").strip()
+            kind = "publisher" if (raw.get("Type") or "").strip().lower() == "publisher" else "title"
+            if not name or not decision:
+                continue
+
+            table = _PUBLISHER_DECISIONS if kind == "publisher" else _TITLE_DECISIONS
+            mapped = table.get(decision.lower())
+            if mapped is None:
+                unmapped.append((name, decision))
+                continue
+
+            key = name.lower()
+            if key in seen[kind]:
+                continue
+            seen[kind].add(key)
+            rows.append(("", name, mapped) if kind == "publisher" else (name, "", mapped))
+
         return rows, unmapped
