@@ -6047,6 +6047,11 @@ def merge_candidates_queue(request: HttpRequest) -> HttpResponse:
     """
     status_filter = request.GET.get("status", MergeCandidate.Status.OPEN)
     entity_filter = request.GET.get("entity", "")
+    # `key` lets an identity_conflict finding link straight to its own
+    # proposal. The finding's condition_key and the candidate's canonical_key
+    # are the same string by construction, so the two surfaces address one
+    # collision.
+    key_filter = request.GET.get("key", "").strip()
 
     qs = MergeCandidate.objects.filter(tenant_id=1).select_related("client")
 
@@ -6054,6 +6059,8 @@ def merge_candidates_queue(request: HttpRequest) -> HttpResponse:
         qs = qs.filter(status=status_filter)
     if entity_filter:
         qs = qs.filter(entity_type=entity_filter)
+    if key_filter:
+        qs = qs.filter(canonical_key=key_filter)
 
     qs = qs.order_by("-confidence", "canonical_key")[:200]
 
@@ -6088,6 +6095,7 @@ def merge_candidates_queue(request: HttpRequest) -> HttpResponse:
             "admin_group": "review",
             "admin_tab": "merges",
             "candidates": qs,
+            "key_filter": key_filter,
             "status_choices": MergeCandidate.Status.choices,
             "entity_types": sorted(set(entity_types)),
             "active_status": status_filter,

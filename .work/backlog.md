@@ -199,12 +199,16 @@ no producer: 0 rows, nothing writing it, and a badge filtering
   `identity_conflict` findings. Measured: 38 proposals across 8 clients,
   idempotent on a second pass, members 4-6 devices per collision.
 
-**Remaining:** reconcile the two surfaces so an operator is not asked the same
-question twice. The finding is the notification, the candidate is the
-decision, and `canonical_key` matches the finding's `condition_key` so they
-address the same collision. The finding should link to the queue rather than
-to a bare merge form, and resolving one should close the other. Confirm the
-queue page renders correctly once real rows exist — it has never had any.
+**Done in 0.114.1:** findings link to the queue filtered to their own
+collision, the queue page renders against the 38 real rows, and its CSV export
+no longer claims three fields the model does not have.
+
+**Remaining:** resolving one surface does not yet close the other. An operator
+who merges from the queue leaves the `identity_conflict` finding open until
+the next resolver pass re-evaluates it, and acknowledging the finding does not
+touch the proposal. Decide whether the finding should auto-resolve on merge or
+whether both should simply reconcile on the next cycle — the latter is already
+true for the candidate, which closes when its collision stops holding.
 
 `client_user_links` remains: 0 rows, no writer, admin-only. Establish what it
 was for before doing anything with it — it is not a removal candidate.

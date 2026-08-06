@@ -2,6 +2,32 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.114.1] — 2026-08-06 — Every identity conflict now has an action
+
+### Fixed
+
+- **15 of 19 open `identity_conflict` findings had no action.** The findings
+  queue only offered a merge link when the collision held exactly two devices,
+  because `device_merge` takes exactly two device IDs. Production collisions
+  run to 3, 4 and 5 devices — and the merge queue holds proposals of up to 10 —
+  so most findings named a problem and offered nothing to click. Findings now
+  link to the merge review queue, which handles any number of members; the
+  direct two-device merge remains as a shortcut where it applies.
+- The merge queue accepts a `key` filter so a finding links to its own
+  proposal. The finding's `condition_key` and the candidate's `canonical_key`
+  are the same string by construction, so the notification and the decision
+  address one collision. The filter is shown on the page with a "Show all"
+  escape and preserved when the other filters change, rather than silently
+  narrowing the view.
+- Merge queue CSV export listed `Created`, `Resolved` and `Resolved by`, none
+  of which are fields on the model. `csv_export._resolve` defaults missing
+  attributes to `""`, so they did not raise — they emitted three permanently
+  blank columns, invisible while the queue was empty. Replaced with member
+  count and match reason.
+- Corrected the queue's description, which read "workflow lands with M2+ once
+  multi-source ingest exists". Multi-source ingest landed long ago; the queue
+  was empty because nothing produced rows.
+
 ## [0.114.0] — 2026-08-06 — Merge proposals are produced
 
 ### Added

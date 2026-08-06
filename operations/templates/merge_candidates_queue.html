@@ -9,9 +9,15 @@
         {% include "_csv_download.html" %}
     </div>
     <p class="muted">
-        Cross-source matches proposed by the merge detector. Approve / reject / split
-        (workflow lands with M2+ once multi-source ingest exists).
+        Devices that look like one machine, proposed for review. Each row groups
+        every device sharing a normalized hostname within one client.
     </p>
+    {% if key_filter %}
+    <p style="margin-top:0.5rem;">
+        Showing one collision: <code>{{ key_filter }}</code>
+        &nbsp;<a href="{% url 'merge_candidates_queue' %}">Show all →</a>
+    </p>
+    {% endif %}
 </div>
 
 <div class="card">
@@ -37,6 +43,8 @@
         <div>
             <button type="submit" style="padding: 0.5rem 1rem;">Apply</button>
         </div>
+        {# Preserve a single-collision link when the other filters are changed. #}
+        {% if key_filter %}<input type="hidden" name="key" value="{{ key_filter }}">{% endif %}
     </form>
 </div>
 

@@ -173,9 +173,16 @@
                         {% else %}
                             <span class="muted">{{ f.get_subject_type_display }}</span>
                         {% endif %}
-                        {% if f.finding_type.name == "identity_conflict" and f.finding_details.candidate_count == 2 and f.client %}
+                        {% if f.finding_type.name == "identity_conflict" %}
+                            {% if f.finding_details.candidate_count == 2 and f.client %}
                             <br><a href="{% url 'device_merge' org_slug=f.client.slug device_id=f.finding_details.candidate_device_ids.0 target_id=f.finding_details.candidate_device_ids.1 %}"
                                    style="font-size:0.75rem;">Merge candidates →</a>
+                            {% endif %}
+                            {# device_merge takes exactly two devices, so collisions of three
+                               or more had no action at all. The review queue handles any
+                               number of members. #}
+                            <br><a href="{% url 'merge_candidates_queue' %}?key={{ f.condition_key|urlencode }}"
+                                   style="font-size:0.75rem;">Review {{ f.finding_details.candidate_count }} matching devices →</a>
                         {% endif %}
                     </td>
                     <td>
