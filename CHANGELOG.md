@@ -6,17 +6,22 @@ All notable changes to this project follow [Semantic Versioning](https://semver.
 
 ### Fixed
 
-- **`client_name_conflict` had never fired and could not.** The detector
-  suppressed the finding when the observed source name matched *either* the
-  canonical client name or the stored `client_links.external_name` — while
-  `client_resolver._attach_group` refreshed that column to the observed name
-  on every sync, so the second test compared the observed value against
-  itself. Measured across all 320 links: 264 matched the canonical client
-  name, 319 matched the stored name, 1 matched neither. With the
-  self-referential term removed the detector emits **55** real name drifts,
-  where a source's group name no longer matches the client it is attached to.
-  Same defect class as the Ninja-only filter behind the `device_links`
+- **`client_name_conflict` was suppressed down to a single finding.** The
+  detector skipped the finding when the observed source name matched *either*
+  the canonical client name or the stored `client_links.external_name` — while
+  `client_resolver._attach_group` refreshed that column to the observed name on
+  every sync, so the second test largely compared the observed value against
+  itself. Measured after deployment: **1** open finding existed beforehand,
+  dating from 2026-07-13, and **50** appeared on the first run afterwards, for
+  51 open. Same defect class as the Ninja-only filter behind the `device_links`
   retirement in 0.111.0.
+  Correction: the 0.112.0 commit message and an earlier draft of this entry
+  said the detector "had never fired and could not". That was wrong — these
+  findings are written to `operations.admin_findings`, not
+  `operations.findings`, and the comparison uses `_norm()` rather than plain
+  lowercase. Measuring the wrong table and the wrong comparison both pointed
+  the same way. The change and its effect are unaffected; the description of
+  the defect was overstated.
 
 ### Changed
 

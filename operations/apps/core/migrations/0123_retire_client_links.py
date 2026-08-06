@@ -25,18 +25,26 @@ the write last, so the lookup only ever served links from earlier cycles.
 ``entity_source_links`` is synced at the collection boundary, which gives the
 same staleness.
 
-**What this fixes.** ``client_name_conflict`` had produced zero findings and
-could not produce one. The detector suppressed the finding when the observed
-source name matched *either* the canonical client name or the stored
+**What this fixes.** ``client_name_conflict`` was suppressed down to a single
+open finding. The detector skipped the finding when the observed source name
+matched *either* the canonical client name or the stored
 ``client_links.external_name`` — while ``_attach_group`` refreshed that column
-to the observed name on every sync. The second comparison tested the observed
-value against itself. Measured across all 320 links: 264 matched the canonical
-client name, **319** matched the stored name, and 1 matched neither. Removing
-the self-referential term surfaces **56** real name drifts.
+to the observed name on every sync, so the second comparison largely tested the
+observed value against itself.
 
-This is the same defect class as the ``WHERE s.name = 'Ninja'`` filter that
-motivated retiring ``device_links``: a column maintained in a way that
-disables the finding that reads it, invisible from row counts.
+Measured after deployment: **1** open finding existed beforehand, dating from
+2026-07-13, and **50** appeared on the first run after the change, for 51 open.
+The suppression was therefore hiding 50 of 51 real drifts.
+
+An earlier draft of this record claimed the detector had produced zero findings
+and could not produce one. That was wrong twice over: these findings write to
+``operations.admin_findings`` rather than ``operations.findings``, and the code
+compares ``_norm()``-stripped names rather than plain lowercase. Both mistakes
+pointed the same way, which is why neither caught the other.
+
+The defect class is still the one that motivated retiring ``device_links``: a
+column maintained so as to disable the finding that reads it, invisible from
+row counts.
 
 **``external_name`` is deliberately not reproduced.** The attribute contract
 could not supply it in any case — ``claim(name)`` is keyed per

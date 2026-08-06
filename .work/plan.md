@@ -90,14 +90,21 @@ collection boundary by `derived.refresh_after_collection`, which gives the
 same staleness. This is the check that made the device-side retirement risky;
 it does not apply here.
 
-**The reason this is worth doing is a second inert detector.**
-`client_name_conflict` has zero findings and cannot produce one: the detector
-suppresses when the observed source name matches the stored
-`client_links.external_name`, and `client_resolver` refreshes that column to
-the observed value on every sync. Measured over 320 links — 264 match the
-canonical client name, 319 match the stored name, 1 matches neither.
-Removing the self-referential term surfaces **56** real name drifts. Same
-defect class as the Ninja-only filter behind `device_links`.
+**The reason this is worth doing is a near-totally suppressed detector.**
+`client_name_conflict` skipped the finding when the observed source name
+matched the stored `client_links.external_name`, which `client_resolver`
+refreshed to the observed value on every sync. Measured after deployment: 1
+open finding existed beforehand (2026-07-13), 50 appeared on the first run
+after the change, 51 open now. Same defect class as the Ninja-only filter
+behind `device_links`.
+
+**Measurement correction, recorded so it is not repeated.** This was first
+written up as "zero findings, cannot fire", which was wrong twice: these
+findings live in `operations.admin_findings`, not `operations.findings`, and
+the comparison uses `_norm()` (strips whitespace, hyphen, underscore, dot),
+not plain lowercase. Two wrong measurements agreed with each other, so neither
+caught the other. Check the table and the comparison function before calling a
+detector inert.
 
 **Decision: surface the 56.** The current behaviour hides them with no
 operator decision and no record, which the "nothing hidden" rule forbids. An

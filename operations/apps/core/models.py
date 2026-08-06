@@ -361,7 +361,7 @@ class ClientSourceLink(models.Model):
     The retired table carried ``external_name``, the source-side group name.
     It is deliberately not reproduced: it existed to suppress
     ``client_name_conflict``, and because it was refreshed to the observed
-    name on every sync it suppressed every drift instead. See
+    name on every sync it suppressed 50 of 51 real drifts. See
     ``client_resolver._check_name_drift``.
     """
 

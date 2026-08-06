@@ -510,19 +510,25 @@ def _resolve_finding(cur, type_name: str, condition_key: str) -> None:
 def _check_name_drift(cur, source_ids_by_name: dict[str, int]) -> None:
     """A mapped link seeing a different display name = one-click apply finding.
 
-    This detector produced zero findings for its entire life, and could not
-    produce one. It suppressed the finding when the observed source name
-    matched *either* the canonical client name or the stored
-    `client_links.external_name` — while `_attach_group` refreshed that column
-    to the observed name on every sync. The second test compared the observed
-    value against itself.
+    This detector was suppressed down to a single open finding. It skipped the
+    finding when the observed source name matched *either* the canonical client
+    name or the stored `client_links.external_name` — while `_attach_group`
+    refreshed that column to the observed name on every sync, so the second
+    test largely compared the observed value against itself.
 
-    Measured across all 320 links before the fix: 264 matched the canonical
-    client name, 319 matched the stored name, and 1 matched neither. Removing
-    the self-referential term surfaces 56 real drifts. `external_name` is gone
-    with the table (migration 0123) and is deliberately not reproduced —
-    suppressing a drift is a decision that belongs to an operator, recorded,
-    not a side effect of the column being rewritten.
+    Measured after the fix deployed: 1 open finding existed beforehand, dating
+    from 2026-07-13, and 50 more appeared on the first run afterwards. The
+    suppression was hiding 50 of 51 real drifts.
+
+    Note for anyone re-deriving this: these findings live in
+    `operations.admin_findings`, not `operations.findings`, and the comparison
+    uses `_norm()` (strips whitespace, hyphen, underscore, dot) rather than a
+    plain lowercase. Measuring either the wrong table or the wrong comparison
+    makes the detector look completely inert; it is not.
+
+    `external_name` is gone with the table (migration 0123) and is deliberately
+    not reproduced — suppressing a drift is a decision that belongs to an
+    operator, recorded, not a side effect of the column being rewritten.
     """
     cur.execute(
         """
