@@ -6,9 +6,15 @@ Track: **ADR-0010 generic entity, claim, relationship, and admin completion**
 one (entity anchors required) deployed and verified. Deployed head `3c7d9a1` on
 both remotes; all containers healthy; working tree clean.
 
-**Complete (local, not yet deployed): retire `device_links` (E6).**
-Release `0.111.0`. Validated end to end against production in rolled-back
-transactions; awaiting commit and push approval.
+**Deployed: retire `device_links` (E6).** Release `0.111.0`, commit
+`6019b0a`, on both remotes. Migration 0121 applied; its parity gate reported
+`5298 rows, 0 differences`. `operations.device_links` is gone,
+`v_device_source_link` is live as a `security_invoker` view, and the first
+post-deploy cycle synced 8,355 links and refreshed derived state in 10.19s
+with zero errors. Patching scope held at 2,643 Included / 1,926 Excluded.
+Stale-but-live links are 0 across all four sources, down from 8,316.
+One follow-up recorded in `.work/backlog.md`: the new view inherited DML
+grants from schema default privileges that it cannot honour.
 
 ### device_links retirement (E6) — done
 
@@ -61,6 +67,44 @@ dropped relations for ~0.6 s. Run any production dry-run with server-side
 `statement_timeout` **and** `idle_in_transaction_session_timeout` — a killed
 client does not stop the server-side transaction, and one such orphan blocked
 ingest for ~3 minutes during this session until it was cancelled.
+
+### E6 remaining scope — resolved 2026-08-06 (ratified in ADR-0013 amendment)
+
+The phase line reads "obsolete compatibility columns/readers" and was never
+enumerated. It covers two halves; only one is actionable.
+
+**Columns — closed, they stay.** Codex design history framed the flat
+`operations.devices` cache columns as transitional ("validating
+cache/projection equality until the compatibility columns are dropped"), which
+conflicts with this track's later entry that they are permanent. Measurement
+settles it without needing the preference: `os_group` and `device_type` have
+**0 of 5,298** effective-contract rows and no source to give them one — the
+projector derives them instead. Dropping them is not achievable until that
+source is built, which is separate work and not an E6 gate. Supporting
+figures, measured 2026-08-06: `os_family` 5,244/5,298 effective coverage,
+`device_role` 4,721, `os_name` 4,720, with **zero** mismatches wherever a
+value exists; flat read 4.7 ms against 362.9 ms pivoted from the contract.
+The single-writer projector plus its ratchet test is therefore the permanent
+enforcement, not an interim one.
+
+**Tables — this is E6's remaining work.** Measured 2026-08-06:
+
+| relation | rows | code readers | note |
+| --- | --- | --- | --- |
+| `client_links` | 320 | 12 | **exact twin of the retired `device_links`.** `entity_source_links` holds 320 `client` rows — 1:1. |
+| `client_candidates` | 9 | 6 | legacy candidate workflow; `entity_candidates` (4,965) is the E4 review authority |
+| `merge_candidates` | 0 | 3 | empty; belongs on the single findings surface |
+| `source_bindings` | 5 | 28 | duplicates `source_instances` (also 5); most readers, least urgent |
+| `ninja_device_detail_current_shadow` | 0 | 6 | empty but has readers — establish whether they are dead or silently returning nothing |
+| `ninja_device_health_current_shadow` | 0 | 2 | as above |
+| `ninja_device_seen_daily_shadow` | 0 | 3 | as above |
+| `device_agent_presence_current_legacy` | 0 | 0 | dead matview |
+| `source_health_current_legacy` | 4 | 0 | dead matview |
+| `client_user_links` | 0 | 2 | empty |
+
+Order: `client_links` first (reuse the `device_links` pattern), then the two
+dead matviews, then the shadow views once their readers are characterised,
+then the candidate tables, then `source_bindings` last.
 
 ### Deployed this session
 

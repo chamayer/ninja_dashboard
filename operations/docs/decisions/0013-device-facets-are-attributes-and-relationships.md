@@ -216,3 +216,54 @@ ADRs alone, without reading the changelog entry for the release that executed
 ADR-0005. That is the same failure this record was created to prevent: taking a
 document's framing as the history rather than checking what was actually built
 and decided. Leaving the retraction visible is more useful than a clean text.
+
+## Amendment — 2026-08-06: what ADR-0010 phase E6 means by "compatibility columns"
+
+ADR-0010's E6 phase line reads "retire competing attachment authority and
+obsolete compatibility columns/readers." It was never enumerated, and two
+records disagreed about the columns half.
+
+**The conflict.** The design intent recorded during the E-track's design
+sessions framed the flat `operations.devices` cache columns as transitional —
+one projector as sole writer, "validating cache/projection equality *until the
+compatibility columns are dropped*." The 2026-08-05 amendment above reached the
+opposite conclusion, that the columns are permanent.
+
+**Measurement settles it without appeal to either record.** Against production
+2026-08-06, 5,298 live devices:
+
+| column | devices with an effective-contract value |
+| --- | --- |
+| `os_family` | 5,244 |
+| `device_role` | 4,721 |
+| `os_name` | 4,720 |
+| `os_group` | **0** |
+| `device_type` | **0** |
+
+`os_group` and `device_type` have no effective-contract representation at all.
+The projector derives them — `os_group` from `os_family` via
+`os_group_mappings`, `device_type` from entity type plus node_class. Dropping
+the compatibility columns is therefore not achievable for two of the five
+regardless of which record is preferred, because there is nothing to drop them
+*to*. Building those contract sources is separate work and is not an E6 gate.
+
+Two supporting measurements, both re-taken 2026-08-06 rather than carried
+forward: where an effective value exists there are **zero** mismatches against
+the flat column (578-580 devices per column have no effective value); and the
+flat read costs 4.7 ms against 362.9 ms pivoted from the contract, consistent
+with the ~70x recorded a day earlier.
+
+### Ratified position
+
+- **The flat Device columns stay.** The 2026-08-05 amendment stands, now on
+  measured rather than argued grounds. The single-writer projector and its
+  ratchet test are the permanent enforcement, not an interim step.
+- **E6's "compatibility columns/readers" means the compatibility _tables_.**
+  Concretely: `client_links`, `client_candidates`, `merge_candidates`,
+  `source_bindings`, the three empty `ninja_*_shadow` views, the two `_legacy`
+  matviews, and `client_user_links`. `device_links` was the first and is
+  retired (ADR-0014); `client_links` is its exact twin at 320 rows against 320
+  `client` rows in `entity_source_links`.
+- **The columns question reopens only if** an effective-contract source is
+  built for `os_group` and `device_type`. Until then it is not a decision, it
+  is unavailable.
