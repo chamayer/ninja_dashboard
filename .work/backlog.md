@@ -180,6 +180,25 @@ This is the proposed successor to the root-level open-work portion of
   bulk report on the findings surface rather than an actionable queue.
 - Trigger: explicit approval; the collapse is destructive.
 
+## Continuous check that read models stay read-only
+
+- Migration 0122 revoked `INSERT, UPDATE, DELETE, TRUNCATE` from the runtime
+  roles on all 17 views and matviews in `operations`, and asserts none remain.
+  That assertion covers the population at migration time only.
+- The root cause is not fixed and cannot be: `ALTER DEFAULT PRIVILEGES` grants
+  `operations_app=arwd` on everything `operations_migrate` creates, and
+  PostgreSQL's default-privilege object type `r` does not distinguish views
+  from tables. Tables must keep those privileges, so any new read model will
+  keep inheriting them.
+- The rule is currently enforced by documentation only
+  (`operations/AGENTS.md`), which this repository has repeatedly shown is
+  insufficient on its own.
+- Options, cheapest first: a Postgres integration test asserting the invariant;
+  a startup assertion alongside the existing privilege checks; or an event
+  trigger on `CREATE VIEW` that revokes automatically. The event trigger is the
+  only one that cannot be forgotten, and is also the most surprising — decide
+  deliberately.
+
 ## Layer tables are write-only; `agent_instance_field_history` never populated
 
 - Measured 2026-08-05. `operations.assets` (5,293), `os_instances` (5,275) and

@@ -60,6 +60,16 @@ Ninja Dashboard stack.
 - In PostgreSQL scripts, do not rely on `psql -v` substitution inside
   `DO $$...$$`; use an appropriate supported mechanism such as `\gexec` or
   `current_setting()` for the specific task.
+- A migration that creates a view or materialized view in `operations` must
+  explicitly revoke `INSERT, UPDATE, DELETE, TRUNCATE` from the runtime roles.
+  Granting only `SELECT` is not enough: `ALTER DEFAULT PRIVILEGES` gives
+  `operations_app` full DML on everything `operations_migrate` creates, and
+  PostgreSQL has no default-privilege object type that separates views from
+  tables, so a read model inherits write access whatever the migration grants.
+  Most such grants are inert because the relation is not auto-updatable, but a
+  `security_barrier` view that *is* auto-updatable executes DML as its
+  superuser owner — migration 0122 found one handing the application write
+  access to two tables that had been explicitly denied to it.
 
 ## Planning and continuity
 

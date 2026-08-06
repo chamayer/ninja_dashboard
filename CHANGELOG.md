@@ -2,6 +2,34 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.111.1] — 2026-08-06 — Read models grant SELECT only
+
+### Fixed
+
+- **A view granted the application write access to two tables it was denied.**
+  `ALTER DEFAULT PRIVILEGES` gives `operations_app` full DML on everything
+  `operations_migrate` creates, and PostgreSQL's default-privilege object type
+  `r` does not distinguish views from tables, so all 17 views and materialized
+  views in `operations` inherited `INSERT`/`UPDATE`/`DELETE` regardless of what
+  their migration granted. Most were inert — a materialized view accepts no
+  DML, and a view is only auto-updatable from a single un-aggregated base
+  table. Three were auto-updatable, and one was a real escalation: as
+  `operations_app`, `entity_attribute_claim_current` and
+  `entity_attribute_claim_history` are denied directly, as migrations 0115 and
+  0117 intended, but `DELETE` through `v_entity_attribute_claim_storage_status`
+  succeeded, because that view is `security_barrier` rather than
+  `security_invoker` and so executes DML as its superuser owner. Migration 0122
+  revokes `INSERT, UPDATE, DELETE, TRUNCATE` from the four runtime roles on
+  every read model and asserts none remains. `SELECT` is unchanged, and no
+  application code wrote through any of them.
+
+### Changed
+
+- `operations/AGENTS.md` now requires a migration creating a read model to
+  revoke the DML it inherits. The default privilege cannot be narrowed to
+  exclude views, so this rule and migration 0122's assertion are the
+  enforcement; a continuous check is recorded in `.work/backlog.md`.
+
 ## [0.111.0] — 2026-08-06 — Retire device_links; source links follow observations
 
 ### Fixed
