@@ -2,6 +2,51 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.112.0] — 2026-08-06 — Retire client_links; name drift becomes visible
+
+### Fixed
+
+- **`client_name_conflict` had never fired and could not.** The detector
+  suppressed the finding when the observed source name matched *either* the
+  canonical client name or the stored `client_links.external_name` — while
+  `client_resolver._attach_group` refreshed that column to the observed name
+  on every sync, so the second test compared the observed value against
+  itself. Measured across all 320 links: 264 matched the canonical client
+  name, 319 matched the stored name, 1 matched neither. With the
+  self-referential term removed the detector emits **55** real name drifts,
+  where a source's group name no longer matches the client it is attached to.
+  Same defect class as the Ninja-only filter behind the `device_links`
+  retirement in 0.111.0.
+
+### Changed
+
+- **`operations.client_links` is retired (migration 0123)**, replaced by
+  `operations.v_client_source_link` over `entity_source_links`, maintained
+  from observation evidence for every source. This is the client-side twin of
+  the `device_links` retirement and completes the attachment half of E6. Four
+  writers are removed; all readers move in this release with no compatibility
+  alias. Verified against production: 320 rows both sides and **zero** source
+  identities changing which client they attach to.
+- `ClientLink` becomes the unmanaged, read-only `ClientSourceLink`; its admin
+  surfaces are read-only and the view rejects writes.
+- Attachment now follows evidence. The retired table pinned `client_id` on
+  first write and never reassigned it, so a source group that genuinely moved
+  between clients stayed with the original.
+
+### Removed
+
+- **`bootstrap_clients_from_ninja`** and its `entrypoint.sh` step. BLUEPRINT
+  Track C superseded it on 2026-07-13 — no source is a client authority — and
+  scheduled its removal as C.7, which never happened. It was a measured no-op
+  (`created=0 updated=0 unchanged=75 total=75`) but would have auto-minted a
+  client for any new Ninja org, which Track C forbids.
+- `client_links.external_name`. It existed to suppress `client_name_conflict`
+  and, being rewritten each sync, suppressed every drift instead. The
+  attribute contract cannot reproduce it — `claim(name)` is per
+  (client, source_instance) while `external_name` is per
+  (source, external_id). An explicit operator-recorded "accepted name" remains
+  a reasonable future feature.
+
 ## [0.111.1] — 2026-08-06 — Read models grant SELECT only
 
 ### Fixed

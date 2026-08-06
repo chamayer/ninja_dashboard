@@ -350,22 +350,40 @@ class Client(UUIDTenantScopedModel):
         return self.display_name
 
 
-class ClientLink(UUIDTenantScopedModel):
-    client = models.ForeignKey(Client, on_delete=models.CASCADE, related_name="links")
-    source = models.ForeignKey(Source, on_delete=models.PROTECT, related_name="client_links")
+class ClientSourceLink(models.Model):
+    """Read-only view of the client rows of ``entity_source_links``.
+
+    Replaces the retired ``ClientLink``/``client_links`` table (migration
+    0123). Attachment follows observation evidence via
+    ``operations.sync_entity_source_links_from_observations()``, so there is
+    nothing to write here.
+
+    The retired table carried ``external_name``, the source-side group name.
+    It is deliberately not reproduced: it existed to suppress
+    ``client_name_conflict``, and because it was refreshed to the observed
+    name on every sync it suppressed every drift instead. See
+    ``client_resolver._check_name_drift``.
+    """
+
+    id = models.UUIDField(primary_key=True)
+    tenant = models.ForeignKey(
+        "Tenant", on_delete=models.DO_NOTHING, db_column="tenant_id", related_name="+"
+    )
+    client = models.ForeignKey(
+        Client, on_delete=models.DO_NOTHING, db_column="client_id", related_name="source_links"
+    )
+    source = models.ForeignKey(
+        Source, on_delete=models.DO_NOTHING, db_column="source_id", related_name="client_source_links"
+    )
     external_id = models.CharField(max_length=240)
-    external_name = models.CharField(max_length=240, blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    created_reason = models.CharField(max_length=120, blank=True, default="")
+    external_namespace = models.CharField(max_length=120)
+    first_seen_at = models.DateTimeField(null=True, blank=True)
+    last_seen_at = models.DateTimeField(null=True, blank=True)
+    missing_since = models.DateTimeField(null=True, blank=True)
 
     class Meta:
-        db_table = "client_links"
-        constraints = (
-            models.UniqueConstraint(
-                fields=("tenant", "source", "external_id"),
-                name="uq_client_links_tenant_source_external_id",
-            ),
-        )
+        managed = False
+        db_table = "v_client_source_link"
 
     def __str__(self) -> str:
         return f"{self.source_id}:{self.external_id}"

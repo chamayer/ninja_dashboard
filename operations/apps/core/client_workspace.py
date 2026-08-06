@@ -173,7 +173,7 @@ def _shared_context() -> tuple[dict, dict, dict]:
         cur.execute(
             """
             SELECT cl.client_id, COUNT(DISTINCT l.id)::int
-            FROM operations.client_links cl
+            FROM operations.v_client_source_link cl
             JOIN operations.sources s ON s.id = cl.source_id
             JOIN ninja_core.locations l
               ON s.name = 'Ninja'

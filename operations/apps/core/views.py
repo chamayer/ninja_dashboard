@@ -34,10 +34,10 @@ from .models import (
     AuditLog,
     Client,
     ClientCandidate,
-    ClientLink,
     ClientNameAlias,
     ClientOrgExclude,
     ClientPolicy,
+    ClientSourceLink,
     CoverageRequirement,
     Device,
     DeviceOperatorDecision,
@@ -386,7 +386,7 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
     dashboard_updated_at = max(observed_updates, default=None)
 
     client_sources: dict = {}
-    for client_id, source_name in ClientLink.objects.filter(tenant_id=1).values_list(
+    for client_id, source_name in ClientSourceLink.objects.filter(tenant_id=1).values_list(
         "client_id", "source__name"
     ):
         client_sources.setdefault(client_id, set()).add(source_name)
@@ -762,7 +762,9 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
         )
         ctx["device_count"] = len(devices)
         ctx["type_summary"] = _type_summary(devices)
-        ctx["client_links"] = list(client.links.select_related("source").order_by("source__name"))
+        ctx["client_links"] = list(
+            client.source_links.select_related("source").order_by("source__name")
+        )
         ctx["policy_count"] = ClientPolicy.objects.filter(tenant_id=1, client=client).count()
         ctx["policy_categories"] = list(
             ClientPolicy.objects.filter(tenant_id=1, client=client)
@@ -1074,8 +1076,8 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
             .select_related("requirement_profile")
             .prefetch_related(
                 Prefetch(
-                    "links",
-                    queryset=ClientLink.objects.select_related("source").order_by("source__name"),
+                    "source_links",
+                    queryset=ClientSourceLink.objects.select_related("source").order_by("source__name"),
                 )
             )
             .annotate(
@@ -1088,7 +1090,7 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
         )
         for c in clients_with_counts:
             # Shared sources carry one link per platform group — dedupe for display.
-            c.source_names = list(dict.fromkeys(l.source.name for l in c.links.all()))
+            c.source_names = list(dict.fromkeys(l.source.name for l in c.source_links.all()))
         fleet_type_counts = {
             row["device_type"]: row["count"]
             for row in Device.objects.filter(tenant_id=1, deleted_at__isnull=True)
@@ -6806,23 +6808,17 @@ def _attach_group_to_client(
     cur,
     source_id: int,
     external_id: str,
-    external_name: str,
     client_id,
-    reason: str,
 ) -> None:
-    """Backfill org + device observations for this group to a client,
-    and mint / update the client_link. Mirrors client_resolver._attach_group."""
-    cur.execute(
-        """
-        INSERT INTO operations.client_links
-            (id, version, tenant_id, client_id, source_id, external_id,
-             external_name, created_at, created_reason)
-        VALUES (gen_random_uuid(), 0, 1, %s, %s, %s, %s, NOW(), %s)
-        ON CONFLICT (tenant_id, source_id, external_id)
-        DO UPDATE SET external_name = EXCLUDED.external_name
-        """,
-        (client_id, source_id, external_id, external_name, reason),
-    )
+    """Backfill org + device observations for this group to a client.
+
+    Mirrors client_resolver._attach_group. The client_link INSERT that used to
+    open this function is retired with migration 0123: setting client_id on the
+    observations below is the attachment, and the link is derived from that
+    evidence by sync_entity_source_links_from_observations() at the next
+    collection boundary. The `external_name` and `reason` parameters went with
+    it — both existed only to populate the link row.
+    """
     cur.execute(
         """
         UPDATE operations.entity_observation_current eo
@@ -6980,14 +6976,7 @@ def client_candidate_accept(request, candidate_id) -> HttpResponse:
             ext_id = ref.get("external_id")
             if not (sid and ext_id):
                 continue
-            _attach_group_to_client(
-                cur,
-                sid,
-                ext_id,
-                ref.get("external_name") or display_name,
-                client.id,
-                "candidate.accept",
-            )
+            _attach_group_to_client(cur, sid, ext_id, client.id)
 
     # Profile is source of truth per BLUEPRINT C.6 — assigning
     # client.requirement_profile above is sufficient. No per-client
@@ -7053,14 +7042,7 @@ def client_candidate_map(request, candidate_id) -> HttpResponse:
             ext_id = ref.get("external_id")
             if not (sid and ext_id):
                 continue
-            _attach_group_to_client(
-                cur,
-                sid,
-                ext_id,
-                ref.get("external_name") or target.display_name,
-                target.id,
-                "candidate.map",
-            )
+            _attach_group_to_client(cur, sid, ext_id, target.id)
 
     candidate.status = ClientCandidate.Status.MAPPED
     candidate.resolved_client = target

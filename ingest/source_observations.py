@@ -11,7 +11,7 @@ Everything else is config-driven via ingest.sources.
 Client resolution order per observation:
   1. Client-scoped source instance (SourceConfig.client_id) — e.g. per-client
      ScreenConnect instances.
-  2. client_links lookup on (source, platform_group_id) — e.g. S1 site id,
+  2. source-link lookup on (source, platform_group_id) — e.g. S1 site id,
      LMI group id.
   3. Resolved device's client (fallback, requires identity match).
 Groups that resolve no client are recorded in
@@ -161,13 +161,21 @@ def _load_placeholder_names(cur) -> set[str]:
 
 
 def _load_client_links(cur, source: SourceConfig) -> dict[str, uuid.UUID]:
-    """Return {external_id: client_id} for this source's client_links."""
+    """Return {external_id: client_id} for this source's attached groups.
+
+    Reads `operations.v_client_source_link` over `entity_source_links`, which
+    `sync_entity_source_links_from_observations()` derives from observation
+    evidence at each collection boundary. The retired `client_links` table was
+    written at the end of this same transaction, so this lookup has always
+    served links established by earlier cycles; the derived table has the same
+    staleness.
+    """
     if not source.ops_source_id:
         return {}
     cur.execute(
         """
         SELECT external_id, client_id
-        FROM operations.client_links
+        FROM operations.v_client_source_link
         WHERE tenant_id = %s AND source_id = %s
         """,
         (_TENANT_ID, source.ops_source_id),
@@ -175,39 +183,13 @@ def _load_client_links(cur, source: SourceConfig) -> dict[str, uuid.UUID]:
     return {row[0]: row[1] for row in cur.fetchall()}
 
 
-def _upsert_client_links(
-    cur,
-    source: SourceConfig,
-    resolved_groups: dict[str, tuple[uuid.UUID, str]],
-) -> None:
-    """Ensure a client_links row exists per resolved source group.
-
-    Per-client sources (is_shared=False, e.g. ScreenConnect-UTA): external_id
-    is the source_key — one stable row per source instance.
-    Shared sources (is_shared=True, e.g. SentinelOne, LogMeIn): external_id
-    is the platform group id (S1 site id, LMI group id) so the mapping
-    survives group renames.
-
-    The link is the source of truth once created: on conflict only
-    external_name refreshes; client_id is never reassigned by ingest.
-    """
-    if not source.ops_source_id:
-        return
-    for group_id, (client_uuid, group_name) in resolved_groups.items():
-        external_id = source.source_key if not source.is_shared else group_id
-        if not external_id:
-            continue
-        external_name = group_name or source.source_name
-        cur.execute(
-            """
-            INSERT INTO operations.client_links
-                (id, version, tenant_id, client_id, source_id, external_id, external_name)
-            VALUES (gen_random_uuid(), 0, %s, %s, %s, %s, %s)
-            ON CONFLICT (tenant_id, source_id, external_id)
-            DO UPDATE SET external_name = EXCLUDED.external_name
-            """,
-            (_TENANT_ID, client_uuid, source.ops_source_id, external_id, external_name),
-        )
+# `_upsert_client_links` stood here. It minted a `client_links` row per
+# resolved source group, and its docstring stated the competing authority
+# plainly: "The link is the source of truth once created ... client_id is
+# never reassigned by ingest." Migration 0123 retires that table; attachment
+# follows observation evidence, which means a group that genuinely moves
+# between clients now moves with it instead of being pinned by whichever
+# cycle created the row first.
 
 
 def _record_unmatched_groups(
@@ -533,6 +515,5 @@ def _write_observations(
             # A group is unmatched only if NO row in the batch resolved it.
             for gid in resolved_groups:
                 unmatched_groups.pop(gid, None)
-            _upsert_client_links(cur, source, resolved_groups)
             _record_unmatched_groups(cur, source, unmatched_groups, placeholder_names)
     return len(obs_rows)

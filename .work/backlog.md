@@ -180,6 +180,37 @@ This is the proposed successor to the root-level open-work portion of
   bulk report on the findings surface rather than an actionable queue.
 - Trigger: explicit approval; the collapse is destructive.
 
+## `client_name_conflict` cannot fire — self-referential suppression
+
+- Measured 2026-08-06. `operations.findings` holds **zero**
+  `client_name_conflict` rows, and the detector cannot produce one.
+- `client_resolver._detect_name_drift` suppresses the finding when the
+  observed source name matches either the canonical client `display_name`
+  **or** the stored `client_links.external_name`. But the same module upserts
+  that column with `DO UPDATE SET external_name = EXCLUDED.external_name` on
+  every sync, so `external_name` is always refreshed to the currently observed
+  name. The second comparison is the observed value against itself.
+- Measured over all 320 links: 264 match the client display name, **319 match
+  the stored name**, and only 1 matches neither. Remove the self-referential
+  term and **56** links surface a source name that differs from the canonical
+  client name — the drift the detector was written to catch.
+- Same defect class as the Ninja-only filter that motivated retiring
+  `device_links` (ADR-0014): a column maintained in a way that disables the
+  finding reading it. Neither was visible from row counts.
+- Fix belongs with the `client_links` retirement, not before it:
+  `entity_source_links` has no `external_name`, and the attribute contract
+  cannot supply one — `claim(name)` is keyed per (client, source_instance)
+  while `external_name` is per (source, external_id). A client with 10 LogMeIn
+  groups has 10 external names and 1 name claim; measured, the join fans 320
+  links to 522 rows with 204 differing.
+- So the retirement decides the detector's semantics. Options: compare observed
+  against the canonical client name only (56 findings, and the column simply
+  disappears); or carry a genuine as-linked name snapshot that is *not*
+  refreshed on sync, which needs somewhere to live.
+- `entity_attribute_claim_history` holds 320 `name` rows with **0 closed
+  intervals**, so no client name has ever been recorded as changing — worth
+  confirming that is real and not a second inert mechanism.
+
 ## Continuous check that read models stay read-only
 
 - Migration 0122 revoked `INSERT, UPDATE, DELETE, TRUNCATE` from the runtime

@@ -68,6 +68,61 @@ dropped relations for ~0.6 s. Run any production dry-run with server-side
 client does not stop the server-side transaction, and one such orphan blocked
 ingest for ~3 minutes during this session until it was cancelled.
 
+### In progress — retire `client_links` (E6)
+
+Second of E6's compatibility tables, after `device_links` (ADR-0014).
+
+**Mapping verified 2026-08-06.** 320 rows both sides against
+`entity_source_links` where `entity_class_id = 'client'`. One benign
+difference each way: ScreenConnect's instance-level key was renamed
+`sc_uta` -> `self`, same client `6d3418ea`. Zero clients disagree about which
+entity a source identity attaches to. No dependent database objects. **No
+companion namespace to exclude** — each source has exactly one
+(`company`/Hudu, `group`/LogMeIn, `organization`/Ninja, `site`/SentinelOne,
+`source-instance`/ScreenConnect), so unlike the device side there is no
+`device-health` analogue and no risk of the aggregate that cost 90 s there.
+
+**No same-transaction ordering trap.** `_load_client_links`
+(`source_observations.py:265`) and `_upsert_client_links` (`:536`) sit in one
+transaction, but the read is first and the write last, so the read only ever
+serves links from prior cycles. `entity_source_links` is synced at the
+collection boundary by `derived.refresh_after_collection`, which gives the
+same staleness. This is the check that made the device-side retirement risky;
+it does not apply here.
+
+**The reason this is worth doing is a second inert detector.**
+`client_name_conflict` has zero findings and cannot produce one: the detector
+suppresses when the observed source name matches the stored
+`client_links.external_name`, and `client_resolver` refreshes that column to
+the observed value on every sync. Measured over 320 links — 264 match the
+canonical client name, 319 match the stored name, 1 matches neither.
+Removing the self-referential term surfaces **56** real name drifts. Same
+defect class as the Ninja-only filter behind `device_links`.
+
+**Decision: surface the 56.** The current behaviour hides them with no
+operator decision and no record, which the "nothing hidden" rule forbids. An
+as-linked *accepted* name would be a legitimate suppression, but only as a
+recorded acceptance — that is a separate feature, and building it first would
+keep the drift hidden meanwhile. `external_name` therefore disappears with the
+table rather than being reproduced; the attribute contract cannot supply it in
+any case (`claim(name)` is per (client, source_instance), `external_name` is
+per (source, external_id) — the join fans 320 links to 522 rows, 204
+differing).
+
+**Scope.** Writers to remove: `_upsert_client_links`
+(`source_observations.py:178/536`), the `client_resolver` INSERT (`:272`), and
+the `views.py` INSERT. Readers to repoint: `_load_client_links`
+(`source_observations.py:163`), `client_resolver` drift/matching queries,
+`core/devices.py`, `client_workspace.py`, `views.py`, the `client.links` ORM
+accessor plus `org_index.html`. Model `ClientLink` becomes unmanaged
+`ClientSourceLink` on a new `v_client_source_link` view; admin read-only.
+Migration drops the table after repointing, mirroring 0121.
+
+**Next action.** Build `v_client_source_link`, repoint readers, remove the
+three writers, change the drift detector to compare observed against the
+canonical client name only, then dry-run the migration against production and
+confirm the finding count moves 0 -> 56.
+
 ### E6 remaining scope — resolved 2026-08-06 (ratified in ADR-0013 amendment)
 
 The phase line reads "obsolete compatibility columns/readers" and was never

@@ -427,7 +427,7 @@ def _write_ninja_observations(
             cur.execute(
                 """
                 SELECT cl.external_id, cl.client_id
-                FROM operations.client_links cl
+                FROM operations.v_client_source_link cl
                 JOIN operations.sources s ON s.id = cl.source_id AND s.name = 'Ninja'
                 WHERE cl.tenant_id = %s
                 """,
@@ -546,7 +546,7 @@ def _write_ninja_observations(
 
             # One `org` observation per Ninja organization per run (BLUEPRINT
             # Track C.2) — every org, including ones with zero devices.
-            # client_id here is rung 1 only (existing client_links); rungs
+            # client_id here is rung 1 only (existing source links); rungs
             # 2-4 belong to the client resolver (C2).
             org_counts: dict[str, int] = {}
             for r in device_rows:

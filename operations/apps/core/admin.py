@@ -8,8 +8,8 @@ from .models import (
     AttributeDefinition,
     AuditLog,
     Client,
-    ClientLink,
     ClientPolicy,
+    ClientSourceLink,
     ClientUser,
     ClientUserLink,
     Collector,
@@ -360,9 +360,20 @@ class FindingTypeAdmin(admin.ModelAdmin):
     search_fields = ("name", "description", "runbook_path")
 
 
-class ClientLinkInline(admin.TabularInline):
-    model = ClientLink
+# Read-only: v_client_source_link is a view (migration 0123).
+class ClientSourceLinkInline(admin.TabularInline):
+    model = ClientSourceLink
     extra = 0
+    can_delete = False
+    fields = ("source", "external_id", "external_namespace",
+              "first_seen_at", "last_seen_at", "missing_since")
+    readonly_fields = fields
+
+    def has_add_permission(self, request, obj=None) -> bool:
+        return False
+
+    def has_change_permission(self, request, obj=None) -> bool:
+        return False
 
 
 class ClientPolicyInline(admin.TabularInline):
@@ -375,14 +386,24 @@ class ClientAdmin(admin.ModelAdmin):
     list_display = ("display_name", "slug", "tenant", "timezone", "deleted_at", "version")
     list_filter = ("tenant", "timezone", "deleted_at")
     search_fields = ("display_name", "slug")
-    inlines = (ClientLinkInline, ClientPolicyInline)
+    inlines = (ClientSourceLinkInline, ClientPolicyInline)
 
 
-@admin.register(ClientLink)
-class ClientLinkAdmin(admin.ModelAdmin):
-    list_display = ("client", "source", "external_id", "external_name", "tenant", "version")
-    list_filter = ("tenant", "source")
-    search_fields = ("client__display_name", "external_id", "external_name")
+@admin.register(ClientSourceLink)
+class ClientSourceLinkAdmin(admin.ModelAdmin):
+    list_display = ("client", "source", "external_id", "external_namespace",
+                    "last_seen_at", "missing_since")
+    list_filter = ("source", "external_namespace")
+    search_fields = ("client__display_name", "external_id")
+
+    def has_add_permission(self, request) -> bool:
+        return False
+
+    def has_change_permission(self, request, obj=None) -> bool:
+        return False
+
+    def has_delete_permission(self, request, obj=None) -> bool:
+        return False
 
 
 @admin.register(ClientPolicy)

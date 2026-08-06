@@ -39,7 +39,7 @@ class SourceConfig:
     # None when no binding has been seeded for this source yet.
     source_binding_id: uuid.UUID | None = None
     entity_type: str | None = None
-    ops_source_id: int | None = None  # operations.sources.id — for client_links upsert
+    ops_source_id: int | None = None  # operations.sources.id — for source-link lookup
 
 
 @dataclass(frozen=True)

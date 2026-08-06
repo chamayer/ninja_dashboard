@@ -4,7 +4,7 @@ Runs before the device resolver drains observations. Scans `org`
 observations with client_id NULL and walks the strictly-exclusive ladder
 from BLUEPRINT Track C.3:
 
-    Rung 1 — id-link.  If operations.client_links has a row for
+    Rung 1 — id-link.  If operations.v_client_source_link has a row for
              (source, external_id) the observation already carries the
              client_id from source_observations._load_client_links. A
              name change on a mapped group DOES NOT re-match — it emits
@@ -264,21 +264,10 @@ def _attach_group(
         """,
         (client_id, _TENANT_ID, binding_id, entity_key),
     )
-    if source_id is not None:
-        cur.execute(
-            """
-            INSERT INTO operations.client_links
-                (id, version, tenant_id, client_id, source_id, external_id,
-                 external_name, created_at, created_reason)
-            VALUES (gen_random_uuid(), 0, %s, %s, %s, %s, %s, NOW(), %s)
-            ON CONFLICT (tenant_id, source_id, external_id)
-            DO UPDATE SET external_name = EXCLUDED.external_name
-            """,
-            (
-                _TENANT_ID, client_id, source_id, entity_key,
-                group_name, reason,
-            ),
-        )
+    # The client_links INSERT that stood here is retired with migration 0123.
+    # Setting client_id on the observations above is the attachment; the link
+    # is derived from that evidence by
+    # sync_entity_source_links_from_observations().
     # Clear the unmatched_source_groups review row.
     if source_id is not None:
         cur.execute(
@@ -519,7 +508,22 @@ def _resolve_finding(cur, type_name: str, condition_key: str) -> None:
 
 
 def _check_name_drift(cur, source_ids_by_name: dict[str, int]) -> None:
-    """A mapped link seeing a different display name = one-click apply finding."""
+    """A mapped link seeing a different display name = one-click apply finding.
+
+    This detector produced zero findings for its entire life, and could not
+    produce one. It suppressed the finding when the observed source name
+    matched *either* the canonical client name or the stored
+    `client_links.external_name` — while `_attach_group` refreshed that column
+    to the observed name on every sync. The second test compared the observed
+    value against itself.
+
+    Measured across all 320 links before the fix: 264 matched the canonical
+    client name, 319 matched the stored name, and 1 matched neither. Removing
+    the self-referential term surfaces 56 real drifts. `external_name` is gone
+    with the table (migration 0123) and is deliberately not reproduced —
+    suppressing a drift is a decision that belongs to an operator, recorded,
+    not a side effect of the column being rewritten.
+    """
     cur.execute(
         """
         WITH latest AS (
@@ -534,9 +538,9 @@ def _check_name_drift(cur, source_ids_by_name: dict[str, int]) -> None:
             ORDER BY source_binding_id, entity_key, observed_at DESC
         )
         SELECT cl.id, cl.client_id, cl.source_id, cl.external_id,
-               cl.external_name, l.observed_name, l.observed_norm,
+               l.observed_name, l.observed_norm,
                c.display_name
-        FROM operations.client_links cl
+        FROM operations.v_client_source_link cl
         JOIN operations.source_bindings sb
              ON sb.enabled
         JOIN operations.source_instances si
@@ -549,13 +553,13 @@ def _check_name_drift(cur, source_ids_by_name: dict[str, int]) -> None:
         (_TENANT_ID, _TENANT_ID),
     )
     drift_rows = cur.fetchall()
-    for link_id, client_id, source_id, external_id, external_name, \
+    for link_id, client_id, source_id, external_id, \
             observed_name, observed_norm, client_display in drift_rows:
         if not observed_name:
             continue
         client_norm = _norm(client_display)
         obs_norm = observed_norm or _norm(observed_name)
-        if obs_norm == client_norm or obs_norm == _norm(external_name):
+        if obs_norm == client_norm:
             _resolve_finding(cur, "client_name_conflict", _cond_link(link_id))
             continue
         _emit_finding(
@@ -567,7 +571,6 @@ def _check_name_drift(cur, source_ids_by_name: dict[str, int]) -> None:
                 "source_id": source_id,
                 "external_id": external_id,
                 "client_display_name": client_display,
-                "external_name_stored": external_name,
                 "observed_name": observed_name,
             },
             details={

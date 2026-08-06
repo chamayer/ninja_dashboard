@@ -95,7 +95,7 @@ def fetch(source: SourceConfig, observed_at: datetime) -> list[dict]:
             "source_name": source.source_name,
             "source_client_name": source.client_name,
             # Hudu company drives client resolution through the existing
-            # client_links / org-container machinery — no bespoke path.
+            # shared org-container machinery — no bespoke path.
             "platform_group_name": asset.get("company_name") or "",
             "platform_group_id": str(asset.get("company_id") or ""),
             "platform_device_id": str(asset.get("id") or ""),
