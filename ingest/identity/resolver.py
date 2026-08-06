@@ -150,6 +150,15 @@ def drain_resolution(batch_size: int = 200, *, refresh_current: bool = True) -> 
     except Exception:
         log.exception("resolver: layer propagation failed — continuing")
 
+    # After promotion and projection have settled the device rows this reads.
+    try:
+        with db.transaction() as cur:
+            cur.execute(f"SET LOCAL operations.tenant_id = {TENANT_ID}")
+            counts = project_merge_candidates(cur)
+        log.info("resolver: merge candidates %s", counts)
+    except Exception:
+        log.exception("resolver: merge candidate projection failed — continuing")
+
     if (resolved_count or promoted_count) and refresh_current:
         # Refresh derived presence matviews in dependency order:
         # device_agent_presence_current first (per-source × device), then
@@ -354,16 +363,12 @@ def _maybe_create_candidate(
 ) -> None:
     """If multiple devices match the hostname, record the conflict.
 
-    Two artefacts, deliberately: an `identity_conflict` Finding is the
-    *notification* that a collision exists (ADR-0005 slice 3), and a
-    `merge_candidates` row is the *reviewable proposal* carrying the member
-    snapshots, match reason and confidence an operator needs to decide.
-
-    The proposal half had never been written. `operations.merge_candidates`
-    sat at 0 rows with a fully built review surface behind it — queue page,
-    navigation entry, admin tab badge, admin overview metric and
-    client-directory column — none of which could ever show anything. The
-    missing piece was only this producer.
+    This emits the *notification* — an `identity_conflict` Finding
+    (ADR-0005 slice 3). The reviewable *proposal* is produced separately by
+    `project_merge_candidates`, which reconciles against current device state
+    rather than firing from here: a collision exists whether or not an
+    observation happens to be pending, and this function only runs for
+    unresolved ones.
     """
     cur.execute(
         """
@@ -420,66 +425,88 @@ def _maybe_create_candidate(
             ),
         )
 
-    # The reviewable proposal. `canonical_key` matches the finding's
-    # condition_key so the two surfaces address the same collision, and the
-    # unique index on it makes repeat observations refresh rather than
-    # duplicate. Members are recorded as snapshots so the queue can render the
-    # comparison without re-deriving it from live rows that may since have
-    # changed.
-    cur.execute(
-        """
-        SELECT id, canonical_hostname, canonical_serial, canonical_vm_uuid,
-               device_type, device_role, os_name, client_id, created_at
-        FROM operations.devices
-        WHERE tenant_id = %s AND id = ANY(%s)
-        ORDER BY created_at
-        """,
-        (TENANT_ID, candidate_ids),
-    )
-    members = [
-        {
-            "device_id": str(row[0]),
-            "hostname": row[1],
-            "serial": row[2] or "",
-            "vm_uuid": row[3] or "",
-            "device_type": row[4],
-            "device_role": row[5],
-            "os_name": row[6] or "",
-            "created_at": row[8].isoformat() if row[8] else None,
-        }
-        for row in cur.fetchall()
-    ]
-    if not members:
-        return
 
-    cur.execute(
-        """
-        INSERT INTO operations.merge_candidates
-            (id, version, tenant_id, client_id, entity_type, canonical_key,
-             member_snapshots, member_observation_ids, match_reason,
-             confidence, status)
-        VALUES (gen_random_uuid(), 1, %s, %s, 'device', %s, %s, %s, %s, %s,
-                'open')
-        ON CONFLICT (tenant_id, canonical_key)
-        WHERE status = 'open'
-        DO UPDATE SET
-            member_snapshots = EXCLUDED.member_snapshots,
-            member_observation_ids = EXCLUDED.member_observation_ids,
-            match_reason = EXCLUDED.match_reason
-        """,
-        (
-            TENANT_ID,
-            client_id,
-            f"identity_conflict:{norm}",
-            Json(members),
-            Json([str(obs_id)]),
-            (
-                f"{len(members)} devices share the normalized hostname "
-                f"'{norm}' within one client"
-            ),
-            0.9000,
-        ),
-    )
+
+_MERGE_CANDIDATE_UPSERT = """
+WITH collisions AS (
+    SELECT d.client_id,
+           d.canonical_hostname,
+           COUNT(*) AS member_count,
+           JSONB_AGG(
+               JSONB_BUILD_OBJECT(
+                   'device_id', d.id,
+                   'hostname', d.canonical_hostname,
+                   'serial', COALESCE(d.canonical_serial, ''),
+                   'vm_uuid', COALESCE(d.canonical_vm_uuid, ''),
+                   'device_type', d.device_type,
+                   'device_role', d.device_role,
+                   'os_name', COALESCE(d.os_name, ''),
+                   'created_at', d.created_at
+               ) ORDER BY d.created_at
+           ) AS members
+    FROM operations.devices d
+    WHERE d.tenant_id = %s AND d.deleted_at IS NULL AND d.canonical_hostname <> ''
+    GROUP BY d.client_id, d.canonical_hostname
+    HAVING COUNT(*) >= %s
+)
+INSERT INTO operations.merge_candidates
+    (id, version, tenant_id, client_id, entity_type, canonical_key,
+     member_snapshots, member_observation_ids, match_reason, confidence, status)
+SELECT gen_random_uuid(), 1, %s, c.client_id, 'device',
+       'identity_conflict:' || c.canonical_hostname,
+       c.members, NULL,
+       FORMAT('%%s devices share the normalized hostname %%s within one client',
+              c.member_count, c.canonical_hostname),
+       0.9000, 'open'
+FROM collisions c
+ON CONFLICT (tenant_id, canonical_key) WHERE status = 'open'
+DO UPDATE SET
+    member_snapshots = EXCLUDED.member_snapshots,
+    match_reason = EXCLUDED.match_reason,
+    client_id = EXCLUDED.client_id
+"""
+
+
+_MERGE_CANDIDATE_CLOSE = """
+UPDATE operations.merge_candidates mc
+SET status = 'merged'
+WHERE mc.tenant_id = %s
+  AND mc.status = 'open'
+  AND mc.entity_type = 'device'
+  AND NOT EXISTS (
+      SELECT 1
+      FROM operations.devices d
+      WHERE d.tenant_id = mc.tenant_id
+        AND d.deleted_at IS NULL
+        AND d.canonical_hostname <> ''
+        AND 'identity_conflict:' || d.canonical_hostname = mc.canonical_key
+      GROUP BY d.client_id, d.canonical_hostname
+      HAVING COUNT(*) >= %s
+  )
+"""
+
+
+def project_merge_candidates(cur) -> dict[str, int]:
+    """Reconcile `operations.merge_candidates` against current collisions.
+
+    A reconciling pass, not a detection side effect. The first attempt hooked
+    production onto `_maybe_create_candidate`, which only runs while resolving
+    an observation that has no device yet. Measured against production there
+    were zero such observations and nineteen open `identity_conflict`
+    findings, so the queue would have stayed permanently empty while real
+    collisions existed. A collision is a property of current device state, so
+    it is projected from that.
+
+    `canonical_key` matches the finding's `condition_key`, so the notification
+    and the proposal address the same collision. Proposals whose collision no
+    longer holds — after a merge, a rename or a deletion — are closed, so the
+    queue reflects what is true now rather than accumulating stale rows.
+    """
+    cur.execute(_MERGE_CANDIDATE_UPSERT, (TENANT_ID, _MIN_IDENTITY_CANDIDATES, TENANT_ID))
+    upserted = cur.rowcount or 0
+    cur.execute(_MERGE_CANDIDATE_CLOSE, (TENANT_ID, _MIN_IDENTITY_CANDIDATES))
+    closed = cur.rowcount or 0
+    return {"upserted": upserted, "closed": closed}
 
 
 def _collapse_mac_variants(

@@ -192,11 +192,12 @@ no producer: 0 rows, nothing writing it, and a badge filtering
   carrying member snapshots, match reason and confidence. Migration 0125 adds
   a partial unique index on `(tenant_id, canonical_key) WHERE status = 'open'`
   so repeat detections refresh one row instead of piling up.
-- Measured against production in a rolled-back transaction: 38 collisions
-  exist fleet-wide across 8 clients, which is the ceiling. The resolver emits
-  only while processing unresolved observations, so the queue fills toward
-  that as observations resolve rather than arriving at 38 immediately. 19
-  `identity_conflict` findings are open today.
+- Production is a reconciling pass (`project_merge_candidates`) over current
+  device collisions, run each resolver cycle. Hooking it to observation
+  resolution — the first attempt — would have produced nothing: production has
+  zero unresolved identity observations against nineteen open
+  `identity_conflict` findings. Measured: 38 proposals across 8 clients,
+  idempotent on a second pass, members 4-6 devices per collision.
 
 **Remaining:** reconcile the two surfaces so an operator is not asked the same
 question twice. The finding is the notification, the candidate is the

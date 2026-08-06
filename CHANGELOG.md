@@ -19,10 +19,18 @@ All notable changes to this project follow [Semantic Versioning](https://semver.
   the same hostname collision refresh one proposal rather than accumulating
   duplicates. `canonical_key` matches the finding's `condition_key`, so both
   surfaces address the same collision.
-- Measured against production: 38 hostname collisions exist across 8 clients,
-  which is the ceiling. The resolver emits while processing unresolved
-  observations, so the queue fills toward that figure rather than arriving at
-  it at once.
+- Production of proposals is a **reconciling pass**, `project_merge_candidates`,
+  running each resolver cycle — not a side effect of observation resolution.
+  The first attempt hooked it to `_maybe_create_candidate`, which only runs
+  while resolving an observation that has no device yet. Production has **zero**
+  such observations and nineteen open `identity_conflict` findings, so that
+  version would have left the queue permanently empty while real collisions
+  existed. A collision is a property of current device state, so it is
+  projected from that. Proposals whose collision no longer holds — after a
+  merge, rename or deletion — are closed, so the queue reflects what is true
+  now.
+- Measured against production: 38 proposals across 8 clients, a second pass
+  changes nothing, and the largest collisions carry 4 to 6 member devices.
 
 ## [0.113.0] — 2026-08-06 — Client renames become actionable
 
