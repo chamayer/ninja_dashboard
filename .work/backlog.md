@@ -233,6 +233,22 @@ true for the candidate, which closes when its collision stops holding.
   same care as devices (what makes two logins the same person across sources)
   and should not be improvised.
 
+## `whitelist_suggestion` fires 131,073 times
+
+- Measured 2026-08-06 while profiling the software page: 131,073 open
+  `whitelist_suggestion` findings, roughly half of every finding in the
+  system, across 20,631 titles.
+- A finding type at that volume is not an actionable queue, and it is what
+  makes the software dashboard's distinct-title tile cost ~273 ms even with
+  the expression index added in migration 0126 — PostgreSQL must read all
+  131,073 entries because there is no index skip-scan for `DISTINCT`.
+- Decide what the finding is for: if it is per (device, title) it should
+  probably be per title with a device count, which is the pattern the
+  recurrence-counter backlog item describes. That would cut it by roughly the
+  average device-per-title factor and make the queue readable.
+- Do not simply suppress it — per the fix-don't-remove rule, the detector is
+  telling the truth; the granularity is wrong.
+
 ## Continuous check that read models stay read-only
 
 - Migration 0122 revoked `INSERT, UPDATE, DELETE, TRUNCATE` from the runtime

@@ -2636,8 +2636,14 @@ def _software_page_data(request: HttpRequest) -> dict:
     # Fetch v_software_safety ONCE up front. Everything downstream —
     # per-title risk map, high-risk count, distribution, this-week
     # highlights, AND the ?safety=<band> filter — is derived from this
-    # single snapshot. Fetching once is essential; the view is a
-    # multi-CTE join that costs ~700-900 ms per evaluation.
+    # single snapshot.
+    #
+    # The comment here used to justify this by "the view is a multi-CTE join
+    # that costs ~700-900 ms per evaluation". That is no longer true: it has
+    # since been materialized, and the full unbounded fetch measures 19 ms
+    # against production. Fetching once is still right — one round trip beats
+    # six — but it is not the page's cost centre, and chasing it would have
+    # been wasted effort.
     all_safety_rows: list[tuple] = []
     if intel_available:
         try:
@@ -2973,44 +2979,39 @@ def _software_page_data(request: HttpRequest) -> dict:
             sc.execute("SET LOCAL operations.tenant_id = 1")
             sc.execute(
                 """
+                -- Pre-aggregate the decisions, then join. This was three
+                -- correlated EXISTS subqueries evaluated per title, i.e.
+                -- 20,631 x 3 scans of software_decisions: 1,484 ms measured
+                -- against production. Aggregating first and hash-joining the
+                -- result measures 83 ms for the same three numbers.
+                WITH scoped AS (
+                    SELECT canonical_name, LOWER(publisher) AS pub, decision
+                    FROM operations.software_decisions
+                    WHERE tenant_id = 1 AND client_id IS NULL AND device_id IS NULL
+                      AND decision IN ('approve','approve_publisher','reject','investigate')
+                ), by_name AS (
+                    SELECT canonical_name,
+                           BOOL_OR(decision IN ('approve','approve_publisher')) AS appr,
+                           BOOL_OR(decision = 'reject') AS rej,
+                           BOOL_OR(decision = 'investigate') AS inv
+                    FROM scoped WHERE canonical_name <> '' GROUP BY 1
+                ), by_pub AS (
+                    SELECT pub,
+                           BOOL_OR(decision IN ('approve','approve_publisher')) AS appr,
+                           BOOL_OR(decision = 'reject') AS rej,
+                           BOOL_OR(decision = 'investigate') AS inv
+                    FROM scoped WHERE pub <> '' GROUP BY 1
+                )
                 SELECT
-                    COUNT(DISTINCT sic.canonical_name) FILTER (
-                        WHERE EXISTS (
-                            SELECT 1 FROM operations.software_decisions sd
-                            WHERE sd.tenant_id = 1 AND sd.client_id IS NULL AND sd.device_id IS NULL
-                              AND sd.decision IN ('approve','approve_publisher')
-                              AND (
-                                  (sd.canonical_name <> '' AND sd.canonical_name = sic.canonical_name)
-                                  OR (sd.publisher <> ''
-                                      AND LOWER(sd.publisher) = LOWER(COALESCE(sic.publisher,'')))
-                              )
-                        )
-                    ) AS approved,
-                    COUNT(DISTINCT sic.canonical_name) FILTER (
-                        WHERE EXISTS (
-                            SELECT 1 FROM operations.software_decisions sd
-                            WHERE sd.tenant_id = 1 AND sd.client_id IS NULL AND sd.device_id IS NULL
-                              AND sd.decision = 'reject'
-                              AND (
-                                  (sd.canonical_name <> '' AND sd.canonical_name = sic.canonical_name)
-                                  OR (sd.publisher <> ''
-                                      AND LOWER(sd.publisher) = LOWER(COALESCE(sic.publisher,'')))
-                              )
-                        )
-                    ) AS rejected,
-                    COUNT(DISTINCT sic.canonical_name) FILTER (
-                        WHERE EXISTS (
-                            SELECT 1 FROM operations.software_decisions sd
-                            WHERE sd.tenant_id = 1 AND sd.client_id IS NULL AND sd.device_id IS NULL
-                              AND sd.decision = 'investigate'
-                              AND (
-                                  (sd.canonical_name <> '' AND sd.canonical_name = sic.canonical_name)
-                                  OR (sd.publisher <> ''
-                                      AND LOWER(sd.publisher) = LOWER(COALESCE(sic.publisher,'')))
-                              )
-                        )
-                    ) AS investigating
+                    COUNT(DISTINCT sic.canonical_name)
+                        FILTER (WHERE COALESCE(n.appr, FALSE) OR COALESCE(p.appr, FALSE)) AS approved,
+                    COUNT(DISTINCT sic.canonical_name)
+                        FILTER (WHERE COALESCE(n.rej, FALSE) OR COALESCE(p.rej, FALSE)) AS rejected,
+                    COUNT(DISTINCT sic.canonical_name)
+                        FILTER (WHERE COALESCE(n.inv, FALSE) OR COALESCE(p.inv, FALSE)) AS investigating
                 FROM operations.software_title_current sic
+                LEFT JOIN by_name n ON n.canonical_name = sic.canonical_name
+                LEFT JOIN by_pub  p ON p.pub = LOWER(COALESCE(sic.publisher, ''))
                 WHERE sic.tenant_id = 1
                 """
             )

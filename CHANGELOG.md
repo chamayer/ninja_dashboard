@@ -2,6 +2,43 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.115.0] — 2026-08-06 — Software page: 3.2s to ~1.1s
+
+### Fixed
+
+- **The software pages took over three seconds.** Measured end-to-end while
+  logged in: `/software/` 3.19 s and `/software/products/` 3.54 s, both driven
+  by the shared `_software_page_data`. Per-query profiling showed 3,524 ms of a
+  3,954 ms render was SQL, concentrated in three queries.
+- **Decision tile counts: 1,484 ms to 83 ms.** Three
+  `COUNT(DISTINCT ...) FILTER (WHERE EXISTS (...))` clauses re-scanned
+  `software_decisions` once per title — 20,631 titles times three. Now
+  pre-aggregates decisions by name and by publisher, then hash-joins. Verified
+  against production to return identical numbers.
+- **New-in-24-hours panel: 718 ms to 0.18 ms.** It filtered
+  `first_observed_at` with no index on that column, scanning all 481,365
+  installation rows. Migration 0126 adds
+  `(tenant_id, first_observed_at DESC) WHERE deleted_at IS NULL`.
+- **Whitelist-suggestion tile: 1,015 ms to ~273 ms.** It counts distinct
+  titles across 131,073 findings. Migration 0126 adds an expression index on
+  the JSON key so the scan reads the index rather than the heap. It cannot go
+  lower — PostgreSQL has no index skip-scan for `DISTINCT`, so all 131,073
+  entries are read either way.
+
+### Changed
+
+- Corrected a stale comment claiming `v_software_safety` "costs ~700-900 ms per
+  evaluation". It has since been materialized and the full unbounded fetch
+  measures 19 ms. Fetching it once is still right, but it is not the page's
+  cost centre — the comment would have sent the next reader after the wrong
+  thing, as it did this one.
+
+### Note
+
+- Both indexes are created `CONCURRENTLY`, so migration 0126 is non-atomic:
+  `findings` and `software_installations_current` take continuous ingest
+  writes and a plain `CREATE INDEX` would block them.
+
 ## [0.114.1] — 2026-08-06 — Every identity conflict now has an action
 
 ### Fixed
