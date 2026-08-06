@@ -390,19 +390,30 @@ mapping tail.
   approvals. Audit/event retention and fleet-wide audit UI remain their defined
   follow-up tracks where not completed by E4/E5.
 
-## Next E4 scope
+## After E6 — the track is complete; its named successors
 
-- Add deployment-controlled relationship types and authority policy, unresolved
-  source relationship evidence, canonical/effective edges and support, and
-  audited include/exclude decisions.
-- Activate the existing generic candidate/event foundation as the review
-  authority while preserving current typed workflows until their measured
-  compatibility cutover.
-- Add immutable generic source events and route Ninja `NODE_DELETED` through
-  the common event/withdrawal contract without retiring canonical entities or
-  exposing protected source-actor metadata.
-- Update root/Operations plans, ADR-0010 progress, `VERSION`, and
-  `CHANGELOG.md` with the implemented E4 contract.
+The E1-E6 phase list ends here; there is no E7. E6's own text names what
+follows, and all of it is deliberately outside the track because it is
+destructive or belongs to another surface:
+
+- **Agent Compliance retirement** — `ninja_agent_compliance`, 21 tables,
+  **12 GB** measured 2026-08-06. Independent operation with its own
+  backup/restore and destructive approval.
+- **Ninja snapshot archive / delete / reclaim** —
+  `ninja_core.device_snapshots` 7,961,331 rows at **14 GB**, and
+  `device_health_snapshots` 7,487,737 rows at **7.4 GB**. Same conditions.
+- **Audit/event retention** and **fleet-wide audit UI** — follow-up tracks
+  where not completed by E4/E5.
+
+For scale: the database is **46 GB**, so those three account for roughly
+**33 GB**, about 72%. That is the largest single lever available and the
+reason E6 pushed them out rather than absorbing them — each needs its own
+backup, its own approval, and its own verification.
+
+Independent of that list, the backlog carries the Users capability (0 rows
+against 3,405 distinct users already ingested), consolidating software merge
+proposals into `merge_candidates`, a continuous check that read models stay
+read-only, and reconciling the merge queue with its findings.
 
 ## Basic validation and deployment
 
