@@ -5435,6 +5435,70 @@ def admin_finding_acknowledge(request: HttpRequest, finding_id: str) -> HttpResp
     return redirect("findings_admin_health")
 
 
+@login_required
+@require_POST
+def admin_finding_apply_client_rename(request: HttpRequest, finding_id: str) -> HttpResponse:
+    """Apply a source-observed client name to the canonical client.
+
+    Completes the `client_name_conflict` workflow. Track C replaced the old
+    `bootstrap_clients_from_ninja` auto-rename with "name drift = finding,
+    never re-match" — an operator decides, rather than a source silently
+    overwriting canonical state. The finding half was built; this apply half
+    was not, which left the rename visible but unactionable.
+
+    `slug` is deliberately untouched. The retired bootstrap command preserved
+    it too, because the slug is in operator-facing URLs and churning it breaks
+    saved links.
+    """
+    finding = get_object_or_404(AdminFinding, id=finding_id, tenant_id=1)
+    if finding.finding_type.name != "client_name_conflict":
+        messages.error(request, "That action only applies to client rename findings.")
+        return redirect("findings_admin_health")
+
+    ref = finding.subject_ref or {}
+    observed_name = (ref.get("observed_name") or "").strip()
+    client_id = ref.get("client_id")
+    if not observed_name or not client_id:
+        messages.error(
+            request,
+            "This finding is missing the observed name or client reference; "
+            "cannot apply.",
+        )
+        return redirect("findings_admin_health")
+
+    client = get_object_or_404(Client, id=client_id, tenant_id=1, deleted_at__isnull=True)
+    previous_name = client.display_name
+    if previous_name == observed_name:
+        messages.info(request, f"{client.display_name} already carries that name.")
+    else:
+        client.display_name = observed_name
+        client.save(update_fields=["display_name"])
+        AuditLog.objects.create(
+            tenant_id=1,
+            actor=request.user if request.user.is_authenticated else None,
+            actor_kind=AuditLog.ActorKind.USER,
+            source=AuditLog.Source.UI,
+            action="client.rename_from_source",
+            entity_type="client",
+            entity_id=client.id,
+            before_state={"display_name": previous_name, "slug": client.slug},
+            after_state={"display_name": observed_name, "slug": client.slug},
+            ip_address=request.META.get("REMOTE_ADDR") or None,
+            user_agent=(request.META.get("HTTP_USER_AGENT") or "")[:2000],
+        )
+        messages.success(
+            request,
+            f"Renamed {previous_name} to {observed_name}. The URL is unchanged.",
+        )
+
+    # The next resolver pass would resolve this itself once the names agree;
+    # closing it here keeps the queue honest in the meantime.
+    finding.status = "resolved"
+    finding.resolved_at = timezone.now()
+    finding.save(update_fields=["status", "resolved_at"])
+    return redirect("findings_admin_health")
+
+
 # ── Patching visibility — Fleet Patch Evidence ─────────────────────────────
 
 

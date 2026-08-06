@@ -180,6 +180,59 @@ This is the proposed successor to the root-level open-work portion of
   bulk report on the findings surface rather than an actionable queue.
 - Trigger: explicit approval; the collapse is destructive.
 
+## `merge_candidates`: a built review workflow with no producer — fix it
+
+**Rule this sits under:** a function or workflow is not removed because it is
+idle. It was created for a purpose; fix or recreate it. Only the data
+structures underneath are being reorganised.
+
+Measured 2026-08-06:
+
+- `operations.merge_candidates` holds **0 rows** and **nothing writes it** —
+  no `create`, no INSERT, in ingest or Operations. The other
+  `merge_candidates` matches in the codebase are unrelated relations in the
+  `ninja_agent_compliance` and `ninja_inventory` schemas.
+- **The badge cannot fire even if rows existed.** `MergeCandidate.Status` is
+  `open | merged | split | rejected`; `context_processors.py:75` counts
+  `status="pending"`, which is not a member. That is a one-word bug.
+- The review surface is fully built and waiting: the queue page
+  (`views.py:5975` + `merge_candidates_queue.html`), its route
+  (`urls.py:182`), the "Merges" nav link (`base.html:383`), the admin tab
+  badge (`_admin_tabs.html:44`), the admin overview metric
+  (`operations_admin_overview.html:96`), the client-directory `merge_reviews`
+  column (`client_workspace.py:442`), the landing card (`views.py:557`), and
+  a Django admin.
+
+**What is missing is only the producer.** The model carries a rich proposal —
+`canonical_key`, `entity_type`, `member_snapshots`, `member_observation_ids`,
+`match_reason`, `confidence` — which is more than a finding expresses. The
+resolver already performs the detection: it emits `identity_conflict` (19
+open) and `duplicate_platform_record` (36 open admin findings) from exactly
+the duplicate-machine analysis a candidate would record.
+
+So the finding and the candidate are not duplicates of each other. The finding
+is the notification that a conflict exists; the candidate is the reviewable
+proposal with its evidence and confidence. The gap is that detection never
+writes the proposal.
+
+**Work, in order:**
+
+1. ~~Fix `context_processors.py:75` to filter `Status.OPEN`, not
+   `"pending"`.~~ **Done in 0.113.0.**
+2. Wire the producer: where `resolver._maybe_create_candidate` and the
+   duplicate-machine grouping detect a conflict, write the `MergeCandidate`
+   with its member snapshots, match reason and confidence alongside the
+   existing finding.
+3. Reconcile the two surfaces so an operator is not asked the same question
+   twice — most likely the finding links to the candidate rather than to a
+   bare merge form, so `identity_conflict` becomes the notification and the
+   queue becomes the decision.
+4. Confirm the queue page renders against real rows once they exist; it has
+   never had any.
+
+`client_user_links` is the same rule: 0 rows, no writer, admin-only. Establish
+what it was for before doing anything with it.
+
 ## Continuous check that read models stay read-only
 
 - Migration 0122 revoked `INSERT, UPDATE, DELETE, TRUNCATE` from the runtime

@@ -22,6 +22,7 @@ from apps.core.generic_admin import (
 )
 from apps.core.views import (
     admin_finding_acknowledge,
+    admin_finding_apply_client_rename,
     admin_jobs,
     admin_jobs_run,
     admin_jobs_run_all,
@@ -176,6 +177,11 @@ urlpatterns = [
         "admin/findings/<uuid:finding_id>/ack/",
         admin_finding_acknowledge,
         name="admin_finding_acknowledge",
+    ),
+    path(
+        "admin/findings/<uuid:finding_id>/apply-client-rename/",
+        admin_finding_apply_client_rename,
+        name="admin_finding_apply_client_rename",
     ),
     path("coverage/", fleet_coverage, name="fleet_coverage"),
     path("sources/", sources_status, name="sources_status"),

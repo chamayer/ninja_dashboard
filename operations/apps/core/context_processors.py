@@ -72,9 +72,12 @@ def brand(request: HttpRequest) -> dict:
         # These badges are rendered only in the application admin tabs, so
         # avoid even their small count queries on ordinary operator pages.
         if request.path_info.startswith("/admin/"):
+            # `pending` is not a member of MergeCandidate.Status
+            # (open | merged | split | rejected), so this badge could never
+            # show a count regardless of the table's contents.
             ctx["nav_pending_merges"] = MergeCandidate.objects.filter(
                 tenant_id=tenant_id,
-                status="pending",
+                status=MergeCandidate.Status.OPEN,
             ).count()
             ctx["nav_pending_client_candidates"] = ClientCandidate.objects.filter(
                 tenant_id=tenant_id,

@@ -2,6 +2,30 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.113.0] — 2026-08-06 — Client renames become actionable
+
+### Added
+
+- **"Apply source name" action on `client_name_conflict` findings.** Track C
+  replaced the old `bootstrap_clients_from_ninja` auto-rename with the rule
+  "name drift = finding, never re-match", so an operator decides rather than a
+  source silently overwriting canonical state. The finding half was built; the
+  apply half never was, which left renames visible but unactionable — and with
+  the bootstrap command retired in 0.112.0, unhandled entirely. The action
+  sets `clients.display_name` to the observed source name, writes a
+  `client.rename_from_source` audit row, and resolves the finding.
+  `slug` is deliberately untouched: it appears in operator-facing URLs, and
+  the retired bootstrap preserved it for the same reason.
+
+### Fixed
+
+- **The pending-merges badge could never show a count.**
+  `context_processors` filtered `MergeCandidate` on `status="pending"`, which
+  is not a member of `MergeCandidate.Status` (`open | merged | split |
+  rejected`). Corrected to `Status.OPEN`. The queue still has no producer —
+  tracked in `.work/backlog.md` — but the badge is no longer wrong on top of
+  that.
+
 ## [0.112.1] — 2026-08-06 — Drop two superseded legacy materialized views
 
 ### Removed

@@ -75,6 +75,15 @@
                         <button type="submit" style="padding: 0.25rem 0.6rem; font-size: 0.8rem;">Ack</button>
                     </form>
                     {% endif %}
+                    {% if f.finding_type.name == "client_name_conflict" and f.status != "resolved" %}
+                    <form method="post" action="{% url 'admin_finding_apply_client_rename' f.id %}" style="display: inline;">
+                        {% csrf_token %}
+                        <button type="submit" style="padding: 0.25rem 0.6rem; font-size: 0.8rem;"
+                                title="Rename the client to the name the source reports. The URL is unchanged.">
+                            Apply source name
+                        </button>
+                    </form>
+                    {% endif %}
                 </td>
             </tr>
             {% endfor %}

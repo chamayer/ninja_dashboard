@@ -130,6 +130,29 @@ three writers, change the drift detector to compare observed against the
 canonical client name only, then dry-run the migration against production and
 confirm the finding count moves 0 -> 56.
 
+### Capability restored after the `bootstrap_clients_from_ninja` retirement
+
+Retiring that command in 0.112.0 followed a documented decision (BLUEPRINT
+Track C superseded it 2026-07-13, removal scheduled as C.7), but it removed a
+working behaviour: Ninja org renames were applied to `clients.display_name`
+while preserving `slug`.
+
+Track C's replacement is "name drift = finding, never re-match", and
+`human_labels` already labels `client_name_conflict` as "Client renamed at
+source". The finding half existed; **the apply half was never built**, so the
+only action on an admin finding was acknowledge. Between 0.112.0 and 0.113.0
+the capability was therefore absent.
+
+0.113.0 adds the apply action, completing the designed replacement rather than
+restoring the command. Renames are now operator-reviewed instead of silently
+applied, which is what Track C intended, and the 50 drift findings surfaced in
+0.112.0 are the backlog of renames that had accumulated while the detector was
+suppressed.
+
+Rule this reflects: a workflow is fixed or recreated, never removed. A prior
+repository decision to delete one still collides with that and should be
+surfaced rather than acted on silently.
+
 ### E6 remaining scope — resolved 2026-08-06 (ratified in ADR-0013 amendment)
 
 The phase line reads "obsolete compatibility columns/readers" and was never
@@ -154,8 +177,8 @@ enforcement, not an interim one.
 | relation | rows | code readers | note |
 | --- | --- | --- | --- |
 | `client_links` | 320 | 12 | **exact twin of the retired `device_links`.** `entity_source_links` holds 320 `client` rows — 1:1. |
-| `client_candidates` | 9 | 6 | legacy candidate workflow; `entity_candidates` (4,965) is the E4 review authority |
-| `merge_candidates` | 0 | 3 | empty; belongs on the single findings surface |
+| `client_candidates` | 9 (8 open) | 6 | **not a swap.** Name-keyed: 8 normalized names awaiting acceptance. `entity_candidates` for class `client` is identity-keyed: 10 `observed_only` rows (7 LogMeIn groups, 3 SentinelOne sites). Retiring it moves the operator from accepting a name once to accepting each source identity, so it needs a queue that groups generic candidates by observed name — UI work, not a repoint. |
+| `merge_candidates` | 0 | 3 | **surface with no producer** — nav badge, workspace section and admin, but nothing writes it. See backlog; decide whether the feature is wanted before dropping. |
 | `source_bindings` | 5 | 28 | duplicates `source_instances` (also 5); most readers, least urgent |
 | `ninja_device_detail_current_shadow` | 5,499 | 6 | **not dead** — presents `entity_observation_current` under legacy Ninja names so readers survived the snapshot cutover. Retiring it is a reader cutover. |
 | `ninja_device_health_current_shadow` | 5,499 | 2 | as above |
