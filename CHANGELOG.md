@@ -2,6 +2,28 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.112.1] — 2026-08-06 — Drop two superseded legacy materialized views
+
+### Removed
+
+- `operations.device_agent_presence_current_legacy` (0 rows) and
+  `operations.source_health_current_legacy` (4 rows, superseded by
+  `source_health_current`'s 5). Neither is referenced by any Python, template,
+  shell or SQL outside frozen historical migrations, nor by any database
+  function; the refresh coordinator drives only the current pair. Migration
+  0124 drops them in dependency order behind a guard that fails on any
+  unexpected dependent rather than using CASCADE.
+
+### Note
+
+- The three `ninja_device_*_shadow` views were previously recorded as empty
+  and slated for retirement. They are not empty — they hold 5,499, 5,499 and
+  357,669 rows and present `entity_observation_current` under legacy Ninja
+  names so readers survived the snapshot cutover. The earlier figure came from
+  joining `pg_stat_user_tables`, whose `n_live_tup` covers tables only and
+  reports 0 for every view. They are working correctly and retiring them is a
+  reader cutover, not cleanup.
+
 ## [0.112.0] — 2026-08-06 — Retire client_links; name drift becomes visible
 
 ### Fixed

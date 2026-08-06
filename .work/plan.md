@@ -157,16 +157,24 @@ enforcement, not an interim one.
 | `client_candidates` | 9 | 6 | legacy candidate workflow; `entity_candidates` (4,965) is the E4 review authority |
 | `merge_candidates` | 0 | 3 | empty; belongs on the single findings surface |
 | `source_bindings` | 5 | 28 | duplicates `source_instances` (also 5); most readers, least urgent |
-| `ninja_device_detail_current_shadow` | 0 | 6 | empty but has readers — establish whether they are dead or silently returning nothing |
-| `ninja_device_health_current_shadow` | 0 | 2 | as above |
-| `ninja_device_seen_daily_shadow` | 0 | 3 | as above |
-| `device_agent_presence_current_legacy` | 0 | 0 | dead matview |
-| `source_health_current_legacy` | 4 | 0 | dead matview |
+| `ninja_device_detail_current_shadow` | 5,499 | 6 | **not dead** — presents `entity_observation_current` under legacy Ninja names so readers survived the snapshot cutover. Retiring it is a reader cutover. |
+| `ninja_device_health_current_shadow` | 5,499 | 2 | as above |
+| `ninja_device_seen_daily_shadow` | 357,669 | 3 | as above |
+| `device_agent_presence_current_legacy` | 0 | 0 | dead matview — dropped in 0124 |
+| `source_health_current_legacy` | 4 | 0 | dead matview, superseded by `source_health_current` (5 rows) — dropped in 0124 |
 | `client_user_links` | 0 | 2 | empty |
 
-Order: `client_links` first (reuse the `device_links` pattern), then the two
-dead matviews, then the shadow views once their readers are characterised,
-then the candidate tables, then `source_bindings` last.
+Order: `client_links` first (done, 0.112.0), then the two dead matviews
+(0124), then the candidate tables, then the shadow views, then
+`source_bindings` last.
+
+**Correction on the shadow views.** They were listed as empty because the
+inventory joined `pg_stat_user_tables`, whose `n_live_tup` covers tables only
+and silently reports 0 for every view and matview. Counted directly they hold
+5,499 / 5,499 / 357,669 rows and are working correctly — they are the *new*
+path wearing legacy names, not abandoned debt. Nothing is broken there, so
+they drop down the order rather than up it. Count a view before calling it
+empty.
 
 ### Deployed this session
 
