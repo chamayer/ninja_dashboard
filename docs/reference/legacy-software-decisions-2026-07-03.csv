@@ -1,0 +1,419 @@
+Name,Decision,Type
+"ABS PDF Install",Approve,software
+"Dime Secure Browser",Approve,software
+"FVD Downloader Module",Reject,software
+"MicrosoftCorporationII.WindowsSubsystemForAndroid",Investigate,software
+"NVM for Windows 1.1.12",Investigate,software
+"TokenTool",Investigate,software
+"ScreenConnect Client (765a32f0fd245ef6)",Investigate,software
+"Adobe AIR",Investigate,software
+"Symantec Endpoint Protection",Reject,software
+"TeamViewer",Reject,software
+"Kaspersky Endpoint Security 10 for Windows",Reject,software
+"ScreenConnect Client (e92fb6feb7c9159a)",Investigate,software
+"LanSchool Student",Investigate,software
+"SpotifyAB.SpotifyMusic",Investigate,software
+"Advanced IP Scanner 2.5.1",Investigate,software
+"WinDirStat",Investigate,software
+"Livigent IC  x64",Investigate,software
+"WavePad Sound Editor",Investigate,software
+"Adobe Flash Player 32 PPAPI",Investigate,software
+"Web Components",Investigate,software
+"NBC Learn Offline",Investigate,software
+"Adobe Flash Player 32 NPAPI",Investigate,software
+"SAP Crystal Reports runtime engine for .NET Framework 4 (32-bit)",Investigate,software
+"NBC Learn Offline Player",Investigate,software
+"Advanced IP Scanner 2.5",Investigate,software
+"Wisenet Device Manager",Investigate,software
+"EZTools 3.0",Investigate,software
+"Agent Ransack",Investigate,software
+"com.nbcuni.aodplayer.38154C9B00B8386E5872F08BE16716F44323C112.1",Investigate,software
+"CyberLinkCorp.th.PowerDVDforLenovo",Investigate,software
+"CyberLinkCorp.th.Power2GoforLenovo",Investigate,software
+"RemoteScan ASP",Investigate,software
+"Twack_64",Investigate,software
+"VIP-102B IP Solutions Setup Tool",Investigate,software
+"AnyBurn",Investigate,software
+"POS Printer Driver V7.17 7.17",Investigate,software
+"7EE7776C.LinkedInforWindows",Reject,software
+"Branding",Investigate,software
+"SupportSoft Assisted Service",Investigate,software
+"WinPcap 4.1.1",Investigate,software
+"EZTools 2.0",Investigate,software
+"Recuva",Investigate,software
+"WavesAudio.MaxxAudioProforDell2019",Investigate,software
+"Npcap",Investigate,software
+"SADPTool",Investigate,software
+"microtype4.2instructor",Investigate,software
+"Microsoft.MicrosoftSolitaireCollection",Reject,software
+"MicrosoftWindows.Client.WebExperience",Approve,software
+"Clipchamp.Clipchamp",Approve,software
+"MicrosoftCorporationII.QuickAssist",Approve,software
+"AppUp.IntelGraphicsExperience",Approve,software
+"AppUp.IntelManagementandSecurityStatus",Approve,software
+"MicrosoftTeams",Approve,software
+"QuickBooks Runtime Redistributable",Approve,software
+"MicrosoftWindows.CrossDevice",Approve,software
+"NVIDIACorp.NVIDIAControlPanel",Approve,software
+"QuickBooks Premier: Accountant Edition 2021",Approve,software
+"Sentinel Agent",Approve,software
+"LogMeIn",Approve,software
+"Realtek Audio Driver",Approve,software
+"Realtek High Definition Audio Driver",Approve,software
+"MSTeams",Approve,software
+"iTunes",Investigate,software
+"AppUp.IntelArcSoftware",Approve,software
+"MicrosoftCorporationII.MicrosoftFamily",Approve,software
+"E046963F.LenovoSettingsforEnterprise",Approve,software
+"Bonjour",Investigate,software
+"Apple Application Support (64-bit)",Investigate,software
+"Apple Application Support (32-bit)",Investigate,software
+"Keyscan Aurora Client",Approve,software
+"WebConnect Desktop Emulator",Approve,software
+"FingerTec BioBridge SDK v2.1.045",Investigate,software
+"QuickBooks Enterprise Solutions 18.0",Approve,software
+"EFI License Manager",Investigate,software
+"Fiery Makeready License Activation",Investigate,software
+"Brother MFL-Pro Suite MFC-L2700DW series",Approve,software
+"Simple Sticky Notes 6.7",Investigate,software
+"Brother PowerENGAGE",Approve,software
+"Adobe Shockwave Player 12.2",Investigate,software
+"Integrated Camera",Approve,software
+"ABS PDF",Approve,software
+"LIBS_3_8_27_32",Investigate,software
+"AD2F1837.HPPrinterControl",Approve,software
+"ACR_12_4_32",Investigate,software
+"LBAI",Approve,software
+"Adobe Photoshop 2020",Approve,software
+"Apple Mobile Device Support",Investigate,software
+"CCXP_4_0_0_32",Approve,software
+"Adobe InDesign 2020",Approve,software
+"58539F3C.LexmarkPrinterHome",Approve,software
+"Mozilla Maintenance Service",Approve,software
+"SADP",Approve,software
+"Dolby Audio X2 Windows API SDK",Approve,software
+"Vulkan Run Time Libraries 1.0.33.0",Approve,software
+"Goverlan Reach Client 9",Investigate,software
+"Adobe Illustrator 2019",Approve,software
+"Realtek Card Reader",Approve,software
+"CDEC_1_0_0",Approve,software
+"Adobe Bridge CC 2019",Approve,software
+"Fiery Command WorkStation Package-6.8.0.541",Approve,software
+"UXP WebView Support",Approve,software
+"GoldWave v6.80",Approve,software
+"Google Legacy Browser Support",Approve,software
+"Adobe Premiere Pro 2019",Approve,software
+"AppUp.IntelOptaneMemoryandStorageManagement",Approve,software
+"PowerDVD Create",Investigate,software
+"Adobe Photoshop 2025",Investigate,software
+"CyberLink PowerDVD 12",Investigate,software
+"GoverLAN Client Agents v8",Investigate,software
+"Dolby Audio X2 Windows APP",Approve,software
+"CyberLink WaveEditor",Investigate,software
+"COMP_1_4_32",Approve,software
+"Batch Configuration",Approve,software
+"Adobe Bridge 2025",Approve,software
+"Adobe InDesign 2025",Approve,software
+"Adobe Illustrator 2025",Approve,software
+"SEPS_0_25_0",Approve,software
+"Brother MFL-Pro Suite ADS-1000W",Approve,software
+"KASU_2_0_32",Approve,software
+"EU Waste Recycling Information",Approve,software
+"KANC_7_0_2",Approve,software
+"Adobe Premiere Rush",Approve,software
+"Lexmark Printer Software G3 XL Print Driver",Approve,software
+"VC14win64_1_1_0",Investigate,software
+"VC11win32_1_0_0_32",Investigate,software
+"Information Center",Approve,software
+"VC11win64_1_0_0",Investigate,software
+"Microsoft.NetworkSpeedTest",Investigate,software
+"Lexmark Network Twain Scan Driver",Approve,software
+"LIBS_4_12_1_32",Investigate,software
+"GoldWave v7.01",Approve,software
+"Adobe Premiere Pro 2025",Approve,software
+"ACR_17_5_32",Approve,software
+"Online Updater",Approve,software
+"Fiery Command WorkStation Package-6.8.0.615",Investigate,software
+"Customer Support",Approve,software
+"Mozilla Firefox (x64 en-US)",Investigate,software
+"COSY_7_7_0_32",Approve,software
+"CCXP_7_1_2_32",Approve,software
+"Foxit Reader",Investigate,software
+"LogMeIn Client",Approve,software
+"Brother MFL-Pro Suite ADS-2000e",Approve,software
+"MicrosoftCorporationII.WinAppRuntime.Singleton",Approve,software
+"Kyocera Product Library",Approve,software
+"LenovoCorporation.LenovoID",Approve,software
+"QuickBooks Premier: Accountant Edition 2018",Approve,software
+"Lexmark Local Scan 5.0.0 Scan Driver",Approve,software
+"Encarta Search Bar (64-bit)",Approve,software
+"E046963F.LenovoCompanion",Approve,software
+"QuickBooks Pro 2014",Approve,software
+"AdobeAcrobatDCCoreApp",Approve,software
+"Revo Uninstaller 2.6.5",Investigate,software
+"Brother MFL-Pro Suite MFC-7360N",Approve,software
+"CrowdStrike Windows Sensor",Reject,software
+"46928bounde.EclipseManager",Investigate,software
+"WinPcap 4.1.3",Investigate,software
+"Apple Software Update",Investigate,software
+"PicPick",Investigate,software
+"GoTo Opener",Investigate,software
+"5319275A.WhatsAppDesktop",Investigate,software
+"CutePDF Writer",Investigate,software
+"D5EA27B7.Duolingo-LearnLanguagesforFree",Investigate,software
+"Disney.37853FC22B2CE",Investigate,software
+"Windows Setup Remediations (x64) (KB4023057)",Investigate,software
+"AnyDesk",Reject,software
+"LocalServiceComponents",Investigate,software
+"ScreenConnect Client (4d18a0e3954a462c)",Investigate,software
+"Software Operation Panel",Investigate,software
+"Apple Application Support",Investigate,software
+"No-IP DUC",Investigate,software
+"Ranger",Investigate,software
+"STWWebViewer for Windows 1.0.170",Investigate,software
+"WavesAudio.WavesMaxxAudioProforDell",Investigate,software
+"Zoiper5",Investigate,software
+"Shockwave",Investigate,software
+"ActiproSoftwareLLC.562882FEEB491",Investigate,software
+"Ranger plug-in: Canon-CR135iCR190i v2.1.1.2",Investigate,software
+"PuTTY release 0.83 (64-bit)",Investigate,software
+"PuTTY release 0.81 (64-bit)",Investigate,software
+"Power Meter Viewer",Investigate,software
+"Agent Ransack x64",Investigate,software
+"NI Software",Investigate,software
+"ScreenConnect Client (c9df9dc4d2206143)",Investigate,software
+"Ranger Remote v2.2.2.1",Investigate,software
+"WebPlugin IPC UN version 1.2.2.0",Investigate,software
+"ELANMicroelectronicsCorpo.ELANTrackPointforThinkpa",Investigate,software
+"Microsoft.MinecraftEducationEdition",Reject,software
+"Microsoft Math Worksheet Generator",Investigate,software
+"Dropbox 25 GB",Investigate,software
+"CyberLink Power Media Player 14",Investigate,software
+"FreeFileSync",Investigate,software
+"SearchTools V5.7.3_20230907",Investigate,software
+"SNC toolbox",Investigate,software
+"9E2F88E3.Twitter",Reject,software
+"WildTangent Games",Investigate,software
+"Valcom IP Utility",Investigate,software
+"PuTTY release 0.80 (64-bit)",Investigate,software
+"PandoraMediaInc.29680B314EFC2",Investigate,software
+"NetGuard EVS 4.6f",Investigate,software
+"WildTangentGameProvider-hp-freegames",Investigate,software
+"WildTangentGameProvider-hp-genres",Investigate,software
+"WildTangentGameProvider-hp-main",Investigate,software
+"Win10Pcap",Investigate,software
+"ScreenConnect Client (da1317176ae8a62a)",Investigate,software
+"Global VPN Client",Investigate,software
+"Amazon.com.Amazon",Investigate,software
+"Advanced Font Viewer 5.1",Investigate,software
+"Advanced Port Scanner 2.5",Investigate,software
+"AdobeAcrobatReaderCoreApp",Investigate,software
+"SearchTools V5.8.9_20241117",Investigate,software
+"Sublime Text",Investigate,software
+"TeamViewer 14",Reject,software
+"TAP-Windows 9.21.2",Investigate,software
+"Wireshark 4.6.2 x64",Investigate,software
+"WebEx",Investigate,software
+"QuickTime 7",Investigate,software
+"AppleInc.iTunes",Investigate,software
+"Npcap OEM",Investigate,software
+"BatchConfigTool",Investigate,software
+"LanSchool Teacher",Investigate,software
+"Dynamic TWAIN 4.1",Investigate,software
+"Class Connection ES Administrator",Investigate,software
+"26720RandomSaladGamesLLC.SimpleSolitaire",Reject,software
+"king.com.CandyCrushSodaSaga",Reject,software
+"king.com.CandyCrushSaga",Reject,software
+"Class Connection ES System Programmer",Investigate,software
+"Express Zip File Compression",Investigate,software
+"AppSense Performance Manager Agent (64 Bit) 8.0.759.0",Investigate,software
+"Npcap 0.9983",Investigate,software
+"Pixillion Image Converter",Investigate,software
+"PuTTY release 0.79 (64-bit)",Investigate,software
+"Radmin Viewer 3.5.2",Investigate,software
+"ScreenConnect Client (d82d0871929c6e93)",Investigate,software
+"ScreenConnect Client (85640150c6716f6c)",Investigate,software
+"ScreenConnect",Investigate,software
+"Symantec Backup Exec Remote Agent for Windows Systems",Investigate,software
+"Switch Sound File Converter",Investigate,software
+"Voxal Voice Changer",Investigate,software
+"WinPcap 4.1.2",Investigate,software
+"king.com.CandyCrushFriends",Reject,software
+"king.com.FarmHeroesSaga",Reject,software
+"COMODO Internet Security Premium",Reject,software
+"CCleaner",Reject,software
+"KeeperSecurityInc.Keeper",Investigate,software
+"Livigent IC  x86",Investigate,software
+"Microsoft.MicrosoftMinesweeper",Reject,software
+"AppSense Performance Manager Configuration 'PM Config Prod' 8.0.1.0",Investigate,software
+"4K Video Downloader+",Reject,software
+"Npcap 0.995",Investigate,software
+"PhotoPad Image Editor",Investigate,software
+"PuTTY release 0.70 (64-bit)",Investigate,software
+"PowerISO",Investigate,software
+"PuTTY release 0.80",Investigate,software
+"Adobe Flash Player 32 ActiveX",Investigate,software
+"Advanced IP Scanner 2.4",Investigate,software
+"iVMS-4200(V2.8.2.2_ML)",Investigate,software
+"PuTTY release 0.78 (64-bit)",Investigate,software
+"PuTTY release 0.74 (64-bit)",Investigate,software
+"PuTTY release 0.73 (64-bit)",Investigate,software
+"PuTTY release 0.71 (64-bit)",Investigate,software
+"Acronis Backup Agent",Investigate,software
+"ScreenConnect Client (1a5d6cc5d5f07e3e)",Investigate,software
+"ScreenConnect Client (054d03ef252425df)",Investigate,software
+"Twacker 32",Investigate,software
+"Verbose Text to Speech",Investigate,software
+"VideoPad Video Editor",Investigate,software
+"Wireshark 3.6.5 64-bit",Investigate,software
+"Wireshark 3.2.6 64-bit",Investigate,software
+"Wireshark 3.2.1 64-bit",Investigate,software
+"Wireshark 3.0.7 64-bit",Investigate,software
+"Wireshark 3.0.4 64-bit",Investigate,software
+"Wireshark 3.0.3 64-bit",Investigate,software
+"Wireshark 2.6.0 64-bit",Investigate,software
+"Wireshark 4.6.3 x64",Investigate,software
+"Wireshark 4.6.0 x64",Investigate,software
+"Wireshark 4.4.5 x64",Investigate,software
+"Wireshark 4.0.4 64-bit",Investigate,software
+"Wireshark 4.0.3 64-bit",Investigate,software
+"shellmenub",Investigate,software
+"shellmenua",Investigate,software
+"king.com.BubbleWitch3Saga",Reject,software
+"Adobe Acrobat (64-bit)",Investigate,software
+"Microsoft Edge Update",Approve,software
+"Microsoft Edge WebView2 Runtime",Approve,software
+"VLC media player",Approve,software
+"VMware Tools",Approve,software
+"Duo Security Authentication Proxy 6.6.0",Approve,software
+"Scanner Utility for Microsoft Windows V10L20",Approve,software
+"FireAlpaca",Investigate,software
+"Wireshark 3.2.18 64-bit",Investigate,software
+"ScreenConnect Client (4e972d7be6e6a95f)",Investigate,software
+"Microsoft_VC90_MFCLOC_x86",Investigate,software
+"Microsoft.MicrosoftSudoku",Reject,software
+"PuTTY release 0.84 (64-bit)",Investigate,software
+"ScreenConnect Client (5a26d8bb91a2861f)",Investigate,software
+"ScreenConnect Client (4080720696384936)",Investigate,software
+"ScreenConnect Client (161974fb0c0d55ed)",Investigate,software
+"ScreenConnect Client (e45e3b19d3c54a97)",Investigate,software
+"ScreenConnect Client (7f6d1f3a48eec842)",Investigate,software
+"Twacker 64",Investigate,software
+"WavesAudio.MaxxAudioProforDell2020",Investigate,software
+"Wireshark 4.0.17 64-bit",Investigate,software
+"Wireshark 4.6.6 x64",Investigate,software
+"ScreenConnect Software",Investigate,publisher
+"Realtek Semiconductor Corp",Approve,publisher
+"Lenovo",Approve,publisher
+"Famatech",Investigate,publisher
+"NCH Software",Investigate,publisher
+"Lexmark International",Approve,publisher
+"Symantec Corporation",Investigate,publisher
+"Xerox Corporation",Approve,publisher
+"Broadcom",Reject,publisher
+"Simon Tatham",Investigate,publisher
+"TeamViewer",Reject,publisher
+"The Wireshark developer community, https://www.wireshark.org",Investigate,publisher
+"Veeam Software Group GmbH",Approve,publisher
+"Kaspersky Lab",Reject,publisher
+"NinjaRMM LLC",Approve,publisher
+"Skype",Approve,publisher
+"Digital Watchdog",Approve,publisher
+"Stoneware",Investigate,publisher
+"Spotify AB",Reject,publisher
+"Intel",Approve,publisher
+"Dolby Laboratories",Approve,publisher
+"WinDirStat Team",Investigate,publisher
+"RnD Software",Investigate,publisher
+"FTDI",Approve,publisher
+"Softland",Approve,publisher
+"Davka Corp",Approve,publisher
+"Adobe",Investigate,publisher
+"Uniview",Investigate,publisher
+"NBC Universal, LLC",Investigate,publisher
+"Realtek",Approve,publisher
+"Web Components",Investigate,publisher
+"ChildPlus Software",Approve,publisher
+"PrintBoss version 6.2.1.4",Approve,publisher
+"Mythicsoft Ltd",Investigate,publisher
+"NBC Universal",Investigate,publisher
+"SAP",Investigate,publisher
+"Valcom",Investigate,publisher
+"TWAIN Working Group",Investigate,publisher
+"CYBERLINKCOM CORPORATION",Reject,publisher
+"Nmap Project",Investigate,publisher
+"Power Software Ltd",Investigate,publisher
+"RemoteScan ASP",Investigate,publisher
+"Waves Audio",Investigate,publisher
+"com.nbcuni.aodplayer.38154C9B00B8386E5872F08BE16716F44323C112.1",Investigate,publisher
+"Hanwha techwin",Investigate,publisher
+"JS 2016 (C) Copyright",Investigate,publisher
+"CACE Technologies",Investigate,publisher
+"KYOCERA Document Solutions Inc",Approve,publisher
+"LinkedIn",Reject,publisher
+"Branding",Investigate,publisher
+"Piriform",Reject,publisher
+"SupportSoft",Reject,publisher
+"hikvision",Investigate,publisher
+"Cengage",Investigate,publisher
+"Xerox Corp",Approve,publisher
+"Lexmark International, Inc.",Approve Publisher,publisher
+"KYOCERA Document Solutions Inc.",Approve,publisher
+"Dell Inc.",Approve,publisher
+"Citrix Systems, Inc.",Approve Publisher,publisher
+"NVIDIA Corp.",Approve,publisher
+"SentinelOne, Inc.",Approve,publisher
+"LogMeIn, Inc.",Approve,publisher
+"LENOVO INC.",Approve,publisher
+"Lenovo Group Limited",Approve,publisher
+"Hangzhou Hikvision Digital Technology Co., Ltd.",Approve,publisher
+"CyberLink Corp.",Approve Publisher,publisher
+"Lexmark International Inc.",Approve,publisher
+"Google Inc",Approve,publisher
+"Devolutions inc.",Approve Publisher,publisher
+"LENOVO INCORPORATED.",Approve,publisher
+"Adobe Inc.",Approve Publisher,publisher
+"Microsoft Studios",Reject,publisher
+"Microsoft Windows",Approve Publisher,publisher
+"INTEL CORP",Approve Publisher,publisher
+"Microsoft Corp.",Approve Publisher,publisher
+"Microsoft",Approve Publisher,publisher
+"Intuit Inc.",Approve Publisher,publisher
+"Realtek Semiconductor Corp.",Approve Publisher,publisher
+"Brother Industries, Ltd.",Approve Publisher,publisher
+"GoldWave Inc.",Approve Publisher,publisher
+"Electronics For Imaging, Inc.",Approve Publisher,publisher
+"dormakaba Canada Inc.",Approve Publisher,publisher
+"HP Inc.",Approve Publisher,publisher
+"Igor Pavlov",Approve Publisher,publisher
+"Adobe Systems",Approve Publisher,publisher
+"Oracle",Approve Publisher,publisher
+"Notepad++ Team",Approve Publisher,publisher
+"Seiko Epson Corporation",Approve Publisher,publisher
+"HID Global",Approve Publisher,publisher
+"ATI Technologies, Inc.",Approve Publisher,publisher
+"PDQ.com",Approve Publisher,publisher
+"VMware, Inc.",Approve Publisher,publisher
+"Cloud Software Group, Inc.",Approve Publisher,publisher
+"Notepad++",Approve Publisher,publisher
+"DW Spectrum",Approve Publisher,publisher
+"Broderbund Software",Approve Publisher,publisher
+"Netwrix Corporation",Approve Publisher,publisher
+"Mozilla",Approve,publisher
+"Goverlan, Inc.",Approve,publisher
+"TimeTec Computing Sdn. Bhd.",Approve,publisher
+"Simnet Ltd.",Approve Publisher,publisher
+"LunarG, Inc.",Approve,publisher
+"Microsoft Research",Approve,publisher
+"Foxit Software Inc.",Approve,publisher
+"VS Revo Group, Ltd.",Approve,publisher
+"PFU",Approve Publisher,publisher
+"PFU Limited",Approve Publisher,publisher
+"OpenConnect Systems, Inc.",Approve,publisher
+"Tri-Sector, Inc.",Approve,publisher
+"Dolby Laboratories, Inc.",Approve,publisher
+"Realtek Semiconduct Corp.",Approve,publisher
+"Hanwha Techwin Co., Ltd.",Approve,publisher
+"Intel Corporation",Approve Publisher,publisher
+"Google Inc.",Approve Publisher,publisher
+"Microsoft Corporation",Approve Publisher,publisher
