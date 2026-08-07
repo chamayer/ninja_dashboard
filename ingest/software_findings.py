@@ -207,11 +207,18 @@ def classify(tenant_id: int = _TENANT_ID) -> int:
                     # fall through to here — skip them.
                     if cfg.get("rare_recent_skip_decided", True) and dec:
                         skip = True
-                    # Categorized software is not "unknown" — either
-                    # another rule already fires (unauthorized_*,
-                    # eol_runtime) or the category is known-safe.
-                    if cfg.get("rare_recent_skip_categorized", True) and cat_list:
-                        skip = True
+                    # Categorisation no longer suppresses. `categories`
+                    # holds functional labels (av / rmm / remote_access) that
+                    # say what software *does*, not whether it is trusted —
+                    # ADR-0015 §3. Trust moved to `software_decisions`, which
+                    # the `dec` test above already covers, so suppressing on a
+                    # functional label would hide an undecided title merely
+                    # because someone recorded its kind.
+                    #
+                    # `rare_recent_skip_categorized` is left in the config
+                    # schema for compatibility but no longer suppresses:
+                    # migration 0127 removed every trust label from the
+                    # catalog, so a category can only be functional now.
 
                     if not skip:
                         if first_seen.tzinfo is None:
@@ -294,11 +301,12 @@ def classify(tenant_id: int = _TENANT_ID) -> int:
                 # uncategorised" review candidate. Distinct from
                 # rare_recent (which fires at the ≤ 2 devices end); the
                 # two are mutually exclusive by device_count threshold.
-                if (
-                    cfg.get("whitelist_suggestion_enabled", True)
-                    and not dec
-                    and not cat_list
-                ):
+                # Suppression tests *decided*, not *labelled* (ADR-0015 §3).
+                # This previously also required `not cat_list`, so tagging a
+                # title `av` — a statement about what it does, carrying no
+                # judgement — silenced the decision prompt exactly as a trust
+                # label did. Trust is a decision and is covered by `dec`.
+                if cfg.get("whitelist_suggestion_enabled", True) and not dec:
                     min_devices = int(cfg.get("whitelist_suggestion_min_devices", 10))
                     fleet_devices = fleet_rarity.get(name.lower(), 0)
                     if fleet_devices >= min_devices:

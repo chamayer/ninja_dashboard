@@ -48,6 +48,8 @@ KNOWN: dict[str, str] = {
     "FINDING_TYPE_VALUES": "EXEMPT UI/dashboard definition",
     "ISSUE_CARDS": "BASELINE 2026-08-05 - not individually reviewed",
     "KNOWN": "BASELINE 2026-08-05 - not individually reviewed",
+    "_PUBLISHER_DECISIONS": "EXEMPT decoder for the legacy decisions CSV format, not a domain mapping - the file format is fixed and dead (ADR-0015 step 1)",
+    "_TITLE_DECISIONS": "EXEMPT decoder for the legacy decisions CSV format, not a domain mapping - the file format is fixed and dead (ADR-0015 step 1)",
     "NAV_DISPLAY_NAMES": "EXEMPT UI/dashboard definition",
     "NAV_LABELS": "EXEMPT UI/dashboard definition",
     "NINJA_MAP": "BASELINE 2026-08-05 - not individually reviewed",
