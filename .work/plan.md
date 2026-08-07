@@ -1,157 +1,102 @@
 # Active root implementation plan
 
-Track: **ADR-0010 generic entity, claim, relationship, and admin completion**
+Track: **Operator experience — five tracks (2026-08-06)**
 
-**Status (2026-08-05, end of session):** E1-E5.3 complete and deployed. E6 step
-one (entity anchors required) deployed and verified. Deployed head `3c7d9a1` on
-both remotes; all containers healthy; working tree clean.
+The ADR-0010 entity track (E1-E6) is complete and deployed; its record is
+retained below. Five tracks follow, set by the user.
 
-**Deployed: retire `device_links` (E6).** Release `0.111.0`, commit
-`6019b0a`, on both remotes. Migration 0121 applied; its parity gate reported
-`5298 rows, 0 differences`. `operations.device_links` is gone,
-`v_device_source_link` is live as a `security_invoker` view, and the first
-post-deploy cycle synced 8,355 links and refreshed derived state in 10.19s
-with zero errors. Patching scope held at 2,643 Included / 1,926 Excluded.
-Stale-but-live links are 0 across all four sources, down from 8,316.
-One follow-up recorded in `.work/backlog.md`: the new view inherited DML
-grants from schema default privileges that it cannot honour.
+## T1 — Page load times
 
-### device_links retirement (E6) — done
+Measure first, then fix. `pg_stat_statements` is available but not loaded, and
+loading it needs a Postgres restart; the page set is finite (79 routes, ~40
+operator-facing), so each page's SQL is timed directly instead.
 
-`operations.device_links` is gone. `operations.v_device_source_link` over
-`entity_source_links` replaces it, maintained for every source by
-`sync_entity_source_links_from_observations()`. Attachment authority is
-observations, per ADR-0012. No compatibility alias remains — all readers moved
-in the same release.
+Known heavy candidates before measuring: the patching posture CTE
+(`views.py` ~5020), the software surfaces over
+`software_installations_current` (475,672 rows / 1,394 MB), the findings queue
+(261,116 rows / 239 MB), and the client workspace, which fans out per client.
 
-**Six writers removed**, not the five the backlog listed. The sixth was
-`views._merge_devices`, which did `UPDATE` + `DELETE`. It now moves only the
-observations; the links follow on the next sync with history intervals
-correctly closed. Writing `entity_source_links` directly would have orphaned
-the open `entity_source_link_history` row.
+**T1 comes first because T2, T3 and T5 all add queries and content to pages.**
+Optimising after that is harder than establishing the baseline now.
 
-**The ordering trap was in two places**, not one: the resolver promotion guard
-and `fast_path` step 1 both read the table inside the transaction that wrote
-it. Both now read `entity_observation_current.device_id`, which the same
-transaction writes — zero disagreements across all four sources in production.
-Both also gained an `entity_type` filter the old unique key could not express.
+## T2 — Click-through everywhere
 
-**A compatibility view was built first and rejected.** It required inventing
-`match_method` / `match_confidence` / `external_name` constants and a synthetic
-primary key, and it was a ~365x performance regression: building
-`device_patching_scope_current` took 247 ms against the original table, >90 s
-through the aggregating view, and 278 ms through the flat view that shipped.
-The aggregate planned *identically* to the fast form — same nodes, same cost
-estimate — so only execution against production exposed it.
+Every count becomes a route to the rows behind it: client device counts to a
+filtered devices page, finding counts to a filtered queue, source counts to
+that source's devices. Templates plus small view filter additions. The
+`?key=` filter added to the merge queue in 0.114.1 is the pattern — the filter
+is shown, escapable and preserved.
 
-The aggregate turned out to be unnecessary. Ninja is the only source with two
-namespaces, and `device-health` is the health-poll companion of the same
-records (already excluded from presence by migration 0098). Excluding it gives
-exactly one row per key: verified identical row sets (14,286 each, zero either
-side), zero duplicate keys, zero disagreement on `missing_since` presence and
-`last_seen_at`.
+## T3 — Details displayed on pages (in columns)
 
-Defect fixed, measured after cutover: stale-but-live links are **0 across all
-four sources** (was 8,316), and `missing_since` is maintained everywhere —
-LogMeIn 65, Ninja 392, ScreenConnect 7, SentinelOne 138.
+Which columns each list shows, sortable and filterable, per the existing
+convention that every table is both.
 
-Validation: `manage.py check` clean, `makemigrations --check` clean, 74 ingest
-tests + 42 Operations tests pass, Ruff unchanged at 67 findings (zero
-introduced). Full migration dry-run against production completed in **567 ms**
-with its parity gate reporting `5298 rows, 0 differences`; `device_links`
-absent, `v_device`/matview restored with exact owners, options and ACLs, and
-`operations_app` holding SELECT only on the new view.
+## T4 — Software classification and categorisation
 
-Operational note for deploy: the migration holds ACCESS EXCLUSIVE on the
-dropped relations for ~0.6 s. Run any production dry-run with server-side
-`statement_timeout` **and** `idle_in_transaction_session_timeout` — a killed
-client does not stop the server-side transaction, and one such orphan blocked
-ingest for ~3 minutes during this session until it was cancelled.
+The only track with an engine rather than a surface: categorising titles in
+`ingest/inventory/` and the software decision surfaces. Independent of the
+other four and can run in parallel.
 
-### In progress — retire `client_links` (E6)
+## T5 — Overall UI
 
-Second of E6's compatibility tables, after `device_links` (ADR-0014).
+Track UI-2 in `operations/BLUEPRINT.md`. Scope to be set by the user; not
+started from this plan.
 
-**Mapping verified 2026-08-06.** 320 rows both sides against
-`entity_source_links` where `entity_class_id = 'client'`. One benign
-difference each way: ScreenConnect's instance-level key was renamed
-`sc_uta` -> `self`, same client `6d3418ea`. Zero clients disagree about which
-entity a source identity attaches to. No dependent database objects. **No
-companion namespace to exclude** — each source has exactly one
-(`company`/Hudu, `group`/LogMeIn, `organization`/Ninja, `site`/SentinelOne,
-`source-instance`/ScreenConnect), so unlike the device side there is no
-`device-health` analogue and no risk of the aggregate that cost 90 s there.
+## Current position
 
-**No same-transaction ordering trap.** `_load_client_links`
-(`source_observations.py:265`) and `_upsert_client_links` (`:536`) sit in one
-transaction, but the read is first and the write last, so the read only ever
-serves links from prior cycles. `entity_source_links` is synced at the
-collection boundary by `derived.refresh_after_collection`, which gives the
-same staleness. This is the check that made the device-side retirement risky;
-it does not apply here.
+**Entity instantiation — `asset` (built locally, not committed).**
 
-**The reason this is worth doing is a near-totally suppressed detector.**
-`client_name_conflict` skipped the finding when the observed source name
-matched the stored `client_links.external_name`, which `client_resolver`
-refreshed to the observed value on every sync. Measured after deployment: 1
-open finding existed beforehand (2026-07-13), 50 appeared on the first run
-after the change, 51 open now. Same defect class as the Ninja-only filter
-behind `device_links`.
+`promote_candidate` in `operations/apps/core/entity_candidate_decisions.py` is
+the missing verb: `attach_candidate` required a target entity that already
+exists, and the only two anchor-creation paths in the platform mint a `device`
+or a `client` by reusing that typed row's UUID, so a class with zero entities
+could never gain its first one.
 
-**Measurement correction, recorded so it is not repeated.** This was first
-written up as "zero findings, cannot fire", which was wrong twice: these
-findings live in `operations.admin_findings`, not `operations.findings`, and
-the comparison uses `_norm()` (strips whitespace, hyphen, underscore, dot),
-not plain lowercase. Two wrong measurements agreed with each other, so neither
-caught the other. Check the table and the comparison function before calling a
-detector inert.
+Files: `entity_candidate_decisions.py` (promote + shared
+`_link_candidate_to_entity` extracted from attach), `generic_admin.py` (view +
+`can_promote`), `config/urls.py`, `templates/entity_candidate_detail.html`,
+`apps/core/tests/test_entity_promotion.py`.
 
-**Decision: surface the 56.** The current behaviour hides them with no
-operator decision and no record, which the "nothing hidden" rule forbids. An
-as-linked *accepted* name would be a legitimate suppression, but only as a
-recorded acceptance — that is a separate feature, and building it first would
-keep the drift hidden meanwhile. `external_name` therefore disappears with the
-table rather than being reproduced; the attribute contract cannot supply it in
-any case (`claim(name)` is per (client, source_instance), `external_name` is
-per (source, external_id) — the join fans 320 links to 522 rows, 204
-differing).
+No schema change. No automatic caller — operator-invoked only. Safe against
+existing surfaces because `v_entity_summary` LEFT JOINs `devices`/`clients` and
+its label already falls back to `'<class> entity'`, i.e. it was built for
+entities that are neither.
 
-**Scope.** Writers to remove: `_upsert_client_links`
-(`source_observations.py:178/536`), the `client_resolver` INSERT (`:272`), and
-the `views.py` INSERT. Readers to repoint: `_load_client_links`
-(`source_observations.py:163`), `client_resolver` drift/matching queries,
-`core/devices.py`, `client_workspace.py`, `views.py`, the `client.links` ORM
-accessor plus `org_index.html`. Model `ClientLink` becomes unmanaged
-`ClientSourceLink` on a new `v_client_source_link` view; admin read-only.
-Migration drops the table after repointing, mirroring 0121.
+Guard: promotion is refused for any class whose entities keep a typed record,
+asked of the data (`class_supports_promotion`) rather than by listing class
+names, so it is a structural invariant and not an ADR-0012 §6 domain mapping.
 
-**Next action.** Build `v_client_source_link`, repoint readers, remove the
-three writers, change the drift detector to compare observed against the
-canonical client name only, then dry-run the migration against production and
-confirm the finding count moves 0 -> 56.
+Validated: ruff clean, `manage.py check` clean, no migration drift, 6 new
+tests, 48 core tests pass (2 Postgres-integration skips), template compiles,
+URL resolves. Not deployed; no data written.
 
-### Capability restored after the `bootstrap_clients_from_ninja` retirement
+**Not covered by this work, measured 2026-08-07:**
 
-Retiring that command in 0.112.0 followed a documented decision (BLUEPRINT
-Track C superseded it 2026-07-13, removal scheduled as C.7), but it removed a
-working behaviour: Ninja org renames were applied to `clients.display_name`
-while preserving `slug`.
+- **software has 0 observations, 0 candidates, 0 source links** against 484,636
+  rows in `software_installations_current`. It never enters the candidate
+  pipeline, so `promote_candidate` does nothing for it. Software identity is
+  *derived* (`publisher, product, version` is deterministic and rebuildable) =
+  a projector, not a promotion.
+- Software is gated on unscoped entities. Verified on production: the
+  `tenant_isolation` policy is `FOR ALL` with
+  `tenant_id = current_setting(...)` in **both** USING and WITH CHECK,
+  `tenant_id` is NOT NULL, and `ck_entities_scope_owner` permits only
+  `tenant`/`client`. A NULL tenant would make the row invisible to every role.
+- `user` class has **no `entity_type` row at all**.
 
-Track C's replacement is "name drift = finding, never re-match", and
-`human_labels` already labels `client_name_conflict` as "Client renamed at
-source". The finding half existed; **the apply half was never built**, so the
-only action on an admin finding was acknowledge. Between 0.112.0 and 0.113.0
-the capability was therefore absent.
+Software scale is settled and is not a partitioning question: 4,863 publishers
++ 20,876 products + 40,261 product+versions = ~66,000 entities ≈ 27 MB at the
+measured 417 B/row, and 484,636 installation relationships ≈ 320 MB at the
+measured 660 B/row, against a 46 GB database. All eight E4 relationship tables
+exist and hold **0 rows**, so software would be that engine's first real use.
 
-0.113.0 adds the apply action, completing the designed replacement rather than
-restoring the command. Renames are now operator-reviewed instead of silently
-applied, which is what Track C intended, and the 50 drift findings surfaced in
-0.112.0 are the backlog of renames that had accumulated while the detector was
-suppressed.
+Open, not concluded: `publisher_aliases` (56 rows) matched **0 of 4,863** raw
+publishers on a literal case-insensitive match. The regex check did not
+complete. Settle it by aggregating distinct publishers into a CTE first
+(4,863 × 56, not 484,636 × 56).
 
-Rule this reflects: a workflow is fixed or recreated, never removed. A prior
-repository decision to delete one still collides with that and should be
-surfaced rather than acted on silently.
+T1 (page load times) is paused at the software page fix in 0.115.0.
 
 ### E6 remaining scope — resolved 2026-08-06 (ratified in ADR-0013 amendment)
 

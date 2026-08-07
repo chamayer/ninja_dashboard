@@ -16,6 +16,7 @@ from apps.core.generic_admin import (
     entity_attribute_reveal,
     entity_candidate_attach,
     entity_candidate_detail,
+    entity_candidate_promote,
     entity_candidate_reject,
     entity_candidates_queue,
     entity_observation_reveal,
@@ -257,6 +258,11 @@ urlpatterns = [
         "admin/entity-candidates/<uuid:candidate_id>/attach/",
         entity_candidate_attach,
         name="entity_candidate_attach",
+    ),
+    path(
+        "admin/entity-candidates/<uuid:candidate_id>/promote/",
+        entity_candidate_promote,
+        name="entity_candidate_promote",
     ),
     path(
         "admin/entity-candidates/<uuid:candidate_id>/reject/",

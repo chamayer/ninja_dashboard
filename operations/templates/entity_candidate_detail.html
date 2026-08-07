@@ -33,6 +33,16 @@
       <button type="submit">Attach</button>
     </form>
   </div>
+  {% if can_promote %}
+  <div class="card">
+    <h2 style="margin-top:0;">Promote to a new {{ candidate.proposed_entity_class.display_name|lower }}</h2>
+    <p class="muted">Use this when the source record is a thing we do not track yet. It creates a new canonical entity and attaches this source identity to it.</p>
+    <form method="post" action="{% url 'entity_candidate_promote' candidate.id %}">{% csrf_token %}
+      <label>Reason<br><textarea name="reason" required></textarea></label><br>
+      <button type="submit">Promote</button>
+    </form>
+  </div>
+  {% endif %}
   <div class="card">
     <h2 style="margin-top:0;">Reject this evidence</h2>
     <p class="muted">The source record remains visible. A material source change may reopen it.</p>

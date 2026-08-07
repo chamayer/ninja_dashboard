@@ -18,7 +18,12 @@ from django.views.decorators.http import require_GET, require_POST
 
 from .csv_export import csv_response, wants_csv
 from .decorators import require_admin
-from .entity_candidate_decisions import attach_candidate, reject_candidate
+from .entity_candidate_decisions import (
+    attach_candidate,
+    class_supports_promotion,
+    promote_candidate,
+    reject_candidate,
+)
 from .models import Entity, EntityCandidate, EntityCandidateEvent
 
 PAGE_SIZE = 100
@@ -489,6 +494,9 @@ def entity_candidate_detail(request: HttpRequest, candidate_id: uuid.UUID) -> Ht
             "target_search": target_search,
             "events": events,
             "can_decide": request.user.has_perm("operations.write_decisions"),
+            # Computed here, not in the template: a class whose entities keep a
+            # typed record is anchored with that record, never on its own.
+            "can_promote": class_supports_promotion(candidate.proposed_entity_class_id),
         },
     )
 
@@ -512,6 +520,27 @@ def entity_candidate_attach(request: HttpRequest, candidate_id: uuid.UUID) -> Ht
         messages.error(request, str(exc) or "Select a valid target entity.")
     else:
         messages.success(request, "Candidate attached to the canonical entity.")
+    return redirect("entity_candidate_detail", candidate_id=candidate_id)
+
+
+@login_required
+@require_admin
+@require_POST
+def entity_candidate_promote(request: HttpRequest, candidate_id: uuid.UUID) -> HttpResponse:
+    tenant_id = _tenant_id(request)
+    candidate = get_object_or_404(EntityCandidate, tenant_id=tenant_id, id=candidate_id)
+    try:
+        promote_candidate(
+            actor=request.user,
+            candidate=candidate,
+            reason=request.POST.get("reason") or "",
+        )
+    except ValidationError as exc:
+        messages.error(request, "; ".join(exc.messages))
+    else:
+        messages.success(
+            request, "Candidate promoted; a new canonical entity now anchors it."
+        )
     return redirect("entity_candidate_detail", candidate_id=candidate_id)
 
 
