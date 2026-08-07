@@ -290,13 +290,35 @@ Client-scoped.
 glossary, so the installation relationship runs device -> software+version;
 an unscoped entity must never reference a scoped one.
 
-**user** — measured: **Ninja is the only source carrying user identity**
-(4,576 `agent.rmm`, 861 `vm.guest`). LogMeIn, ScreenConnect and SentinelOne
-carry none; Hudu mentions email on 10 records. `last_user` is a bare username
-— of 4,528 values, **zero contain `@` and zero contain a backslash**. So there
-is no cross-source correlation problem, because there is no second source.
-Rule: identity is (client, normalised username). Client-scoped, because a bare
-username is not unique across clients.
+**user** — **two sources, and correlation is the whole problem.**
+
+An earlier version of this entry said Ninja was the only source and that no
+cross-source correlation was needed. That was wrong: it measured
+`entity_observation_current`, which is the *output* of a deliberate exclusion.
+`ingest/connectors/hudu.py:44` sets `_EXCLUDED_LAYOUTS = {"people"}`, so Hudu
+People records are fetched every run and then dropped — "personal data, and
+they deliver nothing until a Users surface exists", with the count reported in
+the run summary so the exclusion stays visible.
+
+So the real picture:
+
+- **Hudu People** — proper identity records (name, email, company), currently
+  excluded at ingest, client-scoped through the Hudu company.
+- **Ninja `last_user`** — a bare username on a device. Of 4,528 values, zero
+  contain `@` and zero contain a backslash, so it carries no domain and no
+  email.
+
+The identity rule is therefore a correlation rule: match a bare Ninja username
+to a Hudu person within a client. That is the same cross-source shape as device
+identity, and it is the hardest of the three classes — a wrong match conflates
+two real people.
+
+Prerequisite: **decide whether to stop excluding Hudu People.** The exclusion
+was correct while no Users surface existed; instantiating the class is what
+changes that. Personal data handling (retention, redaction, who may view it)
+needs settling with it — `entity_attribute_definitions` already has a
+sensitivity classification and an audited reveal path from E5.2, which is the
+mechanism to use rather than a new one.
 
 ### Order
 
