@@ -249,6 +249,68 @@ true for the candidate, which closes when its collision stops holding.
 - Do not simply suppress it — per the fix-don't-remove rule, the detector is
   telling the truth; the granularity is wrong.
 
+## Source-to-entity-type mapping is data for Ninja and code everywhere else
+
+The authoritative taxonomy already exists: `entity_classes` (8) ->
+`entity_types` (11), each type carrying its class and capability flags. What is
+missing is the **path from a source record to a type**, per source.
+
+Ninja has it as data: `node_class_mappings` maps pattern -> `entity_type` ->
+`form_factor` with priority and first-match-wins, which is how one source
+yields five types (`agent.rmm`, `vm.guest`, `vm.host`, `network.device`,
+`monitor.target`). Migration 0119 moved it out of code.
+
+**No other source has an equivalent.** Each declares a single
+`sources.entity_type` and stops. Hudu is the worst case, measured against the
+live API 2026-08-07: **12,451 assets across 21 layouts**, all mapped to one
+`cmdb.asset` type.
+
+| layout | count | arguably |
+| --- | --- | --- |
+| Computer Assets | 4,327 | device or asset |
+| Auvik | 2,863 | network monitoring records |
+| **People** | **2,571** | **user** |
+| Servers | 1,434 | device |
+| Printing | 299 | peripheral / device |
+| Locations | 267 | a location entity (nav stub exists) |
+| Applications | 124 | software |
+| Network Devices / WAN | 107 / 107 | device |
+| Special Role Devices | 98 | device |
+| Mobile Devices | 73 | device |
+| Client Summary | 48 | client attributes |
+| Remote Access | 45 | relationship, not entity |
+| Content Filtering / Wireless / File Share | 21 / 14 / 12 | mixed |
+| Managed Certificate | 13 | its own class — ADR-0012's own example |
+| Email Summary / Vendor Summary / Backup | 8 / 7 / 6 | mixed |
+| Credit Card | 7 | **exclude, see below** |
+
+We ingest 9,837 of the 12,451; the gap is People plus a few dozen.
+
+### The work
+
+A `layout -> entity_type` mapping table for Hudu in the same shape as
+`node_class_mappings`, and the same treatment for any source whose records span
+types. Then:
+
+- The People exclusion stops being `_EXCLUDED_LAYOUTS = {"people"}` in
+  `ingest/connectors/hudu.py:44` and becomes a mapping row an operator can see
+  and change — the question is not "should we stop excluding People" but
+  "which entity_type does the People layout map to", answer `user`.
+- Asset identity stops being derived from one source's shape. The earlier rule
+  recorded here — "linked -> device, unlinked -> asset" — was inferred by
+  inspecting Hudu layouts, which is what `node_class_mappings` exists to
+  prevent.
+- Layout must be stored on the observation. It is fetched by `_fetch_layouts`
+  and used only for exclusion; `canonical_data` carries no `asset_layout`, so
+  all 9,837 rows return empty for it today and the mapping cannot be applied
+  retroactively without a re-pull.
+
+### Exclude Credit Card from ingest
+
+The `Credit Card` layout (7 records) must be excluded, alongside whatever
+replaces the People exclusion. Card data has no place in the observation store
+and nothing consumes it.
+
 ## Entity instantiation — the shared prerequisite (asset, software, user)
 
 Six entity classes are registered; **two are instantiated**. `device` (5,318)
