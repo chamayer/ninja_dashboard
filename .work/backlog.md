@@ -249,6 +249,66 @@ true for the candidate, which closes when its collision stops holding.
 - Do not simply suppress it — per the fix-don't-remove rule, the detector is
   telling the truth; the granularity is wrong.
 
+## Entity instantiation — the shared prerequisite (asset, software, user)
+
+Six entity classes are registered; **two are instantiated**. `device` (5,318)
+and `client` (76) work. `asset`, `software`, `user`, `peripheral` and
+`service` hold zero rows, and `unknown` is a fallback.
+
+This is not one domain's problem. It blocks, simultaneously:
+
+- ADR-0015 step 3 (software findings onto real subjects, 137,534 rows -> 1,782)
+- the Users capability (3,402 people ingested daily, nowhere to land)
+- ADR-0013's outstanding "give the unanchored CMDB records the asset class"
+- ADR-0012 §5's `publisher -> product -> software+version` hierarchy
+
+`asset` is the sharpest case: **4,843 candidates already exist**, produced by
+the E4 projector, proposing a class with zero rows. Detection works; the target
+does not exist.
+
+### What is missing: generic anchor creation
+
+Entity creation is hardcoded per class in two places — `resolver.py`'s
+`_create_device_anchor`, and `sync_entity_source_links_from_observations()`
+which anchors clients and devices in SQL (migration 0101, lines 175 and 197).
+Attachment is already generic; **creation is not**. That is the single build
+item.
+
+### Identity rules — determined by measurement, not preference
+
+**asset** — settled by the data. Of 9,837 Hudu CMDB observations, **4,994
+already carry a `device_id`** and 4,487 carry a serial. So a CMDB record is
+documentation *about a device* when it resolves to one, and an asset in its own
+right when it does not — which is exactly the 4,843 unlinked candidates.
+Rule: linked -> attach to the device's entity; unlinked -> own asset entity.
+Client-scoped.
+
+**software** — the normalisation problem is already solved data-side.
+`publisher_aliases` holds 56 rows, the same admin-maintainable shape as
+`os_group_mappings`. Identity is (canonical publisher, product, version) over
+40,259 title+version pairs and 4,863 raw publishers. **Unscoped** per the
+glossary, so the installation relationship runs device -> software+version;
+an unscoped entity must never reference a scoped one.
+
+**user** — measured: **Ninja is the only source carrying user identity**
+(4,576 `agent.rmm`, 861 `vm.guest`). LogMeIn, ScreenConnect and SentinelOne
+carry none; Hudu mentions email on 10 records. `last_user` is a bare username
+— of 4,528 values, **zero contain `@` and zero contain a backslash**. So there
+is no cross-source correlation problem, because there is no second source.
+Rule: identity is (client, normalised username). Client-scoped, because a bare
+username is not unique across clients.
+
+### Order
+
+1. **asset** — candidates exist, intent already stated in ADR-0013, and it is
+   client-scoped like the two classes that already work, so it exercises
+   generic promotion without also introducing unscoped entities.
+2. **software** — unblocks ADR-0015 step 3 and the CVE version work.
+3. **user** — highest cost of error, and the only class where a wrong merge
+   conflates two real people.
+
+`peripheral` and `service` stay registered and empty; nothing feeds them.
+
 ## Software ecosystem — work defined by ADR-0015
 
 Ordered; each step depends on the one before. ADR-0015 applies ADR-0012 §5
