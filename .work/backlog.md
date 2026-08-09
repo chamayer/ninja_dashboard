@@ -300,10 +300,76 @@ types. Then:
   recorded here — "linked -> device, unlinked -> asset" — was inferred by
   inspecting Hudu layouts, which is what `node_class_mappings` exists to
   prevent.
-- Layout must be stored on the observation. It is fetched by `_fetch_layouts`
-  and used only for exclusion; `canonical_data` carries no `asset_layout`, so
-  all 9,837 rows return empty for it today and the mapping cannot be applied
-  retroactively without a re-pull.
+- ~~Layout must be stored on the observation.~~ **Wrong -- it already is.**
+  `hudu.py:113` writes `hudu_layout` (and `hudu_layout_id`) into
+  `canonical_extra` on all 9,837 rows. The earlier claim measured a key name
+  (`asset_layout`) that was guessed rather than read. No re-pull is needed and
+  the mapping is cheap.
+
+### Measured 2026-08-07: the gap is Hudu alone, not every non-Ninja source
+
+| platform | entity_types emitted |
+| --- | --- |
+| Ninja | `agent.rmm`, `vm.guest`, `vm.host`, `network.device`, `monitor.target` (+ `org`) |
+| SentinelOne | `agent.edr` (+ `org`) |
+| LogMeIn | `agent.remote_access` (+ `org`) |
+| ScreenConnect | `agent.remote_access` (+ `org`) |
+| Hudu | `cmdb.asset` (+ `org`) |
+
+The three agent sources are genuinely single-type -- one agent product, one
+record shape -- so a mapping table for them would hold exactly one row. The
+heading above overstates the problem: **there is nothing to migrate for three
+of the five.**
+
+### Bulk promotion of the 4,843 asset candidates is NOT safe
+
+Measured layout split of the unlinked CMDB records. Roughly 1,400 are
+plausibly assets; the rest are other classes or not entities at all:
+
+| layout | unlinked | actually |
+| --- | --- | --- |
+| Auvik | 2,863 | devices synced in from Auvik (confirmed by the user) |
+| Servers / Computer Assets / Printing / WAN / Network Devices / Special Role / Mobile | ~1,414 | device or asset |
+| Locations | 261 | a location, not an asset |
+| Applications | 124 | software |
+| Client Summary | 48 | client attributes, not an entity |
+| Remote Access | 45 | a relationship, not an entity |
+| Managed Certificate | 13 | its own class |
+| Credit Card | 7 | exclude |
+
+**Do not promote in bulk.** ~500 are unambiguously not assets, and the `asset`
+class would become a catch-all for devices, locations, software and
+certificates. The taxonomy question -- which classes/types these map to --
+comes before promotion, and several target classes (`location`, certificate)
+are not registered.
+
+### `provenance` already answers the promotion question and nothing reads it
+
+`hudu.py:118` computes `provenance` per record and stores it. Auvik is
+**2,863/2,863 `second_hand`**. The module docstring already states the policy:
+"Relayed vendors that Operations does not ingest directly stay second-hand:
+recorded, never promoted to first-party evidence." It is recorded and never
+enforced downstream.
+
+Two traps measured 2026-08-07 before using it as a gate:
+
+1. `_provenance` is **vendor-level and ignores `sync_type`**. Ninja emits
+   *location* cards, which are `integrated=True` but not device cards, so
+   **247 Locations records come out `first_party`**.
+2. `_provenance([]) == "first_party"` (asserted in `test_hudu_cards.py:93`),
+   so **920 records with no cards at all** are first-party by default.
+
+A naive `provenance = 'first_party'` promotion gate therefore admits 1,167
+records carrying no first-party device evidence.
+
+**And mapping a Hudu layout to an identity-signal type is a promotion
+decision, not a classification.** `_promote_unmatched_clusters` gates on
+`identity_entity_types()`, which is exactly `entity_types WHERE
+is_identity_signal`. Mapping Auvik to `network.device` would route 2,863
+records with 1.3% serial coverage, 0% MAC and 0% OS into device promotion,
+clustered on a `hostname` that is really the Hudu record *name* -- re-running
+the incident the resolver comment memorialises ("4,991 Devices were minted
+from Hudu doc.asset records before this was caught").
 
 ### Exclude Credit Card from ingest
 
@@ -345,10 +411,44 @@ right when it does not — which is exactly the 4,843 unlinked candidates.
 Rule: linked -> attach to the device's entity; unlinked -> own asset entity.
 Client-scoped.
 
-**software** — the normalisation problem is already solved data-side.
-`publisher_aliases` holds 56 rows, the same admin-maintainable shape as
-`os_group_mappings`. Identity is (canonical publisher, product, version) over
-40,259 title+version pairs and 4,863 raw publishers. **Unscoped** per the
+**software** — **not in the candidate pipeline at all.** Measured 2026-08-07:
+0 software observations, 0 software candidates, 0 software source links,
+against 484,636 rows in `software_installations_current`. Software ingest
+writes straight to a typed table, so `promote_candidate` (added `b53957b`)
+does nothing for it. Software identity is *derived* -- (publisher, product,
+version) is deterministic from the installation rows and fully rebuildable --
+so per `docs/glossary.md` it is a **projector**, not a promotion. Asset and
+software need different machinery; do not plan them as one track.
+
+Measured scale, 2026-08-07, so this is settled and is **not** a partitioning
+question: 4,863 raw publishers, 20,876 products, 40,261 product+versions =
+~66,000 entities at the measured 417 B/row = **~27 MB**; 484,636 installation
+relationships at the measured 660 B/row = **~320 MB**, against a 46 GB
+database and a `software_installations_current` already at 1,400 MB. All eight
+E4 relationship tables exist and hold **0 rows**, so software installations
+would be that engine's first real use -- that, not storage, is the risk.
+
+Base data is clean: 0 installs missing a name, 4 missing a publisher, 13,817
+(2.9%) missing a version, and only **99** (name, version) pairs claimed by more
+than one publisher.
+
+**Publisher normalisation is NOT solved**, contrary to what this entry said
+before. `publisher_aliases` holds 56 enabled rows, all literal (`is_regex`
+false), matched with **ILIKE** (`raw_pattern`, per migration 0088 line 102 --
+not equality and not regex). Measured with the correct operator:
+
+| | |
+| --- | --- |
+| publishers matched | **296 of 4,863** (6%) |
+| installs covered | **407,494 of 484,636** (84%) |
+| distinct canonical publishers | 43 |
+| publisher entities after normalisation | **4,608** (from 4,863) |
+
+So aliases cover install *volume* (the big vendors) but collapse only 255
+distinct publishers. Instantiating today mints ~4,608 publisher entities, most
+unnormalised. Not a blocker, but budget for the tail.
+
+Identity is (canonical publisher, product, version). **Unscoped** per the
 glossary, so the installation relationship runs device -> software+version;
 an unscoped entity must never reference a scoped one.
 
