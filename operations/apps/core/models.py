@@ -3548,6 +3548,57 @@ class IntelMatcherHint(models.Model):
         return f"[{self.kind}] {self.pattern}"
 
 
+class EolProductMap(models.Model):
+    """Which catalogue titles correspond to which endoflife.date product.
+
+    The corpus (462 products, 8,308 releases) is fetched automatically; this
+    mapping is not, and deliberately so. Measured 2026-08-10, naive substring
+    matching of our 21,395 titles against the corpus produced mostly false
+    positives -- 'Intel(R) Trusted Connect Services Client' matched `rust`
+    because "trust" contains "rust", which would have put a confident, precisely
+    dated, entirely wrong EOL finding on 282 devices.
+
+    So this is operator judgement recorded as data (ADR-0012 section 6), in the
+    same shape as `publisher_aliases` and `os_group_mappings`: pattern, target,
+    priority, lowest priority wins.
+
+    Unmapped titles get no EOL evaluation. That is visible rather than silent --
+    see `operations.v_eol_mapping_candidates`, which ranks what is still
+    unmapped by how many devices it would affect.
+    """
+
+    id = models.BigAutoField(primary_key=True)
+    tenant_id = models.BigIntegerField(default=1)
+    raw_pattern = models.CharField(
+        max_length=255,
+        help_text=(
+            "SQL ILIKE pattern matched against catalog.products.canonical_name. "
+            "Anchor it: 'google chrome' or 'mozilla firefox%', not "
+            "'%chrome%'. A loose pattern is how a title inherits the wrong "
+            "product's end-of-life date."
+        ),
+    )
+    eol_product = models.CharField(
+        max_length=255,
+        help_text="endoflife.date product name, e.g. 'chrome', 'notepad-plus-plus'.",
+    )
+    priority = models.IntegerField(
+        default=100, help_text="Lower wins when several patterns match one title."
+    )
+    notes = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "eol_product_map"
+        ordering = ("priority", "raw_pattern")
+        verbose_name = "EOL product mapping"
+        verbose_name_plural = "EOL product mappings"
+
+    def __str__(self) -> str:
+        return f"{self.raw_pattern} -> {self.eol_product}"
+
+
 class SoftwareClassifierRule(models.Model):
     """Data-driven regex / literal patterns for the software classifier.
 

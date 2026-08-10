@@ -232,8 +232,43 @@ design rests on and had never been exercised.
 Rollback confirmed clean: 0 leftover findings, 0 leftover decisions,
 `product_uuid` absent, view absent, `software_decisions` still 427.
 
-Still unexecuted: the endoflife connector has never run against the live API
-beyond schema-discovery fetches, and nothing is deployed.
+**Deployed 2026-08-10 as `6c4ac9f`** on both remotes. Migrations 076-080 and
+0129-0130 applied. Verified: uuids 21,395/40,579 all distinct and non-null;
+`subject_scope` 6 product / 2 version / 3 device; 079 closed 134,184; the only
+device-scoped software findings left open are `rare_recent` 2,658 and
+`install_path_suspicious` 398, exactly as predicted. The endoflife connector
+ran live on first tick — **462 products, 8,308 releases, 0 failed** — and the
+projector logged its empty-mapping warning by design. All containers healthy,
+zero tracebacks.
+
+`cve_match.software_version_id` and the exposure view are still 0 rows pending
+the matcher and classifier ticks.
+
+### EOL mapping — measured, then narrowed (081 / 0131, not yet deployed)
+
+Naive name matching **does not work**: substring matching our 21,395 titles
+against the 462-product corpus is mostly false positives. `Intel(R) Trusted
+Connect Services Client` matches `rust` because "trust" contains "rust" — that
+one alone would have dated 282 devices wrongly. Also seen: `ClickOnce
+Bootstrapper` -> `bootstrap`, `ExpressConnect` -> `express` (Express.js),
+`.net.sdk.tvos.manifest` -> `tvos`.
+
+Seeded only five verified mappings (four rows; `mozilla firefox%` covers both
+builds), with **anchored** patterns rather than `%substring%` for exactly that
+reason: chrome, firefox, notepad-plus-plus, powershell. Rehearsed: 279 versions
+would gain an `eol_date`.
+
+Gap 078 left and 081/0131 close: the table was operator-maintained data with
+**no operator surface** — mappings could only be added by hand in SQL. 0131 adds
+the Django model (state-only; 078 already made the table) and admin.
+
+"The rest" is handled by `operations.v_eol_mapping_candidates`: unmapped titles
+paired with corpus products their installed versions actually match, ranked by
+device impact, so the remaining work is finite, ordered and visible instead of
+silently unevaluated. It contains the false positives by design — an operator
+decides. Materialized because as a plain view it took **37 seconds**
+(21,395 x 462 ILIKE); as a matview it is 1,989 rows read in 2.6 ms, refreshed by
+the projector on the corpus cadence.
 
 ### Steps
 

@@ -133,6 +133,19 @@ def _project() -> tuple[int, int, int]:
         cur.execute(_CLEAR_SQL, {"tenant": _TENANT_ID})
         cleared = cur.rowcount
 
+    # The suggestion list is derived from the corpus and the mapping table, both
+    # of which may have just changed. Refreshed here rather than on read because
+    # it costs ~37s to compute. Best-effort: a stale suggestions list is a
+    # nuisance, a failed projection run is not, so this never fails the caller.
+    try:
+        with db.transaction() as cur:
+            cur.execute(
+                "REFRESH MATERIALIZED VIEW operations.v_eol_mapping_candidates"
+            )
+        log.info("Refreshed operations.v_eol_mapping_candidates")
+    except Exception:
+        log.exception("Failed to refresh v_eol_mapping_candidates")
+
     if mappings == 0:
         # Visible rather than silent: an empty mapping table is a real,
         # actionable state ("nobody has mapped anything yet"), not success.

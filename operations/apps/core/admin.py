@@ -28,6 +28,7 @@ from .models import (
     EntitySourceLink,
     EntitySourceLinkHistory,
     EntityType,
+    EolProductMap,
     Finding,
     FindingType,
     IdentityAuthorityPolicy,
@@ -571,6 +572,14 @@ class IntelMatcherHintAdmin(admin.ModelAdmin):
     list_display = ("kind", "pattern", "enabled", "created_at")
     list_filter = ("kind", "enabled")
     search_fields = ("pattern", "note")
+
+
+@admin.register(EolProductMap)
+class EolProductMapAdmin(admin.ModelAdmin):
+    list_display = ("raw_pattern", "eol_product", "priority", "updated_at")
+    list_filter = ("eol_product",)
+    search_fields = ("raw_pattern", "eol_product", "notes")
+    ordering = ("priority", "raw_pattern")
 
 
 @admin.register(SoftwareDecision)
