@@ -357,6 +357,28 @@ def classify(tenant_id: int = _TENANT_ID) -> int:
                         )
 
             _auto_resolve(cur, tenant_id, emitted_keys, now)
+
+        # The exposure fan-out is materialised (migration 083) because
+        # computing it live cost 3.3s. It derives from the findings just
+        # written, so it is refreshed here, in the same run, rather than left
+        # to go stale until something else happens to touch it.
+        #
+        # Not best-effort: a successful classify that leaves the fan-out stale
+        # is worse than a failed one, because every surface would confidently
+        # show the previous run's exposure. The run fails and says so.
+        with db.transaction() as cur:
+            cur.execute(
+                "REFRESH MATERIALIZED VIEW operations.v_device_software_exposure_base"
+            )
+            # Depends on the fan-out above, so it must refresh after it and in
+            # the same run -- otherwise the directory counts describe the
+            # previous emission.
+            cur.execute(
+                "REFRESH MATERIALIZED VIEW operations.v_client_software_issue_rollup"
+            )
+        log.info(
+            "software_findings: refreshed exposure fan-out and client rollup"
+        )
     except Exception as exc:
         error = str(exc)[:2000]
         raise

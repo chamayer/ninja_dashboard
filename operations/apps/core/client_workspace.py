@@ -99,35 +99,40 @@ def _software_rollup_rows(*, client_id=None) -> list[dict]:
     and break comparability with last week. That is a product decision, not a
     fix, and is not taken here.
 
-    Client- and device-tier approvals are already filtered out by the exposure
-    view, so an approved title stops counting against that client without the
+    Client- and device-tier approvals are filtered out before these counts are
+    built, so an approved title stops counting against that client without the
     finding itself being resolved.
     """
-    where = ["e.tenant_id = 1", "e.status = ANY(%s)"]
-    params: list = [list(ACTIVE_FINDING_STATUSES)]
+    # Reads the pre-aggregated rollup, not the exposure view. This is the only
+    # consumer that scans the entire exposure set rather than a slice of it,
+    # and measured on a simulated full re-emission it cost 8.6s against the
+    # live view and 12.9s once the fan-out was materialised. Every other
+    # surface reads one device, one client or one finding and is sub-second.
+    #
+    # The counts are still device-weighted, computed the same way, just
+    # computed once by the classifier instead of on every page load. They
+    # therefore lag an approval by one classifier run -- acceptable for
+    # directory counts, and not true of v_device_software_exposure, which
+    # applies approvals live for the lists an operator acts on.
+    where = ["r.client_id IS NOT NULL"]
+    params: list = []
     if client_id is not None:
-        where.append("e.client_id = %s")
+        where.append("r.client_id = %s")
         params.append(str(client_id))
 
     sql = f"""
-        SELECT e.client_id,
+        SELECT r.client_id,
                fc.name AS category_name,
                ft.name AS finding_type_name,
-               e.severity,
-               -- (finding, device) pairs, not distinct findings: this is the
-               -- number the per-device findings produced before the collapse.
-               -- DISTINCT on the pair because a product-scoped finding reaches
-               -- a device once per installed version of that title.
-               COUNT(DISTINCT (e.finding_id, e.device_id)) AS n,
-               COUNT(DISTINCT e.device_id)                 AS subjects,
-               COUNT(DISTINCT (e.finding_id, e.device_id))
-                   FILTER (WHERE e.first_seen_at >= now() - interval '24 hours') AS new
-          FROM operations.v_device_software_exposure e
-          JOIN operations.finding_types ft ON ft.id = e.finding_type_id
+               r.severity,
+               r.n,
+               r.subjects,
+               r.new
+          FROM operations.v_client_software_issue_rollup r
+          JOIN operations.finding_types ft ON ft.id = r.finding_type_id
           JOIN operations.finding_categories fc ON fc.id = ft.category_id
          WHERE {' AND '.join(where)}
            AND fc.name = ANY(%s)
-         GROUP BY 1, 2, 3, 4
     """
     params.append(list(DOMAIN_BY_CATEGORY))
 
