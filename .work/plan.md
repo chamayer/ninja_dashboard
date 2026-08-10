@@ -212,10 +212,28 @@ software findings left open were `rare_recent` 2,658 and
 confirms 079's name list is both correct and complete. Rollback verified: the
 `product_uuid` column is absent again.
 
-Not covered by the rehearsal: `v_device_software_exposure` parsed, created and
-executed but returned **0 rows**, because no finding has been re-subjected yet.
-Its join logic is therefore unproven until the emitter runs. The connector has
-still never executed against the live API.
+**Exposure view verified 2026-08-10**, same rolled-back-transaction method, with
+two findings emitted at the new subjects and real approval rows inserted:
+
+| check | expected | got |
+| --- | --- | --- |
+| A product-scoped exposure = product install footprint | 4,023 | 4,023 PASS |
+| B version-scoped exposure = that release's footprint | 3,873 | 3,873 PASS |
+| C device-tier approval drops exactly that device | 4,022 | 4,022 PASS |
+| D client-tier approval drops that client's fleet | 3,958 | 3,958 PASS |
+| E no client leakage (device's client = exposure client) | 0 | 0 PASS |
+
+B being smaller than A is the point of version scope: 150 devices run the
+product but not that release, and at title scope all 4,023 would have been
+flagged. C and D confirm the two narrower approval tiers work as filters on
+derived exposure with no stored finding rows, which is the mechanism the whole
+design rests on and had never been exercised.
+
+Rollback confirmed clean: 0 leftover findings, 0 leftover decisions,
+`product_uuid` absent, view absent, `software_decisions` still 427.
+
+Still unexecuted: the endoflife connector has never run against the live API
+beyond schema-discovery fetches, and nothing is deployed.
 
 ### Steps
 
