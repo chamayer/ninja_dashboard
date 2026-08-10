@@ -168,6 +168,9 @@
                             </a>
                         {% elif f.subject_type == "client" and f.client %}
                             <a href="{% url 'org_index' org_slug=f.client.slug %}">{{ f.client.display_name }}</a>
+                        {% elif f.subject_type == "software_product" or f.subject_type == "software_version" %}
+                            {# The subject is the title or release, not a machine. #}
+                            <code>{{ f.finding_details.canonical_name|default:"(unnamed software)" }}</code>
                         {% elif f.finding_details.hostname %}
                             <code>{{ f.finding_details.hostname }}</code>
                         {% else %}

@@ -110,28 +110,62 @@ def classify(tenant_id: int = _TENANT_ID) -> int:
                 else {}
             )
 
+            # What each finding type is *about* is a registry row, not a
+            # constant here (migration 0130). An unknown name defaults to
+            # device, so a newly registered type never emits against a
+            # subject nobody chose for it.
+            cur.execute("SELECT name, subject_scope FROM operations.finding_types")
+            scopes: dict[str, str] = dict(cur.fetchall())
+
+            # LEFT JOIN, not INNER: an installation with no catalogue link must
+            # still be classified. It falls back to device scope and is counted
+            # below rather than silently dropped.
             cur.execute(
                 """
-                SELECT client_id, device_id, canonical_name,
-                       COALESCE(publisher,''), COALESCE(install_location,''),
-                       first_observed_at
-                FROM operations.software_installations_current
-                WHERE tenant_id = %s AND stale_since IS NULL AND deleted_at IS NULL
+                SELECT sic.client_id, sic.device_id, sic.canonical_name,
+                       COALESCE(sic.publisher,''), COALESCE(sic.install_location,''),
+                       sic.first_observed_at,
+                       p.product_uuid, sv.version_uuid
+                FROM operations.software_installations_current sic
+                LEFT JOIN catalog.software_versions sv
+                       ON sv.id = sic.software_version_id
+                LEFT JOIN catalog.products p
+                       ON p.id = sv.product_id
+                WHERE sic.tenant_id = %s AND sic.stale_since IS NULL
+                  AND sic.deleted_at IS NULL
                 """,
                 (tenant_id,),
             )
             installs = cur.fetchall()
 
+            unlinked = sum(1 for row in installs if row[6] is None)
+            if unlinked:
+                log.warning(
+                    "software_findings: %d of %d installation(s) have no catalogue "
+                    "link; those fall back to device-scoped findings.",
+                    unlinked, len(installs),
+                )
+
             # Per-device AV product count for multi_av_conflict.
             av_products_per_device: dict[uuid.UUID, set[str]] = {}
-            for client_id, device_id, name, _pub, _loc, _first in installs:
+            for client_id, device_id, name, _pub, _loc, _first, _pu, _vu in installs:
                 entry = catalog.get(name.lower(), {})
                 if "av" in entry.get("categories", []):
                     av_products_per_device.setdefault(device_id, set()).add(name)
 
             emitted_keys: set[str] = set()
 
-            for client_id, device_id, name, publisher, location, first_seen in installs:
+            # finding_type_id -> registered scope, so _emit can resolve the
+            # subject from the id it already receives.
+            scope_by_id = {
+                ft_id: scopes.get(ft_name, "device")
+                for ft_name, ft_id in finding_type_ids.items()
+            }
+
+            for (client_id, device_id, name, publisher, location, first_seen,
+                 product_uuid, version_uuid) in installs:
+                # Subject context for every _emit in this iteration.
+                subj = (scope_by_id, product_uuid, version_uuid)
                 # Decision tier: title-scope (device > client > global) then
                 # publisher-scope (device > client > global).
                 dec = _resolve_decision(decisions, device_id, client_id, name, publisher)
@@ -149,7 +183,7 @@ def classify(tenant_id: int = _TENANT_ID) -> int:
                         cur, tenant_id, finding_type_ids["suspicious_name"],
                         client_id, device_id, name, publisher, "high", now,
                         {"reason": "suspicious_name pattern match", "location": location},
-                        emitted_keys,
+                        emitted_keys, subj,
                     )
 
                 # 2. install_path_suspicious
@@ -160,7 +194,7 @@ def classify(tenant_id: int = _TENANT_ID) -> int:
                         cur, tenant_id, finding_type_ids["install_path_suspicious"],
                         client_id, device_id, name, publisher, "high", now,
                         {"reason": "suspicious install path", "location": location},
-                        emitted_keys,
+                        emitted_keys, subj,
                     )
 
                 # 3. unauthorized_av / _rmm / _remote_access
@@ -182,7 +216,7 @@ def classify(tenant_id: int = _TENANT_ID) -> int:
                                 "reason": f"{cat} product not in client's sanctioned set",
                                 "category": cat,
                             },
-                            emitted_keys,
+                            emitted_keys, subj,
                         )
 
                 # 4. multi_av_conflict (only emit once per device — key on 'multi_av')
@@ -191,7 +225,7 @@ def classify(tenant_id: int = _TENANT_ID) -> int:
                         cur, tenant_id, finding_type_ids["multi_av_conflict"],
                         client_id, device_id, "multi_av", publisher, "high", now,
                         {"av_products": sorted(av_products_per_device[device_id])},
-                        emitted_keys,
+                        emitted_keys, subj,
                     )
 
                 # 5. rare_recent — reframed per operator feedback:
@@ -245,7 +279,7 @@ def classify(tenant_id: int = _TENANT_ID) -> int:
                         cur, tenant_id, finding_type_ids["eol_runtime"],
                         client_id, device_id, name, publisher, "medium", now,
                         {"reason": "matches end-of-life runtime pattern"},
-                        emitted_keys,
+                        emitted_keys, subj,
                     )
 
                 # 8. vulnerable_software — installed title has a matched
@@ -274,7 +308,7 @@ def classify(tenant_id: int = _TENANT_ID) -> int:
                     affected += _emit(
                         cur, tenant_id, finding_type_ids["vulnerable_software"],
                         client_id, device_id, name, publisher, severity, now,
-                        detail, emitted_keys,
+                        detail, emitted_keys, subj,
                     )
 
                 # 9. known_malicious_hint — accumulated threat-intel
@@ -294,7 +328,7 @@ def classify(tenant_id: int = _TENANT_ID) -> int:
                             "threat_hit_count": hits,
                             "reason": "community threat-intel accumulation",
                         },
-                        emitted_keys,
+                        emitted_keys, subj,
                     )
 
                 # 7. whitelist_suggestion — the "≥ N devices, undecided,
@@ -319,7 +353,7 @@ def classify(tenant_id: int = _TENANT_ID) -> int:
                                 "threshold": min_devices,
                                 "reason": "uncategorised + undecided + widespread",
                             },
-                            emitted_keys,
+                            emitted_keys, subj,
                         )
 
             _auto_resolve(cur, tenant_id, emitted_keys, now)
@@ -672,17 +706,62 @@ def _condition_key(tenant_id: int, client_id, device_id, ft_name: str, canonical
     return hashlib.sha256(raw.encode()).hexdigest()[:64]
 
 
+def _subject_for(scope: str, device_id, product_uuid, version_uuid):
+    """Resolve (subject_type, subject_id, client_id_used, key_client, key_device)
+    for a finding type's registered scope.
+
+    A software-scoped finding drops both client and device from its identity:
+    the claim is about the title or the release, and who is exposed is derived
+    by joining installations. Keeping either in the condition key is what
+    produced 134,484 rows for ~1,831 distinct claims.
+
+    Falls back to device scope when the catalogue link is missing rather than
+    emitting a finding with a NULL subject. That is visible in the run log as a
+    fallback count -- an unlinked installation is a real condition worth
+    seeing, not something to swallow.
+    """
+    if scope == "software_product" and product_uuid is not None:
+        return "software_product", product_uuid, None, None, None
+    if scope == "software_version" and version_uuid is not None:
+        return "software_version", version_uuid, None, None, None
+    return "device", device_id, None, None, None
+
+
 def _emit(cur, tenant_id, ft_id, client_id, device_id, canonical_name,
-          publisher, severity, now, extra_details, emitted_keys) -> int:
+          publisher, severity, now, extra_details, emitted_keys,
+          subj=None) -> int:
     return _emit_scoped(
         cur, tenant_id, ft_id, client_id, device_id, canonical_name,
-        publisher, severity, now, extra_details, emitted_keys,
+        publisher, severity, now, extra_details, emitted_keys, subj,
     )
 
 
 def _emit_scoped(cur, tenant_id, ft_id, client_id, device_id, canonical_key,
-                 publisher, severity, now, extra_details, emitted_keys) -> int:
-    ckey = _condition_key(tenant_id, client_id, device_id, str(ft_id), canonical_key)
+                 publisher, severity, now, extra_details, emitted_keys,
+                 subj=None) -> int:
+    # subj = (scope_by_finding_type_id, product_uuid, version_uuid).
+    # Absent, everything stays device-scoped, which is the pre-0130 behaviour
+    # and the safe default for any caller not yet passing it.
+    scope_by_id, product_uuid, version_uuid = subj or ({}, None, None)
+    scope = scope_by_id.get(ft_id, "device")
+    subject_type, subject_id, _c, _kc, _kd = _subject_for(
+        scope, device_id, product_uuid, version_uuid
+    )
+    key_material = canonical_key
+    if subject_type == "device":
+        key_client, key_device = client_id, device_id
+        row_client = client_id
+    else:
+        # Identity is the subject alone; client and device leave both the key
+        # and the row. Finding.client is already nullable.
+        key_client, key_device = None, None
+        row_client = None
+        # Version scope needs the version in the key, or two releases of one
+        # title collapse onto each other. Key material only -- canonical_key
+        # itself stays clean, because it is what finding_details reports.
+        if subject_type == "software_version":
+            key_material = f"{canonical_key}@{subject_id}"
+    ckey = _condition_key(tenant_id, key_client, key_device, str(ft_id), key_material)
     if ckey in emitted_keys:
         return 0
     emitted_keys.add(ckey)
@@ -700,7 +779,7 @@ def _emit_scoped(cur, tenant_id, ft_id, client_id, device_id, canonical_key,
             first_seen_at, last_seen_at, last_detected_at
         ) VALUES (
             gen_random_uuid(), 1, %s, %s, %s,
-            'device', %s, %s::jsonb,
+            %s, %s, %s::jsonb,
             %s, %s, 'confirmed', 'open',
             %s, %s, %s
         )
@@ -716,8 +795,8 @@ def _emit_scoped(cur, tenant_id, ft_id, client_id, device_id, canonical_key,
             END
         """,
         (
-            tenant_id, ft_id, client_id, device_id, json.dumps(details),
-            ckey, severity, now, now, now,
+            tenant_id, ft_id, row_client, subject_type, subject_id,
+            json.dumps(details), ckey, severity, now, now, now,
         ),
     )
     return 1
@@ -731,7 +810,21 @@ def _auto_resolve(cur, tenant_id: int, emitted_keys: set[str], now: datetime) ->
     cur.execute(
         """
         UPDATE operations.findings f
-        SET status = 'resolved', last_seen_at = %s
+        SET status = 'resolved',
+            last_seen_at = %s,
+            -- closed_at is documented on the model as being set on any
+            -- transition into a closed status, and this path never set it,
+            -- so "was this active on date D" was unanswerable for every
+            -- auto-resolved software finding.
+            closed_at = COALESCE(f.closed_at, %s),
+            -- ADR-0012: nothing is lost without when and why.
+            finding_details = f.finding_details || jsonb_build_object(
+                'resolution', jsonb_build_object(
+                    'reason', 'no_longer_detected',
+                    'detail', 'The installation is gone, or an operator '
+                           || 'decision now approves it.'
+                )
+            )
         FROM operations.finding_types ft
         WHERE ft.id = f.finding_type_id
           AND ft.source_module = 'platform.software_findings'
@@ -739,5 +832,5 @@ def _auto_resolve(cur, tenant_id: int, emitted_keys: set[str], now: datetime) ->
           AND f.status IN ('open', 'acknowledged')
           AND NOT (f.condition_key = ANY(%s::text[]))
         """,
-        (now, tenant_id, list(emitted_keys)),
+        (now, now, tenant_id, list(emitted_keys)),
     )

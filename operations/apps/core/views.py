@@ -1009,6 +1009,17 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
                              AND f.subject_id = v.device_id
                              AND f.status IN ('open', 'acknowledged', 'investigating')
                              AND f.severity IN ('critical', 'high')
+                       ), 0)
+                       -- Software findings are no longer device subjects, so
+                       -- they are inherited through the installation link.
+                       -- Without this the count silently drops them.
+                       + COALESCE((
+                           SELECT COUNT(DISTINCT e.finding_id)::int
+                           FROM operations.v_device_software_exposure e
+                           WHERE e.tenant_id = 1
+                             AND e.device_id = v.device_id
+                             AND e.status IN ('open', 'acknowledged', 'investigating')
+                             AND e.severity IN ('critical', 'high')
                        ), 0) AS severe
                 FROM operations.v_device v
                 WHERE v.tenant_id = 1 AND v.client_id = %s
@@ -2939,15 +2950,14 @@ def _software_page_data(request: HttpRequest) -> dict:
             sc.execute("SET LOCAL operations.tenant_id = 1")
             sc.execute(
                 """
-                SELECT COUNT(DISTINCT f.subject_id)::int
-                FROM operations.findings f
-                JOIN operations.finding_types ft ON ft.id = f.finding_type_id
-                JOIN operations.finding_categories fc ON fc.id = ft.category_id
-                WHERE f.tenant_id = 1
-                  AND f.status IN ('open','acknowledged')
-                  AND fc.name = 'software'
-                  AND ft.name <> 'whitelist_suggestion'
-                  AND f.subject_type = 'device'
+                -- Software findings are subjects on the title or release now,
+                -- so the affected devices come from the exposure view rather
+                -- than from subject_id.
+                SELECT COUNT(DISTINCT e.device_id)::int
+                FROM operations.v_device_software_exposure e
+                WHERE e.tenant_id = 1
+                  AND e.status IN ('open','acknowledged')
+                  AND e.finding_type <> 'whitelist_suggestion'
                 """
             )
             (workflow_state["tech_checklist_devices"],) = sc.fetchone()
@@ -3753,17 +3763,13 @@ def software_user_risk(request: HttpRequest) -> HttpResponse:
         ),
         finding_items AS (
             SELECT d.id AS device_id, d.client_id,
-                   f.finding_details->>'canonical_name' AS canonical_name,
-                   ft.name AS kind
-            FROM operations.findings f
-            JOIN operations.finding_types ft ON ft.id = f.finding_type_id
-            JOIN operations.finding_categories fc ON fc.id = ft.category_id
-            JOIN operations.devices d ON d.id = f.subject_id AND d.deleted_at IS NULL
-            WHERE f.tenant_id = 1
-              AND f.status IN ('open', 'acknowledged')
-              AND fc.name = 'software'
-              AND ft.name <> 'whitelist_suggestion'
-              AND f.subject_type = 'device'
+                   e.canonical_name,
+                   e.finding_type AS kind
+            FROM operations.v_device_software_exposure e
+            JOIN operations.devices d ON d.id = e.device_id AND d.deleted_at IS NULL
+            WHERE e.tenant_id = 1
+              AND e.status IN ('open', 'acknowledged')
+              AND e.finding_type <> 'whitelist_suggestion'
               {client_where}
         ),
         decision_items AS (
@@ -4412,21 +4418,17 @@ def software_tech_checklist(request: HttpRequest) -> HttpResponse:
         SELECT d.client_id, c.slug, c.display_name,
                d.id AS device_id, d.canonical_hostname,
                d.device_role, d.os_group,
-               f.finding_details->>'canonical_name' AS canonical_name,
-               f.finding_details->>'publisher'      AS publisher,
-               f.finding_details->>'reason'         AS reason,
-               ft.name AS finding_type,
-               f.severity
-        FROM operations.findings f
-        JOIN operations.finding_types ft ON ft.id = f.finding_type_id
-        JOIN operations.finding_categories fc ON fc.id = ft.category_id
-        JOIN operations.devices d ON d.id = f.subject_id AND d.deleted_at IS NULL
+               e.canonical_name,
+               e.publisher,
+               e.finding_details->>'reason'         AS reason,
+               e.finding_type,
+               e.severity
+        FROM operations.v_device_software_exposure e
+        JOIN operations.devices d ON d.id = e.device_id AND d.deleted_at IS NULL
         JOIN operations.clients c ON c.id = d.client_id AND c.deleted_at IS NULL
-        WHERE f.tenant_id = 1
-          AND f.status IN ('open', 'acknowledged')
-          AND fc.name = 'software'
-          AND ft.name <> 'whitelist_suggestion'
-          AND f.subject_type = 'device'
+        WHERE e.tenant_id = 1
+          AND e.status IN ('open', 'acknowledged')
+          AND e.finding_type <> 'whitelist_suggestion'
           {client_where}
     """
 
@@ -4734,6 +4736,13 @@ def devices_page(request: HttpRequest) -> HttpResponse:
                       AND f.subject_id = v.device_id
                       AND f.status IN ('open','acknowledged','investigating')
                       AND f.severity IN ('critical','high')
+                   )
+                   + (SELECT COUNT(DISTINCT e.finding_id)
+                      FROM operations.v_device_software_exposure e
+                      WHERE e.tenant_id = 1
+                        AND e.device_id = v.device_id
+                        AND e.status IN ('open','acknowledged','investigating')
+                        AND e.severity IN ('critical','high')
                    ) AS severe_issues
             FROM operations.v_device v
             LEFT JOIN operations.clients c ON c.id = v.client_id

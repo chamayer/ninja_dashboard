@@ -286,6 +286,21 @@ class FindingType(models.Model):
         ENTITY = "entity", "Entity"
         ADMIN = "admin", "Admin"
 
+    class SubjectScope(models.TextChoices):
+        """What a finding of this type is *about*, which decides the
+        subject an emitter binds it to.
+
+        This is a registry row rather than a constant in the emitter,
+        per ADR-0012 section 6: a rule mapping one domain value to
+        another is operator-maintainable data. A module-level dict of
+        finding-type -> scope would also be exactly what the
+        `test_no_hardcoded_domain_mappings` ratchet exists to catch.
+        """
+
+        DEVICE = "device", "This device"
+        SOFTWARE_PRODUCT = "software_product", "The software title"
+        SOFTWARE_VERSION = "software_version", "The software release"
+
     id = models.SmallAutoField(primary_key=True)
     name = models.CharField(max_length=120, unique=True)
     default_severity = models.CharField(
@@ -302,6 +317,11 @@ class FindingType(models.Model):
         related_name="finding_types",
     )
     source_module = models.CharField(max_length=80, blank=True, default="")
+    # Defaults to device because that is what every existing type is, so
+    # adding the column changes no behaviour until a row is set otherwise.
+    subject_scope = models.CharField(
+        max_length=24, choices=SubjectScope.choices, default=SubjectScope.DEVICE
+    )
     auto_resolvable = models.BooleanField(default=True)
     runbook_path = models.CharField(max_length=255, blank=True)
     description = models.TextField(blank=True)
@@ -3611,6 +3631,20 @@ class Finding(UUIDTenantScopedModel):
         CLIENT_USER = "client_user", "Client user"
         SOURCE_BINDING = "source_binding", "Source binding"
         COLLECTOR_INSTANCE = "collector_instance", "Collector instance"
+        # Software subjects are the first that are not owned entities.
+        # Per the ADR-0012 amendment of 2026-08-10 software is global
+        # reference data beside intel.cves, not a row in
+        # operations.entities, so subject_id here holds
+        # catalog.products.product_uuid or
+        # catalog.software_versions.version_uuid (migration 076).
+        #
+        # Two types rather than one, because granularity differs by
+        # finding: "is this title allowed here" is a property of the
+        # title, while a CVE or an EOL date is a property of the
+        # release. Collapsing them would make it impossible to tell a
+        # patched install from an unpatched one.
+        SOFTWARE_PRODUCT = "software_product", "Software product"
+        SOFTWARE_VERSION = "software_version", "Software version"
 
     class Severity(models.TextChoices):
         CRITICAL = "critical", "Critical"

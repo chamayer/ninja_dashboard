@@ -112,12 +112,133 @@ Validated: `manage.py check` clean; `ruff check` on `views.py` reports 45
 pre-existing findings and none new in the edited ranges. Not deployed; no data
 written.
 
+### Subject granularity — settled 2026-08-10, measured
+
+Findings do not carry a version, so version scope was derived by joining each
+finding's device+title back to the installation it was emitted from. The join
+was exact: `install_not_matched` 0, `matched_but_no_version` 0, and all seven
+`by title` figures above reproduced.
+
+| type | open | by title | **by (title, version)** |
+| --- | --- | --- | --- |
+| vulnerable_software | 1,403 | 17 | **54** |
+| eol_runtime | 630 | 106 | **123** |
+| whitelist_suggestion | 131,073 | 1,631 | 9,564 |
+| unauthorized_remote_access | 522 | 5 | 126 |
+| suspicious_name | 383 | 5 | 5 |
+| known_malicious_hint | 128 | 11 | 42 |
+| unauthorized_av | 45 | 2 | 11 |
+
+7 of 17 vulnerable titles carry multiple installed versions (one has 28); 10 of
+106 EOL titles do (max 3). Collapse total 1,777 -> **1,831**.
+
+**Decision: `vulnerable_software` and `eol_runtime` bind to product+version;
+the other five bind to product.** A CVE applies to a release and an EOL date is
+a release's, so title scope cannot distinguish patched from unpatched — which
+is fatal, because patching is the remedy those two findings exist to prompt.
+
+An earlier proposal to bind all seven to product now and re-subject the two
+later was rejected by the user: build it once, correctly. That is the right
+call, and it makes the evaluators part of this work rather than a follow-up —
+binding to version while the evaluator still decides by title would produce a
+finding that claims to be about a release but was not.
+
+### What each evaluator needs to become version-aware
+
+* **`vulnerable_software` — no new data required.** `matcher.py` already
+  computes version filtering (`_parse_version_prefixes` at :184,
+  `_filter_by_version_prefix` at :287) and then **discards it**: `cve_match` is
+  keyed `(tenant_id, canonical_name, cve_id, match_kind)` at :269. The prefix is
+  also parsed from the *title text*, so the installed `version` column is never
+  read. Fix is to move the matcher's unit of work from title (21,370) to
+  product+version (40,541) and key `cve_match` on the version.
+* **`eol_runtime` — missing producer.** 0 of 40,541 `software_versions.eol_date`
+  populated and no EOL connector exists in `ingest/`; `intel_ingest_status`
+  registers nvd, cisa_kev, epss, winget, chocolatey, otx, abusech_mb,
+  abusech_tf and nothing for lifecycle. Needs an `endoflife.date` connector.
+  User authorized acquiring the data ("if we need more data let's plan on
+  getting it"). Until it lands, `eol_runtime` keeps firing on title patterns;
+  it must **not** be emitted at version scope before then.
+
+### Implementation checkpoint — 2026-08-10, local, not committed, not deployed
+
+Built:
+
+| artifact | what |
+| --- | --- |
+| `sql/migrations/076_catalog_finding_subject_uuids.sql` | `product_uuid` / `version_uuid`, unique, minted. PKs and the 489,347-row FK untouched |
+| `sql/migrations/077_cve_match_binds_to_version.sql` | `cve_match.software_version_id`; replaces unique index `cve_match_scope_idx` with one including the version, `NULLS NOT DISTINCT` |
+| `sql/migrations/078_endoflife_corpus.sql` | `intel.eol_products` / `intel.eol_releases` (natural keys, no tenant) + `operations.eol_product_map` |
+| `ingest/intel/endoflife.py` | corpus fetch, API v1, 462 products, per-product failure isolation |
+| `ingest/intel/eol_match.py` | projector: mapping + longest-cycle-prefix -> `software_versions.eol_date` / `eol_source`, with a clear path |
+| `ingest/intel/matcher.py` | unit of work title -> product+version; version no longer discarded at INSERT |
+| `apps/core/migrations/0129_software_finding_subject_types.py` | `software_product` + `software_version` on `Finding.SubjectType` |
+
+Wired: runner, scheduler (`INTEL_CATALOG_SCHEDULE_HOURS`), `/run/intel-endoflife`,
+startup catch-up plan, `INTEL_ENDOFLIFE_ENABLED`, module docstring.
+
+Decisions taken while building:
+
+* **`cve_match.software_version_id` NULL is meaningful.** A version-agnostic CPE
+  (`*`, `-`, absent) genuinely affects every release, so those rows stay
+  product-level explicitly instead of being fabricated onto a version.
+* **`operations.eol_product_map` has no RLS**, matching its neighbours
+  `cve_match` and `safety_signal` — tenant-scoped tables in this SQL path carry
+  a `tenant_id` and no policy, unlike the Django-managed ones. Recorded in the
+  migration as a known three-table asymmetry, not resolved here.
+* **The mapping table ships empty.** `eol_match` logs a warning rather than
+  reporting success, and `eol_runtime` stays title-scoped until mappings exist.
+  Seeding candidates should be derived by measuring the real catalogue against
+  the 462 corpus products, not invented.
+
+Near-miss worth keeping: three guesses at the existing `cve_match` unique
+constraint name were all wrong (it is `cve_match_scope_idx`, an index not a
+constraint). `DROP ... IF EXISTS` on a wrong name is a silent no-op, so 077
+would have applied cleanly and left the old key enforcing the old behaviour.
+
+Validation: ruff clean on all new modules; `matcher.py`, `main.py`,
+`software_findings.py` and `views.py` carry the same findings before and after
+(3, 42, 8, 45), none new; `manage.py check` clean; no migration drift; template
+compiles; `git diff --check` clean.
+
+**Rehearsed against production 2026-08-10, all five SQL migrations in one
+transaction, rolled back.** All applied without error. `product_uuid` 21,395
+rows / 21,395 distinct / 0 null; `version_uuid` 40,578 / 40,578 / 0. Migration
+079 closed **134,184** rows (the 134,484 in the table above was measured earlier
+the same day; the catalogue also grew 21,370 -> 21,395 products in that window,
+so this is ingest drift, not a discrepancy). Afterwards the only device-scoped
+software findings left open were `rare_recent` 2,658 and
+`install_path_suspicious` 398 — exactly the two that are supposed to stay, which
+confirms 079's name list is both correct and complete. Rollback verified: the
+`product_uuid` column is absent again.
+
+Not covered by the rehearsal: `v_device_software_exposure` parsed, created and
+executed but returned **0 rows**, because no finding has been re-subjected yet.
+Its join logic is therefore unproven until the emitter runs. The connector has
+still never executed against the live API.
+
 ### Steps
 
 0. ~~Fix authorization at all three tiers~~ — done, see above.
-1. `catalog` PKs bigint -> **uuid** (`findings.subject_id` is uuid), including
-   `software_installations_current.software_version_id`. Cheap now, expensive
-   once CVE/EOL data binds to it.
+1. **Retracted: do not convert the `catalog` PKs to uuid.** ADR-0012 §7 exempts
+   global reference corpora, and the 2026-08-10 amendment placed software
+   beside `intel.cves` precisely so it is not shaped like the owned-entity
+   store. That corpus is keyed naturally — `intel.cves.cve_id text PRIMARY KEY`,
+   `intel.cpes.cpe23 text PRIMARY KEY` — and the catalog already has its natural
+   keys under unique constraints. Retyping its PKs would make it the only
+   reference corpus wearing entity-store keys, repeating the error the
+   amendment corrected, and would touch the 489,347-row installation FK for no
+   gain.
+
+   **Replaced by:** add a stored `uuid` column to `catalog.products` and
+   `catalog.software_versions` (migration 076) as the stable handle the
+   polymorphic `findings.subject_id` needs. PKs and FKs untouched. Stored and
+   minted once rather than derived from the natural key, because publisher
+   aliases collapse the long tail over time (84% of installs covered, 6% of
+   distinct publishers) and a derived id would silently re-identify products on
+   every alias addition — ADR-0012's "nothing is lost without when and why".
+   A stored id makes that collapse an explicit merge instead. Postgres is 16,
+   so `gen_random_uuid()` is core; pgcrypto is still not installed.
 2. Add `software` to `Finding.SubjectType` (today: client, device, client_user,
    source_binding, collector_instance).
 3. Re-emit the seven intrinsic types at `(client, title)`; close the 134,484
