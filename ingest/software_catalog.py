@@ -24,12 +24,18 @@ Known limits, recorded rather than papered over:
 
 * `software_installations_current` has **no source column**, and its primary
   key is `(tenant, client, device, canonical_name)`. So two versions of one
-  title on one device collapse to a single row, and a second source reporting
-  the same install has nowhere to go. Both are properties of that table, not
-  of this projector. When a second software source appears, installations move
-  to the observation pipeline and gain attribution and reconciliation there.
-* The catalogue therefore reflects what that table can express, which is one
-  version per (device, title).
+  title on one device would collapse to a single row, and a second source
+  reporting the same install has nowhere to go. Both are properties of that
+  table, not of this projector. When a second software source appears,
+  installations move to the observation pipeline and gain attribution and
+  reconciliation there.
+* The version collapse is **theoretical, not active loss**. Measured
+  2026-08-10 against `software_installations_current` and the retained
+  `software_installation_history` -- which carries `version` and is *not* keyed
+  on it, so it is the only place the evidence could survive -- there are **0**
+  (device, title) pairs with more than one distinct version. The catalogue
+  therefore loses nothing today. The key is not a defect to fix; re-derive this
+  count before treating it as one.
 """
 
 from __future__ import annotations

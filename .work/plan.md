@@ -1,5 +1,147 @@
 # Active root implementation plan
 
+## CURRENT TASK — ADR-0015 step 3: software findings onto software subjects
+
+**Status:** step 0 (authorization) implemented locally, not committed or
+deployed. Next action: step 1, the `catalog` bigint -> uuid migration.
+
+Goal: "know about software installed on devices and be able to authorize /
+report on them with findings." A finding about software is stored once on the
+software; devices inherit it through the installation link.
+
+### Measured (production, 2026-08-10) — do not re-derive
+
+| type | open rows | by title | by (client, title) |
+| --- | --- | --- | --- |
+| whitelist_suggestion | 131,073 | 1,631 | 19,301 |
+| vulnerable_software | 1,403 | 17 | 93 |
+| eol_runtime | 630 | 106 | 214 |
+| unauthorized_remote_access | 522 | 5 | 111 |
+| suspicious_name | 383 | 5 | 62 |
+| known_malicious_hint | 128 | 11 | 36 |
+| unauthorized_av | 45 | 2 | 11 |
+
+Intrinsic-to-software total: **134,484 rows -> ~1,777** (the `by title`
+column). All seven assert a property of the *title*, not of a client:
+a CVE, an EOL date, a suspect name, or an undecided authorization. The client
+is never part of the claim — it only determines who is exposed, which is
+derived by the join.
+
+The `by (client, title)` column (19,828) answers the wrong question and is
+retained only so nobody re-measures it. Storing per client would mean a single
+global approval had to sweep 19,301 rows closed instead of resolving one.
+
+`rare_recent` (2,658) and `install_path_suspicious` (398) stay on
+`subject_type='device'` — recency and install path are per-device facts.
+
+* **0** multi-version-per-device-title rows in active history. Limit 2 in the
+  `074` docstring is theoretical — correct the docstring, do not change the PK.
+* **0** of 137,540 software findings carry a version. Subject binds to
+  `catalog.products`, not `software_versions`.
+* `_resolve_decision` already implements device > client > global for title
+  and publisher scope (`software_findings.py:137`).
+
+### ADR-0015 is correct — do not amend it
+
+Its predicted "137,534 -> 1,782" matches the measured ~1,777. An earlier claim
+in this session that the ADR was "client-blind" was wrong: it modelled the
+subject as the title, which is right, because none of the seven types asserts
+anything about a client.
+
+### Design
+
+* Findings collapse to `(title)` — emitter change is dropping both `client_id`
+  and `device_id` from `_condition_key`, and emitting with `client_id` NULL
+  (`Finding.client` is already nullable).
+* The three authorization tiers all resolve through one mechanism:
+  * **global** approve -> the finding resolves, one row;
+  * **client** approve -> finding stays open, that client's devices drop out
+    of the exposure view;
+  * **device** approve -> finding stays open, that device drops out.
+  Client and device are filters on derived exposure, never stored rows.
+* Device exposure is **derived, not stored**: `findings -> catalog.products ->
+  software_versions -> software_installations_current.software_version_id ->
+  device`, minus device-tier approvals. Patching a title fleet-wide then
+  resolves one finding instead of 1,378.
+
+### Authorization — step 0, done; smaller than it was described
+
+Measured 2026-08-10, `operations.software_decisions`: global 427 (all CSV seed
+import), client 0, device 0.
+
+**Correction to the earlier reading of those zeros.** They were taken as proof
+that no tier had a working operator path. Re-derived from the code
+2026-08-10: all three tiers have a wired surface and a working handler, and
+`software_decision_create` (`views.py:7514`) already accepts
+`scope = global | client | device` and resolves `client_slug` / `device_id`
+correctly. Zero rows means unused, not unreachable. Only one handler was
+genuinely dead:
+
+* **global** — the dead code was in `software_decision_bulk`, *not* the whole
+  global path. Two `return redirect(...)` at function-body indentation made the
+  `update_or_create` loop unreachable, so bulk apply silently no-opped. Fixed:
+  both returns moved inside their validation `if`, and the two
+  `_refresh_software_risk_matview()` calls dropped from those error paths —
+  they refreshed a matview after writing nothing. Per-row global buttons on
+  `software_decisions.html`, `software_products.html`, `software_publishers.html`,
+  `software_detail.html` and `software_publisher_detail.html` always worked;
+  they post to `software_decision_create`.
+* **client** — `org_software_decide` (`views.py:6323`) works and is wired from
+  `org_software.html:169`. Real defect: its `update_or_create` lookup omitted
+  `device`, so a client decision would match and overwrite a device-scoped row
+  for the same client and title. Fixed by adding `device=None` to the lookup.
+* **device** — a surface does exist: the per-install row action in
+  `software_detail.html:180` posts `scope=device` with `device_id`. Nothing to
+  build.
+
+Both follow-on defects are also fixed: `org_software_decide` no longer follows
+an unvalidated `next` / `HTTP_REFERER` (open redirect — `HTTP_REFERER` is
+attacker-settable), and `software_decision_bulk` now rejects a non-`global`
+`scope` with an operator-visible message instead of silently writing a global
+decision. Both bulk forms post `scope=global` today, so that one was latent,
+not live.
+
+No test covers any of these handlers, and none was added — the dead-code bug is
+exactly what a request smoke test would have caught. Recorded in
+`.work/backlog.md` rather than expanded into this change.
+
+Model, `_resolve_decision` (device > client > global), and ingest tier logic
+already supported three tiers.
+
+Validated: `manage.py check` clean; `ruff check` on `views.py` reports 45
+pre-existing findings and none new in the edited ranges. Not deployed; no data
+written.
+
+### Steps
+
+0. ~~Fix authorization at all three tiers~~ — done, see above.
+1. `catalog` PKs bigint -> **uuid** (`findings.subject_id` is uuid), including
+   `software_installations_current.software_version_id`. Cheap now, expensive
+   once CVE/EOL data binds to it.
+2. Add `software` to `Finding.SubjectType` (today: client, device, client_user,
+   source_binding, collector_instance).
+3. Re-emit the seven intrinsic types at `(client, title)`; close the 134,484
+   device rows with a recorded cause.
+4. Build `operations.v_device_software_exposure`; revoke DML from runtime
+   roles per `operations/AGENTS.md`.
+5. **Rewire the ~10 `views.py` sites** filtering software findings by
+   `subject_type = 'device'`, plus `findings_queue.html:165`. Without this the
+   device pages go empty. Not optional; the bulk of the work.
+6. ~~Correct the Limit 2 text~~ — done. It was only in
+   `ingest/software_catalog.py`; `074_software_catalog_entities.sql` never
+   carried the claim, so the applied migration was not touched. The docstring
+   now records the measured 0 multi-version (device, title) pairs and marks the
+   collapse theoretical rather than active loss.
+
+### Process note
+
+Three times in this task a plan was built on an unmeasured assumption and
+retracted (MATCH SIMPLE, publisher alias operator, client-blind collapse).
+Measure before asserting, and do not treat agreement with an existing document
+as corroboration — both can share the same error.
+
+---
+
 Track: **Operator experience — five tracks (2026-08-06)**
 
 The ADR-0010 entity track (E1-E6) is complete and deployed; its record is
