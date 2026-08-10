@@ -77,6 +77,77 @@ def _display_state(
     return state, STATE_LABELS[state]
 
 
+def _software_rollup_rows(*, client_id=None) -> list[dict]:
+    """Per-client software finding counts, attributed through the installation
+    link rather than a stored client_id.
+
+    One software finding reaches many clients, so "how many" needs a stated
+    meaning. **The counts here reproduce what this rollup reported before the
+    findings were re-subjected**, deliberately: the collapse changed how
+    findings are stored and approved, not what this dashboard reports, and
+    changing the displayed magnitude would be a feature change nobody asked
+    for.
+
+      * ``n``        -- device-weighted, i.e. one per (finding, device) pair.
+                        A title on 50 of their devices counts 50, exactly as
+                        the 50 per-device findings did before.
+      * ``subjects`` -- distinct devices of theirs affected, unchanged in
+                        meaning from device-subject findings.
+
+    Counting distinct findings instead would be truer to "one problem, one
+    row", but would drop every client's software total by the collapse factor
+    and break comparability with last week. That is a product decision, not a
+    fix, and is not taken here.
+
+    Client- and device-tier approvals are already filtered out by the exposure
+    view, so an approved title stops counting against that client without the
+    finding itself being resolved.
+    """
+    where = ["e.tenant_id = 1", "e.status = ANY(%s)"]
+    params: list = [list(ACTIVE_FINDING_STATUSES)]
+    if client_id is not None:
+        where.append("e.client_id = %s")
+        params.append(str(client_id))
+
+    sql = f"""
+        SELECT e.client_id,
+               fc.name AS category_name,
+               ft.name AS finding_type_name,
+               e.severity,
+               -- (finding, device) pairs, not distinct findings: this is the
+               -- number the per-device findings produced before the collapse.
+               -- DISTINCT on the pair because a product-scoped finding reaches
+               -- a device once per installed version of that title.
+               COUNT(DISTINCT (e.finding_id, e.device_id)) AS n,
+               COUNT(DISTINCT e.device_id)                 AS subjects,
+               COUNT(DISTINCT (e.finding_id, e.device_id))
+                   FILTER (WHERE e.first_seen_at >= now() - interval '24 hours') AS new
+          FROM operations.v_device_software_exposure e
+          JOIN operations.finding_types ft ON ft.id = e.finding_type_id
+          JOIN operations.finding_categories fc ON fc.id = ft.category_id
+         WHERE {' AND '.join(where)}
+           AND fc.name = ANY(%s)
+         GROUP BY 1, 2, 3, 4
+    """
+    params.append(list(DOMAIN_BY_CATEGORY))
+
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        cur.execute(sql, params)
+        return [
+            {
+                "client_id": row[0],
+                "finding_type__category__name": row[1],
+                "finding_type__name": row[2],
+                "severity": row[3],
+                "n": row[4],
+                "subjects": row[5],
+                "new": row[6],
+            }
+            for row in cur.fetchall()
+        ]
+
+
 def _issue_rollup(*, client_id=None) -> tuple[dict, list[dict]]:
     filters = {
         "tenant_id": 1,
@@ -85,8 +156,18 @@ def _issue_rollup(*, client_id=None) -> tuple[dict, list[dict]]:
     }
     if client_id is not None:
         filters["client_id"] = client_id
-    rows = (
+    rows = list(
         Finding.objects.filter(**filters)
+        # Software findings are excluded here and added below. Their subject is
+        # the title or release, so they carry no client_id -- left in this
+        # query they would group under a None key that no client page reads,
+        # and vanish entirely once a specific client is requested.
+        .exclude(
+            subject_type__in=(
+                Finding.SubjectType.SOFTWARE_PRODUCT,
+                Finding.SubjectType.SOFTWARE_VERSION,
+            )
+        )
         .filter(Q(snoozed_until__isnull=True) | Q(snoozed_until__lt=timezone.now()))
         .values(
             "client_id",
@@ -103,6 +184,7 @@ def _issue_rollup(*, client_id=None) -> tuple[dict, list[dict]]:
             ),
         )
     )
+    rows.extend(_software_rollup_rows(client_id=client_id))
     stats_by_client: dict = {}
     detail_rows = []
     for row in rows:

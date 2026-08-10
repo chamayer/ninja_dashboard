@@ -280,11 +280,25 @@
             <tr>
                 <td><span class="badge badge-{{ f.severity }}">{{ f.severity }}</span></td>
                 <td>
-                    {# Click-through to Issues filtered by this device + this finding type. #}
-                    <a href="{% url 'findings_queue' %}?type={{ f.finding_type.name }}&subject_id={{ device.id }}&status=all"
-                       title="View all {{ f.finding_type.name }} for this device">
-                        {% finding_display_label f %}
-                    </a>
+                    {% if f.subject_type == "software_product" or f.subject_type == "software_version" %}
+                        {# The subject is the title or release, not this machine.
+                           Filtering Issues by subject_id=device.id would match
+                           nothing, so drill through to the software instead. #}
+                        <a href="{% url 'software_detail' name=f.finding_details.canonical_name %}"
+                           title="View this software title across the fleet">
+                            {% finding_display_label f %}
+                        </a>
+                        <span class="muted" style="font-size:0.72rem;"
+                              title="This issue is a property of the software; this device inherits it by having it installed.">
+                            via install
+                        </span>
+                    {% else %}
+                        {# Click-through to Issues filtered by this device + this finding type. #}
+                        <a href="{% url 'findings_queue' %}?type={{ f.finding_type.name }}&subject_id={{ device.id }}&status=all"
+                           title="View all {{ f.finding_type.name }} for this device">
+                            {% finding_display_label f %}
+                        </a>
+                    {% endif %}
                 </td>
                 <td class="muted">{% finding_detail_text f %}</td>
                 <td><span class="badge badge-{{ f.status }}">{{ f.get_status_display }}</span></td>
