@@ -104,7 +104,16 @@ def run(client: NinjaClient, df: str | None = None) -> int:
 
 
 def refresh_read_models() -> None:
-    """Publish compact Software read models in dependency order."""
+    """Publish compact Software read models, then project the catalogue.
+
+    Both software ingest paths call this, so it is the one place a
+    post-ingest step reaches every run.
+
+    The catalogue projection runs *after* the matview refresh deliberately: it
+    is newer, and a fault in it must not stop the established read models from
+    publishing. Its own failure is raised rather than swallowed, and
+    `run_log('software.catalog')` records the outcome either way.
+    """
     for relation in (
         "operations.software_title_current",
         "operations.v_software_safety",
@@ -112,6 +121,12 @@ def refresh_read_models() -> None:
         with db.pool.connection() as conn, conn.cursor() as cur:
             cur.execute(f"REFRESH MATERIALIZED VIEW CONCURRENTLY {relation}")
         log.info("Refreshed materialized view %s", relation)
+
+    # Imported here rather than at module scope: `software_catalog` reads this
+    # table, and a top-level import would make the dependency circular.
+    from ingest.software_catalog import project_software_catalog
+
+    project_software_catalog()
 
 
 def _load_device_map() -> dict[str, tuple[uuid.UUID, uuid.UUID]]:
