@@ -101,29 +101,23 @@ class Command(BaseCommand):
         return actor
 
     def _plan(self, tenant_id: int, layouts: list[str]) -> dict[str, list[str]]:
-        """Candidate ids per layout, joined through the observation's layout.
+        """Candidate ids per layout, read through the E5.1-style read model.
 
-        The candidate carries the stable source identity; the layout lives on
-        the observation's `canonical_data`. They join on the same external id
-        within the same source instance.
+        Reads `v_entity_candidate_source_layout`, not the observation table:
+        migration 0117 revoked raw and canonical observation columns from every
+        runtime role, and that revoke stays. The view exposes the candidate's
+        classification and its layout name and nothing else -- no hostname,
+        serial, URL or payload (migration 0128).
         """
         with connection.cursor() as cursor:
             cursor.execute(
                 """
-                SELECT observation.canonical_data->>'hudu_layout' AS layout,
-                       candidate.id
-                  FROM operations.entity_candidates candidate
-                  JOIN operations.entity_observation_current observation
-                    ON observation.tenant_id = candidate.tenant_id
-                   AND observation.source_instance_id = candidate.source_instance_id
-                   AND observation.external_namespace = candidate.external_namespace
-                   AND observation.external_id = candidate.external_id
-                 WHERE candidate.tenant_id = %s
-                   AND candidate.proposed_entity_class_id = 'asset'
-                   AND candidate.status <> 'attached'
-                   AND candidate.status <> 'rejected'
-                   AND observation.active
-                   AND observation.canonical_data->>'hudu_layout' = ANY(%s)
+                SELECT source_layout, candidate_id
+                  FROM operations.v_entity_candidate_source_layout
+                 WHERE tenant_id = %s
+                   AND entity_class = 'asset'
+                   AND status NOT IN ('attached', 'rejected')
+                   AND source_layout = ANY(%s)
                 """,
                 [tenant_id, layouts],
             )
