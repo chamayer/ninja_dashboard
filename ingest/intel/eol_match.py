@@ -34,30 +34,60 @@ _TENANT_ID = 1
 # `LIKE cycle || '%'` would not ('3.13.2' does start with '3.1').
 _PROJECT_SQL = """
 WITH mapped AS (
-    SELECT p.id AS product_id, m.eol_product, m.priority
+    -- A mapping row now matches on title AND, optionally, on the installed
+    -- version. Rows with an empty version_pattern apply to every version,
+    -- which is the pre-082 behaviour.
+    SELECT sv.id AS version_id,
+           m.eol_product,
+           m.eol_cycle,
+           m.priority,
+           -- A row that names a version range is more specific than one that
+           -- does not, and must win regardless of priority ordering.
+           (m.version_pattern <> '') AS is_version_pinned
       FROM operations.eol_product_map m
       JOIN catalog.products p
         ON p.canonical_name ILIKE m.raw_pattern
+      JOIN catalog.software_versions sv
+        ON sv.product_id = p.id AND sv.version <> ''
      WHERE m.tenant_id = %(tenant)s
+       AND (m.version_pattern = '' OR sv.version ILIKE m.version_pattern)
 ),
-best_product AS (
-    -- One corpus product per catalogue product: lowest priority wins, name
-    -- breaks ties so the result is deterministic rather than arbitrary.
-    SELECT DISTINCT ON (product_id) product_id, eol_product
+best_map AS (
+    -- One mapping per catalogue version: version-pinned rows first, then
+    -- priority, then name so the result is deterministic rather than arbitrary.
+    SELECT DISTINCT ON (version_id)
+           version_id, eol_product, eol_cycle
       FROM mapped
-     ORDER BY product_id, priority, eol_product
+     ORDER BY version_id, is_version_pinned DESC, priority, eol_product
 ),
 candidate AS (
-    SELECT sv.id            AS version_id,
+    SELECT bm.version_id,
            r.eol_from,
            r.product_name,
            r.cycle,
-           length(r.cycle)  AS cycle_len
-      FROM catalog.software_versions sv
-      JOIN best_product bp ON bp.product_id = sv.product_id
-      JOIN intel.eol_releases r ON r.product_name = bp.eol_product
-     WHERE sv.version <> ''
-       AND (sv.version = r.cycle OR sv.version LIKE r.cycle || '.%%')
+           -- An explicitly pinned cycle outranks any derived match, which is
+           -- the only way to reach codename cycles ('22H2', 'Sonoma') that no
+           -- numeric version can prefix-match.
+           (bm.eol_cycle <> '' AND r.cycle = bm.eol_cycle) AS is_pinned_cycle,
+           length(r.cycle) AS cycle_len
+      FROM best_map bm
+      JOIN catalog.software_versions sv ON sv.id = bm.version_id
+      JOIN intel.eol_releases r ON r.product_name = bm.eol_product
+     WHERE (
+             -- explicit cycle, or...
+             (bm.eol_cycle <> '' AND r.cycle = bm.eol_cycle)
+             -- ...derive from the installed version, or...
+          OR (bm.eol_cycle = ''
+              AND (sv.version = r.cycle OR sv.version LIKE r.cycle || '.%%'))
+             -- ...from a year token in the *title*, which is how
+             -- 'Office 2010' (installed as 14.0.x) reaches cycle '2010'.
+             -- The CVE matcher has always done this; the projector did not.
+          OR (bm.eol_cycle = ''
+              AND r.cycle ~ '^(19|20)[0-9]{2}$'
+              AND EXISTS (SELECT 1 FROM catalog.products p2
+                           WHERE p2.id = sv.product_id
+                             AND p2.canonical_name ~ ('\\m' || r.cycle || '\\M')))
+           )
 ),
 best AS (
     SELECT DISTINCT ON (version_id)
@@ -65,16 +95,26 @@ best AS (
            eol_from,
            product_name || '#' || cycle AS src
       FROM candidate
-     ORDER BY version_id, cycle_len DESC, cycle
+     ORDER BY version_id, is_pinned_cycle DESC, cycle_len DESC, cycle
 )
-UPDATE catalog.software_versions sv
-   SET eol_date   = best.eol_from,
-       eol_source = 'endoflife.date:' || best.src,
-       updated_at = now()
+SELECT version_id, eol_from, 'endoflife.date:' || src AS src
+  INTO TEMP TABLE eol_best
   FROM best
- WHERE sv.id = best.version_id
-   AND (sv.eol_date   IS DISTINCT FROM best.eol_from
-     OR sv.eol_source IS DISTINCT FROM 'endoflife.date:' || best.src)
+"""
+
+# Both the write and the clear read the same computed set. They used to carry
+# two copies of the matching logic, which with pinned versions and cycles would
+# have been three chances for the copies to drift -- and a drifted clear silently
+# wipes correctly dated versions.
+_WRITE_SQL = """
+UPDATE catalog.software_versions sv
+   SET eol_date   = b.eol_from,
+       eol_source = b.src,
+       updated_at = now()
+  FROM eol_best b
+ WHERE sv.id = b.version_id
+   AND (sv.eol_date   IS DISTINCT FROM b.eol_from
+     OR sv.eol_source IS DISTINCT FROM b.src)
 """
 
 # A version that no longer matches any mapping must lose its date, or a
@@ -87,21 +127,7 @@ UPDATE catalog.software_versions sv
        eol_source = '',
        updated_at = now()
  WHERE sv.eol_source LIKE 'endoflife.date:%%'
-   AND sv.id NOT IN (
-        SELECT sv2.id
-          FROM catalog.software_versions sv2
-          JOIN (
-              SELECT DISTINCT ON (p.id) p.id AS product_id, m.eol_product
-                FROM operations.eol_product_map m
-                JOIN catalog.products p
-                  ON p.canonical_name ILIKE m.raw_pattern
-               WHERE m.tenant_id = %(tenant)s
-               ORDER BY p.id, m.priority, m.eol_product
-          ) bp ON bp.product_id = sv2.product_id
-          JOIN intel.eol_releases r ON r.product_name = bp.eol_product
-         WHERE sv2.version <> ''
-           AND (sv2.version = r.cycle OR sv2.version LIKE r.cycle || '.%%')
-   )
+   AND NOT EXISTS (SELECT 1 FROM eol_best b WHERE b.version_id = sv.id)
 """
 
 
@@ -127,10 +153,14 @@ def _project() -> tuple[int, int, int]:
         )
         mappings = cur.fetchone()[0]
 
+        # Compute the match set once, then write and clear from it.
+        cur.execute("DROP TABLE IF EXISTS eol_best")
         cur.execute(_PROJECT_SQL, {"tenant": _TENANT_ID})
+
+        cur.execute(_WRITE_SQL)
         written = cur.rowcount
 
-        cur.execute(_CLEAR_SQL, {"tenant": _TENANT_ID})
+        cur.execute(_CLEAR_SQL)
         cleared = cur.rowcount
 
     # The suggestion list is derived from the corpus and the mapping table, both

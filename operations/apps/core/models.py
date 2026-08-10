@@ -3582,6 +3582,26 @@ class EolProductMap(models.Model):
         max_length=255,
         help_text="endoflife.date product name, e.g. 'chrome', 'notepad-plus-plus'.",
     )
+    version_pattern = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        help_text=(
+            "Optional ILIKE pattern over the installed version. Blank applies "
+            "to every version. Use it to split one title across cycles, e.g. "
+            "'14.%' for Office 2010."
+        ),
+    )
+    eol_cycle = models.CharField(
+        max_length=120,
+        blank=True,
+        default="",
+        help_text=(
+            "Optional explicit release cycle. Blank derives it from the "
+            "installed version, which is right for numerically versioned "
+            "software and impossible for cycles like '20h2' or '2008-r2-sp1'."
+        ),
+    )
     priority = models.IntegerField(
         default=100, help_text="Lower wins when several patterns match one title."
     )

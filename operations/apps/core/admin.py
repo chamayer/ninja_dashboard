@@ -576,9 +576,12 @@ class IntelMatcherHintAdmin(admin.ModelAdmin):
 
 @admin.register(EolProductMap)
 class EolProductMapAdmin(admin.ModelAdmin):
-    list_display = ("raw_pattern", "eol_product", "priority", "updated_at")
+    list_display = (
+        "raw_pattern", "version_pattern", "eol_product", "eol_cycle",
+        "priority", "updated_at",
+    )
     list_filter = ("eol_product",)
-    search_fields = ("raw_pattern", "eol_product", "notes")
+    search_fields = ("raw_pattern", "version_pattern", "eol_product", "notes")
     ordering = ("priority", "raw_pattern")
 
 
