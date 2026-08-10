@@ -3,6 +3,24 @@
 This is the proposed successor to the genuinely open portion of
 `operations/TODO.md`. Completed tracks and chronological history are excluded.
 
+## Request smoke tests for the software decision handlers
+
+- Reason deferred: out of scope of the 2026-08-10 authorization fix, which was
+  a defect repair rather than new coverage.
+- Why it matters: `software_decision_bulk` shipped with two `return` statements
+  at function-body indentation, making its entire `update_or_create` loop
+  unreachable. Bulk apply silently wrote nothing and redirected as if it had
+  worked. It went unnoticed because *no test covers any of the three
+  handlers* — `software_decision_create`, `software_decision_bulk`, or
+  `org_software_decide` — and the failure was invisible in the UI.
+- Relevant paths: `apps/core/views.py` (~6323, ~7442, ~7514),
+  `apps/core/tests/`.
+- Candidate scope: one authenticated POST per handler asserting a
+  `SoftwareDecision` row at the intended scope, plus the tier-collision case
+  (a client decision must not overwrite a device-scoped row for the same
+  client and title).
+- Trigger: the next change to any software decision surface.
+
 ## UI roadmap
 
 ### Dashboard and fleet search

@@ -6333,6 +6333,10 @@ def org_software_decide(request: HttpRequest, org_slug: str) -> HttpResponse:
     SoftwareDecision.objects.update_or_create(
         tenant_id=1,
         client=client,
+        # device must be part of the lookup, not just the scope intent: without
+        # it a client decision matches — and overwrites — an existing
+        # device-scoped row for the same client and title.
+        device=None,
         canonical_name=sw_name,
         publisher="",
         defaults={
@@ -6341,11 +6345,12 @@ def org_software_decide(request: HttpRequest, org_slug: str) -> HttpResponse:
             "decided_at": timezone.now(),
         },
     )
-    return redirect(
-        request.POST.get("next")
-        or request.META.get("HTTP_REFERER")
-        or f"/orgs/{org_slug}/software/"
-    )
+    # Follow only a relative ``next``; an unvalidated one (and HTTP_REFERER,
+    # which is attacker-settable) is an open redirect.
+    nxt = request.POST.get("next") or ""
+    if nxt.startswith("/") and not nxt.startswith("//"):
+        return redirect(nxt)
+    return redirect("org_software", org_slug=org_slug)
 
 
 # ── Compliance / fleet coverage page ─────────────────────────────────────────
@@ -7446,22 +7451,30 @@ def software_decision_bulk(request: HttpRequest) -> HttpResponse:
       * canonical_name — repeated (from checkbox list); optional
       * publisher      — repeated; optional
       * decision       — one of SoftwareDecision.Decision.values
-      * scope          — global | client | device (currently only global
-                          supported in the queue UI)
+      * scope          — must be ``global``. Narrower scopes are rejected
+                          rather than silently written as global; use
+                          ``software_decision_create`` for those.
       * next           — return URL
     """
     decision = (request.POST.get("decision") or "").strip()
     if decision not in dict(SoftwareDecision.Decision.choices):
         messages.error(request, "Pick a decision before applying.")
-        _refresh_software_risk_matview()
-    return redirect(_safe_next(request, "software_decisions_queue"))
+        return redirect(_safe_next(request, "software_decisions_queue"))
+
+    scope = (request.POST.get("scope") or "global").strip()
+    if scope != "global":
+        messages.error(
+            request,
+            f"Bulk apply only writes global decisions; got scope '{scope}'. "
+            "Use the per-row action for a client or device decision.",
+        )
+        return redirect(_safe_next(request, "software_decisions_queue"))
 
     canonical_names = [n for n in request.POST.getlist("canonical_name") if n.strip()]
     publishers      = [p for p in request.POST.getlist("publisher")      if p.strip()]
     if not canonical_names and not publishers:
         messages.error(request, "Select at least one product or publisher.")
-        _refresh_software_risk_matview()
-    return redirect(_safe_next(request, "software_decisions_queue"))
+        return redirect(_safe_next(request, "software_decisions_queue"))
 
     created, updated = 0, 0
     for name in canonical_names:
