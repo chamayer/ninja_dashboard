@@ -118,6 +118,10 @@ Referential rules across the boundary:
 
 ### 5. Software
 
+**Superseded by the 2026-08-10 amendment: the hierarchy below is retained, but
+these are global reference entities beside `intel.cves`, not rows in
+`operations.entities`. Software is not owned; a licence is.**
+
 `publisher → product → software+version` are entities joined by plain
 relationships. Software+version is the entity that CVEs, EOL dates and safety
 scores bind to; it is unscoped. An installation is a relationship between a
@@ -316,3 +320,72 @@ Leaving the retraction visible is more useful than a clean text.
 
 `asset` instantiation is unaffected: asset entities are client-scoped, so no
 composite key involving them ever carries a NULL tenant.
+
+## Amendment — 2026-08-10: software is foreign reference data, not an entity in `operations.entities`
+
+Section 5 places `publisher → product → software+version` in the entity model
+as unscoped entities. The amendment above showed the *mechanism* for that could
+not work. This amendment addresses the more basic point: the placement itself
+is wrong.
+
+**Software is not owned.** A client owns a *licence*; it does not own Microsoft
+Word. `operations.entities` is the store for owned things — clients, devices,
+assets, users — and every structure on it assumes ownership: `tenant_id` NOT
+NULL, `scope_kind` of `tenant` or `client`, forced RLS with a tenant policy,
+and 29 composite foreign keys that carry a tenant. Putting an unowned thing in
+that store means fighting all of it, which is exactly what the failed
+`MATCH SIMPLE` mechanism was an attempt to do.
+
+**The platform already has the right home, and this record already exempts
+it.** Section 7 reads: "It does not govern global reference corpora
+(`intel.cves`, `intel.cpes`)." That corpus exists — 92,514 CVEs and 164,860
+CPEs — in its own schema, with no tenant, no RLS and no ownership semantics.
+Software, publisher and product belong beside it. They are the same kind of
+thing: globally true facts about the world that no customer owns.
+
+### Amended position
+
+- **`publisher`, `product` and `software+version` are global reference
+  entities**, held with the intel corpus, carrying no tenant and no
+  `scope_kind`. They are *not* rows in `operations.entities`.
+- **The installation relationship already exists.**
+  `operations.software_installations_current` holds 484,636 rows keyed by
+  device and title strings. It does not need to be rebuilt as a generic
+  relationship; it needs the title strings to gain an identity, i.e. a foreign
+  key to software+version. §1's rule that a relationship may carry its own
+  attributes is already satisfied — `install_location` and `install_date` are
+  on those rows today.
+- **A licence is a scoped asset** and belongs in `operations.entities` under
+  the `asset` class when that work is scheduled. The licence-versus-product
+  distinction is what makes one owned and the other not.
+- **The generic attribute/claim/effective machinery does not apply to
+  software**, and that is not a loss. That machinery exists to resolve
+  disagreement between sources. Software attributes — EOL date, safety score,
+  CVE linkage — come from one intel path, so authority selection, conflict
+  rows and audited operator decisions would be overhead with nothing to
+  arbitrate.
+- **`entity_classes.software` and `entity_types.software` stay registered** and
+  stay empty. Retiring them is a separate decision; nothing depends on them.
+
+### Consequences
+
+- The 29 composite foreign keys on `operations.entities` are **untouched**.
+- **No nullable `tenant_id`, no third `scope_kind`, no RLS policy
+  replacement.** The `.work/backlog.md` item "Unscoped (universal) entities —
+  nullable tenant, third scope_kind" is retired as unnecessary rather than
+  deferred: it existed to make software fit a store software does not belong
+  in.
+- ADR-0015's sequencing is unaffected. Its step 3 (findings onto real subjects)
+  still needs software+version to have an identity; it now gets one from the
+  reference schema instead of from `operations.entities`.
+- Section 5 is superseded by this amendment. The hierarchy it describes is
+  retained; only its location is changed.
+
+### Why the first placement looked right
+
+§4 divides the world into scoped and unscoped and then treats both as
+inhabitants of the same store, which makes "unscoped entity" sound like a
+variant of "entity" rather than a different kind of thing. §7 already drew the
+real line — governed entities versus global reference corpora — but §5 was
+written without applying it to software. The two sections disagreed and nothing
+tested which governed until a migration had to be written.
