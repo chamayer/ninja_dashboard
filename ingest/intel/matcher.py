@@ -14,11 +14,23 @@ Precision knobs are data-driven (``operations.intel_matcher_hints``):
 
 Additional built-ins:
 
-  * Version awareness: a year token (2010..2035) or semver-style
-    ``M[.N[.P]]`` parsed from the canonical name narrows CPE
-    candidates to those whose ``version`` component starts with that
-    string. Version-agnostic CPEs (``version = *``) always stay in
-    the candidate set as a safety net.
+  * Version awareness: matching is per **product+version**, not per
+    title. The installed version from ``catalog.software_versions``
+    supplies progressive prefixes (``3.13.2`` -> ``3.13`` -> ``3``),
+    combined with any year (2010..2035) or semver token parsed from
+    the canonical name itself ("Office 2010", whose installed version
+    is an unrelated ``14.0.x``). Matches carry the resolved
+    ``software_version_id``.
+
+    Version-agnostic CPEs (``version`` of ``*``, ``-`` or absent) are
+    emitted once per title with ``software_version_id`` NULL. That is a
+    genuine product-level claim, not an unknown version -- a CVE with no
+    version constraint really does affect every release.
+
+    Before this, the version filter was parsed only from the title text
+    and then *discarded* at INSERT, so every device running any version
+    of a matched product was flagged identically, patched ones included
+    (ADR-0008 amendment 2026-08-06; ADR-0012 s5 governs).
   * Publisher-alias resolution runs implicitly through the matview /
     scoring layer, not the matcher — the matcher's job is only to
     fill ``operations.cve_match``.
@@ -128,22 +140,92 @@ def _parse_version_prefixes(canonical: str) -> list[str]:
     return [p for p in prefixes if not (p in seen or seen.add(p))]
 
 
+_INSERT_MATCH = """
+    INSERT INTO operations.cve_match (
+        tenant_id, canonical_name, software_version_id, cve_id,
+        match_kind, version_range, confidence
+    ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+    ON CONFLICT (tenant_id, canonical_name, software_version_id,
+                 cve_id, match_kind) DO NOTHING
+"""
+
+
+def _cves_for(
+    cur, cpe_candidates: list[str], cache: dict[tuple[str, ...], list[str]]
+) -> list[str]:
+    """CVE ids affecting any of ``cpe_candidates``, memoised on the candidate
+    set. Sibling versions of one title often produce an identical set."""
+    key = tuple(cpe_candidates)
+    hit = cache.get(key)
+    if hit is not None:
+        return hit
+    cur.execute(
+        """
+        SELECT cve_id
+          FROM intel.cves
+         WHERE affected_cpes ?| %s::text[]
+        """,
+        (cpe_candidates,),
+    )
+    found = [row[0] for row in cur.fetchall()]
+    cache[key] = found
+    return found
+
+
+def _version_prefixes(version: str) -> list[str]:
+    """Progressive prefixes of an *installed* version string.
+
+    '3.13.2' -> ['3.13.2', '3.13', '3']. Most specific first, so a CPE for
+    3.13.2 is preferred over one for the whole 3.x line when both exist in the
+    candidate pool -- though both match, since a CVE against 3.x does affect
+    3.13.2.
+
+    This is the half that was missing: ``_parse_version_prefixes`` reads the
+    *title text* ("Office 2010"), which is all the matcher had before the
+    catalogue gave installations a version identity.
+    """
+    v = (version or "").strip()
+    if not v:
+        return []
+    parts = [p for p in v.split(".") if p != ""]
+    if not parts or not parts[0].isdigit():
+        return []
+    out: list[str] = []
+    for i in range(len(parts), 0, -1):
+        out.append(".".join(parts[:i]))
+    return out
+
+
 def _match_and_upsert() -> int:
     third_token_vendors, ignore_patterns = _load_hints()
 
     with db.transaction() as cur:
+        # Unit of work is the installed product+version, not the bare title.
+        # ADR-0012 s5 binds CVEs to software+version, and the ADR-0008
+        # amendment of 2026-08-06 records what title scope cost: every device
+        # running any version of a matched product was flagged identically,
+        # including patched ones. `software_version_id` is 100% populated on
+        # installations (489,347/489,347 measured 2026-08-10), so the catalogue
+        # join loses no installation.
         cur.execute(
             """
-            SELECT DISTINCT canonical_name
-            FROM operations.software_installations_current
-            WHERE tenant_id = %s
-              AND deleted_at IS NULL
-              AND stale_since IS NULL
-              AND canonical_name <> ''
+            SELECT DISTINCT p.canonical_name, sv.id, sv.version
+            FROM operations.software_installations_current sic
+            JOIN catalog.software_versions sv ON sv.id = sic.software_version_id
+            JOIN catalog.products p           ON p.id  = sv.product_id
+            WHERE sic.tenant_id = %s
+              AND sic.deleted_at IS NULL
+              AND sic.stale_since IS NULL
+              AND sic.software_version_id IS NOT NULL
+              AND p.canonical_name <> ''
             """,
             (_TENANT_ID,),
         )
-        titles = [row[0] for row in cur.fetchall()]
+        # canonical -> [(software_version_id, version_string), ...]
+        installed: dict[str, list[tuple[int, str]]] = {}
+        for canonical, version_id, version in cur.fetchall():
+            installed.setdefault(canonical, []).append((version_id, version or ""))
+        titles = list(installed)
 
         cur.execute(
             "SELECT DISTINCT LOWER(vendor), LOWER(product) FROM intel.cpes"
@@ -166,7 +248,13 @@ def _match_and_upsert() -> int:
 
     total_rows = 0
     matched_titles = 0
+    matched_versions = 0
     ignored_titles = 0
+    # CVE lookups are keyed by the exact CPE candidate set, and sibling
+    # versions of one title frequently resolve to the same set. Without this
+    # the move from title to product+version would roughly double the query
+    # count against intel.cves for no new information.
+    cve_cache: dict[tuple[str, ...], list[str]] = {}
     with db.transaction() as cur:
         cur.execute(
             "DELETE FROM operations.cve_match WHERE tenant_id = %s",
@@ -215,7 +303,10 @@ def _match_and_upsert() -> int:
             if not tier1_pairs and not tier2_products:
                 continue
 
-            cpe_candidates: list[str] = []
+            # Fetch the CPE candidate pool once per title, unfiltered. The
+            # version filter is applied per installed version below, so
+            # filtering here would throw away the rows other versions need.
+            cpe_rows: list[tuple[str, str | None]] = []
             if tier1_pairs:
                 keys = [f"{v}|{p}" for v, p in tier1_pairs]
                 cur.execute(
@@ -225,10 +316,7 @@ def _match_and_upsert() -> int:
                     """,
                     (keys,),
                 )
-                rows = cur.fetchall()
-                cpe_candidates.extend(
-                    _filter_by_version_prefix(rows, version_prefixes)
-                )
+                cpe_rows.extend(cur.fetchall())
             if tier2_products:
                 cur.execute(
                     """
@@ -238,48 +326,68 @@ def _match_and_upsert() -> int:
                     """,
                     (list(tier2_products),),
                 )
-                rows = cur.fetchall()
-                cpe_candidates.extend(
-                    _filter_by_version_prefix(rows, version_prefixes)
-                )
-            cpe_candidates = list({c for c in cpe_candidates if c})
-            if not cpe_candidates:
-                continue
-
-            cur.execute(
-                """
-                SELECT cve_id
-                  FROM intel.cves
-                 WHERE affected_cpes ?| %s::text[]
-                """,
-                (cpe_candidates,),
-            )
-            cve_ids = [row[0] for row in cur.fetchall()]
-            if not cve_ids:
+                cpe_rows.extend(cur.fetchall())
+            if not cpe_rows:
                 continue
 
             confidence = "high" if tier1_pairs else "medium"
             kind = "cpe_exact" if tier1_pairs else "cpe_product_only"
-            rows_out = [
-                (_TENANT_ID, canonical, cve_id, kind, confidence)
-                for cve_id in cve_ids
-            ]
-            cur.executemany(
-                """
-                INSERT INTO operations.cve_match (
-                    tenant_id, canonical_name, cve_id, match_kind, confidence
-                ) VALUES (%s, %s, %s, %s, %s)
-                ON CONFLICT (tenant_id, canonical_name, cve_id, match_kind)
-                DO NOTHING
-                """,
-                rows_out,
-            )
-            total_rows += len(rows_out)
-            matched_titles += 1
+            title_matched = False
+
+            # Version-agnostic CPEs ('*', '-', empty, NULL) genuinely apply to
+            # every release, so they stay product-level: software_version_id
+            # NULL. That is an assertion about the product, not a missing
+            # version -- see the column comment in migration 077. Emitted once
+            # per title, deduplicated by the NULLS NOT DISTINCT unique index.
+            agnostic = sorted({
+                cpe23 for cpe23, ver in cpe_rows
+                if cpe23 and (ver is None or ver.strip() in ("", "*", "-"))
+            })
+            if agnostic:
+                cve_ids = _cves_for(cur, agnostic, cve_cache)
+                if cve_ids:
+                    cur.executemany(_INSERT_MATCH, [
+                        (_TENANT_ID, canonical, None, cve_id, kind, "*", confidence)
+                        for cve_id in cve_ids
+                    ])
+                    total_rows += len(cve_ids)
+                    title_matched = True
+
+            # Then each installed version against the version-specific CPEs.
+            for version_id, version in installed[canonical]:
+                prefixes = _version_prefixes(version) + version_prefixes
+                if not prefixes:
+                    # Nothing to narrow by: the installed version is empty and
+                    # the title carries no version token. Anything more than the
+                    # product-level rows above would be a guess.
+                    continue
+                specific = sorted({
+                    cpe23 for cpe23, ver in cpe_rows
+                    if cpe23 and ver is not None
+                    and ver.strip() not in ("", "*", "-")
+                    and any(ver.strip().startswith(p) for p in prefixes)
+                })
+                if not specific:
+                    continue
+                cve_ids = _cves_for(cur, specific, cve_cache)
+                if not cve_ids:
+                    continue
+                cur.executemany(_INSERT_MATCH, [
+                    (_TENANT_ID, canonical, version_id, cve_id, kind,
+                     version or "", confidence)
+                    for cve_id in cve_ids
+                ])
+                total_rows += len(cve_ids)
+                matched_versions += 1
+                title_matched = True
+
+            if title_matched:
+                matched_titles += 1
 
     log.info(
-        "Intel matcher: %d titles matched, %d sub-components ignored, %d cve_match rows.",
-        matched_titles, ignored_titles, total_rows,
+        "Intel matcher: %d titles matched (%d product+version pairs), "
+        "%d sub-components ignored, %d cve_match rows.",
+        matched_titles, matched_versions, ignored_titles, total_rows,
     )
     return total_rows
 

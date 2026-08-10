@@ -18,6 +18,7 @@ Connectors:
   chocolatey     — Chocolatey community feed
   otx            — AlienVault OTX pulses
   abusech        — abuse.ch MalwareBazaar + ThreatFox dump files
+  endoflife      — endoflife.date release-cycle / EOL corpus
 
 Matcher (canonical_name × CPE → operations.cve_match) lives in
 ingest.intel.matcher and runs on its own cadence.

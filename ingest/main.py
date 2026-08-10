@@ -449,6 +449,25 @@ def run_intel_abusech_once() -> None:
         log.exception("Intel abuse.ch failed")
 
 
+def run_intel_endoflife_once() -> None:
+    try:
+        from ingest.intel import endoflife
+        rows = endoflife.run_once()
+        log.info("Intel end-of-life complete: rows=%d", rows)
+    except Exception:
+        log.exception("Intel end-of-life failed")
+    # Projection follows the fetch in the same job: a refreshed corpus that
+    # never reaches catalog.software_versions.eol_date changes nothing an
+    # operator can see. Runs even if the fetch failed, so a corpus already on
+    # disk still projects.
+    try:
+        from ingest.intel import eol_match
+        rows = eol_match.run_once()
+        log.info("Intel end-of-life projection complete: rows=%d", rows)
+    except Exception:
+        log.exception("Intel end-of-life projection failed")
+
+
 def run_notifications_dispatch_once() -> None:
     try:
         sent = notify_dispatch(tenant_id=1)
@@ -847,6 +866,12 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 return
             threading.Thread(target=run_intel_abusech_once, daemon=True).start()
             self._respond(202, b"intel abuse.ch scheduled\n")
+        elif self.path == "/run/intel-endoflife":
+            if not _READY.is_set():
+                self._respond(503, b"still starting - try again shortly\n")
+                return
+            threading.Thread(target=run_intel_endoflife_once, daemon=True).start()
+            self._respond(202, b"intel end-of-life scheduled\n")
         elif self.path == "/run/software/enqueue" or self.path.startswith("/run/software/enqueue?"):
             self._handle_software_enqueue()
         elif self.path == "/run/software/scoped" or self.path.startswith("/run/software/scoped?"):
@@ -2439,6 +2464,16 @@ def main() -> None:
             id="intel_abusech_cycle",
             max_instances=1,
         )
+        # Corpus pull, so it shares the catalogue cadence with cpe_dict,
+        # winget and chocolatey rather than the faster OSINT one. Release
+        # cycles change on the order of weeks.
+        scheduler.add_job(
+            run_intel_endoflife_once,
+            "interval",
+            hours=settings.INTEL_CATALOG_SCHEDULE_HOURS,
+            id="intel_endoflife_cycle",
+            max_instances=1,
+        )
     scheduler.start()
     log.info(
         "Patch scheduler started (every %dh)",
@@ -2524,6 +2559,7 @@ def _intel_catchup() -> None:
         ("chocolatey", run_intel_chocolatey_once),
         ("otx",        run_intel_otx_once),
         ("abusech",    run_intel_abusech_once),
+        ("endoflife",  run_intel_endoflife_once),
         ("matcher",    run_intel_matcher_once),
     ]
     fired = []

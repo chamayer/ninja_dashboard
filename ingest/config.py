@@ -231,6 +231,7 @@ class Settings(BaseSettings):
     INTEL_CHOCOLATEY_ENABLED: bool = True
     INTEL_OTX_ENABLED: bool = True
     INTEL_ABUSECH_ENABLED: bool = True
+    INTEL_ENDOFLIFE_ENABLED: bool = True
     NVD_API_KEY: SecretStr = SecretStr("")
     OTX_API_KEY: SecretStr = SecretStr("")
     ABUSECH_AUTH_KEY: SecretStr = SecretStr("")
