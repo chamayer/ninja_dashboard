@@ -3,6 +3,51 @@
 This is the proposed successor to the genuinely open portion of
 `operations/TODO.md`. Completed tracks and chronological history are excluded.
 
+## Client workspace rollup excludes software findings
+
+- Reason deferred: not mechanical. `_issue_rollup` in
+  `apps/core/client_workspace.py` groups by `client_id` and counts findings.
+  Software findings now carry `client_id NULL`, so they land under a `None`
+  key that no client page reads, and are filtered out entirely when a specific
+  client is requested.
+- Why it is a design call: one software finding maps to *many* clients through
+  the installation link, so attributing it requires deciding what a client's
+  "software issues: 5" means — five findings, or five titles affecting them.
+  `n`, `subjects` and `new` all change meaning, and a careless merge
+  double-counts on the client workspace dashboard.
+- Effect today: client workspace software domain counts under-report. Nothing
+  errors; the other software surfaces (device detail, org software page,
+  decisions queue, client attention list) are fixed and correct.
+- Relevant paths: `apps/core/client_workspace.py` ~80-120,
+  `operations.v_device_software_exposure`.
+- Trigger: next client workspace change, or a complaint that a client's
+  software count looks low.
+
+## v_device_software_exposure executes as a superuser owner
+
+- Reason deferred: the fix is one line, but it changes failure mode from
+  "works" to "500" for any caller that does not set the tenant GUC, and that
+  caller set has not been audited.
+- State: `operations.findings` has RLS enabled and forced. The view is owned by
+  `ninja` (rolsuper, rolbypassrls) with `security_invoker` unset, so queries
+  through it compute rows with the tenant policy bypassed.
+- Not a leak: one tenant, and three existing views
+  (`v_entity_attribute_claim_current` and siblings) already have this property.
+  The stricter pattern is the ten admin read models owned by
+  `operations_view_owner` (nosuper / nobypassrls / nologin).
+- Measured 2026-08-10 in a rolled-back transaction, after
+  `ALTER VIEW ... OWNER TO operations_view_owner` +
+  `SET (security_invoker = true)`, querying as `operations_app`:
+  with `operations.tenant_id` set, 4,023 rows; without it, **not zero rows but
+  `ERROR: invalid input syntax for type bigint: ""`**, because the policy uses
+  `current_setting(..., true)` and an unset GUC yields `''`/NULL.
+- Root cause of the ownership: SQL migrations run through the ingest runner as
+  `ninja`, while Django-created views run as `operations_migrate`. Any view
+  created under `sql/migrations/` inherits a superuser owner.
+- Trigger: a second tenant, or the audit of every caller of this view.
+- First step: confirm every code path selecting from the view runs inside a
+  block that issues `SET LOCAL operations.tenant_id`.
+
 ## Request smoke tests for the software decision handlers
 
 - Reason deferred: out of scope of the 2026-08-10 authorization fix, which was

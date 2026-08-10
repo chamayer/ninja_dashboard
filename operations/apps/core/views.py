@@ -975,14 +975,20 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
                   ON f.subject_type = 'device'
                  AND d.tenant_id = f.tenant_id
                  AND d.id = f.subject_id
-                WHERE f.tenant_id = 1 AND f.client_id = %s
+                WHERE f.tenant_id = 1
+                  -- Software findings carry no client_id; this client is
+                  -- reached through the installation link instead.
+                  AND (f.client_id = %s
+                       OR f.id IN (SELECT e.finding_id
+                                     FROM operations.v_device_software_exposure e
+                                    WHERE e.tenant_id = 1 AND e.client_id = %s))
                   AND f.status IN ('open', 'acknowledged', 'investigating')
                   AND f.severity IN ('critical', 'high')
                 ORDER BY CASE f.severity WHEN 'critical' THEN 0 ELSE 1 END,
                          f.last_detected_at DESC NULLS LAST
                 LIMIT 15
                 """,
-                [str(client.id)],
+                [str(client.id), str(client.id)],
             )
             ctx["attention_findings"] = [
                 {
@@ -1631,11 +1637,27 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
     )
     links = list(device.source_links.select_related("source").order_by("source__name"))
 
+    # Software findings are subjects on the title or release, so they no longer
+    # carry this device's id. The device inherits them through the installation
+    # link; without this second set, a device page stops reporting that it runs
+    # vulnerable or end-of-life software.
+    with transaction.atomic(), connection.cursor() as _cur:
+        _cur.execute("SET LOCAL operations.tenant_id = 1")
+        _cur.execute(
+            """
+            SELECT DISTINCT finding_id
+              FROM operations.v_device_software_exposure
+             WHERE tenant_id = 1 AND device_id = %s
+            """,
+            [str(device.id)],
+        )
+        exposed_finding_ids = [row[0] for row in _cur.fetchall()]
+
     active_findings = list(
         Finding.objects.filter(
+            Q(subject_type=Finding.SubjectType.DEVICE, subject_id=device.id)
+            | Q(id__in=exposed_finding_ids),
             tenant_id=1,
-            subject_type=Finding.SubjectType.DEVICE,
-            subject_id=device.id,
             status__in=_FINDING_ACTIVE_STATUSES,
         )
         .select_related("finding_type")
@@ -6204,14 +6226,16 @@ def org_software(request: HttpRequest, org_slug: str) -> HttpResponse:
             cur2.execute("SET LOCAL operations.tenant_id = 1")
             cur2.execute(
                 """
-                SELECT f.finding_details->>'canonical_name', COUNT(DISTINCT f.subject_id)
-                FROM operations.findings f
-                JOIN operations.finding_types ft ON ft.id = f.finding_type_id
-                WHERE f.tenant_id = 1
-                  AND f.client_id = %s
-                  AND f.status IN ('open', 'acknowledged')
-                  AND ft.source_module = 'platform.software_findings'
-                  AND f.finding_details->>'canonical_name' = ANY(%s::text[])
+                -- Software findings carry no client_id and no device subject
+                -- now, so "how many of this client's devices does this title
+                -- affect" comes from the exposure view. Filtering on
+                -- f.client_id here returned 0 for every title.
+                SELECT e.canonical_name, COUNT(DISTINCT e.device_id)
+                FROM operations.v_device_software_exposure e
+                WHERE e.tenant_id = 1
+                  AND e.client_id = %s
+                  AND e.status IN ('open', 'acknowledged')
+                  AND e.canonical_name = ANY(%s::text[])
                 GROUP BY 1
                 """,
                 (client.id, canonical_names),
@@ -7249,11 +7273,17 @@ def software_decisions_queue(request: HttpRequest) -> HttpResponse:
                     COALESCE(MAX(f.finding_details->>'publisher'), '') AS publisher,
                     f.finding_details->>'category' AS category,
                     MIN(sc.categories::text) AS catalog_categories,
-                    COUNT(DISTINCT f.subject_id) AS device_count,
+                    -- subject_id is the product or release now, so counting it
+                    -- would report 1 for every title -- and this column drives
+                    -- the ordering of the decisions queue. Devices come from
+                    -- the exposure view instead.
+                    COUNT(DISTINCT e.device_id) AS device_count,
                     MAX(f.last_seen_at) AS latest
                 FROM operations.findings f
                 JOIN operations.finding_types ft
                   ON ft.id = f.finding_type_id
+                LEFT JOIN operations.v_device_software_exposure e
+                  ON e.finding_id = f.id
                 LEFT JOIN operations.software_catalog sc
                   ON LOWER(sc.canonical_name) = LOWER(f.finding_details->>'canonical_name')
                  AND (sc.tenant_id IS NULL OR sc.tenant_id = f.tenant_id)
