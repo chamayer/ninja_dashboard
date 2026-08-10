@@ -109,10 +109,12 @@ Referential rules across the boundary:
 - **An unscoped entity must never reference a scoped one**, or it becomes a
   cross-tenant leak channel. This is validated at relationship-type
   registration.
-- Tenant consistency applies only when the target is scoped. A composite
+- ~~Tenant consistency applies only when the target is scoped. A composite
   foreign key under `MATCH SIMPLE` expresses this natively: a NULL tenant on
   the target stands the constraint down, while a plain foreign key still
-  guarantees the row exists.
+  guarantees the row exists.~~ **Wrong — see the 2026-08-10 amendment. This
+  paragraph describes a mechanism PostgreSQL does not have, and building
+  against it produces entities nothing can reference.**
 
 ### 5. Software
 
@@ -246,3 +248,71 @@ aspirational — software belongs in it, clients rarely will.
   to build against a hypothetical.
 - Consolidating software merge proposals into `merge_candidates` is the
   outstanding item in this area, not client merging.
+
+## Amendment — 2026-08-10: the `MATCH SIMPLE` mechanism for unscoped entities is wrong
+
+Section 4 stated that a composite foreign key under `MATCH SIMPLE` expresses
+"tenant consistency applies only when the target is scoped", because "a NULL
+tenant on the target stands the constraint down."
+
+**PostgreSQL has no such behaviour.** `MATCH SIMPLE` relaxes a constraint when
+a **referencing** column is NULL. A NULL on the **referenced** side relaxes
+nothing — it makes the target row unmatchable, because the referenced key
+`(NULL, id)` cannot satisfy a lookup for `(1, id)`.
+
+The direction was inverted, and the error is load-bearing: it is the only
+mechanism section 4 offered for how scoped rows may point at unscoped ones,
+and it is what made "nullable `entities.tenant_id`" look sufficient.
+
+### What this costs, measured 2026-08-10
+
+**29 composite foreign keys** reference `operations.entities(tenant_id, ...)`.
+The relationship tables — precisely the ones ADR-0012 §5 requires for software
+installations — are among them:
+
+```sql
+entity_relationships:
+  FOREIGN KEY (tenant_id, target_entity_id)
+  REFERENCES operations.entities(tenant_id, id)
+```
+
+A device → software+version installation carries a non-NULL `tenant_id` and a
+non-NULL `target_entity_id`. Neither referencing column is NULL, so the
+constraint is enforced in full and demands `(tenant, software_id)` in
+`entities`. An unscoped software entity holds `(NULL, software_id)`. The
+insert fails.
+
+So making `tenant_id` nullable does not unblock software instantiation. It
+creates entities that **nothing in the schema can reference** — the failure
+appearing not at migration time, when every DDL statement succeeds, but at the
+first relationship insert after deploy.
+
+### Position
+
+- **§4's referential mechanism is withdrawn.** The scope *rules* stand:
+  ownership determines scope, unscoped entities carry no tenant, and an
+  unscoped entity never references a scoped one. Only the claimed enforcement
+  mechanism is wrong.
+- **No unscoped-entity migration may be written until a replacement exists.**
+  A nullable-tenant migration applies cleanly and passes every check, which is
+  what makes this dangerous rather than merely incorrect.
+- Options, none yet chosen: drop `tenant_id` from the composite FKs whose
+  target may be unscoped (keeping a plain FK on `entity_id`, so existence is
+  still guaranteed and tenant consistency is enforced where it applies); or
+  hold unscoped entities in a separate relation; or keep them tenant-stamped
+  and accept the duplication. Each has a different blast radius across the 29
+  constraints and needs its own measurement.
+- The enforcement-table row "Unscoped entities carry no tenant | `CHECK`
+  constraint" remains correct as far as it goes. It constrains the entity row;
+  it says nothing about whether anything can point at it.
+
+### Why this is recorded rather than quietly corrected
+
+The paragraph was written with the confidence of a checked fact and was never
+checked. It survived because nothing had tried to build on it — the first
+attempt to write the migration found it in one query. That is the same failure
+mode this record exists to name: a rule stated without its mechanism verified.
+Leaving the retraction visible is more useful than a clean text.
+
+`asset` instantiation is unaffected: asset entities are client-scoped, so no
+composite key involving them ever carries a NULL tenant.
