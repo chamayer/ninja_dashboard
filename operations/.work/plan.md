@@ -1,5 +1,56 @@
 # Active Operations implementation plan
 
+## E5.3 scoped maintenance — Patch Evidence Windows 11 readiness filter
+
+**Status:** implementation and local validation complete; awaiting separate
+commit and deployment approval. This is a narrow Patch Evidence reader
+extension after the Ninja `w11Compatible` custom field was made API-readable
+and ingested; it does not resume the deferred patch-category work or replace
+any existing E5.3 scope.
+
+**Goal:** allow an operator to restrict current device-patch evidence to the
+Ninja Windows 11 compatibility result.
+
+**Scope:** `apps/core/views.py`, `templates/patch_evidence.html`, focused
+tests, and this plan. Add a fixed semantic selector in a collapsed Advanced
+device attributes filter backed by the current
+`ninja_core.custom_field_values` record for `w11Compatible`: Capable, Not
+capable, Undetermined, or Not assessed. Preserve the generic table/CSV schema,
+current patch-state semantics (one latest row per device/patch), and existing
+filters/count cards.
+
+**Out of scope:** patch-category controls, generic custom-field/query-builder
+work, schema/index migrations, changes to Ninja field values or permissions,
+EOL logic, and deployment until separately approved.
+
+**Decision:** join the latest value by Ninja device ID, the same source ID
+already used to attach patch evidence to an Operations device. `Capable` is an
+exact stored value; alert/error prefixes map the source's Not capable and
+Undetermined values without flattening the detailed Ninja result. Missing
+values are explicitly selectable as Not assessed.
+
+**Validation:** focused unit/source-contract test, Django checks, migration
+drift, Python compile, scoped Ruff/format, template rendering or request smoke
+check, and `git diff --check`. No migration is expected.
+
+**Checkpoint:** fresh ingest completed with `w11Compatible` in the production
+allowlist: 1,539 current device values, 801 Capable. The Evidence reader now
+joins the latest field value by Ninja device ID and exposes only the semantic
+filter under collapsed Advanced device attributes; the generic table and CSV
+schema remain unchanged. Measured current intersection of Capable plus
+`FEATURE_UPDATES` has 320 Rejected records/171 devices, 193 Manual/164, and 5
+Approved/5; this evidence confirms the source device IDs align. A device can
+appear in more than one status for different patches.
+
+**Validation completed:** `pytest apps/core/tests -q` (54 passed, 2 expected
+Postgres-integration skips), `manage.py check`, migration drift, Python
+compile, template loading, and `git diff --check`. Whole-file Ruff/format
+remain unsuitable acceptance gates because `apps/core/views.py` has known
+pre-existing findings outside this scoped change.
+
+**Next action:** review the diff, then obtain separate approval to commit and
+push/deploy. No migration is included or expected.
+
 ## E5.3 scoped maintenance — Findings queue: filter-aware device impact
 
 **Status:** deployed through `f1b5cc0`; device OS context CSV correction

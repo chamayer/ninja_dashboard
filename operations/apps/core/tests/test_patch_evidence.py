@@ -21,6 +21,9 @@ def test_patch_evidence_uses_device_context_filters_and_recent_default():
     assert 'name="online"' in template
     assert 'name="role"' in template
     assert 'name="os_group"' in template
+    assert 'name="win11"' in template
+    assert "w11Compatible" in source
+    assert "not_assessed" in source
     assert "recent sample" in template
     assert "Current result scope" in template
     assert "summary_counts.devices" in template

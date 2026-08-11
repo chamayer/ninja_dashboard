@@ -105,13 +105,27 @@
                 {% endfor %}
             </select>
         </div>
+        <details style="flex-basis:100%;"{% if active_win11 %} open{% endif %}>
+            <summary style="cursor:pointer; font-size:0.9rem;">Advanced device attributes</summary>
+            <div style="display:flex; gap:0.75rem; margin-top:0.5rem;">
+                <div>
+                    <label>Windows 11 upgradeability</label>
+                    <select name="win11">
+                        <option value="">Any</option>
+                        {% for value, label in win11_compatibility_choices %}
+                            <option value="{{ value }}"{% if active_win11 == value %} selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+        </details>
         <div style="flex:1; min-width:180px;">
             <label>Search (patch or KB)</label>
             <input type="text" name="q" value="{{ active_q }}" placeholder="KB5040442, Chrome, ...">
         </div>
         <div style="align-self:end;">
             <button type="submit">Filter</button>
-            {% if active_status or active_severity or active_client or active_online or active_role or active_os_group or active_q %}
+            {% if active_status or active_severity or active_client or active_online or active_role or active_os_group or active_win11 or active_q %}
                 <a href="?" style="margin-left:0.5rem;">Clear</a>
             {% endif %}
         </div>

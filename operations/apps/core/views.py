@@ -5854,6 +5854,13 @@ _PATCH_SEVERITY_VALUES = {
     "security": ("security",),
 }
 
+_WINDOWS_11_COMPATIBILITY_CHOICES = [
+    ("capable", "Capable"),
+    ("not_capable", "Not capable"),
+    ("undetermined", "Undetermined"),
+    ("not_assessed", "Not assessed"),
+]
+
 
 @login_required
 def patch_evidence_page(request: HttpRequest) -> HttpResponse:
@@ -5871,6 +5878,7 @@ def patch_evidence_page(request: HttpRequest) -> HttpResponse:
       - online         Any / Online / Offline / source currently online
       - role           device role
       - os_group       operating-system group
+      - win11          current Ninja Windows 11 compatibility result
       - q              free-text against patch name or KB number
     """
     status_filter = request.GET.get("status", "").strip().upper()
@@ -5879,6 +5887,7 @@ def patch_evidence_page(request: HttpRequest) -> HttpResponse:
     online_filter = request.GET.get("online", "").strip()
     role_filter = request.GET.get("role", "").strip()
     os_group_filter = request.GET.get("os_group", "").strip()
+    win11_filter = request.GET.get("win11", "").strip()
     q_filter = (request.GET.get("q") or "").strip()
 
     role_choices = ("server", "workstation", "unknown")
@@ -5886,6 +5895,10 @@ def patch_evidence_page(request: HttpRequest) -> HttpResponse:
         role_filter = ""
     if severity_filter not in _PATCH_SEVERITY_VALUES:
         severity_filter = ""
+    if win11_filter not in {
+        value for value, _label in _WINDOWS_11_COMPATIBILITY_CHOICES
+    }:
+        win11_filter = ""
 
     source_names = list(Source.objects.order_by("name").values_list("name", flat=True))
     source_names_set = set(source_names)
@@ -5925,6 +5938,14 @@ def patch_evidence_page(request: HttpRequest) -> HttpResponse:
     elif online_filter:
         where.append("%s = ANY(dsc.online_sources)")
         params.append(online_filter)
+    if win11_filter == "capable":
+        where.append("w11.value_text = 'Capable'")
+    elif win11_filter == "not_capable":
+        where.append("w11.value_text LIKE '[Alert] Not Capable%'")
+    elif win11_filter == "undetermined":
+        where.append("w11.value_text LIKE '[Error] Undetermined%'")
+    elif win11_filter == "not_assessed":
+        where.append("w11.entity_id IS NULL")
     if q_filter:
         where.append("(cps.patch_name ILIKE %s OR cps.kb_number ILIKE %s)")
         params.extend([f"%{q_filter}%", f"%{q_filter}%"])
@@ -5936,6 +5957,7 @@ def patch_evidence_page(request: HttpRequest) -> HttpResponse:
         or online_filter
         or role_filter
         or os_group_filter
+        or win11_filter
         or q_filter
     )
     patch_state_source = "ninja_patches.current_patch_state cps"
@@ -5960,6 +5982,16 @@ def patch_evidence_page(request: HttpRequest) -> HttpResponse:
           ON c.id = d.client_id AND c.deleted_at IS NULL
         LEFT JOIN operations.device_session_current dsc
           ON dsc.tenant_id = 1 AND dsc.device_id = d.id
+        LEFT JOIN (
+            SELECT DISTINCT ON (entity_id)
+                   entity_id,
+                   value_text
+            FROM ninja_core.custom_field_values
+            WHERE entity_type = 'DEVICE'
+              AND field_name = 'w11Compatible'
+            ORDER BY entity_id, last_observed_at DESC
+        ) w11
+          ON w11.entity_id = cps.device_id
     """
 
     with transaction.atomic(), connection.cursor() as cur:
@@ -6105,12 +6137,14 @@ def patch_evidence_page(request: HttpRequest) -> HttpResponse:
             + [(name, f"via {name}") for name in source_names],
             "role_choices": role_choices,
             "os_group_choices": os_group_choices,
+            "win11_compatibility_choices": _WINDOWS_11_COMPATIBILITY_CHOICES,
             "active_status": status_filter,
             "active_severity": severity_filter,
             "active_client": client_filter,
             "active_online": online_filter,
             "active_role": role_filter,
             "active_os_group": os_group_filter,
+            "active_win11": win11_filter,
             "active_q": q_filter,
         },
     )
