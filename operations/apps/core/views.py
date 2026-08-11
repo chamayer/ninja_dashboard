@@ -5827,23 +5827,32 @@ def admin_finding_apply_client_rename(request: HttpRequest, finding_id: str) -> 
 
 
 _PATCH_STATUS_CHOICES = [
-    ("Installed", "Installed"),
-    ("Failed", "Failed"),
-    ("Pending", "Pending"),
-    ("Approved", "Approved"),
-    ("Rejected", "Rejected"),
-    ("Manual", "Manual"),
-    ("Delayed", "Delayed"),
+    ("INSTALLED", "Installed"),
+    ("FAILED", "Failed"),
+    ("PENDING", "Pending"),
+    ("APPROVED", "Approved"),
+    ("REJECTED", "Rejected"),
+    ("MANUAL", "Manual"),
+    ("DELAYED", "Delayed"),
 ]
 
 _PATCH_SEVERITY_CHOICES = [
-    ("Critical", "Critical"),
-    ("Important", "Important"),
-    ("Moderate", "Moderate"),
-    ("Low", "Low"),
-    ("Optional", "Optional"),
-    ("Unspecified", "Unspecified"),
+    ("critical", "Critical"),
+    ("important", "Important"),
+    ("moderate", "Moderate"),
+    ("optional", "Optional"),
+    ("none", "Unspecified"),
+    ("security", "Security"),
 ]
+
+_PATCH_SEVERITY_VALUES = {
+    "critical": ("CRITICAL",),
+    "important": ("IMPORTANT",),
+    "moderate": ("MODERATE",),
+    "optional": ("OPTIONAL", "optional"),
+    "none": ("NONE",),
+    "security": ("security",),
+}
 
 
 @login_required
@@ -5856,15 +5865,41 @@ def patch_evidence_page(request: HttpRequest) -> HttpResponse:
     already in the pipeline; this is the native operator surface.
 
     Filters:
-      - status         Installed / Failed / Pending / Approved / …
-      - severity       Critical / Important / Moderate / …
+      - status         current Ninja patch state
+      - severity       current Ninja patch severity
       - client         org slug
+      - online         Any / Online / Offline / source currently online
+      - role           device role
+      - os_group       operating-system group
       - q              free-text against patch name or KB number
     """
-    status_filter = request.GET.get("status", "").strip()
-    severity_filter = request.GET.get("severity", "").strip()
+    status_filter = request.GET.get("status", "").strip().upper()
+    severity_filter = request.GET.get("severity", "").strip().lower()
     client_filter = request.GET.get("client", "").strip()
+    online_filter = request.GET.get("online", "").strip()
+    role_filter = request.GET.get("role", "").strip()
+    os_group_filter = request.GET.get("os_group", "").strip()
     q_filter = (request.GET.get("q") or "").strip()
+
+    role_choices = ("server", "workstation", "unknown")
+    if role_filter not in role_choices:
+        role_filter = ""
+    if severity_filter not in _PATCH_SEVERITY_VALUES:
+        severity_filter = ""
+
+    source_names = list(Source.objects.order_by("name").values_list("name", flat=True))
+    source_names_set = set(source_names)
+    if online_filter not in {"", "online", "offline"} | source_names_set:
+        online_filter = ""
+    os_group_choices = list(
+        Device.objects.filter(tenant_id=1, deleted_at__isnull=True)
+        .exclude(os_group="")
+        .order_by("os_group")
+        .values_list("os_group", flat=True)
+        .distinct()
+    )
+    if os_group_filter not in os_group_choices:
+        os_group_filter = ""
 
     where = ["1=1"]
     params: list = []
@@ -5872,15 +5907,47 @@ def patch_evidence_page(request: HttpRequest) -> HttpResponse:
         where.append("cps.status = %s")
         params.append(status_filter)
     if severity_filter:
-        where.append("cps.severity = %s")
-        params.append(severity_filter)
+        where.append("cps.severity = ANY(%s)")
+        params.append(list(_PATCH_SEVERITY_VALUES[severity_filter]))
     if client_filter:
         where.append("c.slug = %s")
         params.append(client_filter)
+    if role_filter:
+        where.append("d.device_role = %s")
+        params.append(role_filter)
+    if os_group_filter:
+        where.append("d.os_group = %s")
+        params.append(os_group_filter)
+    if online_filter == "online":
+        where.append("COALESCE(cardinality(dsc.online_sources), 0) > 0")
+    elif online_filter == "offline":
+        where.append("COALESCE(cardinality(dsc.online_sources), 0) = 0")
+    elif online_filter:
+        where.append("%s = ANY(dsc.online_sources)")
+        params.append(online_filter)
     if q_filter:
         where.append("(cps.patch_name ILIKE %s OR cps.kb_number ILIKE %s)")
         params.extend([f"%{q_filter}%", f"%{q_filter}%"])
     where_sql = " AND ".join(where)
+    has_explicit_filter = bool(
+        status_filter
+        or severity_filter
+        or client_filter
+        or online_filter
+        or role_filter
+        or os_group_filter
+        or q_filter
+    )
+    patch_state_source = "ninja_patches.current_patch_state cps"
+    if not has_explicit_filter:
+        patch_state_source = """
+            (
+                SELECT *
+                FROM ninja_patches.current_patch_state
+                ORDER BY last_observed_at DESC NULLS LAST
+                LIMIT 1000
+            ) cps
+        """
 
     with transaction.atomic(), connection.cursor() as cur:
         cur.execute("SET LOCAL operations.tenant_id = 1")
@@ -5905,6 +5972,7 @@ def patch_evidence_page(request: HttpRequest) -> HttpResponse:
                 d.device_role,
                 d.os_group,
                 d.os_name,
+                COALESCE(dsc.online_sources, ARRAY[]::text[]) AS online_sources,
                 cps.patch_name,
                 cps.kb_number,
                 cps.status,
@@ -5913,7 +5981,7 @@ def patch_evidence_page(request: HttpRequest) -> HttpResponse:
                 cps.last_observed_at,
                 lio.status                 AS last_install_status,
                 lio.installed_at           AS last_install_at
-            FROM ninja_patches.current_patch_state cps
+            FROM {patch_state_source}
             JOIN operations.v_device_source_link dl
               ON dl.external_id = cps.device_id::text
              AND dl.source_id = (SELECT id FROM operations.sources WHERE name = 'Ninja' LIMIT 1)
@@ -5922,16 +5990,17 @@ def patch_evidence_page(request: HttpRequest) -> HttpResponse:
               ON d.id = dl.device_id AND d.deleted_at IS NULL
             JOIN operations.clients c
               ON c.id = d.client_id AND c.deleted_at IS NULL
+            LEFT JOIN operations.device_session_current dsc
+              ON dsc.tenant_id = 1 AND dsc.device_id = d.id
             LEFT JOIN ninja_patches.latest_install_outcome lio
               ON lio.device_id = cps.device_id AND lio.patch_uid = cps.patch_uid
             WHERE {where_sql}
             ORDER BY
-                CASE cps.severity
-                    WHEN 'Critical'    THEN 0
-                    WHEN 'Important'   THEN 1
-                    WHEN 'Moderate'    THEN 2
-                    WHEN 'Low'         THEN 3
-                    WHEN 'Optional'    THEN 4
+                UPPER(cps.severity)
+                    WHEN 'CRITICAL'    THEN 0
+                    WHEN 'IMPORTANT'   THEN 1
+                    WHEN 'MODERATE'    THEN 2
+                    WHEN 'OPTIONAL'    THEN 3
                     ELSE 5
                 END,
                 cps.last_observed_at DESC NULLS LAST,
@@ -5952,6 +6021,7 @@ def patch_evidence_page(request: HttpRequest) -> HttpResponse:
         "device_role",
         "os_group",
         "os_name",
+        "online_sources",
         "patch_name",
         "kb_number",
         "status",
@@ -5972,6 +6042,7 @@ def patch_evidence_page(request: HttpRequest) -> HttpResponse:
                 ("Role", "device_role"),
                 ("OS group", "os_group"),
                 ("OS name", "os_name"),
+                ("Online sources", "online_sources"),
                 ("KB", "kb_number"),
                 ("Patch", "patch_name"),
                 ("Status", "status"),
@@ -5996,13 +6067,21 @@ def patch_evidence_page(request: HttpRequest) -> HttpResponse:
         {
             "rows": patch_rows,
             "row_count": len(patch_rows),
+            "is_recent_slice": not has_explicit_filter,
             "status_counts": status_counts,
             "clients": clients,
             "status_choices": _PATCH_STATUS_CHOICES,
             "severity_choices": _PATCH_SEVERITY_CHOICES,
+            "online_choices": [("online", "Online (any source)"), ("offline", "Offline")]
+            + [(name, f"via {name}") for name in source_names],
+            "role_choices": role_choices,
+            "os_group_choices": os_group_choices,
             "active_status": status_filter,
             "active_severity": severity_filter,
             "active_client": client_filter,
+            "active_online": online_filter,
+            "active_role": role_filter,
+            "active_os_group": os_group_filter,
             "active_q": q_filter,
         },
     )

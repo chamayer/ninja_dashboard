@@ -57,6 +57,50 @@ Whole-file Ruff/format remain unsuitable as acceptance gates because
 the required mirror, and verify the automatic Portainer redeploy. No migration
 is included or expected.
 
+## E5.3 scoped maintenance — Patch Evidence usable filtering
+
+**Status:** implementation and local/production-read validation complete;
+commit/deployment approved 2026-08-11. This is an
+independent, bounded reader correction under the existing E5.3 plan; it does
+not alter the Findings work above or introduce patch-category work.
+
+**Goal:** make Patching → Evidence responsive by default and let an operator
+filter current patch evidence by device availability, reporting source, role,
+and OS group as well as its existing status, severity, client, and patch search.
+
+**Scope:** `apps/core/views.py`, `templates/patch_evidence.html`, focused
+tests, and this plan. An unfiltered view will use the existing observed-time
+index to show a clearly labelled recent slice before joining device data.
+
+**Out of scope:** patch category filters or taxonomy work, patch ingest/data
+changes, schema/index migrations, queue/finding changes, permissions, and
+deployment until separately approved.
+
+**Decision:** device availability comes from `device_session_current`, with
+Any / Online / Offline / a specific registered source choices. Status and
+severity selectors use Ninja's stored values so choices actually filter; this
+is a reader normalization only. The screen stays capped, and no unfiltered CSV
+will claim to be a complete report.
+
+**Validation:** focused tests, Django checks, migration drift, Python compile,
+scoped lint, diff check; production query-plan evidence already showed the
+existing unfiltered join/sort exceeds a 10-second timeout while a filtered
+feature-update title search completes in 169 ms.
+
+**Checkpoint:** active `current_patch_state` contains 78,972 device-patch
+rows. It has indexes on category, status, severity, and observed time. The
+current blank Evidence page joins and sorts the complete population to show
+only the first 1,000 rows.
+
+**Validation completed:** `pytest apps/core/tests -q` (54 passed, 2 existing
+Postgres-integration skips), focused Ruff/format, Django checks, migration
+drift, Python compile, and diff check. A production `EXPLAIN ANALYZE` of the
+bounded default completed in 233 ms under a 10-second statement timeout.
+
+**Next action:** commit the scoped Patch Evidence change, push `origin` then
+the required mirror, and verify the automatic Portainer redeploy. No migration
+is included or expected.
+
 Track: **ADR-0010 generic ecosystem completion — Phase E5**
 
 **Status:** E1-E5.2 deployed. E5.3 scope restated 2026-08-05 against measured

@@ -24,7 +24,7 @@
     <div style="display:flex; align-items:center; justify-content:space-between; gap:1rem;">
         <h1 style="margin:0;">Patch Evidence
             <span class="muted" style="font-weight:400; font-size:0.9rem;">
-                {{ row_count }} rows{% if row_count == 1000 %} (limited){% endif %}
+                {{ row_count }} rows{% if is_recent_slice %} (recent sample){% elif row_count == 1000 %} (limited){% endif %}
             </span>
         </h1>
         <div style="display:flex; align-items:center; gap:0.75rem;">
@@ -35,7 +35,8 @@
         </div>
     </div>
     <p class="muted" style="margin-top:0.5rem;">
-        Every known (device, patch) pair with current status — filter, search, and export.
+        Current device-patch evidence. Filter before exporting; the unfiltered
+        landing view is a recent, performance-bounded sample.
     </p>
 </div>
 
@@ -77,13 +78,40 @@
                 {% endfor %}
             </select>
         </div>
+        <div>
+            <label>Device online</label>
+            <select name="online">
+                <option value="">Any</option>
+                {% for value, label in online_choices %}
+                    <option value="{{ value }}"{% if active_online == value %} selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <label>Role</label>
+            <select name="role">
+                <option value="">Any</option>
+                {% for value in role_choices %}
+                    <option value="{{ value }}"{% if active_role == value %} selected{% endif %}>{{ value|title }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <label>OS group</label>
+            <select name="os_group">
+                <option value="">Any</option>
+                {% for value in os_group_choices %}
+                    <option value="{{ value }}"{% if active_os_group == value %} selected{% endif %}>{{ value }}</option>
+                {% endfor %}
+            </select>
+        </div>
         <div style="flex:1; min-width:180px;">
             <label>Search (patch or KB)</label>
             <input type="text" name="q" value="{{ active_q }}" placeholder="KB5040442, Chrome, ...">
         </div>
         <div style="align-self:end;">
             <button type="submit">Filter</button>
-            {% if active_status or active_severity or active_client or active_q %}
+            {% if active_status or active_severity or active_client or active_online or active_role or active_os_group or active_q %}
                 <a href="?" style="margin-left:0.5rem;">Clear</a>
             {% endif %}
         </div>
@@ -97,6 +125,7 @@
             <tr>
                 <th>Client</th>
                 <th>Device</th>
+                <th>Online</th>
                 <th>KB</th>
                 <th>Patch</th>
                 <th>Status</th>
@@ -115,6 +144,7 @@
                         <code>{{ r.hostname }}</code>
                     </a>
                 </td>
+                <td>{% if r.online_sources %}{{ r.online_sources|join:", " }}{% else %}<span class="muted">Offline</span>{% endif %}</td>
                 <td class="pe-kb">{{ r.kb_number|default:"—" }}</td>
                 <td style="max-width:400px; word-wrap:break-word;">{{ r.patch_name }}</td>
                 <td><span class="pe-status-{{ r.status }}">{{ r.status }}</span></td>
