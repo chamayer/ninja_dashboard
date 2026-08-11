@@ -509,12 +509,20 @@ def run_notifications_digest_once() -> None:
         log.exception("Notifications digest failed")
 
 
-def run_software_classify_once() -> None:
+def run_software_classify_once(*, with_intel_pre_steps: bool = True) -> None:
+    """Classify software findings, optionally enriching intel first.
+
+    `with_intel_pre_steps` is True for the manual `/run/software-classify`
+    trigger, where nothing else guarantees the intel tables are fresh. The
+    scheduled job passes False: the matcher, Winget and Chocolatey enrichers
+    are already registered as their own scheduler jobs, so running them here
+    too would duplicate that work on every classifier tick.
+    """
     # When intel is enabled, the intel matcher + Winget/Chocolatey
     # enrichers run first so the classifier sees fresh cve_match rows
     # and safety_signal rows for newly ingested products. Each intel
     # step is best-effort and never blocks the classifier itself.
-    if settings.INTEL_ENABLED:
+    if with_intel_pre_steps and settings.INTEL_ENABLED:
         for step_name, step_fn in (
             ("intel matcher pre-classify",     run_intel_matcher_once),
             ("intel Winget pre-classify",      run_intel_winget_once),
@@ -537,6 +545,55 @@ def run_software_classify_once() -> None:
         log.info("Refreshed operations.v_software_safety matview")
     except Exception:
         log.exception("Failed to refresh v_software_safety matview")
+
+
+def run_software_classify_scheduled() -> None:
+    """Scheduler entry point for the software classifier.
+
+    Named rather than a lambda so the job id, the log line and the traceback
+    all identify it. See `run_software_classify_once` for why the intel
+    pre-steps are skipped on this path.
+    """
+    run_software_classify_once(with_intel_pre_steps=False)
+
+
+def software_classify_overdue(schedule_hours: int, now: datetime | None = None) -> bool:
+    """True when the classifier's last run is older than its schedule.
+
+    Deliberately not `should_catch_up()`: that helper reads
+    `ninja_core.run_log` on `domain`/`status`/`finished_at`, while the
+    classifier records itself in `operations.run_log` on `kind`/`ok`/
+    `ended_at`. Passing 'software_classifier' to it would match no row,
+    return False, and disable this catch-up silently.
+
+    Returns True when there is no successful run at all. That differs from
+    `should_catch_up`, which returns False for a never-run domain to avoid
+    kicking a fresh install; here a missing row is the exact condition we
+    need to correct, and the classifier reads existing tables rather than
+    calling a vendor API.
+    """
+    now = now or datetime.now(timezone.utc)
+    try:
+        with db.pool.connection() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT ended_at FROM operations.run_log
+                WHERE kind = 'software_classifier' AND ok
+                ORDER BY started_at DESC
+                LIMIT 1
+                """
+            )
+            row = cur.fetchone()
+    except Exception:
+        # A probe failure must not decide "recent" and skip the run.
+        log.exception("Software classifier catch-up probe failed — assuming overdue")
+        return True
+    if row is None or row[0] is None:
+        return True
+    ended_at = row[0]
+    if ended_at.tzinfo is None:
+        ended_at = ended_at.replace(tzinfo=timezone.utc)
+    return (now - ended_at) > timedelta(hours=schedule_hours)
 
 
 def run_patch_classify_once() -> None:
@@ -2425,6 +2482,18 @@ def main() -> None:
             id="software_queue_drain_cycle",
             max_instances=1,
         )
+    # ADR-0015 step 6. Not gated on SOFTWARE_QUEUE_ENABLED or INTEL_ENABLED:
+    # the classifier reads installed software plus operator decisions and
+    # emits findings with or without either. Intel enrichment reaches it
+    # through the separately scheduled matcher/Winget/Chocolatey jobs, so
+    # this path deliberately skips those pre-steps.
+    scheduler.add_job(
+        run_software_classify_scheduled,
+        "interval",
+        hours=settings.SOFTWARE_CLASSIFY_SCHEDULE_HOURS,
+        id="software_classify_cycle",
+        max_instances=1,
+    )
     if settings.INTEL_ENABLED:
         scheduler.add_job(
             run_intel_nvd_once,
@@ -2532,6 +2601,22 @@ def main() -> None:
     log.info("Agent observations: firing immediately on startup")
 
     log.info("Legacy agent compliance catch-up disabled")
+
+    # Software classifier catch-up. An APScheduler interval job first fires
+    # one whole interval after start, and Portainer restarts this container on
+    # every push — so at a 24h interval the timer would be reset by deploys
+    # and the classifier could go indefinitely without running. This is what
+    # makes the configured cadence real rather than nominal. Unlike the
+    # documentation cycle (see `run_documentation_observations_once`), a kick
+    # here calls no vendor API; it reads tables that are already local.
+    if software_classify_overdue(settings.SOFTWARE_CLASSIFY_SCHEDULE_HOURS):
+        log.info(
+            "Catch-up: software classifier has no successful run in %dh — firing",
+            settings.SOFTWARE_CLASSIFY_SCHEDULE_HOURS,
+        )
+        threading.Thread(target=run_software_classify_scheduled, daemon=True).start()
+    else:
+        log.info("No software classifier catch-up needed (recent successful run)")
 
     # Intel catch-up on startup. Any connector with no successful run
     # in ``operations.intel_ingest_status`` fires immediately in the

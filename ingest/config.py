@@ -51,6 +51,11 @@ class Settings(BaseSettings):
     # without a code change. See `.work/backlog.md`.
     DOCUMENTATION_SCHEDULE_HOURS: int = Field(default=24, ge=1, le=168)
     SOFTWARE_INGEST_SCHEDULE_HOURS: int = Field(default=24, ge=1, le=168)
+    # The classifier's dominant input is installed software, which changes
+    # daily at most, so it shares the software ingest cadence rather than the
+    # faster intel one. Intel enrichment reaches it through the separately
+    # scheduled matcher/Winget/Chocolatey jobs.
+    SOFTWARE_CLASSIFY_SCHEDULE_HOURS: int = Field(default=24, ge=1, le=168)
     SOFTWARE_QUEUE_ENABLED: bool = False
     SOFTWARE_QUEUE_POLL_MINUTES: int = Field(default=5, ge=1, le=60)
     SOFTWARE_QUEUE_WORKER_BATCH: int = Field(default=3, ge=1, le=20)

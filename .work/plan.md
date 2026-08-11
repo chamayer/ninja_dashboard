@@ -1,5 +1,92 @@
 # Active root implementation plan
 
+## CURRENT TASK — Schedule the software classifier (ADR-0015 step 6)
+
+**Status:** implemented locally 2026-08-11; not committed, pushed, or deployed.
+
+**Goal:** close ADR-0015's last open step. The software classifier is reachable
+only by manual invocation, so the software finding surface refreshes only when
+an operator remembers to trigger it.
+
+**Run history, measured 2026-08-11 from `operations.run_log`** (correcting the
+"three times ever, last 2026-07-27" figure carried in the ADR-0015 notes):
+
+| started | duration | rows |
+| --- | --- | --- |
+| 2026-08-10 22:15 UTC | 41 s | 2,719 |
+| 2026-07-27 14:07 UTC | 2 m 47 s | 137,240 |
+| 2026-07-26 16:26 UTC | 2 m 34 s | 138,776 |
+
+The 2026-08-10 run is the one taken during step 3 and is the post-collapse
+measurement: **137,240 rows to 2,719, in 41 seconds**. Current open software
+findings total 2,719 and carry the intended subjects — `software_product` /
+`software_version` for the seven intrinsic types, `device` only for
+`rare_recent` (493) and `install_path_suspicious` (51).
+
+**Why it is unblocked now:** ADR-0015 ordered this step last because scheduling
+it before step 3 would have regenerated 134,861 device-scoped findings. Step 3
+deployed as `6c4ac9f` on 2026-08-10 and closed 134,184 of them, so the
+classifier now emits at the collapsed subject scope.
+
+**Scope:** `ingest/config.py`, `ingest/main.py`, focused ingest tests, and this
+plan section. No migration, no schema change, no finding-emitter change.
+
+**Out of scope:** classifier logic, finding types, the intel connectors
+themselves, `_JOB_CATALOG` (the `software-classify` entry and its
+`/run/software-classify` endpoint already exist), and the release/VERSION bump.
+
+**Decisions:**
+
+1. **Cadence 24h**, aligned with `SOFTWARE_INGEST_SCHEDULE_HOURS`. The
+   classifier's dominant input is installed software, which changes daily at
+   most; a faster cycle mostly reclassifies unchanged inventory. The measured
+   41-second post-collapse runtime means cost is not the constraint and a
+   faster cadence stays affordable if CVE latency later justifies one — the
+   24h choice rests on input freshness, not on expense.
+2. **The scheduled job does not run the intel pre-steps.**
+   `run_software_classify_once` runs the intel matcher, Winget and Chocolatey
+   before classifying, which is correct for a manual operator trigger where
+   nothing else guarantees freshness. All three are already registered as
+   scheduler jobs (`main.py:2457-2477`), so a scheduled call would double-run
+   them. `/run/software-classify` keeps the pre-steps; the scheduled path does
+   not.
+3. **Catch-up cannot use `should_catch_up()`.** That helper reads
+   `ninja_core.run_log` on columns `domain`/`status`/`finished_at`, while the
+   classifier writes `operations.run_log` on `kind`/`ok`/`ended_at`
+   (`software_findings.py:370`). `should_catch_up("software_classifier", 24)`
+   would find no row, return False, and the catch-up would silently never fire.
+   A dedicated reader over `operations.run_log` is used instead, following the
+   existing pattern at `evaluator.py:175`.
+4. **The catch-up is required, not a nicety.** An APScheduler `interval` job
+   first fires one full interval after start, and Portainer restarts the
+   container on every push. At a 24h interval with the current deploy frequency
+   the classifier would be perpetually reset and could never run at all.
+
+**Validation:** `ruff check` clean on `ingest/main.py`, `ingest/config.py` and
+the new test; `py_compile` and `git diff --check` pass.
+
+The committed pytest file **cannot execute on this workstation** — the only
+interpreter is Python 3.14 and `ingest.main` needs `httpx`, `apscheduler`,
+`pydantic` and `pydantic-settings`, of which `pydantic` 2.9.2 has no 3.14
+wheel. This is the same gap already recorded against the root Postgres
+observation test; `pytest.importorskip` turns it into a silent skip, so a
+local "1 skipped" must not be read as a pass.
+
+Executed instead in the ingest container (Python 3.12.13) through
+`Invoke-DevTool.ps1`, which has no pytest, using a stdlib mirror of the same
+ten assertions: **10 passed, 0 failed**. The overlay ran from `/tmp/cc` against
+a copy of the deployed tree with the two modified files layered on;
+`/app/ingest` was verified unmodified before and after, and both temp trees
+were removed. Every assertion monkeypatches `db.pool` and the three intel
+entry points, so no database write, evaluator run or vendor API call occurred.
+The container remained healthy throughout.
+
+Not covered: that APScheduler actually registers `software_classify_cycle` at
+runtime, which would require starting the scheduler. The job's arguments are
+verified only by reading.
+
+**Next action:** request approval for one scoped commit.
+
 ## CURRENT TASK — Windows OS servicing EOL
 
 **Status:** implemented locally 2026-08-11; not committed, pushed, deployed or
