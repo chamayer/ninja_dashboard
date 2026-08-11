@@ -7273,17 +7273,26 @@ def software_decisions_queue(request: HttpRequest) -> HttpResponse:
                     COALESCE(MAX(f.finding_details->>'publisher'), '') AS publisher,
                     f.finding_details->>'category' AS category,
                     MIN(sc.categories::text) AS catalog_categories,
-                    -- subject_id is the product or release now, so counting it
-                    -- would report 1 for every title -- and this column drives
-                    -- the ordering of the decisions queue. Devices come from
-                    -- the exposure view instead.
-                    COUNT(DISTINCT e.device_id) AS device_count,
+                    -- How many devices run this title. subject_id is the
+                    -- product or release now, so counting it would report 1
+                    -- per title -- and this column drives the queue's ordering.
+                    --
+                    -- Counted from installations rather than from the exposure
+                    -- view: this queue is where whitelist_suggestion is
+                    -- decided, and that type deliberately does not fan out to
+                    -- devices (migration 084). Installations are also what this
+                    -- number has always meant -- "how many machines run this" --
+                    -- and it stays correct for every type on the queue.
+                    COUNT(DISTINCT sic.device_id) AS device_count,
                     MAX(f.last_seen_at) AS latest
                 FROM operations.findings f
                 JOIN operations.finding_types ft
                   ON ft.id = f.finding_type_id
-                LEFT JOIN operations.v_device_software_exposure e
-                  ON e.finding_id = f.id
+                LEFT JOIN operations.software_installations_current sic
+                  ON sic.tenant_id = f.tenant_id
+                 AND sic.canonical_name = f.finding_details->>'canonical_name'
+                 AND sic.stale_since IS NULL
+                 AND sic.deleted_at IS NULL
                 LEFT JOIN operations.software_catalog sc
                   ON LOWER(sc.canonical_name) = LOWER(f.finding_details->>'canonical_name')
                  AND (sc.tenant_id IS NULL OR sc.tenant_id = f.tenant_id)

@@ -322,6 +322,16 @@ class FindingType(models.Model):
     subject_scope = models.CharField(
         max_length=24, choices=SubjectScope.choices, default=SubjectScope.DEVICE
     )
+    creates_device_exposure = models.BooleanField(
+        default=True,
+        help_text=(
+            "Uncheck when a finding of this type is about the software rather "
+            "than any device running it, so it must not fan out across "
+            "installations. whitelist_suggestion is the case this exists for: "
+            "it asks whether to allow a title, which needs a device count, not "
+            "a device list."
+        ),
+    )
     auto_resolvable = models.BooleanField(default=True)
     runbook_path = models.CharField(max_length=255, blank=True)
     description = models.TextField(blank=True)
