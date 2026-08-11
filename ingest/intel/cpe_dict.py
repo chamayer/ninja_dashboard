@@ -1,9 +1,33 @@
 """NIST CPE 2.3 dictionary ingest → intel.cpes.
 
-Rather than pulling the whole ~1M-row XML feed, we page the same NVD v2
-CPE endpoint incrementally. First run picks up a bounded slice; steady
-state pulls delta by ``lastModStartDate``. Vendor/product columns are
-lowered and stored raw for matcher use.
+Two modes, and the distinction matters:
+
+* **Backfill** — pages the full index by ``startIndex`` with no date filter,
+  resuming from ``intel.cpe_backfill_state`` and bounded to
+  ``_MAX_PAGES_PER_RUN`` per cycle. Runs until the corpus is complete.
+* **Delta** — the original behaviour, ``lastModStartDate`` forward from the
+  last write.
+
+Delta alone was never going to fill the dictionary, which is why we held
+169,951 of NVD's 1,799,756 CPEs (9.4%) while reporting "Upserted 0 CPE
+entries": it filters on *modification* date, so a CPE untouched since before
+the first run is never returned at all. Measured consequence: the matcher could
+only reach 507 of 21,395 catalogue titles.
+
+Sizing, measured 2026-08-11: 867 bytes/row, so the full corpus is ~1.5 GB
+against a 46 GB database. ``raw_nvd`` is two thirds of that and nothing reads
+it today — the matcher uses vendor/product/version — but it is retained rather
+than dropped at ingest.
+
+``NVD_API_KEY`` is configured, so the limit is ~0.65s/request and the full pull
+is ~360 pages ≈ 4 minutes -- it should complete in a single cycle. The cursor
+exists anyway so an interrupted or rate-limited run resumes rather than
+restarting, and so the mode is observable in `intel_ingest_status` rather than
+being a thing that silently either happened or did not.
+
+**The backfill is one-time.** Once the cursor's ``completed_at`` is set the
+connector returns to delta pulls permanently; nothing re-triggers it. Deltas
+then keep the corpus current on the normal catalogue cadence, forever.
 """
 
 from __future__ import annotations
@@ -25,6 +49,12 @@ _ENDPOINT = "https://services.nvd.nist.gov/rest/json/cpes/2.0"
 _PAGE_SIZE = 5000
 _FIRST_RUN_LOOKBACK_DAYS = 120
 _MAX_PAGES_PER_RUN = 40
+# Backfill gets a larger bound than the delta pull because it is finite and
+# one-time. With an API key the limit is ~0.65s/request, so the full 1.8M-entry
+# corpus is ~360 pages ≈ 4 minutes -- comparable to the other intel connectors,
+# and worth finishing in one pass rather than dribbling across nine cycles.
+# Still cursor-driven, so an interrupted run resumes exactly where it stopped.
+_BACKFILL_MAX_PAGES_PER_RUN = 450
 
 
 def run_once() -> int:
@@ -32,10 +62,98 @@ def run_once() -> int:
         log.info("CPE dict ingest disabled by flag; skipping")
         return 0
     with record_run("cpe_dict") as state:
+        backfill = _backfill_state()
+        if backfill and backfill["completed_at"] is None:
+            rows, done, at, total = _backfill_slice(backfill)
+            state["rows_touched"] = rows
+            pct = (at * 100 // total) if total else 0
+            state["notes"] = (
+                f"Backfill {'complete' if done else 'in progress'}: "
+                f"{at}/{total} ({pct}%), {rows} upserted this run."
+            )
+            return rows
         rows = _pull_and_upsert()
         state["rows_touched"] = rows
         state["notes"] = f"Upserted {rows} CPE entries."
         return rows
+
+
+def _backfill_state() -> dict | None:
+    """Cursor row, or None if migration 085 has not been applied yet."""
+    try:
+        with db.transaction() as cur:
+            cur.execute(
+                "SELECT next_index, total_results, rows_written, started_at, "
+                "completed_at FROM intel.cpe_backfill_state WHERE id"
+            )
+            row = cur.fetchone()
+    except Exception:
+        log.warning("CPE backfill state unavailable; using delta pull")
+        return None
+    if not row:
+        return None
+    return {
+        "next_index": row[0], "total_results": row[1], "rows_written": row[2],
+        "started_at": row[3], "completed_at": row[4],
+    }
+
+
+def _backfill_slice(state: dict) -> tuple[int, bool, int, int]:
+    """Page the full CPE index from the stored cursor, bounded per run.
+
+    The delta pull cannot reach the corpus's history: it filters on
+    lastModStartDate, so a CPE untouched since before the first run is never
+    returned. That is why we hold 9.4% of the dictionary. This pages by
+    startIndex with no date filter instead.
+
+    Returns (rows_written, completed, next_index, total_results).
+    """
+    api_key = settings.NVD_API_KEY.get_secret_value().strip()
+    headers = {"Accept": "application/json"}
+    if api_key:
+        headers["apiKey"] = api_key
+    delay = 0.65 if api_key else 6.5
+
+    at = int(state["next_index"] or 0)
+    total = int(state["total_results"] or 0)
+    written = 0
+
+    with httpx.Client(timeout=60.0, headers=headers) as client:
+        for _ in range(_BACKFILL_MAX_PAGES_PER_RUN):
+            payload = _fetch(client, {
+                "resultsPerPage": _PAGE_SIZE,
+                "startIndex": at,
+            })
+            batch = payload.get("products") or []
+            total = int(payload.get("totalResults") or total)
+            if not batch:
+                break
+            written += _upsert_batch(batch)
+            at += len(batch)
+            if at >= total:
+                break
+            time.sleep(delay)
+
+    done = total > 0 and at >= total
+    with db.transaction() as cur:
+        cur.execute(
+            """
+            UPDATE intel.cpe_backfill_state
+               SET next_index    = %s,
+                   total_results = %s,
+                   rows_written  = rows_written + %s,
+                   updated_at    = now(),
+                   completed_at  = CASE WHEN %s THEN now() ELSE NULL END
+             WHERE id
+            """,
+            (at, total, written, done),
+        )
+    log.info(
+        "CPE backfill: %d/%d (%d%%), %d upserted this run%s",
+        at, total, (at * 100 // total) if total else 0, written,
+        " — COMPLETE" if done else "",
+    )
+    return written, done, at, total
 
 
 def _pull_and_upsert() -> int:
@@ -91,10 +209,28 @@ def _fetch(client: httpx.Client, params: dict) -> dict:
 
 
 def _cursor_from_db() -> datetime | None:
+    """Delta baseline.
+
+    `intel.cpes.updated_at` is when *we* wrote a row, not when NVD modified it.
+    That is fine in steady state, but after a backfill every row was written
+    during the backfill, so MAX(updated_at) is its completion time and any CPE
+    NVD changed while it ran would never be requested again. The backfill's
+    `started_at` is the honest baseline in that case; it re-requests a little
+    already-held data rather than silently skipping a window.
+    """
     with db.transaction() as cur:
         cur.execute("SELECT MAX(updated_at) FROM intel.cpes")
-        (v,) = cur.fetchone()
-        return v
+        (latest,) = cur.fetchone()
+        try:
+            cur.execute(
+                "SELECT started_at, completed_at FROM intel.cpe_backfill_state WHERE id"
+            )
+            row = cur.fetchone()
+        except Exception:
+            row = None
+    if row and row[1] is not None and latest is not None and row[0] < latest:
+        return row[0]
+    return latest
 
 
 def _upsert_batch(products: list[dict]) -> int:
