@@ -14,6 +14,7 @@ def test_patch_evidence_uses_device_context_filters_and_recent_default():
 
     assert "operations.device_session_current" in source
     assert "patch_state_source" in source
+    assert "CASE UPPER(cps.severity)" in source
     assert "LIMIT 1000" in source
     assert 'name="online"' in template
     assert 'name="role"' in template

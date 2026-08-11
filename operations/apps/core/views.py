@@ -5996,7 +5996,7 @@ def patch_evidence_page(request: HttpRequest) -> HttpResponse:
               ON lio.device_id = cps.device_id AND lio.patch_uid = cps.patch_uid
             WHERE {where_sql}
             ORDER BY
-                UPPER(cps.severity)
+                CASE UPPER(cps.severity)
                     WHEN 'CRITICAL'    THEN 0
                     WHEN 'IMPORTANT'   THEN 1
                     WHEN 'MODERATE'    THEN 2

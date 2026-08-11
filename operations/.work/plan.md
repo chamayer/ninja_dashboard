@@ -59,7 +59,7 @@ is included or expected.
 
 ## E5.3 scoped maintenance — Patch Evidence usable filtering
 
-**Status:** implementation and local/production-read validation complete;
+**Status:** deployed in `2bd4205`; SQL sort-expression hotfix validated and
 commit/deployment approved 2026-08-11. This is an
 independent, bounded reader correction under the existing E5.3 plan; it does
 not alter the Findings work above or introduce patch-category work.
@@ -90,16 +90,18 @@ feature-update title search completes in 169 ms.
 **Checkpoint:** active `current_patch_state` contains 78,972 device-patch
 rows. It has indexes on category, status, severity, and observed time. The
 current blank Evidence page joins and sorts the complete population to show
-only the first 1,000 rows.
+only the first 1,000 rows. The first deployment omitted `CASE` before
+`UPPER(cps.severity)` in the new sort expression, producing a syntax error;
+the one-line query correction is ready for validation and deployment.
 
 **Validation completed:** `pytest apps/core/tests -q` (54 passed, 2 existing
 Postgres-integration skips), focused Ruff/format, Django checks, migration
 drift, Python compile, and diff check. A production `EXPLAIN ANALYZE` of the
 bounded default completed in 233 ms under a 10-second statement timeout.
 
-**Next action:** commit the scoped Patch Evidence change, push `origin` then
-the required mirror, and verify the automatic Portainer redeploy. No migration
-is included or expected.
+**Next action:** commit the SQL syntax hotfix, push `origin` then the required
+mirror, redeploy, and repeat the Evidence-page request that previously failed.
+No migration is included or expected.
 
 Track: **ADR-0010 generic ecosystem completion — Phase E5**
 
