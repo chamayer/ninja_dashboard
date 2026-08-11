@@ -103,6 +103,41 @@ bounded default completed in 233 ms under a 10-second statement timeout.
 mirror, redeploy, and repeat the Evidence-page request that previously failed.
 No migration is included or expected.
 
+## E5.3 scoped maintenance — Patch Evidence filtered summary
+
+**Status:** implementation and validation complete; commit/deployment approved
+2026-08-11. This is a
+small extension of the deployed Patch Evidence reader, not a competing plan.
+
+**Goal:** show exact operational counts after any Evidence filter, so the
+table is accompanied by useful scope context rather than only global status
+tiles.
+
+**Scope:** `apps/core/views.py`, `templates/patch_evidence.html`, focused
+tests, and this plan. Add generic cards for matching patch records, devices,
+clients, and online devices, all derived from the same filtered relation as
+the table.
+
+**Out of scope:** patch category work, ingest, schema/index migrations,
+finding changes, exports beyond the existing filtered behavior, and deployment
+until separately approved.
+
+**Decision:** counts describe the current result scope. With no filter they
+describe the clearly labelled recent sample; with filters they describe the
+full matching relation, even if the table display is capped.
+
+**Validation:** focused tests, Django checks, migration drift, Python compile,
+scoped lint, and diff check.
+
+**Validation completed:** `pytest apps/core/tests -q` (54 passed, 2 existing
+Postgres-integration skips), focused Ruff/format, Django checks, migration
+drift, Python compile, and diff check. Production `EXPLAIN ANALYZE` for the
+unfiltered sample aggregate completed in 133 ms under a 10-second timeout.
+
+**Next action:** commit the filtered-summary change, push `origin` then the
+required mirror, and verify the automatic Portainer redeploy. No migration is
+included or expected.
+
 Track: **ADR-0010 generic ecosystem completion — Phase E5**
 
 **Status:** E1-E5.2 deployed. E5.3 scope restated 2026-08-05 against measured

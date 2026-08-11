@@ -5948,6 +5948,19 @@ def patch_evidence_page(request: HttpRequest) -> HttpResponse:
                 LIMIT 1000
             ) cps
         """
+    evidence_from_sql = f"""
+        FROM {patch_state_source}
+        JOIN operations.v_device_source_link dl
+          ON dl.external_id = cps.device_id::text
+         AND dl.source_id = (SELECT id FROM operations.sources WHERE name = 'Ninja' LIMIT 1)
+         AND dl.tenant_id = 1
+        JOIN operations.devices d
+          ON d.id = dl.device_id AND d.deleted_at IS NULL
+        JOIN operations.clients c
+          ON c.id = d.client_id AND c.deleted_at IS NULL
+        LEFT JOIN operations.device_session_current dsc
+          ON dsc.tenant_id = 1 AND dsc.device_id = d.id
+    """
 
     with transaction.atomic(), connection.cursor() as cur:
         cur.execute("SET LOCAL operations.tenant_id = 1")
@@ -5961,6 +5974,24 @@ def patch_evidence_page(request: HttpRequest) -> HttpResponse:
             """
         )
         status_counts = dict(cur.fetchall())
+
+        # Counts are deliberately computed from the same filtered relation as
+        # the table (before its display limit), so cards explain the exact
+        # scope currently being reviewed.
+        cur.execute(
+            f"""
+            SELECT COUNT(*)::int,
+                   COUNT(DISTINCT d.id)::int,
+                   COUNT(DISTINCT c.id)::int,
+                   COUNT(DISTINCT d.id) FILTER (
+                       WHERE COALESCE(cardinality(dsc.online_sources), 0) > 0
+                   )::int
+            {evidence_from_sql}
+            WHERE {where_sql}
+            """,
+            params,
+        )
+        summary_row = cur.fetchone() or (0, 0, 0, 0)
 
         cur.execute(
             f"""
@@ -5981,17 +6012,7 @@ def patch_evidence_page(request: HttpRequest) -> HttpResponse:
                 cps.last_observed_at,
                 lio.status                 AS last_install_status,
                 lio.installed_at           AS last_install_at
-            FROM {patch_state_source}
-            JOIN operations.v_device_source_link dl
-              ON dl.external_id = cps.device_id::text
-             AND dl.source_id = (SELECT id FROM operations.sources WHERE name = 'Ninja' LIMIT 1)
-             AND dl.tenant_id = 1
-            JOIN operations.devices d
-              ON d.id = dl.device_id AND d.deleted_at IS NULL
-            JOIN operations.clients c
-              ON c.id = d.client_id AND c.deleted_at IS NULL
-            LEFT JOIN operations.device_session_current dsc
-              ON dsc.tenant_id = 1 AND dsc.device_id = d.id
+            {evidence_from_sql}
             LEFT JOIN ninja_patches.latest_install_outcome lio
               ON lio.device_id = cps.device_id AND lio.patch_uid = cps.patch_uid
             WHERE {where_sql}
@@ -6012,6 +6033,13 @@ def patch_evidence_page(request: HttpRequest) -> HttpResponse:
             params,
         )
         rows = cur.fetchall()
+
+    summary_counts = {
+        "patch_rows": summary_row[0],
+        "devices": summary_row[1],
+        "clients": summary_row[2],
+        "online_devices": summary_row[3],
+    }
 
     columns = [
         "device_id",
@@ -6068,6 +6096,7 @@ def patch_evidence_page(request: HttpRequest) -> HttpResponse:
             "rows": patch_rows,
             "row_count": len(patch_rows),
             "is_recent_slice": not has_explicit_filter,
+            "summary_counts": summary_counts,
             "status_counts": status_counts,
             "clients": clients,
             "status_choices": _PATCH_STATUS_CHOICES,

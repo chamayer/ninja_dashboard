@@ -119,6 +119,32 @@
 </div>
 
 <div class="card">
+    <h2 class="section-label">Current result scope{% if is_recent_slice %} <span>(recent sample)</span>{% endif %}</h2>
+    <div class="tile-grid">
+        <div class="tile">
+            <div class="tile-label">Patch records</div>
+            <div class="tile-value">{{ summary_counts.patch_rows }}</div>
+            <div class="tile-note">matching device-patch pairs</div>
+        </div>
+        <div class="tile">
+            <div class="tile-label">Devices</div>
+            <div class="tile-value">{{ summary_counts.devices }}</div>
+            <div class="tile-note">with matching patch evidence</div>
+        </div>
+        <div class="tile">
+            <div class="tile-label">Clients</div>
+            <div class="tile-value">{{ summary_counts.clients }}</div>
+            <div class="tile-note">with matching devices</div>
+        </div>
+        <div class="tile">
+            <div class="tile-label">Devices online</div>
+            <div class="tile-value">{{ summary_counts.online_devices }}</div>
+            <div class="tile-note">currently reporting via any source</div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
 {% if rows %}
     <table class="ops-table" data-sortable>
         <thead>
