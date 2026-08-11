@@ -449,8 +449,9 @@
                 <td>
                     {% if s.decision %}
                         <span class="badge-decision {{ s.decision }}">{{ s.decision|humanize_label }}</span>
-                        {% if s.decision_scope == 'client' %}
-                            <span class="muted" style="font-size:0.7rem;">client</span>
+                        {% if s.decision_scope and s.decision_scope != 'global' %}
+                            {# Which tier decided it: device beats client beats global. #}
+                            <span class="muted" style="font-size:0.7rem;">{{ s.decision_scope }}</span>
                         {% endif %}
                     {% else %}
                         <span class="badge-decision pending">pending</span>

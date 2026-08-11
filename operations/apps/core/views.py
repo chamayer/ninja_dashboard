@@ -1792,24 +1792,77 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
     # Software decisions map — key by canonical_name, prefer per-client
     # over global.
     software_titles = [row[0] for row in software_rows]
+    software_publishers = [row[1] for row in software_rows if row[1]]
     decisions_map: dict = {}
     if software_titles:
         with transaction.atomic(), connection.cursor() as cur:
             cur.execute("SET LOCAL operations.tenant_id = 1")
+            # Mirrors _resolve_decision in ingest/software_findings.py:
+            # device > client > global, across BOTH title and publisher scope.
+            #
+            # The previous query filtered only on (client_id IS NULL OR
+            # client_id = <this client>) and matched only canonical_name, which
+            # was wrong twice. Device-scoped rows carry a client_id as well --
+            # software_decision_create sets client = device.client -- so a
+            # decision scoped to one device appeared on every other device of
+            # that client, labelled "client". And an approve_publisher row has
+            # an empty canonical_name, so a title covered by a trusted
+            # publisher rendered as "pending".
             cur.execute(
                 """
-                SELECT canonical_name, decision, client_id
+                SELECT canonical_name, publisher, decision, client_id, device_id
                 FROM operations.software_decisions
                 WHERE tenant_id = 1
-                  AND canonical_name = ANY(%s)
+                  AND (device_id IS NULL OR device_id = %s)
                   AND (client_id IS NULL OR client_id = %s)
+                  AND (canonical_name = ANY(%s) OR publisher = ANY(%s))
                 """,
-                [software_titles, str(device.client_id)],
+                [
+                    str(device.id),
+                    str(device.client_id),
+                    software_titles,
+                    software_publishers or [""],
+                ],
             )
-            for name, decision, client_id in cur.fetchall():
-                existing = decisions_map.get(name)
-                if not existing or (existing["client_id"] is None and client_id is not None):
-                    decisions_map[name] = {"decision": decision, "client_id": client_id}
+            rows = cur.fetchall()
+
+    def _tier(client_id, device_id) -> int:
+        """Specificity: device beats client beats global."""
+        if device_id is not None:
+            return 2
+        if client_id is not None:
+            return 1
+        return 0
+
+    if software_titles:
+        # Title-scope decisions win over publisher-scope at the same tier, so
+        # they are applied last and overwrite.
+        by_publisher: dict = {}
+        for name, publisher, decision, client_id, device_id in rows:
+            entry = {
+                "decision": decision,
+                "client_id": client_id,
+                "device_id": device_id,
+                "tier": _tier(client_id, device_id),
+            }
+            if name:
+                prev = decisions_map.get(name)
+                if not prev or entry["tier"] >= prev["tier"]:
+                    decisions_map[name] = entry
+            elif publisher:
+                prev = by_publisher.get(publisher)
+                if not prev or entry["tier"] >= prev["tier"]:
+                    by_publisher[publisher] = entry
+        # Publisher decisions apply to every title from that publisher that has
+        # no more specific title-scope decision of its own.
+        for row in software_rows:
+            name, publisher = row[0], row[1]
+            pub_entry = by_publisher.get(publisher) if publisher else None
+            if pub_entry and (
+                name not in decisions_map
+                or pub_entry["tier"] > decisions_map[name]["tier"]
+            ):
+                decisions_map[name] = pub_entry
 
     software_view = [
         {
@@ -1821,9 +1874,17 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
             "install_location": r[5],
             "decision": (decisions_map.get(r[0]) or {}).get("decision"),
             "decision_scope": (
-                "client"
-                if (decisions_map.get(r[0]) or {}).get("client_id") is not None
-                else ("global" if r[0] in decisions_map else None)
+                None
+                if r[0] not in decisions_map
+                else (
+                    "device"
+                    if decisions_map[r[0]]["device_id"] is not None
+                    else (
+                        "client"
+                        if decisions_map[r[0]]["client_id"] is not None
+                        else "global"
+                    )
+                )
             ),
         }
         for r in software_rows
