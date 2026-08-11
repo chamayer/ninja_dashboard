@@ -1,5 +1,63 @@
 # Active Operations implementation plan
 
+## E5.3 scoped maintenance — Issues workflow-oriented redesign
+
+**Status:** implementation and local validation complete; commit/push/deploy
+authorized 2026-08-11. This replaces neither the deployed findings reader nor
+the existing Software Decisions workflow; it makes their different
+responsibilities explicit in the Issues UI.
+
+**Goal:** make Issues meaningful by separating actionable findings from
+title-level software policy candidates, showing useful evidence for each, and
+offering only actions that change the owning workflow.
+
+**Scope:** `apps/core/views.py`, `templates/findings_queue.html`, shared
+finding-detail formatting, the existing Software Decisions reader/template as
+needed for a precise review link, focused tests, and this plan. Retain one
+filtered finding relation for exports and counts. Render actionable findings in
+the current incident queue; render `whitelist_suggestion` as a software-policy
+candidate with spread/reason and a link to the existing decisions workflow.
+Refuse generic finding-state actions for that recommendation type in both
+single-row and bulk endpoints.
+
+**Out of scope:** changing the finding classifier, software-decision data or
+scope precedence, EOL evaluators, schema migrations, generic query-builder
+work, unrelated category/taxonomy changes, deletion/rebuilds, and deployment
+until the user-authorized commit/push boundary.
+
+**Decision:** a `whitelist_suggestion` is an undecided widespread software
+title, not a device incident. Its authoritative actions are existing
+SoftwareDecision writes: global, client, or device, with device taking
+precedence over client and client over global. The Issues page will not
+duplicate those writes; it links into their review context. It stays in the
+filtered total/CSV as an auditable finding but no longer receives Ack, Resolve,
+Snooze, or Suppress.
+
+**Validation:** focused route/template/action tests, full Operations test
+suite, Django checks, migration drift, compile, scoped lint/format where
+possible, `git diff --check`, and an approved deployed smoke request after
+push. No migration is expected.
+
+**Checkpoint:** Issues now calculates one filtered relation, partitions it
+into actionable findings and `whitelist_suggestion` policy candidates, and
+keeps the complete relation for the Issues CSV. The generic table uses Subject,
+Evidence, and Context instead of mostly blank device-only columns. A separate
+candidate table exposes product, publisher, installation spread, reason, and a
+link to the existing Software Decisions workflow. Its current state endpoints
+and bulk actions fail closed for recommendation rows. Detail formatting now
+renders recommendation spread/threshold and fuller vulnerability evidence.
+
+**Validation completed:** focused Issues tests (5 passed); full Operations
+suite (55 passed, 2 expected Postgres-integration skips); Django checks,
+migration drift, Python compile, template loading, and `git diff --check`.
+Scoped Ruff passes for the changed test; whole-file Views and detail-tag lint/
+format remain unsuitable because of known pre-existing complexity findings.
+
+**Next action:** review/stage only this scoped redesign, commit, push `origin`
+then the mirror, immediately redeploy through Portainer, and verify the
+deployed filtered Issues request plus action guardrails. No migration is
+included or expected.
+
 ## E5.3 scoped maintenance — Patch Evidence Windows 11 readiness filter
 
 **Status:** filter deployed in `95c3537` on 2026-08-11; documentation update

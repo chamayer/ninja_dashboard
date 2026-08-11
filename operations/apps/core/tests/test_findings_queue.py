@@ -118,8 +118,21 @@ def test_findings_queue_template_exposes_device_csv_and_grouped_types():
     assert "Issues CSV" in template
     assert "Shown issues CSV" not in template
     assert "<optgroup" in template
-    assert "Bulk actions" in template
+    assert "Manage selected" in template
     assert "bulk-action" in template
+    assert "Software policy candidates" in template
+    assert "Review decision" in template
+    assert "Installed devices" in template
+
+
+def test_software_policy_candidates_are_not_managed_as_incidents():
+    source = Path("apps/core/views.py").read_text(encoding="utf-8")
+
+    assert views._SOFTWARE_POLICY_CANDIDATE_TYPES == ("whitelist_suggestion",)
+    assert "policy_qs" in source
+    assert "actionable_qs" in source
+    assert "_policy_candidate_state_action_blocked" in source
+    assert "Skipped {policy_count} software policy candidate" in source
 
 
 def test_findings_queue_csv_includes_windows_servicing_context():

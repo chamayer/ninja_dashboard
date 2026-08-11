@@ -73,6 +73,11 @@ _COALESCED_OFFLINE_FINDING_TYPES = (
     "stale_required_platform",
 )
 
+# These are title-level policy recommendations, not incidents. Their
+# authoritative state changes live in SoftwareDecision, whose scope resolves
+# device before client before global.
+_SOFTWARE_POLICY_CANDIDATE_TYPES = ("whitelist_suggestion",)
+
 log = logging.getLogger(__name__)
 
 
@@ -2478,11 +2483,15 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             subject_id__in=_online_device_ids(online_filter),
         )
 
-    # Severity tiles remain useful after selecting one: they reflect every
-    # other active filter, instead of reducing every nonselected tile to zero.
-    severity_qs = qs
+    # Software-policy candidates have their own review workflow. Severity
+    # tiles stay focused on actionable findings, rather than treating a large
+    # low-severity decision backlog as an incident count.
+    severity_qs = qs.exclude(finding_type__name__in=_SOFTWARE_POLICY_CANDIDATE_TYPES)
     if severity_filter:
         qs = qs.filter(severity=severity_filter)
+
+    policy_qs = qs.filter(finding_type__name__in=_SOFTWARE_POLICY_CANDIDATE_TYPES)
+    actionable_qs = qs.exclude(finding_type__name__in=_SOFTWARE_POLICY_CANDIDATE_TYPES)
 
     # Tile counts and the headline are computed before the display slice from
     # the fully filtered queryset, so they remain exact beyond 500 rows.
@@ -2491,7 +2500,9 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
         for row in severity_qs.values("severity").annotate(n=Count("id"))
     }
     total_matching = qs.count()
-    affected_devices = _affected_device_rows(qs)
+    actionable_matching = actionable_qs.count()
+    policy_matching = policy_qs.count()
+    affected_devices = _affected_device_rows(actionable_qs)
 
     if request.GET.get("format") == "devices_csv":
         return csv_response(
@@ -2536,17 +2547,22 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     # uncapped makes its row count agree with the headline rather than silently
     # truncating at the screen limit.
     findings = sorted(
-        qs if wants_csv(request) else qs[:500],
+        qs if wants_csv(request) else actionable_qs[:500],
         key=lambda f: (
             _SEVERITY_ORDER.get(f.severity, 9),
             -(f.last_detected_at or f.last_seen_at).timestamp(),
         ),
     )
+    policy_findings = sorted(
+        policy_qs[:100],
+        key=lambda f: (-(f.last_detected_at or f.last_seen_at).timestamp(), f.id),
+    )
 
     # Per-device map of platforms whose latest source-reported state is online.
     # Freshness is deliberately separate from this state and remains available
     # on the device detail surface.
-    subject_ids = [f.subject_id for f in findings if f.subject_id]
+    all_display_findings = [*findings, *policy_findings]
+    subject_ids = [f.subject_id for f in all_display_findings if f.subject_id]
     online_map: dict[str, list[str]] = {}
     if subject_ids:
         with transaction.atomic(), connection.cursor() as cur:
@@ -2630,13 +2646,39 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             if days is not None:
                 pieces.append(f"first seen {days}d ago")
             return " · ".join(pieces) if pieces else "rare install"
+        if name == "whitelist_suggestion":
+            devices = d.get("fleet_device_count")
+            threshold = d.get("threshold")
+            if devices is not None and threshold is not None:
+                return f"installed on {devices} devices (review threshold {threshold})"
+            if devices is not None:
+                return f"installed on {devices} devices; no decision recorded"
+            return d.get("reason") or "widespread software with no decision"
+        if name == "vulnerable_software":
+            pieces = [d.get("reason") or "matched vulnerability intelligence"]
+            if d.get("worst_cvss") is not None:
+                pieces.append(f"CVSS {d['worst_cvss']}")
+            if kev := d.get("kev_cves"):
+                pieces.append(f"KEV: {', '.join(kev[:3])}")
+            elif high := d.get("high_cves"):
+                pieces.append(f"high CVEs: {', '.join(high[:3])}")
+            return " · ".join(pieces)
+        if name == "known_malicious_hint":
+            hits = d.get("threat_hit_count")
+            return (
+                f"{hits} community threat-intel hit{'s' if hits != 1 else ''}"
+                if hits is not None
+                else (d.get("reason") or "community threat-intel accumulation")
+            )
         # Fallback: platform if present, else empty
         return d.get("platform") or ""
 
     # Add device context to device-subject findings. Software and client
     # findings have no single device OS, so their context remains blank.
     device_subject_ids = {
-        f.subject_id for f in findings if f.subject_type == "device" and f.subject_id
+        f.subject_id
+        for f in all_display_findings
+        if f.subject_type == Finding.SubjectType.DEVICE and f.subject_id
     }
     device_context_by_id: dict = {}
     if device_subject_ids:
@@ -2686,16 +2728,74 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     def _subject_display_name(f: Finding) -> str | None:
         return _device_context(f).get("hostname") or None
 
-    findings_with_detail = [
-        {
+    def _display_row(f: Finding) -> dict:
+        details = f.finding_details or {}
+        device_context = _device_context(f)
+        online_sources = online_map.get(str(f.subject_id)) if f.subject_id else None
+        subject_label = ""
+        subject_url = ""
+        context_parts: list[str] = []
+
+        if f.subject_type == Finding.SubjectType.DEVICE:
+            subject_label = device_context.get("hostname") or "(unnamed device)"
+            if f.client and f.subject_id:
+                subject_url = reverse(
+                    "device_detail",
+                    kwargs={"org_slug": f.client.slug, "device_id": f.subject_id},
+                )
+            if f.client:
+                context_parts.append(f.client.display_name)
+            os_parts = [
+                device_context.get("os_name", ""),
+                device_context.get("os_release_id", ""),
+                device_context.get("os_build_number", ""),
+            ]
+            if os_text := " ".join(part for part in os_parts if part):
+                context_parts.append(os_text)
+            if online_sources:
+                context_parts.append("online via " + ", ".join(online_sources))
+            elif online_sources is not None:
+                context_parts.append("offline")
+        elif f.subject_type == Finding.SubjectType.CLIENT:
+            subject_label = f.client.display_name if f.client else "(unnamed client)"
+            if f.client:
+                subject_url = reverse("org_index", kwargs={"org_slug": f.client.slug})
+                context_parts.append("client-wide")
+        elif f.subject_type in (
+            Finding.SubjectType.SOFTWARE_PRODUCT,
+            Finding.SubjectType.SOFTWARE_VERSION,
+        ):
+            subject_label = details.get("canonical_name") or "(unnamed software)"
+            if subject_label and subject_label != "(unnamed software)":
+                subject_url = reverse("software_detail", kwargs={"name": subject_label})
+            if publisher := details.get("publisher"):
+                context_parts.append(publisher)
+            context_parts.append(
+                "software release"
+                if f.subject_type == Finding.SubjectType.SOFTWARE_VERSION
+                else "software title"
+            )
+        else:
+            subject_label = f.get_subject_type_display()
+            context_parts.append("platform or source context")
+
+        return {
             "f": f,
             "detail": _detail_string(f),
-            "online_sources": online_map.get(str(f.subject_id)) if f.subject_id else None,
+            "online_sources": online_sources,
             "subject_hostname": _subject_display_name(f),
-            "device_context": _device_context(f),
+            "device_context": device_context,
+            "subject_label": subject_label,
+            "subject_url": subject_url,
+            "context": " · ".join(context_parts),
+            "canonical_name": details.get("canonical_name", ""),
+            "publisher": details.get("publisher", ""),
+            "fleet_device_count": details.get("fleet_device_count"),
+            "threshold": details.get("threshold"),
         }
-        for f in findings
-    ]
+
+    findings_with_detail = [_display_row(f) for f in findings]
+    policy_rows = [_display_row(f) for f in policy_findings]
 
     if wants_csv(request):
         return csv_response(
@@ -2796,17 +2896,37 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             "show_snoozed": show_snoozed,
             "severity_tiles": severity_tiles,
             "total_matching": total_matching,
+            "actionable_matching": actionable_matching,
+            "policy_matching": policy_matching,
+            "policy_rows": policy_rows,
+            "policy_rows_truncated": policy_matching > len(policy_rows),
             "affected_device_count": len(affected_devices),
             "page_query": page_query.urlencode(),
         },
     )
 
 
+def _policy_candidate_state_action_blocked(request: HttpRequest, finding: Finding) -> bool:
+    """Keep recommendation state separate from the SoftwareDecision workflow."""
+    if finding.finding_type.name not in _SOFTWARE_POLICY_CANDIDATE_TYPES:
+        return False
+    messages.info(
+        request,
+        "This is a software policy candidate. Review it through Software Decisions; "
+        "a global, client, or device decision is the authoritative action.",
+    )
+    return True
+
+
 @login_required
 @require_POST
 def finding_acknowledge(request: HttpRequest, finding_id: str) -> HttpResponse:
     """Acknowledge an entity finding."""
-    finding = get_object_or_404(Finding, id=finding_id, tenant_id=1)
+    finding = get_object_or_404(
+        Finding.objects.select_related("finding_type"), id=finding_id, tenant_id=1
+    )
+    if _policy_candidate_state_action_blocked(request, finding):
+        return redirect(request.POST.get("next") or "findings_queue")
     if finding.status == Finding.Status.OPEN:
         finding.status = Finding.Status.ACKNOWLEDGED
         fields = ["status"]
@@ -2820,7 +2940,11 @@ def finding_acknowledge(request: HttpRequest, finding_id: str) -> HttpResponse:
 @login_required
 @require_POST
 def finding_resolve(request: HttpRequest, finding_id: str) -> HttpResponse:
-    finding = get_object_or_404(Finding, id=finding_id, tenant_id=1)
+    finding = get_object_or_404(
+        Finding.objects.select_related("finding_type"), id=finding_id, tenant_id=1
+    )
+    if _policy_candidate_state_action_blocked(request, finding):
+        return redirect(request.POST.get("next") or "findings_queue")
     if finding.status != Finding.Status.RESOLVED:
         finding.status = Finding.Status.RESOLVED
         finding.closed_at = finding.closed_at or timezone.now()
@@ -2832,7 +2956,11 @@ def finding_resolve(request: HttpRequest, finding_id: str) -> HttpResponse:
 @require_POST
 def finding_snooze(request: HttpRequest, finding_id: str) -> HttpResponse:
     """Snooze an issue for N days (default 7)."""
-    finding = get_object_or_404(Finding, id=finding_id, tenant_id=1)
+    finding = get_object_or_404(
+        Finding.objects.select_related("finding_type"), id=finding_id, tenant_id=1
+    )
+    if _policy_candidate_state_action_blocked(request, finding):
+        return redirect(request.POST.get("next") or "findings_queue")
     try:
         days = int(request.POST.get("days") or 7)
     except ValueError:
@@ -2853,6 +2981,8 @@ def finding_suppress(request: HttpRequest, finding_id: str) -> HttpResponse:
         id=finding_id,
         tenant_id=1,
     )
+    if _policy_candidate_state_action_blocked(request, finding):
+        return redirect(request.POST.get("next") or "findings_queue")
     reason = (request.POST.get("reason") or "").strip() or "Suppressed from Issues"
     expires_days = request.POST.get("expires_days")
     expires_at = None
@@ -2893,6 +3023,17 @@ def findings_bulk_action(request: HttpRequest) -> HttpResponse:
 
     now = timezone.now()
     qs = Finding.objects.filter(tenant_id=1, id__in=ids)
+    policy_count = qs.filter(
+        finding_type__name__in=_SOFTWARE_POLICY_CANDIDATE_TYPES
+    ).count()
+    qs = qs.exclude(finding_type__name__in=_SOFTWARE_POLICY_CANDIDATE_TYPES)
+    if not qs.exists():
+        messages.info(
+            request,
+            "Software policy candidates are reviewed through Software Decisions; "
+            "no issue-state action was applied.",
+        )
+        return redirect(request.POST.get("next") or "findings_queue")
     if action == "ack":
         # First-time ack sets acknowledged_at; reack (rare) leaves the
         # original stamp so MTTA stays honest.
@@ -2903,13 +3044,13 @@ def findings_bulk_action(request: HttpRequest) -> HttpResponse:
         touched += qs.filter(status=Finding.Status.OPEN, acknowledged_at__isnull=False).update(
             status=Finding.Status.ACKNOWLEDGED,
         )
-        messages.info(request, f"Acknowledged {touched} issue{'s' if touched != 1 else ''}.")
+        message = f"Acknowledged {touched} issue{'s' if touched != 1 else ''}."
     elif action == "resolve":
         touched = qs.exclude(status=Finding.Status.RESOLVED).update(
             status=Finding.Status.RESOLVED,
             closed_at=now,
         )
-        messages.info(request, f"Resolved {touched} issue{'s' if touched != 1 else ''}.")
+        message = f"Resolved {touched} issue{'s' if touched != 1 else ''}."
     elif action == "snooze":
         try:
             days = int(request.POST.get("days") or 7)
@@ -2918,7 +3059,13 @@ def findings_bulk_action(request: HttpRequest) -> HttpResponse:
         days = max(1, min(days, 90))
         until = timezone.now() + timedelta(days=days)
         touched = qs.update(snoozed_until=until)
-        messages.info(request, f"Snoozed {touched} for {days} day{'s' if days != 1 else ''}.")
+        message = f"Snoozed {touched} for {days} day{'s' if days != 1 else ''}."
+    if policy_count:
+        message += (
+            f" Skipped {policy_count} software policy candidate"
+            f"{'s' if policy_count != 1 else ''}."
+        )
+    messages.info(request, message)
     return redirect(request.POST.get("next") or "findings_queue")
 
 

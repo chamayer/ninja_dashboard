@@ -308,6 +308,14 @@ def finding_detail_text(finding):
         if days is not None:
             pieces.append(f"first seen {days}d ago")
         return " · ".join(pieces) if pieces else "rare install"
+    if name == "whitelist_suggestion":
+        devices = d.get("fleet_device_count")
+        threshold = d.get("threshold")
+        if devices is not None and threshold is not None:
+            return f"installed on {devices} devices (review threshold {threshold})"
+        if devices is not None:
+            return f"installed on {devices} devices; no decision recorded"
+        return d.get("reason") or "widespread software with no decision"
     if name == "unmatched_source_group":
         return f"source group {d.get('external_id', '?')}"
     if name == "unnamed_source_group":
