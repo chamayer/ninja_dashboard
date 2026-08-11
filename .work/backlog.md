@@ -3,6 +3,42 @@
 This is the proposed successor to the root-level open-work portion of
 `TODO.md`. Operations-only items belong in `operations/.work/backlog.md`.
 
+## EOL/EOS: upstream lifecycle gaps for Adobe and Visual C++
+
+- Reason deferred: Adobe Acrobat/Reader and Microsoft Visual C++
+  redistributables are the two measured high-impact lifecycle gaps, but neither
+  has an endoflife.date corpus entry. Local maps, dates, or exception queues
+  would violate the automated lifecycle design.
+- Required path: contribute maintained product/release lifecycle data upstream
+  to endoflife.date, then confirm the existing connector receives it. Add only
+  narrowly scoped, migration-managed matching rules once the corpus entries
+  exist.
+- Constraints: no operator-maintained mappings, local date tables, broad title
+  matcher, or manually refreshed candidate queue.
+- Trigger: upstream corpus entries are accepted and published.
+
+## EOL/EOS: Microsoft 365 channel currency
+
+- Reason deferred: old Microsoft 365 Click-to-Run builds are lifecycle risk,
+  but they are serviced by update channel rather than a fixed Office-product
+  EOL date. The generic Office perpetual rule deliberately excludes them.
+- Required path: identify a trustworthy machine-readable Microsoft channel /
+  build reference, ingest it as global source evidence, and derive a
+  channel-currentness finding. Do not use a periodic download-and-maintain
+  spreadsheet or an operator-maintained build map.
+- Trigger: an authoritative automatable source is available and approved.
+
+## EOL/EOS: agent currency reference sources
+
+- Reason deferred: NinjaRMM and Sentinel agent-version lag is operationally
+  valuable, but current-version claims require a vendor-authoritative reference
+  rather than fleet-relative inference or a manually maintained version list.
+- Required path: identify and ingest supported vendor release feeds, then
+  derive version-currentness findings with provenance and staleness handling.
+- Constraints: no hardcoded current versions or manual update workflow.
+- Trigger: a reliable vendor feed and permitted authentication/collection path
+  are available.
+
 ## Dashboard reporting performance
 
 - Reason deferred: broad historical and compliance cards previously exceeded

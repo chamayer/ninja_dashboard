@@ -87,10 +87,14 @@ verified only by reading.
 
 **Next action:** request approval for one scoped commit.
 
-## CURRENT TASK — Windows OS servicing EOL
+## COMPLETED TASK — Windows OS servicing EOL
 
-**Status:** implemented locally 2026-08-11; not committed, pushed, deployed or
-applied to a database.
+**Status:** committed in `4bc3c90`, deployed 2026-08-11, and applied. Verified
+2026-08-11: `ninja_core.schema_migrations` is at `088_managed_eol_product_rules`
+and Django reports zero unapplied migrations, so SQL migration 087 and
+Operations migration 0134 are both live. The earlier "not committed, pushed,
+deployed or applied to a database" status was left stale by the deploy and is
+corrected here rather than re-derived.
 
 **Goal:** make unsupported and approaching-end-of-support Windows builds
 visible and actionable from the Ninja `buildNumber` / `releaseId` evidence
@@ -150,15 +154,15 @@ integration test could not collect, and neither migration was executed against
 Postgres or production. No live-data, deployment or release validation was
 authorized.
 
-**Next action:** review the local diff and, if accepted, request separate
-approval for a commit. Any later push approval must explicitly include SQL
-migration 087 and Operations migration 0134; migration 086 is not part of this
-change.
+**Next action:** none — deployed and applied. Migration 086 was never part of
+this change and remains untracked.
 
-## CURRENT TASK — Managed lifecycle family coverage
+## COMPLETED TASK — Managed lifecycle family coverage
 
-**Status:** implemented locally 2026-08-11; not committed, pushed, deployed,
-or applied to a database.
+**Status:** committed in `4bc3c90`, deployed 2026-08-11, and applied. SQL
+migration 088 is the current `ninja_core.schema_migrations` head, verified
+2026-08-11. The earlier "not committed, pushed, deployed, or applied to a
+database" status was left stale by the deploy and is corrected here.
 
 **Goal:** extend EOL/EOS coverage beyond Windows servicing for the
 corpus-confirmed, lifecycle-carrying families without an operator mapping queue
@@ -213,15 +217,24 @@ The standalone software-read-model test is skipped because the bare workstation
 lacks `pydantic`, which its import path requires. No root SQL or Django
 migration was applied, and no production/live-data validation occurred.
 
-**Next action:** review the local diff and, if accepted, request separate
-approval for one EOL-focused commit. Any later push approval must explicitly
-include SQL migrations 087 and 088 and Operations migration 0134; migration
-086 remains untracked and out of scope.
+**Next action:** none — deployed and applied. Migration 086 remains untracked
+and out of scope.
 
-## CURRENT TASK — ADR-0015 step 3: software findings onto software subjects
+## COMPLETED TASK — ADR-0015 step 3: software findings onto software subjects
 
-**Status:** step 0 (authorization) implemented locally, not committed or
-deployed. Next action: step 1, the `catalog` bigint -> uuid migration.
+**Status:** deployed as `6c4ac9f` on 2026-08-10; ADR-0015 is now complete, its
+last step (6, scheduling the classifier) having landed in `c853a6e`. The
+"step 0 implemented locally, not committed or deployed" status below predates
+that deployment and is corrected here.
+
+Verified 2026-08-11 against production: open software findings total 2,719 and
+carry the intended subjects — `software_product` / `software_version` for the
+seven intrinsic types, `device` only for `rare_recent` (493) and
+`install_path_suspicious` (51). The classifier's own runtime fell from 2m47s
+for 137,240 rows to 41s for 2,719.
+
+The detail below is retained as the measured record behind those decisions;
+read its step list as history, not as pending work.
 
 Goal: "know about software installed on devices and be able to authorize /
 report on them with findings." A finding about software is stored once on the
