@@ -2519,8 +2519,12 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
         )
 
     _SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
+    # The screen intentionally stays bounded so it remains responsive, but an
+    # explicit CSV is a report of the complete filtered set. Keeping its input
+    # uncapped makes its row count agree with the headline rather than silently
+    # truncating at the screen limit.
     findings = sorted(
-        qs[:500],
+        qs if wants_csv(request) else qs[:500],
         key=lambda f: (
             _SEVERITY_ORDER.get(f.severity, 9),
             -(f.last_detected_at or f.last_seen_at).timestamp(),
