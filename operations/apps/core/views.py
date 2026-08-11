@@ -148,6 +148,9 @@ def _affected_device_rows(findings) -> list[dict]:
             SELECT d.id::text,
                    COALESCE(d.canonical_hostname, ''),
                    COALESCE(c.display_name, ''),
+                   COALESCE(d.os_name, ''),
+                   COALESCE(ws.os_release_id, ''),
+                   COALESCE(ws.os_build_number, ''),
                    array_agg(DISTINCT impacted.finding_type
                              ORDER BY impacted.finding_type)
             FROM impacted
@@ -157,7 +160,10 @@ def _affected_device_rows(findings) -> list[dict]:
             JOIN operations.clients c
               ON c.tenant_id = 1 AND c.id = d.client_id
              AND c.deleted_at IS NULL
-            GROUP BY d.id, d.canonical_hostname, c.display_name
+            LEFT JOIN operations.device_windows_servicing_current ws
+              ON ws.tenant_id = 1 AND ws.device_id = d.id
+            GROUP BY d.id, d.canonical_hostname, c.display_name,
+                     d.os_name, ws.os_release_id, ws.os_build_number
             ORDER BY c.display_name, d.canonical_hostname, d.id
             """,
             matching_params,
@@ -167,7 +173,10 @@ def _affected_device_rows(findings) -> list[dict]:
                 "device_id": row[0],
                 "hostname": row[1],
                 "client": row[2],
-                "finding_types": list(row[3] or []),
+                "os_name": row[3],
+                "os_release_id": row[4],
+                "os_build_number": row[5],
+                "finding_types": list(row[6] or []),
             }
             for row in cur.fetchall()
         ]
@@ -2490,6 +2499,9 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             columns=[
                 ("Hostname", "hostname"),
                 ("Client", "client"),
+                ("Operating system", "os_name"),
+                ("OS release", "os_release_id"),
+                ("OS build", "os_build_number"),
                 ("Finding types", "finding_types"),
                 ("Device ID", "device_id"),
             ],
@@ -2577,10 +2589,12 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
         if name == "device_role_conflict":
             return f"{d.get('previous_role', '?')} → {d.get('new_role', '?')}"
         if name.startswith("windows_servicing_"):
+            os_name = d.get("os_name")
             build = d.get("os_build_number") or d.get("build_number") or "?"
             cycle = d.get("cycle")
             end = d.get("security_support_ends_on")
-            pieces = [f"build {build}"]
+            pieces = [os_name] if os_name else []
+            pieces.append(f"build {build}")
             if cycle:
                 pieces.append(cycle)
             if end:
@@ -2619,28 +2633,58 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
         # Fallback: platform if present, else empty
         return d.get("platform") or ""
 
-    # Bulk-fetch hostnames for device-subject findings so the Subject
-    # column always has the actual device name (not a UUID snippet)
-    # even for software findings that don't carry hostname in
-    # finding_details. Single query, capped by findings page size.
+    # Add device context to device-subject findings. Software and client
+    # findings have no single device OS, so their context remains blank.
     device_subject_ids = {
         f.subject_id for f in findings if f.subject_type == "device" and f.subject_id
     }
-    hostname_by_device_id: dict = {}
+    device_context_by_id: dict = {}
     if device_subject_ids:
-        hostname_by_device_id = dict(
-            Device.objects.filter(
+        device_context_by_id = {
+            device_id: {"hostname": hostname, "os_name": os_name}
+            for device_id, hostname, os_name in Device.objects.filter(
                 tenant_id=1,
                 id__in=device_subject_ids,
-            ).values_list("id", "canonical_hostname")
-        )
+            ).values_list("id", "canonical_hostname", "os_name")
+        }
+
+    windows_context_by_device_id: dict[str, dict[str, str]] = {}
+    if device_subject_ids:
+        with connection.cursor() as cur:
+            cur.execute(
+                """
+                SELECT device_id::text, os_name, os_release_id, os_build_number
+                FROM operations.device_windows_servicing_current
+                WHERE tenant_id = 1 AND device_id = ANY(%s::uuid[])
+                """,
+                ([str(device_id) for device_id in device_subject_ids],),
+            )
+            windows_context_by_device_id = {
+                device_id: {
+                    "os_name": os_name or "",
+                    "os_release_id": os_release_id or "",
+                    "os_build_number": os_build_number or "",
+                }
+                for device_id, os_name, os_release_id, os_build_number in cur.fetchall()
+            }
+
+    def _device_context(finding: Finding) -> dict[str, str]:
+        if finding.subject_type != Finding.SubjectType.DEVICE:
+            return {}
+        current = windows_context_by_device_id.get(str(finding.subject_id), {})
+        device = device_context_by_id.get(finding.subject_id, {})
+        details = finding.finding_details or {}
+        return {
+            "hostname": device.get("hostname") or details.get("hostname", ""),
+            "os_name": details.get("os_name") or current.get("os_name") or device.get("os_name", ""),
+            "os_release_id": details.get("os_release_id") or current.get("os_release_id", ""),
+            "os_build_number": details.get("os_build_number")
+            or details.get("build_number")
+            or current.get("os_build_number", ""),
+        }
 
     def _subject_display_name(f: Finding) -> str | None:
-        if f.subject_type == "device":
-            return hostname_by_device_id.get(f.subject_id) or (f.finding_details or {}).get(
-                "hostname"
-            )
-        return None
+        return _device_context(f).get("hostname") or None
 
     findings_with_detail = [
         {
@@ -2648,6 +2692,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             "detail": _detail_string(f),
             "online_sources": online_map.get(str(f.subject_id)) if f.subject_id else None,
             "subject_hostname": _subject_display_name(f),
+            "device_context": _device_context(f),
         }
         for f in findings
     ]
@@ -2671,6 +2716,28 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
                     "Hostname",
                     lambda r: r.get("subject_hostname")
                     or (r["f"].finding_details or {}).get("hostname", ""),
+                ),
+                (
+                    "Operating system",
+                    lambda r: r["device_context"].get("os_name", ""),
+                ),
+                (
+                    "OS release",
+                    lambda r: r["device_context"].get("os_release_id", ""),
+                ),
+                (
+                    "OS build",
+                    lambda r: r["device_context"].get("os_build_number", ""),
+                ),
+                (
+                    "Lifecycle cycle",
+                    lambda r: (r["f"].finding_details or {}).get("cycle", ""),
+                ),
+                (
+                    "Security support ends",
+                    lambda r: (r["f"].finding_details or {}).get(
+                        "security_support_ends_on", ""
+                    ),
                 ),
                 ("Detail", "detail"),
                 ("Online sources", "online_sources"),

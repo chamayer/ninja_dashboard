@@ -2,8 +2,8 @@
 
 ## E5.3 scoped maintenance — Findings queue: filter-aware device impact
 
-**Status:** deployed in `319ce57`; CSV count-alignment correction validated and
-commit/deployment approved 2026-08-11. This is a
+**Status:** deployed through `f1b5cc0`; device OS context CSV correction
+validated and commit/deployment approved 2026-08-11. This is a
 bounded typed-reader correction under the existing E5.3 track, not a competing
 plan or a replacement for its generic-reader/CSV work.
 
@@ -43,7 +43,9 @@ has one row per device and includes the finding types that affect it. Type
 options are grouped by category, and disabled bulk controls make their
 selected-row scope explicit. The existing generic issue CSV remains a
 complete filtered-set export so its row count agrees with the headline; the
-screen itself remains capped at 500 rows for responsiveness.
+screen itself remains capped at 500 rows for responsiveness. The follow-up CSV
+will expose device OS name, release, and build wherever current inventory has
+them. Lifecycle cycle and security-support end remain lifecycle-specific.
 
 **Validation completed:** `pytest apps/core/tests -q` (51 passed, 2
 Postgres-integration skips), focused Ruff for the new test, `manage.py check`,
@@ -51,9 +53,9 @@ Postgres-integration skips), focused Ruff for the new test, `manage.py check`,
 Whole-file Ruff/format remain unsuitable as acceptance gates because
 `apps/core/views.py` has pre-existing findings outside this scoped change.
 
-**Next action:** commit the CSV correction, push `origin` then the required
-mirror, and verify the automatic Portainer redeploy. No migration is included
-or expected.
+**Next action:** commit the device-context CSV correction, push `origin` then
+the required mirror, and verify the automatic Portainer redeploy. No migration
+is included or expected.
 
 Track: **ADR-0010 generic ecosystem completion — Phase E5**
 

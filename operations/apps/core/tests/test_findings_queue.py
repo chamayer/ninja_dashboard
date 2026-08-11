@@ -47,7 +47,17 @@ class _Cursor:
         self.params = params
 
     def fetchall(self):
-        return [("device-1", "host-1", "Client A", ["windows_servicing_eol"])]
+        return [
+            (
+                "device-1",
+                "host-1",
+                "Client A",
+                "Windows 11 Pro",
+                "23H2",
+                "22631",
+                ["windows_servicing_eol"],
+            )
+        ]
 
 
 class _Connection:
@@ -92,6 +102,9 @@ def test_affected_device_rows_uses_one_filtered_finding_set(monkeypatch):
             "device_id": "device-1",
             "hostname": "host-1",
             "client": "Client A",
+            "os_name": "Windows 11 Pro",
+            "os_release_id": "23H2",
+            "os_build_number": "22631",
             "finding_types": ["windows_servicing_eol"],
         }
     ]
@@ -107,3 +120,13 @@ def test_findings_queue_template_exposes_device_csv_and_grouped_types():
     assert "<optgroup" in template
     assert "Bulk actions" in template
     assert "bulk-action" in template
+
+
+def test_findings_queue_csv_includes_windows_servicing_context():
+    source = Path("apps/core/views.py").read_text(encoding="utf-8")
+
+    assert '"Operating system"' in source
+    assert '"OS release"' in source
+    assert '"OS build"' in source
+    assert '"Lifecycle cycle"' in source
+    assert '"Security support ends"' in source
