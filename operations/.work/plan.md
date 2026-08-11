@@ -1,5 +1,59 @@
 # Active Operations implementation plan
 
+## E5.3 scoped maintenance — Findings queue: filter-aware device impact
+
+**Status:** implementation and local validation complete; commit and deployment
+approved 2026-08-11. This is a
+bounded typed-reader correction under the existing E5.3 track, not a competing
+plan or a replacement for its generic-reader/CSV work.
+
+**Goal:** make the Findings queue readable and actionable by showing an exact
+count of affected devices for the active filters, providing a device-level CSV
+export, and removing misleading/redundant filter presentation.
+
+**Scope:** Operations read/UI behavior only: apply the online/coalescing
+conditions before queue counts and rows; group issue types by category in the
+selector; make bulk controls clearly selected-row actions; add a device-impact
+count and CSV that includes direct device findings plus software-finding
+exposures. Preserve finding state, decisions, routes, tenant scope, and the
+existing per-row actions.
+
+**Out of scope:** schema migrations, finding emitter changes, EOL classifier
+changes, new device-list filters, data rebuilds, changing bulk-action semantics,
+deployment, generic entity read models, generic CSV/redaction work, and any
+other E5.3 consumer cutover.
+
+**Decision:** one filtered finding queryset is the authority for the queue
+total, severity tiles, device impact, and exports. A device impact includes
+direct device-subject findings and devices exposed to matching software
+findings through `operations.v_device_software_exposure`; it must not count
+software titles as devices.
+
+**Affected files:** `apps/core/views.py`, `templates/findings_queue.html`,
+focused Operations tests, and this plan.
+
+**Validation:** focused tests for filter/device-impact behavior and rendering,
+Django checks/migration drift, scoped lint, and diff check. No production
+queries or deployment are in scope.
+
+**Checkpoint:** device availability/coalescing now constrains the queryset
+before severity totals, headline count, rows, and exports. The header reports
+the exact filtered finding count and distinct affected-device count; device CSV
+has one row per device and includes the finding types that affect it. Type
+options are grouped by category, and disabled bulk controls make their
+selected-row scope explicit. The existing generic issue CSV remains a
+displayed-row export and is labelled as such.
+
+**Validation completed:** `pytest apps/core/tests -q` (51 passed, 2
+Postgres-integration skips), focused Ruff for the new test, `manage.py check`,
+`makemigrations --check --dry-run`, `py_compile`, and `git diff --check`.
+Whole-file Ruff/format remain unsuitable as acceptance gates because
+`apps/core/views.py` has pre-existing findings outside this scoped change.
+
+**Next action:** commit the scoped queue change, push `origin` then the
+required mirror, and verify the automatic Portainer redeploy. No migration is
+included or expected.
+
 Track: **ADR-0010 generic ecosystem completion — Phase E5**
 
 **Status:** E1-E5.2 deployed. E5.3 scope restated 2026-08-05 against measured

@@ -14,6 +14,7 @@ from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
 from django.db import connection, transaction
 from django.db.models import Count, Prefetch, Q
+from django.db.models.expressions import RawSQL
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -67,7 +68,109 @@ _FINDING_ACTIVE_STATUSES = (
     Finding.Status.INVESTIGATING,
 )
 
+_COALESCED_OFFLINE_FINDING_TYPES = (
+    "missing_required_platform",
+    "stale_required_platform",
+)
+
 log = logging.getLogger(__name__)
+
+
+def _online_device_ids(source_name: str = "") -> RawSQL:
+    """Return the tenant-safe device set with current source contact."""
+    if source_name:
+        return RawSQL(
+            """
+            SELECT device_id
+            FROM operations.device_session_current
+            WHERE tenant_id = %s AND %s = ANY(online_sources)
+            """,
+            (1, source_name),
+        )
+    return RawSQL(
+        """
+        SELECT device_id
+        FROM operations.device_session_current
+        WHERE tenant_id = %s AND cardinality(online_sources) > 0
+        """,
+        (1,),
+    )
+
+
+def _finding_type_groups(
+    categories: list[FindingCategory], finding_types: list[FindingType]
+) -> list[dict]:
+    """Group the type selector by its data-owned category."""
+    by_category: dict[int | None, list[FindingType]] = {}
+    for finding_type in finding_types:
+        by_category.setdefault(finding_type.category_id, []).append(finding_type)
+
+    groups = [
+        {"label": category.name, "types": by_category.pop(category.id, [])}
+        for category in categories
+        if by_category.get(category.id)
+    ]
+    if ungrouped := by_category.pop(None, []):
+        groups.append({"label": "Other", "types": ungrouped})
+    return groups
+
+
+def _affected_device_rows(findings) -> list[dict]:
+    """Return each device exposed to the filtered finding queryset once.
+
+    A finding can be directly about a device or about a software release. The
+    latter reaches devices through the established exposure view, so this CTE
+    consumes the caller's already-filtered queryset rather than recreating its
+    predicates. It remains tenant-scoped at every relationship boundary.
+    """
+    matching = findings.order_by().values("id")
+    matching_sql, matching_params = matching.query.get_compiler(
+        connection=connection
+    ).as_sql()
+    with connection.cursor() as cur:
+        cur.execute(
+            f"""
+            WITH matching AS ({matching_sql}),
+            impacted AS (
+                SELECT f.subject_id AS device_id, ft.name AS finding_type
+                FROM operations.findings f
+                JOIN matching m ON m.id = f.id
+                JOIN operations.finding_types ft ON ft.id = f.finding_type_id
+                WHERE f.tenant_id = 1 AND f.subject_type = 'device'
+
+                UNION
+
+                SELECT e.device_id, e.finding_type
+                FROM operations.v_device_software_exposure e
+                JOIN matching m ON m.id = e.finding_id
+                WHERE e.tenant_id = 1
+            )
+            SELECT d.id::text,
+                   COALESCE(d.canonical_hostname, ''),
+                   COALESCE(c.display_name, ''),
+                   array_agg(DISTINCT impacted.finding_type
+                             ORDER BY impacted.finding_type)
+            FROM impacted
+            JOIN operations.devices d
+              ON d.tenant_id = 1 AND d.id = impacted.device_id
+             AND d.deleted_at IS NULL
+            JOIN operations.clients c
+              ON c.tenant_id = 1 AND c.id = d.client_id
+             AND c.deleted_at IS NULL
+            GROUP BY d.id, d.canonical_hostname, c.display_name
+            ORDER BY c.display_name, d.canonical_hostname, d.id
+            """,
+            matching_params,
+        )
+        return [
+            {
+                "device_id": row[0],
+                "hostname": row[1],
+                "client": row[2],
+                "finding_types": list(row[3] or []),
+            }
+            for row in cur.fetchall()
+        ]
 
 # Fallback only. The real list is read from operations.sources so that
 # registering a source makes it appear everywhere it should — dashboard tile,
@@ -2280,8 +2383,12 @@ def search(request: HttpRequest) -> HttpResponse:
 
 
 @login_required
+@transaction.atomic
 def findings_queue(request: HttpRequest) -> HttpResponse:
     """Entity findings review page."""
+    with connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+
     status_filter = request.GET.get("status", "active")
     severity_filter = request.GET.get("severity", "")
     type_filter = request.GET.get("type", "")
@@ -2314,8 +2421,6 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     if not show_snoozed and status_filter not in ("all",):
         qs = qs.filter(Q(snoozed_until__isnull=True) | Q(snoozed_until__lt=timezone.now()))
 
-    if severity_filter:
-        qs = qs.filter(severity=severity_filter)
     if category_filter:
         qs = qs.filter(finding_type__category__name=category_filter)
     if type_filter:
@@ -2342,16 +2447,54 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             | Q(finding_details__hostname__icontains=q_filter)
         )
 
-    # Tile counts — computed BEFORE the [:500] slice so tiles show
-    # true matching totals across all filters (severity, category,
-    # client, etc.). Counts respect ALL current filters — including
-    # severity itself, so if severity is set the tiles reflect only
-    # that severity's slice (works as expected — you filter down,
-    # tiles narrow).
+    # Findings with a coalesced platform gap only belong in this queue when
+    # the device is online. Applying the same predicate before aggregates and
+    # row selection keeps every count and export aligned with the visible set.
+    device_subject = Q(subject_type=Finding.SubjectType.DEVICE)
+    qs = qs.exclude(
+        Q(finding_type__name__in=_COALESCED_OFFLINE_FINDING_TYPES)
+        & device_subject
+        & ~Q(subject_id__in=_online_device_ids())
+    )
+
+    # Online is a device-state filter. Software findings are unscoped facts,
+    # not offline devices, and are therefore excluded when this filter is set.
+    if online_filter == "online":
+        qs = qs.filter(device_subject, subject_id__in=_online_device_ids())
+    elif online_filter == "offline":
+        qs = qs.filter(device_subject).exclude(subject_id__in=_online_device_ids())
+    elif online_filter in source_names_set:
+        qs = qs.filter(
+            device_subject,
+            subject_id__in=_online_device_ids(online_filter),
+        )
+
+    # Severity tiles remain useful after selecting one: they reflect every
+    # other active filter, instead of reducing every nonselected tile to zero.
+    severity_qs = qs
+    if severity_filter:
+        qs = qs.filter(severity=severity_filter)
+
+    # Tile counts and the headline are computed before the display slice from
+    # the fully filtered queryset, so they remain exact beyond 500 rows.
     severity_tile_counts = {
-        row["severity"]: row["n"] for row in qs.values("severity").annotate(n=Count("id"))
+        row["severity"]: row["n"]
+        for row in severity_qs.values("severity").annotate(n=Count("id"))
     }
-    total_matching = sum(severity_tile_counts.values())
+    total_matching = qs.count()
+    affected_devices = _affected_device_rows(qs)
+
+    if request.GET.get("format") == "devices_csv":
+        return csv_response(
+            affected_devices,
+            columns=[
+                ("Hostname", "hostname"),
+                ("Client", "client"),
+                ("Finding types", "finding_types"),
+                ("Device ID", "device_id"),
+            ],
+            filename_stem="affected_devices",
+        )
 
     # Prebuild severity tiles — each is a dict the template renders
     # directly (avoids needing a custom dict-lookup template filter).
@@ -2403,35 +2546,6 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             )
             for did, sources in cur.fetchall():
                 online_map[did] = list(sources or [])
-
-    # Coalesce noise: for a device with no source reporting online, suppress
-    # missing/stale_required_platform findings from the queue — they
-    # aren't actionable while the device isn't reachable. Findings still
-    # exist and appear on the device detail page.
-    _COALESCED_TYPES = {"missing_required_platform", "stale_required_platform"}
-    findings = [
-        f
-        for f in findings
-        if not (
-            f.finding_type.name in _COALESCED_TYPES
-            and f.subject_id
-            and not online_map.get(str(f.subject_id))
-        )
-    ]
-
-    # Online filter: "" any, "online" any source in contact, "offline"
-    # none, or a specific source name to filter to devices reached by
-    # that source right now.
-    if online_filter == "online":
-        findings = [f for f in findings if online_map.get(str(f.subject_id))]
-    elif online_filter == "offline":
-        findings = [f for f in findings if f.subject_id and not online_map.get(str(f.subject_id))]
-    elif online_filter in source_names_set:
-        findings = [
-            f
-            for f in findings
-            if f.subject_id and online_filter in online_map.get(str(f.subject_id), [])
-        ]
 
     # Build a per-finding detail string for the inline column.
     _DAYS_KEYS = ("days_since_last_seen", "days_offline")
@@ -2574,12 +2688,13 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     ft_qs = FindingType.objects.select_related("category").order_by("name")
     if category_filter:
         ft_qs = ft_qs.filter(category__name=category_filter)
-    finding_types = list(ft_qs)
     categories = list(FindingCategory.objects.order_by("display_order", "name"))
+    finding_type_groups = _finding_type_groups(categories, list(ft_qs))
     clients = Client.objects.filter(tenant_id=1, deleted_at__isnull=True).order_by("display_name")
 
     page_query = request.GET.copy()
     page_query.pop("page", None)
+    page_query.pop("format", None)
 
     return render(
         request,
@@ -2587,7 +2702,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
         {
             "page_obj": page,
             "findings": page.object_list,
-            "finding_types": finding_types,
+            "finding_type_groups": finding_type_groups,
             "categories": categories,
             "clients": clients,
             "status_choices": Finding.Status.choices,
@@ -2610,6 +2725,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             "show_snoozed": show_snoozed,
             "severity_tiles": severity_tiles,
             "total_matching": total_matching,
+            "affected_device_count": len(affected_devices),
             "page_query": page_query.urlencode(),
         },
     )

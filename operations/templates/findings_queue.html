@@ -8,9 +8,14 @@
 <div class="card">
     <div style="display:flex; align-items:center; justify-content:space-between; gap:1rem;">
         <h1 style="margin:0;">{% if active_category %}{{ active_category|humanize_label }} issues{% else %}Issues{% endif %}
-          <span class="muted" style="font-weight:400; font-size:0.9rem;">({{ total_matching }})</span>
+          <span class="muted" style="font-weight:400; font-size:0.9rem;">({{ total_matching }} issues · {{ affected_device_count }} devices)</span>
         </h1>
-        {% include "_csv_download.html" %}
+        <div style="display:flex; gap:0.75rem; font-size:0.85rem; white-space:nowrap;">
+            <a class="csv-download" href="?{{ page_query }}{% if page_query %}&amp;{% endif %}format=devices_csv"
+               title="Download one row per affected device for the current filters">⤓ Devices CSV</a>
+            <a class="csv-download" href="?{{ page_query }}{% if page_query %}&amp;{% endif %}format=csv"
+               title="Download the currently displayed issue rows">⤓ Shown issues CSV</a>
+        </div>
     </div>
     <div class="tile-grid" style="margin-top:1rem;">
         {% for t in severity_tiles %}
@@ -65,8 +70,12 @@
             <label>Type</label>
             <select name="type">
                 <option value="">Any</option>
-                {% for ft in finding_types %}
-                    <option value="{{ ft.name }}"{% if active_type == ft.name %} selected{% endif %}>{{ ft.name }}</option>
+                {% for group in finding_type_groups %}
+                    <optgroup label="{{ group.label|humanize_label }}">
+                    {% for ft in group.types %}
+                        <option value="{{ ft.name }}"{% if active_type == ft.name %} selected{% endif %}>{{ ft.name|humanize_label }}</option>
+                    {% endfor %}
+                    </optgroup>
                 {% endfor %}
             </select>
         </div>
@@ -80,7 +89,7 @@
             </select>
         </div>
         <div>
-            <label>Online</label>
+            <label>Device online</label>
             <select name="online">
                 <option value="">Any</option>
                 {% for value, label in online_choices %}
@@ -122,11 +131,12 @@
         {% csrf_token %}
         <input type="hidden" name="next" value="{{ request.get_full_path }}">
         <div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.6rem; font-size:0.85rem;">
-            <span id="bulk-selected" style="color:var(--muted);">0 selected</span>
-            <button type="submit" name="action" value="ack" style="padding:0.3rem 0.7rem;">Ack</button>
-            <button type="submit" name="action" value="resolve" style="padding:0.3rem 0.7rem;">Resolve</button>
+            <strong>Bulk actions</strong>
+            <span id="bulk-selected" style="color:var(--muted);">Select rows to enable</span>
+            <button type="submit" name="action" value="ack" class="bulk-action" disabled style="padding:0.3rem 0.7rem;">Ack selected</button>
+            <button type="submit" name="action" value="resolve" class="bulk-action" disabled style="padding:0.3rem 0.7rem;">Resolve selected</button>
             <input type="number" name="days" value="7" min="1" max="90" style="width:60px; padding:0.3rem 0.5rem;">
-            <button type="submit" name="action" value="snooze" style="padding:0.3rem 0.7rem;">Snooze days</button>
+            <button type="submit" name="action" value="snooze" class="bulk-action" disabled style="padding:0.3rem 0.7rem;">Snooze selected</button>
         </div>
         <table data-sortable class="ops-table">
             <thead>
@@ -220,11 +230,13 @@
 (function() {
     var toggle = document.getElementById('bulk-toggle-all');
     var cbs = document.querySelectorAll('.bulk-cb');
+    var actions = document.querySelectorAll('.bulk-action');
     var counter = document.getElementById('bulk-selected');
     function refresh() {
         var n = 0;
         cbs.forEach(function(c) { if (c.checked) n++; });
-        if (counter) counter.textContent = n + ' selected';
+        if (counter) counter.textContent = n ? n + ' selected' : 'Select rows to enable';
+        actions.forEach(function(button) { button.disabled = n === 0; });
     }
     if (toggle) toggle.addEventListener('change', function() {
         cbs.forEach(function(c) { c.checked = toggle.checked; });
