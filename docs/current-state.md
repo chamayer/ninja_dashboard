@@ -38,6 +38,28 @@ operator access; Postgres is not directly published.
 - Notification rules and suppressions
 - Canonical/derived/operator/effective device-state layers
 
+## Patching Evidence and Windows 11 readiness
+
+**Patching → Evidence** is the fleet-wide current device-patch reader. Its
+primary filters remain generic: patch status/severity, client, device
+availability, role, OS group, and patch/KB search. The unfiltered landing page
+is intentionally a recent, performance-bounded sample; any active filter uses
+the complete matching current relation before the display cap.
+
+For the Windows upgrade workflow, open **Advanced device attributes** and use
+**Windows 11 upgradeability**. It reads Ninja's latest device custom field
+`w11Compatible` by the same Ninja device ID as the patch state. The available
+filters are **Capable**, **Not capable**, **Undetermined**, and **Not
+assessed** (no current field value). The filter narrows current patch evidence;
+it does not add a Windows-specific table/CSV column, feature-update category
+control, separate report, or generic query builder.
+
+The field must remain API-readable in Ninja and listed in
+`INGEST_CUSTOM_FIELDS_INCLUDE`. Its source values are `Capable`, alert-prefixed
+Not Capable results with the failed requirements, and an error-prefixed
+Undetermined result. Normal Ninja source cycles ingest the field and preserve
+its SCD-2 observation history.
+
 ## Current release direction
 
 Releases 0.45.0 through 0.50.1 added the Operations Patching page, device

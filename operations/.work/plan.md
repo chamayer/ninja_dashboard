@@ -2,8 +2,8 @@
 
 ## E5.3 scoped maintenance — Patch Evidence Windows 11 readiness filter
 
-**Status:** implementation and local validation complete; awaiting separate
-commit and deployment approval. This is a narrow Patch Evidence reader
+**Status:** filter deployed in `95c3537` on 2026-08-11; documentation update
+is ready for separate commit approval. This is a narrow Patch Evidence reader
 extension after the Ninja `w11Compatible` custom field was made API-readable
 and ingested; it does not resume the deferred patch-category work or replace
 any existing E5.3 scope.
@@ -48,8 +48,13 @@ compile, template loading, and `git diff --check`. Whole-file Ruff/format
 remain unsuitable acceptance gates because `apps/core/views.py` has known
 pre-existing findings outside this scoped change.
 
-**Next action:** review the diff, then obtain separate approval to commit and
-push/deploy. No migration is included or expected.
+**Deployment validation:** `95c3537` was pushed to `origin` and the required
+mirror, then deployed through Portainer at the matching configuration hash.
+Operations and ingest became healthy, Operations `/healthz` returned 200, and
+the tenant-scoped `?win11=capable` Evidence reader returned 200. The current
+ingest migration stayed at 088; no migration ran.
+
+**Next action:** obtain separate approval to commit the documentation update.
 
 ## E5.3 scoped maintenance — Findings queue: filter-aware device impact
 

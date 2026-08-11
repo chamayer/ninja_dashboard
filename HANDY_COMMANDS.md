@@ -163,8 +163,18 @@ docker exec ninja-postgres psql -U ninja -d ninja -c "SELECT version,applied_at 
 Check the current custom-field allowlist seen by the running container:
 
 ```bash
-docker exec -it operations-ingest printenv INGEST_CUSTOM_FIELDS_INCLUDE
 docker exec -it operations-ingest python -c "from ingest.config import settings; print(settings.INGEST_CUSTOM_FIELDS_INCLUDE)"
+```
+
+The configured fields are loaded from the mounted environment file, so the
+effective-settings command is authoritative; `printenv` alone may not show
+them. Windows 11 readiness uses the Ninja device custom-field name
+`w11Compatible`. It must be API-readable in Ninja and included in the
+allowlist before the normal source cycle can ingest it. Check its current
+aggregate values without exposing device identities:
+
+```bash
+docker exec ninja-postgres psql -U ninja -d ninja -P pager=off -c "WITH current_values AS (SELECT DISTINCT ON (entity_id) entity_id, value_text FROM ninja_core.custom_field_values WHERE entity_type = 'DEVICE' AND field_name = 'w11Compatible' ORDER BY entity_id, last_observed_at DESC) SELECT COALESCE(value_text, '(blank)') AS value, COUNT(*) AS devices FROM current_values GROUP BY value_text ORDER BY devices DESC;"
 ```
 
 Backfill historical activities (all codes in the current allowlist):
