@@ -64,6 +64,8 @@ _NINJA_DEVICE_MATERIAL_FIELDS = frozenset(
         "device_role",
         "os_name",
         "os_family",
+        "os_build_number",
+        "os_release_id",
         "domain",
         "offline",
         "needs_reboot",
@@ -224,7 +226,7 @@ def material_projection_version(
     if not use_versioned_contracts or platform.casefold() != "ninja":
         return LEGACY_MATERIAL_PROJECTION_VERSION
     if external_namespace == "device":
-        return 3
+        return 4
     return LEGACY_MATERIAL_PROJECTION_VERSION
 
 

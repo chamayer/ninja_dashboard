@@ -1,5 +1,136 @@
 # Active root implementation plan
 
+## CURRENT TASK — Windows OS servicing EOL
+
+**Status:** implemented locally 2026-08-11; not committed, pushed, deployed or
+applied to a database.
+
+**Goal:** make unsupported and approaching-end-of-support Windows builds
+visible and actionable from the Ninja `buildNumber` / `releaseId` evidence
+already collected for 4,572 devices.
+
+**Scope:** EOL/EOS only. Carry the two source values through the existing
+observation/effective-value contract; classify Windows product, edition and
+build deterministically against automatically refreshed endoflife.date cycle
+data; expose explicit supported, approaching-EOL, EOL and unknown states;
+emit/resolve device findings; add the minimum tenant-safe Operations visibility
+and focused tests. Preserve all unrelated plan items and worktree files.
+
+**Out of scope:** migration 086 and generalized software candidate matching;
+CVE/CPE changes; non-lifecycle device/cache work; Office, Java, Acrobat/Reader,
+Visual C++ and evergreen version lag in this first slice; version/release bump;
+commit, push, deployment, production queries, manual migrations or rebuilds.
+
+**Decisions:** source assertions remain evidence and never write Operations
+state directly; build candidates derive automatically from the corpus
+`latest_version`; automatically seeded generic edition rules disambiguate
+shared builds, so normal operation has no manual mapping or queue; ambiguous or
+unmapped devices remain explicitly unknown; the rules live in data under
+ADR-0012; extended-support/ESU entitlement is never inferred from a build.
+
+**Affected files:** `sql/migrations/087_windows_servicing_lifecycle.sql`,
+`operations/apps/core/migrations/0134_windows_servicing_lifecycle.py`,
+`ingest/core/devices.py`, `ingest/observations.py`,
+`ingest/intel/endoflife.py`, a new `ingest/intel/windows_servicing.py`,
+`ingest/evaluator.py`, `ingest/main.py`, the Operations device/finding display
+helpers and template, focused ingest tests,
+`operations/docs/decisions/0016-windows-servicing-lifecycle-is-corpus-derived.md`,
+and this section of the plan.
+
+**Steps:** (1) inspect current evidence, projector, EOL corpus, finding and UI
+contracts; (2) settle the smallest compatible lifecycle data contract; (3)
+implement mappings, derived servicing state, finding lifecycle and visibility;
+(4) test supported/EOL/approaching/edition-split/unknown cases; (5) run Python,
+Django, migration, SQL ACL, focused test and diff validation.
+
+**Checkpoint:** implementation is complete against HEAD `d0b8aea`. Migration
+087 extends the corpus support dimensions, seeds non-writable generic Windows
+rules, and adds tenant-safe current servicing state. Operations migration 0134
+registers build/release attributes and findings and keeps projection-v3/v4 read
+models compatible. Ninja observations now retain the two fields as material v4
+evidence. The servicing projector derives builds from the corpus, preserves
+ambiguity and ESU entitlement as unknown, updates after device/corpus refreshes
+and during the evaluator sweep, synchronizes three finding types, and feeds the
+device overview. Migration 086 and all local probes remain untouched prior
+untracked work.
+
+**Validation:** Windows classifier/observation/domain-mapping unit tests pass;
+the Operations test suite passes with its two opt-in Postgres tests skipped;
+Django system and migration-state checks pass; the migration plan includes
+0134 after 0133; scoped Ruff, Python compilation and `git diff --check` pass.
+The bare workstation Python lacks `httpx`, so the root Postgres observation
+integration test could not collect, and neither migration was executed against
+Postgres or production. No live-data, deployment or release validation was
+authorized.
+
+**Next action:** review the local diff and, if accepted, request separate
+approval for a commit. Any later push approval must explicitly include SQL
+migration 087 and Operations migration 0134; migration 086 is not part of this
+change.
+
+## CURRENT TASK — Managed lifecycle family coverage
+
+**Status:** implemented locally 2026-08-11; not committed, pushed, deployed,
+or applied to a database.
+
+**Goal:** extend EOL/EOS coverage beyond Windows servicing for the
+corpus-confirmed, lifecycle-carrying families without an operator mapping queue
+or ongoing manual maintenance.
+
+**Scope:** add a read-only, migration-seeded global rule set for deterministic
+catalogue title/publisher matching; retain the existing tenant map only for
+backward compatibility; cover Office perpetual, Oracle/Sun Java, .NET,
+Visual Studio, Python, Node.js, SQL Server, PostgreSQL, MySQL Server, vCenter
+and LibreOffice; add a read-only Windows rollout summary that validates the
+projected state after future deployment.
+
+**Out of scope:** production migration application, commit, push, deployment,
+the candidate matcher in migration 086, Acrobat/Reader and Visual C++ upstream
+contributions, Microsoft 365 channel currency, and any manual candidate or
+operator-mapping workflow.
+
+**Decision:** managed rules are global reference data, not tenant judgement;
+they contain only narrowly anchored title/publisher patterns and optional
+version/cycle dimensions, never lifecycle dates or a build map. The existing
+projector remains the sole writer of catalogue lifecycle dates and clears from
+one computed set. Ambiguous/nonmatching titles remain unmapped rather than
+being inferred from a broad matcher.
+
+**Affected files:** `sql/migrations/088_managed_eol_product_rules.sql`,
+`ingest/intel/eol_match.py`, `ingest/intel/endoflife.py`,
+`ingest/inventory/software.py`, `ingest/intel/windows_servicing.py`,
+`ingest/main.py`, focused ingest tests, the read-only EOL mapping admin/model
+metadata, `operations/docs/decisions/0017-managed-software-lifecycle-coverage.md`,
+and this plan section.
+
+**Validation plan:** focused managed-rule and servicing-summary tests, Python
+compilation, scoped lint, Django checks/migration plan, and diff checks. No
+Postgres or live-data validation occurs without separate authority.
+
+**Checkpoint:** migration 088 creates and seeds 25 global managed rules,
+revokes runtime DML, and retires only the obsolete candidate materialized view.
+The EOL projector unions managed and legacy rows into the existing single
+write/clear set; publisher-gated Java rules include the legacy `1.8.x` to
+cycle-`8` normalization. Software catalogue refreshes now invoke this
+non-fetching projector, so matching converges when either a catalogue version
+or the upstream corpus changes. The legacy map is read-only in the Operations
+admin and to `operations_app`. Windows runs emit a read-only state/contract
+summary after each projection, including a safe migration-pending state.
+
+**Validation:** 43 focused EOL/Windows/observation/domain-rule tests pass;
+scoped Ruff (including the changed model with its four pre-existing DJ008
+findings ignored), Python compilation, and `git diff --check` pass. Django
+system and migration-drift checks pass; its migration plan includes 0134, and
+the Operations suite passes 48 tests with two opt-in PostgreSQL tests skipped.
+The standalone software-read-model test is skipped because the bare workstation
+lacks `pydantic`, which its import path requires. No root SQL or Django
+migration was applied, and no production/live-data validation occurred.
+
+**Next action:** review the local diff and, if accepted, request separate
+approval for one EOL-focused commit. Any later push approval must explicitly
+include SQL migrations 087 and 088 and Operations migration 0134; migration
+086 remains untracked and out of scope.
+
 ## CURRENT TASK — ADR-0015 step 3: software findings onto software subjects
 
 **Status:** step 0 (authorization) implemented locally, not committed or

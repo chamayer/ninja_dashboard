@@ -1667,6 +1667,7 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
     agent_presence = []
     software_rows = []
     patching = None
+    windows_servicing = None
     with transaction.atomic():
         with connection.cursor() as cur:
             cur.execute("SET LOCAL operations.tenant_id = 1")
@@ -1696,6 +1697,38 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
                 [1, str(device.id)],
             )
             software_rows = cur.fetchall()
+
+            cur.execute(
+                """
+                SELECT support_state, product_name, cycle, release_label,
+                       os_name, os_build_number, os_release_id,
+                       active_support_ends_on, security_support_ends_on,
+                       extended_security_ends_on,
+                       extended_security_available, classification_reason,
+                       evidence_source, evaluated_at
+                FROM operations.device_windows_servicing_current
+                WHERE tenant_id = %s AND device_id = %s
+                """,
+                [1, str(device.id)],
+            )
+            servicing_row = cur.fetchone()
+            if servicing_row:
+                windows_servicing = {
+                    "support_state": servicing_row[0],
+                    "product_name": servicing_row[1],
+                    "cycle": servicing_row[2],
+                    "release_label": servicing_row[3],
+                    "os_name": servicing_row[4],
+                    "os_build_number": servicing_row[5],
+                    "os_release_id": servicing_row[6],
+                    "active_support_ends_on": servicing_row[7],
+                    "security_support_ends_on": servicing_row[8],
+                    "extended_security_ends_on": servicing_row[9],
+                    "extended_security_available": servicing_row[10],
+                    "classification_reason": servicing_row[11],
+                    "evidence_source": servicing_row[12],
+                    "evaluated_at": servicing_row[13],
+                }
 
             # Patching context: effective scope + session state from
             # v_device (Track O), plus per-device patch signal from
@@ -2066,6 +2099,7 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
             "agent_presence": agent_presence,
             "software_rows": software_view,
             "patching": patching,
+            "windows_servicing": windows_servicing,
             "active_tab": active_tab,
             "sev_counts": sev_counts,
             "severe_open": severe_open,
@@ -2424,6 +2458,16 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             return f"{base} (last: {last_src})" if last_src else base
         if name == "device_role_conflict":
             return f"{d.get('previous_role', '?')} → {d.get('new_role', '?')}"
+        if name.startswith("windows_servicing_"):
+            build = d.get("os_build_number") or d.get("build_number") or "?"
+            cycle = d.get("cycle")
+            end = d.get("security_support_ends_on")
+            pieces = [f"build {build}"]
+            if cycle:
+                pieces.append(cycle)
+            if end:
+                pieces.append(f"support ended {end}" if name.endswith("_eol") else f"ends {end}")
+            return " · ".join(pieces)
         if name in (
             "unauthorized_av",
             "unauthorized_rmm",

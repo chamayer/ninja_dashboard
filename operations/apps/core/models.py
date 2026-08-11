@@ -3561,20 +3561,12 @@ class IntelMatcherHint(models.Model):
 class EolProductMap(models.Model):
     """Which catalogue titles correspond to which endoflife.date product.
 
-    The corpus (462 products, 8,308 releases) is fetched automatically; this
-    mapping is not, and deliberately so. Measured 2026-08-10, naive substring
-    matching of our 21,395 titles against the corpus produced mostly false
-    positives -- 'Intel(R) Trusted Connect Services Client' matched `rust`
-    because "trust" contains "rust", which would have put a confident, precisely
-    dated, entirely wrong EOL finding on 282 devices.
-
-    So this is operator judgement recorded as data (ADR-0012 section 6), in the
-    same shape as `publisher_aliases` and `os_group_mappings`: pattern, target,
-    priority, lowest priority wins.
-
-    Unmapped titles get no EOL evaluation. That is visible rather than silent --
-    see `operations.v_eol_mapping_candidates`, which ranks what is still
-    unmapped by how many devices it would affect.
+    This legacy tenant map remains only so its existing, verified rows preserve
+    their provenance. Managed global rules now cover the supported lifecycle
+    families automatically; the table is read-only to application users, and
+    there is no operator candidate queue. Broad substring matching remains
+    prohibited because it can assign a precise but wrong lifecycle to an
+    unrelated title.
     """
 
     id = models.BigAutoField(primary_key=True)

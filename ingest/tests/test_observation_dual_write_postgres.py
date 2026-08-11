@@ -470,38 +470,38 @@ def test_current_history_and_run_dual_write(postgres_connection) -> None:
             (instance_id,),
         )
 
-        projection_v3_at = datetime(2026, 8, 2, 16, 0, tzinfo=timezone.utc)
-        projection_v3_run, _ = begin_run(
+        projection_v4_at = datetime(2026, 8, 2, 16, 0, tzinfo=timezone.utc)
+        projection_v4_run, _ = begin_run(
             cursor,
             1,
             binding_id,
             "Ninja",
-            projection_v3_at,
+            projection_v4_at,
             expected_rows=1,
         )
-        projection_v3_row = dict(projection_row)
-        projection_v3_row.update(
+        projection_v4_row = dict(projection_row)
+        projection_v4_row.update(
             observation_id=uuid.uuid4(),
-            observed_at=projection_v3_at,
-            last_seen_at=projection_v3_at,
-            last_received_at=projection_v3_at,
-            last_snapshot_run_id=projection_v3_run,
+            observed_at=projection_v4_at,
+            last_seen_at=projection_v4_at,
+            last_received_at=projection_v4_at,
+            last_snapshot_run_id=projection_v4_run,
             batch_id=uuid.uuid4(),
         )
-        assert write_current_rows(cursor, [projection_v3_row]) == 1
+        assert write_current_rows(cursor, [projection_v4_row]) == 1
         complete_run(
             cursor,
-            projection_v3_run,
+            projection_v4_run,
             1,
             is_complete_snapshot=True,
-            identity_rows=[projection_v3_row],
+            identity_rows=[projection_v4_row],
         )
         cursor.execute(
             """
             SELECT c.material_projection_version,
                    COUNT(*) FILTER (WHERE h.material_projection_version = 2),
                    COUNT(*) FILTER (
-                       WHERE h.material_projection_version = 3
+                       WHERE h.material_projection_version = 4
                          AND h.effective_to IS NULL
                    ),
                    COUNT(DISTINCT h.material_hash)
@@ -517,7 +517,7 @@ def test_current_history_and_run_dual_write(postgres_connection) -> None:
             """,
             (instance_id,),
         )
-        assert cursor.fetchone() == (3, 1, 1, 1)
+        assert cursor.fetchone() == (4, 1, 1, 1)
 
 
 def test_begin_run_holds_one_scope_lock_for_the_source_transaction(

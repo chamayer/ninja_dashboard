@@ -127,6 +127,16 @@ def refresh_read_models() -> None:
     from ingest.software_catalog import project_software_catalog
 
     project_software_catalog()
+    # Lifecycle facts are a projection of both the upstream corpus and the
+    # local catalogue. The scheduled corpus job covers the former; run the
+    # same non-fetching projector here so newly observed versions are not left
+    # waiting for the next corpus interval.
+    try:
+        from ingest.intel import eol_match
+
+        eol_match.run_once()
+    except Exception:
+        log.exception("End-of-life projection after software catalogue refresh failed")
 
 
 def _load_device_map() -> dict[str, tuple[uuid.UUID, uuid.UUID]]:

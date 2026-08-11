@@ -500,6 +500,8 @@ def _write_ninja_observations(
                     # None when node_class/os give no explicit signal — never guessed.
                     "device_role": infer_device_role(r["os_name"], r["node_class"]),
                     "os_name": r["os_name"],
+                    "os_build_number": r["os_build_number"],
+                    "os_release_id": r["os_release_id"],
                     # os_family() returns None for an absent os_name — a source
                     # that states no OS asserts nothing about its family.
                     "os_family": os_family(r["os_name"]),

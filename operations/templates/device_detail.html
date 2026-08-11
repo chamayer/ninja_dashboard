@@ -209,6 +209,22 @@
         <div class="val">{% if patching.needs_reboot %}Yes{% else %}No{% endif %}</div>
         <div class="sub">last boot {{ patching.last_boot_at|date:"Y-m-d"|default:"—" }}</div>
     </div>
+    {% if windows_servicing %}
+    <div class="dd-card {% if windows_servicing.support_state == 'eol' or windows_servicing.support_state == 'eol_esu_available' %}alert{% elif windows_servicing.support_state == 'approaching_eol' or windows_servicing.support_state == 'unknown' %}warn{% endif %}">
+        <div class="lbl">Windows support</div>
+        <div class="val" style="font-size:1.05rem;">{{ windows_servicing.support_state|humanize_label }}</div>
+        <div class="sub">
+            build {{ windows_servicing.os_build_number|default:"—" }}
+            {% if windows_servicing.cycle %} · {{ windows_servicing.cycle }}{% endif %}
+            {% if windows_servicing.security_support_ends_on %}
+                · security support {{ windows_servicing.security_support_ends_on|date:"Y-m-d" }}
+            {% endif %}
+            {% if windows_servicing.extended_security_available %}
+                · ESU available to {{ windows_servicing.extended_security_ends_on|date:"Y-m-d" }}; entitlement unknown
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
     <div class="dd-card">
         <div class="lbl">Software titles</div>
         <div class="val">{{ software_rows|length }}</div>

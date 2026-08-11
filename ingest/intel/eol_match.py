@@ -10,11 +10,10 @@ Deterministic and rebuildable -- a projector in the `docs/glossary.md` sense.
 It is the sole writer of `catalog.software_versions.eol_date` / `eol_source`,
 and re-running it produces the same result.
 
-Which of our titles corresponds to which corpus product is
-**operator-maintained data** in `operations.eol_product_map`, never a constant
-here (ADR-0012 section 6). The table starts empty, so this projector writes
-nothing until an operator maps something -- which is the honest state, not a
-silent no-op: the run log reports how many mappings were in force.
+Managed global rules in `intel.eol_managed_product_rules` cover known
+lifecycle-carrying product families without an operator queue. The legacy
+tenant map remains as a compatibility override for exceptional local titles;
+both sources feed one computed set, and neither stores lifecycle dates.
 """
 
 from __future__ import annotations
@@ -34,6 +33,27 @@ _TENANT_ID = 1
 # `LIKE cycle || '%'` would not ('3.13.2' does start with '3.1').
 _PROJECT_SQL = """
 WITH mapped AS (
+    -- Read-only managed rules are the normal path. Publisher gates are used
+    -- where a title family (notably Java) would otherwise be too broad.
+    SELECT sv.id AS version_id,
+           m.eol_product,
+           m.eol_cycle,
+           m.priority,
+           (m.version_pattern <> '') AS is_version_pinned,
+           1 AS source_rank
+      FROM intel.eol_managed_product_rules m
+      JOIN catalog.products p
+        ON p.canonical_name ILIKE m.title_pattern
+      LEFT JOIN catalog.publishers pub ON pub.id = p.publisher_id
+      JOIN catalog.software_versions sv
+        ON sv.product_id = p.id AND sv.version <> ''
+     WHERE m.enabled
+       AND (m.publisher_pattern = ''
+            OR COALESCE(pub.canonical_name, '') ILIKE m.publisher_pattern)
+       AND (m.version_pattern = '' OR sv.version ILIKE m.version_pattern)
+
+    UNION ALL
+
     -- A mapping row now matches on title AND, optionally, on the installed
     -- version. Rows with an empty version_pattern apply to every version,
     -- which is the pre-082 behaviour.
@@ -43,7 +63,8 @@ WITH mapped AS (
            m.priority,
            -- A row that names a version range is more specific than one that
            -- does not, and must win regardless of priority ordering.
-           (m.version_pattern <> '') AS is_version_pinned
+           (m.version_pattern <> '') AS is_version_pinned,
+           0 AS source_rank
       FROM operations.eol_product_map m
       JOIN catalog.products p
         ON p.canonical_name ILIKE m.raw_pattern
@@ -54,11 +75,13 @@ WITH mapped AS (
 ),
 best_map AS (
     -- One mapping per catalogue version: version-pinned rows first, then
-    -- priority, then name so the result is deterministic rather than arbitrary.
+    -- priority, source then name so the result is deterministic. A legacy
+    -- tenant override wins only at the same priority.
     SELECT DISTINCT ON (version_id)
            version_id, eol_product, eol_cycle
       FROM mapped
-     ORDER BY version_id, is_version_pinned DESC, priority, eol_product
+     ORDER BY version_id, is_version_pinned DESC, priority, source_rank,
+              eol_product
 ),
 candidate AS (
     SELECT bm.version_id,
@@ -79,6 +102,13 @@ candidate AS (
              -- ...derive from the installed version, or...
           OR (bm.eol_cycle = ''
               AND (sv.version = r.cycle OR sv.version LIKE r.cycle || '.%%'))
+             -- Oracle's legacy Java notation reports Java 8 as 1.8.x while
+             -- the corpus calls that release cycle 8. This is a product-
+             -- scoped normalization, not a general fuzzy version rule.
+          OR (bm.eol_cycle = ''
+              AND bm.eol_product = 'oracle-jdk'
+              AND regexp_replace(sv.version, '^1\\.([0-9]+)\\..*$', '\\1')
+                    = r.cycle)
              -- ...from a year token in the *title*, which is how
              -- 'Office 2010' (installed as 14.0.x) reaches cycle '2010'.
              -- The CVE matcher has always done this; the projector did not.
@@ -136,10 +166,10 @@ def run_once() -> int:
         log.info("End-of-life projection disabled by flag; skipping")
         return 0
     with record_run("eol_match") as state:
-        written, cleared, mappings = _project()
+        written, cleared, rules = _project()
         state["rows_touched"] = written + cleared
         state["notes"] = (
-            f"{mappings} mapping(s) in force; {written} version(s) dated, "
+            f"{rules} lifecycle rule(s) in force; {written} version(s) dated, "
             f"{cleared} cleared."
         )
         return written + cleared
@@ -148,10 +178,14 @@ def run_once() -> int:
 def _project() -> tuple[int, int, int]:
     with db.transaction() as cur:
         cur.execute(
-            "SELECT COUNT(*) FROM operations.eol_product_map WHERE tenant_id = %s",
+            """
+            SELECT
+                (SELECT COUNT(*) FROM intel.eol_managed_product_rules WHERE enabled)
+              + (SELECT COUNT(*) FROM operations.eol_product_map WHERE tenant_id = %s)
+            """,
             (_TENANT_ID,),
         )
-        mappings = cur.fetchone()[0]
+        rules = cur.fetchone()[0]
 
         # Compute the match set once, then write and clear from it.
         cur.execute("DROP TABLE IF EXISTS eol_best")
@@ -163,28 +197,8 @@ def _project() -> tuple[int, int, int]:
         cur.execute(_CLEAR_SQL)
         cleared = cur.rowcount
 
-    # The suggestion list is derived from the corpus and the mapping table, both
-    # of which may have just changed. Refreshed here rather than on read because
-    # it costs ~37s to compute. Best-effort: a stale suggestions list is a
-    # nuisance, a failed projection run is not, so this never fails the caller.
-    try:
-        with db.transaction() as cur:
-            cur.execute(
-                "REFRESH MATERIALIZED VIEW operations.v_eol_mapping_candidates"
-            )
-        log.info("Refreshed operations.v_eol_mapping_candidates")
-    except Exception:
-        log.exception("Failed to refresh v_eol_mapping_candidates")
-
-    if mappings == 0:
-        # Visible rather than silent: an empty mapping table is a real,
-        # actionable state ("nobody has mapped anything yet"), not success.
-        log.warning(
-            "End-of-life projection: operations.eol_product_map is empty, so no "
-            "version can receive an EOL date. eol_runtime remains title-scoped."
-        )
     log.info(
-        "End-of-life projection: %d mapping(s), %d version(s) dated, %d cleared.",
-        mappings, written, cleared,
+        "End-of-life projection: %d rule(s), %d version(s) dated, %d cleared.",
+        rules, written, cleared,
     )
-    return written, cleared, mappings
+    return written, cleared, rules

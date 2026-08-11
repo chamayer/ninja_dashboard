@@ -19,9 +19,10 @@ product calls per full refresh is small, but a free community corpus deserves
 the same courtesy the winget connector already extends to api.winget.run.
 
 This module only fetches. Deciding which of *our* titles a corpus product
-corresponds to is a separate step driven by `operations.eol_product_map`
-(ADR-0012 section 6: mappings live in data), so a matching fix never re-fetches
-the corpus and a corpus refresh never re-decides matching.
+corresponds to is a separate projector step driven primarily by read-only,
+migration-seeded managed rules. Historical tenant mappings remain a
+compatibility input, so a matching fix never re-fetches the corpus and a corpus
+refresh never re-decides matching.
 """
 
 from __future__ import annotations
@@ -155,8 +156,12 @@ def _upsert_releases(product_name: str, releases: list[dict]) -> int:
             cycle,
             (r.get("label") or "").strip(),
             _as_date(r.get("releaseDate")),
+            _as_date(r.get("eoasFrom")),
+            _as_bool(r.get("isEoas")),
             _as_date(r.get("eolFrom")),
             bool(r.get("isEol")),
+            _as_date(r.get("eoesFrom")),
+            _as_bool(r.get("isEoes")),
             bool(r.get("isMaintained", True)),
             bool(r.get("isLts")),
             _latest_name(r.get("latest")),
@@ -167,14 +172,21 @@ def _upsert_releases(product_name: str, releases: list[dict]) -> int:
         cur.executemany(
             """
             INSERT INTO intel.eol_releases
-                (product_name, cycle, label, release_date, eol_from,
-                 is_eol, is_maintained, is_lts, latest_version, updated_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+                (product_name, cycle, label, release_date,
+                 eoas_from, is_eoas, eol_from, is_eol,
+                 eoes_from, is_eoes, is_maintained, is_lts,
+                 latest_version, updated_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s, now())
             ON CONFLICT (product_name, cycle) DO UPDATE SET
                 label          = EXCLUDED.label,
                 release_date   = EXCLUDED.release_date,
+                eoas_from      = EXCLUDED.eoas_from,
+                is_eoas        = EXCLUDED.is_eoas,
                 eol_from       = EXCLUDED.eol_from,
                 is_eol         = EXCLUDED.is_eol,
+                eoes_from      = EXCLUDED.eoes_from,
+                is_eoes        = EXCLUDED.is_eoes,
                 is_maintained  = EXCLUDED.is_maintained,
                 is_lts         = EXCLUDED.is_lts,
                 latest_version = EXCLUDED.latest_version,
@@ -196,6 +208,11 @@ def _as_date(value: object) -> date | None:
     except ValueError:
         log.warning("End-of-life: unparseable date %r", value)
         return None
+
+
+def _as_bool(value: object) -> bool | None:
+    """Preserve API null separately from an explicit support-state boolean."""
+    return value if isinstance(value, bool) else None
 
 
 def _latest_name(value: object) -> str:

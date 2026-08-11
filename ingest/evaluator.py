@@ -37,6 +37,7 @@ from typing import Any
 
 from ingest import db
 from ingest.identity import identity_entity_types
+from ingest.intel.windows_servicing import sync as sync_windows_servicing
 from ingest.normalize import normalize_hostname
 
 log = logging.getLogger(__name__)
@@ -100,6 +101,9 @@ def evaluate(tenant_id: int, device_id: uuid.UUID | None = None) -> int:
                 )
                 affected += _evaluate_unenrolled(cur, tenant_id, device_id, now)
                 affected += _evaluate_device_lifecycle(cur, tenant_id, device_id, now)
+                affected += sync_windows_servicing(
+                    cur, tenant_id, device_id, now=now
+                )
                 # cross_client_conflict emitter removed 2026-07-14 — see
                 # BLUEPRINT §1.7 for design rationale. Existing findings
                 # closed in migration 0034.

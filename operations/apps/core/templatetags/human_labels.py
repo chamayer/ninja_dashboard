@@ -38,6 +38,9 @@ _LABELS: dict[str, str] = {
     "multi_av_conflict": "Multiple AV products installed",
     "rare_recent": "Rare software",
     "eol_runtime": "End-of-life runtime",
+    "windows_servicing_eol": "Windows build out of support",
+    "windows_servicing_approaching_eol": "Windows support ending soon",
+    "windows_servicing_unknown": "Windows support state unknown",
     # ── Finding types — coverage / lifecycle ─────────────────
     "missing_required_platform": "Required agent not installed",
     "stale_required_platform": "Required agent not checking in",
@@ -51,6 +54,10 @@ _LABELS: dict[str, str] = {
     "device_long_offline": "Offline for an extended period",
     "cross_client_conflict": "Same hostname on two clients",
     "unmapped_node_class": "Unrecognized device type",
+    "supported": "Supported",
+    "security_support": "Security support only",
+    "approaching_eol": "Support ending soon",
+    "eol_esu_available": "Out of support — ESU available",
     # ── Finding types — platform / identity health ───────────
     "identity_resolution_pending": "Awaiting device identity match",
     "software_queue_stalled": "Software scan queue stalled",
@@ -111,6 +118,7 @@ _LABELS: dict[str, str] = {
     "identity": "Identity",
     "platform": "Platform health",
     "resolver": "Client resolver",
+    "lifecycle": "Lifecycle",
     # ── Software catalog categories ──────────────────────────
     "av": "Antivirus",
     "edr": "EDR",
@@ -234,6 +242,16 @@ def finding_detail_text(finding):
         return f"{base} (last: {last_src})" if last_src else base
     if name == "device_role_conflict":
         return f"{d.get('previous_role', '?')} → {d.get('new_role', '?')}"
+    if name.startswith("windows_servicing_"):
+        build = d.get("os_build_number") or d.get("build_number") or "?"
+        cycle = d.get("cycle")
+        end = d.get("security_support_ends_on")
+        pieces = [f"build {build}"]
+        if cycle:
+            pieces.append(cycle)
+        if end:
+            pieces.append(f"support ended {end}" if name.endswith("_eol") else f"ends {end}")
+        return " · ".join(pieces)
     if name == "device_missing_from_source":
         return f"removed from {d.get('platform', '?')}"
     if name == "device_never_patched":

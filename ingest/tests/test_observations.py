@@ -236,7 +236,7 @@ def test_projection_version_change_opens_a_new_history_version(monkeypatch):
         if "INSERT INTO operations.entity_observation_history" in call[0]
     ]
     assert len(history_inserts) == 1
-    assert history_inserts[0][1][0]["material_projection_version"] == 3
+    assert history_inserts[0][1][0]["material_projection_version"] == 4
 
 
 def test_new_identity_opens_first_history_version():
@@ -478,7 +478,7 @@ def test_ninja_device_contract_keeps_measurements_but_excludes_contact_noise():
             platform="Ninja",
             external_namespace="device",
         )
-        == 3
+        == 4
     )
 
 

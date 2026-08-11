@@ -45,9 +45,15 @@ def test_software_read_models_refresh_in_dependency_order(monkeypatch) -> None:
     pool = _Pool()
     monkeypatch.setattr(software.db, "pool", pool)
 
+    lifecycle_runs = []
+    monkeypatch.setattr(
+        "ingest.intel.eol_match.run_once", lambda: lifecycle_runs.append(True) or 0
+    )
+
     software.refresh_read_models()
 
     assert pool.statements == [
         "REFRESH MATERIALIZED VIEW CONCURRENTLY operations.software_title_current",
         "REFRESH MATERIALIZED VIEW CONCURRENTLY operations.v_software_safety",
     ]
+    assert lifecycle_runs == [True]

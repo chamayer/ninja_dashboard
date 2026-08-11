@@ -583,6 +583,19 @@ class EolProductMapAdmin(admin.ModelAdmin):
     list_filter = ("eol_product",)
     search_fields = ("raw_pattern", "version_pattern", "eol_product", "notes")
     ordering = ("priority", "raw_pattern")
+    readonly_fields = (
+        "tenant_id", "raw_pattern", "version_pattern", "eol_product",
+        "eol_cycle", "priority", "notes", "created_at", "updated_at",
+    )
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return request.method in ("GET", "HEAD")
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(SoftwareDecision)

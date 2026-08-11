@@ -128,6 +128,7 @@ def run_patching_once() -> bool:
                     _safe("activities",     activities_ingest.run, client)
                     _safe("troubleshooting_signal", refresh_device_troubleshooting_signal)
                 refresh_after_collection("Ninja patch collection")
+                run_windows_servicing_once()
                 log.info("Patch ingest run complete")
             return True
         finally:
@@ -170,6 +171,7 @@ def run_ninja_observations_once() -> None:
         _safe("locations",     locations.run, client)
         _safe("devices",       devices.run, client, snapshot_at)
     refresh_after_collection("Ninja observations collection")
+    run_windows_servicing_once()
     log.info("Ninja observations run complete")
 
 
@@ -368,6 +370,25 @@ def run_platform_evaluate_once() -> None:
         log.exception("Platform evaluate failed")
 
 
+def run_windows_servicing_once() -> None:
+    """Refresh Windows servicing state after device or corpus evidence changes."""
+    try:
+        from ingest.intel.windows_servicing import project_and_evaluate, rollout_summary
+
+        affected = project_and_evaluate(tenant_id=1)
+        summary = rollout_summary(tenant_id=1)
+        if summary["invalid_rows"]:
+            log.error("Windows servicing lifecycle validation failed: %s", summary)
+        else:
+            log.info(
+                "Windows servicing lifecycle complete: findings_affected=%d states=%s",
+                affected,
+                summary["states"],
+            )
+    except Exception:
+        log.exception("Windows servicing lifecycle projection failed")
+
+
 def run_intel_nvd_once() -> None:
     try:
         from ingest.intel import nvd
@@ -466,6 +487,10 @@ def run_intel_endoflife_once() -> None:
         log.info("Intel end-of-life projection complete: rows=%d", rows)
     except Exception:
         log.exception("Intel end-of-life projection failed")
+    # Windows servicing state is another projection of this same corpus.  Run
+    # it even after a fetch failure so an already-retained corpus still reaches
+    # device findings, matching the software EOL projector above.
+    run_windows_servicing_once()
 
 
 def run_notifications_dispatch_once() -> None:
