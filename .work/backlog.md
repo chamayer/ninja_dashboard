@@ -39,6 +39,37 @@ This is the proposed successor to the root-level open-work portion of
 - Trigger: a reliable vendor feed and permitted authentication/collection path
   are available.
 
+## Operations pages 500 on gunicorn worker timeout, with no attributable cause
+
+- Observed 2026-08-11: `/findings/?status=active&category=software&type=eol_runtime`
+  returned 500 in the browser. It is **not** an application error — the only
+  traceback is gunicorn's own `handle_abort` / `SystemExit`, i.e. a
+  `WORKER TIMEOUT`. The worker is killed before writing a response, so the
+  access log carries no `500` line and the aborted URL is never recorded.
+- The page itself is healthy: that exact query string renders **HTTP 200 in
+  0.90 s**, 18 queries, slowest 0.19 s; `_affected_device_rows` for
+  `eol_runtime` takes 0.33 s across 368 devices.
+- Four timeouts on 2026-08-11: 20:49:53, 22:10:14, 23:07:28 and 23:09:00 UTC.
+  The first two precede the `c853a6e` classifier deployment at 23:04, so this
+  is recurring and pre-existing, not caused by scheduling the classifier.
+- Leading hypothesis, **not proven**: the software matviews
+  (`software_title_current`, `v_software_safety`) are refreshed on a ~5-minute
+  cycle, and a plain `REFRESH MATERIALIZED VIEW` holds `ACCESS EXCLUSIVE`,
+  blocking every reader until it completes. It fits the timing and the
+  `/software/` referer, but the timed-out URL was `/findings/`, which reads
+  neither matview — so the mechanism is incomplete. Do not close this by
+  asserting the lock story without evidence for that request.
+- Two fixes worth taking regardless of the root cause:
+  1. `REFRESH MATERIALIZED VIEW CONCURRENTLY` removes the reader block
+     entirely. It requires a unique index on each matview; verify that exists
+     or add it before proposing the change.
+  2. No `statement_timeout` is set on the Operations database role, so a slow
+     query rides until the worker dies instead of failing fast with a real,
+     attributable error. This is why the symptom was an unattributable 500.
+- First diagnostic step: make the aborted request identifiable — gunicorn does
+  not log the URL on abort, so today a timeout cannot be traced to a page.
+- Trigger: another user-visible 500, or the next Operations performance work.
+
 ## Dashboard reporting performance
 
 - Reason deferred: broad historical and compliance cards previously exceeded
@@ -269,21 +300,24 @@ true for the candidate, which closes when its collision stops holding.
   same care as devices (what makes two logins the same person across sources)
   and should not be improvised.
 
-## `whitelist_suggestion` fires 131,073 times
+## `whitelist_suggestion` volume — RESOLVED by ADR-0015 step 3
 
-- Measured 2026-08-06 while profiling the software page: 131,073 open
-  `whitelist_suggestion` findings, roughly half of every finding in the
-  system, across 20,631 titles.
-- A finding type at that volume is not an actionable queue, and it is what
-  makes the software dashboard's distinct-title tile cost ~273 ms even with
-  the expression index added in migration 0126 — PostgreSQL must read all
-  131,073 entries because there is no index skip-scan for `DISTINCT`.
-- Decide what the finding is for: if it is per (device, title) it should
-  probably be per title with a device count, which is the pattern the
-  recurrence-counter backlog item describes. That would cut it by roughly the
-  average device-per-title factor and make the queue readable.
-- Do not simply suppress it — per the fix-don't-remove rule, the detector is
-  telling the truth; the granularity is wrong.
+- The original entry recorded 131,073 open `whitelist_suggestion` findings
+  measured 2026-08-06, roughly half of every finding in the system, and
+  concluded the granularity was wrong: it should be per title with a device
+  count rather than per (device, title).
+- That is exactly what ADR-0015 step 3 did. Measured 2026-08-11 against
+  production: **1,491 open, at `subject_type = 'software_product'`.** The
+  diagnosis was right and the fix is deployed; keeping the old figure would
+  send someone to re-solve it.
+- Retained only as the pointer that the ~273 ms distinct-title tile cost on
+  the software dashboard was a symptom of this volume and should be re-timed
+  before any further index work on migration 0126's expression index.
+- Still open, and genuinely undecided: `whitelist_suggestion` (>=10 devices)
+  and `rare_recent` (<=2 devices) are the same question at opposite prevalence
+  ends, and may belong as one finding with a prevalence attribute. `rare_recent`
+  remains device-scoped by design (recency is a per-device fact), so this is a
+  finding-model question, not a re-subjecting one.
 
 ## Source-to-entity-type mapping is data for Ninja and code everywhere else
 
@@ -413,30 +447,63 @@ The `Credit Card` layout (7 records) must be excluded, alongside whatever
 replaces the People exclusion. Card data has no place in the observation store
 and nothing consumes it.
 
-## Entity instantiation — the shared prerequisite (asset, software, user)
+## Entity instantiation — `asset` DONE; `software` resolved elsewhere; `user` starved
 
-Six entity classes are registered; **two are instantiated**. `device` (5,318)
-and `client` (76) work. `asset`, `software`, `user`, `peripheral` and
-`service` hold zero rows, and `unknown` is a fallback.
+Measured 2026-08-12: eight classes registered, **three instantiated**.
 
-This is not one domain's problem. It blocks, simultaneously:
+| class | live entities | |
+| --- | --- | --- |
+| device | 5,375 | working |
+| **asset** | **1,425** | **done 2026-08-10** |
+| client | 76 | working |
+| software / user / peripheral / service / unknown | 0 | see below |
 
-- ADR-0015 step 3 (software findings onto real subjects, 137,534 rows -> 1,782)
-- the Users capability (3,402 people ingested daily, nowhere to land)
-- ADR-0013's outstanding "give the unanchored CMDB records the asset class"
-- ADR-0012 §5's `publisher -> product -> software+version` hierarchy
+**The generic anchor-creation gap is closed.** `promote_candidate` (`b53957b`,
+2026-08-07) added the missing verb — creation had been hardcoded per class in
+`resolver.py` and migration 0101 while attachment was already generic. Layout-
+scoped promotion (`65cada0`, 2026-08-10) then created the 1,425 asset entities,
+each carrying `created_reason = candidate.promote:<candidate-uuid>`.
 
-`asset` is the sharpest case: **4,843 candidates already exist**, produced by
-the E4 projector, proposing a class with zero rows. Detection works; the target
-does not exist.
+**Three of the four "simultaneously blocked" items in the original entry are
+resolved:**
 
-### What is missing: generic anchor creation
+- ADR-0015 step 3 shipped 2026-08-10 (`6c4ac9f`) — it did **not** need entity
+  instantiation; software+version got its identity from the reference catalog
+  instead. See the ADR-0015 section.
+- ADR-0012 §5's hierarchy exists in `catalog.*` as global reference data, per
+  the 2026-08-10 amendment. Not an entity-store item.
+- ADR-0013's "give the unanchored CMDB records the asset class" is done for the
+  seven device/asset layouts; the remainder are deliberately unpromoted.
+- The Users capability remains genuinely blocked — see below and its own entry.
 
-Entity creation is hardcoded per class in two places — `resolver.py`'s
-`_create_device_anchor`, and `sync_entity_source_links_from_observations()`
-which anchors clients and devices in SQL (migration 0101, lines 175 and 197).
-Attachment is already generic; **creation is not**. That is the single build
-item.
+### Asset: 3,435 candidates remain `observed_only`, each for a recorded reason
+
+Not a queue to work through. Measured by layout 2026-08-12: Auvik 2,863
+(`second_hand` provenance — relayed vendor, never promoted to first-party),
+Locations 267 (a location; class not registered), Applications 124 (software),
+Client Summary 48 (client attributes, not an entity), Remote Access 45 (a
+relationship, not an entity), Managed Certificate 13 (own class, not
+registered), Credit Card 7 (should be excluded from ingest), and 68 across
+Content Filtering / Wireless / File Share / Email / Vendor / Backup. Promoting
+these would make `asset` a catch-all for devices, locations, software and
+certificates.
+
+### Software: not an entity-store problem at all
+
+Resolved by ADR-0012's 2026-08-10 amendment — software is global reference
+data, not an owned entity. `entity_classes.software` and
+`entity_types.software` stay registered and stay empty by decision. Nothing to
+build here.
+
+### User: no usable identity signal without Hudu
+
+Measured 2026-08-12 from Ninja: 4,528 devices carry a `last_user`, 3,315
+distinct values, **0 containing `@` and 0 containing a domain backslash**.
+`client_users` and `client_user_links` both hold 0 rows. A bare username with
+no email, domain or display name cannot establish a person: there is no way to
+tell whether the same string at two clients is one person or two. Hudu People
+is the only source with real identity records and is excluded at ingest.
+See the Users capability entry.
 
 ### Identity rules — determined by measurement, not preference
 
@@ -447,22 +514,28 @@ right when it does not — which is exactly the 4,843 unlinked candidates.
 Rule: linked -> attach to the device's entity; unlinked -> own asset entity.
 Client-scoped.
 
-**software** — **not in the candidate pipeline at all.** Measured 2026-08-07:
-0 software observations, 0 software candidates, 0 software source links,
-against 484,636 rows in `software_installations_current`. Software ingest
-writes straight to a typed table, so `promote_candidate` (added `b53957b`)
-does nothing for it. Software identity is *derived* -- (publisher, product,
-version) is deterministic from the installation rows and fully rebuildable --
-so per `docs/glossary.md` it is a **projector**, not a promotion. Asset and
-software need different machinery; do not plan them as one track.
+**software** — **SUPERSEDED 2026-08-10: software is not an entity.** ADR-0012's
+amendment places `publisher`, `product` and `software+version` as global
+reference data beside `intel.cves`, not in `operations.entities`. The
+observation below stands as history and its conclusion was right for the wrong
+destination — software identity is derived, not learned, so it was never a
+promotion — but the sizing and the "first real use of the relationship engine"
+framing no longer apply.
 
-Measured scale, 2026-08-07, so this is settled and is **not** a partitioning
-question: 4,863 raw publishers, 20,876 products, 40,261 product+versions =
-~66,000 entities at the measured 417 B/row = **~27 MB**; 484,636 installation
-relationships at the measured 660 B/row = **~320 MB**, against a 46 GB
-database and a `software_installations_current` already at 1,400 MB. All eight
-E4 relationship tables exist and hold **0 rows**, so software installations
-would be that engine's first real use -- that, not storage, is the risk.
+The retracted framing, kept so it is not re-derived: 4,863 publishers, 20,876
+products, 40,261 product+versions were sized at ~66,000 entities / ~27 MB, and
+484,636 installations at ~320 MB, with the note that "all eight E4 relationship
+tables hold 0 rows, so software installations would be that engine's first real
+use." **They will not be.** ADR-0012's amendment states the installation
+relationship already exists and needs no generic rebuild; measured 2026-08-12,
+`software_installations_current` carries `software_version_id` on 490,732 of
+490,732 rows plus `install_location` and `install_date`. The E4 tables stay
+empty, and agent presence — not software — is the relationship engine's
+intended first use per ADR-0013.
+
+Original measurement, still valid: 0 software observations, 0 candidates, 0
+source links, so `promote_candidate` (`b53957b`) does nothing for software.
+Asset and software need different machinery; do not plan them as one track.
 
 Base data is clean: 0 installs missing a name, 4 missing a publisher, 13,817
 (2.9%) missing a version, and only **99** (name, version) pairs claimed by more
@@ -518,21 +591,86 @@ needs settling with it — `entity_attribute_definitions` already has a
 sensitivity classification and an audited reveal path from E5.2, which is the
 mechanism to use rather than a new one.
 
-### Order
+### Order — superseded by outcome
 
-1. **asset** — candidates exist, intent already stated in ADR-0013, and it is
-   client-scoped like the two classes that already work, so it exercises
-   generic promotion without also introducing unscoped entities.
-2. **software** — unblocks ADR-0015 step 3 and the CVE version work.
-3. **user** — highest cost of error, and the only class where a wrong merge
-   conflates two real people.
+1. ~~**asset**~~ — **done** 2026-08-10, 1,425 entities.
+2. ~~**software**~~ — **withdrawn.** It was ordered here to unblock ADR-0015
+   step 3 and the CVE version work; both shipped on 2026-08-10 without it, and
+   ADR-0012's amendment removed the requirement entirely.
+3. **user** — the only one left, and blocked on input rather than order:
+   without Hudu People there is no identity signal to instantiate from.
 
 `peripheral` and `service` stay registered and empty; nothing feeds them.
+`peripheral` does have one registered relationship type
+(`peripheral_attached_to_device`, enabled), which is the only row in
+`relationship_types` — a registered edge for a class with no entities.
 
-## Software ecosystem — work defined by ADR-0015
+## Software ecosystem — ADR-0015 steps 1-6 COMPLETE; one clause unimplemented
 
-Ordered; each step depends on the one before. ADR-0015 applies ADR-0012 §5
-(`publisher -> product -> software+version`, installation as a relationship)
+**All six ordered steps are deployed** as of 2026-08-11. Verified against
+production 2026-08-12; the step list below is retained as the record of what
+was done, not as pending work.
+
+| step | landed |
+| --- | --- |
+| 1. Import the legacy decision corpus | `97936c4`, `4ed7687`, `23d071c` |
+| 2. Split trust out of `categories` | `0533779`, migration 0127 |
+| 3. Findings onto real subjects | `6c4ac9f` — 137,540 rows to 2,719 |
+| 4. Bind `cve_match` to the version | `d2964d9`, migration 077 |
+| 5. Resolve `software_catalog.eol_date` | endoflife corpus + managed rules, migrations 078/081/082/087/088 |
+| 6. Schedule the classifier | `c853a6e`, 24h cadence, catch-up verified live |
+
+**Superseded — "instantiate `publisher` and `product` entities" is no longer
+the larger unscheduled piece.** ADR-0012's 2026-08-10 amendment places them,
+and software+version, as global reference data beside `intel.cves` rather than
+rows in `operations.entities`. They exist today in `catalog.*`: 4,650
+publishers, 21,438 products, 40,795 versions, measured 2026-08-12. See the
+retired unscoped-entities item above.
+
+**The installation relationship is also complete**, contrary to the framing
+this section previously carried. ADR-0012's amendment states it "already
+exists" and needed only the title strings to gain an identity. Measured
+2026-08-12: `software_installations_current` holds 490,732 rows with
+`software_version_id` populated on **490,732 — zero unlinked** — and carries
+`install_location` and `install_date` as relationship attributes. It does not
+need rebuilding on the generic E4 relationship tables.
+
+### Still open: ADR-0015 §2 vs the implementation on `install_path_suspicious`
+
+ADR-0015 §2 assigns three subject kinds, and one was not implemented:
+
+- ADR-0015 §2: "**Installation facts** — `install_path_suspicious`. The path
+  belongs to the device-and-software pair, so the finding belongs to the
+  **relationship**." It adds that this "becomes the platform's first finding on
+  a relationship rather than an entity", and that whether a relationship
+  subject needs more than `subject_type` is "an implementation question this
+  record does not settle".
+- `.work/plan.md` states the opposite: "`rare_recent` and
+  `install_path_suspicious` stay on `subject_type='device'` — recency and
+  install path are per-device facts."
+- Measured 2026-08-12: `install_path_suspicious` is `subject_type='device'`,
+  51 open. The plan's position was implemented; nothing records that an
+  Accepted ADR was overruled.
+
+Blocker to settle first: `operations.findings.subject_id` is a uuid, and
+`software_installations_current` has **no id column** — it is keyed by device
+plus title strings. A relationship subject therefore needs either a minted
+installation id or a composite subject, which is exactly the implementation
+question ADR-0015 left open. Decide the subject identity before emitting.
+
+`rare_recent` is not part of this: recency is a per-device fact and ADR-0015
+does not place it on the relationship.
+
+### Still open: the prevalence question
+
+`whitelist_suggestion` (>=10 devices) and `rare_recent` (<=2 devices) are the
+same question at opposite prevalence ends, possibly one finding with a
+prevalence attribute. Genuinely undecided. Recorded 2026-08-06 by a Claude
+session; no user decision on record.
+
+### Original step list, retained as the record
+
+Ordered; each step depended on the one before. ADR-0015 applies ADR-0012 §5
 and the glossary's identity test to the software domain.
 
 1. **Import the legacy decision corpus.** 418 decisions in
@@ -637,42 +775,40 @@ finding with a prevalence attribute.
 - Resolve together with the item above — if `v_device_current` lands and the
   typed tables retire, the copy step disappears rather than being rewritten.
 
-## Unscoped (universal) entities — nullable tenant, third scope_kind
+## Unscoped (universal) entities — RETIRED, not deferred
 
-- ADR-0012 section 4: ownership determines scope. Software, software+version,
-  CVE and publisher are universal, not tenant property, so they should not
-  carry a tenant. Today `operations.entities.tenant_id` is NOT NULL and
-  `scope_kind` allows only `tenant` / `client`.
-- **Not a blocker for E6.** Verified 2026-08-05: E6 concerns Client and Device
-  anchors, both tenant-scoped, and both are already fully populated (0 NULL
-  `entity_id` across 5,293 devices and 76 clients). This is parallel work.
-- Measured state: `scope_kind` tenant 76 / client 5,293; PostgreSQL 16.14;
-  `ck_entities_scope_owner` pairs scope_kind with client_id presence.
-- **It is bigger than "make the column nullable".** Two findings from the
-  2026-08-05 investigation:
-  1. `tenant_id` is inherited from the `TenantScopedModel` abstract base shared
-     by many models. `Entity` has to override the field; the column cannot
-     simply be altered in isolation.
-  2. `operations.entities` has **FORCE ROW LEVEL SECURITY**, and the
-     `tenant_isolation` policy is `FOR ALL` with `tenant_id =
-     current_setting('operations.tenant_id', true)::bigint` in **both** USING
-     and WITH CHECK. A NULL tenant evaluates to NULL, so a global row would be
-     invisible to every role including the table owner. The policy must be
-     replaced in the same migration or the entities silently vanish — the exact
-     failure class ADR-0012's "nothing hidden" rule exists to prevent.
-- Shape that survived review: `USING (tenant_id IS NULL OR tenant_id =
-  current_setting(...))`. Checked and clean: the unique indexes
-  `(tenant_id, id)` and `(tenant_id, id, entity_class_id)` stay sound with a
-  NULL tenant because `id` is already the primary key, so no
-  `NULLS NOT DISTINCT` is required. Nullable `tenant_id` is also consistent
-  with the MATCH SIMPLE composite-FK decision already taken.
-- Open decision: the WITH CHECK half. Either any tenant's ingest may create a
-  global entity (simplest, and software/CVE ingest is already tenant-agnostic,
-  but one tenant then defines a universal record) or a dedicated role may,
-  which does not exist yet. Default leaning is the former.
-- Trigger: explicit approval. This is an RLS change on a forced-RLS table and
-  deserves its own commit and its own deploy, separate from anything else in
-  flight.
+**Do not implement this. ADR-0012's 2026-08-10 amendment retires this item by
+name**, in its own consequences: "The `.work/backlog.md` item 'Unscoped
+(universal) entities — nullable tenant, third scope_kind' is retired as
+unnecessary rather than deferred: it existed to make software fit a store
+software does not belong in."
+
+The item proposed making `operations.entities.tenant_id` nullable, adding a
+third `scope_kind`, and replacing the RLS policy, so that software, publisher,
+product and CVE could be held as unscoped entities. Two amendments removed the
+need:
+
+1. **The referential mechanism was wrong.** §4 claimed a composite foreign key
+   under `MATCH SIMPLE` stands down when the *referenced* row has a NULL
+   tenant. PostgreSQL relaxes on a NULL *referencing* column instead. **29
+   composite foreign keys** reference `operations.entities(tenant_id, id)`,
+   including `entity_relationships`. A row `(NULL, id)` can never satisfy a
+   lookup for `(1, id)`, so the migration would have produced entities nothing
+   in the schema could reference — failing at the first relationship insert
+   after deploy, not at migration time, because every DDL statement succeeds.
+2. **The placement was wrong.** Software is not owned — a client owns a
+   licence, not the product. `publisher`, `product` and `software+version` are
+   global reference data beside `intel.cves`, which ADR-0012 §7 already
+   exempts from the entity model.
+
+Consequently: no nullable `tenant_id`, no third `scope_kind`, no RLS policy
+replacement, and the 29 composite foreign keys are untouched. Verified
+2026-08-12: `operations.entities.tenant_id` is still `NOT NULL`, which is now
+correct by decision rather than an outstanding gap.
+
+Retained only so the proposal is not rediscovered and re-planned. A **licence**
+is a scoped asset and does belong in `operations.entities` under the `asset`
+class; that is separate work and carries no unscoped-entity requirement.
 
 ## 33 devices carry a form factor with no supporting evidence
 
