@@ -3,24 +3,30 @@
 ## E5.3 scoped maintenance — Issues filter-aware magnitude summary
 
 **Status:** implementation and local validation complete; awaiting separate
-commit/push approval. This is a small restoration on top of the deployed
-workflow-oriented Issues redesign; it does not alter finding actions,
-software-decision ownership, or any EOL behavior.
+approved commit/push/deploy as release `0.115.1`. This is a small restoration
+on top of the deployed workflow-oriented Issues redesign; it does not alter
+finding actions, software-decision ownership, or any EOL behavior.
 
 **Goal:** restore a quick sense of the magnitude of the current Issues result
-set after any filter is applied.
+set after any filter is applied, including its fraction of the relevant
+baseline.
 
 **Scope:** `apps/core/views.py`, `templates/findings_queue.html`, focused
-Issues tests, and this plan. Add a compact summary row for matching findings,
-actionable findings, affected devices, affected clients, and software policy
-candidates. Values must use the already filtered relations behind the page and
+Issues tests, the root release authorities, and this plan. Extend the compact
+summary row for matching findings, actionable findings, affected devices,
+affected clients, and software policy candidates with a fraction and
+percentage. Values must use the already filtered relations behind the page and
 exports.
 
 **Out of scope:** changing classifiers or finding state, adding a new filter,
 schema/index migrations, category/taxonomy work, EOL changes, or deployment
 until separately authorized.
 
-**Decision:** the summary describes the active filter, not global fleet totals.
+**Decision:** the numerator always describes the active filters. Findings,
+actionable findings, and policy candidates are compared with their active
+status/snooze baseline before narrow filters; affected devices and clients are
+compared with the current non-deleted fleet population. Every denominator is
+labelled, so a filtered subset is never mistaken for a fleet-wide total.
 Affected devices and clients come from the existing action-finding device
 impact relation; software policy candidates remain a title-level count and are
 shown separately rather than pretending to be device incidents.
@@ -33,14 +39,20 @@ count but removed the prior high-level cards, making filtered magnitude harder
 to scan. The page now exposes a Current result scope card row for matching
 findings, actionable findings, affected devices, affected clients, and policy
 review candidates. It reuses the existing action-finding device-impact list,
-so no extra per-filter source relation is introduced.
+so no extra per-filter source relation is introduced. Each card now displays
+the filtered value plus a labelled numerator/denominator and percentage:
+findings/actionable/policy use the matching status/snooze scope before narrow
+filters, while devices/clients use the current non-deleted fleet population.
 
-**Validation completed:** focused Issues tests and the full Operations suite
-(55 passed, 2 expected Postgres-integration skips); Django checks, migration
-drift, Python compile, template loading, and `git diff --check` passed.
+**Validation completed:** focused Issues tests (6 passed) and the full
+Operations suite (56 passed, 2 expected Postgres-integration skips); Django
+checks, migration drift, Python compile, template loading, and `git diff
+--check` passed. The test runner reported only existing Django deprecation
+warnings.
 
-**Next action:** obtain separate approval to commit and push/deploy. No
-migration is included or expected.
+**Next action:** commit release `0.115.1`, push `origin` then the required
+mirror, immediately redeploy through Portainer, and verify the rendered Issues
+request. No migration is included or expected.
 
 ## E5.3 scoped maintenance — Issues workflow-oriented redesign
 

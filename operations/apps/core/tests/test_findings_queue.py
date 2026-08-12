@@ -124,8 +124,19 @@ def test_findings_queue_template_exposes_device_csv_and_grouped_types():
     assert "Review decision" in template
     assert "Installed devices" in template
     assert "Current result scope" in template
-    assert "result_scope_counts.devices" in template
-    assert "result_scope_counts.clients" in template
+    assert "result_scope_cards" in template
+    assert "card.count }} / {{ card.total" in template
+    assert "card.percentage" in template
+
+
+def test_findings_scope_cards_compare_filtered_counts_with_labelled_baselines():
+    source = Path("apps/core/views.py").read_text(encoding="utf-8")
+
+    assert "status_scope_qs = qs" in source
+    assert "fleet_device_total" in source
+    assert "fleet_client_total" in source
+    assert "result_scope_cards" in source
+    assert '"total_label": total_label' in source
 
 
 def test_software_policy_candidates_are_not_managed_as_incidents():

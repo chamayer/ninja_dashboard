@@ -2,6 +2,17 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.115.1] — 2026-08-12 — Issues scope is measurable at a glance
+
+### Changed
+
+- The Issues page's filtered scope cards now show both the count and a
+  labelled fraction/percentage. Findings, actionable findings, and software
+  policy candidates are compared with the selected status/snooze population;
+  affected devices and clients are compared with the current fleet population.
+  This makes the magnitude of a filter immediately visible without implying
+  every card is a fleet-wide total.
+
 ## [0.115.0] — 2026-08-06 — Software page: 3.2s to ~1.1s
 
 ### Fixed

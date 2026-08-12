@@ -2434,6 +2434,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     # Hide snoozed issues by default; user can toggle to see them.
     if not show_snoozed and status_filter not in ("all",):
         qs = qs.filter(Q(snoozed_until__isnull=True) | Q(snoozed_until__lt=timezone.now()))
+    status_scope_qs = qs
 
     if category_filter:
         qs = qs.filter(finding_type__category__name=category_filter)
@@ -2465,11 +2466,13 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     # the device is online. Applying the same predicate before aggregates and
     # row selection keeps every count and export aligned with the visible set.
     device_subject = Q(subject_type=Finding.SubjectType.DEVICE)
-    qs = qs.exclude(
+    coalesced_offline_q = (
         Q(finding_type__name__in=_COALESCED_OFFLINE_FINDING_TYPES)
         & device_subject
         & ~Q(subject_id__in=_online_device_ids())
     )
+    status_scope_qs = status_scope_qs.exclude(coalesced_offline_q)
+    qs = qs.exclude(coalesced_offline_q)
 
     # Online is a device-state filter. Software findings are unscoped facts,
     # not offline devices, and are therefore excluded when this filter is set.
@@ -2504,13 +2507,66 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     policy_matching = policy_qs.count()
     affected_devices = _affected_device_rows(actionable_qs)
     affected_client_count = len({row["client"] for row in affected_devices if row["client"]})
-    result_scope_counts = {
-        "findings": total_matching,
-        "actionable": actionable_matching,
-        "devices": len(affected_devices),
-        "clients": affected_client_count,
-        "policy_candidates": policy_matching,
-    }
+    status_scope_total = status_scope_qs.count()
+    status_scope_actionable_total = status_scope_qs.exclude(
+        finding_type__name__in=_SOFTWARE_POLICY_CANDIDATE_TYPES
+    ).count()
+    status_scope_policy_total = status_scope_qs.filter(
+        finding_type__name__in=_SOFTWARE_POLICY_CANDIDATE_TYPES
+    ).count()
+    fleet_device_total = Device.objects.filter(tenant_id=1, deleted_at__isnull=True).count()
+    fleet_client_total = Client.objects.filter(tenant_id=1, deleted_at__isnull=True).count()
+    status_scope_label = "all" if status_filter == "all" else status_filter.replace("_", " ")
+
+    def scope_card(label: str, count: int, total: int, total_label: str, note: str) -> dict:
+        """Build a labelled filtered-count fraction for the Issues summary."""
+        percentage = f"{(100 * count / total):.1f}%" if total else "0%"
+        return {
+            "label": label,
+            "count": count,
+            "total": total,
+            "total_label": total_label,
+            "percentage": percentage,
+            "note": note,
+        }
+
+    result_scope_cards = [
+        scope_card(
+            "Findings",
+            total_matching,
+            status_scope_total,
+            f"{status_scope_label} findings",
+            "matching the active filters",
+        ),
+        scope_card(
+            "Actionable",
+            actionable_matching,
+            status_scope_actionable_total,
+            f"{status_scope_label} actionable findings",
+            "incident or remediation work",
+        ),
+        scope_card(
+            "Devices",
+            len(affected_devices),
+            fleet_device_total,
+            "fleet devices",
+            "affected by actionable findings",
+        ),
+        scope_card(
+            "Clients",
+            affected_client_count,
+            fleet_client_total,
+            "fleet clients",
+            "with affected devices",
+        ),
+        scope_card(
+            "Policy review",
+            policy_matching,
+            status_scope_policy_total,
+            f"{status_scope_label} policy candidates",
+            "software decision candidates",
+        ),
+    ]
 
     if request.GET.get("format") == "devices_csv":
         return csv_response(
@@ -2906,7 +2962,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             "total_matching": total_matching,
             "actionable_matching": actionable_matching,
             "policy_matching": policy_matching,
-            "result_scope_counts": result_scope_counts,
+            "result_scope_cards": result_scope_cards,
             "policy_rows": policy_rows,
             "policy_rows_truncated": policy_matching > len(policy_rows),
             "affected_device_count": len(affected_devices),
