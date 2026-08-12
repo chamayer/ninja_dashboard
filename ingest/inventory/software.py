@@ -72,6 +72,17 @@ def run(client: NinjaClient, df: str | None = None) -> int:
                             "version": version or None,
                             "location": (item.get("location") or "").strip() or None,
                             "install_date": item.get("installDate"),
+                            # Fetched on every cycle and previously discarded.
+                            # productCode is an MSI GUID (~94% populated) and
+                            # is the only stable product identity Ninja gives
+                            # us -- canonical_name is a display string.
+                            # isSystemComponent marks OS components nobody
+                            # installed (~8%). `timestamp` is deliberately not
+                            # kept: it is the query's own clock, and
+                            # last_observed_at already records when we saw it.
+                            "product_code": (item.get("productCode") or "").strip() or None,
+                            "size_bytes": item.get("size") or None,
+                            "is_system_component": item.get("isSystemComponent"),
                         }
                     ),
                     "batch_id": batch_id,
@@ -184,6 +195,13 @@ def _write_installation_current(cur, rows: list[dict]) -> None:
             "location": canonical.get("location"),
             "install_date": canonical.get("install_date"),
         }
+        # product_code / size_bytes / is_system_component are deliberately NOT
+        # in `material`. The hash decides whether an installation materially
+        # changed; adding them would change every hash on the first run after
+        # deploy and close/reopen all 490,733 SCD-2 intervals in one cycle.
+        # They describe the product rather than the installation event --
+        # product_code and is_system_component are stable per product, and size
+        # tracks version, which is already hashed. See migration 091.
         content_hash = material_hash(material)
         identity = {
             "tenant_id": row["tenant_id"],
@@ -265,6 +283,9 @@ def _write_installation_current(cur, rows: list[dict]) -> None:
                 "version": material["version"],
                 "install_location": material["location"],
                 "install_date": material["install_date"],
+                "product_code": canonical.get("product_code"),
+                "size_bytes": canonical.get("size_bytes"),
+                "is_system_component": canonical.get("is_system_component"),
                 "first_observed_at": row["observed_at"],
                 "last_observed_at": row["observed_at"],
                 "refreshed_at": row["observed_at"],
@@ -288,6 +309,9 @@ def _write_installation_current(cur, rows: list[dict]) -> None:
             "version",
             "install_location",
             "install_date",
+            "product_code",
+            "size_bytes",
+            "is_system_component",
             "last_observed_at",
             "refreshed_at",
             "stale_since",
