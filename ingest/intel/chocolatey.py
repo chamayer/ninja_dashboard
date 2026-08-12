@@ -78,7 +78,7 @@ def _titles_needing_refresh() -> list[str]:
                 WHERE tenant_id = %s AND source = 'chocolatey' AND canonical_name <> ''
                 GROUP BY LOWER(canonical_name)
             )
-            SELECT DISTINCT sic.canonical_name
+            SELECT sic.canonical_name
             FROM operations.software_installations_current sic
             LEFT JOIN latest_signal ls ON ls.canonical = LOWER(sic.canonical_name)
             WHERE sic.tenant_id = %s
@@ -86,7 +86,14 @@ def _titles_needing_refresh() -> list[str]:
               AND sic.stale_since IS NULL
               AND sic.canonical_name <> ''
               AND (ls.observed_at IS NULL OR ls.observed_at < %s)
-            ORDER BY sic.canonical_name
+            GROUP BY sic.canonical_name
+            -- Most-installed first, not alphabetical. Each run is capped at
+            -- _MAX_TITLES_PER_RUN, so the ordering decides what the cap buys.
+            -- Alphabetical spent a whole run on '. .', '1.1.3.4' and
+            -- '4500_help': measured 2026-08-12, ~225 titles processed for 8
+            -- writes, a 3.5% hit rate, while the 544 titles that carry 73% of
+            -- the fleet's installs sat untouched behind the digits.
+            ORDER BY COUNT(DISTINCT sic.device_id) DESC, sic.canonical_name
             """,
             (_TENANT_ID, _TENANT_ID, datetime.now(timezone.utc) - _STALE_AFTER),
         )
@@ -135,12 +142,26 @@ def _search(client: httpx.Client, canonical: str) -> tuple[list[str], list[str]]
     if not entries:
         return [], []
 
-    # Prefer an exact normalised title match; otherwise the first result, which
-    # the gallery orders by relevance. Returning the best single match keeps a
-    # tag attributable to a package.
+    # Exact normalised match only. No relevance fallback, no similarity
+    # threshold: both were measured against 31 real titles on 2026-08-12 and
+    # neither separates right from wrong here.
+    #
+    #   1.1.3.4                -> dotnetcore-3.1-sdk-4xx   ratio 0.18  WRONG
+    #   3utools                -> yuanliao-utools          ratio 0.57  WRONG
+    #   microsoft edge update  -> microsoft-edge-insider   ratio 0.71  WRONG
+    #   25415inkscape.inkscape -> InkScape                 ratio 0.55  right
+    #
+    # The one correct fuzzy match scores *below* the worst wrong one, so any
+    # threshold that rejects the errors also rejects it. At 0.75+ the fuzzy
+    # path accepts exactly what exact matching accepts and nothing more.
+    # Writing nothing is the honest outcome: an unmatched title is a title
+    # Chocolatey does not carry, which is a fact worth preserving rather than
+    # papering over with the gallery's nearest guess.
     wanted = _normalise(canonical)
-    best = next((e for e in entries if _normalise(e[0]) == wanted), entries[0])
-    return sorted(set(best[1])), [t for t, _ in entries if t]
+    match = next((e for e in entries if _normalise(e[0]) == wanted), None)
+    if match is None:
+        return [], [t for t, _ in entries if t]
+    return sorted(set(match[1])), [t for t, _ in entries if t]
 
 
 def _write_signal(canonical: str, tags: list[str], titles_found: list[str]) -> int:

@@ -66,10 +66,27 @@ def test_tags_are_read_per_entry_not_across_the_response() -> None:
     assert "_TAG_ELEMENT.findall(r.text)" not in code
 
 
-def test_one_package_is_chosen_rather_than_all_of_them() -> None:
+def test_only_an_exact_match_is_accepted() -> None:
+    """Measured 2026-08-12 over 31 real titles: the best correct fuzzy match
+    (25415inkscape.inkscape -> InkScape, 0.55) scores below the worst wrong one
+    (microsoft edge update -> microsoft-edge-insider, 0.71), so no threshold
+    separates them. Writing nothing beats guessing."""
     code = _code_only()
     assert "_normalise(canonical)" in code
-    assert "entries[0]" in code, "needs a defined fallback when nothing matches exactly"
+    assert "if match is None:" in code
+    assert "entries[0]" not in code, (
+        "a relevance fallback accepts the gallery's nearest guess for titles "
+        "Chocolatey does not carry -- 1.1.3.4 became dotnetcore-sdk"
+    )
+    assert "difflib" not in code, "similarity thresholds were measured and rejected"
+
+
+def test_refresh_order_is_by_install_count() -> None:
+    """Each run is capped, so ordering decides what the cap buys. Alphabetical
+    spent a run on '. .' and '1.1.3.4' at a 3.5% hit rate."""
+    code = _code_only()
+    assert "ORDER BY COUNT(DISTINCT sic.device_id) DESC" in code
+    assert "ORDER BY sic.canonical_name\n" not in code
 
 
 def test_normalise_ignores_punctuation_and_case() -> None:
