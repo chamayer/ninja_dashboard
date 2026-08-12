@@ -38,6 +38,19 @@ Additional built-ins:
 Every run is a full refresh (``DELETE tenant + INSERT``) and ends by
 issuing ``REFRESH MATERIALIZED VIEW operations.v_software_safety`` so
 the software pages see fresh scores immediately.
+
+Cost, and why it is no longer assumed: the full refresh does one
+``affected_cpes ?|`` lookup per unit of work, and both sides of that grew
+sharply in August 2026 without anything recording the effect. Migration 077
+moved the unit of work from ~21k titles to ~40k product+versions, and the
+``d0b8aea`` backfill took ``intel.cpes`` from 164,860 rows (ADR-0015,
+2026-08-06) to 1,799,966 (measured 2026-08-12) -- a 10.9x increase. Migration
+090 adds ``intel_ingest_status.last_duration_seconds`` so this run's cost is
+observable instead of inferred. Whether the full rebuild should become
+incremental is a separate, measured decision -- see ``.work/backlog.md``; do
+not make the matcher incremental on the strength of this note alone, because a
+full rebuild is what currently guarantees no stale match survives a CVE
+withdrawal.
 """
 
 from __future__ import annotations
@@ -308,13 +321,27 @@ def _match_and_upsert() -> int:
             # filtering here would throw away the rows other versions need.
             cpe_rows: list[tuple[str, str | None]] = []
             if tier1_pairs:
-                keys = [f"{v}|{p}" for v, p in tier1_pairs]
+                # Joined on the two columns separately, NOT on
+                # `LOWER(vendor) || '|' || LOWER(product)`. The concatenated
+                # form is a different expression from the index
+                # `cpes_vendor_product_idx ON (lower(vendor), lower(product))`,
+                # so PostgreSQL could not use it and fell back to a parallel
+                # sequential scan of the whole table -- once per title, ~21k
+                # times per run. That was survivable at 164,860 CPE rows and
+                # stopped being so when the d0b8aea backfill took the table to
+                # 1,799,966. Measured 2026-08-12 on the same input: seq scan
+                # over 1.79M rows versus a 20 ms index scan, returning an
+                # identical 9,662 rows.
+                pairs = sorted(tier1_pairs)
                 cur.execute(
                     """
-                    SELECT cpe23, version FROM intel.cpes
-                     WHERE (LOWER(vendor) || '|' || LOWER(product)) = ANY(%s::text[])
+                    SELECT c.cpe23, c.version
+                      FROM intel.cpes c
+                      JOIN unnest(%s::text[], %s::text[]) AS k(vendor, product)
+                        ON LOWER(c.vendor) = k.vendor
+                       AND LOWER(c.product) = k.product
                     """,
-                    (keys,),
+                    ([v for v, _ in pairs], [p for _, p in pairs]),
                 )
                 cpe_rows.extend(cur.fetchall())
             if tier2_products:
