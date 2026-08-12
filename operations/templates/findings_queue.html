@@ -32,6 +32,37 @@
 </div>
 
 <div class="card">
+    <h2 class="section-label">Current result scope</h2>
+    <div class="tile-grid">
+        <div class="tile">
+            <div class="tile-label">Findings</div>
+            <div class="tile-value">{{ result_scope_counts.findings }}</div>
+            <div class="tile-note">matching the active filters</div>
+        </div>
+        <div class="tile">
+            <div class="tile-label">Actionable</div>
+            <div class="tile-value">{{ result_scope_counts.actionable }}</div>
+            <div class="tile-note">incident or remediation work</div>
+        </div>
+        <div class="tile">
+            <div class="tile-label">Devices</div>
+            <div class="tile-value">{{ result_scope_counts.devices }}</div>
+            <div class="tile-note">affected by actionable findings</div>
+        </div>
+        <div class="tile">
+            <div class="tile-label">Clients</div>
+            <div class="tile-value">{{ result_scope_counts.clients }}</div>
+            <div class="tile-note">with affected devices</div>
+        </div>
+        <div class="tile">
+            <div class="tile-label">Policy review</div>
+            <div class="tile-value">{{ result_scope_counts.policy_candidates }}</div>
+            <div class="tile-note">software decision candidates</div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
     <form action="" method="get" class="filterbar">
         <div>
             <label>Status</label>

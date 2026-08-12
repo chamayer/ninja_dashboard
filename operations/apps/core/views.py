@@ -2503,6 +2503,14 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     actionable_matching = actionable_qs.count()
     policy_matching = policy_qs.count()
     affected_devices = _affected_device_rows(actionable_qs)
+    affected_client_count = len({row["client"] for row in affected_devices if row["client"]})
+    result_scope_counts = {
+        "findings": total_matching,
+        "actionable": actionable_matching,
+        "devices": len(affected_devices),
+        "clients": affected_client_count,
+        "policy_candidates": policy_matching,
+    }
 
     if request.GET.get("format") == "devices_csv":
         return csv_response(
@@ -2898,6 +2906,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             "total_matching": total_matching,
             "actionable_matching": actionable_matching,
             "policy_matching": policy_matching,
+            "result_scope_counts": result_scope_counts,
             "policy_rows": policy_rows,
             "policy_rows_truncated": policy_matching > len(policy_rows),
             "affected_device_count": len(affected_devices),

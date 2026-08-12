@@ -123,6 +123,9 @@ def test_findings_queue_template_exposes_device_csv_and_grouped_types():
     assert "Software policy candidates" in template
     assert "Review decision" in template
     assert "Installed devices" in template
+    assert "Current result scope" in template
+    assert "result_scope_counts.devices" in template
+    assert "result_scope_counts.clients" in template
 
 
 def test_software_policy_candidates_are_not_managed_as_incidents():

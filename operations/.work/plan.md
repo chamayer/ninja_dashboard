@@ -1,5 +1,47 @@
 # Active Operations implementation plan
 
+## E5.3 scoped maintenance — Issues filter-aware magnitude summary
+
+**Status:** implementation and local validation complete; awaiting separate
+commit/push approval. This is a small restoration on top of the deployed
+workflow-oriented Issues redesign; it does not alter finding actions,
+software-decision ownership, or any EOL behavior.
+
+**Goal:** restore a quick sense of the magnitude of the current Issues result
+set after any filter is applied.
+
+**Scope:** `apps/core/views.py`, `templates/findings_queue.html`, focused
+Issues tests, and this plan. Add a compact summary row for matching findings,
+actionable findings, affected devices, affected clients, and software policy
+candidates. Values must use the already filtered relations behind the page and
+exports.
+
+**Out of scope:** changing classifiers or finding state, adding a new filter,
+schema/index migrations, category/taxonomy work, EOL changes, or deployment
+until separately authorized.
+
+**Decision:** the summary describes the active filter, not global fleet totals.
+Affected devices and clients come from the existing action-finding device
+impact relation; software policy candidates remain a title-level count and are
+shown separately rather than pretending to be device incidents.
+
+**Validation:** focused test, Django checks, migration drift, Python compile,
+template loading, and `git diff --check`. No migration is expected.
+
+**Checkpoint:** the workflow redesign retained a terse actionable/device title
+count but removed the prior high-level cards, making filtered magnitude harder
+to scan. The page now exposes a Current result scope card row for matching
+findings, actionable findings, affected devices, affected clients, and policy
+review candidates. It reuses the existing action-finding device-impact list,
+so no extra per-filter source relation is introduced.
+
+**Validation completed:** focused Issues tests and the full Operations suite
+(55 passed, 2 expected Postgres-integration skips); Django checks, migration
+drift, Python compile, template loading, and `git diff --check` passed.
+
+**Next action:** obtain separate approval to commit and push/deploy. No
+migration is included or expected.
+
 ## E5.3 scoped maintenance — Issues workflow-oriented redesign
 
 **Status:** implementation and local validation complete; commit/push/deploy
