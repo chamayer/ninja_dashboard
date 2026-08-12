@@ -70,6 +70,61 @@ This is the proposed successor to the root-level open-work portion of
   not log the URL on abort, so today a timeout cannot be traced to a page.
 - Trigger: another user-visible 500, or the next Operations performance work.
 
+## Intel matcher slowness — ROOT CAUSE FOUND AND FIXED 2026-08-12
+
+**This entry originally proposed the wrong work.** It framed the matcher as
+structurally too expensive and floated making it incremental or set-based. The
+actual cause was a one-line indexing mistake, now fixed; keeping the original
+framing would have sent someone to redesign a security-relevant path that did
+not need redesigning.
+
+- `matcher.py` filtered CPE candidates on
+  `LOWER(vendor) || '|' || LOWER(product)`. The only usable index is
+  `cpes_vendor_product_idx ON intel.cpes (lower(vendor), lower(product))` —
+  two columns, not a concatenation — so the predicate could not use it and
+  PostgreSQL fell back to a **parallel sequential scan of the whole table,
+  once per installed title**, ~21k times per run.
+- Survivable at 164,860 CPE rows; not after `d0b8aea` took `intel.cpes` to
+  **1,799,966** (10.9x). The code never changed — the table underneath it did.
+- Fixed by joining on the two indexed columns via `unnest`. Measured on
+  production with identical inputs: parallel seq scan removing 596,768 rows per
+  worker, versus a **20 ms index scan**, both returning the same 9,662 rows.
+- Guarded by `ingest/tests/test_matcher_uses_cpe_index.py`, verified to fail
+  when the concatenated form is reintroduced. The regression is invisible
+  otherwise — the query stays *correct* and merely gets slower as the table
+  grows, which is exactly how it survived the backfill.
+- Migration 090 adds `intel_ingest_status.last_duration_seconds` so the next
+  such drift shows up as a number rather than as someone waiting.
+
+**Still open, and genuinely separate:** `matcher.py` ends with a
+**non-concurrent** `REFRESH MATERIALIZED VIEW operations.v_software_safety`,
+whose inline comment calls the view "small enough that a full rebuild is cheap"
+with no figure behind it. That refresh takes `ACCESS EXCLUSIVE` and is a
+candidate mechanism for the worker-timeout item above. Measure it before
+assuming; that assumption is what this entry got wrong the first time.
+
+**Do not make the matcher incremental** without a separate, measured case. The
+full rebuild (`DELETE tenant + INSERT`) is what guarantees no stale match
+survives a CVE withdrawal or CPE correction, and a silently retained match is
+worse than a slow one.
+
+## Jobs catalog: add the classifier-only entry once `views.py` is free
+
+- `/run/software-classify-only` was added 2026-08-12 and runs the classifier
+  without the intel pre-steps — the same path the scheduler uses, ~45 s against
+  the enriching endpoint's many minutes.
+- It has **no `_JOB_CATALOG` entry**, so an operator cannot see or run it from
+  the Jobs page. That is the exact "built but invisible" pattern the Admin Jobs
+  catalog item below exists to close, and it is deliberate only in timing:
+  `_JOB_CATALOG` lives in `operations/apps/core/views.py`, which had unrelated
+  uncommitted work in the tree at the time, and staging a whole file would have
+  swept that work into an unrelated commit.
+- The entry to add, beside the existing `software-classify` row:
+  id `software-classify-only`, name "Software classifier (no intel refresh)",
+  category `evaluators`, endpoint `run/software-classify-only`, status_key
+  `software_classifier`, status_source `run_log`.
+- Trigger: `views.py` is clean, or the next Jobs-page work — whichever first.
+
 ## Dashboard reporting performance
 
 - Reason deferred: broad historical and compliance cards previously exceeded

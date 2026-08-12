@@ -1,5 +1,79 @@
 # Active root implementation plan
 
+## CURRENT TASK — Intel run cost becomes visible; classifier-only endpoint
+
+**Status:** implemented locally 2026-08-12; not committed, pushed, or deployed.
+
+**Goal:** close two gaps exposed by triggering the classifier manually after
+the ADR-0015 §2 deploy. Neither is a one-off: both would recur every time.
+
+**Gap 1 — the only reachable classifier was the slow one.** The scheduled job
+`run_software_classify_scheduled` skips the intel pre-steps and takes ~45 s
+(measured). The manual endpoint `/run/software-classify` front-loads the
+matcher, Winget and Chocolatey, and there was no HTTP route to the fast path —
+so an operator who had just changed a decision or a rule had no way to re-run
+only the classifier. That asymmetry was introduced by `c853a6e` earlier the
+same day; exposing the scheduled path is the missing half of it.
+
+**Gap 2 — connector cost was unrecorded.** `operations.intel_ingest_status`
+held when a connector ran, whether it succeeded, and what it touched, but never
+how long it took. Asked for an estimate of a running matcher, there was no way
+to answer from data. Meanwhile the matcher's cost grew: migration 077 took its
+unit of work from ~21k titles to ~40k product+versions, and `d0b8aea` took
+`intel.cpes` from 164,860 rows to **1,799,966** — 10.9x — with nothing
+surfacing the effect.
+
+**Scope:** `sql/migrations/090_intel_status_duration.sql`,
+`ingest/intel/status.py`, `ingest/intel/matcher.py` (docstring only),
+`ingest/main.py`, `.work/backlog.md`, this section.
+
+**Gap 3 — the matcher's CPE lookup could not use its index.** Found while
+measuring gap 2. `matcher.py` filtered on
+`LOWER(vendor) || '|' || LOWER(product)`, while the only usable index is
+`cpes_vendor_product_idx ON intel.cpes (lower(vendor), lower(product))` — two
+columns, not a concatenation. PostgreSQL therefore seq-scanned all 1.8M rows
+once per installed title, ~21k times per run. Fixed by joining on the two
+indexed columns through `unnest`. Measured on production with identical
+inputs: parallel seq scan removing 596,768 rows per worker versus a **20 ms
+index scan**, both returning the same 9,662 rows. Guarded by
+`ingest/tests/test_matcher_uses_cpe_index.py`, which was verified to fail when
+the concatenated form is reintroduced.
+
+**Out of scope:** making the matcher incremental (the full rebuild is what
+guarantees no stale match survives a CVE withdrawal), the non-concurrent
+`v_software_safety` refresh, and the `_JOB_CATALOG` entry — all filed in
+`.work/backlog.md`.
+
+**Decisions:**
+
+1. **Duration is recorded in the shared `record_run` wrapper, not in the
+   matcher.** All eleven connectors are covered by one change, and a future
+   slow feed becomes visible without anyone remembering to instrument it.
+   Recorded for failures too — a connector that fails slowly is a different
+   problem from one that fails fast.
+2. **`monotonic()` for the interval, wall-clock for the timestamps.** A clock
+   adjustment mid-run must not produce a negative duration.
+3. **Nullable column, no backfill.** Rows written before 090 have no duration;
+   inventing one would be worse than an honest NULL.
+4. **The matcher is not made incremental here.** Its full rebuild is what
+   guarantees no stale match survives a CVE withdrawal or CPE correction. That
+   is a security-relevant property, and trading it away on the strength of one
+   unmeasured slow run would be exactly the mistake this plan keeps recording.
+   The instrumentation is what makes the later decision measurable.
+
+**Correction to the record:** an earlier reading of `matcher.py` cited its
+"small enough that a full rebuild is cheap" comment as justifying the
+`cve_match` full refresh. It does not — that comment is about the
+non-concurrent `v_software_safety` matview refresh. The growth figures above
+stand; the citation was wrong and is corrected in the module docstring.
+
+**Validation:** `ruff check` clean on all three changed modules, `py_compile`
+and `git diff --check` pass. Migration 090 is an additive nullable column with
+no rewrite (no volatile default, unlike 089) and no grant change.
+
+**Next action:** request approval for one scoped commit covering 090 and the
+endpoint. Any push approval must explicitly include SQL migration 090.
+
 ## CURRENT TASK — `install_path_suspicious` onto the installation (ADR-0015 §2)
 
 **Status:** implemented locally 2026-08-12; not committed, pushed, or deployed.

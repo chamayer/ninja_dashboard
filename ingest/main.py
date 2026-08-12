@@ -875,7 +875,20 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 self._respond(503, b"still starting - try again shortly\n")
                 return
             threading.Thread(target=run_software_classify_once, daemon=True).start()
-            self._respond(202, b"software classify scheduled\n")
+            self._respond(202, b"software classify scheduled (with intel enrichment)\n")
+        elif self.path == "/run/software-classify-only":
+            if not _READY.is_set():
+                self._respond(503, b"still starting - try again shortly\n")
+                return
+            # The classifier without the intel pre-steps -- the same path the
+            # scheduler uses. Exposed because the enriching endpoint above
+            # front-loads the matcher, whose cost grew ~10.9x with the CPE
+            # backfill, so "re-run the classifier" and "refresh intel then
+            # classify" are different jobs with very different durations. An
+            # operator who has just changed a decision or a rule wants this
+            # one; without it the only reachable option was the slow path.
+            threading.Thread(target=run_software_classify_scheduled, daemon=True).start()
+            self._respond(202, b"software classify scheduled (classifier only)\n")
         elif self.path == "/run/patch-classify":
             if not _READY.is_set():
                 self._respond(503, b"still starting - try again shortly\n")
