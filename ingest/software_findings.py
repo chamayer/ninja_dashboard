@@ -125,7 +125,8 @@ def classify(tenant_id: int = _TENANT_ID) -> int:
                 SELECT sic.client_id, sic.device_id, sic.canonical_name,
                        COALESCE(sic.publisher,''), COALESCE(sic.install_location,''),
                        sic.first_observed_at,
-                       p.product_uuid, sv.version_uuid
+                       p.product_uuid, sv.version_uuid,
+                       sic.installation_uuid
                 FROM operations.software_installations_current sic
                 LEFT JOIN catalog.software_versions sv
                        ON sv.id = sic.software_version_id
@@ -148,7 +149,7 @@ def classify(tenant_id: int = _TENANT_ID) -> int:
 
             # Per-device AV product count for multi_av_conflict.
             av_products_per_device: dict[uuid.UUID, set[str]] = {}
-            for client_id, device_id, name, _pub, _loc, _first, _pu, _vu in installs:
+            for client_id, device_id, name, _pub, _loc, _first, _pu, _vu, _iu in installs:
                 entry = catalog.get(name.lower(), {})
                 if "av" in entry.get("categories", []):
                     av_products_per_device.setdefault(device_id, set()).add(name)
@@ -163,9 +164,9 @@ def classify(tenant_id: int = _TENANT_ID) -> int:
             }
 
             for (client_id, device_id, name, publisher, location, first_seen,
-                 product_uuid, version_uuid) in installs:
+                 product_uuid, version_uuid, installation_uuid) in installs:
                 # Subject context for every _emit in this iteration.
-                subj = (scope_by_id, product_uuid, version_uuid)
+                subj = (scope_by_id, product_uuid, version_uuid, installation_uuid)
                 # Decision tier: title-scope (device > client > global) then
                 # publisher-scope (device > client > global).
                 dec = _resolve_decision(decisions, device_id, client_id, name, publisher)
@@ -707,7 +708,8 @@ def _condition_key(tenant_id: int, client_id, device_id, ft_name: str, canonical
     return hashlib.sha256(raw.encode()).hexdigest()[:64]
 
 
-def _subject_for(scope: str, device_id, product_uuid, version_uuid):
+def _subject_for(scope: str, device_id, product_uuid, version_uuid,
+                 installation_uuid=None):
     """Resolve (subject_type, subject_id, client_id_used, key_client, key_device)
     for a finding type's registered scope.
 
@@ -716,7 +718,13 @@ def _subject_for(scope: str, device_id, product_uuid, version_uuid):
     by joining installations. Keeping either in the condition key is what
     produced 134,484 rows for ~1,831 distinct claims.
 
-    Falls back to device scope when the catalogue link is missing rather than
+    `software_installation` is ADR-0015 §2's third subject kind and behaves
+    differently from the two above: the install path belongs to the
+    device-and-software *pair*, so the pair is the identity and neither
+    endpoint is dropped. It is already unique per (device, title), so the
+    condition key needs no client or device component either.
+
+    Falls back to device scope when the required handle is missing rather than
     emitting a finding with a NULL subject. That is visible in the run log as a
     fallback count -- an unlinked installation is a real condition worth
     seeing, not something to swallow.
@@ -725,6 +733,8 @@ def _subject_for(scope: str, device_id, product_uuid, version_uuid):
         return "software_product", product_uuid, None, None, None
     if scope == "software_version" and version_uuid is not None:
         return "software_version", version_uuid, None, None, None
+    if scope == "software_installation" and installation_uuid is not None:
+        return "software_installation", installation_uuid, None, None, None
     return "device", device_id, None, None, None
 
 
@@ -740,13 +750,18 @@ def _emit(cur, tenant_id, ft_id, client_id, device_id, canonical_name,
 def _emit_scoped(cur, tenant_id, ft_id, client_id, device_id, canonical_key,
                  publisher, severity, now, extra_details, emitted_keys,
                  subj=None) -> int:
-    # subj = (scope_by_finding_type_id, product_uuid, version_uuid).
-    # Absent, everything stays device-scoped, which is the pre-0130 behaviour
-    # and the safe default for any caller not yet passing it.
-    scope_by_id, product_uuid, version_uuid = subj or ({}, None, None)
+    # subj = (scope_by_finding_type_id, product_uuid, version_uuid,
+    #         installation_uuid). Absent, everything stays device-scoped, which
+    # is the pre-0130 behaviour and the safe default for any caller not yet
+    # passing it. The 4-tuple is unpacked tolerantly so a 3-tuple caller keeps
+    # working rather than raising.
+    scope_by_id, product_uuid, version_uuid, installation_uuid = (
+        tuple(subj) + (None,) if subj is not None and len(subj) == 3 else
+        (subj or ({}, None, None, None))
+    )
     scope = scope_by_id.get(ft_id, "device")
     subject_type, subject_id, _c, _kc, _kd = _subject_for(
-        scope, device_id, product_uuid, version_uuid
+        scope, device_id, product_uuid, version_uuid, installation_uuid
     )
     key_material = canonical_key
     if subject_type == "device":
@@ -760,7 +775,14 @@ def _emit_scoped(cur, tenant_id, ft_id, client_id, device_id, canonical_key,
         # Version scope needs the version in the key, or two releases of one
         # title collapse onto each other. Key material only -- canonical_key
         # itself stays clean, because it is what finding_details reports.
-        if subject_type == "software_version":
+        #
+        # Installation scope needs it for a sharper reason: the subject is the
+        # (device, title) pair, so dropping client and device from the key
+        # would make the same title on two devices produce one identical key
+        # and silently dedupe the second away in `emitted_keys`. The
+        # installation uuid restores the per-pair identity that the subject
+        # already carries.
+        if subject_type in ("software_version", "software_installation"):
             key_material = f"{canonical_key}@{subject_id}"
     ckey = _condition_key(tenant_id, key_client, key_device, str(ft_id), key_material)
     if ckey in emitted_keys:

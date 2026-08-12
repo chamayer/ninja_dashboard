@@ -1,5 +1,124 @@
 # Active root implementation plan
 
+## CURRENT TASK — `install_path_suspicious` onto the installation (ADR-0015 §2)
+
+**Status:** implemented locally 2026-08-12; not committed, pushed, or deployed.
+
+**Goal:** implement the one clause of ADR-0015 §2 that was never built. The ADR
+assigns three subject kinds and says of the second: "**Installation facts** —
+`install_path_suspicious`. The path belongs to the device-and-software pair, so
+the finding belongs to the **relationship**." Step 3 moved five types to
+software subjects and left this one on `device`, and `.work/plan.md` recorded
+the opposite position ("install path is a per-device fact") without noting that
+an Accepted ADR was being overruled. Measured 2026-08-12: 51 open, all
+`subject_type='device'`.
+
+**Scope:** SQL migration 089 minting `installation_uuid`; an Operations
+migration adding the `software_installation` subject type and repointing the
+`install_path_suspicious` registry row; the emitter's subject resolution;
+closing the 51 device-scoped rows with a recorded cause; focused tests; this
+plan section.
+
+**Out of scope:** `rare_recent` (recency is genuinely per-device and ADR-0015
+does not place it on the relationship), the other six software types, the
+generic E4 relationship tables, and the prevalence question.
+
+**Decisions:**
+
+1. **The subject id is minted and stored, not derived.** Migration 076 already
+   settled this for the catalogue: "a derived id would silently re-identify
+   products on every alias addition, orphaning their findings with no record of
+   when or why." A composed uuid over `(device_id, version_uuid)` fails harder
+   still — the installation PK is
+   `(tenant_id, client_id, device_id, canonical_name)` and **excludes the
+   version**, so an upgrade updates the row in place. A version-derived subject
+   would therefore change on **every software update**, closing and reopening
+   the finding even though the install path never moved.
+2. **The installation row is a durable identity, which is what makes minting
+   safe.** Its PK is the natural key, deletes are soft (`deleted_at`,
+   `deleted_reason`; 0 soft-deleted of 490,733 today), and version is an
+   attribute rather than part of the key. One row per (device, title) survives
+   version upgrades, uninstall/reinstall and re-normalisation.
+3. **The subject stays data, not code.** `finding_types.subject_scope`
+   (migration 0130) already drives subject resolution, and an unknown scope
+   falls back to `device`. Only a registry row and one branch in `_subject_for`
+   change; the detector is untouched.
+4. **Existing rows are closed with a cause, not rewritten.** ADR-0012's
+   "nothing is lost without when and why" applies: the 51 device-scoped rows
+   are resolved with an explicit reason and re-emitted at the new subject.
+
+**Affected files:** `sql/migrations/089_installation_subject_uuid.sql`,
+`operations/apps/core/migrations/0135_software_installation_subject.py`,
+`operations/apps/core/models.py`, `ingest/software_findings.py`, focused ingest
+tests, and this plan section.
+
+5. **Migration 089 keeps 076's one-liner, and the heap rewrite is the
+   measured-cheaper option.** `gen_random_uuid()` is volatile, so PostgreSQL
+   11+'s fast-path `ADD COLUMN ... DEFAULT` does not apply and the table is
+   rewritten under `ACCESS EXCLUSIVE`.
+
+   A split form — add nullable, mint in an `UPDATE`, then `SET NOT NULL` — was
+   written on the theory that the slow step would hold no exclusive lock.
+   **That theory is false here and was rejected on measurement.** The ingest
+   runner applies each file in one transaction (`ingest/migrations.py`:
+   "applies pending in a transaction per file"), and `ALTER TABLE` takes
+   `ACCESS EXCLUSIVE` at the first statement and holds it to commit. The
+   `UPDATE` therefore runs *inside* the lock it was supposed to avoid.
+
+   Rehearsed against production in rolled-back transactions, 2026-08-12:
+
+   | variant | exclusive-lock duration |
+   | --- | --- |
+   | one-liner rewrite | **12.94 s** (+ ~1.9 s unique index) |
+   | add nullable + `UPDATE` + `SET NOT NULL` | **61.52 s** (`UPDATE` alone 58.39 s) |
+
+   The split holds the lock 4.75x longer, exceeds the 30 s gunicorn worker
+   timeout — so it would *cause* the 500s it was meant to prevent — and leaves
+   ~1.15 GB of dead tuples, where a rewrite compacts and leaves none.
+
+   Deployment consequence, to be stated in any push approval: applying 089
+   blocks every reader of `software_installations_current` — the software pages
+   and the classifier — for roughly **15 seconds**.
+
+**Validation:** 8 focused tests pass, covering subject resolution at all four
+scopes, the NULL-handle fallback to device, per-pair condition-key uniqueness,
+and the upgrade-stability property that is the whole reason 089 mints rather
+than derives. `ruff check` clean on all three changed/added Python files;
+`py_compile` and `git diff --check` pass. Django system check clean, no
+migration drift, and `migrate --plan` lists 0135's three operations in order.
+
+**The rewrite claim behind 089's shape was validated empirically**, on the
+production server, in rolled-back transactions over temp tables (2026-08-12):
+
+| case | relfilenode changed | `atthasmissing` |
+| --- | --- | --- |
+| `DEFAULT gen_random_uuid()` | **yes — rewrite** | false (no fast path) |
+| `DEFAULT '…0001'::uuid` (control) | no | true (fast path) |
+| the split sequence 089 actually uses | **no, at any step** | n/a |
+
+`pg_proc.provolatile` for `gen_random_uuid` is `v`. The constant-default
+control isolates volatility as the cause rather than `ADD COLUMN` generally.
+
+Both variants were then rehearsed against the real 1.4 GB table in rolled-back
+transactions under a 5 s `lock_timeout`; the durations are in decision 5 and
+they reversed the design.
+
+Post-rehearsal production state verified: 0 probe or `installation_uuid`
+columns present, `ninja_core.schema_migrations` still at
+`088_managed_eol_product_rules`, `n_dead_tup` 0 with autovacuum already run,
+total relation size 1,412 to 1,421 MB (ordinary ingest churn), and both
+application containers healthy. Nothing was applied and nothing leaked.
+
+Method note worth keeping: the diagnosis (volatile default forces a rewrite)
+was correct and the remedy derived from it was wrong, because the remedy
+assumed a property of the migration runner that was never checked. Measuring
+the fix, not just the fault, is what caught it.
+
+**Next action:** obtain approval to rehearse 089 in a rolled-back transaction,
+then request approval for one scoped commit. Any push approval must explicitly
+include SQL migration 089 and Operations migration 0135, and 0135 closes the
+51 open device-scoped rows as part of startup migration.
+
 ## CURRENT TASK — Schedule the software classifier (ADR-0015 step 6)
 
 **Status:** implemented locally 2026-08-11; not committed, pushed, or deployed.

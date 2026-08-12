@@ -3718,6 +3718,14 @@ class Finding(UUIDTenantScopedModel):
         # patched install from an unpatched one.
         SOFTWARE_PRODUCT = "software_product", "Software product"
         SOFTWARE_VERSION = "software_version", "Software version"
+        # ADR-0015 §2's third subject kind: an installation fact. The install
+        # path belongs to the device-and-software pair rather than to either
+        # endpoint, so the finding belongs to the relationship. subject_id
+        # holds software_installations_current.installation_uuid (migration
+        # 089), minted rather than derived because that row's key excludes the
+        # version -- a version-derived id would change on every upgrade and
+        # reopen the finding while the path stayed put.
+        SOFTWARE_INSTALLATION = "software_installation", "Software installation"
 
     class Severity(models.TextChoices):
         CRITICAL = "critical", "Critical"
