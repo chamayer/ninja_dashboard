@@ -2,6 +2,15 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.116.1] — 2026-08-12 — Capability migration startup repair
+
+### Fixed
+
+- Synchronized the `finding_types` identity sequence before registering the
+  capability review finding. This repairs an existing production sequence
+  drift that prevented Operations migration 0137 from starting; the failed
+  migration transaction made no partial schema or data change.
+
 ## [0.116.0] — 2026-08-12 — Reliable software capability recognition
 
 ### Added

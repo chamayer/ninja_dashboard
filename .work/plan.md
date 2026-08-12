@@ -279,6 +279,12 @@ pre-existing debt in `operations/apps/core/views.py` and `models.py`, recorded
 separately in the backlog. Per release direction, the broader test suite is
 deferred in favor of post-deployment migration, health, and endpoint checks.
 
+**Deployment correction:** release `eaff70b` exposed pre-existing
+`operations.finding_types` identity-sequence drift while migration 0137 tried
+to register the review finding. The Django migration transaction rolled back;
+no partial capability data applied. Version `0.116.1` synchronizes that
+sequence inside 0137 before the idempotent registry upsert, then redeploys.
+
 ## CURRENT TASK — Intel run cost becomes visible; classifier-only endpoint
 
 **Status:** implemented locally 2026-08-12; not committed, pushed, or deployed.

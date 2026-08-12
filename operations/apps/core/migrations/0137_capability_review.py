@@ -50,6 +50,20 @@ _REVIEW_FINDING = {
 def add_finding_type(apps, schema_editor):
     FindingType = apps.get_model("operations", "FindingType")
     FindingCategory = apps.get_model("operations", "FindingCategory")
+    # Production's finding-type sequence predates several data-managed registry
+    # inserts and can lag the table's maximum id.  Synchronize it before this
+    # migration inserts the review type; otherwise an otherwise-idempotent
+    # update_or_create retries the same duplicate primary key on every startup.
+    with schema_editor.connection.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT setval(
+                pg_get_serial_sequence('operations.finding_types', 'id'),
+                COALESCE((SELECT max(id) FROM operations.finding_types), 1),
+                EXISTS (SELECT 1 FROM operations.finding_types)
+            )
+            """
+        )
     category = FindingCategory.objects.filter(name="software").first()
     FindingType.objects.update_or_create(
         name=_REVIEW_FINDING["name"],

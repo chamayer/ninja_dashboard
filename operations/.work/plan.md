@@ -42,6 +42,11 @@ endpoint checks.
 passes. Whole-file lint still reports unrelated, pre-existing findings in
 `views.py` and `models.py`; the new import/migration-format checks are clean.
 
+**Deployment correction:** `eaff70b` reached Operations migration 0137 but
+hit pre-existing `finding_types` identity-sequence drift before the review
+type could be inserted. The transaction rolled back. This release synchronizes
+the sequence in 0137 before its idempotent upsert and redeploys as `0.116.1`.
+
 **Next action:** release `0.116.0`, then record deployed migration and service
 health evidence. Do not turn on either capability emission flag as part of the
 release.
