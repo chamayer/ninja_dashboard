@@ -1,5 +1,51 @@
 # Active Operations implementation plan
 
+## Software capability recognition — Operations integration
+
+**Status:** implementation complete locally; release preparation in progress.
+Raw SQL migrations 093–096 create capability evidence, seeded rules, policy
+identity mapping, and the LOLRMM corpus. Operations migrations 0136–0138
+provide approval suppression, the curator review type/permission, state-only
+policy-map model, and unauthorized finding scope repair. The user authorized a
+release commit, both remote pushes, coupled redeploy, and simple live checks.
+
+**Goal:** expose and curate global product capability evidence without making
+capability truth tenant-scoped; use stable product identities to determine
+per-client policy sanctioning; allow only confirmed/vetted capability evidence
+to create unauthorized findings.
+
+**Scope:** Operations state-only catalog models and parity tests, product-map
+storage/admin, capability review routes and audit events, the software readers;
+ingest policy/evaluator wiring and LOLRMM connector; root SQL and Operations
+migrations; focused tests and the root plan.
+
+**Decisions:** capability remains global and is read through the catalog
+readiness guard; the `core.curate_software_capability` permission is required
+for global confirmation/rejection; `platform_product_map` connects an
+`operations.agents` row to one or more `catalog.products` identities; unknown
+and candidate evidence never create unauthorized findings. `multi_av_conflict`
+remains disabled because package inventory cannot establish active protection.
+
+**Validation:** focused Python/SQL contract tests, disposable PostgreSQL
+behavioral tests, Operations request tests, migration checks, compilation,
+Ruff, and `git diff --check`. Production behavior remains unverified pending
+separate authorization.
+
+**Checkpoint:** all planned code is wired. Enforcement and candidate review
+remain explicitly off until production product UUID mappings and shadow-mode
+results are reviewed; old unauthorized findings are preserved while off. This
+does not restore name-containment exemptions. Release validation is limited by
+user request to light local checks and simple deployed health, migration, and
+endpoint checks.
+
+**Local release checks:** changed Python modules compile and `git diff --check`
+passes. Whole-file lint still reports unrelated, pre-existing findings in
+`views.py` and `models.py`; the new import/migration-format checks are clean.
+
+**Next action:** release `0.116.0`, then record deployed migration and service
+health evidence. Do not turn on either capability emission flag as part of the
+release.
+
 ## E5.3 scoped maintenance — Issues filter-aware magnitude summary
 
 **Status:** implementation and local validation complete; awaiting separate

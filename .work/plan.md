@@ -1,5 +1,284 @@
 # Active root implementation plan
 
+## CURRENT TASK — Software capability recognition (all phases, local implementation)
+
+**Status:** implementation complete locally; release preparation in progress.
+Phases 0–4 are wired: the evidence schema and projector, seeded rules,
+identity-based policy sanctioning, LOLRMM connector, Operations review and
+mapping surfaces, classifier consumer, and safe default gates. Pending
+migrations are 093–096 (raw SQL) and Operations 0136–0138. The user authorized
+one release commit, both remote pushes, the coupled Portainer redeploy, and
+simple post-deployment validation.
+
+**Verified by execution, not assertion:** constraint enforcement, effective-view
+precedence, withdrawal semantics, current-row uniqueness with withdraw/reinsert
+history, and every grant — including that a non-superuser `ninja_ingest` can
+insert machine evidence but cannot touch operator rows, registry rows, rules, or
+immutable machine columns.
+
+**Caveat on scope:** the container fixture is a minimal 074/076-compatible
+schema, not the full migration chain through 092. It proves 093 is
+self-consistent against its stated dependencies; only a rehearsal against the
+real chain shows it applies to production's accumulated schema.
+
+**Goal:** reliable recognition of software with three operational capabilities —
+`endpoint_security` (AV/EDR), `rmm`, `remote_access` — with enough precision that
+an `unauthorized_*` finding can be trusted. **Not** taxonomy. Coverage is not the
+metric; precision is. The long tail (12,096 single-install titles, 3% of
+installs) stays unrecognised by design.
+
+**Why:** the classifier (`ingest/software_findings.py`) is the only
+**finding-producing** consumer of categories, and they are the trigger for
+`unauthorized_*` and `multi_av_conflict`. (Operations UI has other readers —
+the products page, publishers page and CSV exports — which display categories
+but emit nothing.) Measured 2026-08-12: **7 categorized titles of 21,995**, so
+those detectors are a blind sensor, not a clean fleet.
+
+**Three questions that must never share one field:** capability truth (what it
+*is*), policy sanctioning (permitted *here*), trust (operator approved it).
+
+### Contract 1 — authority is registry-owned, not connector-written
+
+A projector must not be able to declare its own output authoritative.
+
+```
+catalog.capability_source        -- migration-seeded, runtime DML revoked
+  source_key, authority_class, may_alert bool, managed_by, enabled
+
+catalog.capability_assertion_machine   -- ingest writes; Operations read-only
+catalog.capability_assertion_operator  -- Operations writes; ingest read-only
+  source_key → capability_source, product_uuid → catalog.products,
+  capability, confidence, evidence_kind, evidence_ref, matcher_version,
+  first_observed_at, last_observed_at, withdrawn_at, withdrawn_reason,
+  (operator only) polarity, confirmed_by, confirmed_at
+```
+
+`may_alert` lives **only** on the registry. Two tables rather than RLS gives
+write separation that grants enforce, matching 088's style. **Machine assertions
+have no polarity** — machine evidence is positive-only; only an operator may
+assert a negative. Core fields NOT NULL: a new empty table, nothing to rewrite.
+
+**Authority and confidence are separate axes.** An exact match against a
+community feed has high matching confidence and low authority.
+
+The registry holds **machine sources only**. There is deliberately no `operator`
+row and no `operator` authority class: `capability_assertion_machine.source_key`
+is a foreign key to it, so an operator row would let any machine writer insert
+`source_key='operator'` and manufacture alertable evidence. Operator precedence
+comes from the operator *table*, which the effective view reads directly.
+
+| authority class | may alert |
+| --- | --- |
+| `vetted_identity` (exact vetted identity, incl. LOLRMM) | yes |
+| `vetted_rule` (narrow, tested name rule) | yes, after test |
+| `publisher_rule` | no — candidate |
+| `community_tag` (Winget/Chocolatey) | no — candidate |
+
+`may_alert` is a CHECK-derived function of `authority_class`, so no later UPDATE
+can promote a community tag into a security finding.
+
+### Contract 2 — the effective relation
+
+One relation consumed by both classifier and UI. Precedence: operator negative
+overrides everything → operator positive → machine positive from a `may_alert`
+source → machine positive as candidate → **no row means unknown**, reported as
+unknown rather than as safe. Withdrawal (`withdrawn_at` + reason) excludes from
+effective and retains history; reappearance inserts a new row. Unique current
+row per `(source_key, product_uuid, capability) WHERE withdrawn_at IS NULL`.
+**Global, not tenant-layered** — capability is a property of the product, like
+`catalog.software_versions.eol_date`; tenancy belongs to policy and trust.
+
+### Contract 3 — permitted, and the suppression matrix
+
+```
+permitted = product mapped to a platform required by this client   -- policy
+         OR applicable approve decision (device > client > global) -- trust
+unauthorized_<cap> = effective alertable capability AND NOT permitted
+```
+
+The suppression matrix is Phase 0, delivered below.
+
+### Contract 4 — policy-to-product mapping, and vetted rules
+
+`operations.platform_product_map`: `agents.id` (stable smallint PK, **not** the
+free-form platform name) → `product_uuid`, component role (agent | tray |
+updater | uninstaller | component), provenance, enabled, unique
+`(agent_id, product_uuid)`. One platform is commonly four products.
+**Production product UUIDs cannot be seeded in a repository migration**, so this
+is operator-maintained with an admin surface from day one. `vetted_rule` gets
+`catalog.capability_rule`, migration-seeded, anchored patterns only. Substring
+matching is removed from the enforcement path.
+
+### Contract 5 — cross-service migration and integration
+
+Schema `catalog` (global reference, no tenant, no RLS). Raw SQL issues all DDL;
+Django gets **state-only** models via `SeparateDatabaseAndState`, exactly as
+0131 did for `eol_product_map` — whose docstring records that column parity
+across the two runners is load-bearing and unenforced, so a parity test is
+added. Containers start concurrently, so the Django migration issues no DDL,
+reads use a catalog-probe readiness guard (the Phase 0 `_column_exists`
+pattern), and writes fail closed with an explicit error. Grants: ingest
+INSERT/UPDATE on `_machine`, Operations on `_operator`, DELETE revoked from
+both, registry read-only to both. Also required: finding-type registry row for
+the review finding; POST routes with CSRF, permission check and `audit_log`
+event; `ingest/config.py` enable flag and cadence; tests both sides.
+
+### Confirmation loop, and permission boundary
+
+Tier-3/4 evidence raises a **review finding** in `operations.findings` (the
+platform's single operator surface — no new queue). Confirm/reject writes an
+operator assertion; the review finding resolves once the assertion exists.
+`software_decisions` is untouched by this loop and keeps meaning
+allowed/trusted — it **cannot** carry capability confirmation, because an
+`approve` is a blanket trust statement, not a classification.
+
+Capability truth is global, so confirmation requires a **dedicated
+platform-curator permission**, distinct from tenant/client operator rights,
+with actor and audit records. A client operator must not set global truth.
+
+### Feed safety
+
+An empty, malformed or partially parsed corpus must **never** withdraw prior
+assertions — withdrawal requires a run that parsed successfully and completely.
+"Exact normalised" must resolve **one-to-one**; normalisation collisions and
+duplicate product names across publishers become candidates, never alertable.
+
+### LOLRMM — corpus yes, identity no
+
+Apache-2.0, JSON with RMM/RAT category, install paths, certs, domains. Carries
+**no product_uuid and no MSI ProductCode**, and its executable/certificate/domain
+artifacts are not comparable to what we store (title, publisher, version,
+install directory). So: vetted capability corpus; LOLRMM record → local product
+is a **separate identity assertion**; alertable only on exact normalised
+tool-name match or operator-vetted alias; path/cert/domain evidence not offered
+until those signals are collected. Recall needs **independent ground truth** —
+"every LOLRMM tool present in the fleet" is circular otherwise.
+
+### Retiring the competing truths
+
+`software_catalog.categories` stops being read for capability (keeps
+`publisher_hint`). **`PublisherCategory` is retired** (`publisher_categories`,
+seeded 0087, driving `views.py:4042-4076`) — content migrates to
+`capability_rule` at `publisher_rule` tier. "Retired" initially means stop
+reading and writing, then verify migrated parity; dropping the table is a
+separate step under explicit approval once rollback compatibility is no longer
+needed. Only capability-relevant tokens transfer: `av`/`edr` →
+`endpoint_security`, `rmm` → `rmm`, `remote-access` → `remote_access`; generic
+`management` must **not** be inferred as `rmm`; all other tokens ignored.
+Winget/Chocolatey presentation stays candidates-only.
+
+### Naming decision still open
+
+The capability is `endpoint_security`, but the finding type is
+`unauthorized_av` and `_load_sanctioned_per_client` maps `agent.edr → "av"`.
+Either rename the finding type with its registry row and migrate open rows, or
+keep an `av` alias at the finding boundary. Decide once; do not let them drift.
+
+### Phases
+
+1. **Phase 1** — registry, assertion tables, effective relation, projector
+   (`ingest/intel/capability_match.py`, sole writer of machine rows, modelled on
+   `ingest/intel/eol_match.py`). Shadow mode: no new alerts.
+2. **Phase 2** — `platform_product_map` + admin; sanctioning by identity;
+   report the 99 substring-exempted titles and the delta.
+3. **Phase 3** — LOLRMM connector (shape of `ingest/intel/endoflife.py`).
+4. **Phase 4** — enforcement from alertable/operator assertions only; candidate
+   review findings on; `multi_av_conflict` re-specified. **Separate approval,
+   after shadow-mode results.**
+
+**Shadow-mode exit (phase 1):** recall against an independently built known-tool
+list; precision from a hand-scored sample; **every** proposed high-severity
+finding reviewed, not sampled; source conflicts enumerated; exact finding delta
+by type if enforcement were enabled.
+
+### Phase 0 — approval stops silencing facts (done, local)
+
+`software_findings.py` skipped every rule for an approved installation, so
+approving a title also silenced its CVEs, threat-intel hits, EOL state and
+suspicious install path. `vulnerable_software` and `known_malicious_hint` also
+re-tested the decision locally — suppressed twice, so removing the loop-head
+skip alone would not have freed them.
+
+Which findings a trust decision may silence is now
+`finding_types.suppressed_by_approval` (Operations migration 0136), a registry
+row beside `subject_scope` for the same reason (ADR-0012 §6; the
+`test_no_hardcoded_domain_mappings` ratchet). Not suppressed:
+`vulnerable_software`, `known_malicious_hint`, `eol_runtime`,
+`install_path_suspicious`. Suppressed: the `unauthorized_*` trio,
+`whitelist_suggestion`, `suspicious_name`, `rare_recent` (defined as "recent AND
+rare AND *undecided*"). Default `True`, so nothing starts firing that was not
+already firing for undecided software.
+
+**`multi_av_conflict` is disabled by default** (`multi_av_conflict_enabled`,
+default False). Installed packages cannot prove active protection, and removing
+the old blanket skip would otherwise *expose* new occurrences since that skip
+incidentally suppressed some — so disabling was required before deploy, not
+after. It is also not approval-gateable: it is device-wide while `dec` belongs
+to whichever installation the loop is on, so gating would make suppression
+row-order-dependent. Re-enable only against a real active-protection signal, or
+rename and lower it to "multiple endpoint-security packages installed".
+
+A schema-readiness guard (`_column_exists`, probing `pg_attribute` via
+`to_regclass`) treats every type as suppressed when the column is absent —
+Operations 0136 is applied by a different container that starts concurrently,
+so a classifier catch-up can meet the old schema. Deliberately a catalog probe,
+**not** `try/except UndefinedColumn`: a failed statement aborts the transaction,
+and rolling back to recover would discard `SET LOCAL operations.tenant_id`,
+after which every RLS-protected read returns nothing and the run reports a
+misleading successful zero-row pass.
+
+Also fixed: migration 0135 set `subject_scope = 'software_installation'` without
+declaring it in `FindingType.SubjectScope`, leaving the registry holding a value
+the model rejected.
+
+**Validation:** 11 focused tests, including executable coverage of
+`approval_silences`, both schema paths, and a fake cursor whose `rollback()`
+raises so the transaction-discarding regression fails loudly. Ratchet verified
+by reinstating the blanket skip and confirming the test fails. Ruff clean on
+changed files; `py_compile`, Django check, migration drift and
+`git diff --check` pass. Whole-file Ruff still reports four pre-existing DJ008
+findings in `models.py`, none in the new code.
+
+**Known validation limitation:** `test_no_hardcoded_domain_mappings` currently
+fails on four constants in `operations/apps/core/views.py`
+(`_COALESCED_OFFLINE_FINDING_TYPES`, `_PATCH_SEVERITY_VALUES`,
+`_SOFTWARE_POLICY_CANDIDATE_TYPES`, `_WINDOWS_11_COMPATIBILITY_CHOICES`).
+Verified pre-existing by stashing this work; all four arrived in already-deployed
+commits from a separate session. Not absorbed here — see `.work/backlog.md`.
+
+### Live defect found, not yet fixed
+
+`unauthorized_av` / `_rmm` / `_remote_access` are **`software_product`** scoped
+with `creates_device_exposure = true`, and all 6 open rows carry **no
+client_id** (measured 2026-08-12). The sanctioned check runs per client in the
+emitter, but the finding it produces is client-blind and fans out to every
+device running the product — so a tool sanctioned at client A is reported there
+because client B does not sanction it.
+
+Migration 0130 assigned that scope, contradicting ADR-0015 §2 ("Device facts —
+`unauthorized_av`, `unauthorized_remote_access`. The remedy is per device").
+Same drift class as `install_path_suspicious`, opposite direction. **This is a
+Phase 2 design gate**: enforcement must represent "authorized for one client,
+not another" without exposing sanctioned devices as affected.
+
+### Release checkpoint
+
+The implementation replaces classifier containment matching with exact product
+UUID policy mappings and moves capability truth to
+`catalog.v_product_capability_effective`. `CAPABILITY_ENFORCEMENT_ENABLED` and
+`CAPABILITY_REVIEW_FINDINGS_ENABLED` remain false by default: there are no
+repository-seedable production product UUID mappings, and Phase 1 data must be
+reviewed before a finding is emitted. This is the completed safety gate, not
+unfinished code. The release must verify startup application of raw migrations
+093–096 before Operations 0138's state-only model is used, then confirm both
+services are healthy and run the two new ingest endpoints once.
+
+**Local release checks:** Python compilation and `git diff --check` pass.
+Focused import/migration-format lint passes; full-file lint continues to report
+pre-existing debt in `operations/apps/core/views.py` and `models.py`, recorded
+separately in the backlog. Per release direction, the broader test suite is
+deferred in favor of post-deployment migration, health, and endpoint checks.
+
 ## CURRENT TASK — Intel run cost becomes visible; classifier-only endpoint
 
 **Status:** implemented locally 2026-08-12; not committed, pushed, or deployed.

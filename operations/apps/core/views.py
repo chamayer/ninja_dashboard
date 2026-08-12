@@ -12,7 +12,7 @@ from urllib.parse import urlencode
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
-from django.db import connection, transaction
+from django.db import IntegrityError, connection, transaction
 from django.db.models import Count, Prefetch, Q
 from django.db.models.expressions import RawSQL
 from django.http import HttpRequest, HttpResponse, JsonResponse
@@ -22,6 +22,7 @@ from django.utils import timezone
 from django.utils.text import slugify
 from django.views.decorators.http import require_GET, require_POST
 
+from . import capability as capability_evidence
 from .client_workspace import build_client_directory, build_client_workspace
 from .csv_export import csv_response, wants_csv
 from .decorators import require_admin
@@ -52,7 +53,6 @@ from .models import (
     NotificationEvent,
     NotificationRoute,
     NotificationRule,
-    PublisherCategory,
     RequirementProfile,
     SoftwareCatalog,
     SoftwareDecision,
@@ -3944,6 +3944,18 @@ def software_detail(request: HttpRequest, name: str) -> HttpResponse:
     client_decisions = [d for d in decision_rows if d.client_id and not d.device_id]
     device_decisions = [d for d in decision_rows if d.device_id]
 
+    # Global capability evidence belongs to stable product identities, not the
+    # display title. The catalog can hold more than one identity for a title,
+    # so retain that distinction in the review surface rather than guessing.
+    capability_schema_ready = capability_evidence.schema_ready()
+    capability_product_uuids = capability_evidence.products_for_title(canonical_name)
+    capability_by_product = capability_evidence.effective_for_products(capability_product_uuids)
+    capability_product_rows = [
+        {"product_uuid": product_uuid, "rows": capability_by_product.get(product_uuid, [])}
+        for product_uuid in capability_product_uuids
+    ]
+    can_curate_capability = request.user.has_perm(capability_evidence.CURATOR_PERMISSION)
+
     # Related active findings that name this title.
     related_findings = list(
         Finding.objects.filter(
@@ -3972,6 +3984,9 @@ def software_detail(request: HttpRequest, name: str) -> HttpResponse:
             "locations": location_rows,
             "install_rows": install_rows,
             "global_decision": global_decision,
+            "capability_schema_ready": capability_schema_ready,
+            "capability_product_rows": capability_product_rows,
+            "can_curate_capability": can_curate_capability,
             "client_decisions": client_decisions,
             "device_decisions": device_decisions,
             "related_findings": related_findings,
@@ -3984,6 +3999,65 @@ def software_detail(request: HttpRequest, name: str) -> HttpResponse:
             "software_tab": "overview",
         },
     )
+
+
+@login_required
+@require_POST
+@transaction.atomic
+def software_capability_decide(request: HttpRequest) -> HttpResponse:
+    """Confirm or reject global capability truth for one product identity."""
+    if not request.user.has_perm(capability_evidence.CURATOR_PERMISSION):
+        messages.error(request, "Platform-curator permission is required for capability decisions.")
+        return redirect(_safe_next(request, "software_page"))
+
+    product_uuid = (request.POST.get("product_uuid") or "").strip()
+    capability = (request.POST.get("capability") or "").strip()
+    decision = (request.POST.get("decision") or "").strip()
+    rationale = (request.POST.get("rationale") or "").strip()
+    if decision not in {"confirm", "reject"} or not product_uuid or not capability:
+        messages.error(request, "A product identity, capability, and confirm or reject decision are required.")
+        return redirect(_safe_next(request, "software_page"))
+    try:
+        product_id = uuid.UUID(product_uuid)
+    except ValueError:
+        messages.error(request, "Invalid product identity.")
+        return redirect(_safe_next(request, "software_page"))
+
+    polarity = decision == "confirm"
+    try:
+        # The nested transaction contains a rejected foreign-key/check input
+        # without poisoning the request transaction or its audit path.
+        with transaction.atomic():
+            capability_evidence.confirm(
+                str(product_id), capability, polarity, request.user.get_username(), rationale
+            )
+    except (capability_evidence.CapabilitySchemaUnavailable, IntegrityError, ValueError) as exc:
+        messages.error(request, str(exc))
+        return redirect(_safe_next(request, "software_page"))
+
+    AuditLog.objects.create(
+        tenant_id=1,
+        actor=request.user,
+        actor_kind=AuditLog.ActorKind.USER,
+        source=AuditLog.Source.UI,
+        action="software_capability.confirm" if polarity else "software_capability.reject",
+        entity_type="catalog.product_capability",
+        entity_id=product_id,
+        before_state={},
+        after_state={
+            "product_uuid": str(product_id),
+            "capability": capability,
+            "polarity": polarity,
+            "rationale": rationale,
+        },
+        ip_address=request.META.get("REMOTE_ADDR") or None,
+        user_agent=(request.META.get("HTTP_USER_AGENT") or "")[:2000],
+    )
+    messages.success(
+        request,
+        f"Capability {'confirmed' if polarity else 'rejected'} for the selected product identity.",
+    )
+    return redirect(_safe_next(request, "software_page"))
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -4039,28 +4113,6 @@ def software_publishers(request: HttpRequest) -> HttpResponse:
         ).exclude(publisher="")
     }
 
-    # Publisher → category from PublisherCategory rules (ILIKE patterns).
-    # Small table — fetch all enabled rules and match in Python.
-    pub_cat_rules = list(
-        PublisherCategory.objects.filter(enabled=True).order_by("-priority", "id")
-    )
-
-    def _publisher_categories(pub_name: str) -> str:
-        import fnmatch, re
-        lower = pub_name.lower()
-        for rule in pub_cat_rules:
-            if rule.is_regex:
-                try:
-                    if re.search(rule.publisher_pattern, lower, re.IGNORECASE):
-                        return ", ".join(rule.categories or [])
-                except re.error:
-                    pass
-            else:
-                pattern = rule.publisher_pattern.lower().replace("%", "*").replace("_", "?")
-                if fnmatch.fnmatch(lower, pattern):
-                    return ", ".join(rule.categories or [])
-        return ""
-
     publishers = []
     for pub, installations, titles, devices, clients, last_observed in rollup_rows:
         dec = pub_decisions.get(pub.lower())
@@ -4073,7 +4125,11 @@ def software_publishers(request: HttpRequest) -> HttpResponse:
                 "clients": clients,
                 "last_observed": last_observed,
                 "global_decision": dec.decision if dec else "",
-                "category": _publisher_categories(pub),
+                # PublisherCategory is retired as a competing capability path.
+                # Product capability evidence appears on the title detail page,
+                # where the stable product identity and its provenance are
+                # visible; a publisher-wide label is too broad to be truth.
+                "category": "",
             }
         )
 
@@ -4499,6 +4555,8 @@ _JOB_CATALOG: list[dict] = [
     {"id": "intel-matcher",      "name": "Intel: title × CVE matcher","category": "intel", "endpoint": "run/intel-matcher",     "status_key": "matcher",    "status_source": "intel", "description": "Match installed products to CPE entries and populate cve_match."},
     {"id": "intel-winget",       "name": "Intel: Winget enrichment",  "category": "intel", "endpoint": "run/intel-winget",      "status_key": "winget",     "status_source": "intel", "description": "Per-product tags + publisher from Windows Package Manager."},
     {"id": "intel-chocolatey",   "name": "Intel: Chocolatey enrichment","category": "intel","endpoint": "run/intel-chocolatey", "status_key": "chocolatey", "status_source": "intel", "description": "Per-product tags from the Chocolatey community feed."},
+    {"id": "intel-capability",   "name": "Intel: capability projection", "category": "intel", "endpoint": "run/intel-capability", "status_key": "capability_match", "status_source": "intel", "description": "Project vetted and candidate software capability evidence from catalog rules."},
+    {"id": "intel-lolrmm",       "name": "Intel: LOLRMM corpus",       "category": "intel", "endpoint": "run/intel-lolrmm", "status_key": "lolrmm", "status_source": "intel", "description": "Refresh the LOLRMM corpus and exact one-to-one local product matches."},
     {"id": "intel-otx",          "name": "Intel: AlienVault OTX",     "category": "intel", "endpoint": "run/intel-otx",         "status_key": "otx",        "status_source": "intel", "description": "Community threat-intel pulses from OTX."},
     {"id": "intel-abusech",      "name": "Intel: abuse.ch",           "category": "intel", "endpoint": "run/intel-abusech",     "status_key": "abusech",    "status_source": "intel", "description": "MalwareBazaar + ThreatFox recent dump files."},
     # Notifications

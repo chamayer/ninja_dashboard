@@ -596,6 +596,33 @@ def software_classify_overdue(schedule_hours: int, now: datetime | None = None) 
     return (now - ended_at) > timedelta(hours=schedule_hours)
 
 
+def run_intel_capability_once() -> None:
+    """Project capability evidence from the rule table.
+
+    Shadow mode: this records assertions and nothing consumes them for
+    enforcement. `unauthorized_*` emission is unchanged until the Phase 4
+    enablement gate, which needs its own approval.
+    """
+    try:
+        from ingest.intel import capability_match
+
+        rows = capability_match.run_once()
+        log.info("Capability projection complete: rows=%d", rows)
+    except Exception:
+        log.exception("Capability projection failed")
+
+
+def run_intel_lolrmm_once() -> None:
+    """Refresh the LOLRMM corpus and exact local-product assertions."""
+    try:
+        from ingest.intel import lolrmm
+
+        rows = lolrmm.run_once()
+        log.info("LOLRMM corpus refresh complete: rows=%d", rows)
+    except Exception:
+        log.exception("LOLRMM corpus refresh failed")
+
+
 def run_patch_classify_once() -> None:
     try:
         affected = patch_classify(tenant_id=1)
@@ -889,6 +916,18 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             # one; without it the only reachable option was the slow path.
             threading.Thread(target=run_software_classify_scheduled, daemon=True).start()
             self._respond(202, b"software classify scheduled (classifier only)\n")
+        elif self.path == "/run/intel-capability":
+            if not _READY.is_set():
+                self._respond(503, b"still starting - try again shortly\n")
+                return
+            threading.Thread(target=run_intel_capability_once, daemon=True).start()
+            self._respond(202, b"capability projection scheduled\n")
+        elif self.path == "/run/intel-lolrmm":
+            if not _READY.is_set():
+                self._respond(503, b"still starting - try again shortly\n")
+                return
+            threading.Thread(target=run_intel_lolrmm_once, daemon=True).start()
+            self._respond(202, b"LOLRMM corpus refresh scheduled\n")
         elif self.path == "/run/patch-classify":
             if not _READY.is_set():
                 self._respond(503, b"still starting - try again shortly\n")
@@ -2581,6 +2620,23 @@ def main() -> None:
             id="intel_endoflife_cycle",
             max_instances=1,
         )
+        # Capability projection reads only local tables (rules + catalogue), so
+        # it is cheap and carries no vendor rate limit. Shares the catalogue
+        # cadence because rules change on the order of weeks.
+        scheduler.add_job(
+            run_intel_capability_once,
+            "interval",
+            hours=settings.INTEL_CAPABILITY_SCHEDULE_HOURS,
+            id="intel_capability_cycle",
+            max_instances=1,
+        )
+        scheduler.add_job(
+            run_intel_lolrmm_once,
+            "interval",
+            hours=settings.INTEL_CATALOG_SCHEDULE_HOURS,
+            id="intel_lolrmm_cycle",
+            max_instances=1,
+        )
     scheduler.start()
     log.info(
         "Patch scheduler started (every %dh)",
@@ -2684,6 +2740,8 @@ def _intel_catchup() -> None:
         ("abusech",    run_intel_abusech_once),
         ("endoflife",  run_intel_endoflife_once),
         ("matcher",    run_intel_matcher_once),
+        ("capability_match", run_intel_capability_once),
+        ("lolrmm", run_intel_lolrmm_once),
     ]
     fired = []
     for connector, fn in plan:

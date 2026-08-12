@@ -125,6 +125,35 @@ worse than a slow one.
   `software_classifier`, status_source `run_log`.
 - Trigger: `views.py` is clean, or the next Jobs-page work — whichever first.
 
+## Domain-mapping ratchet is failing on four deployed constants
+
+- `ingest/tests/test_no_hardcoded_domain_mappings.py` fails as of 2026-08-12.
+  The ratchet exists to stop new module-level domain mappings entering the
+  codebase (ADR-0012 §6), so a failing ratchet means it has stopped protecting
+  anything — every future violation lands in an already-red test.
+- The four unlisted constants, all in `operations/apps/core/views.py`:
+
+  | constant | arrived in |
+  | --- | --- |
+  | `_COALESCED_OFFLINE_FINDING_TYPES` | `319ce57` findings queue device impact |
+  | `_PATCH_SEVERITY_VALUES` | `2bd4205` patch evidence filters |
+  | `_WINDOWS_11_COMPATIBILITY_CHOICES` | `95c3537` Windows 11 readiness filter |
+  | `_SOFTWARE_POLICY_CANDIDATE_TYPES` | `2091c02` Issues scope percentages |
+
+- All four are **already deployed**. Verified pre-existing by stashing the
+  capability-recognition work and re-running: the failure is identical without
+  it.
+- Each needs its own decision, not a blanket one. Some are plausibly genuine
+  exemptions — `_WINDOWS_11_COMPATIBILITY_CHOICES` is arguably UI display
+  choices rather than a domain mapping, and `_PATCH_SEVERITY_VALUES` may be a
+  source-value normalisation. Others map finding-type names to behaviour, which
+  is exactly what the ratchet is for and what
+  `finding_types.suppressed_by_approval` (migration 0136) did instead.
+- Do **not** simply add all four to the reviewed inventory to make the test
+  green. That converts the ratchet into a rubber stamp.
+- Trigger: next Operations work touching these surfaces, or sooner if another
+  change needs the ratchet to be trustworthy.
+
 ## Dashboard reporting performance
 
 - Reason deferred: broad historical and compliance cards previously exceeded

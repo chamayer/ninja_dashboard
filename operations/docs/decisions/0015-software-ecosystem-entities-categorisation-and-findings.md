@@ -192,3 +192,16 @@ Applies ADR-0012 §5 and `docs/glossary.md`'s identity test to the software
 domain. Raises and resolves a conflict with **ADR-0008** in favour of
 ADR-0012 §5. Complements ADR-0004 (findings state conditions; responses are
 separate). Implements BLUEPRINT Track 3's intent.
+
+## Amendment — 2026-08-12: capability is evidence, policy uses identity
+
+The functional category labels described in §3 are retired as the enforcement
+input by ADR-0018. `endpoint_security`, `rmm`, and `remote_access` are now
+global product capability evidence with provenance and authority; they are not
+a general taxonomy. A candidate label cannot create an unauthorized finding.
+
+Policy sanctioning is no longer product-name containment. A required platform
+maps explicitly to one or more catalog product UUIDs, and that exact identity
+map determines whether a client permits an alertable capability. Consequently
+unauthorized AV, RMM, and remote-access findings are device-scoped: the same
+product can be allowed for one client and unauthorized for another.

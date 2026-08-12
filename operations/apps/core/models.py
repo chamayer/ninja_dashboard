@@ -300,6 +300,9 @@ class FindingType(models.Model):
         DEVICE = "device", "This device"
         SOFTWARE_PRODUCT = "software_product", "The software title"
         SOFTWARE_VERSION = "software_version", "The software release"
+        # Migration 0135 set install_path_suspicious to this scope but did not
+        # declare it here, so the registry held a value the model rejected.
+        SOFTWARE_INSTALLATION = "software_installation", "The installation"
 
     id = models.SmallAutoField(primary_key=True)
     name = models.CharField(max_length=120, unique=True)
@@ -333,6 +336,31 @@ class FindingType(models.Model):
         ),
     )
     auto_resolvable = models.BooleanField(default=True)
+    # Whether an `approve` / `approve_publisher` software decision silences a
+    # finding of this type. A registry row for the same reason subject_scope is
+    # one: it maps a domain value to a behaviour, so it is operator-maintainable
+    # data rather than a constant in the emitter (ADR-0012 section 6, and the
+    # `test_no_hardcoded_domain_mappings` ratchet).
+    #
+    # Approval means "this software is allowed here". That is a statement about
+    # trust, not about facts: it cannot make a CVE, a malicious-intel hit, an
+    # end-of-life date or a suspicious install path untrue. Before this column
+    # the emitter skipped every rule for an approved installation
+    # (`software_findings.py` loop head), so approving a title silenced its
+    # vulnerabilities too.
+    #
+    # Defaults True, preserving the previous behaviour for any type whose row
+    # has not been considered -- the same fail-safe stance subject_scope takes
+    # by defaulting to `device`.
+    suppressed_by_approval = models.BooleanField(
+        default=True,
+        help_text=(
+            "When checked, an approve decision on the software silences this "
+            "finding. Leave unchecked for findings that state a fact about the "
+            "software (vulnerability, malicious intel, end-of-life, install "
+            "path) -- approving software does not make those untrue."
+        ),
+    )
     runbook_path = models.CharField(max_length=255, blank=True)
     description = models.TextField(blank=True)
 
@@ -3316,6 +3344,16 @@ class SoftwareCatalog(models.Model):
     class Meta:
         db_table = "software_catalog"
         ordering = ("canonical_name",)
+        # Capability truth is global -- a product either is remote-access
+        # software or it is not, for every client -- so confirming one is not a
+        # tenant/client operator right. Defaults to nobody, like the restricted
+        # -evidence reveal permission added in 0117.
+        permissions = (
+            (
+                "curate_software_capability",
+                "Can confirm or reject global software capability claims",
+            ),
+        )
         constraints = (
             models.UniqueConstraint(
                 fields=("canonical_name",),
@@ -3888,6 +3926,56 @@ class Agent(models.Model):
 
     def __str__(self) -> str:
         return self.name
+
+
+class PlatformProductMap(models.Model):
+    """Products that satisfy one required platform capability.
+
+    This is policy identity data, not capability truth. A platform can install
+    several catalog products (agent, tray application, updater, uninstall
+    component); each mapping is explicit so policy evaluation never relies on
+    a product-name substring.
+
+    The table is created by ingest SQL migration 095. ``managed = False`` is
+    deliberate: Operations owns the editor, but the raw migration runner owns
+    the DDL because ingest consumes the same table before Django may start.
+    """
+
+    class ComponentRole(models.TextChoices):
+        AGENT = "agent", "Agent"
+        TRAY = "tray", "Tray application"
+        UPDATER = "updater", "Updater"
+        UNINSTALLER = "uninstaller", "Uninstaller"
+        COMPONENT = "component", "Component"
+
+    id = models.BigAutoField(primary_key=True)
+    agent = models.ForeignKey(
+        Agent,
+        on_delete=models.PROTECT,
+        related_name="product_capability_maps",
+        db_constraint=False,
+    )
+    product_uuid = models.UUIDField(
+        help_text="Stable catalog product UUID; choose it from the product capability reader."
+    )
+    capability = models.CharField(max_length=64)
+    component_role = models.CharField(
+        max_length=16, choices=ComponentRole.choices, default=ComponentRole.AGENT
+    )
+    provenance = models.TextField(
+        help_text="Why this product identity belongs to the platform."
+    )
+    enabled = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "platform_product_map"
+        managed = False
+        ordering = ("agent", "capability", "component_role")
+
+    def __str__(self) -> str:
+        return f"{self.agent}: {self.capability} ({self.component_role})"
 
 
 class OsGroupMapping(models.Model):

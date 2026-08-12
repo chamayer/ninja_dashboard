@@ -5,11 +5,12 @@ software catalog, and operator decisions; emits per-device findings.
 
 Everything the classifier "knows" is data:
   * regex patterns → `software_classifier_rules`
-  * category / publisher hints → `software_catalog`
+   * non-capability presentation labels → `software_catalog`
   * approve / reject / investigate → `software_decisions` (device
     > client > global tier resolution)
-  * sanctioned agent set per client → derived from RequirementProfile
-    items OR the global CoverageRequirement fallback
+   * capability truth → `catalog.v_product_capability_effective`
+   * sanctioned product identities per client → `platform_product_map` joined
+     to requirement-profile items or the global CoverageRequirement fallback
 
 No hardcoded product lists.
 """
@@ -24,6 +25,7 @@ import uuid
 from datetime import datetime, timezone
 
 from ingest import db
+from ingest.config import settings
 
 log = logging.getLogger(__name__)
 
@@ -90,7 +92,9 @@ def classify(tenant_id: int = _TENANT_ID) -> int:
             rules = _load_rules(cur)
             catalog = _load_catalog(cur, tenant_id)
             decisions = _load_decisions(cur, tenant_id)
-            sanctioned = _load_sanctioned_per_client(cur, tenant_id)
+            capability_ready = _capability_schema_ready(cur)
+            capabilities = _load_effective_capabilities(cur) if capability_ready else {}
+            sanctioned = _load_sanctioned_product_identities(cur, tenant_id) if capability_ready else {}
             fleet_rarity = _load_fleet_rarity(cur, tenant_id)
             finding_type_ids = _finding_type_ids(cur)
             cfg = _load_config(cur, tenant_id)
@@ -114,8 +118,7 @@ def classify(tenant_id: int = _TENANT_ID) -> int:
             # constant here (migration 0130). An unknown name defaults to
             # device, so a newly registered type never emits against a
             # subject nobody chose for it.
-            cur.execute("SELECT name, subject_scope FROM operations.finding_types")
-            scopes: dict[str, str] = dict(cur.fetchall())
+            scopes, suppressed_by_approval = _load_scopes(cur)
 
             # LEFT JOIN, not INNER: an installation with no catalogue link must
             # still be classified. It falls back to device scope and is counted
@@ -147,12 +150,10 @@ def classify(tenant_id: int = _TENANT_ID) -> int:
                     unlinked, len(installs),
                 )
 
-            # Per-device AV product count for multi_av_conflict.
+            # Installed package inventory cannot establish whether endpoint
+            # protection is active. Keep the type disabled until a real signal
+            # (for example Windows Security Center) exists.
             av_products_per_device: dict[uuid.UUID, set[str]] = {}
-            for client_id, device_id, name, _pub, _loc, _first, _pu, _vu, _iu in installs:
-                entry = catalog.get(name.lower(), {})
-                if "av" in entry.get("categories", []):
-                    av_products_per_device.setdefault(device_id, set()).add(name)
 
             emitted_keys: set[str] = set()
 
@@ -170,14 +171,13 @@ def classify(tenant_id: int = _TENANT_ID) -> int:
                 # Decision tier: title-scope (device > client > global) then
                 # publisher-scope (device > client > global).
                 dec = _resolve_decision(decisions, device_id, client_id, name, publisher)
-                if dec in ("approve", "approve_publisher"):
-                    continue  # approved, skip all rules
+                approved = dec in ("approve", "approve_publisher")
 
                 cat_entry = catalog.get(name.lower(), {})
                 cat_list = cat_entry.get("categories", [])
 
                 # 1. suspicious_name (unless whitelisted)
-                if "whitelist" not in cat_list and _matches_rules(
+                if not approval_silences("suspicious_name", approved, suppressed_by_approval) and "whitelist" not in cat_list and _matches_rules(
                     name, rules.get("suspicious_name", [])
                 ):
                     affected += _emit(
@@ -187,8 +187,9 @@ def classify(tenant_id: int = _TENANT_ID) -> int:
                         emitted_keys, subj,
                     )
 
-                # 2. install_path_suspicious
-                if location and _matches_rules(
+                # 2. install_path_suspicious — a fact about where the software
+                # sits on disk. Approval does not relocate it.
+                if not approval_silences("install_path_suspicious", approved, suppressed_by_approval) and location and _matches_rules(
                     location, rules.get("install_path_suspicious", [])
                 ):
                     affected += _emit(
@@ -198,30 +199,79 @@ def classify(tenant_id: int = _TENANT_ID) -> int:
                         emitted_keys, subj,
                     )
 
-                # 3. unauthorized_av / _rmm / _remote_access
-                # Match sanctioned list case-insensitively with substring
-                # containment either direction — the sanctioned set holds
-                # Agent product names (e.g. "LogMeIn") while `name` is a
-                # software canonical_name (e.g. "logmein client"), and
-                # they rarely line up as exact strings.
-                client_sanctioned = sanctioned.get(client_id, {})
-                for cat in ("av", "rmm", "remote_access"):
-                    if cat in cat_list and not _matches_sanctioned(
-                        name, client_sanctioned.get(cat, set())
-                    ):
-                        finding_name = f"unauthorized_{cat}"
+                # 3. Unauthorized capability: only effective alertable evidence
+                # (vetted machine or operator confirmation) may alert. Policy
+                # exemption is exact product identity, never a name substring.
+                product_capabilities = capabilities.get(product_uuid, []) if product_uuid else []
+                if settings.CAPABILITY_ENFORCEMENT_ENABLED:
+                    client_sanctioned = sanctioned.get(client_id, {})
+                    for capability in product_capabilities:
+                        if not capability["alertable"]:
+                            continue
+                        finding_name = capability["finding_type"]
+                        if (
+                            finding_name not in finding_type_ids
+                            or approval_silences(finding_name, approved, suppressed_by_approval)
+                            or product_uuid in client_sanctioned.get(capability["capability"], set())
+                        ):
+                            continue
                         affected += _emit(
                             cur, tenant_id, finding_type_ids[finding_name],
                             client_id, device_id, name, publisher, "high", now,
                             {
-                                "reason": f"{cat} product not in client's sanctioned set",
-                                "category": cat,
+                                "reason": "alertable capability product is not mapped to a required platform",
+                                "capability": capability["capability"],
+                                "evidence_sources": capability["sources"],
+                                "product_uuid": str(product_uuid),
                             },
                             emitted_keys, subj,
                         )
 
-                # 4. multi_av_conflict (only emit once per device — key on 'multi_av')
-                if len(av_products_per_device.get(device_id, set())) >= 2:
+                # Candidate evidence is deliberately a review prompt, not an
+                # unauthorized finding. It is off by default until the seeded
+                # publisher-rule corpus has been inspected in shadow mode.
+                if settings.CAPABILITY_REVIEW_FINDINGS_ENABLED:
+                    for capability in product_capabilities:
+                        if capability["state"] != "candidate":
+                            continue
+                        finding_name = "capability_review_candidate"
+                        if finding_name not in finding_type_ids or product_uuid is None:
+                            continue
+                        affected += _emit(
+                            cur, tenant_id, finding_type_ids[finding_name],
+                            client_id, device_id, name, publisher, "low", now,
+                            {
+                                "reason": "candidate capability evidence needs curator review",
+                                "capability": capability["capability"],
+                                "evidence_sources": capability["sources"],
+                                "product_uuid": str(product_uuid),
+                            },
+                            emitted_keys, subj,
+                        )
+
+                # 4. multi_av_conflict — DISABLED by default.
+                #
+                # Two installed security-related packages do not mean two active
+                # AV engines: leftover components, management consoles and EDR
+                # sensors are not interchangeable, and installed-package
+                # inventory cannot prove active protection. The finding claims
+                # more than its evidence supports.
+                #
+                # It is also not approval-gateable. The finding is device-wide
+                # while `dec` belongs to whichever installation the loop is on,
+                # so suppression would depend on row order. Note that removing
+                # the old blanket `continue` would otherwise *expose* new
+                # occurrences, since that skip incidentally suppressed some.
+                # Disabling is therefore required before deploy, not after.
+                #
+                # Re-enable only against a real active-protection signal
+                # (Windows Security Center), or rename and lower it to
+                # "multiple endpoint-security packages installed", which is what
+                # this data can actually support.
+                if (
+                    cfg.get("multi_av_conflict_enabled", False)
+                    and len(av_products_per_device.get(device_id, set())) >= 2
+                ):
                     affected += _emit_scoped(
                         cur, tenant_id, finding_type_ids["multi_av_conflict"],
                         client_id, device_id, "multi_av", publisher, "high", now,
@@ -233,13 +283,18 @@ def classify(tenant_id: int = _TENANT_ID) -> int:
                 #    fire only for uncategorized + undecided titles that
                 #    are recent AND rare across the fleet. Every gate is
                 #    admin-tunable via evaluator_config.
-                if cfg.get("rare_recent_enabled", True) and first_seen:
+                if (
+                    cfg.get("rare_recent_enabled", True)
+                    and first_seen
+                    and not approval_silences("rare_recent", approved, suppressed_by_approval)
+                ):
                     skip = False
                     # Any prior decision (approve, approve_publisher,
                     # reject, investigate) means an operator already
-                    # looked. Approve/approve_publisher was caught by
-                    # the loop-head early-continue; reject/investigate
-                    # fall through to here — skip them.
+                    # looked. The finding is defined as "recent AND rare AND
+                    # undecided", so approval genuinely does silence it —
+                    # `approval_silences` above covers approve/approve_publisher
+                    # and this covers reject/investigate.
                     if cfg.get("rare_recent_skip_decided", True) and dec:
                         skip = True
                     # Categorisation no longer suppresses. `categories`
@@ -274,8 +329,11 @@ def classify(tenant_id: int = _TENANT_ID) -> int:
                                 emitted_keys,
                             )
 
-                # 6. eol_runtime
-                if _matches_rules(name, rules.get("eol_runtime", [])):
+                # 6. eol_runtime — a fact about the release. Approving software
+                # does not extend its vendor support.
+                if not approval_silences("eol_runtime", approved, suppressed_by_approval) and _matches_rules(
+                    name, rules.get("eol_runtime", [])
+                ):
                     affected += _emit(
                         cur, tenant_id, finding_type_ids["eol_runtime"],
                         client_id, device_id, name, publisher, "medium", now,
@@ -285,10 +343,14 @@ def classify(tenant_id: int = _TENANT_ID) -> int:
 
                 # 8. vulnerable_software — installed title has a matched
                 # CVE that is either actively exploited (KEV) or severe
-                # (CVSS >= cutoff). Approval decisions still suppress:
-                # the operator has explicitly accepted the risk.
+                # (CVSS >= cutoff).
+                #
+                # This previously re-tested the decision locally *as well as*
+                # being skipped by the loop head, so it was suppressed twice.
+                # Approval is a trust statement and cannot make a CVE untrue,
+                # so the registry now says this type is not silenced by it.
                 vuln = vuln_titles.get(name.lower())
-                if vuln and dec not in ("approve", "approve_publisher"):
+                if vuln and not approval_silences("vulnerable_software", approved, suppressed_by_approval):
                     if vuln["kev"]:
                         severity = str(cfg.get("vulnerable_software_severity_kev", "critical"))
                         detail = {
@@ -314,11 +376,16 @@ def classify(tenant_id: int = _TENANT_ID) -> int:
 
                 # 9. known_malicious_hint — accumulated threat-intel
                 # signals on the title or its publisher. Explicitly a
-                # hint (OSINT is noisy). Suppressed by approve/approve_publisher.
+                # hint (OSINT is noisy).
+                #
+                # Also previously double-suppressed: skipped by the loop head
+                # and re-tested here. Threat-intel accumulation is evidence
+                # about the software, not a trust question, so approval no
+                # longer hides it.
                 hits = threat_hits.get(name.lower(), 0)
                 if (
                     hits >= int(cfg.get("known_malicious_hint_min_hits", 3))
-                    and dec not in ("approve", "approve_publisher")
+                    and not approval_silences("known_malicious_hint", approved, suppressed_by_approval)
                     and "known_malicious_hint" in finding_type_ids
                 ):
                     severity = str(cfg.get("known_malicious_hint_severity", "low"))
@@ -341,7 +408,11 @@ def classify(tenant_id: int = _TENANT_ID) -> int:
                 # title `av` — a statement about what it does, carrying no
                 # judgement — silenced the decision prompt exactly as a trust
                 # label did. Trust is a decision and is covered by `dec`.
-                if cfg.get("whitelist_suggestion_enabled", True) and not dec:
+                if (
+                    cfg.get("whitelist_suggestion_enabled", True)
+                    and not dec
+                    and not approval_silences("whitelist_suggestion", approved, suppressed_by_approval)
+                ):
                     min_devices = int(cfg.get("whitelist_suggestion_min_devices", 10))
                     fleet_devices = fleet_rarity.get(name.lower(), 0)
                     if fleet_devices >= min_devices:
@@ -357,7 +428,20 @@ def classify(tenant_id: int = _TENANT_ID) -> int:
                             emitted_keys, subj,
                         )
 
-            _auto_resolve(cur, tenant_id, emitted_keys, now)
+            # Do not close capability findings while their producer is either
+            # unavailable or deliberately in shadow mode. Neither a missing
+            # schema nor a feature flag set to false is evidence that a
+            # capability disappeared. Keeping the pre-existing findings until
+            # the reviewed enforcement gate opens is safer than silently
+            # resolving them on deploy.
+            preserve_types = set()
+            if not capability_ready or not settings.CAPABILITY_ENFORCEMENT_ENABLED:
+                preserve_types.update({
+                    "unauthorized_av", "unauthorized_rmm", "unauthorized_remote_access",
+                })
+            if not capability_ready or not settings.CAPABILITY_REVIEW_FINDINGS_ENABLED:
+                preserve_types.add("capability_review_candidate")
+            _auto_resolve(cur, tenant_id, emitted_keys, now, preserve_types)
 
     except Exception as exc:
         error = str(exc)[:2000]
@@ -399,6 +483,90 @@ def _load_rules(cur) -> dict[str, list[tuple[str, bool]]]:
     for rt, pattern, is_regex in cur.fetchall():
         out.setdefault(rt, []).append((pattern, is_regex))
     return out
+
+
+def approval_silences(
+    finding_type: str, approved: bool, matrix: dict[str, bool]
+) -> bool:
+    """Does an `approve` software decision silence this finding type?
+
+    Replaces a blanket `continue` that skipped every rule for an approved
+    installation, so approving a title also silenced its CVEs, threat-intel
+    hits, end-of-life state and suspicious install path. Approval is a
+    statement about *trust*; it cannot make a fact untrue.
+
+    `matrix` comes from `finding_types.suppressed_by_approval` (migration
+    0136), not from a constant here: it maps a domain value to a behaviour,
+    which ADR-0012 section 6 requires to be data and which
+    `test_no_hardcoded_domain_mappings` would otherwise flag.
+
+    An unregistered finding type defaults to **suppressed**, preserving the
+    previous behaviour rather than silently opening a new finding up. The same
+    default applies when the column does not exist yet -- see `_load_scopes`.
+    """
+    if not approved:
+        return False
+    return matrix.get(finding_type, True)
+
+
+def _column_exists(cur, qualified_table: str, column: str) -> bool:
+    """Catalog probe, so the optional column is never queried blindly.
+
+    Deliberately not a `try/except UndefinedColumn`. A failed statement aborts
+    the whole transaction, and recovering from it would mean rolling back --
+    which would also discard the `SET LOCAL operations.tenant_id` this
+    classifier runs under. Every RLS-protected read afterwards would then
+    return nothing and the run would report a successful zero-row pass. Asking
+    the catalog first costs one cheap query and cannot poison the transaction.
+
+    `to_regclass` yields NULL for a missing table rather than raising, so an
+    absent table answers False too.
+    """
+    cur.execute(
+        """
+        SELECT EXISTS (
+            SELECT 1 FROM pg_attribute
+             WHERE attrelid = to_regclass(%s)
+               AND attname = %s
+               AND attnum > 0
+               AND NOT attisdropped
+        )
+        """,
+        (qualified_table, column),
+    )
+    row = cur.fetchone()
+    return bool(row and row[0])
+
+
+def _load_scopes(cur) -> tuple[dict[str, str], dict[str, bool]]:
+    """(subject_scope, suppressed_by_approval) per finding type.
+
+    `suppressed_by_approval` arrives with Operations migration 0136, which a
+    *different* container applies. Ingest and Operations start concurrently and
+    neither waits for the other, so a classifier catch-up can run against a
+    schema where the column does not exist yet. Falling back to the pre-0136
+    behaviour -- everything suppressed by approval, expressed as an empty
+    matrix -- keeps that window behaving exactly as it did before this change.
+    """
+    if not _column_exists(cur, "operations.finding_types", "suppressed_by_approval"):
+        log.info(
+            "finding_types.suppressed_by_approval absent (Operations migration "
+            "0136 not yet applied); treating every finding as suppressed by "
+            "approval, which is the pre-0136 behaviour"
+        )
+        cur.execute("SELECT name, subject_scope FROM operations.finding_types")
+        return {name: scope for name, scope in cur.fetchall()}, {}
+
+    cur.execute(
+        "SELECT name, subject_scope, suppressed_by_approval "
+        "FROM operations.finding_types"
+    )
+    scopes: dict[str, str] = {}
+    suppressed: dict[str, bool] = {}
+    for name, scope, flag in cur.fetchall():
+        scopes[name] = scope
+        suppressed[name] = bool(flag)
+    return scopes, suppressed
 
 
 def _load_catalog(cur, tenant_id: int) -> dict[str, dict]:
@@ -490,99 +658,86 @@ def _resolve_decision(
     return None
 
 
-def _matches_sanctioned(canonical: str, sanctioned: set) -> bool:
-    """Case-insensitive containment match between a software canonical
-    name and any Agent-product name in the sanctioned set. Either
-    substring counts as a match — Agent name "LogMeIn" matches
-    software "logmein client", Agent "Ninja" matches "ninjarmmagent",
-    etc. Avoids false-positive `unauthorized_*` findings on required
-    agents whose canonical software name isn't identical to their
-    Agent-table name.
-    """
-    if not sanctioned:
+def _capability_schema_ready(cur) -> bool:
+    """Catalog probe that never aborts the classifier transaction."""
+    cur.execute(
+        """
+        SELECT bool_and(to_regclass(name) IS NOT NULL)
+          FROM unnest(%s::text[]) AS name
+        """,
+        ([
+            "catalog.capability",
+            "catalog.v_product_capability_effective",
+            "operations.platform_product_map",
+        ],),
+    )
+    row = cur.fetchone()
+    if not row or not row[0]:
         return False
-    nl = (canonical or "").lower()
-    if not nl:
-        return False
-    for a in sanctioned:
-        al = str(a or "").lower()
-        if not al:
-            continue
-        if al in nl or nl in al:
-            return True
-    return False
+    return _column_exists(cur, "catalog.capability", "unauthorized_finding_type")
 
 
-def _load_sanctioned_per_client(cur, tenant_id: int) -> dict:
-    """Per client: {category → set(canonical_names sanctioned by policy)}.
-
-    Sanctioned = the platform name attached to any coverage requirement
-    or profile item the client has under an agent.* entity_type. Maps
-    each agent's platform to the classifier category (av/rmm/
-    remote_access) via the Agent table.
-    """
-    # First, agent → category from Agent.entity_type
-    cur.execute("SELECT name, entity_type FROM operations.agents")
-    agent_to_cat: dict[str, str] = {}
-    _entity_to_cat = {
-        "agent.rmm": "rmm",
-        "agent.edr": "av",
-        "agent.remote_access": "remote_access",
-    }
-    for name, entity_type in cur.fetchall():
-        cat = _entity_to_cat.get(entity_type)
-        if cat:
-            agent_to_cat[name] = cat
-
-    # Per client sanctioned: profile items → each item's platform is
-    # in the sanctioned set for that agent's category.
+def _load_effective_capabilities(cur) -> dict:
+    """Global product capability truth, including its registered finding name."""
     cur.execute(
         """
-        SELECT c.id, rpi.platform
-        FROM operations.clients c
-        JOIN operations.requirement_profile_items rpi
-          ON rpi.tenant_id = c.tenant_id
-         AND rpi.profile_id = c.requirement_profile_id
-        WHERE c.tenant_id = %s AND c.deleted_at IS NULL
-          AND rpi.platform <> ''
-        """,
-        (tenant_id,),
+        SELECT e.product_uuid, e.capability, e.state, e.alertable,
+               e.evidence_sources, c.unauthorized_finding_type
+          FROM catalog.v_product_capability_effective e
+          JOIN catalog.capability c ON c.key = e.capability
+        """
     )
-    per_client: dict = {}
-    for client_id, platform in cur.fetchall():
-        cat = agent_to_cat.get(platform)
-        if cat:
-            per_client.setdefault(client_id, {}).setdefault(cat, set()).add(platform)
+    out: dict = {}
+    for product_uuid, capability, state, alertable, sources, finding_type in cur.fetchall():
+        out.setdefault(product_uuid, []).append(
+            {
+                "capability": capability,
+                "state": state,
+                "alertable": bool(alertable),
+                "sources": sources,
+                "finding_type": finding_type,
+            }
+        )
+    return out
 
-    # Global fallback for clients without a profile: use global
-    # coverage_requirements (client_id NULL) as the sanctioned set for
-    # each of those clients.
+
+def _load_sanctioned_product_identities(cur, tenant_id: int) -> dict:
+    """Per client: capability -> exact catalog product UUIDs allowed by policy."""
     cur.execute(
         """
-        SELECT cr.platform FROM operations.coverage_requirements cr
-        WHERE cr.tenant_id = %s AND cr.client_id IS NULL AND cr.enabled
-          AND cr.platform <> ''
+        WITH profile_platforms AS (
+            SELECT c.id AS client_id, rpi.platform
+              FROM operations.clients c
+              JOIN operations.requirement_profile_items rpi
+                ON rpi.tenant_id = c.tenant_id
+               AND rpi.profile_id = c.requirement_profile_id
+             WHERE c.tenant_id = %s AND c.deleted_at IS NULL
+               AND rpi.platform <> ''
+        ), fallback_platforms AS (
+            SELECT c.id AS client_id, cr.platform
+              FROM operations.clients c
+              JOIN operations.coverage_requirements cr
+                ON cr.tenant_id = c.tenant_id
+               AND cr.client_id IS NULL AND cr.enabled
+             WHERE c.tenant_id = %s AND c.deleted_at IS NULL
+               AND c.requirement_profile_id IS NULL AND cr.platform <> ''
+        ), required_platforms AS (
+            SELECT * FROM profile_platforms
+            UNION ALL
+            SELECT * FROM fallback_platforms
+        )
+        SELECT rp.client_id, ppm.capability, ppm.product_uuid
+          FROM required_platforms rp
+          JOIN operations.agents a ON a.name = rp.platform
+          JOIN operations.platform_product_map ppm
+            ON ppm.agent_id = a.id AND ppm.enabled
         """,
-        (tenant_id,),
+        (tenant_id, tenant_id),
     )
-    global_sanctioned: dict = {}
-    for (platform,) in cur.fetchall():
-        cat = agent_to_cat.get(platform)
-        if cat:
-            global_sanctioned.setdefault(cat, set()).add(platform)
-
-    cur.execute(
-        """
-        SELECT id FROM operations.clients
-        WHERE tenant_id = %s AND deleted_at IS NULL
-          AND requirement_profile_id IS NULL
-        """,
-        (tenant_id,),
-    )
-    for (client_id,) in cur.fetchall():
-        per_client[client_id] = {k: set(v) for k, v in global_sanctioned.items()}
-
-    return per_client
+    out: dict = {}
+    for client_id, capability, product_uuid in cur.fetchall():
+        out.setdefault(client_id, {}).setdefault(capability, set()).add(product_uuid)
+    return out
 
 
 def _load_fleet_rarity(cur, tenant_id: int) -> dict[str, int]:
@@ -607,8 +762,8 @@ def _finding_type_ids(cur) -> dict[str, int]:
             'suspicious_name', 'install_path_suspicious',
             'unauthorized_av', 'unauthorized_rmm', 'unauthorized_remote_access',
             'multi_av_conflict', 'rare_recent', 'eol_runtime',
-            'whitelist_suggestion', 'vulnerable_software',
-            'known_malicious_hint'
+             'whitelist_suggestion', 'vulnerable_software',
+             'known_malicious_hint', 'capability_review_candidate'
         )
         """
     )
@@ -825,9 +980,16 @@ def _emit_scoped(cur, tenant_id, ft_id, client_id, device_id, canonical_key,
     return 1
 
 
-def _auto_resolve(cur, tenant_id: int, emitted_keys: set[str], now: datetime) -> None:
+def _auto_resolve(
+    cur, tenant_id: int, emitted_keys: set[str], now: datetime,
+    preserve_types: set[str] | None = None,
+) -> None:
     """Close any open software finding NOT emitted this run — the install
     is gone or a decision approved it."""
+    preserve_types = preserve_types or set()
+    # An empty emission set can mean that an upstream input failed open. The
+    # established conservative behavior is to leave findings untouched rather
+    # than treating no output as proof that every condition is gone.
     if not emitted_keys:
         return
     cur.execute(
@@ -853,7 +1015,8 @@ def _auto_resolve(cur, tenant_id: int, emitted_keys: set[str], now: datetime) ->
           AND ft.source_module = 'platform.software_findings'
           AND f.tenant_id = %s
           AND f.status IN ('open', 'acknowledged')
-          AND NOT (f.condition_key = ANY(%s::text[]))
+           AND NOT (f.condition_key = ANY(%s::text[]))
+           AND NOT (ft.name = ANY(%s::text[]))
         """,
-        (now, now, tenant_id, list(emitted_keys)),
+        (now, now, tenant_id, list(emitted_keys), list(preserve_types)),
     )

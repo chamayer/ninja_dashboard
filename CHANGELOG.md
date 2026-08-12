@@ -2,6 +2,42 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.116.0] — 2026-08-12 — Reliable software capability recognition
+
+### Added
+
+- Added a global, evidence-backed capability model for endpoint security,
+  RMM, and remote access software. Machine evidence records its source and
+  confidence; an effective relation gives curator rejections and confirmations
+  explicit precedence over vetted and candidate sources.
+- Added exact product-identity mappings from required platforms to their
+  agent, tray, updater, uninstall, and component products. This replaces the
+  unsafe display-name containment used to sanction software.
+- Added Operations capability evidence on software detail pages, curator-only
+  confirm/reject actions with audit records, and an admin editor for platform
+  product mappings.
+- Added local capability projection, a manually runnable capability job, and
+  the LOLRMM corpus connector. LOLRMM is alertable only for one-to-one exact
+  normalized local product-name matches; collisions remain review candidates.
+
+### Changed
+
+- Approval decisions now suppress only finding types explicitly marked as
+  trust-sensitive. They no longer silence vulnerability, malicious-intel,
+  end-of-life, or suspicious-install-path facts.
+- Retired PublisherCategory as a competing capability source. Its narrowly
+  relevant AV/EDR, RMM, and remote-access patterns are seeded as candidate
+  publisher rules instead.
+- `multi_av_conflict` is disabled by default because installed-package
+  inventory cannot prove concurrent active protection.
+
+### Safety
+
+- Capability enforcement and candidate-review emission default to off while
+  production product mappings and shadow-mode precision/recall results are
+  reviewed. Existing unauthorized findings are retained during that gate;
+  the system never falls back to name-containment matching.
+
 ## [0.115.1] — 2026-08-12 — Issues scope is measurable at a glance
 
 ### Changed

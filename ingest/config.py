@@ -249,6 +249,18 @@ class Settings(BaseSettings):
     INTEL_CATALOG_SCHEDULE_HOURS: int = Field(default=24, ge=1, le=168)
     INTEL_OSINT_SCHEDULE_HOURS: int = Field(default=6, ge=1, le=24)
     INTEL_MATCHER_SCHEDULE_HOURS: int = Field(default=6, ge=1, le=24)
+    # Capability recognition (endpoint_security / rmm / remote_access).
+    # Phase 1 is shadow mode: assertions are recorded and nothing enforces
+    # them. Shares the catalogue cadence -- rules change on the order of
+    # weeks, and the projector reads only local tables.
+    INTEL_CAPABILITY_ENABLED: bool = True
+    INTEL_CAPABILITY_SCHEDULE_HOURS: int = Field(default=24, ge=1, le=168)
+    INTEL_LOLRMM_ENABLED: bool = True
+    # Phase 4 is code-complete but intentionally fails closed until every
+    # sanctioned platform has production product-identity mappings. A product
+    # name substring is not an acceptable temporary exemption.
+    CAPABILITY_ENFORCEMENT_ENABLED: bool = False
+    CAPABILITY_REVIEW_FINDINGS_ENABLED: bool = False
 
     @property
     def patch_ingest_schedule_hours(self) -> int:

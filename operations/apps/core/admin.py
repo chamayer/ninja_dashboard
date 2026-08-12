@@ -35,8 +35,8 @@ from .models import (
     IntelMatcherHint,
     MergeCandidate,
     NotificationRoute,
+    PlatformProductMap,
     PublisherAlias,
-    PublisherCategory,
     RunLog,
     Secret,
     SoftwareCatalog,
@@ -560,13 +560,6 @@ class PublisherAliasAdmin(admin.ModelAdmin):
     search_fields = ("raw_pattern", "canonical_publisher", "note")
 
 
-@admin.register(PublisherCategory)
-class PublisherCategoryAdmin(admin.ModelAdmin):
-    list_display = ("publisher_pattern", "categories", "priority", "enabled", "created_at")
-    list_filter = ("enabled",)
-    search_fields = ("publisher_pattern", "note")
-
-
 @admin.register(IntelMatcherHint)
 class IntelMatcherHintAdmin(admin.ModelAdmin):
     list_display = ("kind", "pattern", "enabled", "created_at")
@@ -595,6 +588,20 @@ class EolProductMapAdmin(admin.ModelAdmin):
         return request.method in ("GET", "HEAD")
 
     def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(PlatformProductMap)
+class PlatformProductMapAdmin(admin.ModelAdmin):
+    list_display = ("agent", "capability", "component_role", "product_uuid", "enabled")
+    list_filter = ("agent", "capability", "component_role", "enabled")
+    search_fields = ("product_uuid", "provenance")
+    ordering = ("agent", "capability", "component_role")
+
+    def has_delete_permission(self, request, obj=None):
+        # Raw migration 095 intentionally revokes DELETE: mappings should be
+        # disabled with their provenance retained, not erased from policy
+        # history.
         return False
 
 

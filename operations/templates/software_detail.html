@@ -93,6 +93,43 @@
 <div class="sd-grid">
 <div>
     <div class="sd-card">
+        <h2>Capability recognition</h2>
+        {% if not capability_schema_ready %}
+        <p class="muted">Capability data is not available yet. The ingest schema migration may still be applying.</p>
+        {% elif not capability_product_rows %}
+        <p class="muted">No stable catalog product identity is linked to the current installations, so capability remains unknown.</p>
+        {% else %}
+            {% for product in capability_product_rows %}
+                <div style="padding:0.45rem 0; border-bottom:1px solid var(--border);">
+                    <div class="muted" style="font-size:0.75rem;">Product identity <code>{{ product.product_uuid }}</code></div>
+                    {% if product.rows %}
+                        {% for cap in product.rows %}
+                        <div style="margin-top:0.3rem;">
+                            <strong>{{ cap.capability|humanize_label|default:cap.capability }}</strong>
+                            · {{ cap.state|humanize_label|default:cap.state }}
+                            {% if cap.alertable %}<span class="sd-pill approve">alertable</span>{% else %}<span class="sd-pill none">candidate</span>{% endif %}
+                            <span class="muted">· {{ cap.sources }}</span>
+                            {% if can_curate_capability %}
+                            <form method="post" action="{% url 'software_capability_decide' %}" style="display:inline-flex; gap:0.3rem; margin-left:0.35rem;">
+                                {% csrf_token %}
+                                <input type="hidden" name="product_uuid" value="{{ product.product_uuid }}">
+                                <input type="hidden" name="capability" value="{{ cap.capability }}">
+                                <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                                <select name="decision" style="font-size:0.75rem;"><option value="confirm">Confirm</option><option value="reject">Reject</option></select>
+                                <button type="submit" style="font-size:0.75rem;">Save</button>
+                            </form>
+                            {% endif %}
+                        </div>
+                        {% endfor %}
+                    {% else %}
+                        <span class="muted">Unknown — no effective capability evidence.</span>
+                    {% endif %}
+                </div>
+            {% endfor %}
+        {% endif %}
+    </div>
+
+    <div class="sd-card">
         <h2>Decision</h2>
         <p class="muted" style="margin-top:0; font-size:0.85rem;">
             Global scope applies to every install of this title unless a

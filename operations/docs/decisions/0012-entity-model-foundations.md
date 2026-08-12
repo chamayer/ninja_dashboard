@@ -203,6 +203,17 @@ States the principle underlying ADR-0002, ADR-0005, ADR-0006, ADR-0010 and
 ADR-0011; supersedes none of them. Supersedes the `DESIGN.md` low-churn
 exception for source-derived attributes on canonical tables.
 
+## Amendment — 2026-08-12: software capability needs dedicated evidence authority
+
+The 2026-08-10 software amendment described product attributes as arriving
+from one intelligence path with nothing to arbitrate. Capability recognition
+does not satisfy that premise: vetted identities, narrowly tested rules,
+publisher evidence, community tags, and global curator confirmation have
+different authority. ADR-0018 therefore defines a dedicated capability
+evidence model beside the global software catalog. It does not adopt the
+generic tenant-scoped entity machinery, and it preserves this record's rule
+that a source assertion is evidence rather than state.
+
 ## Amendment — 2026-08-06: merging is not a universal entity operation
 
 Making the entity model generic invites the assumption that every operation on
