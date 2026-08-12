@@ -20,14 +20,16 @@ from ingest.intel.status import record_run
 
 log = logging.getLogger(__name__)
 
-_ENDPOINT = "https://community.chocolatey.org/api/v2/Packages()"
+_ENDPOINT = "https://community.chocolatey.org/api/v2/Search()"
 _TENANT_ID = 1
 _STALE_AFTER = timedelta(days=30)
 _MAX_TITLES_PER_RUN = 500
 _DELAY_SECONDS = 0.5
 
+_ENTRY_ELEMENT = re.compile(r"<entry[\s>].*?</entry>", re.S)
 _TAG_ELEMENT = re.compile(r"<d:Tags[^>]*>(.*?)</d:Tags>", re.S)
 _TITLE_ELEMENT = re.compile(r"<title[^>]*>(.*?)</title>", re.S)
+_NORMALISE_RE = re.compile(r"[^a-z0-9]+")
 
 
 def run_once() -> int:
@@ -91,14 +93,28 @@ def _titles_needing_refresh() -> list[str]:
         return [row[0] for row in cur.fetchall()]
 
 
+def _normalise(value: str) -> str:
+    return _NORMALISE_RE.sub("", value.lower())
+
+
 def _search(client: httpx.Client, canonical: str) -> tuple[list[str], list[str]]:
-    # OData wants ``searchTerm='...'`` quoted, ``$filter`` unmodified,
-    # and both keys as raw ``$``-prefixed names. httpx URL-encodes
-    # params too aggressively for OData, so hand-assemble the query.
+    # `Search()`, not `Packages()`. `searchTerm` is a parameter of the Search
+    # function; `Packages()` accepts the query string, ignores the term, and
+    # returns HTTP 200 with the unfiltered first page of the gallery. That is
+    # what this connector did for its whole life -- every enriched title got
+    # the alphabetically-first packages' tags, which is why all 1,473 stored
+    # rows carried one identical 22-tag set beginning "0install, 1c, 1c83".
+    # Search() additionally requires targetFramework and includePrerelease;
+    # omitting them returns HTTP 400.
+    #
+    # OData wants ``searchTerm='...'`` quoted and ``$``-prefixed keys raw.
+    # httpx URL-encodes params too aggressively for OData, so hand-assemble.
     from urllib.parse import quote
     quoted = quote(canonical[:120].replace("'", ""), safe="")
     url = (
         f"{_ENDPOINT}?searchTerm=%27{quoted}%27"
+        "&targetFramework=%27%27"
+        "&includePrerelease=false"
         "&$filter=IsLatestVersion"
         "&$top=5"
     )
@@ -106,15 +122,25 @@ def _search(client: httpx.Client, canonical: str) -> tuple[list[str], list[str]]
     if r.status_code == 404:
         return [], []
     r.raise_for_status()
-    body = r.text
-    tags_raw = _TAG_ELEMENT.findall(body)
-    titles = _TITLE_ELEMENT.findall(body)
-    tags: set[str] = set()
-    for chunk in tags_raw:
-        for tag in re.split(r"\s+", chunk.strip()):
-            if tag:
-                tags.add(tag)
-    return sorted(tags), [t.strip() for t in titles if t.strip()]
+
+    # Per entry, never unioned across the response. Tags describe one package;
+    # merging five results' tags produces a set that describes none of them.
+    entries: list[tuple[str, list[str]]] = []
+    for block in _ENTRY_ELEMENT.findall(r.text):
+        title_match = _TITLE_ELEMENT.search(block)
+        title = title_match.group(1).strip() if title_match else ""
+        tag_match = _TAG_ELEMENT.search(block)
+        tags = [t for t in re.split(r"\s+", tag_match.group(1).strip())] if tag_match else []
+        entries.append((title, [t for t in tags if t]))
+    if not entries:
+        return [], []
+
+    # Prefer an exact normalised title match; otherwise the first result, which
+    # the gallery orders by relevance. Returning the best single match keeps a
+    # tag attributable to a package.
+    wanted = _normalise(canonical)
+    best = next((e for e in entries if _normalise(e[0]) == wanted), entries[0])
+    return sorted(set(best[1])), [t for t, _ in entries if t]
 
 
 def _write_signal(canonical: str, tags: list[str], titles_found: list[str]) -> int:
