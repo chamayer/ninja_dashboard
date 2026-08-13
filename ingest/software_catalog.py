@@ -1,22 +1,22 @@
-"""Project the global software catalogue from fleet installations.
+"""Project the global software catalog from fleet installations.
 
 `catalog.publishers` -> `catalog.products` -> `catalog.software_versions` are
 global reference entities: software is not owned, so they carry no tenant and
 live outside `operations.entities` (ADR-0012 s5 as amended 2026-08-10).
 
 This is a **projector** in the `docs/glossary.md` sense -- deterministic,
-rebuildable, sole writer, and safe to re-run. Drop the catalogue and this
+rebuildable, sole writer, and safe to re-run. Drop the catalog and this
 rebuilds it identically from the installations. It makes no identity decision
 that a later run cannot correct.
 
-Publisher normalisation goes through `operations.publisher_aliases`, matched
+Publisher normalization goes through `operations.publisher_aliases`, matched
 with ILIKE -- the operator migration 0088 uses, since `raw_pattern` is a
 pattern column, not a literal and not a regex. Measured 2026-08-07: aliases
 cover 84% of installs but only 6% of distinct publishers, so the long tail
-arrives unnormalised and collapses later as an operator adds aliases. That is
+arrives unnormalized and collapses later as an operator adds aliases. That is
 why re-running must stay cheap and non-destructive.
 
-Nothing is deleted. A catalogue entry whose last installation disappears is
+Nothing is deleted. A catalog entry whose last installation disappears is
 still a real product, and removing it would break historical installations
 pointing at it.
 
@@ -33,7 +33,7 @@ Known limits, recorded rather than papered over:
   2026-08-10 against `software_installations_current` and the retained
   `software_installation_history` -- which carries `version` and is *not* keyed
   on it, so it is the only place the evidence could survive -- there are **0**
-  (device, title) pairs with more than one distinct version. The catalogue
+  (device, title) pairs with more than one distinct version. The catalog
   therefore loses nothing today. The key is not a defect to fix; re-derive this
   count before treating it as one.
 """
@@ -144,7 +144,7 @@ UPDATE operations.software_installations_current target
 
 
 def project_software_catalog() -> dict[str, int]:
-    """Build the catalogue and link installations to it. Safe to re-run."""
+    """Build the catalog and link installations to it. Safe to re-run."""
     with run_log("software.catalog") as stats:
         counts: dict[str, int] = {}
         with db.pool.connection() as conn, conn.cursor() as cur:

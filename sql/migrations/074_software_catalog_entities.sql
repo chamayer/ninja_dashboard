@@ -3,7 +3,7 @@
 -- Global software reference entities: publisher -> product -> version.
 --
 -- ADR-0012 section 5, as amended 2026-08-10. Software is not owned: a client
--- owns a licence, not Microsoft Word. `operations.entities` is the store for
+-- owns a license, not Microsoft Word. `operations.entities` is the store for
 -- owned things and every structure on it assumes ownership -- NOT NULL tenant,
 -- scope_kind, forced RLS with a tenant policy, and 29 composite foreign keys
 -- carrying a tenant. Software does not belong there, so it lives here with the
@@ -11,14 +11,14 @@
 --
 -- A separate schema from `intel` on purpose: ADR-0008 defines `intel` as
 -- external vulnerability and OSINT *feeds*. These rows are not a feed. They
--- are the canonical catalogue those feeds bind to, derived from what we
--- observe across the fleet and normalised through operator-maintained aliases.
+-- are the canonical catalog those feeds bind to, derived from what we
+-- observe across the fleet and normalized through operator-maintained aliases.
 --
 -- No tenant column, no RLS, no scope_kind -- deliberately, and that is the
 -- whole point of the placement. Nothing here is owned by anybody.
 --
 -- Measured 2026-08-07 against 484,636 installations: 4,863 raw publishers
--- (4,608 after alias normalisation), 20,876 products, 40,261 product+version
+-- (4,608 after alias normalization), 20,876 products, 40,261 product+version
 -- pairs. At the measured 417 bytes/row that is roughly 27 MB.
 -- =============================================================================
 
@@ -26,10 +26,10 @@ CREATE SCHEMA IF NOT EXISTS catalog;
 
 GRANT USAGE ON SCHEMA catalog TO operations_app, operations_readonly, metabase_ro, ninja_ingest;
 
--- Publisher: the vendor, after alias normalisation. `publisher_aliases`
+-- Publisher: the vendor, after alias normalization. `publisher_aliases`
 -- (operations, operator-maintained) maps raw installation strings onto these
 -- names; measured coverage is 84% of installs but only 6% of distinct raw
--- publishers, so the long tail arrives unnormalised and collapses later as
+-- publishers, so the long tail arrives unnormalized and collapses later as
 -- aliases are added. That is why `canonical_name` is the key and the raw
 -- string stays on the installation row.
 CREATE TABLE IF NOT EXISTS catalog.publishers (
@@ -76,7 +76,7 @@ CREATE INDEX IF NOT EXISTS catalog_versions_eol_idx
     ON catalog.software_versions (eol_date) WHERE eol_date IS NOT NULL;
 
 -- Least privilege: the projector runs in ingest and is the sole writer.
--- Operations and Metabase read. Nobody deletes -- a catalogue entry that
+-- Operations and Metabase read. Nobody deletes -- a catalog entry that
 -- stops being installed is still a real product, and removing it would break
 -- every historical installation that pointed at it.
 GRANT SELECT ON ALL TABLES IN SCHEMA catalog

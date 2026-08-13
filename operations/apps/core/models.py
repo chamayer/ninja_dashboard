@@ -321,7 +321,7 @@ class FindingType(models.Model):
     )
     source_module = models.CharField(max_length=80, blank=True, default="")
     # Defaults to device because that is what every existing type is, so
-    # adding the column changes no behaviour until a row is set otherwise.
+    # adding the column changes no behavior until a row is set otherwise.
     subject_scope = models.CharField(
         max_length=24, choices=SubjectScope.choices, default=SubjectScope.DEVICE
     )
@@ -338,7 +338,7 @@ class FindingType(models.Model):
     auto_resolvable = models.BooleanField(default=True)
     # Whether an `approve` / `approve_publisher` software decision silences a
     # finding of this type. A registry row for the same reason subject_scope is
-    # one: it maps a domain value to a behaviour, so it is operator-maintainable
+    # one: it maps a domain value to a behavior, so it is operator-maintainable
     # data rather than a constant in the emitter (ADR-0012 section 6, and the
     # `test_no_hardcoded_domain_mappings` ratchet).
     #
@@ -349,7 +349,7 @@ class FindingType(models.Model):
     # (`software_findings.py` loop head), so approving a title silenced its
     # vulnerabilities too.
     #
-    # Defaults True, preserving the previous behaviour for any type whose row
+    # Defaults True, preserving the previous behavior for any type whose row
     # has not been considered -- the same fail-safe stance subject_scope takes
     # by defaulting to `device`.
     suppressed_by_approval = models.BooleanField(
@@ -3463,7 +3463,7 @@ class SoftwareDecision(UUIDTenantScopedModel):
 
 
 class PublisherAlias(models.Model):
-    """Publisher-name normalisation. Every raw publisher variant maps to
+    """Publisher-name normalization. Every raw publisher variant maps to
     a canonical publisher for matching / grouping ONLY. Detail pages
     still surface the raw ingested string; the alias is used for the
     aggregation aggregate — no publisher name is ever hidden.
@@ -3498,11 +3498,11 @@ class PublisherAlias(models.Model):
 
 
 class PublisherCategory(models.Model):
-    """Data-driven default categorisation: any product whose publisher
+    """Data-driven default categorization: any product whose publisher
     matches ``publisher_pattern`` is auto-tagged with ``categories``.
     Editable in Django admin so operators can extend the rule set
     without a deploy. Applied on top of, not instead of, the per-title
-    catalogue rows in ``SoftwareCatalog.categories``.
+    catalog rows in ``SoftwareCatalog.categories``.
     """
 
     id = models.SmallAutoField(primary_key=True)
@@ -3510,7 +3510,7 @@ class PublisherCategory(models.Model):
         max_length=255,
         help_text=(
             "SQL ILIKE pattern; matched against the canonical publisher "
-            "after PublisherAlias normalisation."
+            "after PublisherAlias normalization."
         ),
     )
     categories = models.JSONField(
@@ -3597,7 +3597,7 @@ class IntelMatcherHint(models.Model):
 
 
 class EolProductMap(models.Model):
-    """Which catalogue titles correspond to which endoflife.date product.
+    """Which catalog titles correspond to which endoflife.date product.
 
     This legacy tenant map remains only so its existing, verified rows preserve
     their provenance. Managed global rules now cover the supported lifecycle

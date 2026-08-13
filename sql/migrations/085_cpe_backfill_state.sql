@@ -7,7 +7,7 @@
 -- entries" -- fully caught up on a window that excludes most of the corpus.
 --
 -- The consequence is measured: the matcher can only match titles whose CPEs we
--- hold, and CVE coverage is 507 of 21,395 catalogue titles.
+-- hold, and CVE coverage is 507 of 21,395 catalog titles.
 --
 -- A backfill pages the full index by startIndex with no date filter. With the
 -- configured NVD API key that is ~0.65s/request, so 360 pages of 5,000 is about

@@ -14,7 +14,7 @@
 -- so today nothing in the pipeline reads the version we actually observed.
 -- This migration gives the match somewhere to put it.
 
--- The resolved catalogue version this match applies to. Nullable: a CPE with a
+-- The resolved catalog version this match applies to. Nullable: a CPE with a
 -- version-agnostic version ('*', '-', or absent) genuinely applies to the whole
 -- product, and forcing those onto an arbitrary version would be a fabrication.
 -- Those rows keep software_version_id NULL and stay product-level, which is now
@@ -48,7 +48,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS cve_match_scope_idx
     ) NULLS NOT DISTINCT;
 
 COMMENT ON COLUMN operations.cve_match.software_version_id IS
-    'Catalogue version this match applies to. NULL means the CPE was '
+    'Catalog version this match applies to. NULL means the CPE was '
     'version-agnostic and the match is genuinely product-level -- not that the '
     'version is unknown.';
 

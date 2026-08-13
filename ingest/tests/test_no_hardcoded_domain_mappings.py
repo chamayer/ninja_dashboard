@@ -13,7 +13,7 @@ strings appears that is not on the list, which is what a new hardcoded mapping
 looks like. Removing an entry as it moves to data is the intended direction;
 adding one requires justifying it here in review.
 
-Exempt by design (ADR-0012 §6): function dispatch, normalisation regexes,
+Exempt by design (ADR-0012 §6): function dispatch, normalization regexes,
 endpoint/timeout config, and documented fail-closed bootstrap fallbacks.
 """
 

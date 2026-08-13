@@ -37,7 +37,7 @@
 -- with version, which is already hashed. So they are written on insert and
 -- refreshed in place, without manufacturing a material change.
 --
--- Nullable with no default, so this is a catalogue-only change: no heap
+-- Nullable with no default, so this is a catalog-only change: no heap
 -- rewrite, unlike 089 whose volatile default forced one. Existing rows carry
 -- NULL until the next collection refreshes them, which is an honest "not yet
 -- observed" rather than a fabricated value.
@@ -50,7 +50,7 @@ ALTER TABLE operations.software_installations_current
 COMMENT ON COLUMN operations.software_installations_current.product_code IS
     'Ninja productCode -- MSI ProductCode GUID where the installer provides '
     'one. ~94% populated. Stable across name spelling/casing/localisation, so '
-    'preferable to canonical_name for joining to external catalogues.';
+    'preferable to canonical_name for joining to external catalogs.';
 COMMENT ON COLUMN operations.software_installations_current.size_bytes IS
     'Ninja size. ~40% populated; absent for many non-MSI installers.';
 COMMENT ON COLUMN operations.software_installations_current.is_system_component IS

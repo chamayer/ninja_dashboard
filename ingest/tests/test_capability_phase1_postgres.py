@@ -1,4 +1,4 @@
-"""Executed behaviour for migration 093 and the capability projector.
+"""Executed behavior for migration 093 and the capability projector.
 
 Run with ``RUN_POSTGRES_INTEGRATION_TESTS=1``. Uses a disposable Postgres
 container and never connects to a configured environment.
@@ -206,7 +206,7 @@ def test_migration_is_idempotent(pg) -> None:
         assert cur.fetchone()[0] == 5
 
 
-# ── projector behaviour ─────────────────────────────────────────────────────
+# ── projector behavior ─────────────────────────────────────────────────────
 
 def test_colliding_rules_collapse_deterministically(pg) -> None:
     """Two rules matching one product previously raised

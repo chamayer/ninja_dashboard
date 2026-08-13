@@ -10,7 +10,7 @@ constant. This taxonomy was hardcoded twice and the copies had drifted:
 Both are replaced by `operations.os_family_mappings`, mirroring the existing
 `os_group_mappings` shape (pattern / value / priority, first match wins).
 
-Behaviour change, deliberate: the function now returns NULL rather than
+Behavior change, deliberate: the function now returns NULL rather than
 'Unknown' for a NULL or empty os_name. 'Unknown' was our fallback presented as
 a value, and when it reached the claim layer it won authority for 488 devices
 whose real family was known. Both live SQL callers already guard NULL

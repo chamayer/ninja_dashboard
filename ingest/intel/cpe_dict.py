@@ -5,14 +5,14 @@ Two modes, and the distinction matters:
 * **Backfill** — pages the full index by ``startIndex`` with no date filter,
   resuming from ``intel.cpe_backfill_state`` and bounded to
   ``_MAX_PAGES_PER_RUN`` per cycle. Runs until the corpus is complete.
-* **Delta** — the original behaviour, ``lastModStartDate`` forward from the
+* **Delta** — the original behavior, ``lastModStartDate`` forward from the
   last write.
 
 Delta alone was never going to fill the dictionary, which is why we held
 169,951 of NVD's 1,799,756 CPEs (9.4%) while reporting "Upserted 0 CPE
 entries": it filters on *modification* date, so a CPE untouched since before
 the first run is never returned at all. Measured consequence: the matcher could
-only reach 507 of 21,395 catalogue titles.
+only reach 507 of 21,395 catalog titles.
 
 Sizing, measured 2026-08-11: 867 bytes/row, so the full corpus is ~1.5 GB
 against a 46 GB database. ``raw_nvd`` is two thirds of that and nothing reads
@@ -27,7 +27,7 @@ being a thing that silently either happened or did not.
 
 **The backfill is one-time.** Once the cursor's ``completed_at`` is set the
 connector returns to delta pulls permanently; nothing re-triggers it. Deltas
-then keep the corpus current on the normal catalogue cadence, forever.
+then keep the corpus current on the normal catalog cadence, forever.
 """
 
 from __future__ import annotations

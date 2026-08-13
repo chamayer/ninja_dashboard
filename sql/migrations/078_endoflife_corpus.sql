@@ -1,5 +1,5 @@
 -- 078: end-of-life corpus from endoflife.date, plus the operator-maintained
--- mapping from our catalogue titles onto it.
+-- mapping from our catalog titles onto it.
 --
 -- `eol_runtime` has been firing on a title regex ("matches end-of-life runtime
 -- pattern") because no lifecycle producer ever existed: 0 of 40,541
@@ -10,7 +10,7 @@
 --
 -- Shape follows cpe_dict exactly: the raw feed lands in `intel` as a global
 -- reference corpus with no tenant and no RLS, keyed naturally, and a separate
--- mapping step decides what it means for our catalogue. That separation is why
+-- mapping step decides what it means for our catalog. That separation is why
 -- a feed refresh never has to re-decide title matching, and why a matching fix
 -- never has to re-fetch 462 products.
 
@@ -57,7 +57,7 @@ CREATE TABLE IF NOT EXISTS intel.eol_releases (
 CREATE INDEX IF NOT EXISTS eol_releases_eol_from_idx
     ON intel.eol_releases (eol_from) WHERE eol_from IS NOT NULL;
 
--- Which catalogue titles correspond to which endoflife.date product.
+-- Which catalog titles correspond to which endoflife.date product.
 --
 -- ADR-0012 section 6: a rule mapping one domain value to another is
 -- operator-maintainable data, never a constant in code. A hardcoded

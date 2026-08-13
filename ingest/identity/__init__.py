@@ -20,7 +20,7 @@ log = logging.getLogger(__name__)
 
 # Used only if the lookup runs before the table exists (a container started
 # against a database that has not yet applied migration 0092). Deliberately
-# identical to the pre-migration literal so behaviour is unchanged in that
+# identical to the pre-migration literal so behavior is unchanged in that
 # window, and logged loudly when used.
 _BOOTSTRAP_FALLBACK = frozenset({
     "agent.rmm",
@@ -57,7 +57,7 @@ def identity_entity_types(cur: Any) -> frozenset[str]:
     except Exception:
         log.exception(
             "entity_types lookup failed — falling back to the built-in set. "
-            "Identity behaviour is unchanged, but the table is authoritative "
+            "Identity behavior is unchanged, but the table is authoritative "
             "and should be repaired."
         )
         return _BOOTSTRAP_FALLBACK

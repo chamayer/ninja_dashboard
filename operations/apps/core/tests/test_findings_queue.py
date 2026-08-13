@@ -129,7 +129,7 @@ def test_findings_queue_template_exposes_device_csv_and_grouped_types():
     assert "card.percentage" in template
 
 
-def test_findings_scope_cards_compare_filtered_counts_with_labelled_baselines():
+def test_findings_scope_cards_compare_filtered_counts_with_labeled_baselines():
     source = Path("apps/core/views.py").read_text(encoding="utf-8")
 
     assert "status_scope_qs = qs" in source

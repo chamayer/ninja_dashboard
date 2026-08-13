@@ -199,8 +199,8 @@ def humanize_label(value):
             arg = m.group(1)
             # Recursively humanize the suffix so
             # `default:workstation` → "Default for Workstation devices"
-            arg_labelled = _LABELS.get(arg, arg)
-            return tmpl.format(arg_labelled.lower() if tmpl.endswith(" devices") else arg_labelled)
+            arg_labeled = _LABELS.get(arg, arg)
+            return tmpl.format(arg_labeled.lower() if tmpl.endswith(" devices") else arg_labeled)
     return key
 
 

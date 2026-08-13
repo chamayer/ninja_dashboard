@@ -236,7 +236,7 @@ def test_rules_cannot_claim_an_unrelated_source() -> None:
 
 def test_publisher_only_rules_cannot_be_vetted() -> None:
     """A rule matching only `Microsoft%` claiming vetted_rule would raise
-    unauthorized findings across a publisher's entire catalogue."""
+    unauthorized findings across a publisher's entire catalog."""
     sql = _sql()
     assert "ck_capability_rule_vetted_needs_a_title" in sql
     assert "source_key <> 'vetted_rule' OR title_pattern <> ''" in sql

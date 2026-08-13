@@ -19,22 +19,22 @@ from psycopg_pool import ConnectionPool
 log = logging.getLogger(__name__)
 
 
-class _NotInitialised:
+class _NotInitialized:
     def __getattr__(self, name: str) -> Any:
         raise RuntimeError("db.init(dsn) must be called before using the pool")
 
 
-pool: Any = _NotInitialised()
+pool: Any = _NotInitialized()
 
 
 def init(dsn: str, min_size: int = 1, max_size: int = 4) -> None:
-    """Initialise the module-level connection pool. Idempotent: a second
+    """Initialize the module-level connection pool. Idempotent: a second
     call is a no-op (avoids accidental double-init from reimports)."""
     global pool
-    if not isinstance(pool, _NotInitialised):
+    if not isinstance(pool, _NotInitialized):
         return
     pool = ConnectionPool(dsn, min_size=min_size, max_size=max_size, open=True)
-    log.info("Postgres pool initialised (min=%d, max=%d)", min_size, max_size)
+    log.info("Postgres pool initialized (min=%d, max=%d)", min_size, max_size)
 
 
 @contextmanager

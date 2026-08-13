@@ -5,7 +5,7 @@
 ## Context
 
 Lifecycle coverage must focus on software that has an independently supported
-release lifecycle. A broad corpus-to-catalogue candidate matcher is both slow
+release lifecycle. A broad corpus-to-catalog candidate matcher is both slow
 and unsafe: unrelated title substrings can acquire a precise, incorrect EOL
 date. An operator-maintained mapping queue also conflicts with the requirement
 that routine lifecycle coverage needs no manual upkeep.
@@ -13,7 +13,7 @@ that routine lifecycle coverage needs no manual upkeep.
 ## Decision
 
 Use the global, migration-seeded `intel.eol_managed_product_rules` table for a
-small set of verified, high-risk product families. Rules use narrow catalogue
+small set of verified, high-risk product families. Rules use narrow catalog
 title patterns, optional publisher gates, and optional version/cycle selectors;
 they never contain lifecycle dates or build maps. The existing EOL projector
 remains the single writer of `catalog.software_versions.eol_date` and
@@ -27,7 +27,7 @@ is not part of this lifecycle path.
 ## Consequences
 
 Known families are refreshed automatically when either the corpus or software
-catalogue changes. Ambiguous or unrecognized titles remain unmapped instead of
+catalog changes. Ambiguous or unrecognized titles remain unmapped instead of
 being guessed. Microsoft 365 channel currency, Adobe Acrobat/Reader, and
 Visual C++ redistributables remain separate concerns: they cannot safely be
 claimed by these rules without a trustworthy lifecycle source or distinct

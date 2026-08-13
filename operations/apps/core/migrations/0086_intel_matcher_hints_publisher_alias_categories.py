@@ -14,7 +14,7 @@ class Migration(migrations.Migration):
             name='PublisherCategory',
             fields=[
                 ('id', models.SmallAutoField(primary_key=True, serialize=False)),
-                ('publisher_pattern', models.CharField(help_text='SQL ILIKE pattern; matched against the canonical publisher after PublisherAlias normalisation.', max_length=255)),
+                ('publisher_pattern', models.CharField(help_text='SQL ILIKE pattern; matched against the canonical publisher after PublisherAlias normalization.', max_length=255)),
                 ('categories', models.JSONField(blank=True, default=list, help_text="List of category tokens, e.g. ['browser', 'productivity'].")),
                 ('is_regex', models.BooleanField(default=False)),
                 ('enabled', models.BooleanField(default=True)),

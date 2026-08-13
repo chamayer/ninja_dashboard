@@ -82,7 +82,7 @@ the scorer can weight down fuzzy matches later without re-encoding.
   intuition. Conservative default matching (exact vendor + product,
   ignore version) is the safest starting point.
 - Intel tables grow. `cves` will hit ~250k rows steady-state. `cve_match`
-  scales with the fleet catalogue; ~100k rows at the current
+  scales with the fleet catalog; ~100k rows at the current
   ~8k canonical titles is a plausible upper bound. Both are indexable
   and bounded; no matview needed initially.
 

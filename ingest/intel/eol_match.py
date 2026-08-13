@@ -1,4 +1,4 @@
-"""Project end-of-life dates from the corpus onto catalogue versions.
+"""Project end-of-life dates from the corpus onto catalog versions.
 
 Separate from `endoflife.py` for the same reason `matcher.py` is separate from
 `cpe_dict.py`: fetching a corpus and deciding what it means for our titles are
@@ -56,7 +56,7 @@ WITH mapped AS (
 
     -- A mapping row now matches on title AND, optionally, on the installed
     -- version. Rows with an empty version_pattern apply to every version,
-    -- which is the pre-082 behaviour.
+    -- which is the pre-082 behavior.
     SELECT sv.id AS version_id,
            m.eol_product,
            m.eol_cycle,
@@ -74,7 +74,7 @@ WITH mapped AS (
        AND (m.version_pattern = '' OR sv.version ILIKE m.version_pattern)
 ),
 best_map AS (
-    -- One mapping per catalogue version: version-pinned rows first, then
+    -- One mapping per catalog version: version-pinned rows first, then
     -- priority, source then name so the result is deterministic. A legacy
     -- tenant override wins only at the same priority.
     SELECT DISTINCT ON (version_id)

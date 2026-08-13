@@ -101,7 +101,7 @@ def drain_resolution(batch_size: int = 200, *, refresh_current: bool = True) -> 
                     log.debug("resolver: vm_uuid match %s → device %s", entity_key, device_id)
                     continue
 
-            # Fall back to normalised hostname
+            # Fall back to normalized hostname
             hostname_raw = cd.get("hostname") or cd.get("guest_name")
             if not hostname_raw:
                 continue

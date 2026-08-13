@@ -146,7 +146,7 @@ worse than a slow one.
 - Each needs its own decision, not a blanket one. Some are plausibly genuine
   exemptions — `_WINDOWS_11_COMPATIBILITY_CHOICES` is arguably UI display
   choices rather than a domain mapping, and `_PATCH_SEVERITY_VALUES` may be a
-  source-value normalisation. Others map finding-type names to behaviour, which
+  source-value normalization. Others map finding-type names to behavior, which
   is exactly what the ratchet is for and what
   `finding_types.suppressed_by_approval` (migration 0136) did instead.
 - Do **not** simply add all four to the reviewed inventory to make the test
@@ -248,7 +248,7 @@ worse than a slow one.
   `AGENT_COMPLIANCE_SCHEDULE_HOURS` to restore a single effective cadence.
 - Why it is only interim: capability is a poor proxy for cadence. Two
   documentation sources may warrant different intervals, and a per-source
-  schedule is already modelled in the database — this hardcodes in Python
+  schedule is already modeled in the database — this hardcodes in Python
   what the schema was designed to express.
 - Constraints: must not change existing agent-source cadence without
   approval; per-binding schedules need a defined format (cron vs interval)
@@ -625,7 +625,7 @@ Base data is clean: 0 installs missing a name, 4 missing a publisher, 13,817
 (2.9%) missing a version, and only **99** (name, version) pairs claimed by more
 than one publisher.
 
-**Publisher normalisation is NOT solved**, contrary to what this entry said
+**Publisher normalization is NOT solved**, contrary to what this entry said
 before. `publisher_aliases` holds 56 enabled rows, all literal (`is_regex`
 false), matched with **ILIKE** (`raw_pattern`, per migration 0088 line 102 --
 not equality and not regex). Measured with the correct operator:
@@ -635,11 +635,11 @@ not equality and not regex). Measured with the correct operator:
 | publishers matched | **296 of 4,863** (6%) |
 | installs covered | **407,494 of 484,636** (84%) |
 | distinct canonical publishers | 43 |
-| publisher entities after normalisation | **4,608** (from 4,863) |
+| publisher entities after normalization | **4,608** (from 4,863) |
 
 So aliases cover install *volume* (the big vendors) but collapse only 255
 distinct publishers. Instantiating today mints ~4,608 publisher entities, most
-unnormalised. Not a blocker, but budget for the tail.
+unnormalized. Not a blocker, but budget for the tail.
 
 Identity is (canonical publisher, product, version). **Unscoped** per the
 glossary, so the installation relationship runs device -> software+version;
@@ -767,7 +767,7 @@ and the glossary's identity test to the software domain.
    both `Type=publisher` — mapping to `approve_publisher`.
 2. **Split trust out of `categories`.** Move the 5 `whitelist` and 7
    `trusted_publisher` entries into `software_decisions` as approvals; change
-   suppression to test *decided* rather than *labelled*. Functional categories
+   suppression to test *decided* rather than *labeled*. Functional categories
    (`av`, `remote_access`, `rmm`) stay as the coverage mechanism.
 3. **Move findings onto their real subjects.** Five types to software+version,
    `install_path_suspicious` to the installation relationship, the two
@@ -853,7 +853,7 @@ finding with a prevalence attribute.
   completed work, and it was reported at the time as a simplification.
 - Also outstanding from ADR-0013: rename `operations.assets` to
   `device_hardware`; narrow `asset_type` to hardware-descriptive values;
-  promote peripherals/licences to their own entity classes; give the 4,842
+  promote peripherals/licenses to their own entity classes; give the 4,842
   unanchored CMDB records the `asset` class; migrate agent instances to
   relationships.
 - Resolve together with the item above — if `v_device_current` lands and the
@@ -881,7 +881,7 @@ need:
    in the schema could reference — failing at the first relationship insert
    after deploy, not at migration time, because every DDL statement succeeds.
 2. **The placement was wrong.** Software is not owned — a client owns a
-   licence, not the product. `publisher`, `product` and `software+version` are
+   license, not the product. `publisher`, `product` and `software+version` are
    global reference data beside `intel.cves`, which ADR-0012 §7 already
    exempts from the entity model.
 
@@ -890,7 +890,7 @@ replacement, and the 29 composite foreign keys are untouched. Verified
 2026-08-12: `operations.entities.tenant_id` is still `NOT NULL`, which is now
 correct by decision rather than an outstanding gap.
 
-Retained only so the proposal is not rediscovered and re-planned. A **licence**
+Retained only so the proposal is not rediscovered and re-planned. A **license**
 is a scoped asset and does belong in `operations.entities` under the `asset`
 class; that is separate work and carries no unscoped-entity requirement.
 

@@ -1,6 +1,6 @@
 """Import operator software decisions from a legacy `decisions_*.csv`.
 
-The legacy analyser accumulated its decisions in `decisions_global.csv` and
+The legacy analyzer accumulated its decisions in `decisions_global.csv` and
 merged on every save so none were ever lost. That corpus is the most expensive
 artefact in the software domain to recreate — human judgement about what is
 allowed in this fleet — and `operations.software_decisions` held 3 rows

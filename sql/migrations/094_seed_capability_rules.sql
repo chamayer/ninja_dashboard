@@ -14,7 +14,7 @@
 --
 -- Anchored patterns only; the table's CHECK rejects a leading % or _. A
 -- vetted_rule additionally requires a title pattern, so a publisher-only rule
--- cannot become alertable across a vendor's whole catalogue.
+-- cannot become alertable across a vendor's whole catalog.
 
 -- ---------------------------------------------------------------------------
 -- publisher_rule: migrated from operations.publisher_categories (seeded by

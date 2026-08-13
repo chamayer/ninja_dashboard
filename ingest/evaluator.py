@@ -854,7 +854,7 @@ def _evaluate_duplicate_records(cur: Any, tenant_id: int, now: datetime) -> int:
         FROM operations.entity_observation_current
         WHERE tenant_id = %s
           -- Allowlist, not `<> 'software'`. This finding says "each extra
-          -- record consumes a licence", which is only true of installed-agent
+          -- record consumes a license", which is only true of installed-agent
           -- streams. CMDB pages consume nothing, and two pages sharing a name
           -- is normal there (a machine legitimately has both a Computer Asset
           -- and a Servers page). Left unfiltered this raised 572 false

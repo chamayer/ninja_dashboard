@@ -1,6 +1,6 @@
 """Seed the ``whitelist_suggestion`` FindingType (Software Batch 3).
 
-Fires for titles that are uncategorised, undecided at every scope, and
+Fires for titles that are uncategorized, undecided at every scope, and
 installed on ≥ N devices. Threshold + severity are tunable via
 ``EvaluatorConfig``. The suggestion surfaces in the standard findings
 queue and the software decisions queue — one row per (device × title),
@@ -28,7 +28,7 @@ def apply(apps, schema_editor):
             "runbook_path": "",
             "description": (
                 "Software installed on ≥ N devices fleet-wide with no "
-                "categorisation and no operator decision — a candidate to "
+                "categorization and no operator decision — a candidate to "
                 "approve as a fleet whitelist or reject explicitly."
             ),
             "category": software_cat,

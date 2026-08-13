@@ -1,6 +1,6 @@
 -- 093: capability recognition -- evidence, authority, and one effective relation.
 --
--- Recognises software with three operational capabilities (endpoint_security,
+-- Recognizes software with three operational capabilities (endpoint_security,
 -- rmm, remote_access) precisely enough that an `unauthorized_*` finding can be
 -- trusted. NOT a taxonomy: coverage is not the metric, precision is.
 --
@@ -84,7 +84,7 @@ INSERT INTO catalog.capability_source
     (source_key, authority_class, may_alert, managed_by, notes)
 VALUES
     ('lolrmm',           'vetted_identity', TRUE,  'migration',
-     'LOLRMM corpus, exact normalised tool-name match only (Phase 3).'),
+     'LOLRMM corpus, exact normalized tool-name match only (Phase 3).'),
     ('vetted_rule',      'vetted_rule',     TRUE,  'migration',
      'Narrow anchored product-name rules from catalog.capability_rule.'),
     ('publisher_rule',   'publisher_rule',  FALSE, 'migration',
@@ -184,7 +184,7 @@ CREATE TABLE IF NOT EXISTS catalog.capability_rule (
     ),
     -- A publisher pattern alone is not identity. Without this, a rule matching
     -- only `%Microsoft%` could claim `vetted_rule` and become alertable,
-    -- raising unauthorized findings across a publisher's entire catalogue.
+    -- raising unauthorized findings across a publisher's entire catalog.
     CONSTRAINT ck_capability_rule_vetted_needs_a_title CHECK (
         source_key <> 'vetted_rule' OR title_pattern <> ''
     )

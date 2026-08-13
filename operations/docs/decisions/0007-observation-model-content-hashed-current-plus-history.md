@@ -193,7 +193,7 @@ Every write to `_current` (regardless of material hash change):
   `row.observed_at <= _current.observed_at` (equal timestamps are treated
   as stale — different material at the same source time would otherwise
   produce a zero-length SCD-2 interval). The bespoke SQL upsert mirrors
-  the guard as defence in depth: `WHERE _current.observed_at <
+  the guard as defense in depth: `WHERE _current.observed_at <
   EXCLUDED.observed_at`. Older snapshots silently lose the race.
 - Absent-row race: `SELECT ... FOR UPDATE` serializes existing identities but
   cannot lock a row that does not exist yet. When the first read is absent,

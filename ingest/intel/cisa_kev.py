@@ -1,6 +1,6 @@
 """CISA Known Exploited Vulnerabilities → intel.cves KEV flags.
 
-One HTTPS GET pulls the full catalogue (~1,200 rows). We set kev_flag,
+One HTTPS GET pulls the full catalog (~1,200 rows). We set kev_flag,
 kev_added_at, and kev_notes on the matching intel.cves row. If NVD
 hasn't ingested the CVE yet we insert a stub row that later NVD runs
 will enrich.

@@ -251,7 +251,7 @@ class Settings(BaseSettings):
     INTEL_MATCHER_SCHEDULE_HOURS: int = Field(default=6, ge=1, le=24)
     # Capability recognition (endpoint_security / rmm / remote_access).
     # Phase 1 is shadow mode: assertions are recorded and nothing enforces
-    # them. Shares the catalogue cadence -- rules change on the order of
+    # them. Shares the catalog cadence -- rules change on the order of
     # weeks, and the projector reads only local tables.
     INTEL_CAPABILITY_ENABLED: bool = True
     INTEL_CAPABILITY_SCHEDULE_HOURS: int = Field(default=24, ge=1, le=168)

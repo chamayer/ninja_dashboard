@@ -43,7 +43,7 @@ _DEFAULT_CONFIG: dict = {
     "rare_recent_skip_categorized": True,
     "rare_recent_skip_decided": True,
     # whitelist_suggestion — the other side of rarity: titles installed
-    # on ≥ N devices, uncategorised, and undecided at every scope. These
+    # on ≥ N devices, uncategorized, and undecided at every scope. These
     # are the titles worth reviewing for a fleet-wide APPROVE decision.
     "whitelist_suggestion_enabled": True,
     "whitelist_suggestion_min_devices": 10,
@@ -120,7 +120,7 @@ def classify(tenant_id: int = _TENANT_ID) -> int:
             # subject nobody chose for it.
             scopes, suppressed_by_approval = _load_scopes(cur)
 
-            # LEFT JOIN, not INNER: an installation with no catalogue link must
+            # LEFT JOIN, not INNER: an installation with no catalog link must
             # still be classified. It falls back to device scope and is counted
             # below rather than silently dropped.
             cur.execute(
@@ -145,7 +145,7 @@ def classify(tenant_id: int = _TENANT_ID) -> int:
             unlinked = sum(1 for row in installs if row[6] is None)
             if unlinked:
                 log.warning(
-                    "software_findings: %d of %d installation(s) have no catalogue "
+                    "software_findings: %d of %d installation(s) have no catalog "
                     "link; those fall back to device-scoped findings.",
                     unlinked, len(installs),
                 )
@@ -297,7 +297,7 @@ def classify(tenant_id: int = _TENANT_ID) -> int:
                     # and this covers reject/investigate.
                     if cfg.get("rare_recent_skip_decided", True) and dec:
                         skip = True
-                    # Categorisation no longer suppresses. `categories`
+                    # Categorization no longer suppresses. `categories`
                     # holds functional labels (av / rmm / remote_access) that
                     # say what software *does*, not whether it is trusted —
                     # ADR-0015 §3. Trust moved to `software_decisions`, which
@@ -400,10 +400,10 @@ def classify(tenant_id: int = _TENANT_ID) -> int:
                     )
 
                 # 7. whitelist_suggestion — the "≥ N devices, undecided,
-                # uncategorised" review candidate. Distinct from
+                # uncategorized" review candidate. Distinct from
                 # rare_recent (which fires at the ≤ 2 devices end); the
                 # two are mutually exclusive by device_count threshold.
-                # Suppression tests *decided*, not *labelled* (ADR-0015 §3).
+                # Suppression tests *decided*, not *labeled* (ADR-0015 §3).
                 # This previously also required `not cat_list`, so tagging a
                 # title `av` — a statement about what it does, carrying no
                 # judgement — silenced the decision prompt exactly as a trust
@@ -423,7 +423,7 @@ def classify(tenant_id: int = _TENANT_ID) -> int:
                             {
                                 "fleet_device_count": fleet_devices,
                                 "threshold": min_devices,
-                                "reason": "uncategorised + undecided + widespread",
+                                "reason": "uncategorized + undecided + widespread",
                             },
                             emitted_keys, subj,
                         )
@@ -496,12 +496,12 @@ def approval_silences(
     statement about *trust*; it cannot make a fact untrue.
 
     `matrix` comes from `finding_types.suppressed_by_approval` (migration
-    0136), not from a constant here: it maps a domain value to a behaviour,
+    0136), not from a constant here: it maps a domain value to a behavior,
     which ADR-0012 section 6 requires to be data and which
     `test_no_hardcoded_domain_mappings` would otherwise flag.
 
     An unregistered finding type defaults to **suppressed**, preserving the
-    previous behaviour rather than silently opening a new finding up. The same
+    previous behavior rather than silently opening a new finding up. The same
     default applies when the column does not exist yet -- see `_load_scopes`.
     """
     if not approved:
@@ -545,14 +545,14 @@ def _load_scopes(cur) -> tuple[dict[str, str], dict[str, bool]]:
     *different* container applies. Ingest and Operations start concurrently and
     neither waits for the other, so a classifier catch-up can run against a
     schema where the column does not exist yet. Falling back to the pre-0136
-    behaviour -- everything suppressed by approval, expressed as an empty
+    behavior -- everything suppressed by approval, expressed as an empty
     matrix -- keeps that window behaving exactly as it did before this change.
     """
     if not _column_exists(cur, "operations.finding_types", "suppressed_by_approval"):
         log.info(
             "finding_types.suppressed_by_approval absent (Operations migration "
             "0136 not yet applied); treating every finding as suppressed by "
-            "approval, which is the pre-0136 behaviour"
+            "approval, which is the pre-0136 behavior"
         )
         cur.execute("SELECT name, subject_scope FROM operations.finding_types")
         return {name: scope for name, scope in cur.fetchall()}, {}
@@ -907,7 +907,7 @@ def _emit_scoped(cur, tenant_id, ft_id, client_id, device_id, canonical_key,
                  subj=None) -> int:
     # subj = (scope_by_finding_type_id, product_uuid, version_uuid,
     #         installation_uuid). Absent, everything stays device-scoped, which
-    # is the pre-0130 behaviour and the safe default for any caller not yet
+    # is the pre-0130 behavior and the safe default for any caller not yet
     # passing it. The 4-tuple is unpacked tolerantly so a 3-tuple caller keeps
     # working rather than raising.
     scope_by_id, product_uuid, version_uuid, installation_uuid = (

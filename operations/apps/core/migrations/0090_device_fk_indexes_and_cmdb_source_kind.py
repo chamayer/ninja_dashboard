@@ -13,7 +13,7 @@ device removal — merges, retirement, tenant offboarding — not just cleanup.
 **CMDB source kind.** Hudu is registered as an Operations source whose
 observations describe assets but establish no per-device identity. The kind
 is ``cmdb`` rather than a vendor name so a second CMDB inherits the same
-behaviour with no code change: excluded from ``IDENTITY_ENTITY_TYPES`` (never
+behavior with no code change: excluded from ``IDENTITY_ENTITY_TYPES`` (never
 resolved, promoted, or written to ``device_links``) and placed on the slower
 documentation collection cycle. Precedent: ``agent.remote_access`` already
 serves both ScreenConnect and LogMeIn.

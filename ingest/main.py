@@ -8,7 +8,7 @@ Boot sequence:
      mid-startup (which historically caused migration rollback loops).
      /readyz reports starting/ready state; /healthz is always green
      once the listener binds.
-  3. Initialise DB pool.
+  3. Initialize DB pool.
   4. Apply pending migrations.
   5. Start APScheduler at the configured interval. No jobs wired yet —
      each ingest module adds its job once it lands.
@@ -2610,7 +2610,7 @@ def main() -> None:
             id="intel_abusech_cycle",
             max_instances=1,
         )
-        # Corpus pull, so it shares the catalogue cadence with cpe_dict,
+        # Corpus pull, so it shares the catalog cadence with cpe_dict,
         # winget and chocolatey rather than the faster OSINT one. Release
         # cycles change on the order of weeks.
         scheduler.add_job(
@@ -2620,8 +2620,8 @@ def main() -> None:
             id="intel_endoflife_cycle",
             max_instances=1,
         )
-        # Capability projection reads only local tables (rules + catalogue), so
-        # it is cheap and carries no vendor rate limit. Shares the catalogue
+        # Capability projection reads only local tables (rules + catalog), so
+        # it is cheap and carries no vendor rate limit. Shares the catalog
         # cadence because rules change on the order of weeks.
         scheduler.add_job(
             run_intel_capability_once,

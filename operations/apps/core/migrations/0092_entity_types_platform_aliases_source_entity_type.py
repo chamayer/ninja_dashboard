@@ -54,7 +54,7 @@ INSERT INTO operations.entity_types (name, is_identity_signal, description) VALU
     ('monitor.target',       TRUE,  'Monitored target discovered by a probe.'),
     ('cmdb.asset',           FALSE, 'CMDB documentation record. Describes a thing; is not evidence the thing was reached.'),
     ('software',             FALSE, 'Software installation on a device. Device-scoped attribute, not identity.'),
-    ('org',                  FALSE, 'Source-side container/organisation. Resolves to a client, never a device.'),
+    ('org',                  FALSE, 'Source-side container/organization. Resolves to a client, never a device.'),
     ('unknown',              FALSE, 'Unclassified stream. Never treated as identity evidence.')
 ON CONFLICT (name) DO NOTHING;
 

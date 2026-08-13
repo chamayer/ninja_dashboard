@@ -1,4 +1,4 @@
-# 0015 — Software ecosystem: entities, categorisation, decisions and findings
+# 0015 — Software ecosystem: entities, categorization, decisions and findings
 
 Status: Accepted
 Date: 2026-08-06
@@ -8,10 +8,10 @@ Date: 2026-08-06
 Software is the platform's largest domain by row count and its least defined by
 decision record. ADR-0008 covers the intel layer feeding it; ADR-0012 §5 states
 the entity hierarchy in three sentences. Nothing defined how those meet: what a
-software finding's subject is, what categorisation is for, or which of the four
+software finding's subject is, what categorization is for, or which of the four
 moving parts owns what.
 
-This record was first drafted from the legacy analyser alone, re-deriving a
+This record was first drafted from the legacy analyzer alone, re-deriving a
 model that ADR-0012 and `docs/glossary.md` already specify. That draft is
 replaced. `operations/AGENTS.md` requires both to be read before entity,
 attribute, relationship or scope work, and this revision is the cost of not
@@ -20,7 +20,7 @@ having done so.
 ### Origin
 
 A port of `inventory-scripts/SW Inventory/analyze_inventory.py`, a per-client
-analyser producing Excel workbooks with an embedded decision workflow. Its data
+analyzer producing Excel workbooks with an embedded decision workflow. Its data
 came from `Ninja_sw_inventory.ps1` pulling `/device/{id}/software` from the
 Ninja API — the same data `ingest/inventory/software.py` ingests continuously.
 
@@ -91,11 +91,11 @@ why it cannot express that a title is both AV and trusted.
 
 Emitting a subject-level fact per device multiplies one fact by its install
 count. That is what turned 1,633 titles into 134,861 findings, and it is a
-regression against the legacy analyser: `generate_whitelist_suggestions`
+regression against the legacy analyzer: `generate_whitelist_suggestions`
 iterates the frequency frame and emits one row per title carrying
 `# Machines: n_machines` as a count.
 
-### 3. Categorisation is a coverage mechanism, not a taxonomy
+### 3. Categorization is a coverage mechanism, not a taxonomy
 
 `software_catalog.categories` conflates two unrelated labels:
 
@@ -112,7 +112,7 @@ judgement — silences a decision prompt exactly as `whitelist` does.
 
 Trust becomes what it already is elsewhere: a **decision** at title or
 publisher scope, which `software_decisions` models with scoping and audit.
-Suppression then tests *decided*, not *labelled*.
+Suppression then tests *decided*, not *labeled*.
 
 **A general taxonomy is out of scope.** No finding, coverage requirement or
 page consumes one, and per the glossary `entity_type` "is not a taxonomy"
@@ -139,8 +139,8 @@ vulnerability, and must say so on its face rather than implying the latter.
 
 ### 5. Classification without a decision corpus is noise
 
-`whitelist_suggestion` fires on *uncategorised + undecided + widespread*. With
-52 of 20,631 titles categorised and 3 decisions recorded, it does not report a
+`whitelist_suggestion` fires on *uncategorized + undecided + widespread*. With
+52 of 20,631 titles categorized and 3 decisions recorded, it does not report a
 software problem — it reports that the reference data is empty. Fix the inputs
 before tuning the detector.
 
@@ -171,7 +171,7 @@ than three to one, because publisher sits above product in the hierarchy.
   relationship rather than an entity. `operations.findings` already carries
   `subject_type`; whether a relationship subject needs more than that is an
   implementation question this record does not settle.
-- Moving trust out of `categories` un-suppresses titles labelled only
+- Moving trust out of `categories` un-suppresses titles labeled only
   functionally. They surface for decision, correctly, because nobody decided
   them.
 - `software_catalog.eol_date` is populated on **0 of 52** rows while

@@ -43,7 +43,7 @@ Treating all three as entities produced concrete, measured problems:
 
 - **Keep three layer entities, fix only the write direction.** Rejected: it
   preserves the conflation that produced the collisions, and leaves hardware
-  modelled as an entity that can never have an independent identity.
+  modeled as an entity that can never have an independent identity.
 - **Collapse all three into attributes.** Rejected: agent presence genuinely
   describes a pair, and flattening it onto the device loses which agent
   product a version belongs to.
@@ -62,8 +62,8 @@ existing attribute definitions.
 ### Agent presence is a relationship
 
 Agent presence is a **relationship** between a Device entity and an agent
-product from the `agents` catalogue, carrying version, heartbeat and coverage
-state as relationship attributes. The agent catalogue is unscoped reference
+product from the `agents` catalog, carrying version, heartbeat and coverage
+state as relationship attributes. The agent catalog is unscoped reference
 data per ADR-0012.
 
 Measured 2026-08-05, `operations.agent_instances` does **not** currently hold
@@ -101,7 +101,7 @@ pressure to retire on its account.**
 ### The `asset` entity class means a top-level tracked thing
 
 `asset` is reserved for things the MSP tracks that are not devices — the
-unanchored CMDB records, peripherals, licences. `operations.assets` is renamed
+unanchored CMDB records, peripherals, licenses. `operations.assets` is renamed
 to `device_hardware` so the word stops denoting both a device facet and a
 top-level class. `asset_type` values duplicating registered entity classes
 (`peripheral`, `service`, `network_appliance`, `license`) are retired in favour
@@ -148,7 +148,7 @@ is the constant `'trigger.audit'` and whose `change_source` is never written.
 - **Agent instances migrate to relationships.** Larger work; the typed table
   remains a projection until consumers move.
 - **`asset_type` narrows** to hardware-descriptive values. Peripherals and
-  licences become entities of their own class.
+  licenses become entities of their own class.
 - No migration is required to *start*: the projector and the rename can land
   independently, and the entity-class work is unblocked immediately.
 

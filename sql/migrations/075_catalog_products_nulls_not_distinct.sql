@@ -10,7 +10,7 @@
 -- them and insert a fresh row on every run.
 --
 -- Small blast radius today (4 installations), unbounded later: every
--- publisher the alias table has not yet learned arrives unnormalised, and any
+-- publisher the alias table has not yet learned arrives unnormalized, and any
 -- future source reporting titles without a vendor lands here.
 --
 -- PostgreSQL 16 is deployed, so NULLS NOT DISTINCT is available and states the

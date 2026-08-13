@@ -1,4 +1,4 @@
--- 076: stable uuid handles on the software catalogue, so findings can name a
+-- 076: stable uuid handles on the software catalog, so findings can name a
 -- product or a product+version as their subject.
 --
 -- `operations.findings.subject_id` is a bare uuid column with no foreign key --
@@ -9,18 +9,18 @@
 -- software is global reference data beside `intel.cves`, carrying no tenant and
 -- no scope_kind.
 --
--- So the catalogue is NOT retyped to look like the entity store. Its primary
+-- So the catalog is NOT retyped to look like the entity store. Its primary
 -- keys stay bigint and its natural keys stay authoritative, matching how this
 -- platform keys reference corpora (`intel.cves.cve_id`, `intel.cpes.cpe23` are
 -- both natural text keys). These columns are only the handle the uuid-shaped
 -- subject pointer needs.
 --
 -- Minted, not derived. A uuid v5 over the natural key would be rebuildable, but
--- publisher aliases collapse the unnormalised long tail over time -- measured
+-- publisher aliases collapse the unnormalized long tail over time -- measured
 -- 2026-08-07 at 84% of installs covered but only 6% of distinct publishers --
 -- and a derived id would silently re-identify products on every alias
 -- addition, orphaning their findings with no record of when or why. A stored
--- id keeps identity stable across re-normalisation and forces that collapse to
+-- id keeps identity stable across re-normalization and forces that collapse to
 -- be an explicit, audited merge.
 --
 -- gen_random_uuid() is core in PostgreSQL 13+; the server is 16. pgcrypto is

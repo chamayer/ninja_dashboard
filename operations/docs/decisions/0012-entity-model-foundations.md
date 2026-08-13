@@ -10,7 +10,7 @@ ADR-0002, ADR-0005, ADR-0010 and ADR-0011 each apply the same underlying
 principle to a different domain — identity, attributes, lifecycle — but the
 principle itself was never written down. Each was authored after a violation
 surfaced in that domain, so every new area rediscovers it, and any area nobody
-revisited keeps its pre-principle behaviour indefinitely.
+revisited keeps its pre-principle behavior indefinitely.
 
 The cost is concrete and measurable:
 
@@ -120,7 +120,7 @@ Referential rules across the boundary:
 
 **Superseded by the 2026-08-10 amendment: the hierarchy below is retained, but
 these are global reference entities beside `intel.cves`, not rows in
-`operations.entities`. Software is not owned; a licence is.**
+`operations.entities`. Software is not owned; a license is.**
 
 `publisher → product → software+version` are entities joined by plain
 relationships. Software+version is the entity that CVEs, EOL dates and safety
@@ -141,7 +141,7 @@ value and priority with first-match-wins. The counter-example sits beside it —
 `os_name → os_family` is hardcoded in `ingest/normalize.py` *and* duplicated in
 SQL in migration 0023, while its coarser sibling is a table.
 
-Exempt: function dispatch, regexes used for normalisation, endpoint and timeout
+Exempt: function dispatch, regexes used for normalization, endpoint and timeout
 configuration, and fail-closed bootstrap fallbacks that are documented as such.
 
 ### 7. Out of scope
@@ -270,7 +270,7 @@ Section 4 stated that a composite foreign key under `MATCH SIMPLE` expresses
 "tenant consistency applies only when the target is scoped", because "a NULL
 tenant on the target stands the constraint down."
 
-**PostgreSQL has no such behaviour.** `MATCH SIMPLE` relaxes a constraint when
+**PostgreSQL has no such behavior.** `MATCH SIMPLE` relaxes a constraint when
 a **referencing** column is NULL. A NULL on the **referenced** side relaxes
 nothing — it makes the target row unmatchable, because the referenced key
 `(NULL, id)` cannot satisfy a lookup for `(1, id)`.
@@ -339,7 +339,7 @@ as unscoped entities. The amendment above showed the *mechanism* for that could
 not work. This amendment addresses the more basic point: the placement itself
 is wrong.
 
-**Software is not owned.** A client owns a *licence*; it does not own Microsoft
+**Software is not owned.** A client owns a *license*; it does not own Microsoft
 Word. `operations.entities` is the store for owned things — clients, devices,
 assets, users — and every structure on it assumes ownership: `tenant_id` NOT
 NULL, `scope_kind` of `tenant` or `client`, forced RLS with a tenant policy,
@@ -366,8 +366,8 @@ thing: globally true facts about the world that no customer owns.
   key to software+version. §1's rule that a relationship may carry its own
   attributes is already satisfied — `install_location` and `install_date` are
   on those rows today.
-- **A licence is a scoped asset** and belongs in `operations.entities` under
-  the `asset` class when that work is scheduled. The licence-versus-product
+- **A license is a scoped asset** and belongs in `operations.entities` under
+  the `asset` class when that work is scheduled. The license-versus-product
   distinction is what makes one owned and the other not.
 - **The generic attribute/claim/effective machinery does not apply to
   software**, and that is not a loss. That machinery exists to resolve

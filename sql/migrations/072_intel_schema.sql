@@ -14,7 +14,7 @@ GRANT USAGE ON SCHEMA intel TO operations_app, operations_readonly, metabase_ro;
 ALTER DEFAULT PRIVILEGES IN SCHEMA intel
     GRANT SELECT ON TABLES TO operations_app, operations_readonly, metabase_ro;
 
--- CVE catalogue: one row per CVE identifier. Populated by the NVD
+-- CVE catalog: one row per CVE identifier. Populated by the NVD
 -- delta ingest; CVSS / EPSS / KEV columns are updated in place by the
 -- respective feed connectors.
 CREATE TABLE IF NOT EXISTS intel.cves (

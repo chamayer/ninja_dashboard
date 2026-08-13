@@ -72,7 +72,7 @@ def test_only_an_exact_match_is_accepted() -> None:
     (microsoft edge update -> microsoft-edge-insider, 0.71), so no threshold
     separates them. Writing nothing beats guessing."""
     code = _code_only()
-    assert "_normalise(canonical)" in code
+    assert "_normalize(canonical)" in code
     assert "if match is None:" in code
     assert "entries[0]" not in code, (
         "a relevance fallback accepts the gallery's nearest guess for titles "
@@ -89,17 +89,17 @@ def test_refresh_order_is_by_install_count() -> None:
     assert "ORDER BY sic.canonical_name\n" not in code
 
 
-def test_normalise_ignores_punctuation_and_case() -> None:
+def test_normalize_ignores_punctuation_and_case() -> None:
     import importlib.util
 
     spec = importlib.util.spec_from_file_location("_choco_probe", _CHOCO)
     assert spec and spec.loader
     # The module imports `ingest.*` at top level, so exercise the regex
     # directly rather than importing it.
-    normalise_re = re.compile(r"[^a-z0-9]+")
+    normalize_re = re.compile(r"[^a-z0-9]+")
 
     def norm(v: str) -> str:
-        return normalise_re.sub("", v.lower())
+        return normalize_re.sub("", v.lower())
 
     assert norm("Google Chrome") == norm("google-chrome") == "googlechrome"
     assert norm("7-Zip") == "7zip"

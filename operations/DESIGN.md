@@ -485,7 +485,7 @@ Breach → `operations.admin_findings` row opens automatically.
 Recovery → finding auto-resolves.
 No per-queue monitoring code required.
 
-### 5.3 Queue catalogue
+### 5.3 Queue catalog
 
 **Refresh queues**
 

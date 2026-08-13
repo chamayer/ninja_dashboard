@@ -112,7 +112,7 @@ def _link_candidate_to_entity(
     """Attach the candidate's stable source identity to `entity`.
 
     Extracted verbatim from `attach_candidate` so promotion reuses the exact
-    link and history behaviour rather than a second copy that can drift.
+    link and history behavior rather than a second copy that can drift.
     Returns the timestamp used, so the caller stamps the decision with it.
     """
     identity = {

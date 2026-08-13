@@ -103,7 +103,7 @@ def _insert_writes_cache_column(window: str) -> list[str]:
     )
     vals_match = re.search(r"VALUES\s*\((.*?)\)\s*$", window, re.IGNORECASE | re.S)
     if not cols_match or not vals_match:
-        # Unrecognised shape -- fail loud rather than silently allow.
+        # Unrecognized shape -- fail loud rather than silently allow.
         return [c for c in CACHE_COLUMNS if re.search(rf"\b{c}\b", window)]
 
     columns = [c.strip() for c in _split_top_level(cols_match.group(1))]

@@ -2,7 +2,7 @@
 -- unmapped so it is visible rather than silently unevaluated.
 --
 -- Measured 2026-08-10 against the live corpus (462 products, 8,308 releases).
--- Naive substring matching of our 21,395 catalogue titles produced mostly
+-- Naive substring matching of our 21,395 catalog titles produced mostly
 -- FALSE POSITIVES, which is why this table is operator judgement and not a
 -- matcher:
 --
@@ -50,7 +50,7 @@ ON CONFLICT DO NOTHING;
 -- 21,395 x 462 ILIKE cross-match, and that cost is inherent to suggesting
 -- matches rather than requiring exact names. Behind an operator page that is
 -- unusable, and page load time is an active track. The inputs are the corpus
--- (refreshed on the catalogue cadence) and the mapping table (operator edits),
+-- (refreshed on the catalog cadence) and the mapping table (operator edits),
 -- so a matview refreshed alongside the corpus is exactly right -- the result is
 -- 1,989 rows.
 --
@@ -110,7 +110,7 @@ GRANT SELECT ON operations.v_eol_mapping_candidates
     TO operations_app, operations_readonly, metabase_ro;
 
 COMMENT ON MATERIALIZED VIEW operations.v_eol_mapping_candidates IS
-    'Suggestions only. Catalogue titles with no EOL mapping, paired with corpus '
+    'Suggestions only. Catalog titles with no EOL mapping, paired with corpus '
     'products whose release cycles their installed versions would actually '
     'match, ranked by device impact. Substring-matched, so it contains false '
     'positives by design -- an operator decides, and records the decision in '

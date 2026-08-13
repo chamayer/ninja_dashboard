@@ -39,7 +39,7 @@ install_path_suspicious to that scope without adding it to the model's choices,
 leaving the registry holding a value the model rejected.
 
 Data only for rows that exist; a fresh install seeds its own finding types and
-picks the default up. Reversible: the column drops and behaviour returns to the
+picks the default up. Reversible: the column drops and behavior returns to the
 blanket skip.
 """
 
@@ -58,7 +58,7 @@ _FACTUAL = (
 
 def set_matrix(apps, schema_editor):
     FindingType = apps.get_model("operations", "FindingType")
-    # Everything defaults to True (previous behaviour). Only the factual types
+    # Everything defaults to True (previous behavior). Only the factual types
     # are opened up, so no finding starts firing that was not already firing
     # for undecided software.
     FindingType.objects.filter(name__in=_FACTUAL).update(suppressed_by_approval=False)

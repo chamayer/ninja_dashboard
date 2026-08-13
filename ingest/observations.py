@@ -539,7 +539,7 @@ def write_current_rows(cur: Any, rows: Iterable[dict[str, Any]]) -> int:
             changed_for_history.append(row)
 
         # (4) Resolved-ID preservation — mirrored in the SQL COALESCE below
-        # as defence in depth, but doing it here keeps the row shape truthful
+        # as defense in depth, but doing it here keeps the row shape truthful
         # before shaping / logging.
         if prev is not None:
             if row.get("client_id") is None and prev[3] is not None:

@@ -115,12 +115,12 @@ def run(client: NinjaClient, df: str | None = None) -> int:
 
 
 def refresh_read_models() -> None:
-    """Publish compact Software read models, then project the catalogue.
+    """Publish compact Software read models, then project the catalog.
 
     Both software ingest paths call this, so it is the one place a
     post-ingest step reaches every run.
 
-    The catalogue projection runs *after* the matview refresh deliberately: it
+    The catalog projection runs *after* the matview refresh deliberately: it
     is newer, and a fault in it must not stop the established read models from
     publishing. Its own failure is raised rather than swallowed, and
     `run_log('software.catalog')` records the outcome either way.
@@ -139,7 +139,7 @@ def refresh_read_models() -> None:
 
     project_software_catalog()
     # Lifecycle facts are a projection of both the upstream corpus and the
-    # local catalogue. The scheduled corpus job covers the former; run the
+    # local catalog. The scheduled corpus job covers the former; run the
     # same non-fetching projector here so newly observed versions are not left
     # waiting for the next corpus interval.
     try:
@@ -147,7 +147,7 @@ def refresh_read_models() -> None:
 
         eol_match.run_once()
     except Exception:
-        log.exception("End-of-life projection after software catalogue refresh failed")
+        log.exception("End-of-life projection after software catalog refresh failed")
 
 
 def _load_device_map() -> dict[str, tuple[uuid.UUID, uuid.UUID]]:

@@ -4,7 +4,7 @@ Renders a two-column multi-select (Clients / Devices) with live JS
 search and batched submission support.  Any page that needs a df
 scope picker imports load_scope_choices() + render_scope_selector().
 
-Batch behaviour
+Batch behavior
 ───────────────
 When the operator selects more than one item (or types a comma-separated
 list), the JS intercepts the submit and fires one GET request per scope

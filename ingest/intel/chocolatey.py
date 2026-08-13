@@ -100,7 +100,7 @@ def _titles_needing_refresh() -> list[str]:
         return [row[0] for row in cur.fetchall()]
 
 
-def _normalise(value: str) -> str:
+def _normalize(value: str) -> str:
     return _NORMALISE_RE.sub("", value.lower())
 
 
@@ -142,7 +142,7 @@ def _search(client: httpx.Client, canonical: str) -> tuple[list[str], list[str]]
     if not entries:
         return [], []
 
-    # Exact normalised match only. No relevance fallback, no similarity
+    # Exact normalized match only. No relevance fallback, no similarity
     # threshold: both were measured against 31 real titles on 2026-08-12 and
     # neither separates right from wrong here.
     #
@@ -157,8 +157,8 @@ def _search(client: httpx.Client, canonical: str) -> tuple[list[str], list[str]]
     # Writing nothing is the honest outcome: an unmatched title is a title
     # Chocolatey does not carry, which is a fact worth preserving rather than
     # papering over with the gallery's nearest guess.
-    wanted = _normalise(canonical)
-    match = next((e for e in entries if _normalise(e[0]) == wanted), None)
+    wanted = _normalize(canonical)
+    match = next((e for e in entries if _normalize(e[0]) == wanted), None)
     if match is None:
         return [], [t for t, _ in entries if t]
     return sorted(set(match[1])), [t for t, _ in entries if t]

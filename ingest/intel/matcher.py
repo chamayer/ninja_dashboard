@@ -195,7 +195,7 @@ def _version_prefixes(version: str) -> list[str]:
 
     This is the half that was missing: ``_parse_version_prefixes`` reads the
     *title text* ("Office 2010"), which is all the matcher had before the
-    catalogue gave installations a version identity.
+    catalog gave installations a version identity.
     """
     v = (version or "").strip()
     if not v:
@@ -218,7 +218,7 @@ def _match_and_upsert() -> int:
         # amendment of 2026-08-06 records what title scope cost: every device
         # running any version of a matched product was flagged identically,
         # including patched ones. `software_version_id` is 100% populated on
-        # installations (489,347/489,347 measured 2026-08-10), so the catalogue
+        # installations (489,347/489,347 measured 2026-08-10), so the catalog
         # join loses no installation.
         cur.execute(
             """

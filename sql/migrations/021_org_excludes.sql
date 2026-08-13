@@ -6,7 +6,7 @@
 -- in Multi_org_agent_compliance.ps1 (line 183). PS shipped with exactly the
 -- same two seed values; nothing else was excluded by default. The PS author
 -- separately documented $LMIGroupExclude with COMMENTED-OUT examples of
--- "Unknown" and ".Default" — meaning they recognised those as common noise
+-- "Unknown" and ".Default" — meaning they recognized those as common noise
 -- but deliberately left the decision to the operator. We mirror that stance:
 -- seed only the two PS values, let the operator add more from the dashboard.
 

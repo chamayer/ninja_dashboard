@@ -63,7 +63,7 @@ _FETCHERS = {
 # Sources outside the identity-signal set carry no independent identity
 # evidence: they either already know their device or have none. Gating here
 # rather than branching per platform means any future non-identity source
-# inherits the behaviour. The set lives in ingest.identity because the
+# inherits the behavior. The set lives in ingest.identity because the
 # resolver enforces the same rule on its own read path.
 
 

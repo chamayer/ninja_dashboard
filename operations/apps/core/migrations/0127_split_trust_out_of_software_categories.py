@@ -7,7 +7,7 @@
   `unauthorized_remote_access`;
 * **trust** — `whitelist`, `trusted_publisher`: whether we *trust* it.
 
-In the legacy analyser these were separate lists (`WHITELIST`,
+In the legacy analyzer these were separate lists (`WHITELIST`,
 `TRUSTED_PUBLISHERS`) with no relation to any category. The port merged them
 into one array, and the conflation became load-bearing: `whitelist_suggestion`
 fired on `not cat_list`, so labelling a title `av` — a statement carrying no

@@ -69,7 +69,7 @@ def load_platform_aliases(cur) -> None:
 
     Called once per collection run by ingest.sources.load_sources. On failure
     the built-in map stays in effect, so a missing table degrades to previous
-    behaviour rather than breaking canonicalisation.
+    behavior rather than breaking canonicalisation.
     """
     global _alias_cache
     rows = _load_mapping_rows(

@@ -15,7 +15,7 @@ them.
 Approval means "this software is allowed here" — a statement about trust. It
 cannot make a fact untrue. Which findings it may silence is a per-type registry
 row (`finding_types.suppressed_by_approval`, migration 0136), not a constant in
-the emitter: it maps a domain value to a behaviour, which ADR-0012 section 6
+the emitter: it maps a domain value to a behavior, which ADR-0012 section 6
 requires to be data and which `test_no_hardcoded_domain_mappings` would flag.
 
 These tests are a ratchet. The failure they prevent is silent: a re-introduced
@@ -81,8 +81,8 @@ def test_factual_findings_do_not_re_test_the_decision_locally() -> None:
     assert 'dec not in ("approve", "approve_publisher")' not in code
 
 
-def test_approval_silences_executable_behaviour() -> None:
-    """Behaviour, not source text — the ratchets above only read the file."""
+def test_approval_silences_executable_behavior() -> None:
+    """Behavior, not source text — the ratchets above only read the file."""
     sf = pytest.importorskip("ingest.software_findings")
     matrix = {"vulnerable_software": False, "unauthorized_av": True}
 
@@ -94,7 +94,7 @@ def test_approval_silences_executable_behaviour() -> None:
     assert sf.approval_silences("vulnerable_software", True, matrix) is False
     assert sf.approval_silences("unauthorized_av", True, matrix) is True
 
-    # Unregistered type defaults to suppressed — the pre-0136 behaviour, so a
+    # Unregistered type defaults to suppressed — the pre-0136 behavior, so a
     # newly added finding never starts firing for approved software by accident.
     assert sf.approval_silences("brand_new_finding", True, matrix) is True
 
@@ -187,17 +187,19 @@ def test_every_finding_consults_the_registry() -> None:
     for name in literally_gated:
         assert f'approval_silences("{name}"' in code, name
 
-    # The unauthorized_* loop: name is built from the category, then gated.
-    assert 'finding_name = f"unauthorized_{cat}"' in code
+    # The unauthorized_* types are emitted from effective capability evidence,
+    # where the finding name comes from the capability row rather than a
+    # literal. The property that matters is unchanged: the name is passed
+    # through the registry gate before anything is emitted.
     assert "approval_silences(finding_name" in code
 
     # Called directly, not through a closure rebuilt for every installation.
     assert "def _silenced" not in code
 
 
-def test_registry_default_preserves_previous_behaviour() -> None:
+def test_registry_default_preserves_previous_behavior() -> None:
     """An unregistered type must not silently start firing for approved
-    software. `test_approval_silences_executable_behaviour` is the authority
+    software. `test_approval_silences_executable_behavior` is the authority
     here; this guards the default surviving a refactor of the helper."""
     code = _code_only()
     assert "matrix.get(finding_type, True)" in code

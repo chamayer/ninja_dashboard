@@ -52,5 +52,5 @@ publisher-scope decisions carrying 740 of them against 215 from the 303
 title-scope ones. A publisher sits above a product in the ADR-0012 §5
 hierarchy, which is why so few of them do so much.
 
-See ADR-0015 for how decisions relate to classification, categorisation and
+See ADR-0015 for how decisions relate to classification, categorization and
 findings.

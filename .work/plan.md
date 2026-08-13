@@ -25,7 +25,7 @@ real chain shows it applies to production's accumulated schema.
 `endpoint_security` (AV/EDR), `rmm`, `remote_access` — with enough precision that
 an `unauthorized_*` finding can be trusted. **Not** taxonomy. Coverage is not the
 metric; precision is. The long tail (12,096 single-install titles, 3% of
-installs) stays unrecognised by design.
+installs) stays unrecognized by design.
 
 **Why:** the classifier (`ingest/software_findings.py`) is the only
 **finding-producing** consumer of categories, and they are the trigger for
@@ -140,7 +140,7 @@ with actor and audit records. A client operator must not set global truth.
 
 An empty, malformed or partially parsed corpus must **never** withdraw prior
 assertions — withdrawal requires a run that parsed successfully and completely.
-"Exact normalised" must resolve **one-to-one**; normalisation collisions and
+"Exact normalized" must resolve **one-to-one**; normalization collisions and
 duplicate product names across publishers become candidates, never alertable.
 
 ### LOLRMM — corpus yes, identity no
@@ -149,7 +149,7 @@ Apache-2.0, JSON with RMM/RAT category, install paths, certs, domains. Carries
 **no product_uuid and no MSI ProductCode**, and its executable/certificate/domain
 artifacts are not comparable to what we store (title, publisher, version,
 install directory). So: vetted capability corpus; LOLRMM record → local product
-is a **separate identity assertion**; alertable only on exact normalised
+is a **separate identity assertion**; alertable only on exact normalized
 tool-name match or operator-vetted alias; path/cert/domain evidence not offered
 until those signals are collected. Recall needs **independent ground truth** —
 "every LOLRMM tool present in the fleet" is circular otherwise.
@@ -177,7 +177,7 @@ keep an `av` alias at the finding boundary. Decide once; do not let them drift.
 ### Phases
 
 1. **Phase 1** — registry, assertion tables, effective relation, projector
-   (`ingest/intel/capability_match.py`, sole writer of machine rows, modelled on
+   (`ingest/intel/capability_match.py`, sole writer of machine rows, modeled on
    `ingest/intel/eol_match.py`). Shadow mode: no new alerts.
 2. **Phase 2** — `platform_product_map` + admin; sanctioning by identity;
    report the 99 substring-exempted titles and the delta.
@@ -285,6 +285,22 @@ to register the review finding. The Django migration transaction rolled back;
 no partial capability data applied. Version `0.116.1` synchronizes that
 sequence inside 0137 before the idempotent registry upsert, then redeploys.
 
+## CURRENT TASK — Products-page timeout repair
+
+**Status:** implementation and release preparation in progress as `0.116.2`.
+
+**Goal:** restore `/software/products/`, whose whitelist-suggestion distinct
+title counter exceeded Gunicorn's 30-second limit and produced HTTP 500.
+
+**Decision:** production verified the existing direct partial expression index
+is valid and the direct aggregate completes in 57 ms. The generic ORM relation
+joins prevented its use. The counter now resolves the `whitelist_suggestion`
+registry ID, then applies the same active finding/status predicate directly.
+No schema or finding behavior changes.
+
+**Next action:** run light compilation/diff checks, then use the approved
+commit/push/redeploy path and validate Products plus service health.
+
 ## CURRENT TASK — Intel run cost becomes visible; classifier-only endpoint
 
 **Status:** implemented locally 2026-08-12; not committed, pushed, or deployed.
@@ -385,7 +401,7 @@ generic E4 relationship tables, and the prevalence question.
 **Decisions:**
 
 1. **The subject id is minted and stored, not derived.** Migration 076 already
-   settled this for the catalogue: "a derived id would silently re-identify
+   settled this for the catalog: "a derived id would silently re-identify
    products on every alias addition, orphaning their findings with no record of
    when or why." A composed uuid over `(device_id, version_uuid)` fails harder
    still — the installation PK is
@@ -397,7 +413,7 @@ generic E4 relationship tables, and the prevalence question.
    safe.** Its PK is the natural key, deletes are soft (`deleted_at`,
    `deleted_reason`; 0 soft-deleted of 490,733 today), and version is an
    attribute rather than part of the key. One row per (device, title) survives
-   version upgrades, uninstall/reinstall and re-normalisation.
+   version upgrades, uninstall/reinstall and re-normalization.
 3. **The subject stays data, not code.** `finding_types.subject_scope`
    (migration 0130) already drives subject resolution, and an unknown scope
    falls back to `device`. Only a registry row and one branch in `_subject_for`
@@ -647,7 +663,7 @@ corpus-confirmed, lifecycle-carrying families without an operator mapping queue
 or ongoing manual maintenance.
 
 **Scope:** add a read-only, migration-seeded global rule set for deterministic
-catalogue title/publisher matching; retain the existing tenant map only for
+catalog title/publisher matching; retain the existing tenant map only for
 backward compatibility; cover Office perpetual, Oracle/Sun Java, .NET,
 Visual Studio, Python, Node.js, SQL Server, PostgreSQL, MySQL Server, vCenter
 and LibreOffice; add a read-only Windows rollout summary that validates the
@@ -661,7 +677,7 @@ operator-mapping workflow.
 **Decision:** managed rules are global reference data, not tenant judgement;
 they contain only narrowly anchored title/publisher patterns and optional
 version/cycle dimensions, never lifecycle dates or a build map. The existing
-projector remains the sole writer of catalogue lifecycle dates and clears from
+projector remains the sole writer of catalog lifecycle dates and clears from
 one computed set. Ambiguous/nonmatching titles remain unmapped rather than
 being inferred from a broad matcher.
 
@@ -680,8 +696,8 @@ Postgres or live-data validation occurs without separate authority.
 revokes runtime DML, and retires only the obsolete candidate materialized view.
 The EOL projector unions managed and legacy rows into the existing single
 write/clear set; publisher-gated Java rules include the legacy `1.8.x` to
-cycle-`8` normalization. Software catalogue refreshes now invoke this
-non-fetching projector, so matching converges when either a catalogue version
+cycle-`8` normalization. Software catalog refreshes now invoke this
+non-fetching projector, so matching converges when either a catalog version
 or the upstream corpus changes. The legacy map is read-only in the Operations
 admin and to `operations_app`. Windows runs emit a read-only state/contract
 summary after each projection, including a safe migration-pending state.
@@ -753,7 +769,7 @@ global approval had to sweep 19,301 rows closed instead of resolving one.
 ### ADR-0015 is correct — do not amend it
 
 Its predicted "137,534 -> 1,782" matches the measured ~1,777. An earlier claim
-in this session that the ADR was "client-blind" was wrong: it modelled the
+in this session that the ADR was "client-blind" was wrong: it modeled the
 subject as the title, which is right, because none of the seven types asserts
 anything about a client.
 
@@ -897,13 +913,13 @@ Decisions taken while building:
   migration as a known three-table asymmetry, not resolved here.
 * **The mapping table ships empty.** `eol_match` logs a warning rather than
   reporting success, and `eol_runtime` stays title-scoped until mappings exist.
-  Seeding candidates should be derived by measuring the real catalogue against
+  Seeding candidates should be derived by measuring the real catalog against
   the 462 corpus products, not invented.
 
 Near-miss worth keeping: three guesses at the existing `cve_match` unique
 constraint name were all wrong (it is `cve_match_scope_idx`, an index not a
 constraint). `DROP ... IF EXISTS` on a wrong name is a silent no-op, so 077
-would have applied cleanly and left the old key enforcing the old behaviour.
+would have applied cleanly and left the old key enforcing the old behavior.
 
 Validation: ruff clean on all new modules; `matcher.py`, `main.py`,
 `software_findings.py` and `views.py` carry the same findings before and after
@@ -914,7 +930,7 @@ compiles; `git diff --check` clean.
 transaction, rolled back.** All applied without error. `product_uuid` 21,395
 rows / 21,395 distinct / 0 null; `version_uuid` 40,578 / 40,578 / 0. Migration
 079 closed **134,184** rows (the 134,484 in the table above was measured earlier
-the same day; the catalogue also grew 21,370 -> 21,395 products in that window,
+the same day; the catalog also grew 21,370 -> 21,395 products in that window,
 so this is ingest drift, not a discrepancy). Afterwards the only device-scoped
 software findings left open were `rare_recent` 2,658 and
 `install_path_suspicious` 398 — exactly the two that are supposed to stay, which
@@ -1057,7 +1073,7 @@ is shown, escapable and preserved.
 Which columns each list shows, sortable and filterable, per the existing
 convention that every table is both.
 
-## T4 — Software classification and categorisation
+## T4 — Software classification and categorization
 
 The only track with an engine rather than a surface: categorising titles in
 `ingest/inventory/` and the software decision surfaces. Independent of the
@@ -1193,7 +1209,7 @@ empty.
 | --- | --- | --- |
 | `c3dcd9d` | os_name to os_family becomes data (migration 0118); os_family returns NULL not 'Unknown' | 123/123 os_name values identical; 13,716 stale `Unknown` claims cleared to 0 |
 | `7e57ba3` | device cache projector is sole writer of five columns; nine producer writes removed | live run matched dry run exactly; all five columns 0 changes after convergence |
-| `803417d` | node_class taxonomy becomes data (migration 0119); evidence counter corrected 379 to 33 | `device_type` 0 changes live, so table-driven derivation is behaviour-preserving |
+| `803417d` | node_class taxonomy becomes data (migration 0119); evidence counter corrected 379 to 33 | `device_type` 0 changes live, so table-driven derivation is behavior-preserving |
 | `79f4462` | mapping-table loads contained in a SAVEPOINT | fixes a defect 803417d shipped; clean startup, no `InFailedSqlTransaction` |
 | `322d2a4` | Client/Device entity anchors required (migration 0120) | both columns NOT NULL; promotion path proven by a rolled-back transaction |
 | `e52eb20` `aa500f7` `d8243b6` `3c7d9a1` | records: findings sanitization closed, backlog findings, ADR-0013 amendment, device_links rule | docs only |
@@ -1597,7 +1613,7 @@ gate rested on that conflation. Corrected:
   (`resolver.py:733`, `:845`) and never updated: zero
   `UPDATE ... SET canonical_*` repo-wide, and zero `serial` / `vm_uuid` rows in
   `asset_field_history` across 5,273 assets despite an enabled trigger watching
-  both fields. "Retain identity on withdrawal" is already the behaviour, so
+  both fields. "Retain identity on withdrawal" is already the behavior, so
   there is nothing to decide or build. The alarming hostname figure
   (28/5,186 exact) compared a write-once anchor against a live selection — a
   category error, not a blocker.

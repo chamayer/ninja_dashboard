@@ -7,7 +7,7 @@
 -- title-scoped types onto software subjects and left this one on `device`.
 -- ADR-0015 explicitly left the mechanism open: "whether a relationship subject
 -- needs more than that is an implementation question this record does not
--- settle." This migration settles it the same way 076 did for the catalogue.
+-- settle." This migration settles it the same way 076 did for the catalog.
 --
 -- Minted, not derived -- and the case here is stronger than 076's.
 --
@@ -25,7 +25,7 @@
 -- That same PK is what makes minting durable: one row per (device, title),
 -- deletes are soft (deleted_at / deleted_reason), and version is an attribute
 -- rather than part of the identity. The handle therefore survives version
--- upgrades, uninstall/reinstall and catalogue re-normalisation.
+-- upgrades, uninstall/reinstall and catalog re-normalization.
 --
 -- gen_random_uuid() is core in PostgreSQL 13+; the server is 16. pgcrypto is
 -- not installed and is not needed.
