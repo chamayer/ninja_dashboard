@@ -2,7 +2,8 @@
 
 ## Supplemental task — Agent-compliance stale-age default
 
-**Status:** complete locally; not committed or deployed.
+**Status:** committed and pushed; Portainer accepted the redeploy. Runtime
+verification was not authorized.
 
 **Goal:** set the stale-agent threshold to 180 days for every customer and
 device scope.
@@ -35,7 +36,11 @@ pytest coverage (`5 passed`); migration-order check; no remaining runtime
 `httpx`, so a live bootstrap-object import was not run; dependency-free source
 coverage verifies the active Setup card continues to read the effective view.
 
-**Next action:** await review or separate approval to commit/deploy.
+**Release:** `335f63f` (`Set agent stale threshold to 180 days`) pushed to
+`origin` and `a-m-rose`; Portainer accepted the coupled Git redeploy. Both
+remote `master` refs resolve to this commit.
+
+**Next action:** external post-deployment validation requires explicit approval.
 
 ## CURRENT TASK — Software capability recognition (all phases, local implementation)
 
@@ -377,6 +382,48 @@ category, catalog entries now carry an optional `run_all` flag that
 Validated: ratchet and approval-matrix tests pass (9 passed, 3 skipped);
 `manage.py check` clean; ruff error count on `views.py` unchanged at 50
 pre-existing; `git diff --check` clean.
+
+### Follow-up item 3 — platform mappings and the nine conflicts (2026-08-13)
+
+**Conflicts: two root causes, not nine judgements.** Seven came from
+`lolrmm.py` mapping the LOLRMM `Category` onto our capability at the alertable
+tier, so TeamViewer, ScreenConnect, AnyDesk, LogMeIn and GoToMyPC were asserted
+`rmm` against vetted rules that call them `remote_access`. Two came from 094
+seeding `pub-connectwise-ra` and `pub-connectwise-rmm` on the identical
+`ConnectWise%` pattern with no title. Fixed in `14df63f` (migration 098 +
+connector). Rehearsed: 12 assertions withdrawn, conflicts 9 → 3, residuals are
+stale `publisher_rule` rows the projector clears.
+
+**Mapping applied to production 2026-08-13: 22 rows**, covering Ninja (6),
+SentinelOne (7), LogMeIn (7), ScreenConnect (2). Deliberately excluded and
+recorded in the seed file: SafeNet/Thales `sentinel *` licensing components,
+`logmein antivirus`, LogMeIn Rescue, and every ScreenConnect instance GUID
+except ours.
+
+**The ScreenConnect instance GUID is the strongest signal in the fleet.**
+`da1317176ae8a62a` spans 71 clients and is ours. Seven other GUIDs cover 2,218
+devices and are either a second instance of ours or another provider's; they
+need an operator decision before enforcement.
+
+**Finding delta, measured (both gates still off): 13,670 → 9,446.** 4,224
+installations are now correctly sanctioned. Remaining: `remote_access` 6,041 /
+`rmm` 3,405. Deploying 098 removes almost all of the `rmm` half, because
+`logmein` (2,856 devices) fires only as `rmm` — mapped as `remote_access`,
+so the capability mismatch defeats sanctioning until 098 lands.
+
+**Blocking gap found — permitted is derived from required.**
+`_load_sanctioned_product_identities` sanctions a product only when the client
+*requires* its platform. ScreenConnect is required by exactly one profile (UTA),
+and the global fallback requires only LogMeIn, Ninja, SentinelOne — while 70 of
+76 clients have no profile at all. So our own ScreenConnect on 3,007 devices
+across 70 clients reads as unauthorized. The same rows drive
+`missing_required_platform`, so making ScreenConnect required to sanction it
+would also demand it from clients that do not run it. The model has no way to
+express "permitted but not mandatory", which Contract 3 assumed away.
+
+Also observed: `requirement_profile_items` carries duplicate rows (Ruby
+Staffing, UTA list Ninja and SentinelOne twice) and the `A.M. Rose policy`
+profile has no platforms at all.
 
 ### Release checkpoint
 
