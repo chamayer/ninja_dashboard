@@ -1,5 +1,42 @@
 # Active root implementation plan
 
+## Supplemental task — Agent-compliance stale-age default
+
+**Status:** complete locally; not committed or deployed.
+
+**Goal:** set the stale-agent threshold to 180 days for every customer and
+device scope.
+
+**Scope / affected files:** agent-compliance configuration loader, Metabase
+dashboard bootstrap, a new SQL migration, and focused tests.
+
+**Steps:**
+
+1. Update runtime and Metabase fallback values to 180 days.
+2. Add an idempotent migration for the database column default, existing
+   default-profile data, and the effective-settings view.
+3. Run focused tests, syntax checks, migration-order review, and diff checks.
+
+**Decision:** the request supersedes the prior scope-preserving interpretation:
+every stored customer and scope threshold, including UTA's former seven-day
+setting, is set to 180. Required-platform selections remain unchanged.
+
+**Validation plan:** test the no-requirement runtime fallback and inspect the
+migration plus generated-dashboard definitions for 180-day consistency.
+
+**Checkpoint:** runtime fallbacks, dashboard fallback, and new-profile creation
+use 180 days. Migration 097 sets every existing client default and platform
+requirement to 180 while preserving platform selections. The effective-settings
+view reports a 180-day null fallback.
+
+**Validation:** `python -m compileall -q ingest\\agent_compliance`; focused
+pytest coverage (`5 passed`); migration-order check; no remaining runtime
+30-day fallback; and `git diff --check` all passed. The local environment lacks
+`httpx`, so a live bootstrap-object import was not run; dependency-free source
+coverage verifies the active Setup card continues to read the effective view.
+
+**Next action:** await review or separate approval to commit/deploy.
+
 ## CURRENT TASK — Software capability recognition (all phases, local implementation)
 
 **Status:** implementation complete locally; release preparation in progress.

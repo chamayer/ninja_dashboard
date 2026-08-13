@@ -1583,7 +1583,7 @@ _LEGACY_DASHBOARDS_UNUSED = [
                         CASE WHEN 'SentinelOne' = ANY(required_platforms) THEN 'On' ELSE 'Off' END AS "SentinelOne",
                         CASE WHEN 'LogMeIn' = ANY(required_platforms) THEN 'On' ELSE 'Off' END AS "LogMeIn",
                         CASE WHEN 'ScreenConnect' = ANY(required_platforms) THEN 'On' ELSE 'Off' END AS "ScreenConnect",
-                        COALESCE(max_age_days, 30) AS "Max age",
+                        COALESCE(max_age_days, 180) AS "Max age",
                         CASE
                             WHEN source_client_id IS NULL THEN 'Default'
                             WHEN source_scope <> device_scope AND source = 'manual' THEN 'Reviewed, from all devices'

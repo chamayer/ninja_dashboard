@@ -16,6 +16,9 @@ from ingest.normalize import (
 )
 
 
+DEFAULT_MAX_AGE_DAYS = 180
+
+
 @dataclass(frozen=True)
 class SourceConfig:
     source_id: int
@@ -1155,7 +1158,7 @@ def set_customer_requirement(
             """
             INSERT INTO ninja_agent_compliance.platform_requirements
                 (client_id, device_scope, required_platforms, max_age_days, notes, source, updated_by)
-            VALUES (%s, %s, %s, 30, 'Manual customer coverage override', 'manual', %s)
+            VALUES (%s, %s, %s, %s, 'Manual customer coverage override', 'manual', %s)
             ON CONFLICT (COALESCE(client_id, 0), device_scope)
             DO UPDATE SET
                 required_platforms = EXCLUDED.required_platforms,
@@ -1166,7 +1169,7 @@ def set_customer_requirement(
                 updated_at = now(),
                 updated_by = EXCLUDED.updated_by
             """,
-            (client_id, scope_value, platforms, updated_by),
+            (client_id, scope_value, platforms, DEFAULT_MAX_AGE_DAYS, updated_by),
         )
         return ", ".join(platforms)
 
@@ -1206,11 +1209,11 @@ def toggle_customer_required_platform(
             return None
         client_id = row[0]
         cur.execute(
-            """
+            f"""
             WITH effective AS (
                 SELECT
                     pr.required_platforms,
-                    COALESCE(pr.max_age_days, 30) AS max_age_days
+                    COALESCE(pr.max_age_days, {DEFAULT_MAX_AGE_DAYS}) AS max_age_days
                 FROM ninja_agent_compliance.platform_requirements pr
                 WHERE pr.enabled
                   AND (
@@ -1230,10 +1233,10 @@ def toggle_customer_required_platform(
             )
             SELECT
                 COALESCE(required_platforms, ARRAY['Ninja']::text[]),
-                COALESCE(max_age_days, 30)
+                COALESCE(max_age_days, {DEFAULT_MAX_AGE_DAYS})
             FROM effective
             UNION ALL
-            SELECT ARRAY['Ninja']::text[], 30
+            SELECT ARRAY['Ninja']::text[], {DEFAULT_MAX_AGE_DAYS}
             LIMIT 1
             """,
             (
@@ -1249,7 +1252,11 @@ def toggle_customer_required_platform(
         )
         effective_row = cur.fetchone()
         required = list(effective_row[0]) if effective_row else ["Ninja"]
-        max_age_days = int(effective_row[1]) if effective_row else 30
+        max_age_days = (
+            int(effective_row[1])
+            if effective_row
+            else DEFAULT_MAX_AGE_DAYS
+        )
         normalized = [canonical_platform(p) for p in required if canonical_platform(p) in allowed_platforms]
         current = set(normalized)
         if platform_value in current:
@@ -1695,7 +1702,12 @@ def get_requirement(
         for req in requirements:
             if req.client_id == wanted_client_id and req.device_scope == wanted_scope:
                 return req
-    return Requirement(None, "all", ("Ninja", "SentinelOne", "LogMeIn"), 30)
+    return Requirement(
+        None,
+        "all",
+        ("Ninja", "SentinelOne", "LogMeIn"),
+        DEFAULT_MAX_AGE_DAYS,
+    )
 
 
 def resolve_client_id(
