@@ -2,6 +2,14 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.116.3] — 2026-08-13 — Software detail legacy-evidence repair
+
+### Fixed
+
+- Made the Product detail page tolerate a legacy text-form safety-signal
+  payload. Invalid legacy category evidence is ignored instead of causing an
+  internal server error; valid JSON evidence retains its existing tag behavior.
+
 ## [0.116.2] — 2026-08-13 — Products page timeout repair
 
 ### Fixed

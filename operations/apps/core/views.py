@@ -3945,8 +3945,13 @@ def software_detail(request: HttpRequest, name: str) -> HttpResponse:
     # Pull tags from winget/chocolatey safety_signal into a merged
     # categorisation list. Operator-set catalog_entry.categories still wins.
     for row in osint_rows:
-        if row["source"] in ("winget", "chocolatey") and row["signal_type"] == "category":
-            for tag in (row["details"] or {}).get("tags", []) or []:
+        details = row["details"]
+        if (
+            row["source"] in ("winget", "chocolatey")
+            and row["signal_type"] == "category"
+            and isinstance(details, dict)
+        ):
+            for tag in details.get("tags", []) or []:
                 if tag and tag not in catalog_tags:
                     catalog_tags.append(str(tag))
 

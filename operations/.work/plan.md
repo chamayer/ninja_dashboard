@@ -90,6 +90,20 @@ no longer silently turn malformed narrow requests into global decisions.
 **Scope:** `apps/core/views.py` and the four Products/Publishers templates.
 No schema change.
 
+## Software detail legacy-evidence repair
+
+**Status:** implementation and release preparation in progress as `0.116.3`.
+
+**Goal:** keep the scoped Product decision controls reachable when historical
+intel has a text-form `details` payload rather than the expected JSON object.
+
+**Decision:** category tags are optional display enrichment. Only dictionary
+payloads are read for tags; malformed legacy values are ignored without
+changing valid evidence or classification behavior.
+
+**Scope:** `apps/core/views.py`, root version/changelog, and this plan. No
+schema change.
+
 ## E5.3 scoped maintenance — Issues filter-aware magnitude summary
 
 **Status:** implementation and local validation complete; awaiting separate
