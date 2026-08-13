@@ -154,6 +154,48 @@ worse than a slow one.
 - Trigger: next Operations work touching these surfaces, or sooner if another
   change needs the ratchet to be trustworthy.
 
+## Migration 086 was deleted — do not recreate it
+
+`sql/migrations/086_eol_candidates_word_and_alias.sql` existed untracked for
+days, was briefly committed by mistake, and is now deleted. Recorded here so
+nobody restores it from history thinking it was lost.
+
+**What it did.** Rebuilt `operations.v_eol_mapping_candidates`, replacing the
+substring matcher from 081 (`canonical_name ILIKE '%' || name || '%'`) with
+whole-word regex plus corpus aliases.
+
+**Why it is moot.** Migration 088 retired that materialized view. Verified
+2026-08-13: no relation matching `%eol_mapping_candidate%` exists, and the
+25 enabled rows in `intel.eol_managed_product_rules` are what does the job now.
+086 would recreate a view a later migration deliberately removed.
+
+**Why it was actively dangerous.** The ingest runner applies every pending file
+in `sql/migrations/` at container start. 086 matches 21,437 titles against 462
+corpus products with word-boundary regex — roughly 30 million evaluations, none
+indexable. On 2026-08-13 it ran over 7 minutes without completing and held
+ingest at `readyz 503`, because migrations run before the service reports
+ready. A long-running migration in that directory is an outage, not a slow job.
+
+**Its measurement is worth keeping**, since the same trap applies to any future
+title-to-corpus matcher. Measured 2026-08-11 across 21,437 titles / 462
+products:
+
+| approach | pairs | device weight |
+| --- | --- | --- |
+| substring on name/label (what 081 did) | 20,899 | 780,486 |
+| whole-word on name/label/alias | 8,019 | 103,285 |
+| substring-only, i.e. rejected by whole-word | **6,937** | 365,411 |
+
+A third of all pairs and 47% of device weight existed only because a corpus
+term sat inside a longer word: `Intel(R) Trusted Connect Services Client`
+matched `rust`, `ClickOnce Bootstrapper` matched `bootstrap`,
+`ExpressConnect` matched `express`. Anchored or word-boundary matching is the
+rule the EOL managed rules already follow, and `catalog.capability_rule` now
+enforces with a CHECK constraint.
+
+**If a candidate queue is ever wanted again:** build it as a query behind an
+operator surface, not as a materialized view refreshed by a startup migration.
+
 ## Dashboard reporting performance
 
 - Reason deferred: broad historical and compliance cards previously exceeded
