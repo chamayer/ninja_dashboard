@@ -130,7 +130,7 @@ until separately authorized.
 actionable findings, and policy candidates are compared with their active
 status/snooze baseline before narrow filters; affected devices and clients are
 compared with the current non-deleted fleet population. Every denominator is
-labelled, so a filtered subset is never mistaken for a fleet-wide total.
+labeled, so a filtered subset is never mistaken for a fleet-wide total.
 Affected devices and clients come from the existing action-finding device
 impact relation; software policy candidates remain a title-level count and are
 shown separately rather than pretending to be device incidents.
@@ -144,7 +144,7 @@ to scan. The page now exposes a Current result scope card row for matching
 findings, actionable findings, affected devices, affected clients, and policy
 review candidates. It reuses the existing action-finding device-impact list,
 so no extra per-filter source relation is introduced. Each card now displays
-the filtered value plus a labelled numerator/denominator and percentage:
+the filtered value plus a labeled numerator/denominator and percentage:
 findings/actionable/policy use the matching status/snooze scope before narrow
 filters, while devices/clients use the current non-deleted fleet population.
 
@@ -342,7 +342,7 @@ and OS group as well as its existing status, severity, client, and patch search.
 
 **Scope:** `apps/core/views.py`, `templates/patch_evidence.html`, focused
 tests, and this plan. An unfiltered view will use the existing observed-time
-index to show a clearly labelled recent slice before joining device data.
+index to show a clearly labeled recent slice before joining device data.
 
 **Out of scope:** patch category filters or taxonomy work, patch ingest/data
 changes, schema/index migrations, queue/finding changes, permissions, and
@@ -395,7 +395,7 @@ finding changes, exports beyond the existing filtered behavior, and deployment
 until separately approved.
 
 **Decision:** counts describe the current result scope. With no filter they
-describe the clearly labelled recent sample; with filters they describe the
+describe the clearly labeled recent sample; with filters they describe the
 full matching relation, even if the table display is capped.
 
 **Validation:** focused tests, Django checks, migration drift, Python compile,

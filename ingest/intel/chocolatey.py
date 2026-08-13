@@ -29,7 +29,7 @@ _DELAY_SECONDS = 0.5
 _ENTRY_ELEMENT = re.compile(r"<entry[\s>].*?</entry>", re.S)
 _TAG_ELEMENT = re.compile(r"<d:Tags[^>]*>(.*?)</d:Tags>", re.S)
 _TITLE_ELEMENT = re.compile(r"<title[^>]*>(.*?)</title>", re.S)
-_NORMALISE_RE = re.compile(r"[^a-z0-9]+")
+_NORMALIZE_RE = re.compile(r"[^a-z0-9]+")
 
 
 def run_once() -> int:
@@ -101,7 +101,7 @@ def _titles_needing_refresh() -> list[str]:
 
 
 def _normalize(value: str) -> str:
-    return _NORMALISE_RE.sub("", value.lower())
+    return _NORMALIZE_RE.sub("", value.lower())
 
 
 def _search(client: httpx.Client, canonical: str) -> tuple[list[str], list[str]]:

@@ -74,7 +74,7 @@ All notable changes to this project follow [Semantic Versioning](https://semver.
 ### Changed
 
 - The Issues page's filtered scope cards now show both the count and a
-  labelled fraction/percentage. Findings, actionable findings, and software
+  labeled fraction/percentage. Findings, actionable findings, and software
   policy candidates are compared with the selected status/snooze population;
   affected devices and clients are compared with the current fleet population.
   This makes the magnitude of a filter immediately visible without implying
@@ -108,7 +108,7 @@ All notable changes to this project follow [Semantic Versioning](https://semver.
 - Corrected a stale comment claiming `v_software_safety` "costs ~700-900 ms per
   evaluation". It has since been materialized and the full unbounded fetch
   measures 19 ms. Fetching it once is still right, but it is not the page's
-  cost centre — the comment would have sent the next reader after the wrong
+  cost center — the comment would have sent the next reader after the wrong
   thing, as it did this one.
 
 ### Note
@@ -356,7 +356,7 @@ All notable changes to this project follow [Semantic Versioning](https://semver.
 
 - **Activities ingest was collecting unfiltered since 0.7.1 (2026-06-03).** The
   `/v2/activities` query parameter is `status`, not `statusCode` — `statusCode`
-  is not a recognised parameter and was silently dropped, so every call returned
+  is not a recognized parameter and was silently dropped, so every call returned
   the full stream. Because 0.7.1 also removed client-side rejection, the
   configured `INGEST_ACTIVITY_TYPES_INCLUDE` allowlist has been inert for two
   months: 163 activity types were arriving against an allowlist of 16.
@@ -380,7 +380,7 @@ All notable changes to this project follow [Semantic Versioning](https://semver.
   event as well was ~1M rows of duplication. The per-run discard count is
   logged as `trigger_only_discarded`.
 - `.env.example` records the `status`/`statusCode` parameter asymmetry, that an
-  unrecognised code returns HTTP 500 and aborts the run while a valid but
+  unrecognized code returns HTTP 500 and aborts the run while a valid but
   never-emitted code correctly returns zero rows, and that some codes match
   loosely rather than exactly.
 
@@ -865,7 +865,7 @@ All notable changes to this project follow [Semantic Versioning](https://semver.
 
 ### Changed
 - **Risk distribution strip** on the Software Overview is now fully clickable:
-  each coloured segment and its legend label links to Products filtered by
+  each colored segment and its legend label links to Products filtered by
   the matching safety level (`?safety=high/medium/low/clean/unknown`).
 - **Publishers list** — added Category column (resolved from
   `publisher_categories` rules); replaced the per-row dropdown+Apply with
@@ -959,13 +959,13 @@ All notable changes to this project follow [Semantic Versioning](https://semver.
 
 ### Added
 - **`operations.publisher_aliases`** (model + admin) — canonical
-  publisher-name normalisation. Raw variants preserved and shown on
+  publisher-name normalization. Raw variants preserved and shown on
   the detail page; the alias is used for aggregation and matching
   only. Every rule is a row, editable in Django admin.
 - **`operations.publisher_categories`** (model + admin) — data-driven
-  default categorisation: any product whose publisher matches a
+  default categorization: any product whose publisher matches a
   pattern is auto-tagged with the row's categories. Applied on top of
-  the per-title catalogue entries.
+  the per-title catalog entries.
 - **`operations.intel_matcher_hints`** (model + admin) — two kinds of
   matcher tuning:
   * `require_third_token` — for common vendors (Microsoft, Adobe,
@@ -1136,7 +1136,7 @@ All notable changes to this project follow [Semantic Versioning](https://semver.
 ## [0.97.3] — 2026-07-26 — Jobs page: groups, run-all, correct kind mapping, recent activity
 
 ### Fixed
-- **Every non-intel job showed "Never run"** — the catalogue's
+- **Every non-intel job showed "Never run"** — the catalog's
   `status_key`s did not match the actual `run_log.kind` values
   emitted by the writers (`software_classifier`, `patch_findings`,
   `platform_evaluator`, `parity_check`, `source.<Platform>`).
@@ -1157,7 +1157,7 @@ All notable changes to this project follow [Semantic Versioning](https://semver.
 ### Changed
 - Jobs page renders one section per category (Source ingest / Intel /
   Evaluators / Notifications) instead of a flat list.
-- Added `Parity check` to the catalogue.
+- Added `Parity check` to the catalog.
 - Category-level "Run all" buttons appear both above and inline with
   each section heading.
 
@@ -1188,7 +1188,7 @@ All notable changes to this project follow [Semantic Versioning](https://semver.
   `epss.empiricalsecurity.com` (301 redirect). Pointed the connector
   at the new URL and enabled `follow_redirects=True` so the next
   domain change is also handled transparently.
-- **Intel matcher matched zero products** — the day-one normaliser
+- **Intel matcher matched zero products** — the day-one normalizer
   concatenated every canonical name into a single token
   (`googlechrome` etc.) and never lined up with CPE product names
   (`chrome`). Rewrote the matcher as token-intersection: split every
@@ -1268,7 +1268,7 @@ All notable changes to this project follow [Semantic Versioning](https://semver.
   operator-facing page and search placeholder; "Open items" reworded;
   workflow card descriptions phrased for humans.
 
-### Changed (behaviour)
+### Changed (behavior)
 - **Intel matcher + Winget + Chocolatey enrichers now fire on the
   software classify cycle**, before the classifier itself. Newly
   ingested products get scored and enriched in the same run instead of
@@ -1297,9 +1297,9 @@ Software safety-intel track (Batches A–H) is now complete.
 - **`/software/` worker timeout on some renders** — split the risk lookup
   into its own atomic block, gated behind a `to_regclass` probe so the
   page still loads when the intel view hasn't been migrated yet.
-- **"Whitelist" chip on the fleet page** was surfacing a legacy catalogue
+- **"Whitelist" chip on the fleet page** was surfacing a legacy catalog
   category value; hidden from the chip strip. Trust now lives in
-  decisions, not the catalogue.
+  decisions, not the catalog.
 
 ### Changed (operator-facing)
 - **Fleet page reshape** — high-level dashboard with two rows of tiles:
@@ -1383,7 +1383,7 @@ Software safety-intel track (Batches A–H) is now complete.
   signature and filename tokens; signals stored at `severity='medium'`.
 - **Two new APScheduler cycles** on `INTEL_OSINT_SCHEDULE_HOURS`.
 
-## [0.90.0] — 2026-07-24 — Intel catalogue enrichment: Winget + Chocolatey (Batch C)
+## [0.90.0] — 2026-07-24 — Intel catalog enrichment: Winget + Chocolatey (Batch C)
 
 ### Added
 - **Winget enrichment** (`ingest/intel/winget.py`) — per-canonical query
@@ -1409,13 +1409,13 @@ Software safety-intel track (Batches A–H) is now complete.
   same paginated shape, populates `intel.cpes` with lowered
   vendor/product/version tokens for the matcher.
 - **CISA KEV ingest** (`ingest/intel/cisa_kev.py`) — single JSON pull,
-  upserts `kev_flag / kev_added_at / kev_notes` on every catalogued
+  upserts `kev_flag / kev_added_at / kev_notes` on every cataloged
   CVE and clears the flag on rows CISA removed from the list.
 - **FIRST.org EPSS ingest** (`ingest/intel/epss.py`) — daily gzipped
   CSV, only updates CVEs already present in `intel.cves` so the
   update set stays bounded.
 - **Conservative day-one matcher** (`ingest/intel/matcher.py`) —
-  normalises canonical software names to alphanum tokens, exact-matches
+  normalizes canonical software names to alphanum tokens, exact-matches
   against CPE `product`, then joins to CVEs via `affected_cpes ?|`.
   Marks every hit `confidence='high', match_kind='cpe_exact'`.
 - **APScheduler wiring** — five new cycles under the `INTEL_ENABLED`
@@ -1479,7 +1479,7 @@ Software safety-intel track (Batches A–H) is now complete.
 
 ### Added
 - **`whitelist_suggestion` FindingType** (migration `0080`, seeded under
-  the software category). Fires for uncategorised + undecided titles
+  the software category). Fires for uncategorized + undecided titles
   installed on ≥ N devices fleet-wide — the "widespread but nobody has
   decided on it" review queue.
 - **Software classifier step 7** — the ingest evaluator emits
@@ -1516,7 +1516,7 @@ Software safety-intel track (Batches A–H) is now complete.
   honours publisher-scope tiers: title-scope wins (device > client >
   global), publisher-scope is the fallback (device > client > global).
   Publisher-approving no longer requires per-title decisions to actually
-  suppress findings across the publisher's catalogue.
+  suppress findings across the publisher's catalog.
 - **Fleet page `?decision=` filter** now considers publisher-scope
   approvals/rejections/pending when computing the title's disposition.
 - **`software_decision_create`** accepts a `publisher` POST param and
@@ -1639,7 +1639,7 @@ Software safety-intel track (Batches A–H) is now complete.
   poison newer state and open a phantom SCD-2 interval. The primitive
   now drops rows in Python when `row.observed_at <= _current.observed_at`
   (equal timestamps treated as stale to prevent zero-length intervals),
-  and the bespoke SQL upsert mirrors the guard as defence in depth:
+  and the bespoke SQL upsert mirrors the guard as defense in depth:
   `WHERE _current.observed_at < EXCLUDED.observed_at`.
 - **Connector NULL could clear resolver-populated `device_id`/`client_id`.**
   Bespoke upsert now uses
@@ -3260,8 +3260,8 @@ No-data as hero tiles) with what fleet operators actually scan:
 ### Fixed
 - US English throughout UI copy — dropped British spellings that
   slipped in:
-  - "Unrecognised device type" → "Unrecognized device type"
-  - "Active organisations" → "Active organizations"
+  - "Unrecognized device type" → "Unrecognized device type"
+  - "Active organizations" → "Active organizations"
 - UI principles memory updated with a "US English only in UI copy"
   rule to prevent recurrence.
 
@@ -3279,7 +3279,7 @@ No-data as hero tiles) with what fleet operators actually scan:
   - `device_unenrolled` → "No management agent installed"
   - `device_long_offline` → "Offline for an extended period"
   - `cross_client_conflict` → "Same hostname on two clients"
-  - `unmapped_node_class` → "Unrecognised device type"
+  - `unmapped_node_class` → "Unrecognized device type"
   - `identity_resolution_pending` → "Awaiting device identity match"
   - `software_queue_stalled` → "Software scan queue stalled"
   - `stale_collector_binding` → "Ingest connector stopped"
@@ -3385,7 +3385,7 @@ filters, proven out on the Patching page before rolling site-wide.
 ## [0.45.2] — 2026-07-16
 
 ### Changed
-- Patching page reorganised (feedback):
+- Patching page reorganized (feedback):
   - Filter bar moved to the top (above tiles) so tile counts
     visibly reflect the current filter selection.
   - Per-type finding tiles now honor the status + client filters
@@ -3746,7 +3746,7 @@ filters, proven out on the Patching page before rolling site-wide.
   RLS enabled. (migration 0014)
 - `operations.admin_findings`: platform-health findings (condition_key unique
   partial constraint on active). RLS enabled. (migration 0014)
-- `operations.queue_registry`: queue governance catalogue (no tenant scope,
+- `operations.queue_registry`: queue governance catalog (no tenant scope,
   no RLS). Seeded with 4 queues: software.scheduled, software.demand,
   software.activity, identity.resolution. (migration 0014)
 - `operations.identity_candidates`: pending device-pair merge suggestions
@@ -5452,7 +5452,7 @@ filters, proven out on the Patching page before rolling site-wide.
   ingest change.
 - Deferred from this pass (low value or high complexity, parked):
   warning-category → device-list drillthrough (requires a new
-  Metabase param + categorised device card); with-drivers vs.
+  Metabase param + categorized device card); with-drivers vs.
   without-drivers compliance comparison (adds confusion, env-var
   toggle already does the job for ad-hoc).
 - Commit: `TBD`

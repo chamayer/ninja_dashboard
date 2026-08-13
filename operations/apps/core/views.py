@@ -1955,7 +1955,7 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
             # was wrong twice. Device-scoped rows carry a client_id as well --
             # software_decision_create sets client = device.client -- so a
             # decision scoped to one device appeared on every other device of
-            # that client, labelled "client". And an approve_publisher row has
+            # that client, labeled "client". And an approve_publisher row has
             # an empty canonical_name, so a title covered by a trusted
             # publisher rendered as "pending".
             cur.execute(
@@ -2519,7 +2519,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     status_scope_label = "all" if status_filter == "all" else status_filter.replace("_", " ")
 
     def scope_card(label: str, count: int, total: int, total_label: str, note: str) -> dict:
-        """Build a labelled filtered-count fraction for the Issues summary."""
+        """Build a labeled filtered-count fraction for the Issues summary."""
         percentage = f"{(100 * count / total):.1f}%" if total else "0%"
         return {
             "label": label,
@@ -3179,7 +3179,7 @@ def _software_page_data(request: HttpRequest) -> dict:
     # that costs ~700-900 ms per evaluation". That is no longer true: it has
     # since been materialized, and the full unbounded fetch measures 19 ms
     # against production. Fetching once is still right — one round trip beats
-    # six — but it is not the page's cost centre, and chasing it would have
+    # six — but it is not the page's cost center, and chasing it would have
     # been wasted effort.
     all_safety_rows: list[tuple] = []
     if intel_available:
@@ -3643,7 +3643,7 @@ def software_page(request: HttpRequest) -> HttpResponse:
     ctx = _software_page_data(request)
     if wants_csv(request):
         # CSV export on Overview yields the top products the dashboard
-        # dashboards summarize; keep parity with the previous behaviour.
+        # dashboards summarize; keep parity with the previous behavior.
         return csv_response(
             ctx["titles"],
             columns=[
@@ -3943,7 +3943,7 @@ def software_detail(request: HttpRequest, name: str) -> HttpResponse:
         .first()
     )
     # Pull tags from winget/chocolatey safety_signal into a merged
-    # categorisation list. Operator-set catalog_entry.categories still wins.
+    # categorization list. Operator-set catalog_entry.categories still wins.
     for row in osint_rows:
         details = row["details"]
         if (
@@ -4585,7 +4585,7 @@ def software_user_risk(request: HttpRequest) -> HttpResponse:
 
 
 # ─────────────────────────────────────────────────────────────────────
-# Jobs — operator-facing catalogue of every scheduled ingest / intel /
+# Jobs — operator-facing catalog of every scheduled ingest / intel /
 # evaluator / notifier job with last-run status and a "Run now" button
 # that POSTs to the ingest container's /run/<slug> HTTP endpoint.
 # ─────────────────────────────────────────────────────────────────────
@@ -4593,7 +4593,7 @@ def software_user_risk(request: HttpRequest) -> HttpResponse:
 
 _INGEST_BASE_URL = os.environ.get("INGEST_BASE_URL", "http://ingest:8090")
 
-# Static catalogue of jobs surfaced on /admin/jobs/. Each row maps to an
+# Static catalog of jobs surfaced on /admin/jobs/. Each row maps to an
 # existing /run/<slug> HTTP endpoint on the ingest container. Categories
 # keep the UI groupable; last-run status is looked up per-category with
 # a small helper query (intel jobs use intel_ingest_status; everything
@@ -4604,7 +4604,7 @@ _JOB_CATALOG: list[dict] = [
     {"id": "patches",            "name": "Ninja source cycle",   "category": "source ingest", "endpoint": "run/patches",   "status_key": "source.Ninja",         "status_source": "run_log_like",  "description": "Full Ninja API pull: devices, activities, patches, custom fields, matviews."},
     {"id": "agent-observations", "name": "Agent observations",   "category": "source ingest", "endpoint": "run/agents",    "status_key": "source.",              "status_source": "run_log_like",  "description": "Fetch device inventory + agent presence from every source."},
     # Evaluators
-    {"id": "software-classify",  "name": "Software classifier (+ auto-intel)", "category": "evaluators", "endpoint": "run/software-classify", "status_key": "software_classifier", "status_source": "run_log", "description": "Run intel matcher + catalogue enrichers then the software finding classifier."},
+    {"id": "software-classify",  "name": "Software classifier (+ auto-intel)", "category": "evaluators", "endpoint": "run/software-classify", "status_key": "software_classifier", "status_source": "run_log", "description": "Run intel matcher + catalog enrichers then the software finding classifier."},
     {"id": "patch-classify",     "name": "Patch classifier",     "category": "evaluators", "endpoint": "run/patch-classify",    "status_key": "patch_findings",   "status_source": "run_log", "description": "Emit patch findings from the current patch inventory."},
     {"id": "platform-evaluate",  "name": "Platform evaluator",   "category": "evaluators", "endpoint": "run/platform-evaluate", "status_key": "platform_evaluator", "status_source": "run_log", "description": "Refresh coverage, identity, and lifecycle findings."},
     {"id": "resolver",           "name": "Identity resolver",    "category": "evaluators", "endpoint": "run/resolver",          "status_key": "identity_resolver", "status_source": "run_log", "description": "Merge candidate resolver + layered-entity write path."},
@@ -4727,7 +4727,7 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
 
     # Dynamic per-source-instance rows — one entry per distinct
     # source.<Platform>[.<Instance>] kind we've ever seen. These aren't
-    # in the static catalogue because instance names come from data.
+    # in the static catalog because instance names come from data.
     dynamic_source_entries: list[dict] = []
     seen_source_kinds = [k for k in run_log_status.keys() if k.startswith("source.")]
     for kind in seen_source_kinds:
@@ -4794,7 +4794,7 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
         jobs = [j for j in jobs if j["state"] == "ok" and not j["is_stale"]]
 
     # Group by category so the template can render sections instead of
-    # a flat list. Preserve catalogue order within each group.
+    # a flat list. Preserve catalog order within each group.
     jobs_by_category: dict[str, list[dict]] = {}
     for j in jobs:
         jobs_by_category.setdefault(j["category"], []).append(j)
@@ -4841,7 +4841,7 @@ def admin_jobs_run(request: HttpRequest, job_id: str) -> HttpResponse:
 @login_required
 @require_POST
 def admin_jobs_run_all(request: HttpRequest) -> HttpResponse:
-    """Fire every job in the catalogue, or every job in a category if
+    """Fire every job in the catalog, or every job in a category if
     ``category`` is supplied on the POST body."""
     category = (request.POST.get("category") or "").strip().lower()
     targets = [j for j in _JOB_CATALOG if (not category or j["category"] == category)]

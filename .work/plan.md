@@ -1058,7 +1058,7 @@ Known heavy candidates before measuring: the patching posture CTE
 (261,116 rows / 239 MB), and the client workspace, which fans out per client.
 
 **T1 comes first because T2, T3 and T5 all add queries and content to pages.**
-Optimising after that is harder than establishing the baseline now.
+Optimizing after that is harder than establishing the baseline now.
 
 ## T2 — Click-through everywhere
 
@@ -1075,7 +1075,7 @@ convention that every table is both.
 
 ## T4 — Software classification and categorization
 
-The only track with an engine rather than a surface: categorising titles in
+The only track with an engine rather than a surface: categorizing titles in
 `ingest/inventory/` and the software decision surfaces. Independent of the
 other four and can run in parallel.
 

@@ -46,7 +46,7 @@ against production: the flat and aggregated forms produce identical row sets
 keys, and — compared row by row — zero disagreement on ``missing_since``
 presence and zero on ``last_seen_at``.
 
-That is not a micro-optimisation. Building
+That is not a micro-optimization. Building
 ``device_patching_scope_current`` measured 247 ms against the original
 ``device_links`` table, more than 90 s (statement timeout) through the
 aggregating shim, and 278 ms through this flat view. The aggregate form is a

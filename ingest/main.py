@@ -2399,7 +2399,7 @@ def main() -> None:
     # green and prevents migration-rollback restart loops.
     httpd = _start_http_server()
 
-    log.info("Initialising DB pool")
+    log.info("Initializing DB pool")
     db.init(settings.postgres_dsn)
 
     log.info("Applying pending migrations")
