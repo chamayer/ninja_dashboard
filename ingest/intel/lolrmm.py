@@ -82,7 +82,18 @@ def _fetch_complete_corpus() -> dict[str, dict]:
         normalized = _normalize(name)
         if not normalized:
             raise RuntimeError(f"LOLRMM record normalized to empty: {filename}")
-        capability = "rmm" if category == "RMM" else "remote_access"
+        # LOLRMM evidences `remote_access`, never `rmm`, whatever its own
+        # Category says. The corpus is "tools abused for unattended remote
+        # access", which is what our `remote_access` means; its RMM/RAT split
+        # describes vendor legitimacy, not capability. Mapping Category
+        # straight through asserted `rmm` on TeamViewer, ScreenConnect,
+        # AnyDesk, LogMeIn and GoToMyPC at the alertable tier, contradicting
+        # the vetted rules that deliberately call those remote_access, so one
+        # install raised both unauthorized_rmm and unauthorized_remote_access.
+        # `rmm` means full endpoint management -- patching, scripting,
+        # monitoring -- which a name match against this corpus cannot show.
+        # Category is still validated above and kept verbatim in raw_record.
+        capability = "remote_access"
         data = {
             "display_name": name,
             "capability": capability,
