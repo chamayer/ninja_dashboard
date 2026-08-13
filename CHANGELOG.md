@@ -2,6 +2,20 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.116.2] — 2026-08-13 — Products page timeout repair
+
+### Fixed
+
+- Restored `/software/products/`. Its whitelist-suggestion title counter had
+  timed out inside PostgreSQL and caused Gunicorn to return HTTP 500. The
+  counter now resolves the finding-type registry id first and uses the existing
+  partial expression index directly; the equivalent production aggregate
+  completes in 57 ms.
+- Made Products and Publishers decision controls scope-consistent. Their detail
+  pages now support global, client, and device decisions; compact list actions
+  remain global and link to the scoped form. Invalid narrow-scope submissions
+  are rejected instead of being silently recorded globally.
+
 ## [0.116.1] — 2026-08-12 — Capability migration startup repair
 
 ### Fixed

@@ -63,19 +63,44 @@
 
 <div class="pd-grid">
 <div>
-    <div class="pd-card">
+    <div class="pd-card" id="decision-scopes">
         <h2>Publisher-scope decision</h2>
         <p class="muted" style="margin-top:0; font-size:0.85rem;">
-            Applies to every title from this publisher, including titles
-            first observed after the decision is recorded.
-            Title-scope decisions on a specific title still override this.
+            Choose global, client, or device scope. It applies to every title
+            from this publisher at that scope; narrower decisions override
+            broader ones.
         </p>
         <form method="post" action="{% url 'software_decision_create' %}"
-              style="display:grid; gap:0.5rem; grid-template-columns:1fr auto; align-items:end;">
+              style="display:grid; gap:0.5rem; grid-template-columns:repeat(4, minmax(0, 1fr)) auto; align-items:end;" data-scope-form>
             {% csrf_token %}
             <input type="hidden" name="publisher" value="{{ publisher }}">
-            <input type="hidden" name="scope" value="global">
             <input type="hidden" name="next" value="{{ request.get_full_path }}">
+            <div>
+                <label style="display:block; font-size:0.78rem; color:var(--muted);">Scope</label>
+                <select name="scope" data-scope style="width:100%;">
+                    <option value="global">Global</option>
+                    <option value="client">Client</option>
+                    <option value="device">Device</option>
+                </select>
+            </div>
+            <div data-client-target hidden>
+                <label style="display:block; font-size:0.78rem; color:var(--muted);">Client</label>
+                <select name="client_slug" style="width:100%;">
+                    <option value="">Choose client…</option>
+                    {% for client in decision_scope_clients %}
+                    <option value="{{ client.slug }}">{{ client.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div data-device-target hidden>
+                <label style="display:block; font-size:0.78rem; color:var(--muted);">Device</label>
+                <select name="device_id" style="width:100%;">
+                    <option value="">Choose device…</option>
+                    {% for device in decision_scope_devices %}
+                    <option value="{{ device.id }}">{{ device.client_name }} — {{ device.hostname }}</option>
+                    {% endfor %}
+                </select>
+            </div>
             <div>
                 <label style="display:block; font-size:0.78rem; color:var(--muted);">Decision</label>
                 <select name="decision" style="width:100%;">
@@ -186,4 +211,19 @@
     </div>
 </div>
 </div>
+<script>
+    document.querySelectorAll('[data-scope-form]').forEach(function (form) {
+        var scope = form.querySelector('[data-scope]');
+        var client = form.querySelector('[data-client-target]');
+        var device = form.querySelector('[data-device-target]');
+        function updateScopeTargets() {
+            client.hidden = scope.value !== 'client';
+            device.hidden = scope.value !== 'device';
+            client.querySelector('select').disabled = scope.value !== 'client';
+            device.querySelector('select').disabled = scope.value !== 'device';
+        }
+        scope.addEventListener('change', updateScopeTargets);
+        updateScopeTargets();
+    });
+</script>
 {% endblock %}

@@ -31,7 +31,8 @@
                    text-transform: uppercase; letter-spacing: 0.03em; }
     .sd-table td.num, .sd-table th.num { text-align: right; }
     .sd-decision-form { display: grid; gap: 0.5rem;
-                        grid-template-columns: 1fr auto; align-items: end; }
+                        grid-template-columns: repeat(4, minmax(0, 1fr)) auto;
+                        align-items: end; }
     .sd-decision-form select, .sd-decision-form input[type=text] {
         padding: 0.4rem 0.55rem; border: 1px solid var(--border);
         border-radius: 4px; font-size: 0.88rem; }
@@ -129,20 +130,47 @@
         {% endif %}
     </div>
 
-    <div class="sd-card">
+    <div class="sd-card" id="decision-scopes">
         <h2>Decision</h2>
         <p class="muted" style="margin-top:0; font-size:0.85rem;">
-            Global scope applies to every install of this title unless a
-            narrower client- or device-scoped decision overrides it.
+            Choose the scope deliberately: global applies everywhere; client
+            applies to every current and future install at that client; device
+            applies only to the selected device. Narrower decisions override
+            broader ones.
             {% if catalog_entry %}Catalog notes:
                 <em>{{ catalog_entry.notes|default:"none" }}</em>.
             {% endif %}
         </p>
-        <form method="post" action="{% url 'software_decision_create' %}" class="sd-decision-form">
+        <form method="post" action="{% url 'software_decision_create' %}" class="sd-decision-form" data-scope-form>
             {% csrf_token %}
             <input type="hidden" name="canonical_name" value="{{ canonical_name }}">
-            <input type="hidden" name="scope" value="global">
             <input type="hidden" name="next" value="{{ request.get_full_path }}">
+            <div>
+                <label style="display:block; font-size:0.78rem; color:var(--muted);">Scope</label>
+                <select name="scope" data-scope style="width:100%;">
+                    <option value="global">Global</option>
+                    <option value="client">Client</option>
+                    <option value="device">Device</option>
+                </select>
+            </div>
+            <div data-client-target hidden>
+                <label style="display:block; font-size:0.78rem; color:var(--muted);">Client</label>
+                <select name="client_slug" style="width:100%;">
+                    <option value="">Choose client…</option>
+                    {% for client in decision_scope_clients %}
+                    <option value="{{ client.slug }}">{{ client.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div data-device-target hidden>
+                <label style="display:block; font-size:0.78rem; color:var(--muted);">Device</label>
+                <select name="device_id" style="width:100%;">
+                    <option value="">Choose device…</option>
+                    {% for device in decision_scope_devices %}
+                    <option value="{{ device.id }}">{{ device.client_name }} — {{ device.hostname }}</option>
+                    {% endfor %}
+                </select>
+            </div>
             <div>
                 <label style="display:block; font-size:0.78rem; color:var(--muted);">Decision</label>
                 <select name="decision" style="width:100%;">
@@ -156,10 +184,6 @@
             </div>
             <button type="submit">Apply</button>
         </form>
-        <p class="muted" style="margin-top:0.6rem; font-size:0.8rem;">
-            For a narrower scope, use the row action in the per-device list
-            below or the client's software page.
-        </p>
     </div>
 
     <div class="sd-card">
@@ -445,4 +469,19 @@
     </div>
 </div>
 </div>
+<script>
+    document.querySelectorAll('[data-scope-form]').forEach(function (form) {
+        var scope = form.querySelector('[data-scope]');
+        var client = form.querySelector('[data-client-target]');
+        var device = form.querySelector('[data-device-target]');
+        function updateScopeTargets() {
+            client.hidden = scope.value !== 'client';
+            device.hidden = scope.value !== 'device';
+            client.querySelector('select').disabled = scope.value !== 'client';
+            device.querySelector('select').disabled = scope.value !== 'device';
+        }
+        scope.addEventListener('change', updateScopeTargets);
+        updateScopeTargets();
+    });
+</script>
 {% endblock %}

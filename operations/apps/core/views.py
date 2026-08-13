@@ -3500,9 +3500,30 @@ def _software_page_data(request: HttpRequest) -> dict:
     software_issues = software_open_qs.exclude(
         finding_type__name="whitelist_suggestion"
     ).count()
-    whitelist_suggestions = software_open_qs.filter(
-        finding_type__name="whitelist_suggestion"
-    ).values("finding_details__canonical_name").distinct().count()
+    # Resolve the registry id before the distinct JSON aggregate.  Filtering
+    # through the category/type joins made PostgreSQL abandon the existing
+    # partial expression index on `finding_details -> 'canonical_name'`; on
+    # production that aggregate then exceeded Gunicorn's 30-second timeout and
+    # made the Products page return 500.  The direct predicate is equivalent
+    # (the type is itself a software finding) and uses
+    # idx_findings_type_canonical.
+    whitelist_type_id = (
+        FindingType.objects.filter(name="whitelist_suggestion")
+        .values_list("id", flat=True)
+        .first()
+    )
+    whitelist_suggestions = (
+        Finding.objects.filter(
+            tenant_id=1,
+            status__in=_FINDING_ACTIVE_STATUSES,
+            finding_type_id=whitelist_type_id,
+        )
+        .values("finding_details__canonical_name")
+        .distinct()
+        .count()
+        if whitelist_type_id is not None
+        else 0
+    )
 
     # Product-level decision counts. A publisher-scope decision applies
     # to every product from that publisher, so the raw
@@ -3943,6 +3964,7 @@ def software_detail(request: HttpRequest, name: str) -> HttpResponse:
     )
     client_decisions = [d for d in decision_rows if d.client_id and not d.device_id]
     device_decisions = [d for d in decision_rows if d.device_id]
+    decision_scope_clients, decision_scope_devices = _decision_scope_targets(install_rows)
 
     # Global capability evidence belongs to stable product identities, not the
     # display title. The catalog can hold more than one identity for a title,
@@ -3984,6 +4006,8 @@ def software_detail(request: HttpRequest, name: str) -> HttpResponse:
             "locations": location_rows,
             "install_rows": install_rows,
             "global_decision": global_decision,
+            "decision_scope_clients": decision_scope_clients,
+            "decision_scope_devices": decision_scope_devices,
             "capability_schema_ready": capability_schema_ready,
             "capability_product_rows": capability_product_rows,
             "can_curate_capability": can_curate_capability,
@@ -4234,6 +4258,34 @@ def software_publisher_detail(request: HttpRequest, publisher: str) -> HttpRespo
         )
         title_rows_raw = cur.fetchall()
 
+        # Scope targets are limited to current installations of this publisher.
+        # A publisher-wide decision may only be narrowed to a client/device
+        # that actually runs one of its products.
+        cur.execute(
+            """
+            SELECT DISTINCT ON (sic.device_id)
+                   sic.device_id, c.slug, c.display_name, d.canonical_hostname
+              FROM operations.software_installations_current sic
+              JOIN operations.clients c ON c.id = sic.client_id
+              JOIN operations.devices d ON d.id = sic.device_id
+             WHERE sic.tenant_id = 1 AND sic.deleted_at IS NULL
+               AND sic.stale_since IS NULL
+               AND LOWER(sic.publisher) = LOWER(%s)
+             ORDER BY sic.device_id, c.display_name, d.canonical_hostname
+             LIMIT 500
+            """,
+            [pub],
+        )
+        publisher_scope_rows = [
+            {
+                "device_id": row[0],
+                "client_slug": row[1],
+                "client_name": row[2],
+                "hostname": row[3],
+            }
+            for row in cur.fetchall()
+        ]
+
     canonical_names = [row[0] for row in title_rows_raw]
     title_decisions = {
         d.canonical_name.lower(): d
@@ -4274,6 +4326,9 @@ def software_publisher_detail(request: HttpRequest, publisher: str) -> HttpRespo
         d for d in pub_decision_rows if d.client_id and not d.device_id
     ]
     device_pub_decisions = [d for d in pub_decision_rows if d.device_id]
+    decision_scope_clients, decision_scope_devices = _decision_scope_targets(
+        publisher_scope_rows
+    )
 
     return render(
         request,
@@ -4288,6 +4343,8 @@ def software_publisher_detail(request: HttpRequest, publisher: str) -> HttpRespo
             "last_observed": last_observed,
             "title_rows": title_rows,
             "global_pub_decision": global_pub_decision,
+            "decision_scope_clients": decision_scope_clients,
+            "decision_scope_devices": decision_scope_devices,
             "client_pub_decisions": client_pub_decisions,
             "device_pub_decisions": device_pub_decisions,
             "decision_choices": SoftwareDecision.Decision.choices,
@@ -8273,6 +8330,33 @@ def _safe_next(request: HttpRequest, fallback_url_name: str) -> str:
     return reverse(fallback_url_name)
 
 
+def _decision_scope_targets(install_rows: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Distinct client/device choices for one title or publisher's current installs."""
+    clients: dict[str, dict] = {}
+    devices: dict[str, dict] = {}
+    for row in install_rows:
+        client_slug = row.get("client_slug") or ""
+        if client_slug:
+            clients.setdefault(
+                client_slug,
+                {"slug": client_slug, "name": row.get("client_name") or client_slug},
+            )
+        device_id = str(row.get("device_id") or "")
+        if device_id:
+            devices.setdefault(
+                device_id,
+                {
+                    "id": device_id,
+                    "hostname": row.get("hostname") or device_id,
+                    "client_name": row.get("client_name") or "",
+                },
+            )
+    return (
+        sorted(clients.values(), key=lambda row: (row["name"].lower(), row["slug"])),
+        sorted(devices.values(), key=lambda row: (row["client_name"].lower(), row["hostname"].lower())),
+    )
+
+
 @login_required
 @require_POST
 @transaction.atomic
@@ -8298,14 +8382,52 @@ def software_decision_create(request: HttpRequest) -> HttpResponse:
         )
         return redirect("software_decisions_queue")
 
+    if scope not in {"global", "client", "device"}:
+        messages.error(request, "Choose global, client, or device scope.")
+        return redirect(_safe_next(request, "software_decisions_queue"))
+
     client = None
     device = None
-    if scope == "client" and client_slug:
+    if scope == "client":
+        if not client_slug:
+            messages.error(request, "Choose a client for a client-scoped decision.")
+            return redirect(_safe_next(request, "software_decisions_queue"))
         client = get_object_or_404(Client, slug=client_slug, tenant_id=1)
-    elif scope == "device" and device_id_str:
+    elif scope == "device":
+        if not device_id_str:
+            messages.error(request, "Choose a device for a device-scoped decision.")
+            return redirect(_safe_next(request, "software_decisions_queue"))
         device = get_object_or_404(Device, id=device_id_str, tenant_id=1)
         client = device.client
-    # scope == "global": both remain None
+    # scope == "global": both remain None.
+
+    if scope != "global":
+        target_column, target_value = (
+            ("client_id", client.id) if scope == "client" else ("device_id", device.id)
+        )
+        match_column, match_value = (
+            ("canonical_name", canonical_name) if canonical_name else ("publisher", publisher)
+        )
+        with connection.cursor() as cur:
+            cur.execute("SET LOCAL operations.tenant_id = 1")
+            cur.execute(
+                f"""
+                SELECT EXISTS (
+                    SELECT 1
+                      FROM operations.software_installations_current
+                     WHERE tenant_id = 1 AND deleted_at IS NULL AND stale_since IS NULL
+                       AND {target_column} = %s
+                       AND LOWER({match_column}) = LOWER(%s)
+                )
+                """,
+                (target_value, match_value),
+            )
+            if not cur.fetchone()[0]:
+                messages.error(
+                    request,
+                    "The selected scope has no current installation of this software.",
+                )
+                return redirect(_safe_next(request, "software_decisions_queue"))
 
     obj, created = SoftwareDecision.objects.update_or_create(
         tenant_id=1,

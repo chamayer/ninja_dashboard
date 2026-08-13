@@ -162,6 +162,7 @@
                             {% endfor %}
                         </select>
                         <button type="submit">Apply</button>
+                        <a href="{% url 'software_detail' name=t.canonical_name %}#decision-scopes" class="secondary">Client/device…</a>
                     </form>
                 </td>
             </tr>

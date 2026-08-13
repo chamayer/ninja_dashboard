@@ -47,9 +47,48 @@ hit pre-existing `finding_types` identity-sequence drift before the review
 type could be inserted. The transaction rolled back. This release synchronizes
 the sequence in 0137 before its idempotent upsert and redeploys as `0.116.1`.
 
+## Products-page timeout repair
+
+**Status:** implementation and release preparation in progress as `0.116.2`.
+
+**Goal:** restore `/software/products/` without changing its counter's
+meaning.
+
+**Cause and decision:** production logs showed Gunicorn killing the request
+after 30 seconds in the whitelist-suggestion distinct-title aggregate. The
+existing direct partial expression index is valid, and the equivalent direct
+type-ID query measured 57 ms. The ORM's category/type joins prevented that
+fast path. Resolve the registry ID first, then count distinct canonical names
+directly from active findings; the type is already a software type, so the
+result is equivalent.
+
+**Scope:** `apps/core/views.py`, Products/Publishers templates, root
+version/changelog, this plan, and light post-deployment page validation. No
+schema change.
+
+**Next action:** compile and diff-check, then commit, push, redeploy, and make
+authenticated Products and Publisher detail requests plus a health check.
+
 **Next action:** release `0.116.0`, then record deployed migration and service
 health evidence. Do not turn on either capability emission flag as part of the
 release.
+
+## Software decision scope parity
+
+**Status:** implementation complete; included in the `0.116.2` release.
+
+**Goal:** make Product and Publisher decisions equally capable of applying at
+global, client, or device scope.
+
+**Decision:** list pages retain compact global quick actions and link directly
+to their detail page's scoped action. Each detail page offers one explicit
+scope selector, bounded to clients/devices with current installations of that
+title or publisher. The write path rejects a missing/invalid scope and a
+client/device that does not currently run the selected title/publisher; it can
+no longer silently turn malformed narrow requests into global decisions.
+
+**Scope:** `apps/core/views.py` and the four Products/Publishers templates.
+No schema change.
 
 ## E5.3 scoped maintenance — Issues filter-aware magnitude summary
 

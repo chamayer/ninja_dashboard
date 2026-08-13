@@ -131,6 +131,7 @@
                             <input type="hidden" name="decision" value="investigate">
                             <button type="submit" class="btn-review" title="Flag this publisher for review">Review</button>
                         </form>
+                        <a href="{% url 'software_publisher_detail' publisher=p.publisher %}#decision-scopes" class="secondary">Client/device…</a>
                     </div>
                 </td>
             </tr>
