@@ -4605,6 +4605,11 @@ _JOB_CATALOG: list[dict] = [
     {"id": "agent-observations", "name": "Agent observations",   "category": "source ingest", "endpoint": "run/agents",    "status_key": "source.",              "status_source": "run_log_like",  "description": "Fetch device inventory + agent presence from every source."},
     # Evaluators
     {"id": "software-classify",  "name": "Software classifier (+ auto-intel)", "category": "evaluators", "endpoint": "run/software-classify", "status_key": "software_classifier", "status_source": "run_log", "description": "Run intel matcher + catalog enrichers then the software finding classifier."},
+    # Same underlying job as the entry above, minus the intel pre-steps, so it
+    # writes the same run_log kind and is held out of "run all": firing both
+    # would start two concurrent classifier passes over the same findings, and
+    # nothing in ingest serializes them.
+    {"id": "software-classify-only", "name": "Software classifier (no intel refresh)", "category": "evaluators", "endpoint": "run/software-classify-only", "status_key": "software_classifier", "status_source": "run_log", "run_all": False, "description": "Re-emit software findings from the intel already stored. The same path the scheduler runs; use it when the enriching job above would spend ~41 minutes on a matcher pass you do not need."},
     {"id": "patch-classify",     "name": "Patch classifier",     "category": "evaluators", "endpoint": "run/patch-classify",    "status_key": "patch_findings",   "status_source": "run_log", "description": "Emit patch findings from the current patch inventory."},
     {"id": "platform-evaluate",  "name": "Platform evaluator",   "category": "evaluators", "endpoint": "run/platform-evaluate", "status_key": "platform_evaluator", "status_source": "run_log", "description": "Refresh coverage, identity, and lifecycle findings."},
     {"id": "resolver",           "name": "Identity resolver",    "category": "evaluators", "endpoint": "run/resolver",          "status_key": "identity_resolver", "status_source": "run_log", "description": "Merge candidate resolver + layered-entity write path."},
@@ -4844,7 +4849,10 @@ def admin_jobs_run_all(request: HttpRequest) -> HttpResponse:
     """Fire every job in the catalog, or every job in a category if
     ``category`` is supplied on the POST body."""
     category = (request.POST.get("category") or "").strip().lower()
-    targets = [j for j in _JOB_CATALOG if (not category or j["category"] == category)]
+    targets = [
+        j for j in _JOB_CATALOG
+        if j.get("run_all", True) and (not category or j["category"] == category)
+    ]
     if not targets:
         messages.warning(request, f"No jobs matched category '{category or 'all'}'.")
         return redirect(request.META.get("HTTP_REFERER") or reverse("admin_jobs"))

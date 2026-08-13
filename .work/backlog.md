@@ -96,6 +96,26 @@ not need redesigning.
 - Migration 090 adds `intel_ingest_status.last_duration_seconds` so the next
   such drift shows up as a number rather than as someone waiting.
 
+### Open decision: incremental vs full rebuild — now measurable
+
+**Measured 2026-08-13: 2,477 seconds per run, i.e. 41 minutes.** At
+`INTEL_MATCHER_SCHEDULE_HOURS = 6` that is four runs a day, about **2.75
+database-hours daily**. For scale, the next most expensive connector is
+chocolatey at 301 s; everything else is under a minute.
+
+This closes the "measure first" caveat and opens an explicit decision. Note
+that the index fix above removed the per-title sequential scan of `intel.cpes`,
+so these 41 minutes are a *different* cost — most likely the per-unit
+`affected_cpes ?|` lookups across ~40k product+versions. Profile that before
+choosing a strategy rather than assuming the earlier fix was the whole story.
+
+The full rebuild is what guarantees no stale match survives a CVE withdrawal or
+a CPE correction, so going incremental needs an explicit answer for removals.
+This is a security-relevant path: a silently retained match is worse than a
+slow one. Options worth costing: set-based issuing of the per-unit lookups;
+restricting the rebuild to products whose version set changed, with a periodic
+full reconciliation; or leaving it alone and accepting 2.75 hours/day.
+
 **Still open, and genuinely separate:** `matcher.py` ends with a
 **non-concurrent** `REFRESH MATERIALIZED VIEW operations.v_software_safety`,
 whose inline comment calls the view "small enough that a full rebuild is cheap"

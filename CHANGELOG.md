@@ -2,6 +2,32 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.117.0] — 2026-08-13 — Classifier-only job and mapping ratchet repair
+
+### Added
+
+- Added a "Software classifier (no intel refresh)" job, which runs the same
+  path the scheduler uses. The existing classifier job first refreshes intel,
+  including a title-to-CVE matcher pass measured at 41 minutes; the new entry
+  re-emits software findings from the intel already stored.
+- Job catalog entries may now set `run_all: false` to be held out of "run all".
+
+### Fixed
+
+- Stopped "run all evaluators" from starting two concurrent software classifier
+  passes over the same findings. Nothing serializes them, so the new
+  classifier-only job is excluded from bulk dispatch rather than being filed
+  under a category it does not belong to.
+
+### Changed
+
+- Restored the hardcoded-domain-mapping ratchet to passing. Six module-level
+  constants were reviewed individually: four finding-type, severity and display
+  mappings are recorded as awaiting a data table, and the two capability
+  constants are exempt — one is a write-ownership boundary that must stay in
+  code so a row edit cannot widen a withdrawal onto evidence the projector
+  cannot rebuild, and the other is a fail-closed schema probe.
+
 ## [0.116.3] — 2026-08-13 — Software detail legacy-evidence repair
 
 ### Fixed

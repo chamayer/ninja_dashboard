@@ -191,6 +191,57 @@ list; precision from a hand-scored sample; **every** proposed high-severity
 finding reviewed, not sampled; source conflicts enumerated; exact finding delta
 by type if enforcement were enabled.
 
+### Shadow-mode review, run 2026-08-13 — RESULT: DO NOT ENABLE
+
+Both gates stay off (`CAPABILITY_ENFORCEMENT_ENABLED`,
+`CAPABILITY_REVIEW_FINDINGS_ENABLED`). The blocker is not precision.
+
+**Evidence in place:** 120 alertable assertions (112 `remote_access`, 8 `rmm`,
+**0 `endpoint_security`**), 331 candidates, and **0 operator assertions** — the
+confirm/reject loop has never been exercised.
+
+**1. Finding delta if enforcement were enabled today: 13,670 findings across
+4,440 devices and 73 clients** — effectively the whole fleet.
+
+| capability | device-product pairs | devices | clients |
+| --- | --- | --- | --- |
+| rmm | 7,624 | 4,353 | 73 |
+| remote_access | 6,046 | 4,154 | 72 |
+
+**Cause: `operations.platform_product_map` holds 0 rows.** That table is the
+policy exemption — which product is the sanctioned agent for a client. Phase 2
+built it and nothing populated it, so nothing is permitted and everything
+alertable fires. The top three contributors are the MSP's own tooling:
+`ninjarmmagent` → rmm on **4,260 devices**, `screenconnect client
+(da1317176ae8a62a)` → remote_access on **3,012**, `logmein` → rmm on **2,856**.
+Enabling the gate would raise unauthorized-RMM against our own RMM agent,
+fleet-wide.
+
+**2. Source conflicts: 9 products** assert two capabilities from disagreeing
+sources, mostly our `vetted_rule` saying `remote_access` while `lolrmm` says
+`rmm`: teamviewer, logmein, screenconnect, goto opener, gotomypc, anydesk,
+screenconnectsoftware.screenconnect, and both ConnectWise Automate components.
+This is not cosmetic — exemption is per *(product, capability)*, so sanctioning
+LogMeIn as `remote_access` leaves its `rmm` claim still firing. Resolve before
+re-running the delta, or a second wave of false positives follows the first.
+
+**3. Precision: high.** No clear false positive in the top 45 by device count;
+the alertable set is genuinely remote-access and RMM software. Two judgement
+calls left for a human: `tailscale` is classed `remote_access` but is a mesh
+VPN rather than remote control, and ScreenConnect fans out to ~40 per-instance
+products (`screenconnect client (hash)`), each a distinct product_uuid — so
+findings *and* exemptions are both per-instance.
+
+**4. Recall: not claimable.** Zero `endpoint_security` assertions are alertable
+(65 candidates, none vetted), so `unauthorized_av` would fire on nothing and AV
+recognition is still blind. An independent known-tool list does not exist;
+deriving one from the same rules would be marking our own homework. **AV
+recognition is a separate prerequisite, not a reason to weaken this gate.**
+
+**Order before re-running the delta:** populate `platform_product_map` for the
+sanctioned agents → resolve the 9 capability conflicts → re-measure. The delta
+should fall from 13,670 to a reviewable number.
+
 ### Phase 0 — approval stops silencing facts (done, local)
 
 `software_findings.py` skipped every rule for an approved installation, so
@@ -260,6 +311,35 @@ Migration 0130 assigned that scope, contradicting ADR-0015 §2 ("Device facts �
 Same drift class as `install_path_suspicious`, opposite direction. **This is a
 Phase 2 design gate**: enforcement must represent "authorized for one client,
 not another" without exposing sanctioned devices as affected.
+
+### Follow-up item 2 — mapping ratchet and Jobs entry (done, local, uncommitted)
+
+`test_no_hardcoded_domain_mappings` went red on six module-level constants. Each
+was classified individually rather than blanket-listed, which would have turned
+the ratchet into a rubber stamp:
+
+| constant | disposition |
+| --- | --- |
+| `_COALESCED_OFFLINE_FINDING_TYPES` | MIGRATE — finding type → behavior, the same shape as `finding_types.suppressed_by_approval` (0136) and `.subject_scope` (0130) |
+| `_SOFTWARE_POLICY_CANDIDATE_TYPES` | MIGRATE — same registry |
+| `_PATCH_SEVERITY_VALUES` | MIGRATE — source-value normalization; alias tables already do this job for client/platform/publisher |
+| `_WINDOWS_11_COMPATIBILITY_CHOICES` | EXEMPT — stored value → display label for a filter dropdown; decides nothing |
+| `_OWNED_SOURCES` (capability projector) | EXEMPT — a write-ownership boundary, not a mapping. In data, a row edit could widen a withdrawal onto operator or LOLRMM evidence the projector cannot rebuild; 093's grants draw the same line |
+| `_REQUIRED_RELATIONS` (Operations capability guard) | EXEMPT — schema shape for the `to_regclass` fail-closed probe |
+
+Jobs gains `software-classify-only` → `/run/software-classify-only`, the
+scheduler's own path. It shares `status_key = software_classifier` with the
+enriching entry, which is correct — one job, one run_log kind.
+
+**Defect avoided:** both entries in category `evaluators` meant "run all
+evaluators" would dispatch two concurrent classifier passes over the same
+findings, and nothing in ingest serializes them. Rather than misfile the
+category, catalog entries now carry an optional `run_all` flag that
+`admin_jobs_run_all` honors, defaulting to True.
+
+Validated: ratchet and approval-matrix tests pass (9 passed, 3 skipped);
+`manage.py check` clean; ruff error count on `views.py` unchanged at 50
+pre-existing; `git diff --check` clean.
 
 ### Release checkpoint
 

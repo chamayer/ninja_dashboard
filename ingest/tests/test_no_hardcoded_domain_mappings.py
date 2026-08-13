@@ -87,6 +87,7 @@ KNOWN: dict[str, str] = {
     "_CARD_TITLE_OVERRIDES": "BASELINE 2026-08-05 - not individually reviewed",
     "_CLASSIFIER_DEFAULTS": "MIGRATE classifier defaults; belongs in config rows",
     "_CLIENT_DOMAIN_LABELS": "EXEMPT UI/dashboard definition",
+    "_COALESCED_OFFLINE_FINDING_TYPES": "MIGRATE finding type -> coalesce-when-offline behavior; same shape as finding_types.suppressed_by_approval (0136) and .subject_scope (0130), so it belongs in that registry",
     "_CMD_PARAM_MAPPINGS": "BASELINE 2026-08-05 - not individually reviewed",
     "_CMD_PARAM_MAPPINGS_FULL": "BASELINE 2026-08-05 - not individually reviewed",
     "_CMD_TAGS": "EXEMPT UI/dashboard definition",
@@ -140,6 +141,17 @@ KNOWN: dict[str, str] = {
     "_PATCHING_SCOPE_OPTIONS": "EXEMPT UI/dashboard definition",
     "_PATCHING_TYPES": "BASELINE 2026-08-05 - not individually reviewed",
     "_PATCH_SEVERITY_CHOICES": "BASELINE 2026-08-05 - not individually reviewed",
+    "_OWNED_SOURCES": (
+        "EXEMPT write-ownership boundary, not a mapping - the set of "
+        "capability sources this projector may withdraw. Moving it to data "
+        "would let a row edit widen a clear onto operator or lolrmm evidence "
+        "the projector cannot rebuild (093 grants make the same split)"
+    ),
+    "_PATCH_SEVERITY_VALUES": (
+        "MIGRATE UI severity token -> the severity values Ninja actually "
+        "stores; source-value normalization, which alias TABLES already do "
+        "for client/platform/publisher"
+    ),
     "_PATCH_STATUS_CHOICES": "BASELINE 2026-08-05 - not individually reviewed",
     "_PCOV_PARAM_MAPPINGS": "BASELINE 2026-08-05 - not individually reviewed",
     "_PCOV_STATUS_OPTIONS": "EXEMPT UI/dashboard definition",
@@ -148,11 +160,21 @@ KNOWN: dict[str, str] = {
     "_PREFIX_TEMPLATES": "BASELINE 2026-08-05 - not individually reviewed",
     "_QUEUE_COLUMNS": "EXEMPT schema shape",
     "_RAW_FIELD_CATEGORIES": "BASELINE 2026-08-05 - not individually reviewed",
+    "_REQUIRED_RELATIONS": (
+        "EXEMPT schema shape - the relation names 093 must have created "
+        "before the Operations write path may run; a to_regclass fail-closed "
+        "probe, not a domain mapping"
+    ),
     "_RETIRED_DASHBOARD_NAMES": "EXEMPT UI/dashboard definition",
     "_SCALAR_ALERT_RULES": "BASELINE 2026-08-05 - not individually reviewed",
     "_SCALAR_SUFFIX_RULES": "BASELINE 2026-08-05 - not individually reviewed",
     "_SEVERITY_OPTIONS": "EXEMPT UI/dashboard definition",
     "_SEVERITY_RANK": "MIGRATE severity ordering",
+    "_SOFTWARE_POLICY_CANDIDATE_TYPES": (
+        "MIGRATE finding type -> offered as a software policy candidate; same "
+        "shape as finding_types.suppressed_by_approval (0136) and "
+        ".subject_scope (0130), so it belongs in that registry"
+    ),
     "_SOURCES_FALLBACK": "BASELINE 2026-08-05 - not individually reviewed",
     "_STATUS_OPTIONS": "EXEMPT UI/dashboard definition",
     "_STOP_TOKENS": "BASELINE 2026-08-05 - not individually reviewed",
@@ -164,6 +186,10 @@ KNOWN: dict[str, str] = {
     "_UTIL_PARAM_MAPPINGS": "BASELINE 2026-08-05 - not individually reviewed",
     "_UTIL_TAGS": "EXEMPT UI/dashboard definition",
     "_VISIBLE_TRENDS_CARD_KEYS": "EXEMPT UI/dashboard definition",
+    "_WINDOWS_11_COMPATIBILITY_CHOICES": (
+        "EXEMPT UI/dashboard definition - stored value -> display label for a "
+        "filter dropdown; it decides nothing"
+    ),
 }
 
 _COLLECTION = (ast.Set, ast.Dict, ast.List, ast.Tuple)
