@@ -2,6 +2,32 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.119.0] — 2026-08-14 — Endpoint security recognition
+
+### Added
+
+- Added 18 vetted endpoint-security rules (migration 100), covering
+  SentinelOne, CrowdStrike, Symantec, Kaspersky, Trend Micro, Malwarebytes,
+  ThreatDown, Huntress, Webroot, Avast, AVG and Panda. `endpoint_security`
+  previously had 65 candidate products and no alertable ones, so
+  `unauthorized_av` could not fire at all and recall was not claimable. It now
+  recognizes 36 products across 4,233 devices and 73 clients.
+- Recorded, in the migration, every candidate deliberately not promoted —
+  browser extensions, password managers, VPNs, updaters, management agents and
+  on-demand scanners from the same security vendors — so the omissions are
+  decisions rather than oversights.
+
+### Notes
+
+- Each pattern was dry-run against the whole product catalog before being
+  seeded, with no false positive in the result. Two traps shaped the patterns:
+  `sentinel agent%` rather than `sentinel%`, because SafeNet and Thales ship
+  software-licensing components sharing the first word; and
+  `malwarebytes version%` rather than `malwarebytes%`, because Malwarebytes
+  Privacy is a VPN.
+- No finding behavior changes on deployment. Both capability gates remain off,
+  and no authorization rows are created.
+
 ## [0.118.0] — 2026-08-14 — Software authorization, separate from coverage
 
 ### Added
