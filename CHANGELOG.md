@@ -2,6 +2,40 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.118.0] — 2026-08-14 — Software authorization, separate from coverage
+
+### Added
+
+- Added `operations.product_authorizations` (migrations 099 and 0139), which
+  records whether a product may carry a capability at a client. Until now the
+  classifier derived permission from coverage requirements, so the only way to
+  authorize software was to mandate it: the MSP's own ScreenConnect instance
+  read as unauthorized on 3,007 devices across 70 clients, and silencing it by
+  making ScreenConnect required would have demanded it from the five clients
+  that do not run it. Coverage requirements are unchanged and still state only
+  what a client must run.
+- Added an authorization control to the product detail page and a matching
+  admin surface, both behind a new `authorize_software_product` permission that
+  is separate from capability curation. Authorizations may be global or scoped
+  to one client, must state permit or deny explicitly, and require a rationale.
+- Recorded the reasoning in ADR-0019.
+
+### Changed
+
+- Unauthorized capability findings now resolve through a documented precedence
+  ladder — client deny, client permit, global deny, global permit, then the
+  required-platform mapping — and record which rule decided them. Deny precedes
+  permit at each tier, so a client can be excluded from something permitted
+  fleet-wide.
+- An authorization is retired by withdrawal with a recorded reason rather than
+  deleted, and re-authorizing inserts a new row so the gap stays visible.
+
+### Notes
+
+- No authorization rows are created by this release. Both capability gates
+  remain off, so the new precedence ladder is not reached and no finding
+  behavior changes on deployment.
+
 ## [0.117.0] — 2026-08-13 — Classifier-only job and mapping ratchet repair
 
 ### Added

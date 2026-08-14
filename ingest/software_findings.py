@@ -95,6 +95,7 @@ def classify(tenant_id: int = _TENANT_ID) -> int:
             capability_ready = _capability_schema_ready(cur)
             capabilities = _load_effective_capabilities(cur) if capability_ready else {}
             sanctioned = _load_sanctioned_product_identities(cur, tenant_id) if capability_ready else {}
+            authorizations = _load_authorizations(cur, tenant_id) if capability_ready else {}
             fleet_rarity = _load_fleet_rarity(cur, tenant_id)
             finding_type_ids = _finding_type_ids(cur)
             cfg = _load_config(cur, tenant_id)
@@ -204,22 +205,26 @@ def classify(tenant_id: int = _TENANT_ID) -> int:
                 # exemption is exact product identity, never a name substring.
                 product_capabilities = capabilities.get(product_uuid, []) if product_uuid else []
                 if settings.CAPABILITY_ENFORCEMENT_ENABLED:
-                    client_sanctioned = sanctioned.get(client_id, {})
                     for capability in product_capabilities:
                         if not capability["alertable"]:
                             continue
                         finding_name = capability["finding_type"]
-                        if (
-                            finding_name not in finding_type_ids
-                            or approval_silences(finding_name, approved, suppressed_by_approval)
-                            or product_uuid in client_sanctioned.get(capability["capability"], set())
-                        ):
+                        if finding_name not in finding_type_ids:
+                            continue
+                        if approval_silences(finding_name, approved, suppressed_by_approval):
+                            continue
+                        permitted, basis = _permitted(
+                            authorizations, sanctioned, client_id,
+                            capability["capability"], product_uuid,
+                        )
+                        if permitted:
                             continue
                         affected += _emit(
                             cur, tenant_id, finding_type_ids[finding_name],
                             client_id, device_id, name, publisher, "high", now,
                             {
-                                "reason": "alertable capability product is not mapped to a required platform",
+                                "reason": "alertable capability product is not authorized here",
+                                "not_permitted_basis": basis,
                                 "capability": capability["capability"],
                                 "evidence_sources": capability["sources"],
                                 "product_uuid": str(product_uuid),
@@ -669,6 +674,10 @@ def _capability_schema_ready(cur) -> bool:
             "catalog.capability",
             "catalog.v_product_capability_effective",
             "operations.platform_product_map",
+            # Authorization is what suppresses an unauthorized finding, so a
+            # missing table must fail closed to "capability not ready" rather
+            # than leave enforcement running with nothing able to permit.
+            "operations.product_authorizations",
         ],),
     )
     row = cur.fetchone()
@@ -698,6 +707,62 @@ def _load_effective_capabilities(cur) -> dict:
                 "finding_type": finding_type,
             }
         )
+    return out
+
+
+def _permitted(authorizations: dict, sanctioned: dict, client_id, capability: str,
+               product_uuid) -> tuple[bool, str]:
+    """Is this product allowed to carry this capability at this client?
+
+    Two questions that must not share a field. A coverage requirement says what
+    a client *must* run; an authorization says what it is *allowed* to run.
+    Deriving the second from the first is what made the MSP's own ScreenConnect
+    read as unauthorized on 3,007 devices across 70 clients, because the only
+    way to permit it was to mandate it everywhere.
+
+    First match wins, most specific first. Deny precedes permit at each tier so
+    a client can be excluded from something permitted fleet-wide -- the case a
+    single boolean cannot express. The required-platform mapping stays last and
+    unchanged, so coverage semantics do not shift.
+
+    Returns the decision and the rule that produced it, so a finding can say
+    why it was not permitted rather than leaving it to be re-derived.
+    """
+    for scope, label in ((client_id, "client"), (None, "global")):
+        tier = authorizations.get(scope, {}).get(capability)
+        if not tier:
+            continue
+        if product_uuid in tier["deny"]:
+            return False, f"{label} deny"
+        if product_uuid in tier["permit"]:
+            return True, f"{label} permit"
+    if product_uuid in sanctioned.get(client_id, {}).get(capability, set()):
+        return True, "required platform"
+    return False, "no authorization and not mapped to a required platform"
+
+
+def _load_authorizations(cur, tenant_id: int) -> dict:
+    """scope -> capability -> {"permit": set, "deny": set}.
+
+    The scope key is the client UUID, or None for the global tier. Withdrawn
+    rows are excluded here rather than at the call site: a withdrawn
+    authorization has no force, and filtering later would make that depend on
+    every caller remembering to.
+    """
+    cur.execute(
+        """
+        SELECT client_id, capability, polarity, product_uuid
+          FROM operations.product_authorizations
+         WHERE tenant_id = %s AND withdrawn_at IS NULL
+        """,
+        (tenant_id,),
+    )
+    out: dict = {}
+    for client_id, capability, polarity, product_uuid in cur.fetchall():
+        tier = out.setdefault(client_id, {}).setdefault(
+            capability, {"permit": set(), "deny": set()}
+        )
+        tier["permit" if polarity else "deny"].add(product_uuid)
     return out
 
 

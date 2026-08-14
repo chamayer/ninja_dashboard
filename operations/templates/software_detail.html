@@ -120,6 +120,23 @@
                                 <button type="submit" style="font-size:0.75rem;">Save</button>
                             </form>
                             {% endif %}
+                            {% if can_authorize_software %}
+                            <form method="post" action="{% url 'software_product_authorize' %}" style="display:inline-flex; gap:0.3rem; margin-left:0.35rem;">
+                                {% csrf_token %}
+                                <input type="hidden" name="product_uuid" value="{{ product.product_uuid }}">
+                                <input type="hidden" name="capability" value="{{ cap.capability }}">
+                                <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                                <select name="client_id" style="font-size:0.75rem;">
+                                    <option value="">All clients</option>
+                                    {% for client in authorization_clients %}
+                                    <option value="{{ client.id }}">{{ client.display_name }}</option>
+                                    {% endfor %}
+                                </select>
+                                <select name="decision" style="font-size:0.75rem;"><option value="permit">Permit</option><option value="deny">Deny</option></select>
+                                <input type="text" name="rationale" placeholder="Why" required style="font-size:0.75rem;">
+                                <button type="submit" style="font-size:0.75rem;">Authorize</button>
+                            </form>
+                            {% endif %}
                         </div>
                         {% endfor %}
                     {% else %}

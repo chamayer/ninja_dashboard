@@ -83,6 +83,7 @@ from apps.core.views import (
     software_capability_decide,
     software_detail,
     software_page,
+    software_product_authorize,
     software_products,
     software_publisher_detail,
     software_publishers,
@@ -276,6 +277,11 @@ urlpatterns = [
     path("software/decisions/", software_decisions_queue, name="software_decisions_queue"),
     path("software/decisions/create", software_decision_create, name="software_decision_create"),
     path("software/capability/decide", software_capability_decide, name="software_capability_decide"),
+    path(
+        "software/authorization/decide",
+        software_product_authorize,
+        name="software_product_authorize",
+    ),
     path("orgs/<slug:org_slug>/profile/", client_profile_assign, name="client_profile_assign"),
     path(
         "orgs/<slug:org_slug>/configuration/",

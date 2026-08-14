@@ -53,6 +53,7 @@ from .models import (
     NotificationEvent,
     NotificationRoute,
     NotificationRule,
+    ProductAuthorization,
     RequirementProfile,
     SoftwareCatalog,
     SoftwareDecision,
@@ -3982,6 +3983,21 @@ def software_detail(request: HttpRequest, name: str) -> HttpResponse:
         for product_uuid in capability_product_uuids
     ]
     can_curate_capability = request.user.has_perm(capability_evidence.CURATOR_PERMISSION)
+    # Authorizing a product is a different decision from settling what it is,
+    # so it carries its own permission and its own control.
+    can_authorize_software = request.user.has_perm("core.authorize_software_product")
+    # `decision_scope_clients` carries slugs, but an authorization is written
+    # against the client UUID, so resolve them rather than letting the form
+    # post an empty scope and silently authorize every client.
+    authorization_clients = list(
+        Client.objects.filter(
+            tenant_id=1,
+            deleted_at__isnull=True,
+            slug__in=[row["slug"] for row in decision_scope_clients],
+        )
+        .order_by("display_name")
+        .values("id", "display_name")
+    )
 
     # Related active findings that name this title.
     related_findings = list(
@@ -4016,6 +4032,8 @@ def software_detail(request: HttpRequest, name: str) -> HttpResponse:
             "capability_schema_ready": capability_schema_ready,
             "capability_product_rows": capability_product_rows,
             "can_curate_capability": can_curate_capability,
+            "can_authorize_software": can_authorize_software,
+            "authorization_clients": authorization_clients,
             "client_decisions": client_decisions,
             "device_decisions": device_decisions,
             "related_findings": related_findings,
@@ -4085,6 +4103,97 @@ def software_capability_decide(request: HttpRequest) -> HttpResponse:
     messages.success(
         request,
         f"Capability {'confirmed' if polarity else 'rejected'} for the selected product identity.",
+    )
+    return redirect(_safe_next(request, "software_page"))
+
+
+@login_required
+@require_POST
+@transaction.atomic
+def software_product_authorize(request: HttpRequest) -> HttpResponse:
+    """Permit or deny a product capability, globally or at one client.
+
+    Distinct from `software_capability_decide`, which settles what a product
+    *is*. This settles whether it is allowed here, and it is deliberately not a
+    coverage requirement: requiring a platform states that a client must run
+    it, which is a different claim from allowing it.
+    """
+    if not request.user.has_perm("core.authorize_software_product"):
+        messages.error(request, "Authorization permission is required to permit or deny software.")
+        return redirect(_safe_next(request, "software_page"))
+
+    product_uuid = (request.POST.get("product_uuid") or "").strip()
+    capability = (request.POST.get("capability") or "").strip()
+    decision = (request.POST.get("decision") or "").strip()
+    rationale = (request.POST.get("rationale") or "").strip()
+    client_id = (request.POST.get("client_id") or "").strip()
+    # No default polarity anywhere in the write path: an authorization must
+    # state whether it permits or denies.
+    if decision not in {"permit", "deny"} or not product_uuid or not capability:
+        messages.error(request, "A product identity, capability, and permit or deny decision are required.")
+        return redirect(_safe_next(request, "software_page"))
+    if not rationale:
+        messages.error(request, "A rationale is required so the authorization can be reviewed later.")
+        return redirect(_safe_next(request, "software_page"))
+    try:
+        product_id = uuid.UUID(product_uuid)
+        client_key = uuid.UUID(client_id) if client_id else None
+    except ValueError:
+        messages.error(request, "Invalid product or client identity.")
+        return redirect(_safe_next(request, "software_page"))
+
+    polarity = decision == "permit"
+    try:
+        with transaction.atomic():
+            # Supersede rather than overwrite: the live row is withdrawn with a
+            # reason and a new one inserted, so the change stays visible in
+            # history instead of being erased.
+            superseded = ProductAuthorization.objects.filter(
+                tenant_id=1,
+                client_id=client_key,
+                product_uuid=product_id,
+                capability=capability,
+                withdrawn_at__isnull=True,
+            ).update(
+                withdrawn_at=timezone.now(),
+                withdrawn_reason=f"superseded by a new {decision} decision",
+            )
+            ProductAuthorization.objects.create(
+                tenant_id=1,
+                client_id=client_key,
+                product_uuid=product_id,
+                capability=capability,
+                polarity=polarity,
+                rationale=rationale,
+                authorized_by=request.user,
+            )
+    except (IntegrityError, ValueError) as exc:
+        messages.error(request, str(exc))
+        return redirect(_safe_next(request, "software_page"))
+
+    AuditLog.objects.create(
+        tenant_id=1,
+        actor=request.user,
+        actor_kind=AuditLog.ActorKind.USER,
+        source=AuditLog.Source.UI,
+        action=f"software_authorization.{decision}",
+        entity_type="operations.product_authorization",
+        entity_id=product_id,
+        before_state={"superseded_rows": superseded},
+        after_state={
+            "product_uuid": str(product_id),
+            "capability": capability,
+            "client_id": str(client_key) if client_key else None,
+            "polarity": polarity,
+            "rationale": rationale,
+        },
+        ip_address=request.META.get("REMOTE_ADDR") or None,
+        user_agent=(request.META.get("HTTP_USER_AGENT") or "")[:2000],
+    )
+    scope = "this client" if client_key else "all clients"
+    messages.success(
+        request,
+        f"Software {'permitted' if polarity else 'denied'} for {scope}.",
     )
     return redirect(_safe_next(request, "software_page"))
 

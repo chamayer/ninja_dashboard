@@ -3978,6 +3978,80 @@ class PlatformProductMap(models.Model):
         return f"{self.agent}: {self.capability} ({self.component_role})"
 
 
+class ProductAuthorization(models.Model):
+    """Whether a product may carry a capability at a client.
+
+    Authorization, kept strictly apart from coverage requirement. A
+    CoverageRequirement states what a client *must* run and drives
+    ``missing_required_platform``; this states what a client is *allowed* to
+    run and drives ``unauthorized_<capability>``. Deriving one from the other
+    is what made the MSP's own ScreenConnect read as unauthorized on 3,007
+    devices, because silencing it would have meant mandating it everywhere.
+
+    ``client`` NULL is the global tier, applying to every client of the
+    tenant. Precedence at the classifier is client deny, client permit, global
+    deny, global permit, then the required-platform mapping.
+
+    The table is created by ingest SQL migration 099. ``managed = False`` is
+    deliberate: Operations owns the editor, but the raw migration runner owns
+    the DDL because ingest consumes the same table before Django may start.
+    """
+
+    id = models.BigAutoField(primary_key=True)
+    tenant = models.ForeignKey(
+        "Tenant",
+        on_delete=models.PROTECT,
+        related_name="product_authorizations",
+        db_constraint=False,
+    )
+    client = models.ForeignKey(
+        "Client",
+        on_delete=models.PROTECT,
+        related_name="product_authorizations",
+        db_constraint=False,
+        null=True,
+        blank=True,
+        help_text="Leave empty to authorize for every client of this tenant.",
+    )
+    product_uuid = models.UUIDField(
+        help_text="Stable catalog product UUID; choose it from the product capability reader."
+    )
+    capability = models.CharField(max_length=64)
+    # No default. Permit and deny are opposite decisions, so an authorization
+    # must state which one it is; a default would let an incomplete write
+    # silently become a permit.
+    polarity = models.BooleanField(
+        help_text="Permitted when true, explicitly denied when false."
+    )
+    rationale = models.TextField(help_text="Why this product is permitted or denied here.")
+    authorized_by = models.ForeignKey(
+        "User",
+        on_delete=models.PROTECT,
+        related_name="product_authorizations",
+        db_constraint=False,
+    )
+    authorized_at = models.DateTimeField(auto_now_add=True)
+    # Withdrawal is the retirement path; DELETE is revoked from the runtime
+    # roles, so an authorization once in force can always be shown to have been.
+    withdrawn_at = models.DateTimeField(null=True, blank=True)
+    withdrawn_reason = models.TextField(blank=True, default="")
+
+    class Meta:
+        db_table = "product_authorizations"
+        managed = False
+        ordering = ("client", "capability", "product_uuid")
+        permissions = (
+            (
+                "authorize_software_product",
+                "Can permit or deny a product capability at a client",
+            ),
+        )
+
+    def __str__(self) -> str:
+        scope = self.client_id or "all clients"
+        return f"{'permit' if self.polarity else 'deny'} {self.capability} @ {scope}"
+
+
 class OsGroupMapping(models.Model):
     """Maps os_family patterns to a coarse os_group.
 

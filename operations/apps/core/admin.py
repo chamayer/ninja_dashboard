@@ -36,6 +36,7 @@ from .models import (
     MergeCandidate,
     NotificationRoute,
     PlatformProductMap,
+    ProductAuthorization,
     PublisherAlias,
     RunLog,
     Secret,
@@ -602,6 +603,27 @@ class PlatformProductMapAdmin(admin.ModelAdmin):
         # Raw migration 095 intentionally revokes DELETE: mappings should be
         # disabled with their provenance retained, not erased from policy
         # history.
+        return False
+
+
+@admin.register(ProductAuthorization)
+class ProductAuthorizationAdmin(admin.ModelAdmin):
+    list_display = (
+        "client", "capability", "product_uuid", "polarity", "authorized_at", "withdrawn_at",
+    )
+    list_filter = ("capability", "polarity", "client")
+    search_fields = ("product_uuid", "rationale", "withdrawn_reason")
+    ordering = ("client", "capability", "product_uuid")
+    readonly_fields = ("authorized_at",)
+
+    @admin.display(description="Scope", ordering="client")
+    def scope(self, obj):
+        return obj.client or "All clients"
+
+    def has_delete_permission(self, request, obj=None):
+        # Raw migration 099 revokes DELETE. An authorization is retired by
+        # setting withdrawn_at with a reason, so a permission that was once in
+        # force can always be shown to have been.
         return False
 
 
