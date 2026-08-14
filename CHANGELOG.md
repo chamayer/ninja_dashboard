@@ -2,6 +2,27 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.119.1] — 2026-08-14 — Intel matcher lookup index
+
+### Fixed
+
+- Indexed `intel.cves.affected_cpes` (migration 101). The intel matcher ran for
+  41 minutes, four times a day, because its per-title CVE lookup
+  (`affected_cpes ?| candidates`) had no GIN index and sequentially scanned all
+  97,520 CVE rows on every call: 684 ms and roughly 143 MB of buffers per
+  lookup, against 0.063 ms and 7 buffers with the index.
+
+### Notes
+
+- Full rebuild semantics are unchanged. Every run still deletes and reinserts
+  the tenant's matches, which is what guarantees no stale match survives a CVE
+  withdrawal; the deferred incremental-versus-full-rebuild question is answered
+  by fixing the lookup rather than by trading that guarantee for speed.
+- Measured: 34 MB index against a 137 MB table, 11.4 CPEs per CVE, 3.4 s to
+  build. `jsonb_ops` is required because `jsonb_path_ops` does not support the
+  `?|` operator. The build holds a brief exclusive lock during startup, before
+  the service reports ready.
+
 ## [0.119.0] — 2026-08-14 — Endpoint security recognition
 
 ### Added
