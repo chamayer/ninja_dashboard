@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from ingest import db
 from ingest.normalize import (
     canonical_platform,
+    load_identity_value_rejections,
     load_node_class_mappings,
     load_os_family_mappings,
     load_platform_aliases,
@@ -108,6 +109,7 @@ def _fetch_source_rows(cur) -> list[tuple]:
         load_platform_aliases(cur)
         load_os_family_mappings(cur)
         load_node_class_mappings(cur)
+        load_identity_value_rejections(cur)
         cur.execute(_SOURCE_QUERY.format(entity_type_expr="s.kind"))
         rows = cur.fetchall()
         return [
@@ -128,6 +130,7 @@ def load_sources() -> list[SourceConfig]:
         load_platform_aliases(cur)
         load_os_family_mappings(cur)
         load_node_class_mappings(cur)
+        load_identity_value_rejections(cur)
         rows = _fetch_source_rows(cur)
 
     configs: list[SourceConfig] = []

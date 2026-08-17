@@ -273,6 +273,9 @@ def finding_detail_text(finding):
     if name == "shared_serial":
         count = d.get("device_count")
         return f"{count} devices share serial {d.get('serial', '')}" if count else "shared serial"
+    if name == "cross_client_serial":
+        count = d.get("client_count")
+        return f"serial seen at {count} clients" if count else "cross-client serial"
     if name == "placeholder_mac":
         macs = d.get("junk_macs") or []
         return ", ".join(macs) if macs else "junk MAC"

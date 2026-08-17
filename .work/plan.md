@@ -1,5 +1,39 @@
 # Active root implementation plan
 
+## CURRENT TASK — Identity serial quality and cross-client review
+
+**Status:** release prepared as 0.119.7; commit, push, and coupled deploy
+authorized.
+
+**Goal:** move explicit placeholder serial values from runtime literals into one
+Operations-owned registry, and surface a usable serial shared across clients as
+a review finding on every affected device. Neither condition may create an
+automatic cross-client merge.
+
+**Scope:** `ingest/normalize.py`, source/resolver wiring and serial findings,
+one raw SQL registry migration, one Operations state/finding-type migration,
+admin state, focused tests, and this plan.
+
+**Decisions:** missing serial remains silent. Structural quality checks (blank,
+short, repeated characters) remain code; enumerated rejected values are data.
+Cross-client sharing is distinct from the existing same-client `shared_serial`
+group finding: it is a per-device `cross_client_serial` review signal, with
+the other clients/devices retained as evidence.
+
+**Validation:** focused serial-quality and resolver tests, Django migration
+check, changed-module compilation, and `git diff --check`. No commit, push,
+deployment, or production query is in scope.
+
+**Checkpoint / next action:** raw migration 102 creates and seeds the registry;
+Operations migration 0141 declares the editor and finding type. Ingest loads
+the registry before matching, keeps structural checks in code, and emits a
+per-device `cross_client_serial` finding from current source serial evidence
+(including Ninja service tags). Focused unit/ratchet tests pass; Django check
+and migration-state check pass; the PostgreSQL behavioral test is added but not
+run locally under the reduced-test instruction. Version and changelog are
+updated for 0.119.7. Next action is commit, push, coupled redeploy, then
+simple migration/health validation.
+
 ## Supplemental task — Agent-compliance stale-age default
 
 **Status:** committed and pushed; Portainer accepted the redeploy. Runtime

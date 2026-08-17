@@ -1,5 +1,26 @@
 # Active Operations implementation plan
 
+## CURRENT TASK — Identity serial quality and cross-client review
+
+**Status:** release prepared as 0.119.7; commit, push, and coupled deploy
+authorized.
+
+**Goal / scope:** declare Operations state and an admin editor for the raw-SQL
+identity-value rejection registry, and register the per-device
+`cross_client_serial` review finding. Ingest owns matching and emission.
+
+**Decision:** a valid serial seen at more than one client is evidence for
+review, never a cross-client merge. It produces one finding per affected
+device. Missing serial remains silent; explicit placeholder values become
+registry data while structural checks remain code.
+
+**Validation / next action:** state-only migration 0141 and the admin editor
+are built. Focused unit/ratchet tests, Django check, and migration-state check
+pass; the disposable PostgreSQL behavior test is present but not run locally
+under the reduced-test instruction. Version and changelog are updated; next is
+the authorized commit, push, coupled deploy, and simple migration/health
+validation.
+
 ## Device-detail patch signal source guard
 
 **Status:** release authorized as `0.119.6`; commit and deployment pending.

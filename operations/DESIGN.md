@@ -351,7 +351,7 @@ so `entity_observations.device_id` is set on first write.
 | Signal | Confidence | Action |
 |---|---|---|
 | Same source, `external_id` already in `device_links` | Certain | Resolve immediately |
-| Serial number exact match across any source | High | Resolve immediately, log cross-source match |
+| Serial number exact match within one client | High | Resolve immediately, log cross-source match |
 | Exact hostname, unique match across `device_links` | Medium-high | Resolve immediately, flag as auto-resolved |
 
 Rule: **if you can resolve with certainty at ingest, do it. If you are
@@ -361,8 +361,10 @@ guessing, defer.**
 they are real. Placeholder values (`System Serial Number`,
 `Default string`, `To Be Filled By O.E.M.`, `0`, `None`, empty) and any
 serial shared by more than one device fleet-wide are classified
-low-quality and excluded from matching. Quality classification is
-computed at ingest and surfaced on the identity review page.
+low-quality and excluded from matching. A usable serial reported under more
+than one client creates a per-device `cross_client_serial` review finding;
+it never merges the devices. Quality classification is computed at ingest and
+surfaced on the identity review page.
 
 ### 4.2 Async resolver (slow path)
 

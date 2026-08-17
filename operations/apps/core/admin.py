@@ -32,6 +32,7 @@ from .models import (
     Finding,
     FindingType,
     IdentityAuthorityPolicy,
+    IdentityValueRejection,
     IntelMatcherHint,
     MergeCandidate,
     NotificationRoute,
@@ -624,6 +625,20 @@ class ProductAuthorizationAdmin(admin.ModelAdmin):
         # Raw migration 099 revokes DELETE. An authorization is retired by
         # setting withdrawn_at with a reason, so a permission that was once in
         # force can always be shown to have been.
+        return False
+
+
+@admin.register(IdentityValueRejection)
+class IdentityValueRejectionAdmin(admin.ModelAdmin):
+    list_display = ("value_kind", "normalized_value", "reason", "enabled", "provenance")
+    list_filter = ("value_kind", "enabled")
+    search_fields = ("normalized_value", "reason", "provenance")
+    ordering = ("value_kind", "normalized_value")
+    readonly_fields = ("created_at", "updated_at")
+
+    def has_delete_permission(self, request, obj=None):
+        # Disabling preserves the reason a value stopped being rejected and
+        # matches the raw migration's DELETE/TRUNCATE grants.
         return False
 
 

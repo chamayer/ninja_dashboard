@@ -455,6 +455,8 @@ def _write_ninja_observations(
                 offline = snapshot.get("offline")
                 last_contact = snapshot.get("last_contact")
                 last_boot = snapshot.get("last_boot")
+                raw = (raw_by_id or {}).get(r["id"]) or {}
+                raw_system = raw.get("system") or {}
                 canonical_data = {
                     "hostname": (
                         r["system_name"] or r["display_name"] or r["dns_name"]
@@ -486,6 +488,12 @@ def _write_ninja_observations(
                         else None
                     ),
                     "serial_number": r["serial_number"],
+                    # Ninja also exposes a service tag for some systems. It
+                    # is retained as source evidence alongside the standard
+                    # serial number: a service tag may establish a
+                    # cross-client review conflict, but never a merge by
+                    # itself.
+                    "service_tag": raw.get("serviceTag") or raw_system.get("serviceTag"),
                     "macs": sorted(
                         {
                             m
@@ -537,7 +545,7 @@ def _write_ninja_observations(
                         "platform": "Ninja",
                         "subplatform": "",
                         "observed_at": snapshot_at,
-                        "raw_data": Json((raw_by_id or {}).get(r["id"]) or {}),
+                        "raw_data": Json(raw),
                         "canonical_data": Json(canonical_data),
                         "batch_id": batch_id,
                         "observation_hash": obs_hash,

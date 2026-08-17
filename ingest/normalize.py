@@ -103,30 +103,28 @@ def normalize_loose_hostname(name: str | None) -> str:
     return _HOST_LOOSE_CHARS_RE.sub("", short)
 
 
-# BIOS/SMBIOS placeholder serials seen in live fleet data. These are shared
-# by unrelated machines, so serial matching on them merges distinct devices
-# into one blob (observed: 100 UTA servers collapsed onto one device via
-# serial 'None').
-_JUNK_SERIALS = {
-    "",
-    "none",
-    "null",
-    "default string",
-    "to be filled by o.e.m.",
-    "to be filled by o.e.m",
-    "system serial number",
-    "chassis serial number",
-    "123-1234-123",
-    "invalid",
-    "not specified",
-    "not applicable",
-    "n/a",
-    "na",
-    "unknown",
-    "0",
-    "00000000",
-    "0123456789",
-}
+# Explicit serial fillers are operator-maintained data in
+# operations.identity_value_rejections (migration 102). ``None`` means the
+# registry has not loaded; identity matching fails closed in that case rather
+# than risking a cross-device merge while the rejection set is unknown.
+_serial_rejection_cache: frozenset[str] | None = None
+
+
+def load_identity_value_rejections(cur) -> None:
+    """Prime explicit identity-value rejections for fast serial matching."""
+    global _serial_rejection_cache
+    rows = _load_mapping_rows(
+        cur,
+        "SELECT normalized_value FROM operations.identity_value_rejections "
+        "WHERE value_kind = 'serial' AND enabled",
+        "identity_value_rejections",
+    )
+    if rows is None:
+        _serial_rejection_cache = None
+        return
+    _serial_rejection_cache = frozenset(value for (value,) in rows)
+    if not _serial_rejection_cache:
+        _log.warning("identity_value_rejections has no enabled serial rows")
 
 
 def is_usable_serial(serial: str | None) -> bool:
@@ -134,10 +132,12 @@ def is_usable_serial(serial: str | None) -> bool:
     if not serial:
         return False
     value = serial.strip().lower()
-    if value in _JUNK_SERIALS or len(value) < 4:
+    if len(value) < 4:
         return False
     # All one repeated character (e.g. '0000000', 'FFFFFFFF') is filler.
-    return len(set(value)) > 1
+    if len(set(value)) <= 1:
+        return False
+    return _serial_rejection_cache is not None and value not in _serial_rejection_cache
 
 
 _MAC_RE = re.compile(r"^[0-9a-f]{2}([:-][0-9a-f]{2}){5}$")

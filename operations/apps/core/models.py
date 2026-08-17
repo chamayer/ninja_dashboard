@@ -4052,6 +4052,40 @@ class ProductAuthorization(models.Model):
         return f"{'permit' if self.polarity else 'deny'} {self.capability} @ {scope}"
 
 
+class IdentityValueRejection(models.Model):
+    """Explicit identity values that must never drive a device match.
+
+    The raw SQL migration owns the relation because ingest consumes it during
+    collection. Operations owns the registry editor; deleting a row would
+    silently make a previously rejected value matchable, so retirement is by
+    disabling it.
+    """
+
+    class ValueKind(models.TextChoices):
+        SERIAL = "serial", "Serial"
+
+    id = models.SmallAutoField(primary_key=True)
+    value_kind = models.CharField(max_length=32, choices=ValueKind.choices)
+    normalized_value = models.CharField(max_length=255)
+    reason = models.TextField()
+    enabled = models.BooleanField(default=True)
+    provenance = models.TextField(default="operations_admin")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "identity_value_rejections"
+        managed = False
+        ordering = ("value_kind", "normalized_value")
+
+    def __str__(self) -> str:
+        return f"{self.value_kind}: {self.normalized_value}"
+
+    def save(self, *args, **kwargs):
+        self.normalized_value = self.normalized_value.strip().lower()
+        super().save(*args, **kwargs)
+
+
 class OsGroupMapping(models.Model):
     """Maps os_family patterns to a coarse os_group.
 

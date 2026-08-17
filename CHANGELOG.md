@@ -2,6 +2,28 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.119.7] — 2026-08-17 — Cross-client serial review
+
+### Fixed
+
+- Added per-device `cross_client_serial` findings for usable serial evidence
+  reported under multiple clients. The finding is a review signal on every
+  affected device; it never merges devices or changes coverage.
+- Retained Ninja service tags as current serial evidence so a host record and
+  an RMM record under different clients can be surfaced for review.
+
+### Changed
+
+- Moved explicit rejected serial values, including `Default string`, into the
+  Operations-managed identity-value registry (migration 102). Missing serials
+  remain silent; structural filler checks remain in code.
+
+### Notes
+
+- Migration 0141 registers the `cross_client_serial` finding type and the
+  registry editor. The next Ninja collection and identity resolver sweep emit
+  newly detectable conflicts.
+
 ## [0.119.6] — 2026-08-17 — Device patch-signal source guard
 
 ### Fixed
