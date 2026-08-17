@@ -59,6 +59,32 @@ All notable changes to this project follow [Semantic Versioning](https://semver.
   Capability gate values again use only the existing mounted runtime `.env`
   configuration path.
 
+## [0.119.8] — 2026-08-17 — Ninja device shadow views readable again
+
+### Fixed
+
+- Restored `/software/user-risk/`, which had returned HTTP 500 on every request
+  since migration 0117. That migration revoked table `SELECT` on
+  `entity_observation_current` to protect the restricted observation payload,
+  but `ninja_device_detail_current_shadow` and
+  `ninja_device_health_current_shadow` are `security_invoker`, so their
+  permission check runs as the calling role and both stopped being readable.
+  They are now `security_barrier` views owned by `operations_view_owner` —
+  the pattern 0117 established for itself — so the application sees only the
+  columns they project and the payload remains restricted.
+
+### Notes
+
+- Found by loading all 30 operator-facing pages synthetically. The failure took
+  26 ms, so no timing-based check would ever have flagged it, and migration
+  0122 had examined both views without noticing the missing privilege.
+- `ninja_device_seen_daily_shadow` is deliberately left alone: it reads
+  `source_record_seen_daily`, where `operations_app` has `SELECT` and
+  `operations_view_owner` does not, so re-owning it would break a working view.
+- Rehearsed against production in a rolled-back transaction. Tenant isolation
+  still applies, and reads of `canonical_data` or of an unprojected key still
+  fail with permission denied.
+
 ## [0.119.2] — 2026-08-17 — Capability permission checks
 
 ### Fixed
