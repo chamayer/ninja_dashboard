@@ -1,5 +1,31 @@
 # Active Operations implementation plan
 
+## Product authorization scope context
+
+**Status:** release authorized as `0.119.5`; commit and deployment pending.
+
+**Goal:** make a client-scoped product authorization understandable at the
+point of decision by showing each currently affected client's device and
+installation counts in the existing product-detail selector.
+
+**Scope:** `apps/core/views.py`, `templates/software_detail.html`, and a
+focused display contract test. No schema, authorization precedence, or
+finding-emission change.
+
+**Decision:** counts come from the full current-installation relation, not the
+500-row device list rendered below the fold. The selector remains an explicit
+global-or-client permit/deny action; it does not infer ownership or create an
+authorization automatically.
+
+**Validation:** focused test, Django check, changed-file compilation, and
+`git diff --check`.
+
+**Checkpoint:** the existing product-detail authorization selector now labels
+each current client with its full device and installation counts. A focused
+contract test, Django check, changed-module compilation, template loading, and
+diff check pass. No migration, policy behavior, or authorization data changed.
+
+
 ## Software capability recognition — Operations integration
 
 **Status:** implementation complete locally; release preparation in progress.

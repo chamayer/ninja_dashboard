@@ -129,7 +129,7 @@
                                 <select name="client_id" style="font-size:0.75rem;">
                                     <option value="">All clients</option>
                                     {% for client in authorization_clients %}
-                                    <option value="{{ client.id }}">{{ client.display_name }}</option>
+                                    <option value="{{ client.id }}">{{ client.display_name }} — {{ client.device_count }} devices / {{ client.installation_count }} installs</option>
                                     {% endfor %}
                                 </select>
                                 <select name="decision" style="font-size:0.75rem;"><option value="permit">Permit</option><option value="deny">Deny</option></select>

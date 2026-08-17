@@ -3986,18 +3986,39 @@ def software_detail(request: HttpRequest, name: str) -> HttpResponse:
     # Authorizing a product is a different decision from settling what it is,
     # so it carries its own permission and its own control.
     can_authorize_software = request.user.has_perm(capability_evidence.AUTHORIZE_PERMISSION)
-    # `decision_scope_clients` carries slugs, but an authorization is written
-    # against the client UUID, so resolve them rather than letting the form
-    # post an empty scope and silently authorize every client.
-    authorization_clients = list(
-        Client.objects.filter(
-            tenant_id=1,
-            deleted_at__isnull=True,
-            slug__in=[row["slug"] for row in decision_scope_clients],
-        )
-        .order_by("display_name")
-        .values("id", "display_name")
-    )
+    # Authorization is written against a client UUID.  Use the complete
+    # current-installation relation here rather than `install_rows`, which is
+    # deliberately capped at 500 rows for page rendering.  The counts make a
+    # narrow permit/deny intelligible before an operator commits it.
+    authorization_clients: list[dict] = []
+    if can_authorize_software and capability_product_rows:
+        with transaction.atomic(), connection.cursor() as cur:
+            cur.execute("SET LOCAL operations.tenant_id = 1")
+            cur.execute(
+                """
+                SELECT c.id, c.display_name,
+                       COUNT(DISTINCT sic.device_id)::int AS device_count,
+                       COUNT(*)::int AS installation_count
+                FROM operations.software_installations_current sic
+                JOIN operations.clients c ON c.id = sic.client_id
+                WHERE sic.tenant_id = 1
+                  AND sic.deleted_at IS NULL
+                  AND sic.stale_since IS NULL
+                  AND LOWER(sic.canonical_name) = LOWER(%s)
+                GROUP BY c.id, c.display_name
+                ORDER BY LOWER(c.display_name), c.id
+                """,
+                [canonical_name],
+            )
+            authorization_clients = [
+                {
+                    "id": row[0],
+                    "display_name": row[1],
+                    "device_count": row[2],
+                    "installation_count": row[3],
+                }
+                for row in cur.fetchall()
+            ]
 
     # Related active findings that name this title.
     related_findings = list(

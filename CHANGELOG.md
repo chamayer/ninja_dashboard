@@ -2,6 +2,20 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.119.5] — 2026-08-17 — Product authorization scope context
+
+### Changed
+
+- Client-scoped product authorization choices on Software product detail now
+  show each client's current device and installation counts. This supports
+  informed authorization of ScreenConnect and every other recognized product
+  without changing authorization precedence or creating any policy rows.
+
+### Notes
+
+- Counts come from the complete current-installation relation, not the
+  page's capped device list. No migration or finding-emission change.
+
 ## [0.119.4] — 2026-08-17 — Capability gate configuration correction
 
 ### Fixed
