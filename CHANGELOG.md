@@ -2,6 +2,19 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.119.6] — 2026-08-17 — Device patch-signal source guard
+
+### Fixed
+
+- Prevented device-detail pages from failing when an unrelated source link has
+  a numeric identifier outside Ninja patch-signal's integer range. The patch
+  context now reads only valid Ninja source-link IDs, preserving patch data for
+  devices that have a valid Ninja link.
+
+### Notes
+
+- No migration or patching-policy change.
+
 ## [0.119.5] — 2026-08-17 — Product authorization scope context
 
 ### Changed

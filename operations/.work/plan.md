@@ -1,8 +1,35 @@
 # Active Operations implementation plan
 
+## Device-detail patch signal source guard
+
+**Status:** release authorized as `0.119.6`; commit and deployment pending.
+
+**Goal:** prevent an unrelated source link from crashing a device-detail page
+while it loads Ninja patch-signal context.
+
+**Scope:** `apps/core/views.py`, a focused unit test, and this plan. No
+schema, source data, patching policy, or rendered patch-signal semantics
+change.
+
+**Decision:** derive valid 32-bit Ninja IDs from the device's already-loaded
+source links before querying `ninja_patches.device_patch_signal`. The prior SQL
+cast every candidate link as an integer; PostgreSQL may evaluate that cast
+before filtering source name, so a large SentinelOne ID caused a 500 despite a
+valid Ninja link. The new lookup only queries those valid Ninja IDs.
+
+**Validation:** focused helper test, Django check, changed-module compilation,
+and `git diff --check`; production reproduction and page verification require
+separate deployment approval.
+
+**Checkpoint:** production confirms the reported device has one valid Ninja
+link and one out-of-range SentinelOne link. The rewritten lookup queries only
+valid Ninja IDs. Focused regression test, Django check, changed-module
+compilation, and diff check pass.
+
+
 ## Product authorization scope context
 
-**Status:** release authorized as `0.119.5`; commit and deployment pending.
+**Status:** deployed as `0.119.5` / `4731a45`.
 
 **Goal:** make a client-scoped product authorization understandable at the
 point of decision by showing each currently affected client's device and
@@ -20,10 +47,12 @@ authorization automatically.
 **Validation:** focused test, Django check, changed-file compilation, and
 `git diff --check`.
 
-**Checkpoint:** the existing product-detail authorization selector now labels
-each current client with its full device and installation counts. A focused
-contract test, Django check, changed-module compilation, template loading, and
-diff check pass. No migration, policy behavior, or authorization data changed.
+**Checkpoint:** deployed as `0.119.5` / `4731a45`. The existing
+product-detail authorization selector now labels each current client with its
+full device and installation counts. Focused contract test, Django check,
+changed-module compilation, template loading, and diff check passed; both
+services were healthy after Portainer redeploy. No migration, policy behavior,
+or authorization data changed.
 
 
 ## Software capability recognition — Operations integration

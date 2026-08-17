@@ -81,6 +81,31 @@ _SOFTWARE_POLICY_CANDIDATE_TYPES = ("whitelist_suggestion",)
 
 log = logging.getLogger(__name__)
 
+_NINJA_PATCH_DEVICE_ID_MAX = 2_147_483_647
+
+
+def _ninja_patch_device_ids(links) -> list[int]:
+    """Return patch-table-compatible IDs from this device's Ninja links.
+
+    Source-link IDs are text because their source owns their shape.  Ninja
+    patch facts use PostgreSQL ``integer`` IDs, so an unrelated source's large
+    numeric ID must never be cast by the device-detail patch lookup.
+    """
+    result: list[int] = []
+    seen: set[int] = set()
+    for link in links:
+        if link.source.name != "Ninja":
+            continue
+        external_id = (link.external_id or "").strip()
+        if not external_id.isascii() or not external_id.isdecimal():
+            continue
+        ninja_id = int(external_id)
+        if ninja_id > _NINJA_PATCH_DEVICE_ID_MAX or ninja_id in seen:
+            continue
+        seen.add(ninja_id)
+        result.append(ninja_id)
+    return result
+
 
 def _online_device_ids(source_name: str = "") -> RawSQL:
     """Return the tenant-safe device set with current source contact."""
@@ -1754,6 +1779,7 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
         deleted_at__isnull=True,
     )
     links = list(device.source_links.select_related("source").order_by("source__name"))
+    ninja_patch_device_ids = _ninja_patch_device_ids(links)
 
     # Software findings are subjects on the title or release, so they no longer
     # carry this device's id. The device inherits them through the installation
@@ -1883,26 +1909,25 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
                     "last_contact_at": row[9],
                 }
 
-                # Patch signal from ninja_patches — one row per Ninja
-                # device_id. Ops device may have >1 Ninja link; pick
-                # the freshest signal.
-                cur.execute(
-                    """
-                    SELECT dps.ever_installed,
-                           dps.last_seen_at,
-                           dps.install_attempts
-                    FROM operations.v_device_source_link dl
-                    JOIN operations.sources s
-                      ON s.id = dl.source_id AND s.name = 'Ninja'
-                    JOIN ninja_patches.device_patch_signal dps
-                      ON dps.device_id = dl.external_id::int
-                    WHERE dl.device_id = %s AND dl.tenant_id = %s
-                    ORDER BY dps.last_seen_at DESC NULLS LAST
-                    LIMIT 1
-                    """,
-                    [str(device.id), 1],
-                )
-                sig = cur.fetchone()
+                # Patch signal has one row per Ninja device ID.  Resolve
+                # compatible Ninja IDs above from the already-loaded links:
+                # casting arbitrary source IDs here can crash this page before
+                # the source-name filter is applied.
+                sig = None
+                if ninja_patch_device_ids:
+                    cur.execute(
+                        """
+                        SELECT dps.ever_installed,
+                               dps.last_seen_at,
+                               dps.install_attempts
+                        FROM ninja_patches.device_patch_signal dps
+                        WHERE dps.device_id = ANY(%s::integer[])
+                        ORDER BY dps.last_seen_at DESC NULLS LAST
+                        LIMIT 1
+                        """,
+                        [ninja_patch_device_ids],
+                    )
+                    sig = cur.fetchone()
                 if sig:
                     patching["ever_installed"] = sig[0]
                     patching["last_patch_installed_at"] = sig[1]
