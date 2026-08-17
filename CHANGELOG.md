@@ -2,14 +2,13 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
-## [0.119.3] — 2026-08-17 — Capability gate configuration
+## [0.119.4] — 2026-08-17 — Capability gate configuration correction
 
-### Changed
+### Fixed
 
-- Made software-capability enforcement and candidate-review gates explicit
-  ingest Compose settings. They remain false by default and can be overridden
-  per Portainer stack without modifying the root-owned runtime environment
-  file.
+- Removed the nonstandard Compose override for software-capability gates.
+  Capability gate values again use only the existing mounted runtime `.env`
+  configuration path.
 
 ## [0.119.2] — 2026-08-17 — Capability permission checks
 

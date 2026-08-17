@@ -113,10 +113,6 @@ services:
       # Static — never overridden. Pin DB host/port to docker network.
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
-      # Stack-level overrides keep capability gates configurable without
-      # modifying the root-owned runtime .env. Safe default remains off.
-      CAPABILITY_ENFORCEMENT_ENABLED: ${CAPABILITY_ENFORCEMENT_ENABLED:-false}
-      CAPABILITY_REVIEW_FINDINGS_ENABLED: ${CAPABILITY_REVIEW_FINDINGS_ENABLED:-false}
     volumes:
       # Bind-mount the host env DIRECTORY into the container. config.py
       # loads /app/envdir/.env at startup and merges into os.environ.
