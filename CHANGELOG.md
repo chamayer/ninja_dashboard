@@ -2,6 +2,34 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.119.2] — 2026-08-17 — Capability permission checks
+
+### Fixed
+
+- Corrected the app label in the software capability and authorization
+  permission checks. Both named `core.`, while the app is registered as
+  `operations`, and `has_perm` matches the label exactly — so neither check
+  could ever pass. Superusers short-circuit that check, so the controls worked
+  for them while silently never rendering for anyone else, and granting the
+  permission in the admin did not help because the string being checked did not
+  name it. Capability curation was affected since it shipped; product
+  authorization since 0.118.0.
+
+### Changed
+
+- Centralized the authorization permission as
+  `capability.AUTHORIZE_PERMISSION`, replacing two literal copies in
+  `views.py`. Having one definition per call site is how the label drifted in
+  the first place.
+
+### Notes
+
+- No migration. The `auth_permission` rows were always correct; only the
+  strings checking them were wrong.
+- Added `test_permission_strings`, which resolves each permission against the
+  app registry rather than asserting a check is merely present. Verified to
+  fail when the original defect is reintroduced.
+
 ## [0.119.1] — 2026-08-14 — Intel matcher lookup index
 
 ### Fixed

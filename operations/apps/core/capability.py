@@ -29,7 +29,17 @@ from django.db import connection
 
 log = logging.getLogger(__name__)
 
-CURATOR_PERMISSION = "core.curate_software_capability"
+# `operations`, not `core`: apps/core/apps.py sets label = "operations", and
+# has_perm() matches the app label exactly. The wrong prefix fails closed and
+# silently -- superusers short-circuit to True, so the control works for them
+# while never rendering for anyone else. test_permission_strings_resolve pins
+# both halves against the app registry.
+CURATOR_PERMISSION = "operations.curate_software_capability"
+
+# Authorizing a product is a different decision from settling what it is, so it
+# is a separate grant. Defined here beside the curator permission rather than
+# inline at its two call sites, which is how the two copies drifted.
+AUTHORIZE_PERMISSION = "operations.authorize_software_product"
 
 _REQUIRED_RELATIONS = (
     "catalog.capability",

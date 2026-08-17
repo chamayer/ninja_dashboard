@@ -3985,7 +3985,7 @@ def software_detail(request: HttpRequest, name: str) -> HttpResponse:
     can_curate_capability = request.user.has_perm(capability_evidence.CURATOR_PERMISSION)
     # Authorizing a product is a different decision from settling what it is,
     # so it carries its own permission and its own control.
-    can_authorize_software = request.user.has_perm("core.authorize_software_product")
+    can_authorize_software = request.user.has_perm(capability_evidence.AUTHORIZE_PERMISSION)
     # `decision_scope_clients` carries slugs, but an authorization is written
     # against the client UUID, so resolve them rather than letting the form
     # post an empty scope and silently authorize every client.
@@ -4118,7 +4118,7 @@ def software_product_authorize(request: HttpRequest) -> HttpResponse:
     coverage requirement: requiring a platform states that a client must run
     it, which is a different claim from allowing it.
     """
-    if not request.user.has_perm("core.authorize_software_product"):
+    if not request.user.has_perm(capability_evidence.AUTHORIZE_PERMISSION):
         messages.error(request, "Authorization permission is required to permit or deny software.")
         return redirect(_safe_next(request, "software_page"))
 
