@@ -2,6 +2,15 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.119.3] — 2026-08-17 — Capability gate configuration
+
+### Changed
+
+- Made software-capability enforcement and candidate-review gates explicit
+  ingest Compose settings. They remain false by default and can be overridden
+  per Portainer stack without modifying the root-owned runtime environment
+  file.
+
 ## [0.119.2] — 2026-08-17 — Capability permission checks
 
 ### Fixed
