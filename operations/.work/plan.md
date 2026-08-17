@@ -1,25 +1,28 @@
 # Active Operations implementation plan
 
-## CURRENT TASK — Identity serial quality and cross-client review
+## CURRENT TASK — Cross-client serial drill-through
 
-**Status:** release prepared as 0.119.7; commit, push, and coupled deploy
-authorized.
+**Status:** release 0.119.9 authorized; commit, push, and coupled deploy
+pending.
 
-**Goal / scope:** declare Operations state and an admin editor for the raw-SQL
-identity-value rejection registry, and register the per-device
-`cross_client_serial` review finding. Ingest owns matching and emission.
+**Goal / scope:** make a device-page cross-client-serial link show the entire
+conflict group in the existing Issues queue, and make its shared-serial
+evidence visible. Scope is the `finding_types` registry, the Issues queue,
+the device-detail link, a Django migration, and focused tests.
 
-**Decision:** a valid serial seen at more than one client is evidence for
-review, never a cross-client merge. It produces one finding per affected
-device. Missing serial remains silent; explicit placeholder values become
-registry data while structural checks remain code.
+**Decision:** per-device findings remain the lifecycle/action records. The
+registry chooses their drill-through: empty grouping key preserves the current
+subject-scoped queue; a configured JSON evidence key opens the same finding
+type's whole evidence group. `cross_client_serial` configures `serial`.
+The queue validates the grouping key from the registry rather than accepting
+an arbitrary JSON field from the request.
 
-**Validation / next action:** state-only migration 0141 and the admin editor
-are built. Focused unit/ratchet tests, Django check, and migration-state check
-pass; the disposable PostgreSQL behavior test is present but not run locally
-under the reduced-test instruction. Version and changelog are updated; next is
-the authorized commit, push, coupled deploy, and simple migration/health
-validation.
+**Validation / next action:** migration 0143 registers the field and configures
+`cross_client_serial`; the link, queue validation, scope notice, and evidence
+text are wired. Focused tests (10), Django check, migration-drift check,
+template loading, compilation, and diff check pass. Migration 0143 is the only
+pending migration; commit, push, redeploy, then verify migration, health, and
+the two-row serial drill-through.
 
 ## Device-detail patch signal source guard
 

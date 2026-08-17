@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import uuid
 from datetime import datetime, timedelta, timezone
 from urllib import request as _urllib_request
@@ -82,6 +83,7 @@ _SOFTWARE_POLICY_CANDIDATE_TYPES = ("whitelist_suggestion",)
 log = logging.getLogger(__name__)
 
 _NINJA_PATCH_DEVICE_ID_MAX = 2_147_483_647
+_FINDING_DETAIL_KEY_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 
 
 def _ninja_patch_device_ids(links) -> list[int]:
@@ -105,6 +107,29 @@ def _ninja_patch_device_ids(links) -> list[int]:
         seen.add(ninja_id)
         result.append(ninja_id)
     return result
+
+
+def _finding_group_lookup(
+    *,
+    finding_type_name: str,
+    configured_key: str,
+    requested_key: str,
+    requested_value: str,
+) -> dict[str, str] | None:
+    """Return the registered evidence-group filter, or reject the request.
+
+    The URL carries a value, but it does not choose which JSON evidence field
+    can be queried. Only a FindingType's registry field may do that.
+    """
+    if not (
+        finding_type_name
+        and requested_key
+        and requested_value
+        and configured_key == requested_key
+        and _FINDING_DETAIL_KEY_RE.fullmatch(configured_key)
+    ):
+        return None
+    return {f"finding_details__{configured_key}__iexact": requested_value}
 
 
 def _online_device_ids(source_name: str = "") -> RawSQL:
@@ -2438,6 +2463,8 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     platform_filter = request.GET.get("platform", "")
     online_filter = request.GET.get("online", "")
     subject_id_filter = (request.GET.get("subject_id") or "").strip()
+    group_key_filter = (request.GET.get("group_key") or "").strip()
+    group_value_filter = (request.GET.get("group_value") or "").strip()
     q_filter = (request.GET.get("q") or "").strip()
 
     # Source names come from operations.sources (admin-editable
@@ -2481,6 +2508,26 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             subject_id_filter = ""
         else:
             qs = qs.filter(subject_id=subject_id_filter)
+    active_group_key = ""
+    if group_key_filter or group_value_filter:
+        configured_key = (
+            FindingType.objects.filter(name=type_filter)
+            .values_list("drilldown_evidence_key", flat=True)
+            .first()
+            or ""
+        )
+        group_lookup = _finding_group_lookup(
+            finding_type_name=type_filter,
+            configured_key=configured_key,
+            requested_key=group_key_filter,
+            requested_value=group_value_filter,
+        )
+        if group_lookup is None:
+            # A malformed URL must never become a broader Issues query.
+            qs = qs.none()
+        else:
+            qs = qs.filter(**group_lookup)
+            active_group_key = configured_key
     if q_filter:
         # Free-text match against canonical_name OR hostname in details
         qs = qs.filter(
@@ -2694,6 +2741,13 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             return f"{base} (last: {last_src})" if last_src else base
         if name == "device_role_conflict":
             return f"{d.get('previous_role', '?')} → {d.get('new_role', '?')}"
+        if name == "cross_client_serial":
+            devices = d.get("device_count")
+            clients = d.get("client_count")
+            serial = d.get("serial")
+            if devices and clients and serial:
+                return f"{devices} devices across {clients} clients share serial {serial}"
+            return "cross-client serial"
         if name.startswith("windows_servicing_"):
             os_name = d.get("os_name")
             build = d.get("os_build_number") or d.get("build_number") or "?"
@@ -2983,6 +3037,8 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             "active_q": q_filter,
             "active_confidence": confidence_filter,
             "active_client": client_filter,
+            "active_subject_id": subject_id_filter,
+            "active_group_key": active_group_key,
             "show_snoozed": show_snoozed,
             "severity_tiles": severity_tiles,
             "total_matching": total_matching,

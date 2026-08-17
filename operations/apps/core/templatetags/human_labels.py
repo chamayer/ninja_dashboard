@@ -16,10 +16,32 @@ Rules:
 from __future__ import annotations
 
 import re
+from urllib.parse import urlencode
 
 from django import template
 
 register = template.Library()
+
+
+@register.simple_tag(name="finding_drilldown_query")
+def finding_drilldown_query(finding, subject_id):
+    """Build a registered FindingType's safe Issues drill-through query.
+
+    A non-empty registry key groups a finding by that exact evidence value;
+    otherwise this preserves the established device-subject drill-through.
+    The queue independently validates the key before it applies the filter.
+    """
+    finding_type = getattr(finding, "finding_type", None)
+    finding_name = getattr(finding_type, "name", "") or ""
+    details = getattr(finding, "finding_details", None) or {}
+    evidence_key = getattr(finding_type, "drilldown_evidence_key", "") or ""
+    evidence_value = details.get(evidence_key) if evidence_key else None
+    params = {"type": finding_name, "status": "all"}
+    if evidence_key and evidence_value not in (None, ""):
+        params.update(group_key=evidence_key, group_value=str(evidence_value))
+    else:
+        params["subject_id"] = str(subject_id)
+    return urlencode(params)
 
 
 _LABELS: dict[str, str] = {
@@ -274,8 +296,12 @@ def finding_detail_text(finding):
         count = d.get("device_count")
         return f"{count} devices share serial {d.get('serial', '')}" if count else "shared serial"
     if name == "cross_client_serial":
-        count = d.get("client_count")
-        return f"serial seen at {count} clients" if count else "cross-client serial"
+        devices = d.get("device_count")
+        clients = d.get("client_count")
+        serial = d.get("serial")
+        if devices and clients and serial:
+            return f"{devices} devices across {clients} clients share serial {serial}"
+        return "cross-client serial"
     if name == "placeholder_mac":
         macs = d.get("junk_macs") or []
         return ", ".join(macs) if macs else "junk MAC"

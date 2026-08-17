@@ -358,7 +358,7 @@ class CollectorAdmin(admin.ModelAdmin):
 
 @admin.register(FindingType)
 class FindingTypeAdmin(admin.ModelAdmin):
-    list_display = ("name", "default_severity", "runbook_path")
+    list_display = ("name", "default_severity", "drilldown_evidence_key", "runbook_path")
     list_filter = ("default_severity",)
     search_fields = ("name", "description", "runbook_path")
 

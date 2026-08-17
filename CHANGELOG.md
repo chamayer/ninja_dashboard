@@ -2,6 +2,19 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.119.9] — 2026-08-17 — Cross-client serial conflict drill-through
+
+### Fixed
+
+- Device-page cross-client serial findings now open the complete conflict group
+  in Issues instead of a hidden one-device filter. The queue identifies the
+  shared serial evidence and shows every affected device's finding.
+
+### Changed
+
+- Added a data-owned Finding Type drill-through key (migration 0143). Empty
+  preserves device scope; `cross_client_serial` is seeded to group by `serial`.
+
 ## [0.119.7] — 2026-08-17 — Cross-client serial review
 
 ### Fixed

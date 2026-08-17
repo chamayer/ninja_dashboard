@@ -1,7 +1,9 @@
 from pathlib import Path
 from types import SimpleNamespace
+from urllib.parse import parse_qs
 
 from apps.core import views
+from apps.core.templatetags.human_labels import finding_drilldown_query
 
 
 def test_finding_type_groups_preserve_category_order_and_other_bucket():
@@ -157,3 +159,59 @@ def test_findings_queue_csv_includes_windows_servicing_context():
     assert '"OS build"' in source
     assert '"Lifecycle cycle"' in source
     assert '"Security support ends"' in source
+
+
+def test_registered_evidence_group_drilldown_opens_the_full_group():
+    finding = SimpleNamespace(
+        finding_type=SimpleNamespace(
+            name="cross_client_serial", drilldown_evidence_key="serial"
+        ),
+        finding_details={"serial": "AB 123"},
+    )
+
+    assert parse_qs(finding_drilldown_query(finding, "device-1")) == {
+        "type": ["cross_client_serial"],
+        "status": ["all"],
+        "group_key": ["serial"],
+        "group_value": ["AB 123"],
+    }
+
+
+def test_unregistered_evidence_group_preserves_device_drilldown():
+    finding = SimpleNamespace(
+        finding_type=SimpleNamespace(name="device_offline", drilldown_evidence_key=""),
+        finding_details={},
+    )
+
+    assert parse_qs(finding_drilldown_query(finding, "device-1")) == {
+        "type": ["device_offline"],
+        "status": ["all"],
+        "subject_id": ["device-1"],
+    }
+
+
+def test_finding_group_filter_requires_the_registry_key():
+    assert views._finding_group_lookup(
+        finding_type_name="cross_client_serial",
+        configured_key="serial",
+        requested_key="serial",
+        requested_value="AB 123",
+    ) == {"finding_details__serial__iexact": "AB 123"}
+    assert (
+        views._finding_group_lookup(
+            finding_type_name="cross_client_serial",
+            configured_key="serial",
+            requested_key="client_ids",
+            requested_value="AB 123",
+        )
+        is None
+    )
+
+
+def test_device_and_issues_templates_explain_the_drilldown_scope():
+    device_template = Path("templates/device_detail.html").read_text(encoding="utf-8")
+    findings_template = Path("templates/findings_queue.html").read_text(encoding="utf-8")
+
+    assert "{% finding_drilldown_query f device.id %}" in device_template
+    assert "Showing every device with this finding type" in findings_template
+    assert "Filtered to the selected device." in findings_template

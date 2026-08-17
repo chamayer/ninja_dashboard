@@ -33,6 +33,11 @@
 
 <div class="card">
     <h2 class="section-label">Current result scope</h2>
+    {% if active_group_key %}
+    <p class="muted" style="margin-top:0;">Showing every device with this finding type and the same {{ active_group_key|humanize_label }} evidence value.</p>
+    {% elif active_subject_id %}
+    <p class="muted" style="margin-top:0;">Filtered to the selected device.</p>
+    {% endif %}
     <div class="tile-grid">
         {% for card in result_scope_cards %}
             <div class="tile">
@@ -47,6 +52,12 @@
 
 <div class="card">
     <form action="" method="get" class="filterbar">
+        {% if active_group_key %}
+        <input type="hidden" name="group_key" value="{{ active_group_key }}">
+        <input type="hidden" name="group_value" value="{{ request.GET.group_value }}">
+        {% elif active_subject_id %}
+        <input type="hidden" name="subject_id" value="{{ active_subject_id }}">
+        {% endif %}
         <div>
             <label>Status</label>
             <select name="status">

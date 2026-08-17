@@ -309,9 +309,9 @@
                             via install
                         </span>
                     {% else %}
-                        {# Click-through to Issues filtered by this device + this finding type. #}
-                        <a href="{% url 'findings_queue' %}?type={{ f.finding_type.name }}&subject_id={{ device.id }}&status=all"
-                           title="View all {{ f.finding_type.name }} for this device">
+                        {# FindingType owns whether this opens the device or its evidence group. #}
+                        <a href="{% url 'findings_queue' %}?{% finding_drilldown_query f device.id %}"
+                           title="View related {{ f.finding_type.name }} issues">
                             {% finding_display_label f %}
                         </a>
                     {% endif %}

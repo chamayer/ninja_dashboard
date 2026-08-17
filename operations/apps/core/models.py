@@ -361,12 +361,32 @@ class FindingType(models.Model):
             "path) -- approving software does not make those untrue."
         ),
     )
+    drilldown_evidence_key = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        help_text=(
+            "Optional finding_details key used for device-page drill-through. "
+            "When empty, the Issues link stays scoped to the selected device; "
+            "when set, it opens all findings of this type with the same "
+            "evidence value."
+        ),
+    )
     runbook_path = models.CharField(max_length=255, blank=True)
     description = models.TextField(blank=True)
 
     class Meta:
         db_table = "finding_types"
         ordering = ("name",)
+        constraints: ClassVar = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(drilldown_evidence_key="")
+                    | models.Q(drilldown_evidence_key__regex=r"^[a-z][a-z0-9_]{0,63}$")
+                ),
+                name="finding_type_drilldown_evidence_key_format",
+            )
+        ]
 
     def __str__(self) -> str:
         return self.name
