@@ -5588,32 +5588,59 @@ def devices_page(request: HttpRequest) -> HttpResponse:
             params.append(client_filter)
 
         where_sql = " AND ".join(where)
+        # The severe-issue counts are aggregated ONCE for the page, not per row.
+        #
+        # `v_device_software_exposure` builds a `software_findings` CTE that is
+        # referenced twice, so PostgreSQL materialises it, and the device
+        # predicate applies to the installation join rather than to the
+        # findings -- so every per-device call rebuilds the whole fleet's
+        # software-finding set. Measured 2026-08-17: 363 ms and ~670 MB of
+        # buffer traffic for a single device, x500 rows = 176 s for this one
+        # statement, which is what made /devices/ exceed the gunicorn worker
+        # timeout. Aggregating over the page's 500 devices in one pass returns
+        # identical counts in 1.3 s.
         cur.execute(
             f"""
-            SELECT v.device_id, v.canonical_hostname, v.canonical_serial,
-                   v.device_role, v.os_group, v.os_name,
-                   v.is_online_any, v.online_sources, v.last_contact_at,
-                   v.effective_patching_scope,
+            WITH page AS MATERIALIZED (
+                SELECT v.device_id, v.canonical_hostname, v.canonical_serial,
+                       v.device_role, v.os_group, v.os_name,
+                       v.is_online_any, v.online_sources, v.last_contact_at,
+                       v.effective_patching_scope, v.client_id
+                FROM operations.v_device v
+                WHERE {where_sql}
+                ORDER BY v.canonical_hostname
+                LIMIT 500
+            ),
+            device_findings AS (
+                SELECT f.subject_id AS device_id, COUNT(*) AS n
+                FROM operations.findings f
+                JOIN page p ON p.device_id = f.subject_id
+                WHERE f.tenant_id = 1
+                  AND f.subject_type = 'device'
+                  AND f.status IN ('open','acknowledged','investigating')
+                  AND f.severity IN ('critical','high')
+                GROUP BY f.subject_id
+            ),
+            device_exposure AS (
+                SELECT e.device_id, COUNT(DISTINCT e.finding_id) AS n
+                FROM operations.v_device_software_exposure e
+                WHERE e.tenant_id = 1
+                  AND e.status IN ('open','acknowledged','investigating')
+                  AND e.severity IN ('critical','high')
+                  AND e.device_id IN (SELECT device_id FROM page)
+                GROUP BY e.device_id
+            )
+            SELECT p.device_id, p.canonical_hostname, p.canonical_serial,
+                   p.device_role, p.os_group, p.os_name,
+                   p.is_online_any, p.online_sources, p.last_contact_at,
+                   p.effective_patching_scope,
                    c.display_name AS client_name, c.slug AS client_slug,
-                   (SELECT COUNT(*) FROM operations.findings f
-                    WHERE f.tenant_id = 1
-                      AND f.subject_type = 'device'
-                      AND f.subject_id = v.device_id
-                      AND f.status IN ('open','acknowledged','investigating')
-                      AND f.severity IN ('critical','high')
-                   )
-                   + (SELECT COUNT(DISTINCT e.finding_id)
-                      FROM operations.v_device_software_exposure e
-                      WHERE e.tenant_id = 1
-                        AND e.device_id = v.device_id
-                        AND e.status IN ('open','acknowledged','investigating')
-                        AND e.severity IN ('critical','high')
-                   ) AS severe_issues
-            FROM operations.v_device v
-            LEFT JOIN operations.clients c ON c.id = v.client_id
-            WHERE {where_sql}
-            ORDER BY v.canonical_hostname
-            LIMIT 500
+                   COALESCE(df.n, 0) + COALESCE(de.n, 0) AS severe_issues
+            FROM page p
+            LEFT JOIN operations.clients c ON c.id = p.client_id
+            LEFT JOIN device_findings df ON df.device_id = p.device_id
+            LEFT JOIN device_exposure de ON de.device_id = p.device_id
+            ORDER BY p.canonical_hostname
             """,
             params,
         )
