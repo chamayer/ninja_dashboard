@@ -157,6 +157,28 @@ All notable changes to this project follow [Semantic Versioning](https://semver.
   alone is fast (under 1 s); `decisions_sql` was the actual cost. The note is
   removed now that the real cause is fixed.
 
+## [0.119.14] — 2026-08-18 — Admin overview: one query instead of four
+
+### Fixed
+
+- `/admin/overview/` issued four separate round trips for its finding tile
+  counts, one of them (`nav_pending_software_decisions`) a byte-for-byte
+  duplicate of another (`software_findings_open`) — same tenant, same status
+  filter, same category filter, queried twice. The three distinct counts are
+  now one grouped aggregate (`Count(..., filter=...)`), and the duplicate
+  reuses that result instead of re-querying. Verified identical results;
+  measured 3,999 ms → 117 ms for the four round trips this replaces.
+
+### Notes
+
+- The other pages flagged as "slow" in the same measurement pass
+  (`/findings/`, `/software/`, `/software/products/`, `/software/publishers/`,
+  `/patching/activity/`) were re-measured in isolation and found to vary with
+  concurrent host load (load average observed between ~4 and ~8 during this
+  session), not with a fixable defect in the query itself — the same query
+  ran 14-20 s under load and under 700 ms moments later with no code change.
+  Nothing further was changed there.
+
 ## [0.119.2] — 2026-08-17 — Capability permission checks
 
 ### Fixed

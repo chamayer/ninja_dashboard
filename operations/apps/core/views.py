@@ -9075,17 +9075,20 @@ def operations_admin_overview(request: HttpRequest) -> HttpResponse:
     except Exception:
         intel_ok = intel_failed = intel_never = 0
 
-    open_findings = Finding.objects.filter(
+    # One grouped query instead of three sequential .count() round trips
+    # against the same base filter. `nav_pending_software_decisions` below
+    # used to issue a fourth, byte-for-byte duplicate of the software count;
+    # it now reuses this result instead of re-querying.
+    _finding_tile_counts = Finding.objects.filter(
         tenant_id=1, status__in=_FINDING_ACTIVE_STATUSES
-    ).count()
-    software_findings_open = Finding.objects.filter(
-        tenant_id=1, status__in=_FINDING_ACTIVE_STATUSES,
-        finding_type__category__name="software",
-    ).count()
-    patching_findings_open = Finding.objects.filter(
-        tenant_id=1, status__in=_FINDING_ACTIVE_STATUSES,
-        finding_type__category__name="patching",
-    ).count()
+    ).aggregate(
+        total=Count("id"),
+        software=Count("id", filter=Q(finding_type__category__name="software")),
+        patching=Count("id", filter=Q(finding_type__category__name="patching")),
+    )
+    open_findings = _finding_tile_counts["total"]
+    software_findings_open = _finding_tile_counts["software"]
+    patching_findings_open = _finding_tile_counts["patching"]
     software_decision_count = SoftwareDecision.objects.filter(tenant_id=1).count()
     classifier_rule_count = 0
     try:
@@ -9107,11 +9110,10 @@ def operations_admin_overview(request: HttpRequest) -> HttpResponse:
             "nav_pending_merges": MergeCandidate.objects.filter(
                 tenant_id=1, status="open"
             ).count(),
-            "nav_pending_software_decisions": Finding.objects.filter(
-                tenant_id=1,
-                status__in=_FINDING_ACTIVE_STATUSES,
-                finding_type__category__name="software",
-            ).count(),
+            # Was a separate, byte-for-byte duplicate of software_findings_open
+            # below: same tenant, same status filter, same category filter,
+            # queried twice.
+            "nav_pending_software_decisions": software_findings_open,
             "open_findings": open_findings,
             "software_findings_open": software_findings_open,
             "patching_findings_open": patching_findings_open,
