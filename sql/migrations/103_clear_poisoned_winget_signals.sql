@@ -1,0 +1,41 @@
+-- 103: discard the Winget category signals, all of which are invalid.
+--
+-- The enricher queried `/v2/packages?query=<title>&take=5` and unioned the
+-- tags, publisher and package identifier of every one of the top-5 results
+-- into one row, on the theory that more matched data was more helpful. It
+-- was the same failure 092 found in the Chocolatey enricher, wearing a
+-- different cause: 092's endpoint ignored the search term outright and
+-- returned an unfiltered gallery page; this one does filter by query, but
+-- "top-5 relevance matches" still is not "the one right package."
+--
+-- Measured 2026-08-18: 374 of 379 rows (98.7%) carry more than one publisher
+-- or package identifier -- the union signature. Querying "01 transaction pro
+-- exporter 6.0" returned Chinese chat, video and shopping apps in the same
+-- top-5 batch, and tags describing them -- "chat", "video", "taobao" -- were
+-- stored as if they described the exporter.
+--
+-- 092's own comment cited "Winget... has 154 distinct tag sets across 379
+-- rows" as evidence its enricher was shaped correctly. That comparison was
+-- mistaken: 154 distinct SETS is what varying top-5 unions across different
+-- queries produce regardless of correctness, not evidence any one of them
+-- describes its title. It was never verified, only assumed by contrast.
+--
+-- Deleted rather than left to expire, for the same reason 092 deleted rather
+-- than waited: `_titles_needing_refresh` only re-queries a title whose newest
+-- signal is older than 30 days, so the corrected enricher (exact
+-- normalized-title match, one package per row, `titles_found` recorded even
+-- on no match) would not revisit any of these until mid-September otherwise.
+-- Deleting makes every affected title eligible on the next run.
+--
+-- This removes no true information: not one of these rows is a verified
+-- match to the title it is attached to under the corrected logic. ADR-0012's
+-- "nothing is lost without when and why" is satisfied by this file.
+--
+-- Scoped to source = 'winget'. Chocolatey, OTX, ThreatFox and AbuseCH rows
+-- are untouched.
+
+DELETE FROM operations.safety_signal
+ WHERE source = 'winget';
+
+-- The corrected enricher repopulates these at _MAX_TITLES_PER_RUN = 500 per
+-- cycle, exact-match only.

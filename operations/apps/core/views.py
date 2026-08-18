@@ -3297,10 +3297,29 @@ def _software_page_data(request: HttpRequest) -> dict:
     with transaction.atomic(), connection.cursor() as cur:
         cur.execute("SET LOCAL operations.tenant_id = 1")
 
+        # Titles that actually match a catalog row, not the catalog's raw row
+        # count. The two are unrelated numbers: software_catalog carries
+        # entries that match nothing installed, and this used to compute
+        # uncategorized_titles as unique_titles minus that raw count, which
+        # produced a plausible-looking number without measuring a real match.
+        #
+        # LOWER() on both sides is load-bearing, not defensive: software_catalog
+        # stores canonical_name in mixed case ("SentinelOne", "Sophos Endpoint")
+        # while software_title_current stores it lowercase. Measured
+        # 2026-08-18: the exact-case join this replaces matches ZERO of the 52
+        # catalog rows against any installed title -- every category filter and
+        # the categories column on this page were silently returning nothing
+        # for that reason, not because software_catalog was too sparse to help
+        # at all. Case-insensitive, the same 52 rows match 11 titles.
         cur.execute(
             """
-            SELECT COUNT(*) FROM operations.software_catalog
-            WHERE tenant_id = 1 OR tenant_id IS NULL
+            SELECT COUNT(*) FROM operations.software_title_current stc
+            WHERE stc.tenant_id = 1
+              AND EXISTS (
+                SELECT 1 FROM operations.software_catalog cat
+                WHERE LOWER(cat.canonical_name) = LOWER(stc.canonical_name)
+                  AND (cat.tenant_id = stc.tenant_id OR cat.tenant_id IS NULL)
+              )
             """
         )
         (categorized_titles,) = cur.fetchone()
@@ -3351,15 +3370,18 @@ def _software_page_data(request: HttpRequest) -> dict:
                 "   AND f.finding_details->>'canonical_name' = sic.canonical_name)"
             )
         if category_filter == "uncategorized":
+            # LOWER() on both sides: software_catalog stores canonical_name in
+            # mixed case, software_installations_current stores it lowercase.
+            # The exact-case join this replaces matched nothing, ever.
             where_clauses.append(
                 "NOT EXISTS (SELECT 1 FROM operations.software_catalog cat "
-                " WHERE cat.canonical_name = sic.canonical_name "
+                " WHERE LOWER(cat.canonical_name) = LOWER(sic.canonical_name) "
                 "   AND (cat.tenant_id = sic.tenant_id OR cat.tenant_id IS NULL))"
             )
         elif category_filter:
             where_clauses.append(
                 "EXISTS (SELECT 1 FROM operations.software_catalog cat "
-                " WHERE cat.canonical_name = sic.canonical_name "
+                " WHERE LOWER(cat.canonical_name) = LOWER(sic.canonical_name) "
                 "   AND (cat.tenant_id = sic.tenant_id OR cat.tenant_id IS NULL) "
                 "   AND cat.categories ? %s)"
             )
@@ -3420,7 +3442,7 @@ def _software_page_data(request: HttpRequest) -> dict:
                    (SELECT array_agg(DISTINCT cat_name)
                     FROM operations.software_catalog cat,
                          jsonb_array_elements_text(cat.categories) AS cat_name
-                    WHERE cat.canonical_name = sic.canonical_name
+                    WHERE LOWER(cat.canonical_name) = LOWER(sic.canonical_name)
                       AND (cat.tenant_id = sic.tenant_id OR cat.tenant_id IS NULL)
                    ) AS categories,
                    (SELECT MIN(sd.decision)

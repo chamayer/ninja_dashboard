@@ -179,6 +179,47 @@ All notable changes to this project follow [Semantic Versioning](https://semver.
   ran 14-20 s under load and under 700 ms moments later with no code change.
   Nothing further was changed there.
 
+## [0.119.15] — 2026-08-18 — Software categorization: honest count, honest data
+
+### Fixed
+
+- Products/Software page category filters and the "Not categorized" tile
+  compared the wrong populations and used a case-sensitive join.
+  `software_catalog.canonical_name` is stored mixed-case
+  ("SentinelOne", "Sophos Endpoint"); the titles it was joined against are
+  stored lowercase. The exact-case `=` this used everywhere matched **zero**
+  of the 52 catalog rows against any installed title, so every category
+  filter, the categories column, and the uncategorized count were silently
+  wrong. `LOWER()` on both sides now matches 11 titles case-insensitively.
+  The uncategorized tile also compared `unique_titles` against the catalog's
+  raw row count rather than a real match count — fixed to count titles with
+  zero matching catalog rows via the same join the filter uses, so the tile
+  and the filter now agree.
+- The Winget enricher queried the top 5 search results per title and unioned
+  their tags, publisher and package identifier into one row — the same class
+  of defect migration 092 found and fixed in the Chocolatey enricher, with a
+  different cause: this endpoint does filter by query, but "top-5 relevance
+  matches" is not "the one right package." Measured: 374 of 379 stored rows
+  (98.7%) carried more than one publisher or package identifier — the union
+  signature. It now matches the single package whose normalized title exactly
+  equals the queried title, or writes nothing (while still recording which
+  titles it saw), mirroring Chocolatey's already-proven discipline. Migration
+  103 discards the 379 existing rows, none of which is a verified match under
+  the corrected logic.
+
+### Notes
+
+- `software_catalog.categories` was found to contain only three values —
+  `av`, `remote_access`, `rmm` — the same three concepts `catalog.capability`
+  now handles properly, seeded once by hand and never a general taxonomy.
+  There is currently no general software categorization (browser,
+  productivity, dev tools, ...) anywhere in the system; retiring this table
+  in favor of the capability model is a separate, smaller decision from
+  building one, and remains open.
+- Both fixes are additive to what they replace: no migration changes the
+  capability model, and both category-filter fixes preserve every existing
+  code path's shape, just the join predicate.
+
 ## [0.119.2] — 2026-08-17 — Capability permission checks
 
 ### Fixed

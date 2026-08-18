@@ -9,14 +9,15 @@ auth, so we use it as the enrichment source for tags and publisher.
 
 Per-title queries against ``/v2/packages`` (search); one HTTPS GET per
 canonical we've observed and don't already have a fresh signal for.
-Results merge into ``operations.safety_signal`` as one aggregated row
-per canonical (source='winget', signal_type='category').
+Exact-match only, one row per canonical (source='winget',
+signal_type='category') — see ``_search`` for why.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -34,6 +35,11 @@ _STALE_AFTER = timedelta(days=30)
 _MAX_TITLES_PER_RUN = 500
 _DELAY_SECONDS = 0.4
 _USER_AGENT = "ninja-dashboard/intel-winget (+ops)"
+_NORMALIZE_RE = re.compile(r"[^a-z0-9]+")
+
+
+def _normalize(value: str) -> str:
+    return _NORMALIZE_RE.sub("", value.lower())
 
 
 def run_once() -> int:
@@ -59,12 +65,12 @@ def _enrich() -> int:
     ) as client:
         for canonical in titles[:_MAX_TITLES_PER_RUN]:
             try:
-                packages = _search(client, canonical)
+                tags, publisher, package_id, titles_found = _search(client, canonical)
             except httpx.HTTPError as exc:
                 log.warning("Winget search failed for %s: %s", canonical, exc)
                 continue
-            if packages:
-                written += _write_signal(canonical, packages)
+            if tags or publisher or package_id or titles_found:
+                written += _write_signal(canonical, tags, publisher, package_id, titles_found)
             time.sleep(_DELAY_SECONDS)
     return written
 
@@ -94,45 +100,64 @@ def _titles_needing_refresh() -> list[str]:
         return [row[0] for row in cur.fetchall()]
 
 
-def _search(client: httpx.Client, canonical: str) -> list[dict]:
+def _search(
+    client: httpx.Client, canonical: str
+) -> tuple[list[str], str, str, list[str]]:
+    """One package's tags/publisher/id, exact-name-matched -- or nothing.
+
+    The old version unioned tags, publishers and package identifiers across
+    every one of the top-5 search results into one row, on the theory that
+    more data was more helpful. It wasn't: querying "01 transaction pro
+    exporter 6.0" returned Chinese chat, video and shopping apps in the same
+    top-5 batch (measured 2026-08-18, safety_signal), and their tags —
+    "chat", "video", "taobao" — got stored as if they described the exporter.
+    This is the same failure Chocolatey had (092: `Packages()` ignored its
+    search term entirely; 1,473 rows carried one identical alphabetical
+    tag set) wearing a different cause: here the endpoint *is* filtering by
+    query, but "top 5 relevance matches" still isn't "the one right package."
+
+    Exact match on the normalized package title (`Latest.Name`), same
+    discipline as `chocolatey._search`: a fuzzy or top-N union cannot be
+    trusted to describe the queried title rather than its neighbors in the
+    search results, and no threshold was found (there, measured on 31 titles)
+    that keeps the right matches without keeping the wrong ones too.
+    """
     r = client.get(
         _SEARCH_ENDPOINT,
         params={"query": canonical[:120], "take": 5},
     )
     if r.status_code == 404:
-        return []
+        return [], "", "", []
     r.raise_for_status()
     body = r.json() or {}
     packages = body.get("Packages") or body.get("packages") or []
-    return packages if isinstance(packages, list) else []
+    if not isinstance(packages, list) or not packages:
+        return [], "", "", []
 
-
-def _write_signal(canonical: str, packages: list[dict]) -> int:
-    tags: set[str] = set()
-    publishers: set[str] = set()
-    package_ids: set[str] = set()
+    wanted = _normalize(canonical)
+    titles_found: list[str] = []
     for pkg in packages:
         latest = pkg.get("Latest") or pkg.get("latest") or {}
-        pkg_meta = pkg.get("Metadata") or pkg
-        for tag in (latest.get("Tags") or pkg_meta.get("Tags") or []):
-            if tag:
-                tags.add(str(tag))
-        publisher = (
-            latest.get("Publisher")
-            or pkg_meta.get("Publisher")
-            or ""
-        )
-        if publisher:
-            publishers.add(str(publisher))
-        pkg_id = pkg.get("Id") or pkg_meta.get("Id") or ""
-        if pkg_id:
-            package_ids.add(str(pkg_id))
-    if not (tags or publishers or package_ids):
-        return 0
+        name = str(latest.get("Name") or "")
+        if name:
+            titles_found.append(name)
+        if _normalize(name) == wanted:
+            tags = sorted({str(t) for t in (latest.get("Tags") or []) if t})
+            publisher = str(latest.get("Publisher") or "")
+            package_id = str(pkg.get("Id") or "")
+            return tags, publisher, package_id, titles_found
+    return [], "", "", titles_found
+
+
+def _write_signal(
+    canonical: str, tags: list[str], publisher: str, package_id: str,
+    titles_found: list[str],
+) -> int:
     details = {
-        "package_identifiers": sorted(package_ids),
-        "publishers": sorted(publishers),
-        "tags": sorted(tags),
+        "package_identifiers": [package_id] if package_id else [],
+        "publishers": [publisher] if publisher else [],
+        "tags": tags,
+        "titles_found": titles_found,
     }
     with db.transaction() as cur:
         cur.execute(
