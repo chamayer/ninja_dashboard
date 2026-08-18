@@ -8278,42 +8278,70 @@ def software_decisions_queue(request: HttpRequest) -> HttpResponse:
     with transaction.atomic():
         with connection.cursor() as cur:
             cur.execute("SET LOCAL operations.tenant_id = 1")
+            # Each side is aggregated on its own, then joined.
+            #
+            # Joining `software_installations_current` (529,784 rows) directly
+            # on `f.finding_details->>'canonical_name'` and grouping afterwards
+            # meant evaluating that join across the whole table: no index leads
+            # with `canonical_name` (the two that contain it lead with
+            # client_id/device_id, and the lower(canonical_name) index does not
+            # match this non-lowered predicate). Measured 2026-08-17: 187 s for
+            # this one statement, which is what made the page exceed the
+            # gunicorn worker timeout.
+            #
+            # The device count does not depend on the finding's category, so
+            # aggregating installations by canonical_name first is equivalent
+            # and returns the same rows and the same total (90,891) in 1.4 s.
+            #
+            # The count still comes from installations rather than the exposure
+            # view: this queue is where whitelist_suggestion is decided, and
+            # that type deliberately does not fan out to devices (migration
+            # 084). "How many machines run this" is what the column has always
+            # meant, and it stays correct for every type on the queue.
             cur.execute(
                 """
-                SELECT
-                    f.finding_details->>'canonical_name' AS canonical,
-                    COALESCE(MAX(f.finding_details->>'publisher'), '') AS publisher,
-                    f.finding_details->>'category' AS category,
-                    MIN(sc.categories::text) AS catalog_categories,
-                    -- How many devices run this title. subject_id is the
-                    -- product or release now, so counting it would report 1
-                    -- per title -- and this column drives the queue's ordering.
-                    --
-                    -- Counted from installations rather than from the exposure
-                    -- view: this queue is where whitelist_suggestion is
-                    -- decided, and that type deliberately does not fan out to
-                    -- devices (migration 084). Installations are also what this
-                    -- number has always meant -- "how many machines run this" --
-                    -- and it stays correct for every type on the queue.
-                    COUNT(DISTINCT sic.device_id) AS device_count,
-                    MAX(f.last_seen_at) AS latest
-                FROM operations.findings f
-                JOIN operations.finding_types ft
-                  ON ft.id = f.finding_type_id
-                LEFT JOIN operations.software_installations_current sic
-                  ON sic.tenant_id = f.tenant_id
-                 AND sic.canonical_name = f.finding_details->>'canonical_name'
-                 AND sic.stale_since IS NULL
-                 AND sic.deleted_at IS NULL
-                LEFT JOIN operations.software_catalog sc
-                  ON LOWER(sc.canonical_name) = LOWER(f.finding_details->>'canonical_name')
-                 AND (sc.tenant_id IS NULL OR sc.tenant_id = f.tenant_id)
-                WHERE f.tenant_id = 1
-                  AND f.status IN ('open', 'acknowledged')
-                  AND ft.source_module = 'platform.software_findings'
-                  AND f.finding_details->>'canonical_name' IS NOT NULL
-                GROUP BY 1, 3
-                ORDER BY device_count DESC, canonical
+                WITH finding_agg AS (
+                    SELECT f.finding_details->>'canonical_name' AS canonical,
+                           f.finding_details->>'category' AS category,
+                           COALESCE(MAX(f.finding_details->>'publisher'), '') AS publisher,
+                           MAX(f.last_seen_at) AS latest
+                    FROM operations.findings f
+                    JOIN operations.finding_types ft
+                      ON ft.id = f.finding_type_id
+                    WHERE f.tenant_id = 1
+                      AND f.status IN ('open', 'acknowledged')
+                      AND ft.source_module = 'platform.software_findings'
+                      AND f.finding_details->>'canonical_name' IS NOT NULL
+                    GROUP BY 1, 2
+                ),
+                install_agg AS (
+                    SELECT sic.canonical_name,
+                           COUNT(DISTINCT sic.device_id) AS device_count
+                    FROM operations.software_installations_current sic
+                    WHERE sic.tenant_id = 1
+                      AND sic.stale_since IS NULL
+                      AND sic.deleted_at IS NULL
+                      AND sic.canonical_name IN (SELECT canonical FROM finding_agg)
+                    GROUP BY sic.canonical_name
+                ),
+                catalog_agg AS (
+                    SELECT LOWER(sc.canonical_name) AS lname,
+                           MIN(sc.categories::text) AS cats
+                    FROM operations.software_catalog sc
+                    WHERE (sc.tenant_id IS NULL OR sc.tenant_id = 1)
+                      AND LOWER(sc.canonical_name) IN (SELECT LOWER(canonical) FROM finding_agg)
+                    GROUP BY 1
+                )
+                SELECT fa.canonical,
+                       fa.publisher,
+                       fa.category,
+                       ca.cats AS catalog_categories,
+                       COALESCE(ia.device_count, 0) AS device_count,
+                       fa.latest
+                FROM finding_agg fa
+                LEFT JOIN install_agg ia ON ia.canonical_name = fa.canonical
+                LEFT JOIN catalog_agg ca ON ca.lname = LOWER(fa.canonical)
+                ORDER BY device_count DESC, fa.canonical
                 LIMIT 500
                 """,
             )
