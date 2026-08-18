@@ -5340,6 +5340,15 @@ def software_tech_checklist(request: HttpRequest) -> HttpResponse:
     # device (title-scope or publisher-scope). These may not have a
     # classifier finding (e.g. reject-only) but still belong on the
     # cleanup list.
+    #
+    # Split by scope instead of matching with OR. Measured 2026-08-18: with
+    # the OR, the planner could not use either side as an index condition and
+    # this statement took 21-38 s -- the dominant cost of the page.
+    # `ck_software_decisions_scope_key_xor` guarantees canonical_name and
+    # publisher are never both set, so two UNION ALL branches -- each a real
+    # equi-join -- cannot double-count. Same fix already proven in the
+    # /software/decisions/ queue (de046ee) and /software/user-risk/
+    # (c0b932a). Rewritten: 1.3 s for identical rows.
     decisions_sql = f"""
         SELECT d.client_id, c.slug, c.display_name,
                d.id AS device_id, d.canonical_hostname,
@@ -5353,22 +5362,48 @@ def software_tech_checklist(request: HttpRequest) -> HttpResponse:
                END AS reason,
                ('decision_' || sd.decision) AS finding_type,
                'medium' AS severity
-        FROM operations.software_installations_current sic
+        FROM operations.software_decisions sd
+        JOIN operations.software_installations_current sic
+          ON sic.tenant_id = sd.tenant_id
+         AND sic.canonical_name = sd.canonical_name
+         AND sic.deleted_at IS NULL
+         AND sic.stale_since IS NULL
         JOIN operations.devices d ON d.id = sic.device_id AND d.deleted_at IS NULL
         JOIN operations.clients c ON c.id = d.client_id AND c.deleted_at IS NULL
-        JOIN operations.software_decisions sd
-          ON sd.tenant_id = sic.tenant_id
-         AND sd.decision IN ('reject', 'investigate')
-         AND (
-              (sd.canonical_name <> '' AND sd.canonical_name = sic.canonical_name)
-           OR (sd.publisher <> ''
-               AND LOWER(sd.publisher) = LOWER(COALESCE(sic.publisher, '')))
-         )
-         AND (sd.device_id IS NULL OR sd.device_id = sic.device_id)
-         AND (sd.client_id IS NULL OR sd.client_id = sic.client_id)
-        WHERE sic.tenant_id = 1
-          AND sic.deleted_at IS NULL
-          AND sic.stale_since IS NULL
+        WHERE sd.tenant_id = 1
+          AND sd.decision IN ('reject', 'investigate')
+          AND sd.canonical_name <> ''
+          AND (sd.device_id IS NULL OR sd.device_id = sic.device_id)
+          AND (sd.client_id IS NULL OR sd.client_id = sic.client_id)
+          {client_where}
+
+        UNION ALL
+
+        SELECT d.client_id, c.slug, c.display_name,
+               d.id AS device_id, d.canonical_hostname,
+               d.device_role, d.os_group,
+               sic.canonical_name,
+               sic.publisher,
+               CASE sd.decision
+                   WHEN 'reject' THEN 'operator rejected'
+                   WHEN 'investigate' THEN 'operator flagged for investigation'
+                   ELSE 'operator decision'
+               END AS reason,
+               ('decision_' || sd.decision) AS finding_type,
+               'medium' AS severity
+        FROM operations.software_decisions sd
+        JOIN operations.software_installations_current sic
+          ON sic.tenant_id = sd.tenant_id
+         AND LOWER(sic.publisher) = LOWER(sd.publisher)
+         AND sic.deleted_at IS NULL
+         AND sic.stale_since IS NULL
+        JOIN operations.devices d ON d.id = sic.device_id AND d.deleted_at IS NULL
+        JOIN operations.clients c ON c.id = d.client_id AND c.deleted_at IS NULL
+        WHERE sd.tenant_id = 1
+          AND sd.decision IN ('reject', 'investigate')
+          AND sd.publisher <> ''
+          AND (sd.device_id IS NULL OR sd.device_id = sic.device_id)
+          AND (sd.client_id IS NULL OR sd.client_id = sic.client_id)
           {client_where}
     """
 
@@ -5376,7 +5411,9 @@ def software_tech_checklist(request: HttpRequest) -> HttpResponse:
         cur.execute("SET LOCAL operations.tenant_id = 1")
         cur.execute(findings_sql, client_params)
         finding_rows = cur.fetchall()
-        cur.execute(decisions_sql, client_params)
+        # decisions_sql now has two UNION ALL branches, each carrying its own
+        # {client_where}, so its parameters must repeat once per branch.
+        cur.execute(decisions_sql, client_params * 2)
         decision_rows = cur.fetchall()
 
     per_device: dict = {}

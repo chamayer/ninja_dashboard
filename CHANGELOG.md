@@ -131,6 +131,32 @@ All notable changes to this project follow [Semantic Versioning](https://semver.
 - Verified against production with and without a client filter; every row
   returned under a filter was correctly scoped to that client.
 
+## [0.119.13] — 2026-08-18 — /software/tech-checklist/ decision query fixed
+
+### Fixed
+
+- `/software/tech-checklist/`'s decision-cleanup query (`decisions_sql`)
+  matched `software_decisions` to installations with `OR (title match) OR
+  (publisher match)`, the same defect already fixed in
+  `/software/decisions/` (de046ee) and `/software/user-risk/` (c0b932a):
+  neither side of the OR could be used as an index condition. Measured
+  2026-08-18: 21–38 s, confirmed as the dominant cost of the page.
+  `ck_software_decisions_scope_key_xor` guarantees `canonical_name` and
+  `publisher` are never both set, so splitting into two `UNION ALL`
+  branches — each a real equi-join — cannot double-count: 1.3–2.4 s for
+  identical rows.
+- Verified with a combined client-and-role filter against the exact assembled
+  SQL: 42 correctly-scoped rows in 82 ms, confirming the doubled parameter
+  list (`client_params * 2`, one set per UNION ALL branch) is correct.
+
+### Notes
+
+- An earlier backlog note attributed this page's slowness to `findings_sql`
+  based on a truncated statement-shape key that had merged two different
+  queries under one 60-character prefix. Re-measured directly: `findings_sql`
+  alone is fast (under 1 s); `decisions_sql` was the actual cost. The note is
+  removed now that the real cause is fixed.
+
 ## [0.119.2] — 2026-08-17 — Capability permission checks
 
 ### Fixed
