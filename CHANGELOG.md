@@ -98,6 +98,39 @@ All notable changes to this project follow [Semantic Versioning](https://semver.
   still applies, and reads of `canonical_data` or of an unprojected key still
   fail with permission denied.
 
+## [0.119.12] — 2026-08-18 — /software/user-risk/ under the worker timeout
+
+### Fixed
+
+- `/software/user-risk/` took ~123 s and would 500 behind a gunicorn worker
+  timeout. Two defects, in the same query:
+  - `device_user` joined a CTE to `v_device_source_link` on
+    `external_id::integer = ninja_device_id`. PostgreSQL inlined the CTE into
+    a Nested Loop run once per user (4,542 times measured), each iteration
+    bitmap-scanning every link row for the Ninja source instance and applying
+    the cast as a Join Filter rather than an index condition — 28.3 million
+    rows removed by that filter. Forcing the link set to materialise once (`AS
+    MATERIALIZED`) before hash-joining drops this from 86 s to 4.6 s.
+  - `decision_items` matched `software_decisions` to installations with `OR
+    (title match) OR (publisher match)`, and the planner could not use either
+    side as an index condition: it built the full devices × decisions cross
+    product (5,453 × 254 rows), then filtered the OR afterward, removing 44.8
+    million rows. `software_decisions` has a XOR constraint guaranteeing
+    canonical_name and publisher are never both set, so splitting into two
+    `UNION ALL` branches — each a real equi-join — cannot double-count.
+    38.9 s → 1.9 s for identical rows.
+  - Combined: ~123 s → ~9 s (no client filter) / ~6 s (filtered).
+
+### Notes
+
+- Same family as the `/devices/` and `/software/decisions/` fixes: an
+  expensive relation evaluated once per row instead of once per page.
+- The publisher-match `OR` pattern also appears in
+  `/software/tech-checklist/`'s decision query; not fixed here — recorded in
+  the backlog since that page survives at 23.6 s cold / 1.9 s warm.
+- Verified against production with and without a client filter; every row
+  returned under a filter was correctly scoped to that client.
+
 ## [0.119.2] — 2026-08-17 — Capability permission checks
 
 ### Fixed

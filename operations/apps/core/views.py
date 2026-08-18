@@ -4607,14 +4607,28 @@ def software_user_risk(request: HttpRequest) -> HttpResponse:
             FROM operations.ninja_device_detail_current_shadow ds
             WHERE ds.last_user IS NOT NULL AND TRIM(ds.last_user) <> ''
         ),
-        device_user AS (
-            SELECT DISTINCT dl.device_id AS ops_device_id, lu.last_user, lu.snapshot_at
-            FROM latest_user lu
-            JOIN operations.v_device_source_link dl
-              ON dl.external_id ~ '^\\d+$'
-             AND dl.external_id::integer = lu.ninja_device_id
+        -- MATERIALIZED is load-bearing, not stylistic. Without it PostgreSQL
+        -- inlines this CTE into a Nested Loop run once per latest_user row
+        -- (4,542 times measured), each iteration bitmap-scanning every
+        -- entity_source_links row for the ninja source instance and filtering
+        -- by `external_id::integer = device_id` as a Join Filter rather than
+        -- an index condition, because nothing indexes that cast. Measured
+        -- 2026-08-18: 28.3 million rows removed by that filter, 86 s total.
+        -- Forcing this set to materialise once (~14,788 rows, cast and
+        -- filtered a single time) then hash-joining against latest_user drops
+        -- it to 4.6 s for identical results.
+        ninja_links AS MATERIALIZED (
+            SELECT dl.device_id, dl.external_id::integer AS ninja_device_id
+            FROM operations.v_device_source_link dl
             JOIN operations.sources s ON s.id = dl.source_id
-            WHERE dl.tenant_id = 1 AND LOWER(s.name) = 'ninja'
+            WHERE dl.tenant_id = 1
+              AND LOWER(s.name) = 'ninja'
+              AND dl.external_id ~ '^\\d+$'
+        ),
+        device_user AS (
+            SELECT DISTINCT nl.device_id AS ops_device_id, lu.last_user, lu.snapshot_at
+            FROM latest_user lu
+            JOIN ninja_links nl ON nl.ninja_device_id = lu.ninja_device_id
         ),
         finding_items AS (
             SELECT d.id AS device_id, d.client_id,
@@ -4627,25 +4641,49 @@ def software_user_risk(request: HttpRequest) -> HttpResponse:
               AND e.finding_type <> 'whitelist_suggestion'
               {client_where}
         ),
+        -- Split by scope instead of matching with OR. `sd` was joined to
+        -- `sic` on the OR of a title match or a publisher match, and the
+        -- planner could not use either as an index condition: it built the
+        -- full devices x software_decisions cross product (5,453 x 254 rows
+        -- measured), hashed that, joined it to all 530k installations, then
+        -- applied the OR as a Join Filter removing 44.8 million rows.
+        -- `ck_software_decisions_scope_key_xor` guarantees canonical_name and
+        -- publisher are never both set, so splitting into two UNION ALL
+        -- branches -- each a real equi-join -- cannot double-count. Measured
+        -- 2026-08-18: 1.9 s against 38.9 s for identical rows.
         decision_items AS (
-            SELECT d.id AS device_id, d.client_id,
-                   sic.canonical_name,
+            SELECT d.id AS device_id, d.client_id, sic.canonical_name,
                    ('decision_' || sd.decision) AS kind
-            FROM operations.software_installations_current sic
+            FROM operations.software_decisions sd
+            JOIN operations.software_installations_current sic
+              ON sic.tenant_id = sd.tenant_id
+             AND sic.canonical_name = sd.canonical_name
+             AND sic.deleted_at IS NULL
+             AND sic.stale_since IS NULL
             JOIN operations.devices d ON d.id = sic.device_id AND d.deleted_at IS NULL
-            JOIN operations.software_decisions sd
-              ON sd.tenant_id = sic.tenant_id
-             AND sd.decision IN ('reject', 'investigate')
-             AND (
-                 (sd.canonical_name <> '' AND sd.canonical_name = sic.canonical_name)
-              OR (sd.publisher <> ''
-                  AND LOWER(sd.publisher) = LOWER(COALESCE(sic.publisher, '')))
-             )
-             AND (sd.device_id IS NULL OR sd.device_id = sic.device_id)
-             AND (sd.client_id IS NULL OR sd.client_id = sic.client_id)
-            WHERE sic.tenant_id = 1
-              AND sic.deleted_at IS NULL
-              AND sic.stale_since IS NULL
+            WHERE sd.tenant_id = 1
+              AND sd.decision IN ('reject', 'investigate')
+              AND sd.canonical_name <> ''
+              AND (sd.device_id IS NULL OR sd.device_id = sic.device_id)
+              AND (sd.client_id IS NULL OR sd.client_id = sic.client_id)
+              {client_where}
+
+            UNION ALL
+
+            SELECT d.id AS device_id, d.client_id, sic.canonical_name,
+                   ('decision_' || sd.decision) AS kind
+            FROM operations.software_decisions sd
+            JOIN operations.software_installations_current sic
+              ON sic.tenant_id = sd.tenant_id
+             AND LOWER(sic.publisher) = LOWER(sd.publisher)
+             AND sic.deleted_at IS NULL
+             AND sic.stale_since IS NULL
+            JOIN operations.devices d ON d.id = sic.device_id AND d.deleted_at IS NULL
+            WHERE sd.tenant_id = 1
+              AND sd.decision IN ('reject', 'investigate')
+              AND sd.publisher <> ''
+              AND (sd.device_id IS NULL OR sd.device_id = sic.device_id)
+              AND (sd.client_id IS NULL OR sd.client_id = sic.client_id)
               {client_where}
         ),
         all_items AS (
@@ -4669,8 +4707,9 @@ def software_user_risk(request: HttpRequest) -> HttpResponse:
         ORDER BY du.last_user, d.canonical_hostname, ai.kind, ai.canonical_name
     """
 
-    # client_where appears 3× in the SQL — client_params must repeat.
-    run_params = client_params * 3 if client_params else []
+    # client_where appears 4× in the SQL (finding_items, both decision_items
+    # branches, the final WHERE) — client_params must repeat.
+    run_params = client_params * 4 if client_params else []
 
     with transaction.atomic(), connection.cursor() as cur:
         cur.execute("SET LOCAL operations.tenant_id = 1")
