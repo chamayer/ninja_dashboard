@@ -24,6 +24,7 @@ from django.utils.text import slugify
 from django.views.decorators.http import require_GET, require_POST
 
 from . import capability as capability_evidence
+from . import category as category_evidence
 from .client_workspace import build_client_directory, build_client_workspace
 from .csv_export import csv_response, wants_csv
 from .decorators import require_admin
@@ -4208,6 +4209,18 @@ def software_detail(request: HttpRequest, name: str) -> HttpResponse:
         for product_uuid in capability_product_uuids
     ]
     can_curate_capability = request.user.has_perm(capability_evidence.CURATOR_PERMISSION)
+
+    # Descriptive category (migration 104) -- same product-identity shape as
+    # capability above, separate table, separate permission, no alertable axis.
+    category_schema_ready = category_evidence.schema_ready()
+    category_product_uuids = category_evidence.products_for_title(canonical_name)
+    category_by_product = category_evidence.effective_for_products(category_product_uuids)
+    category_product_rows = [
+        {"product_uuid": product_uuid, "rows": category_by_product.get(product_uuid, [])}
+        for product_uuid in category_product_uuids
+    ]
+    can_curate_category = request.user.has_perm(category_evidence.CURATOR_PERMISSION)
+
     # Authorizing a product is a different decision from settling what it is,
     # so it carries its own permission and its own control.
     can_authorize_software = request.user.has_perm(capability_evidence.AUTHORIZE_PERMISSION)
@@ -4278,6 +4291,9 @@ def software_detail(request: HttpRequest, name: str) -> HttpResponse:
             "capability_schema_ready": capability_schema_ready,
             "capability_product_rows": capability_product_rows,
             "can_curate_capability": can_curate_capability,
+            "category_schema_ready": category_schema_ready,
+            "category_product_rows": category_product_rows,
+            "can_curate_category": can_curate_category,
             "can_authorize_software": can_authorize_software,
             "authorization_clients": authorization_clients,
             "client_decisions": client_decisions,
@@ -4349,6 +4365,68 @@ def software_capability_decide(request: HttpRequest) -> HttpResponse:
     messages.success(
         request,
         f"Capability {'confirmed' if polarity else 'rejected'} for the selected product identity.",
+    )
+    return redirect(_safe_next(request, "software_page"))
+
+
+@login_required
+@require_POST
+@transaction.atomic
+def software_category_decide(request: HttpRequest) -> HttpResponse:
+    """Confirm or reject global descriptive category for one product identity.
+
+    Mirrors software_capability_decide exactly. Never touches an
+    unauthorized_* finding or any alerting path -- migration 104's
+    v_product_category_effective has no alertable axis at all.
+    """
+    if not request.user.has_perm(category_evidence.CURATOR_PERMISSION):
+        messages.error(request, "Platform-curator permission is required for category decisions.")
+        return redirect(_safe_next(request, "software_page"))
+
+    product_uuid = (request.POST.get("product_uuid") or "").strip()
+    category = (request.POST.get("category") or "").strip()
+    decision = (request.POST.get("decision") or "").strip()
+    rationale = (request.POST.get("rationale") or "").strip()
+    if decision not in {"confirm", "reject"} or not product_uuid or not category:
+        messages.error(request, "A product identity, category, and confirm or reject decision are required.")
+        return redirect(_safe_next(request, "software_page"))
+    try:
+        product_id = uuid.UUID(product_uuid)
+    except ValueError:
+        messages.error(request, "Invalid product identity.")
+        return redirect(_safe_next(request, "software_page"))
+
+    polarity = decision == "confirm"
+    try:
+        with transaction.atomic():
+            category_evidence.confirm(
+                str(product_id), category, polarity, request.user.get_username(), rationale
+            )
+    except (category_evidence.CategorySchemaUnavailable, IntegrityError, ValueError) as exc:
+        messages.error(request, str(exc))
+        return redirect(_safe_next(request, "software_page"))
+
+    AuditLog.objects.create(
+        tenant_id=1,
+        actor=request.user,
+        actor_kind=AuditLog.ActorKind.USER,
+        source=AuditLog.Source.UI,
+        action="software_category.confirm" if polarity else "software_category.reject",
+        entity_type="catalog.product_category",
+        entity_id=product_id,
+        before_state={},
+        after_state={
+            "product_uuid": str(product_id),
+            "category": category,
+            "polarity": polarity,
+            "rationale": rationale,
+        },
+        ip_address=request.META.get("REMOTE_ADDR") or None,
+        user_agent=(request.META.get("HTTP_USER_AGENT") or "")[:2000],
+    )
+    messages.success(
+        request,
+        f"Category {'confirmed' if polarity else 'rejected'} for the selected product identity.",
     )
     return redirect(_safe_next(request, "software_page"))
 

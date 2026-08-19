@@ -73,6 +73,48 @@ show up as broken until something adds load to it. Live authenticated
 verification (not just a route/login check) is what caught this, immediately
 after being asked directly whether the live page had actually been checked.
 
+## COMPLETED TASK — Category confirm/reject review (0.120.4)
+
+**Status:** implemented, rehearsed against production (write path only, in a
+rolled-back transaction), pending commit/push approval.
+
+**Goal:** `catalog.category_assertion_operator` (migration 104) had no UI at
+all — every category assertion was stuck at "candidate" forever. Capability
+already has a full confirm/reject loop (`software_capability_decide`,
+ADR-0018); category needed the same shape on its own axis.
+
+**Decision:** dedicated `curate_software_category` permission, not reuse of
+`curate_software_capability` — same reasoning as why `authorize_software_product`
+got its own permission rather than folding into the capability one: category
+is a different decision from capability, so it gets its own grant, even
+though (unlike capability) it can never alert. `apps/core/category.py` mirrors
+`capability.py`'s write boundary exactly (operator INSERTs, only ever
+withdraws via column-restricted UPDATE) but drops the `alertable` field
+entirely, since `v_product_category_effective` has no such axis.
+
+**Scope:** `apps/core/category.py` (new), `apps/core/views.py`
+(`software_category_decide`, category context in `software_detail`),
+`apps/core/models.py` (new permission on `SoftwareCatalog.Meta`),
+migration `0144_category_review.py` (permission only, no DDL — same
+`SeparateDatabaseAndState` avoidance 0137 documents for capability),
+`config/urls.py`, `templates/software_detail.html` (new "Category" card).
+
+**Validation:** `python manage.py check` and `makemigrations --check
+--dry-run` clean (migration matches model state exactly); template loads;
+`ruff check` on all new/changed files: 0 new findings (`category.py`,
+migration, `urls.py` fully clean; `views.py` unchanged at 50 pre-existing;
+`models.py`'s 4 pre-existing DJ008 findings untouched). Rehearsed the actual
+confirm/withdraw SQL against production in a rolled-back transaction on a
+real row (google chrome / browser): candidate → confirmed → candidate,
+exactly as designed. No live UI write was exercised (would have left a real
+row in production without a specific reason to), only the read-only render
+path and the SQL logic in isolation.
+
+**Next action:** request commit/push approval; verify the live page renders
+the new Category card and (if the user wants) exercise one real confirm/
+reject through the UI as the deployed admin user, who is a superuser and so
+bypasses the new permission gate.
+
 ## CURRENT TASK — Cross-client serial drill-through
 
 **Status:** deployed as 0.119.9 / `7384e6e`.

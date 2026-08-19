@@ -3373,6 +3373,10 @@ class SoftwareCatalog(models.Model):
                 "curate_software_capability",
                 "Can confirm or reject global software capability claims",
             ),
+            (
+                "curate_software_category",
+                "Can confirm or reject global software category claims",
+            ),
         )
         constraints = (
             models.UniqueConstraint(

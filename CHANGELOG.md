@@ -2,6 +2,18 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.120.4] — 2026-08-19 — Category confirm/reject review
+
+### Added
+
+- Descriptive category (migration 104) now has the same operator confirm/
+  reject loop capability already had: a "Category" card on the software
+  title-detail page, a dedicated `curate_software_category` permission
+  (global truth, same reasoning as capability's own dedicated permission),
+  and a write path (`apps/core/category.py`, `software_category_decide`)
+  that mirrors the capability one exactly. Never touches alerting — category
+  has no alertable axis at all.
+
 ## [0.120.3] — 2026-08-19 — Fix Products page 500 from 0.120.2
 
 ### Fixed
