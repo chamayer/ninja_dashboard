@@ -2,6 +2,25 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.120.7] — 2026-08-19 — Fix /orgs/&lt;client&gt;/ 500 and simplify manual-assign
+
+### Fixed
+
+- `/orgs/<client>/` returned HTTP 500 for every client: a query in
+  `org_index` was missing the `f` string prefix, so `{active_device_days}`
+  was sent to Postgres literally instead of interpolated, producing an
+  invalid interval literal. Pre-existing bug, unrelated to today's other
+  changes — swept every other `{active_device_days}`/`{source_delay_hours}`/
+  `{patch_activity_days}` interpolation site in the file and confirmed this
+  was the only one missing its `f` prefix.
+
+### Changed
+
+- The manual-assign control (0.120.5/0.120.6) simplified further per
+  feedback: "Is this also [x]? Yes/No" replaced with a plain dropdown +
+  Apply button. The per-row list of machine-suggested evidence (each with
+  its own Confirm/Reject) is unchanged.
+
 ## [0.120.6] — 2026-08-19 — Friendlier wording on the manual-assign control
 
 ### Changed

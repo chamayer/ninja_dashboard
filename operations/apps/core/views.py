@@ -968,7 +968,7 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
 
                 # Presence per platform per scope.
                 cur.execute(
-                    """
+                    f"""
                     SELECT ap.platform, ap.entity_type, od.device_role AS scope,
                            COUNT(DISTINCT ap.device_id)::int AS present,
                            MAX(ap.last_observed_at) AS last_seen

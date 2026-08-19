@@ -147,15 +147,13 @@
                         {% csrf_token %}
                         <input type="hidden" name="product_uuid" value="{{ product.product_uuid }}">
                         <input type="hidden" name="next" value="{{ request.get_full_path }}">
-                        <span class="muted">Is this also</span>
+                        <input type="hidden" name="decision" value="confirm">
                         <select name="capability" style="font-size:0.75rem;">
                             {% for key, label in product.missing %}
-                            <option value="{{ key }}">{{ label|lower }}</option>
+                            <option value="{{ key }}">{{ label }}</option>
                             {% endfor %}
                         </select>
-                        <span class="muted">?</span>
-                        <button type="submit" name="decision" value="confirm" style="font-size:0.75rem;">Yes</button>
-                        <button type="submit" name="decision" value="reject" style="font-size:0.75rem;">No</button>
+                        <button type="submit" style="font-size:0.75rem;">Apply</button>
                     </form>
                     {% endif %}
                 </div>
@@ -204,15 +202,13 @@
                         {% csrf_token %}
                         <input type="hidden" name="product_uuid" value="{{ product.product_uuid }}">
                         <input type="hidden" name="next" value="{{ request.get_full_path }}">
-                        <span class="muted">Is this also</span>
+                        <input type="hidden" name="decision" value="confirm">
                         <select name="category" style="font-size:0.75rem;">
                             {% for key, label in product.missing %}
-                            <option value="{{ key }}">{{ label|lower }}</option>
+                            <option value="{{ key }}">{{ label }}</option>
                             {% endfor %}
                         </select>
-                        <span class="muted">?</span>
-                        <button type="submit" name="decision" value="confirm" style="font-size:0.75rem;">Yes</button>
-                        <button type="submit" name="decision" value="reject" style="font-size:0.75rem;">No</button>
+                        <button type="submit" style="font-size:0.75rem;">Apply</button>
                     </form>
                     {% endif %}
                 </div>
