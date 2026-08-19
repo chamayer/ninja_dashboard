@@ -2,6 +2,17 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.120.1] — 2026-08-19 — Wire Winget/Chocolatey tags into capability evidence
+
+### Added
+
+- `catalog.capability_tag_rule` (migration 106) maps community package tags
+  (`rdp`, `remote-control`, `remote-desktop`, `remote-access`, `chromoting`) to
+  the `remote_access` capability. The capability projector now runs a second,
+  independent evidence pass over Winget/Chocolatey tags, writing non-alertable
+  candidate evidence (`winget_tag`/`chocolatey_tag`, seeded in migration 093
+  but previously unused). Shadow mode only — nothing here can raise a finding.
+
 ## [0.119.9] — 2026-08-17 — Cross-client serial conflict drill-through
 
 ### Fixed

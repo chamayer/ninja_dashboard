@@ -20,16 +20,28 @@ Phase 1 is shadow mode: assertions are recorded and nothing enforces them.
 `unauthorized_*` emission is unchanged until Phase 4, which needs its own
 approval after shadow-mode results.
 
+Two independent evidence paths, run as two independent passes in
+`project_with_cursor`: anchored title/publisher patterns from
+`catalog.capability_rule` (`vetted_rule`, `publisher_rule`), and community
+package tags from `catalog.capability_tag_rule` (migration 106; `winget_tag`,
+`chocolatey_tag`). They are kept apart rather than unioned into one query so a
+change to one cannot regress the other -- `capability_rule`'s own
+`ck_capability_rule_source` CHECK forbids it from carrying the tag source keys
+at all, which is *why* there are two tables instead of one.
+
 Withdrawal safety is the sharpest edge here, and it turns on one distinction:
 a source that **loaded its rules and matched nothing** must withdraw its stale
 assertions, while a rule set that **failed to load** must withdraw nothing at
 all. Conflating them either strands evidence that no rule supports, or wipes
-the whole corpus on a bad read.
+the whole corpus on a bad read. Each pass carries its own guard, so an empty
+(or not-yet-migrated) tag_rule table cannot block the pattern-rule pass and
+vice versa.
 
 So "evaluated" means *rules loaded*, computed independently of whether any
 product matched, and withdrawal is scoped to those sources. The empty-rule
-guard in `project_with_cursor` is the other half: zero enabled rules is treated
-as a failed or empty load and the run returns without touching anything.
+guard in each pass of `project_with_cursor` is the other half: zero enabled
+rules for that pass is treated as a failed or empty load and that pass returns
+without touching anything.
 """
 
 from __future__ import annotations
@@ -145,6 +157,88 @@ UPDATE catalog.capability_assertion_machine m
 """
 
 
+# Second, independent evidence path: community package tags matched through
+# catalog.capability_tag_rule (migration 106; data, ADR-0012 section 6 -- never
+# a Python dict). Kept fully separate from the compute/write/withdraw above
+# rather than unioned into one query, so a change here cannot regress the
+# vetted_rule/publisher_rule path already running in production -- the same
+# reason category_match.py's tag matching lives in its own module rather than
+# folded into this one.
+#
+# winget_tag/chocolatey_tag are seeded in capability_source (093) with
+# may_alert=FALSE. The effective view already resolves that correctly via its
+# join to capability_source, so nothing below needs to know about alerting at
+# all -- same non-authority discipline as the rule-based path above.
+_TAG_OWNED_SOURCES = ("winget_tag", "chocolatey_tag")
+
+_TAG_COMPUTE_SQL = """
+CREATE TEMP TABLE capability_tag_desired ON COMMIT DROP AS
+WITH matched AS (
+    SELECT DISTINCT
+           p.product_uuid,
+           r.capability,
+           CASE ss.source
+               WHEN 'winget'     THEN 'winget_tag'
+               WHEN 'chocolatey' THEN 'chocolatey_tag'
+           END AS source_key,
+           LOWER(tag_val) AS tag
+      FROM operations.safety_signal ss
+      JOIN operations.software_installations_current sic
+        ON LOWER(sic.canonical_name) = LOWER(ss.canonical_name)
+       AND sic.tenant_id = ss.tenant_id
+       AND sic.deleted_at IS NULL
+       AND sic.stale_since IS NULL
+      JOIN catalog.software_versions sv ON sv.id = sic.software_version_id
+      JOIN catalog.products p ON p.id = sv.product_id
+      CROSS JOIN LATERAL jsonb_array_elements_text(ss.details->'tags') AS tag_val
+      JOIN catalog.capability_tag_rule r ON r.tag = LOWER(tag_val) AND r.enabled
+     WHERE ss.signal_type = 'category'
+       AND ss.source IN ('winget', 'chocolatey')
+)
+-- Same collapse reasoning as the rule-based compute above: several tags on
+-- one title routinely map to the same capability, and without this the
+-- upsert would try to update the same unique row twice in one statement.
+SELECT product_uuid, capability, source_key,
+       0.700::numeric(4,3) AS confidence,
+       'tag_match' AS evidence_kind,
+       string_agg(DISTINCT tag, ',' ORDER BY tag) AS evidence_ref
+  FROM matched
+ GROUP BY product_uuid, capability, source_key
+"""
+
+_TAG_WRITE_SQL = """
+INSERT INTO catalog.capability_assertion_machine
+    (product_uuid, capability, source_key, confidence,
+     evidence_kind, evidence_ref, matcher_version)
+SELECT d.product_uuid, d.capability, d.source_key, d.confidence,
+       d.evidence_kind, d.evidence_ref, %s
+  FROM capability_tag_desired d
+ON CONFLICT (product_uuid, capability, source_key)
+    WHERE withdrawn_at IS NULL
+DO UPDATE SET
+    last_observed_at = now(),
+    confidence       = EXCLUDED.confidence,
+    evidence_kind    = EXCLUDED.evidence_kind,
+    evidence_ref     = EXCLUDED.evidence_ref,
+    matcher_version  = EXCLUDED.matcher_version
+"""
+
+_TAG_WITHDRAW_SQL = """
+UPDATE catalog.capability_assertion_machine m
+   SET withdrawn_at     = now(),
+       withdrawn_reason = 'no longer matched by ' || m.source_key
+                          || ' tag rules (' || %s || ')'
+ WHERE m.withdrawn_at IS NULL
+   AND m.source_key = ANY(%s::text[])
+   AND NOT EXISTS (
+       SELECT 1 FROM capability_tag_desired d
+        WHERE d.product_uuid = m.product_uuid
+          AND d.capability   = m.capability
+          AND d.source_key   = m.source_key
+   )
+"""
+
+
 def run_once() -> int:
     # Imported here rather than at module scope so the projector's SQL and
     # control flow can be exercised against a disposable Postgres without
@@ -173,6 +267,12 @@ def _project() -> tuple[int, int, int, list[str]]:
 def project_with_cursor(cur) -> tuple[int, int, int, list[str]]:
     """The whole projection, including its guards, against one cursor.
 
+    Two independent passes -- pattern rules, then tag rules -- each with its
+    own empty-rule guard, so an empty (or not-yet-migrated) tag_rule table
+    cannot block the pattern-rule path and vice versa. Combined totals are
+    returned; each pass's withdrawal is scoped only to the sources it owns,
+    same as before this was split in two.
+
     Separated from `_project` so the control flow -- not just the SQL -- is
     executable in tests. The empty-rule guard in particular is the difference
     between "matched nothing" and "failed to load", and asserting its condition
@@ -181,47 +281,74 @@ def project_with_cursor(cur) -> tuple[int, int, int, list[str]]:
     Must run inside a transaction: `_COMPUTE_SQL` builds a TEMP TABLE ...
     ON COMMIT DROP, so an autocommit connection would drop it before the write.
     """
+    written = 0
+    withdrawn = 0
+    rules = 0
+    evaluated: list[str] = []
+
     cur.execute(
         "SELECT count(*) FROM catalog.capability_rule "
         "WHERE enabled AND source_key = ANY(%s::text[])",
         (list(_OWNED_SOURCES),),
     )
-    rules = int(cur.fetchone()[0])
+    rule_count = int(cur.fetchone()[0])
 
     # A rule table that loaded as empty is indistinguishable from one that
     # matched nothing, and treating the two the same would withdraw every
     # assertion this projector has ever made. Refuse instead.
-    if rules == 0:
+    if rule_count == 0:
         log.warning(
-            "capability_match: no enabled rules for %s -- skipping the run "
-            "rather than withdrawing existing evidence",
+            "capability_match: no enabled rules for %s -- skipping the "
+            "pattern-rule pass rather than withdrawing existing evidence",
             ", ".join(_OWNED_SOURCES),
         )
-        return 0, 0, 0, []
+    else:
+        # Sources whose rules LOADED, not sources that produced matches.
+        #
+        # Deriving this from the output would mean a source whose rules all
+        # stopped matching never withdrew anything: its former assertions
+        # would stay current forever, asserting a capability no rule
+        # supports. A successful zero-match evaluation and a failed
+        # evaluation must be distinguishable, and this is the line between
+        # them -- the query below is what "the rules loaded" means, and the
+        # `rule_count == 0` guard above is what "the load failed or the
+        # table is empty" means.
+        cur.execute(
+            "SELECT DISTINCT source_key FROM catalog.capability_rule "
+            "WHERE enabled AND source_key = ANY(%s::text[]) ORDER BY source_key",
+            (list(_OWNED_SOURCES),),
+        )
+        rule_evaluated = [row[0] for row in cur.fetchall()]
 
-    # Sources whose rules LOADED, not sources that produced matches.
-    #
-    # Deriving this from the output would mean a source whose rules all
-    # stopped matching never withdrew anything: its former assertions would
-    # stay current forever, asserting a capability no rule supports. A
-    # successful zero-match evaluation and a failed evaluation must be
-    # distinguishable, and this is the line between them -- the query below
-    # is what "the rules loaded" means, and the `rules == 0` guard above is
-    # what "the load failed or the table is empty" means.
-    cur.execute(
-        "SELECT DISTINCT source_key FROM catalog.capability_rule "
-        "WHERE enabled AND source_key = ANY(%s::text[]) ORDER BY source_key",
-        (list(_OWNED_SOURCES),),
-    )
-    evaluated = [row[0] for row in cur.fetchall()]
+        cur.execute(_COMPUTE_SQL, (list(_OWNED_SOURCES),))
+        cur.execute(_WRITE_SQL, (MATCHER_VERSION,))
+        written += cur.rowcount or 0
+        cur.execute(_WITHDRAW_SQL, (MATCHER_VERSION, rule_evaluated))
+        withdrawn += cur.rowcount or 0
 
-    cur.execute(_COMPUTE_SQL, (list(_OWNED_SOURCES),))
+        rules += rule_count
+        evaluated += rule_evaluated
 
-    cur.execute(_WRITE_SQL, (MATCHER_VERSION,))
-    written = cur.rowcount or 0
+    cur.execute("SELECT count(*) FROM catalog.capability_tag_rule WHERE enabled")
+    tag_count = int(cur.fetchone()[0])
 
-    cur.execute(_WITHDRAW_SQL, (MATCHER_VERSION, evaluated))
-    withdrawn = cur.rowcount or 0
+    if tag_count == 0:
+        log.warning(
+            "capability_match: no enabled capability_tag_rule rows -- "
+            "skipping the tag-rule pass rather than withdrawing existing "
+            "evidence"
+        )
+    else:
+        tag_evaluated = list(_TAG_OWNED_SOURCES)
+
+        cur.execute(_TAG_COMPUTE_SQL)
+        cur.execute(_TAG_WRITE_SQL, (MATCHER_VERSION,))
+        written += cur.rowcount or 0
+        cur.execute(_TAG_WITHDRAW_SQL, (MATCHER_VERSION, tag_evaluated))
+        withdrawn += cur.rowcount or 0
+
+        rules += tag_count
+        evaluated += tag_evaluated
 
     log.info(
         "Capability projection: %d rule(s), %d written, %d withdrawn, sources=%s",

@@ -1,38 +1,89 @@
 # Active root implementation plan
 
-## CURRENT TASK — Identity serial quality and cross-client review
+## COMPLETED TASK — Wire winget_tag/chocolatey_tag into the capability model
 
-**Status:** release prepared as 0.119.7; commit, push, and coupled deploy
-authorized.
+**Status:** implemented and rehearsed against production 2026-08-19; committed
+and pushed with the coupled Portainer redeploy.
 
-**Goal:** move explicit placeholder serial values from runtime literals into one
-Operations-owned registry, and surface a usable serial shared across clients as
-a review finding on every affected device. Neither condition may create an
-automatic cross-client merge.
+**Goal:** two items flagged during the general-category work (migration 104):
+(1) an `ingest/main.py` route bug reported as `\run\intel-lolrmm` — on
+inspection this route already uses forward slashes; nothing to fix, and a full
+sweep of every `self.path ==` comparison in the file found no sibling bug.
+(2) `catalog.capability_source` (093) seeded `winget_tag`/`chocolatey_tag`
+rows (`authority_class='community_tag'`, `may_alert=FALSE`) that nothing ever
+wrote evidence for, because `catalog.capability_rule`'s own
+`ck_capability_rule_source` CHECK restricts it to `('vetted_rule',
+'publisher_rule')` — a rule there is a title/publisher pattern, not a tag.
 
-**Scope:** `ingest/normalize.py`, source/resolver wiring and serial findings,
-one raw SQL registry migration, one Operations state/finding-type migration,
-admin state, focused tests, and this plan.
+**Scope:** `sql/migrations/106_capability_tag_rule.sql` (new
+`catalog.capability_tag_rule`, seeded from the same real tag vocabulary
+measured for migration 104 — only `remote_access` has evidence-backed tags:
+`rdp`, `remote-control`, `remote-desktop`, `remote-access`, `chromoting`);
+`ingest/intel/capability_match.py` (a second, fully independent
+compute/write/withdraw pass, each guarded separately so an empty tag-rule
+table cannot block the existing pattern-rule pass or vice versa — the existing
+`vetted_rule`/`publisher_rule` SQL is untouched); `ingest/tests/
+test_capability_phase1.py` and `test_capability_phase1_postgres.py` (new
+tests for the tag pass; fixture now also applies migration 106 and the
+minimal `operations.safety_signal` / `software_installations_current` /
+`catalog.software_versions` shape the tag join reads).
 
-**Decisions:** missing serial remains silent. Structural quality checks (blank,
-short, repeated characters) remain code; enumerated rejected values are data.
-Cross-client sharing is distinct from the existing same-client `shared_serial`
-group finding: it is a per-device `cross_client_serial` review signal, with
-the other clients/devices retained as evidence.
+**Decision:** kept the tag path as a second independent pass rather than
+unioning it into the existing rule-based query, so a change here cannot
+regress the vetted_rule/publisher_rule matching already running in
+production — the same reason `category_match.py`'s tag matching lives in its
+own module. The effective view (`v_product_capability_effective`) needed no
+change: it already resolves `may_alert` per source_key via its join to
+`capability_source`, so these two sources surface correctly as non-alertable
+candidates with zero view-level changes.
 
-**Validation:** focused serial-quality and resolver tests, Django migration
-check, changed-module compilation, and `git diff --check`. No commit, push,
-deployment, or production query is in scope.
+**Validation:** rehearsed the full migration + compute + write + effective-view
+resolution against production in a rolled-back transaction — exactly 3 real
+products match (anydesk, teamviewer, chrome remote desktop host), all
+`remote_access`; anydesk/teamviewer already have `vetted_rule` coverage (pure
+corroboration), chrome remote desktop host gets a genuinely new
+`winget_tag` candidate; confirmed 0 rows resolve `may_alert=TRUE` from these
+two sources. `ingest/tests/test_capability_phase1.py` passes locally (44/44).
+The Postgres integration suite (`test_capability_phase1_postgres.py`) could
+not be run locally — Docker Desktop's daemon was unresponsive on this
+workstation (`docker ps` timed out even after killing stray client
+processes) and a restart was in progress when the user redirected to deploy
+directly on the strength of the production rehearsal. `py_compile` clean on
+all three changed/added files.
 
-**Checkpoint / next action:** raw migration 102 creates and seeds the registry;
-Operations migration 0141 declares the editor and finding type. Ingest loads
-the registry before matching, keeps structural checks in code, and emits a
-per-device `cross_client_serial` finding from current source serial evidence
-(including Ninja service tags). Focused unit/ratchet tests pass; Django check
-and migration-state check pass; the PostgreSQL behavioral test is added but not
-run locally under the reduced-test instruction. Version and changelog are
-updated for 0.119.7. Next action is commit, push, coupled redeploy, then
-simple migration/health validation.
+**Next action:** none — deployed. If the local Postgres integration suite is
+later run, it should pass unmodified against this code; the test file changes
+were written and reasoned through carefully but not executed locally.
+
+## CURRENT TASK — Cross-client serial drill-through
+
+**Status:** deployed as 0.119.9 / `7384e6e`.
+
+**Goal:** make the deployed per-device cross-client serial findings drill from a
+device to their full evidence group in the existing Issues queue. Neither the
+new registry nor this display work may create an automatic cross-client merge.
+
+**Scope:** the Operations finding-type registry/model/migration, device-detail
+link, Issues queue, focused tests, and this plan. The deployed ingest detector
+and serial-quality registry are unchanged.
+
+**Decision:** a finding type can declare an evidence key for group
+drill-through. Empty preserves device scope; `cross_client_serial` declares
+`serial`. The view reads this registry value and validates it before filtering,
+so no arbitrary JSON field is accepted from a URL.
+
+**Validation:** focused Operations request/model/template tests, Django
+migration check, changed-module compilation, and `git diff --check`. No
+commit, push, deployment, or production query is in scope.
+
+**Checkpoint / next action:** production has two per-device findings for each
+serial conflict, but a device-page click uses a hidden `subject_id` filter and
+the Issues queue renders no cross-client-serial evidence. Local migration 0143
+adds a data-owned grouping key and configures `cross_client_serial = serial`;
+the generic link opens the complete group, validates the registered key, and
+makes the scope and evidence visible. Focused checks pass. Migration 0143 is
+applied; both services are healthy. Production confirms the seeded registry
+key and a sample serial group resolves to two findings, devices, and clients.
 
 ## Supplemental task — Agent-compliance stale-age default
 
@@ -458,6 +509,41 @@ express "permitted but not mandatory", which Contract 3 assumed away.
 Also observed: `requirement_profile_items` carries duplicate rows (Ruby
 Staffing, UTA list Ninja and SentinelOne twice) and the `A.M. Rose policy`
 profile has no platforms at all.
+
+### Checkpoint 2026-08-14 — deployed, both gates still off
+
+Released and verified in production, in order: `3c706d1` (0.117.0, classifier
+job + ratchet), `14df63f`/`f2cc00b` (migration 098, capability conflicts),
+`2044bcf` (0.118.0, migrations 099 + 0139, authorization), `a224b20` (0.119.0,
+migration 100, endpoint security), `1563fb6` (0.119.1, migration 101, matcher
+index).
+
+Current measured state:
+
+| | |
+| --- | --- |
+| capability conflicts | **0** |
+| `endpoint_security` alertable | **36** (was 0) |
+| `remote_access` / `rmm` alertable | 112 / 1 |
+| `platform_product_map` rows | 22 |
+| `product_authorizations` rows | **0** — held deliberately |
+| finding delta if enforcement were on | 6,430 would fire / 8,395 sanctioned |
+| matcher run | **542 s**, was 2,527 s |
+
+`CAPABILITY_ENFORCEMENT_ENABLED` and `CAPABILITY_REVIEW_FINDINGS_ENABLED`
+remain false.
+
+**The next gate is ScreenConnect ownership, and it is not inferable from
+inventory.** Seven instance GUIDs covering 2,218 devices are either a second
+instance of ours or another provider's; the console is needed to tell. Until
+that is answered, no authorization rows are written — owner decision
+2026-08-14, on the grounds that a wrong permit silences a real detection and a
+wrong omission accuses sanctioned software.
+
+Once ownership is confirmed, the authorization entries follow directly, and
+should include a global permit for `sentinel agent`: it fires on 23 devices at
+2 clients (Bobov45 requires Ninja only; `A.M. Rose policy` lists no platforms),
+so our own EDR currently reads as unauthorized there. Rerun the delta after.
 
 ### Release checkpoint
 
@@ -1244,19 +1330,29 @@ Track: **Operator experience — five tracks (2026-08-06)**
 The ADR-0010 entity track (E1-E6) is complete and deployed; its record is
 retained below. Five tracks follow, set by the user.
 
-## T1 — Page load times
+## T1 — Page load times — DROPPED 2026-08-17
 
-Measure first, then fix. `pg_stat_statements` is available but not loaded, and
-loading it needs a Postgres restart; the page set is finite (79 routes, ~40
-operator-facing), so each page's SQL is timed directly instead.
+Dropped by the owner. `pg_stat_statements` was loaded (Postgres restart, then
+`ALTER SYSTEM`), produced nothing actionable, and was removed the same day: the
+extension is dropped and `shared_preload_libraries` is reset, so the next
+restart unloads it. Do not reload it without a specific question to answer.
 
-Known heavy candidates before measuring: the patching posture CTE
-(`views.py` ~5020), the software surfaces over
-`software_installations_current` (475,672 rows / 1,394 MB), the findings queue
-(261,116 rows / 239 MB), and the client workspace, which fans out per client.
+The one measurement taken, kept because it cost a production restart:
 
-**T1 comes first because T2, T3 and T5 all add queries and content to pages.**
-Optimizing after that is harder than establishing the baseline now.
+- Findings queue severity aggregate: **2,062 ms cold, 68 ms warm**; display
+  slice 42 ms. Identical plans — the difference is entirely I/O, 4,406 buffers
+  read cold versus zero warm.
+- Both reach rows through `idx_findings_type_canonical` used to satisfy
+  `tenant_id = 1` alone, walking 20,547 rows and 13,444 buffers (~105 MB) to
+  count five severity values. `idx_findings_status_severity
+  (tenant_id, status, severity)` exists and the planner does not choose it.
+- `operations.findings` is now **345,081 rows / 371 MB**, up from the 261,116 /
+  239 MB recorded when this track was written.
+- **This does not explain the gunicorn worker timeout.** Worst observed is 2 s
+  against a 30 s+ timeout, so that backlog item stays open and unattributed.
+
+If page speed is raised again, start from the index observation above rather
+than from a profiler.
 
 ## T2 — Click-through everywhere
 

@@ -175,10 +175,12 @@ def test_nothing_may_delete_evidence() -> None:
 
 def test_empty_rule_set_does_not_withdraw_everything() -> None:
     """A rule table that failed to load looks exactly like one that matched
-    nothing. Treating them alike would withdraw the whole corpus."""
+    nothing. Treating them alike would withdraw the whole corpus. Two
+    independent guards -- pattern rules and tag rules -- so one empty table
+    cannot block the other's pass."""
     code = _projector_code()
-    assert "if rules == 0:" in code
-    assert "return 0, 0, 0, []" in code
+    assert "if rule_count == 0:" in code
+    assert "if tag_count == 0:" in code
 
 
 def test_evaluated_sources_come_from_loaded_rules_not_from_output() -> None:
@@ -376,3 +378,65 @@ def test_enforcement_is_explicitly_gated() -> None:
 @pytest.mark.parametrize("name", ["endpoint_security", "rmm", "remote_access"])
 def test_three_capabilities_seeded(name: str) -> None:
     assert f"('{name}'," in _sql()
+
+
+# ── Tag-based evidence path (migration 106) ─────────────────────────────────
+
+_TAG_MIGRATION = _ROOT / "sql" / "migrations" / "106_capability_tag_rule.sql"
+
+
+def _tag_sql() -> str:
+    raw = _TAG_MIGRATION.read_text(encoding="utf-8")
+    return "\n".join(re.sub(r"--.*$", "", line) for line in raw.splitlines())
+
+
+def test_tag_rule_table_is_migration_managed_only() -> None:
+    """No runtime writer for vocabulary, same as capability_rule."""
+    sql = _tag_sql()
+    assert re.search(
+        r"REVOKE INSERT, UPDATE, DELETE, TRUNCATE\s*\n?\s*ON catalog\."
+        r"capability_tag_rule\s*\n?\s*FROM operations_app, ninja_ingest",
+        sql,
+    )
+
+
+def test_tag_rule_tags_are_lowercase_only() -> None:
+    sql = _tag_sql()
+    assert "ck_capability_tag_rule_tag_lower" in sql
+
+
+def test_tag_rule_seed_is_evidence_backed_remote_access_only() -> None:
+    """Seeded 2026-08-19 from real exact matches; endpoint_security and rmm
+    get no rows here until a real match produces one."""
+    sql = _tag_sql()
+    for tag in ("rdp", "remote-control", "remote-desktop", "remote-access", "chromoting"):
+        assert re.search(rf"'{tag}',\s*'remote_access'", sql), tag
+    assert "'endpoint_security'" not in sql
+    assert "'rmm'" not in sql
+
+
+def test_tag_owned_sources_are_the_two_community_tag_registry_rows() -> None:
+    code = _projector_code()
+    owned = re.search(r"_TAG_OWNED_SOURCES = \((.*?)\)", code, re.DOTALL)
+    assert owned is not None
+    assert set(re.findall(r'"([a-z_]+)"', owned.group(1))) == {
+        "winget_tag", "chocolatey_tag"
+    }
+
+
+def test_tag_pass_is_independent_of_the_rule_pass() -> None:
+    """An empty (or not-yet-migrated) tag_rule table must not short-circuit
+    the pattern-rule pass, and vice versa -- there is no single early return
+    covering both."""
+    code = _projector_code()
+    assert "return 0, 0, 0, []" not in code
+    assert code.index("if rule_count == 0:") < code.index("if tag_count == 0:")
+
+
+def test_tag_write_does_not_move_first_observed_at() -> None:
+    """A second run over unchanged tags must not duplicate evidence or move
+    first_observed_at -- same upsert discipline as the rule-based write."""
+    literals = _projector_sql_literals()
+    tag_block = literals[literals.index("capability_tag_desired"):]
+    assert "ON CONFLICT (product_uuid, capability, source_key)" in tag_block
+    assert "first_observed_at" not in tag_block.split("DO UPDATE SET")[1].split(")")[0]
