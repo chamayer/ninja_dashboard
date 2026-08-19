@@ -93,6 +93,13 @@
         {% endfor %}
     </div>
 
+    {% if active_software %}
+    <div class="dv-chip active" style="margin-top:0.6rem; display:inline-flex;">
+        Software: {{ active_software|title }}{% if active_version %} {{ active_version }}{% endif %}{% if active_software_publisher %} · {{ active_software_publisher|title }}{% endif %}
+        <a href="?" style="color:#fecaca; margin-left:0.4rem;">×</a>
+    </div>
+    {% endif %}
+
     <form method="get" class="filterbar" style="margin-top:0.75rem;">
         <div>
             <label>Search</label>
@@ -132,6 +139,9 @@
             </select>
         </div>
         {% if active_os %}<input type="hidden" name="os" value="{{ active_os }}">{% endif %}
+        {% if active_software %}<input type="hidden" name="software" value="{{ active_software }}">{% endif %}
+        {% if active_version %}<input type="hidden" name="version" value="{{ active_version }}">{% endif %}
+        {% if active_software_publisher %}<input type="hidden" name="software_publisher" value="{{ active_software_publisher }}">{% endif %}
         <div><button type="submit">Apply</button></div>
         {% if active_q or active_client or active_role or active_online or active_state %}
             <div><a href="?{% if active_os %}os={{ active_os }}{% endif %}" class="reset">Clear</a></div>

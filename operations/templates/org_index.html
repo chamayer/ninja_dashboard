@@ -204,7 +204,7 @@
 
 <section class="directory-summary" aria-label="Client directory summary">
   <div class="directory-stat"><strong>{{ all_client_count }}</strong><span>clients</span></div>
-  <div class="directory-stat"><strong>{{ all_device_count }}</strong><span>managed devices</span></div>
+  <a class="directory-stat" href="{% url 'devices_page' %}" style="text-decoration:none; color:inherit;"><strong>{{ all_device_count }}</strong><span>managed devices</span></a>
   <div class="directory-stat"><strong>{{ all_location_count }}</strong><span>locations</span></div>
   <div class="directory-stat"><strong>{{ all_user_count }}</strong><span>known client users</span></div>
   <div class="directory-stat"><strong>{{ directory_attention }}</strong><span>clients with open items</span></div>
@@ -240,7 +240,7 @@
       {% for row in directory_rows %}
         <tr data-name="{{ row.client.display_name|lower }}" data-devices="{{ row.devices }}" data-locations="{{ row.locations }}" data-users="{{ row.users }}" data-patching="{{ row.domains.0.state }}" data-compliance="{{ row.domains.1.state }}" data-software="{{ row.domains.2.state }}" data-inventory="{{ row.domains.3.state }}" data-data="{{ row.data_sort }}" data-review="{{ row.review_count }}" data-attention="{{ row.needs_attention|yesno:'1,0' }}" data-delayed="{% if row.data_state == 'delayed' %}1{% else %}0{% endif %}">
           <td><a class="row-title" href="{% url 'org_index' org_slug=row.client.slug %}">{{ row.client.display_name }}</a><a class="row-detail" href="{% url 'client_requirements_config' row.client.slug %}">Configuration →</a></td>
-          <td><strong>{{ row.devices }}</strong></td><td>{{ row.locations }}</td><td>{{ row.users }}</td>
+          <td><a href="{% url 'org_devices' org_slug=row.client.slug %}"><strong>{{ row.devices }}</strong></a></td><td>{{ row.locations }}</td><td>{{ row.users }}</td>
           {% for domain in row.domains %}<td class="domain-cell"><a class="row-title" href="{{ domain.href }}"><span class="state-dot dot-{{ domain.state }}"></span>{{ domain.state_label }}</a><span class="row-detail">{{ domain.count }} open</span></td>{% endfor %}
           <td><span class="row-title"><span class="state-dot dot-{{ row.data_state }}"></span>{{ row.data_label }}</span></td>
           <td>{% if row.review_count %}<a class="row-title" href="{% url 'merge_candidates_queue' %}">{{ row.review_count }} pending</a>{% else %}<a class="muted" href="{% url 'client_requirements_config' row.client.slug %}">Open configuration →</a>{% endif %}</td>

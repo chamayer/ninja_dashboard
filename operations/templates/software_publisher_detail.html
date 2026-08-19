@@ -55,8 +55,12 @@
 <div class="pd-tiles">
     <div class="pd-tile"><div class="label">Installations</div><div class="value">{{ installations }}</div></div>
     <div class="pd-tile"><div class="label">Titles</div><div class="value">{{ title_count }}</div></div>
-    <div class="pd-tile"><div class="label">Devices</div><div class="value">{{ device_count }}</div></div>
-    <div class="pd-tile"><div class="label">Clients</div><div class="value">{{ client_count }}</div></div>
+    <a class="pd-tile" style="text-decoration:none; color:inherit;" href="{% url 'devices_page' %}?software_publisher={{ publisher|urlencode }}">
+        <div class="label">Devices</div><div class="value">{{ device_count }}</div>
+    </a>
+    <a class="pd-tile" style="text-decoration:none; color:inherit;" href="{% url 'devices_page' %}?software_publisher={{ publisher|urlencode }}">
+        <div class="label">Clients</div><div class="value">{{ client_count }}</div>
+    </a>
     <div class="pd-tile"><div class="label">First observed</div><div class="value" style="font-size:0.95rem;">{{ first_observed|date:"Y-m-d"|default:"—" }}</div></div>
     <div class="pd-tile"><div class="label">Last observed</div><div class="value" style="font-size:0.95rem;">{{ last_observed|date:"Y-m-d"|default:"—" }}</div></div>
 </div>
@@ -146,8 +150,8 @@
                         </a>
                     </td>
                     <td class="num">{{ t.installs }}</td>
-                    <td class="num">{{ t.devices }}</td>
-                    <td class="num">{{ t.clients }}</td>
+                    <td class="num"><a href="{% url 'devices_page' %}?software={{ t.canonical_name|urlencode }}&software_publisher={{ publisher|urlencode }}">{{ t.devices }}</a></td>
+                    <td class="num"><a href="{% url 'devices_page' %}?software={{ t.canonical_name|urlencode }}&software_publisher={{ publisher|urlencode }}">{{ t.clients }}</a></td>
                     <td class="num muted">{{ t.last_observed|date:"Y-m-d"|default:"—" }}</td>
                     <td>
                         {% if t.decision %}

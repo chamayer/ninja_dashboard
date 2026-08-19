@@ -5809,6 +5809,13 @@ def devices_page(request: HttpRequest) -> HttpResponse:
     online_filter = request.GET.get("online", "")  # online | offline
     state_filter = request.GET.get("state", "")  # active | not-reporting
     client_filter = request.GET.get("client", "")  # slug
+    # Software drill-through: click a device/client count on a Products,
+    # title-detail, or publisher-detail page and land here scoped to exactly
+    # that slice, reusing this page's existing device list rather than a new
+    # one-off view per number.
+    software_filter = (request.GET.get("software") or "").strip()  # canonical_name
+    version_filter = (request.GET.get("version") or "").strip()
+    software_publisher_filter = (request.GET.get("software_publisher") or "").strip()
 
     with transaction.atomic(), connection.cursor() as cur:
         cur.execute("SET LOCAL operations.tenant_id = 1")
@@ -5905,6 +5912,25 @@ def devices_page(request: HttpRequest) -> HttpResponse:
                 "v.client_id = (SELECT id FROM operations.clients WHERE slug = %s AND tenant_id = 1)"
             )
             params.append(client_filter)
+        if software_filter or software_publisher_filter:
+            software_exists = (
+                "EXISTS (SELECT 1 FROM operations.software_installations_current sic "
+                " WHERE sic.tenant_id = 1 AND sic.device_id = v.device_id "
+                "   AND sic.deleted_at IS NULL AND sic.stale_since IS NULL"
+            )
+            software_params = []
+            if software_filter:
+                software_exists += " AND LOWER(sic.canonical_name) = LOWER(%s)"
+                software_params.append(software_filter)
+            if version_filter:
+                software_exists += " AND sic.version = %s"
+                software_params.append(version_filter)
+            if software_publisher_filter:
+                software_exists += " AND LOWER(sic.publisher) = LOWER(%s)"
+                software_params.append(software_publisher_filter)
+            software_exists += ")"
+            where.append(software_exists)
+            params.extend(software_params)
 
         where_sql = " AND ".join(where)
         # The severe-issue counts are aggregated ONCE for the page, not per row.
@@ -6057,6 +6083,9 @@ def devices_page(request: HttpRequest) -> HttpResponse:
             "active_online": online_filter,
             "active_state": state_filter,
             "active_client": client_filter,
+            "active_software": software_filter,
+            "active_version": version_filter,
+            "active_software_publisher": software_publisher_filter,
             "coverage_issues": coverage_issues,
             "identity_issues": identity_issues,
             "delayed_sources": delayed_sources,

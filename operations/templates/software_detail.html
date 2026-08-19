@@ -84,8 +84,12 @@
 
 <div class="sd-tiles">
     <div class="sd-tile"><div class="label">Installations</div><div class="value">{{ installations }}</div></div>
-    <div class="sd-tile"><div class="label">Devices</div><div class="value">{{ device_count }}</div></div>
-    <div class="sd-tile"><div class="label">Clients</div><div class="value">{{ client_count }}</div></div>
+    <a class="sd-tile" style="text-decoration:none; color:inherit;" href="{% url 'devices_page' %}?software={{ canonical_name|urlencode }}">
+        <div class="label">Devices</div><div class="value">{{ device_count }}</div>
+    </a>
+    <a class="sd-tile" style="text-decoration:none; color:inherit;" href="{% url 'devices_page' %}?software={{ canonical_name|urlencode }}">
+        <div class="label">Clients</div><div class="value">{{ client_count }}</div>
+    </a>
     <div class="sd-tile"><div class="label">Versions observed</div><div class="value">{{ versions|length }}</div></div>
     <div class="sd-tile"><div class="label">First observed</div><div class="value" style="font-size:0.95rem;">{{ first_observed|date:"Y-m-d"|default:"—" }}</div></div>
     <div class="sd-tile"><div class="label">Last observed</div><div class="value" style="font-size:0.95rem;">{{ last_observed|date:"Y-m-d"|default:"—" }}</div></div>
@@ -286,8 +290,8 @@
                 <tr>
                     <td><code>{{ v.version }}</code></td>
                     <td class="num">{{ v.installs }}</td>
-                    <td class="num">{{ v.devices }}</td>
-                    <td class="num">{{ v.clients }}</td>
+                    <td class="num"><a href="{% url 'devices_page' %}?software={{ canonical_name|urlencode }}&version={{ v.version|urlencode }}">{{ v.devices }}</a></td>
+                    <td class="num"><a href="{% url 'devices_page' %}?software={{ canonical_name|urlencode }}&version={{ v.version|urlencode }}">{{ v.clients }}</a></td>
                     <td class="num muted">{{ v.last_observed|date:"Y-m-d"|default:"—" }}</td>
                 </tr>
                 {% endfor %}
@@ -479,7 +483,13 @@
                         {% endif %}
                     </td>
                     <td class="num">{{ p.installs }}</td>
-                    <td class="num">{{ p.devices }}</td>
+                    <td class="num">
+                        {% if p.publisher != '(unknown)' %}
+                        <a href="{% url 'devices_page' %}?software={{ canonical_name|urlencode }}&software_publisher={{ p.publisher|urlencode }}">{{ p.devices }}</a>
+                        {% else %}
+                        {{ p.devices }}
+                        {% endif %}
+                    </td>
                 </tr>
                 {% endfor %}
             </tbody>

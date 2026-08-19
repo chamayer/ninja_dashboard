@@ -147,8 +147,8 @@
                     </div>
                     {% endif %}
                 </td>
-                <td class="num">{{ t.device_count }}</td>
-                <td class="num">{{ t.client_count }}</td>
+                <td class="num"><a href="{% url 'devices_page' %}?software={{ t.canonical_name|urlencode }}">{{ t.device_count }}</a></td>
+                <td class="num"><a href="{% url 'devices_page' %}?software={{ t.canonical_name|urlencode }}">{{ t.client_count }}</a></td>
                 <td>
                     {% if t.categories %}
                         {% for cat in t.categories %}{% if not forloop.first %}, {% endif %}{{ cat|humanize_label|default:cat|title }}{% endfor %}

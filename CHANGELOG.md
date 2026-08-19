@@ -2,6 +2,24 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.120.8] — 2026-08-19 — Device/client counts are now clickable
+
+### Added
+
+- Device and client counts across the Products page, title-detail page
+  (tiles, Versions table, Publishers sub-table), publisher-detail page
+  (tiles, title sub-table), and the client directory now link through to
+  the fleet-wide device list, pre-filtered to that exact slice (software
+  title, version, and/or publisher). `devices_page` gained `software`,
+  `version`, and `software_publisher` query filters, reused by every link
+  rather than building a new list view per number. Per-client device counts
+  in the directory link to that client's own device list.
+- Rehearsed the new filter's query plan against production: canonical-name
+  and version-scoped lookups use the existing index (9-114ms); the
+  publisher-only path does a full scan of the installations table with no
+  index (333ms) — safely within bounds since it only runs on click, not on
+  every page load.
+
 ## [0.120.7] — 2026-08-19 — Fix /orgs/&lt;client&gt;/ 500 and simplify manual-assign
 
 ### Fixed
