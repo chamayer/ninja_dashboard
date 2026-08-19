@@ -2,6 +2,18 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.120.3] — 2026-08-19 — Fix Products page 500 from 0.120.2
+
+### Fixed
+
+- The Products page returned HTTP 500 (Gunicorn worker timeout) on every
+  load. 0.120.2's "Type" column re-ran a correlated join per displayed row
+  (measured ~530ms each against the 530k-row installations table); the
+  pre-existing "Category" column used the identical pattern and was already
+  marginal, so adding a second one pushed every request past the 30s worker
+  limit. Both are now computed once as a set-based aggregate joined into the
+  row list, not per row. Measured fix: full page query 610ms (was a timeout).
+
 ## [0.120.2] — 2026-08-19 — Descriptive category on the Products page
 
 ### Added

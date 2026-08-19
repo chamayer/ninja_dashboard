@@ -3440,48 +3440,29 @@ def _software_page_data(request: HttpRequest) -> dict:
                 "   AND ft.source_module = 'platform.software_findings' "
                 "   AND f.finding_details->>'canonical_name' = sic.canonical_name)"
             )
+        # category_filter / product_category_filter are checked against
+        # category_by_title / product_category_by_title below -- CTEs joined
+        # once into `filtered`, not a per-row correlated EXISTS. That EXISTS
+        # shape (still used by the other filters below, on the much smaller
+        # operations.software_decisions table) measured ~530ms per outer row
+        # against the 530k-row installations table here, because the
+        # correlation on sic.canonical_name cannot be pushed into an index in
+        # that plan -- 500 rows x 2 columns like this is what produced the
+        # Gunicorn worker timeout this replaces.
         if category_filter == "uncategorized":
-            where_clauses.append(
-                "NOT EXISTS (SELECT 1 FROM operations.software_installations_current sic2 "
-                " JOIN catalog.software_versions sv ON sv.id = sic2.software_version_id "
-                " JOIN catalog.products p ON p.id = sv.product_id "
-                " JOIN catalog.v_product_capability_effective cap ON cap.product_uuid = p.product_uuid "
-                " WHERE sic2.tenant_id = sic.tenant_id AND sic2.canonical_name = sic.canonical_name "
-                "   AND sic2.deleted_at IS NULL AND sic2.stale_since IS NULL)"
-            )
+            where_clauses.append("cbt.categories IS NULL")
         elif category_filter:
             # 'av' is the URL-facing alias for the endpoint_security
             # capability key, matching the unauthorized_av finding type name
             # operators already see.
             capability_key = "endpoint_security" if category_filter == "av" else category_filter
-            where_clauses.append(
-                "EXISTS (SELECT 1 FROM operations.software_installations_current sic2 "
-                " JOIN catalog.software_versions sv ON sv.id = sic2.software_version_id "
-                " JOIN catalog.products p ON p.id = sv.product_id "
-                " JOIN catalog.v_product_capability_effective cap ON cap.product_uuid = p.product_uuid "
-                " WHERE sic2.tenant_id = sic.tenant_id AND sic2.canonical_name = sic.canonical_name "
-                "   AND sic2.deleted_at IS NULL AND sic2.stale_since IS NULL "
-                "   AND cap.capability = %s)"
-            )
+            where_clauses.append("%s = ANY(COALESCE(cbt.categories, ARRAY[]::text[]))")
             params.append(capability_key)
         if product_category_filter == "uncategorized":
-            where_clauses.append(
-                "NOT EXISTS (SELECT 1 FROM operations.software_installations_current sic2 "
-                " JOIN catalog.software_versions sv ON sv.id = sic2.software_version_id "
-                " JOIN catalog.products p ON p.id = sv.product_id "
-                " JOIN catalog.v_product_category_effective pce ON pce.product_uuid = p.product_uuid "
-                " WHERE sic2.tenant_id = sic.tenant_id AND sic2.canonical_name = sic.canonical_name "
-                "   AND sic2.deleted_at IS NULL AND sic2.stale_since IS NULL)"
-            )
+            where_clauses.append("pcbt.product_categories IS NULL")
         elif product_category_filter:
             where_clauses.append(
-                "EXISTS (SELECT 1 FROM operations.software_installations_current sic2 "
-                " JOIN catalog.software_versions sv ON sv.id = sic2.software_version_id "
-                " JOIN catalog.products p ON p.id = sv.product_id "
-                " JOIN catalog.v_product_category_effective pce ON pce.product_uuid = p.product_uuid "
-                " WHERE sic2.tenant_id = sic.tenant_id AND sic2.canonical_name = sic.canonical_name "
-                "   AND sic2.deleted_at IS NULL AND sic2.stale_since IS NULL "
-                "   AND pce.category = %s)"
+                "%s = ANY(COALESCE(pcbt.product_categories, ARRAY[]::text[]))"
             )
             params.append(product_category_filter)
         if decision_filter == "approved":
@@ -3523,30 +3504,39 @@ def _software_page_data(request: HttpRequest) -> dict:
             params.append(safety_filter_names)
 
         where_sql = " AND ".join(where_clauses)
-        categories_subquery = (
-            """(SELECT array_agg(DISTINCT
-                        CASE cap.capability WHEN 'endpoint_security' THEN 'av' ELSE cap.capability END)
-                FROM operations.software_installations_current sic2
-                JOIN catalog.software_versions sv ON sv.id = sic2.software_version_id
-                JOIN catalog.products p ON p.id = sv.product_id
-                JOIN catalog.v_product_capability_effective cap ON cap.product_uuid = p.product_uuid
-                WHERE sic2.tenant_id = sic.tenant_id AND sic2.canonical_name = sic.canonical_name
-                  AND sic2.deleted_at IS NULL AND sic2.stale_since IS NULL
-               )"""
+        # Both aggregates computed ONCE across the whole fleet, not as a
+        # correlated subquery re-run per displayed row. The correlated form
+        # (kept until this change) measured ~530ms per canonical_name because
+        # the plan starts from the small evidence table outward through a
+        # full products scan rather than using the tenant/name correlation as
+        # an index lookup -- 500 rows of that is minutes, which is what
+        # produced the Gunicorn worker timeout. A single GROUP BY pass here
+        # costs about what the category-breakdown queries above already cost.
+        category_cte_sql = (
+            """SELECT sic2.canonical_name,
+                      array_agg(DISTINCT
+                          CASE cap.capability WHEN 'endpoint_security' THEN 'av' ELSE cap.capability END
+                      ) AS categories
+                 FROM operations.software_installations_current sic2
+                 JOIN catalog.software_versions sv ON sv.id = sic2.software_version_id
+                 JOIN catalog.products p ON p.id = sv.product_id
+                 JOIN catalog.v_product_capability_effective cap ON cap.product_uuid = p.product_uuid
+                WHERE sic2.tenant_id = 1 AND sic2.deleted_at IS NULL AND sic2.stale_since IS NULL
+                GROUP BY sic2.canonical_name"""
             if capability_available
-            else "NULL"
+            else "SELECT NULL::text AS canonical_name, NULL::text[] AS categories WHERE FALSE"
         )
-        product_categories_subquery = (
-            """(SELECT array_agg(DISTINCT pce.category)
-                FROM operations.software_installations_current sic2
-                JOIN catalog.software_versions sv ON sv.id = sic2.software_version_id
-                JOIN catalog.products p ON p.id = sv.product_id
-                JOIN catalog.v_product_category_effective pce ON pce.product_uuid = p.product_uuid
-                WHERE sic2.tenant_id = sic.tenant_id AND sic2.canonical_name = sic.canonical_name
-                  AND sic2.deleted_at IS NULL AND sic2.stale_since IS NULL
-               )"""
+        product_category_cte_sql = (
+            """SELECT sic2.canonical_name,
+                      array_agg(DISTINCT pce.category) AS product_categories
+                 FROM operations.software_installations_current sic2
+                 JOIN catalog.software_versions sv ON sv.id = sic2.software_version_id
+                 JOIN catalog.products p ON p.id = sv.product_id
+                 JOIN catalog.v_product_category_effective pce ON pce.product_uuid = p.product_uuid
+                WHERE sic2.tenant_id = 1 AND sic2.deleted_at IS NULL AND sic2.stale_since IS NULL
+                GROUP BY sic2.canonical_name"""
             if product_category_available
-            else "NULL"
+            else "SELECT NULL::text AS canonical_name, NULL::text[] AS product_categories WHERE FALSE"
         )
         cur.execute(
             f"""
@@ -3556,20 +3546,24 @@ def _software_page_data(request: HttpRequest) -> dict:
                 FROM operations.software_title_current
                 WHERE tenant_id = 1
             ),
+            category_by_title AS ({category_cte_sql}),
+            product_category_by_title AS ({product_category_cte_sql}),
             filtered AS (
                 SELECT sic.canonical_name,
                        sic.publisher,
                        sic.device_count,
                        sic.client_count,
                        sic.latest_install AS last_install,
-                   {categories_subquery} AS categories,
-                   {product_categories_subquery} AS product_categories,
-                   (SELECT MIN(sd.decision)
-                    FROM operations.software_decisions sd
-                    WHERE sd.tenant_id = sic.tenant_id
-                      AND sd.canonical_name = sic.canonical_name
-                   ) AS decision
+                       cbt.categories,
+                       pcbt.product_categories,
+                       (SELECT MIN(sd.decision)
+                        FROM operations.software_decisions sd
+                        WHERE sd.tenant_id = sic.tenant_id
+                          AND sd.canonical_name = sic.canonical_name
+                       ) AS decision
                 FROM operations.software_title_current sic
+                LEFT JOIN category_by_title cbt ON cbt.canonical_name = sic.canonical_name
+                LEFT JOIN product_category_by_title pcbt ON pcbt.canonical_name = sic.canonical_name
                 WHERE {where_sql}
                   AND sic.device_count >= {min_devices_int}
                 ORDER BY sic.device_count DESC, sic.canonical_name

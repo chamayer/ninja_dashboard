@@ -39,6 +39,40 @@ returns 2, `uncategorized` filter returns 22,095 of 22,119 (24 categorized +
 **Next action:** request commit/push approval; verify the live page renders
 and both chip strips work correctly post-deploy.
 
+### Post-deploy incident — 0.120.2 broke the Products page, fixed as 0.120.3
+
+Deployed 0.120.2, then verified live by logging in and fetching the page
+directly (not just an unauthenticated route check) — it returned HTTP 500.
+Log traceback: Gunicorn worker killed by its own timeout inside
+`_software_page_data`'s main query. Root cause: the new `product_categories`
+column used the exact correlated-subquery-per-row shape the pre-existing
+`categories` (capability) column already used — `EXPLAIN ANALYZE` on that
+pre-existing subquery ALONE, for one canonical_name, measured ~530ms, because
+the plan starts from the small evidence table outward through a full
+`products` seq scan rather than using the `canonical_name` correlation as an
+index lookup. 500 displayed rows x that cost is minutes; adding a second,
+near-identical subquery pushed an already-marginal query over the 30s worker
+limit. The pre-existing capability column had apparently been running this
+way in production already — my change is what finally exercised it hard
+enough to surface.
+
+**Fix (0.120.3):** replaced both correlated subqueries with two CTEs
+(`category_by_title`, `product_category_by_title`), each a single `GROUP BY`
+pass over the whole fleet, LEFT JOINed into the row list once instead of
+re-executed per row. The `category`/`product_category` filter predicates were
+rewritten the same way (array-containment against the CTE result, replacing
+another correlated EXISTS of the same shape) rather than left half-fixed.
+Rehearsed against production: `EXPLAIN ANALYZE` on the full rewritten query,
+500 rows, both columns populated: 610ms total.
+
+**Lesson:** "the SQL runs correctly" (which I did verify, read-only, before
+the first deploy) is not the same claim as "the SQL runs fast enough for a
+30s worker" — mirroring an existing pattern inherits that pattern's
+performance characteristics, and a pattern that was already marginal doesn't
+show up as broken until something adds load to it. Live authenticated
+verification (not just a route/login check) is what caught this, immediately
+after being asked directly whether the live page had actually been checked.
+
 ## CURRENT TASK — Cross-client serial drill-through
 
 **Status:** deployed as 0.119.9 / `7384e6e`.
