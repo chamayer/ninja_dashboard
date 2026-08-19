@@ -251,6 +251,19 @@ All notable changes to this project follow [Semantic Versioning](https://semver.
   page honest about the capability data that does exist; it does not create
   broader taxonomy. That remains a separate, unscoped project.
 
+## [0.119.17] — 2026-08-19 — Winget refresh ordered by install count
+
+### Fixed
+
+- The Winget enricher refreshed titles alphabetically, capped at 500 per
+  24-hour run against 22,119 total. Same defect already fixed for the
+  Chocolatey enricher (measured 2026-08-12 there: 225 titles processed for 8
+  writes, a 3.5% hit rate, while the 544 titles carrying 73% of the fleet's
+  installs sat untouched). Now orders by installed device count descending,
+  same as Chocolatey. The set of titles refreshed each cycle is unchanged —
+  verified the row count is identical (22,119) before and after — only which
+  titles get covered first.
+
 ## [0.119.2] — 2026-08-17 — Capability permission checks
 
 ### Fixed

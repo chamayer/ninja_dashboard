@@ -85,7 +85,7 @@ def _titles_needing_refresh() -> list[str]:
                 WHERE tenant_id = %s AND source = 'winget' AND canonical_name <> ''
                 GROUP BY LOWER(canonical_name)
             )
-            SELECT DISTINCT sic.canonical_name
+            SELECT sic.canonical_name
             FROM operations.software_installations_current sic
             LEFT JOIN latest_signal ls ON ls.canonical = LOWER(sic.canonical_name)
             WHERE sic.tenant_id = %s
@@ -93,7 +93,14 @@ def _titles_needing_refresh() -> list[str]:
               AND sic.stale_since IS NULL
               AND sic.canonical_name <> ''
               AND (ls.observed_at IS NULL OR ls.observed_at < %s)
-            ORDER BY sic.canonical_name
+            GROUP BY sic.canonical_name
+            -- Most-installed first, not alphabetical. Same fix already proven
+            -- for the Chocolatey enricher (measured 2026-08-12: 225 titles
+            -- processed for 8 writes, a 3.5% hit rate, alphabetically, while
+            -- the 544 titles carrying 73% of the fleet's installs sat
+            -- untouched). At 500 titles/run against 22,118 total, order
+            -- decides which titles the first weeks of coverage reach.
+            ORDER BY COUNT(DISTINCT sic.device_id) DESC, sic.canonical_name
             """,
             (_TENANT_ID, _TENANT_ID, datetime.now(timezone.utc) - _STALE_AFTER),
         )

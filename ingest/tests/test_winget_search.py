@@ -155,6 +155,17 @@ def test_search_returns_nothing_but_records_candidates_on_no_match() -> None:
     assert titles_found == ["Something Else Entirely"]
 
 
+def test_refresh_order_is_by_install_count() -> None:
+    """Same fix already proven for Chocolatey (test_chocolatey_search.py):
+    each run is capped, so ordering decides what the cap buys. Measured
+    2026-08-12 there: alphabetical spent a run on '. .' and '1.1.3.4' at a
+    3.5% hit rate while the highest-install titles sat untouched. At 500
+    titles/run against 22,119 total this matters even more."""
+    code = _code_only()
+    assert "ORDER BY COUNT(DISTINCT sic.device_id) DESC" in code
+    assert "ORDER BY sic.canonical_name\n" not in code
+
+
 def test_migration_clears_the_poisoned_rows() -> None:
     """The fix alone changes nothing for 30 days -- refresh is stale-gated."""
     migration = (
