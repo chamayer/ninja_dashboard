@@ -612,6 +612,22 @@ def run_intel_capability_once() -> None:
         log.exception("Capability projection failed")
 
 
+def run_intel_category_once() -> None:
+    """Project general-category evidence from Winget/Chocolatey tags.
+
+    A different axis from capability (migration 104): descriptive taxonomy,
+    never alertable, never consumed by any finding. Nothing enforces this --
+    there is nothing to enforce.
+    """
+    try:
+        from ingest.intel import category_match
+
+        rows = category_match.run_once()
+        log.info("Category projection complete: rows=%d", rows)
+    except Exception:
+        log.exception("Category projection failed")
+
+
 def run_intel_lolrmm_once() -> None:
     """Refresh the LOLRMM corpus and exact local-product assertions."""
     try:
@@ -922,6 +938,12 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 return
             threading.Thread(target=run_intel_capability_once, daemon=True).start()
             self._respond(202, b"capability projection scheduled\n")
+        elif self.path == "/run/intel-category":
+            if not _READY.is_set():
+                self._respond(503, b"still starting - try again shortly\n")
+                return
+            threading.Thread(target=run_intel_category_once, daemon=True).start()
+            self._respond(202, b"category projection scheduled\n")
         elif self.path == "/run/intel-lolrmm":
             if not _READY.is_set():
                 self._respond(503, b"still starting - try again shortly\n")
@@ -2631,6 +2653,13 @@ def main() -> None:
             max_instances=1,
         )
         scheduler.add_job(
+            run_intel_category_once,
+            "interval",
+            hours=settings.INTEL_CATEGORY_SCHEDULE_HOURS,
+            id="intel_category_cycle",
+            max_instances=1,
+        )
+        scheduler.add_job(
             run_intel_lolrmm_once,
             "interval",
             hours=settings.INTEL_CATALOG_SCHEDULE_HOURS,
@@ -2741,6 +2770,7 @@ def _intel_catchup() -> None:
         ("endoflife",  run_intel_endoflife_once),
         ("matcher",    run_intel_matcher_once),
         ("capability_match", run_intel_capability_once),
+        ("category_match", run_intel_category_once),
         ("lolrmm", run_intel_lolrmm_once),
     ]
     fired = []

@@ -9130,8 +9130,11 @@ def operations_admin_overview(request: HttpRequest) -> HttpResponse:
                     intel_failed += 1
                 else:
                     intel_never += 1
-        # Every connector we know about, minus what's recorded.
-        intel_never += max(0, 9 - (intel_ok + intel_failed + intel_never))
+        # No backfill against a guessed total. Migration 105 seeds a
+        # placeholder row (last_status NULL) for every known connector, so
+        # "never run" is exactly the rows that are that placeholder --
+        # data, not a hardcoded count kept in sync by hand against a
+        # connector list that lives in a different service's source.
     except Exception:
         intel_ok = intel_failed = intel_never = 0
 

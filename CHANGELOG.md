@@ -292,6 +292,64 @@ All notable changes to this project follow [Semantic Versioning](https://semver.
   correctly escaped as `%%` in the executed SQL; only the two enrichers had
   the defect, both introduced by the same prose-with-percentages pattern.
 
+## [0.120.0] — 2026-08-19 — General software categorization (Phase 2)
+
+### Added
+
+- `catalog.software_category`, `category_source`, `category_tag_rule`,
+  `category_assertion_machine`, `category_assertion_operator`, and
+  `v_product_category_effective` (migration 104) — a general descriptive
+  taxonomy (browser, dev_tools, media, cloud_storage, archive_utility,
+  system_update, virtualization, graphics_design, communication, utility),
+  mirroring `catalog.capability`'s exact evidence/authority contract on a
+  separate axis. Explicitly excludes `endpoint_security`/`rmm`/`remote_access`
+  by CHECK constraint — those remain owned by `catalog.capability` and are
+  never re-derived here, so a title never gets two competing truths for the
+  same fact.
+- `catalog.category_tag_rule` seeded with 54 tag→category mappings, curated
+  from the real Winget/Chocolatey tag vocabulary measured 2026-08-19 (47
+  exact matches) — not an imagined taxonomy. Deliberately excludes
+  capability-adjacent tags (remote, remote-control, rdp, vpn) and
+  non-semantic tags ("admin", present on 13 titles, confirmed to be
+  Chocolatey's own install-metadata convention, not a category).
+- `ingest/intel/category_match.py`, the projector — sole writer of
+  `category_assertion_machine`, same shape as `capability_match.py`: positive
+  machine evidence only, an operator negative is the only way to silence a
+  candidate permanently. Wired as `/run/intel-category`, a scheduled job on
+  the catalog cadence (24h, shares it with the Winget/Chocolatey enrichers
+  whose tags it reads), and the catch-up/status-report connector lists.
+- Rehearsed against production in a rolled-back transaction before shipping:
+  37 rows would be written this run, zero cross-category conflicts on one
+  product, zero rows in a capability-owned category name.
+
+### Fixed
+
+- `/admin/overview/`'s intel connector health tile derived "never run" from
+  `9 - (ok + failed + never)`, a hardcoded guess at the total connector count
+  kept in sync by hand against a list that lives entirely in a different
+  service's source (`ingest/main.py`). Measured 2026-08-19: the real count
+  was already 11 before this release's own `category_match` connector made
+  it 12 — the "9" had been silently wrong for a while. Migration 105 seeds a
+  placeholder row (`last_run_at` NULL) for every known connector, matching
+  the same registry pattern already used for capability/category vocabulary,
+  so "never run" is derived from real rows instead of a magic number.
+
+### Notes
+
+- Shadow mode only: nothing reads `v_product_category_effective` for
+  filtering or display yet. That is the next, separate step, to be measured
+  against real projector output before any UI change — same phased approach
+  capability recognition used.
+- Wiring Winget/Chocolatey tags into the *existing* capability model
+  (`catalog.capability_source` already has unused `winget_tag`/
+  `chocolatey_tag` rows, seeded in migration 093, never wired to a
+  projector) is a related, smaller, separate opportunity — not built here,
+  to avoid mixing two axes in one release.
+- Found but not fixed here, unrelated to this release: `ingest/main.py`'s
+  `/run/intel-lolrmm` HTTP route is registered with backslashes
+  (`elif self.path == "\run\intel-lolrmm":`), making it unreachable over
+  HTTP. The scheduled job and catch-up path are unaffected.
+
 ## [0.119.2] — 2026-08-17 — Capability permission checks
 
 ### Fixed

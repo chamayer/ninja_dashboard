@@ -255,6 +255,13 @@ class Settings(BaseSettings):
     # weeks, and the projector reads only local tables.
     INTEL_CAPABILITY_ENABLED: bool = True
     INTEL_CAPABILITY_SCHEDULE_HOURS: int = Field(default=24, ge=1, le=168)
+    # General category recognition (browser / dev_tools / media / ...), a
+    # different axis from capability -- see migration 104. Shares the catalog
+    # cadence for the same reason capability does: it reads only local tables
+    # (safety_signal tag rows the Winget/Chocolatey enrichers already wrote on
+    # that cadence), so running it more often would not find new evidence.
+    INTEL_CATEGORY_ENABLED: bool = True
+    INTEL_CATEGORY_SCHEDULE_HOURS: int = Field(default=24, ge=1, le=168)
     INTEL_LOLRMM_ENABLED: bool = True
     # Phase 4 is code-complete but intentionally fails closed until every
     # sanctioned platform has production product-identity mappings. A product
