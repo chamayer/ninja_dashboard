@@ -4204,8 +4204,21 @@ def software_detail(request: HttpRequest, name: str) -> HttpResponse:
     capability_schema_ready = capability_evidence.schema_ready()
     capability_product_uuids = capability_evidence.products_for_title(canonical_name)
     capability_by_product = capability_evidence.effective_for_products(capability_product_uuids)
+    all_capabilities = capability_evidence.all_capabilities()
     capability_product_rows = [
-        {"product_uuid": product_uuid, "rows": capability_by_product.get(product_uuid, [])}
+        {
+            "product_uuid": product_uuid,
+            "rows": (rows := capability_by_product.get(product_uuid, [])),
+            # A curator may need to assert a capability nothing has ever
+            # suggested -- not just react to a machine candidate -- so every
+            # key the product has no row for at all is offered separately
+            # from the confirm/reject controls above, which only cover keys
+            # with existing evidence.
+            "missing": [
+                (key, label) for key, label in all_capabilities
+                if key not in {r["capability"] for r in rows}
+            ],
+        }
         for product_uuid in capability_product_uuids
     ]
     can_curate_capability = request.user.has_perm(capability_evidence.CURATOR_PERMISSION)
@@ -4215,8 +4228,16 @@ def software_detail(request: HttpRequest, name: str) -> HttpResponse:
     category_schema_ready = category_evidence.schema_ready()
     category_product_uuids = category_evidence.products_for_title(canonical_name)
     category_by_product = category_evidence.effective_for_products(category_product_uuids)
+    all_categories = category_evidence.all_categories()
     category_product_rows = [
-        {"product_uuid": product_uuid, "rows": category_by_product.get(product_uuid, [])}
+        {
+            "product_uuid": product_uuid,
+            "rows": (rows := category_by_product.get(product_uuid, [])),
+            "missing": [
+                (key, label) for key, label in all_categories
+                if key not in {r["category"] for r in rows}
+            ],
+        }
         for product_uuid in category_product_uuids
     ]
     can_curate_category = request.user.has_perm(category_evidence.CURATOR_PERMISSION)

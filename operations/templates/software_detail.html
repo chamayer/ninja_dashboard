@@ -142,6 +142,21 @@
                     {% else %}
                         <span class="muted">Unknown — no effective capability evidence.</span>
                     {% endif %}
+                    {% if can_curate_capability and product.missing %}
+                    <form method="post" action="{% url 'software_capability_decide' %}" style="display:flex; align-items:center; gap:0.3rem; margin-top:0.4rem; font-size:0.75rem;">
+                        {% csrf_token %}
+                        <input type="hidden" name="product_uuid" value="{{ product.product_uuid }}">
+                        <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                        <span class="muted">Not yet evaluated:</span>
+                        <select name="capability" style="font-size:0.75rem;">
+                            {% for key, label in product.missing %}
+                            <option value="{{ key }}">{{ label }}</option>
+                            {% endfor %}
+                        </select>
+                        <select name="decision" style="font-size:0.75rem;"><option value="confirm">Yes, it is</option><option value="reject">No, it isn't</option></select>
+                        <button type="submit" style="font-size:0.75rem;">Save</button>
+                    </form>
+                    {% endif %}
                 </div>
             {% endfor %}
         {% endif %}
@@ -182,6 +197,21 @@
                         {% endfor %}
                     {% else %}
                         <span class="muted">Unknown — no effective category evidence.</span>
+                    {% endif %}
+                    {% if can_curate_category and product.missing %}
+                    <form method="post" action="{% url 'software_category_decide' %}" style="display:flex; align-items:center; gap:0.3rem; margin-top:0.4rem; font-size:0.75rem;">
+                        {% csrf_token %}
+                        <input type="hidden" name="product_uuid" value="{{ product.product_uuid }}">
+                        <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                        <span class="muted">Not yet evaluated:</span>
+                        <select name="category" style="font-size:0.75rem;">
+                            {% for key, label in product.missing %}
+                            <option value="{{ key }}">{{ label }}</option>
+                            {% endfor %}
+                        </select>
+                        <select name="decision" style="font-size:0.75rem;"><option value="confirm">Yes, it is</option><option value="reject">No, it isn't</option></select>
+                        <button type="submit" style="font-size:0.75rem;">Save</button>
+                    </form>
                     {% endif %}
                 </div>
             {% endfor %}

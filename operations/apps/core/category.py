@@ -92,6 +92,17 @@ def effective_for_products(product_uuids: list[str]) -> dict[str, list[dict]]:
     return out
 
 
+def all_categories() -> list[tuple[str, str]]:
+    """(key, label) for every defined category -- the fixed vocabulary a
+    curator can pick from when asserting one that has no evidence yet on a
+    given product."""
+    if not schema_ready():
+        return []
+    with connection.cursor() as cur:
+        cur.execute("SELECT key, label FROM catalog.software_category ORDER BY label")
+        return list(cur.fetchall())
+
+
 def products_for_title(canonical_name: str) -> list[str]:
     """Stable product identities currently observed for one display title.
 

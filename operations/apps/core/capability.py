@@ -112,6 +112,18 @@ def effective_for_products(product_uuids: list[str]) -> dict[str, list[dict]]:
     return out
 
 
+def all_capabilities() -> list[tuple[str, str]]:
+    """(key, label) for every defined capability -- the fixed vocabulary a
+    curator can pick from when asserting one that has no evidence yet on a
+    given product. Only three rows; no schema-readiness probe needed since
+    this reads the registry table, not an assertion table."""
+    if not schema_ready():
+        return []
+    with connection.cursor() as cur:
+        cur.execute("SELECT key, label FROM catalog.capability ORDER BY key")
+        return list(cur.fetchall())
+
+
 def products_for_title(canonical_name: str) -> list[str]:
     """Stable product identities currently observed for one display title.
 

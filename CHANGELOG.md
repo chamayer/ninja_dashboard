@@ -2,6 +2,17 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.120.5] — 2026-08-19 — Assign capability/category with no prior evidence
+
+### Added
+
+- A curator can now confirm or reject any capability or category on a
+  product even when nothing has ever suggested it — a "Not yet evaluated"
+  control lists every key with no existing row for that product and lets
+  a curator pick one directly. The existing per-row confirm/reject controls
+  (for keys a machine already suggested) are unchanged; this only fills the
+  gap where a product showed "Unknown" with no way to act on it.
+
 ## [0.120.4] — 2026-08-19 — Category confirm/reject review
 
 ### Added

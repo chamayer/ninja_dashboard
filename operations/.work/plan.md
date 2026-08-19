@@ -110,10 +110,29 @@ exactly as designed. No live UI write was exercised (would have left a real
 row in production without a specific reason to), only the read-only render
 path and the SQL logic in isolation.
 
-**Next action:** request commit/push approval; verify the live page renders
-the new Category card and (if the user wants) exercise one real confirm/
-reject through the UI as the deployed admin user, who is a superuser and so
-bypasses the new permission gate.
+**Next action:** none — deployed and verified live (see below).
+
+### Post-deploy: manual assign for zero-evidence keys (0.120.5)
+
+User hit "Unknown — no effective capability/category evidence" on a real
+product and asked where to choose one — confirmed neither axis had any way
+to originate an assertion when nothing had ever suggested it; confirm/reject
+only reacted to existing rows. Added `all_capabilities()`/`all_categories()`
+(read the registry vocabulary) and a per-product `missing` list (registry
+keys minus keys already present in `product.rows`) in the view, plus a
+"Not yet evaluated" dropdown+confirm/reject control in the template,
+separate from the existing per-row controls. No backend write-path change
+was needed — `confirm()` already writes directly to `*_assertion_operator`
+with no dependency on machine evidence existing.
+
+User feedback: don't call it "Assert" in the UI — labeled the action
+"Yes, it is" / "No, it isn't" instead of introducing new jargon.
+
+Rehearsed against production, read-only + rolled-back: confirmed
+`endpoint_security` as refuted on anydesk (which had zero prior evidence
+for that key) without disturbing its existing `remote_access` rows.
+`python manage.py check`, template load, and `ruff check` (0 new findings)
+pass. Pending commit/push approval and live verification.
 
 ## CURRENT TASK — Cross-client serial drill-through
 
