@@ -220,6 +220,37 @@ All notable changes to this project follow [Semantic Versioning](https://semver.
   capability model, and both category-filter fixes preserve every existing
   code path's shape, just the join predicate.
 
+## [0.119.16] — 2026-08-19 — Products page repointed to the capability model
+
+### Changed
+
+- The Software/Products page's category filter bullets, "Not categorized"
+  tile, `?category=` filter, and per-title categories column now read
+  `catalog.v_product_capability_effective` instead of
+  `operations.software_catalog`. Retired per ADR-0012's "stop reading and
+  writing" sense — the table itself is untouched, only this page's queries
+  changed. `software_catalog` was measured to hold only three values,
+  `av`/`remote_access`/`rmm`, the same three concepts `catalog.capability`
+  now handles with vetted/candidate tiers and dry-run-verified rules; it was
+  never a general taxonomy, just a smaller, disconnected, case-broken
+  duplicate of it.
+- Categorized-title coverage: **11 → 441** distinct titles (357 remote
+  access, 74 av, 10 rmm), matching real vetted capability data rather than a
+  52-row hand-seed. `av` is the URL-facing alias for the `endpoint_security`
+  capability key, matching the `unauthorized_av` finding type name already in
+  use.
+- Added a `capability_available` startup-race probe (`to_regclass`),
+  mirroring the existing `intel_available` guard: if the capability schema is
+  briefly absent during a redeploy, the page degrades to "no category data"
+  instead of a hard 500 for every visitor.
+
+### Notes
+
+- General software categorization (browser, productivity, dev tools, ...)
+  still does not exist anywhere in the system in any form. This makes the
+  page honest about the capability data that does exist; it does not create
+  broader taxonomy. That remains a separate, unscoped project.
+
 ## [0.119.2] — 2026-08-17 — Capability permission checks
 
 ### Fixed

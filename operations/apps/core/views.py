@@ -3252,6 +3252,22 @@ def _software_page_data(request: HttpRequest) -> dict:
     if not intel_available and safety_filter:
         safety_filter = ""
 
+    # Capability layer availability probe — the raw SQL migration runner and
+    # Django both apply at container startup with no ordering guarantee, so
+    # this table can be briefly absent. Same shape as intel_available above:
+    # fail closed to "no category data" rather than a hard 500 for every
+    # visitor to this page during that window.
+    capability_available = False
+    try:
+        with connection.cursor() as pcur:
+            pcur.execute("SELECT to_regclass('catalog.v_product_capability_effective')")
+            (regclass,) = pcur.fetchone()
+            capability_available = regclass is not None
+    except Exception:
+        capability_available = False
+    if not capability_available and category_filter:
+        category_filter = ""
+
     # Fetch v_software_safety ONCE up front. Everything downstream —
     # per-title risk map, high-risk count, distribution, this-week
     # highlights, AND the ?safety=<band> filter — is derived from this
@@ -3297,32 +3313,52 @@ def _software_page_data(request: HttpRequest) -> dict:
     with transaction.atomic(), connection.cursor() as cur:
         cur.execute("SET LOCAL operations.tenant_id = 1")
 
-        # Titles that actually match a catalog row, not the catalog's raw row
-        # count. The two are unrelated numbers: software_catalog carries
-        # entries that match nothing installed, and this used to compute
-        # uncategorized_titles as unique_titles minus that raw count, which
-        # produced a plausible-looking number without measuring a real match.
+        # Retired reading software_catalog.categories for this page (ADR-0012
+        # "retired means stop reading and writing" -- the table itself is not
+        # dropped). Measured 2026-08-18: software_catalog held only three
+        # values, av/remote_access/rmm, the same three concepts
+        # catalog.capability now handles with vetted/candidate tiers and
+        # dry-run-verified rules, seeded once by hand and never a general
+        # taxonomy. It also had a case-sensitivity bug (mixed-case catalog
+        # rows against lowercase installed titles) that made every filter on
+        # this page match nothing at all before that was even considered.
         #
-        # LOWER() on both sides is load-bearing, not defensive: software_catalog
-        # stores canonical_name in mixed case ("SentinelOne", "Sophos Endpoint")
-        # while software_title_current stores it lowercase. Measured
-        # 2026-08-18: the exact-case join this replaces matches ZERO of the 52
-        # catalog rows against any installed title -- every category filter and
-        # the categories column on this page were silently returning nothing
-        # for that reason, not because software_catalog was too sparse to help
-        # at all. Case-insensitive, the same 52 rows match 11 titles.
-        cur.execute(
-            """
-            SELECT COUNT(*) FROM operations.software_title_current stc
-            WHERE stc.tenant_id = 1
-              AND EXISTS (
-                SELECT 1 FROM operations.software_catalog cat
-                WHERE LOWER(cat.canonical_name) = LOWER(stc.canonical_name)
-                  AND (cat.tenant_id = stc.tenant_id OR cat.tenant_id IS NULL)
-              )
-            """
-        )
-        (categorized_titles,) = cur.fetchone()
+        # The capability model reaches 441 distinct titles this way, against
+        # 11 through the case-fixed old join -- real, vetted data rather than
+        # a bigger version of the same small hand-seed.
+        categorized_titles = 0
+        category_rows: list = []
+        if capability_available:
+            cur.execute(
+                """
+                SELECT COUNT(DISTINCT sic.canonical_name)
+                FROM operations.software_installations_current sic
+                JOIN catalog.software_versions sv ON sv.id = sic.software_version_id
+                JOIN catalog.products p ON p.id = sv.product_id
+                JOIN catalog.v_product_capability_effective cap ON cap.product_uuid = p.product_uuid
+                WHERE sic.tenant_id = 1 AND sic.deleted_at IS NULL AND sic.stale_since IS NULL
+                """
+            )
+            (categorized_titles,) = cur.fetchone()
+
+            # Capability breakdown, replacing the software_catalog category
+            # breakdown this used to read. 'av' is the URL-facing alias for
+            # the endpoint_security capability, matching the unauthorized_av
+            # finding type name it already drives.
+            cur.execute(
+                """
+                SELECT CASE cap.capability WHEN 'endpoint_security' THEN 'av' ELSE cap.capability END,
+                       COUNT(DISTINCT sic.canonical_name)
+                FROM operations.software_installations_current sic
+                JOIN catalog.software_versions sv ON sv.id = sic.software_version_id
+                JOIN catalog.products p ON p.id = sv.product_id
+                JOIN catalog.v_product_capability_effective cap ON cap.product_uuid = p.product_uuid
+                WHERE sic.tenant_id = 1 AND sic.deleted_at IS NULL AND sic.stale_since IS NULL
+                GROUP BY cap.capability
+                ORDER BY 2 DESC
+                """
+            )
+            category_rows = cur.fetchall()
 
         # Decisions rollup
         cur.execute(
@@ -3332,19 +3368,6 @@ def _software_page_data(request: HttpRequest) -> dict:
             """
         )
         decision_counts = {row[0]: row[1] for row in cur.fetchall()}
-
-        # Category breakdown (from catalog rows)
-        cur.execute(
-            """
-            SELECT jsonb_array_elements_text(categories) AS category,
-                   COUNT(DISTINCT canonical_name) AS titles
-            FROM operations.software_catalog
-            WHERE tenant_id = 1 OR tenant_id IS NULL
-            GROUP BY category
-            ORDER BY titles DESC
-            """
-        )
-        category_rows = cur.fetchall()
 
         # Titles-across-the-fleet aggregate. One row per canonical
         # product with rollup counts. Filter by name, category,
@@ -3370,22 +3393,29 @@ def _software_page_data(request: HttpRequest) -> dict:
                 "   AND f.finding_details->>'canonical_name' = sic.canonical_name)"
             )
         if category_filter == "uncategorized":
-            # LOWER() on both sides: software_catalog stores canonical_name in
-            # mixed case, software_installations_current stores it lowercase.
-            # The exact-case join this replaces matched nothing, ever.
             where_clauses.append(
-                "NOT EXISTS (SELECT 1 FROM operations.software_catalog cat "
-                " WHERE LOWER(cat.canonical_name) = LOWER(sic.canonical_name) "
-                "   AND (cat.tenant_id = sic.tenant_id OR cat.tenant_id IS NULL))"
+                "NOT EXISTS (SELECT 1 FROM operations.software_installations_current sic2 "
+                " JOIN catalog.software_versions sv ON sv.id = sic2.software_version_id "
+                " JOIN catalog.products p ON p.id = sv.product_id "
+                " JOIN catalog.v_product_capability_effective cap ON cap.product_uuid = p.product_uuid "
+                " WHERE sic2.tenant_id = sic.tenant_id AND sic2.canonical_name = sic.canonical_name "
+                "   AND sic2.deleted_at IS NULL AND sic2.stale_since IS NULL)"
             )
         elif category_filter:
+            # 'av' is the URL-facing alias for the endpoint_security
+            # capability key, matching the unauthorized_av finding type name
+            # operators already see.
+            capability_key = "endpoint_security" if category_filter == "av" else category_filter
             where_clauses.append(
-                "EXISTS (SELECT 1 FROM operations.software_catalog cat "
-                " WHERE LOWER(cat.canonical_name) = LOWER(sic.canonical_name) "
-                "   AND (cat.tenant_id = sic.tenant_id OR cat.tenant_id IS NULL) "
-                "   AND cat.categories ? %s)"
+                "EXISTS (SELECT 1 FROM operations.software_installations_current sic2 "
+                " JOIN catalog.software_versions sv ON sv.id = sic2.software_version_id "
+                " JOIN catalog.products p ON p.id = sv.product_id "
+                " JOIN catalog.v_product_capability_effective cap ON cap.product_uuid = p.product_uuid "
+                " WHERE sic2.tenant_id = sic.tenant_id AND sic2.canonical_name = sic.canonical_name "
+                "   AND sic2.deleted_at IS NULL AND sic2.stale_since IS NULL "
+                "   AND cap.capability = %s)"
             )
-            params.append(category_filter)
+            params.append(capability_key)
         if decision_filter == "approved":
             where_clauses.append(
                 "(EXISTS (SELECT 1 FROM operations.software_decisions sd "
@@ -3425,6 +3455,19 @@ def _software_page_data(request: HttpRequest) -> dict:
             params.append(safety_filter_names)
 
         where_sql = " AND ".join(where_clauses)
+        categories_subquery = (
+            """(SELECT array_agg(DISTINCT
+                        CASE cap.capability WHEN 'endpoint_security' THEN 'av' ELSE cap.capability END)
+                FROM operations.software_installations_current sic2
+                JOIN catalog.software_versions sv ON sv.id = sic2.software_version_id
+                JOIN catalog.products p ON p.id = sv.product_id
+                JOIN catalog.v_product_capability_effective cap ON cap.product_uuid = p.product_uuid
+                WHERE sic2.tenant_id = sic.tenant_id AND sic2.canonical_name = sic.canonical_name
+                  AND sic2.deleted_at IS NULL AND sic2.stale_since IS NULL
+               )"""
+            if capability_available
+            else "NULL"
+        )
         cur.execute(
             f"""
             WITH totals AS (
@@ -3439,12 +3482,7 @@ def _software_page_data(request: HttpRequest) -> dict:
                        sic.device_count,
                        sic.client_count,
                        sic.latest_install AS last_install,
-                   (SELECT array_agg(DISTINCT cat_name)
-                    FROM operations.software_catalog cat,
-                         jsonb_array_elements_text(cat.categories) AS cat_name
-                    WHERE LOWER(cat.canonical_name) = LOWER(sic.canonical_name)
-                      AND (cat.tenant_id = sic.tenant_id OR cat.tenant_id IS NULL)
-                   ) AS categories,
+                   {categories_subquery} AS categories,
                    (SELECT MIN(sd.decision)
                     FROM operations.software_decisions sd
                     WHERE sd.tenant_id = sic.tenant_id
