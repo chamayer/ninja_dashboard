@@ -1,9 +1,47 @@
 # Active Operations implementation plan
 
+## COMPLETED TASK — Descriptive category on the Products page
+
+**Status:** implemented, validated read-only against production, pending
+commit/push approval.
+
+**Goal:** `catalog.v_product_category_effective` (root migration 104,
+descriptive taxonomy: browser, dev_tools, media, ...) had real data but
+nothing in Operations read it. Wire it into the Products page as its own axis.
+
+**Decision:** kept fully separate from the existing "Category" filter/column,
+which is actually the security-relevant capability axis (av/rmm/remote_access)
+despite the generic name — confirmed by reading `_software_page_data`
+(`operations/apps/core/views.py`), where the existing "Not categorized"
+count already reads `catalog.v_product_capability_effective`, not a
+descriptive taxonomy. Conflating the two would have redefined an existing
+live metric's meaning. New param `product_category`, new context keys
+(`descriptive_categorized_titles`, `descriptive_category_rows`,
+`active_product_category`), new "Type" chip strip/column/CSV column in
+`software_products.html`. `_software_page_data` also serves the Overview page
+and its CSV export, both left untouched — this axis is scoped to Products only.
+
+**Scope:** `operations/apps/core/views.py` (`_software_page_data`,
+`software_products`), `operations/templates/software_products.html`. No
+migration, no schema change, no capability-model change.
+
+**Validation:** `python manage.py check` clean; `py_compile` clean; `ruff
+check` on `views.py` unchanged at 50 pre-existing errors (none in the new
+code); template loads via `get_template()` with no syntax error. No focused
+pytest suite exists for this page to extend (pre-existing gap), and the local
+dev DB is sqlite so the raw Postgres SQL cannot be exercised locally --
+validated instead by running the actual new SQL (probe, count, breakdown,
+per-title array, both filter branches) directly against production
+read-only: 24 categorized titles, 10-category breakdown, `browser` filter
+returns 2, `uncategorized` filter returns 22,095 of 22,119 (24 categorized +
+22,095 = 22,119, exact). No writes involved anywhere in this change.
+
+**Next action:** request commit/push approval; verify the live page renders
+and both chip strips work correctly post-deploy.
+
 ## CURRENT TASK — Cross-client serial drill-through
 
-**Status:** release 0.119.9 authorized; commit, push, and coupled deploy
-pending.
+**Status:** deployed as 0.119.9 / `7384e6e`.
 
 **Goal / scope:** make a device-page cross-client-serial link show the entire
 conflict group in the existing Issues queue, and make its shared-serial
@@ -20,9 +58,9 @@ an arbitrary JSON field from the request.
 **Validation / next action:** migration 0143 registers the field and configures
 `cross_client_serial`; the link, queue validation, scope notice, and evidence
 text are wired. Focused tests (10), Django check, migration-drift check,
-template loading, compilation, and diff check pass. Migration 0143 is the only
-pending migration; commit, push, redeploy, then verify migration, health, and
-the two-row serial drill-through.
+template loading, compilation, and diff check pass. Migration 0143 applied;
+both services are healthy. Production confirms the seeded registry key and a
+sample serial group resolves to two findings, devices, and clients.
 
 ## Device-detail patch signal source guard
 

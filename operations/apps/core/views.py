@@ -3231,6 +3231,11 @@ def _software_page_data(request: HttpRequest) -> dict:
     q_filter = (request.GET.get("q") or "").strip()
     decision_filter = request.GET.get("decision", "")  # approved|rejected|pending|any
     category_filter = request.GET.get("category", "")  # av|rmm|remote_access|...|uncategorized
+    # Separate axis from `category` above: that one is the security-relevant
+    # capability (av/rmm/remote_access). This is the descriptive taxonomy
+    # (browser/dev_tools/media/...) from catalog.v_product_category_effective
+    # (migration 104) -- distinct table, distinct filter, never conflated.
+    product_category_filter = request.GET.get("product_category", "")
     safety_filter = request.GET.get("safety", "")      # high|medium|low|clean
     publisher_filter = (request.GET.get("publisher") or "").strip()
     flagged_filter = request.GET.get("flagged", "").strip().lower() in ("1", "true", "yes", "on")
@@ -3267,6 +3272,18 @@ def _software_page_data(request: HttpRequest) -> dict:
         capability_available = False
     if not capability_available and category_filter:
         category_filter = ""
+
+    # Descriptive-category layer availability probe, same fail-closed shape.
+    product_category_available = False
+    try:
+        with connection.cursor() as pcur:
+            pcur.execute("SELECT to_regclass('catalog.v_product_category_effective')")
+            (regclass,) = pcur.fetchone()
+            product_category_available = regclass is not None
+    except Exception:
+        product_category_available = False
+    if not product_category_available and product_category_filter:
+        product_category_filter = ""
 
     # Fetch v_software_safety ONCE up front. Everything downstream —
     # per-title risk map, high-risk count, distribution, this-week
@@ -3360,6 +3377,37 @@ def _software_page_data(request: HttpRequest) -> dict:
             )
             category_rows = cur.fetchall()
 
+        # Descriptive category (migration 104) -- same join shape as the
+        # capability block above, distinct table, never merged with it.
+        descriptive_categorized_titles = 0
+        descriptive_category_rows: list = []
+        if product_category_available:
+            cur.execute(
+                """
+                SELECT COUNT(DISTINCT sic.canonical_name)
+                FROM operations.software_installations_current sic
+                JOIN catalog.software_versions sv ON sv.id = sic.software_version_id
+                JOIN catalog.products p ON p.id = sv.product_id
+                JOIN catalog.v_product_category_effective pce ON pce.product_uuid = p.product_uuid
+                WHERE sic.tenant_id = 1 AND sic.deleted_at IS NULL AND sic.stale_since IS NULL
+                """
+            )
+            (descriptive_categorized_titles,) = cur.fetchone()
+
+            cur.execute(
+                """
+                SELECT pce.category, COUNT(DISTINCT sic.canonical_name)
+                FROM operations.software_installations_current sic
+                JOIN catalog.software_versions sv ON sv.id = sic.software_version_id
+                JOIN catalog.products p ON p.id = sv.product_id
+                JOIN catalog.v_product_category_effective pce ON pce.product_uuid = p.product_uuid
+                WHERE sic.tenant_id = 1 AND sic.deleted_at IS NULL AND sic.stale_since IS NULL
+                GROUP BY pce.category
+                ORDER BY 2 DESC
+                """
+            )
+            descriptive_category_rows = cur.fetchall()
+
         # Decisions rollup
         cur.execute(
             """
@@ -3416,6 +3464,26 @@ def _software_page_data(request: HttpRequest) -> dict:
                 "   AND cap.capability = %s)"
             )
             params.append(capability_key)
+        if product_category_filter == "uncategorized":
+            where_clauses.append(
+                "NOT EXISTS (SELECT 1 FROM operations.software_installations_current sic2 "
+                " JOIN catalog.software_versions sv ON sv.id = sic2.software_version_id "
+                " JOIN catalog.products p ON p.id = sv.product_id "
+                " JOIN catalog.v_product_category_effective pce ON pce.product_uuid = p.product_uuid "
+                " WHERE sic2.tenant_id = sic.tenant_id AND sic2.canonical_name = sic.canonical_name "
+                "   AND sic2.deleted_at IS NULL AND sic2.stale_since IS NULL)"
+            )
+        elif product_category_filter:
+            where_clauses.append(
+                "EXISTS (SELECT 1 FROM operations.software_installations_current sic2 "
+                " JOIN catalog.software_versions sv ON sv.id = sic2.software_version_id "
+                " JOIN catalog.products p ON p.id = sv.product_id "
+                " JOIN catalog.v_product_category_effective pce ON pce.product_uuid = p.product_uuid "
+                " WHERE sic2.tenant_id = sic.tenant_id AND sic2.canonical_name = sic.canonical_name "
+                "   AND sic2.deleted_at IS NULL AND sic2.stale_since IS NULL "
+                "   AND pce.category = %s)"
+            )
+            params.append(product_category_filter)
         if decision_filter == "approved":
             where_clauses.append(
                 "(EXISTS (SELECT 1 FROM operations.software_decisions sd "
@@ -3468,6 +3536,18 @@ def _software_page_data(request: HttpRequest) -> dict:
             if capability_available
             else "NULL"
         )
+        product_categories_subquery = (
+            """(SELECT array_agg(DISTINCT pce.category)
+                FROM operations.software_installations_current sic2
+                JOIN catalog.software_versions sv ON sv.id = sic2.software_version_id
+                JOIN catalog.products p ON p.id = sv.product_id
+                JOIN catalog.v_product_category_effective pce ON pce.product_uuid = p.product_uuid
+                WHERE sic2.tenant_id = sic.tenant_id AND sic2.canonical_name = sic.canonical_name
+                  AND sic2.deleted_at IS NULL AND sic2.stale_since IS NULL
+               )"""
+            if product_category_available
+            else "NULL"
+        )
         cur.execute(
             f"""
             WITH totals AS (
@@ -3483,6 +3563,7 @@ def _software_page_data(request: HttpRequest) -> dict:
                        sic.client_count,
                        sic.latest_install AS last_install,
                    {categories_subquery} AS categories,
+                   {product_categories_subquery} AS product_categories,
                    (SELECT MIN(sd.decision)
                     FROM operations.software_decisions sd
                     WHERE sd.tenant_id = sic.tenant_id
@@ -3500,6 +3581,7 @@ def _software_page_data(request: HttpRequest) -> dict:
                    filtered.client_count,
                    filtered.last_install,
                    filtered.categories,
+                   filtered.product_categories,
                    filtered.decision,
                    totals.installations,
                    totals.unique_titles
@@ -3509,9 +3591,9 @@ def _software_page_data(request: HttpRequest) -> dict:
             params,
         )
         software_rows = cur.fetchall()
-        installations = software_rows[0][7]
-        unique_titles = software_rows[0][8]
-        title_rows = [row[:7] for row in software_rows if row[0] is not None]
+        installations = software_rows[0][8]
+        unique_titles = software_rows[0][9]
+        title_rows = [row[:8] for row in software_rows if row[0] is not None]
 
         canonical_names = [row[0] for row in title_rows]
 
@@ -3738,7 +3820,8 @@ def _software_page_data(request: HttpRequest) -> dict:
             "client_count": row[3],
             "last_install": row[4],
             "categories": row[5] or [],
-            "decision": row[6],
+            "product_categories": row[6] or [],
+            "decision": row[7],
             "safety_score": safety.get("score"),
             "safety_band": safety.get("band", ""),
             "safety_cve_count": safety.get("cve_count", 0),
@@ -3753,6 +3836,12 @@ def _software_page_data(request: HttpRequest) -> dict:
         "uncategorized_titles": unique_titles - categorized_titles
         if unique_titles > categorized_titles
         else 0,
+        "descriptive_categorized_titles": descriptive_categorized_titles,
+        "descriptive_uncategorized_titles": unique_titles - descriptive_categorized_titles
+        if unique_titles > descriptive_categorized_titles
+        else 0,
+        "descriptive_category_rows": descriptive_category_rows,
+        "active_product_category": product_category_filter,
         "approved_titles": approved_titles,
         "rejected_titles": rejected_titles,
         "investigate_titles": investigate_titles,
@@ -3819,6 +3908,7 @@ def software_products(request: HttpRequest) -> HttpResponse:
                 ("Clients", "client_count"),
                 ("Last install", "last_install"),
                 ("Categories", "categories"),
+                ("Type", "product_categories"),
                 ("Decision", "decision"),
                 ("Risk band", "safety_band"),
                 ("Risk score", "safety_score"),

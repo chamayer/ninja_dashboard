@@ -41,6 +41,32 @@
     </a>
 </div>
 
+{# ── Type chip strip (descriptive taxonomy — browser/dev tools/media/...,
+     a separate axis from the security-relevant Category above; nothing
+     here ever alerts) ─────────────────────────────────────────────── #}
+{% if descriptive_category_rows or descriptive_uncategorized_titles %}
+<div class="sw-section-label">Type</div>
+<div class="sw-filterbar" style="gap:0.4rem;">
+    <a class="cat-chip {% if not active_product_category %}active{% endif %}"
+       href="{% url 'software_products' %}"
+       style="padding:0.28rem 0.65rem; border:1px solid var(--border); border-radius:999px; background:#fff; text-decoration:none; color:#374151; font-size:0.82rem;{% if not active_product_category %} background:#1e40af; border-color:#1e40af; color:#fff;{% endif %}">
+        All {{ unique_titles }}
+    </a>
+    {% for type_name, type_titles in descriptive_category_rows %}
+        <a class="cat-chip {% if active_product_category == type_name %}active{% endif %}"
+           href="?product_category={{ type_name }}"
+           style="padding:0.28rem 0.65rem; border:1px solid var(--border); border-radius:999px; background:#fff; text-decoration:none; color:#374151; font-size:0.82rem;{% if active_product_category == type_name %} background:#1e40af; border-color:#1e40af; color:#fff;{% endif %}">
+            {{ type_name|humanize_label|default:type_name|title }} <strong>{{ type_titles }}</strong>
+        </a>
+    {% endfor %}
+    <a class="cat-chip {% if active_product_category == 'uncategorized' %}active{% endif %}"
+       href="?product_category=uncategorized"
+       style="padding:0.28rem 0.65rem; border:1px solid var(--border); border-radius:999px; background:#fff; text-decoration:none; color:#374151; font-size:0.82rem;{% if active_product_category == 'uncategorized' %} background:#1e40af; border-color:#1e40af; color:#fff;{% endif %}">
+        No type <strong>{{ descriptive_uncategorized_titles }}</strong>
+    </a>
+</div>
+{% endif %}
+
 {# ── Per-column filter bar ───────────────────────────────── #}
 <div class="sw-section-label">Filter</div>
 <form action="" method="get" class="sw-filterbar">
@@ -84,9 +110,10 @@
         </label>
     </div>
     {% if active_category %}<input type="hidden" name="category" value="{{ active_category }}">{% endif %}
+    {% if active_product_category %}<input type="hidden" name="product_category" value="{{ active_product_category }}">{% endif %}
     <button type="submit">Apply</button>
     {% if active_q or active_publisher or active_min_devices or active_safety or active_decision %}
-        <a class="clear" href="?{% if active_category %}category={{ active_category }}{% endif %}">Clear</a>
+        <a class="clear" href="?{% if active_category %}category={{ active_category }}{% endif %}{% if active_category and active_product_category %}&{% endif %}{% if active_product_category %}product_category={{ active_product_category }}{% endif %}">Clear</a>
     {% endif %}
 </form>
 
@@ -101,6 +128,7 @@
                 <th class="num">Devices</th>
                 <th class="num">Clients</th>
                 <th>Category</th>
+                <th>Type</th>
                 <th>Risk</th>
                 <th>Decision</th>
                 <th class="actions">Apply</th>
@@ -124,6 +152,13 @@
                 <td>
                     {% if t.categories %}
                         {% for cat in t.categories %}{% if not forloop.first %}, {% endif %}{{ cat|humanize_label|default:cat|title }}{% endfor %}
+                    {% else %}
+                        <span class="muted">—</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if t.product_categories %}
+                        {% for cat in t.product_categories %}{% if not forloop.first %}, {% endif %}{{ cat|humanize_label|default:cat|title }}{% endfor %}
                     {% else %}
                         <span class="muted">—</span>
                     {% endif %}

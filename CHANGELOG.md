@@ -2,6 +2,17 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.120.2] — 2026-08-19 — Descriptive category on the Products page
+
+### Added
+
+- The Products page now shows descriptive software type (browser, dev tools,
+  media, ...) from `catalog.v_product_category_effective` (migration 104) as
+  a new "Type" filter/column, separate from the existing security-relevant
+  "Category" (av/rmm/remote_access). The two axes are never conflated: this
+  one can never raise a finding and the existing "Not categorized" capability
+  count is unchanged.
+
 ## [0.120.1] — 2026-08-19 — Wire Winget/Chocolatey tags into capability evidence
 
 ### Added
