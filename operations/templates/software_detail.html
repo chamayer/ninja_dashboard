@@ -147,14 +147,15 @@
                         {% csrf_token %}
                         <input type="hidden" name="product_uuid" value="{{ product.product_uuid }}">
                         <input type="hidden" name="next" value="{{ request.get_full_path }}">
-                        <span class="muted">Not yet evaluated:</span>
+                        <span class="muted">Is this also</span>
                         <select name="capability" style="font-size:0.75rem;">
                             {% for key, label in product.missing %}
-                            <option value="{{ key }}">{{ label }}</option>
+                            <option value="{{ key }}">{{ label|lower }}</option>
                             {% endfor %}
                         </select>
-                        <select name="decision" style="font-size:0.75rem;"><option value="confirm">Yes, it is</option><option value="reject">No, it isn't</option></select>
-                        <button type="submit" style="font-size:0.75rem;">Save</button>
+                        <span class="muted">?</span>
+                        <button type="submit" name="decision" value="confirm" style="font-size:0.75rem;">Yes</button>
+                        <button type="submit" name="decision" value="reject" style="font-size:0.75rem;">No</button>
                     </form>
                     {% endif %}
                 </div>
@@ -203,14 +204,15 @@
                         {% csrf_token %}
                         <input type="hidden" name="product_uuid" value="{{ product.product_uuid }}">
                         <input type="hidden" name="next" value="{{ request.get_full_path }}">
-                        <span class="muted">Not yet evaluated:</span>
+                        <span class="muted">Is this also</span>
                         <select name="category" style="font-size:0.75rem;">
                             {% for key, label in product.missing %}
-                            <option value="{{ key }}">{{ label }}</option>
+                            <option value="{{ key }}">{{ label|lower }}</option>
                             {% endfor %}
                         </select>
-                        <select name="decision" style="font-size:0.75rem;"><option value="confirm">Yes, it is</option><option value="reject">No, it isn't</option></select>
-                        <button type="submit" style="font-size:0.75rem;">Save</button>
+                        <span class="muted">?</span>
+                        <button type="submit" name="decision" value="confirm" style="font-size:0.75rem;">Yes</button>
+                        <button type="submit" name="decision" value="reject" style="font-size:0.75rem;">No</button>
                     </form>
                     {% endif %}
                 </div>

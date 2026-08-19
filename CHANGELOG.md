@@ -2,6 +2,14 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.120.6] — 2026-08-19 — Friendlier wording on the manual-assign control
+
+### Changed
+
+- "Not yet evaluated: [dropdown] [Yes, it is / No, it isn't] Save" replaced
+  with "Is this also [dropdown]? [Yes] [No]" — reads like a question a
+  person would actually ask instead of a form label.
+
 ## [0.120.5] — 2026-08-19 — Assign capability/category with no prior evidence
 
 ### Added
