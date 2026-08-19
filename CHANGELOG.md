@@ -264,6 +264,34 @@ All notable changes to this project follow [Semantic Versioning](https://semver.
   verified the row count is identical (22,119) before and after — only which
   titles get covered first.
 
+## [0.119.18] — 2026-08-19 — Fix a live SQL parameter-scanning defect
+
+### Fixed
+
+- The Winget enricher failed on every run with `incomplete placeholder: '%'`.
+  `_titles_needing_refresh`'s query is executed as `cur.execute(sql, params)`,
+  and psycopg scans the whole string — including SQL comments — for `%s`
+  placeholders. The ordering-fix comment landed in `0.119.17` with two
+  unescaped literal `%` characters ("a 3.5% hit rate", "73% of the fleet"),
+  which broke the scan and failed the query before a single HTTP request went
+  out. Found immediately: triggered the corrected enricher as this release's
+  own verification step and it failed instantly (0 rows, 0.0s).
+- The Chocolatey enricher's `_titles_needing_refresh` carries the identical
+  construction — the same prose, the same unescaped `%` characters, added
+  2026-08-12. It has not failed yet only because its 24-hour cron has not
+  re-fired against that code since; the next scheduled run would have hit
+  the identical failure. Fixed the same way here too, found by checking for
+  the same defect shape elsewhere rather than assuming it was isolated.
+- Both fixes move the explanatory prose to a Python-level comment above
+  `cur.execute`, outside the string psycopg scans, rather than relying on
+  remembering to escape `%%` inside it — a comment inside the SQL string is
+  exactly where this mistake will recur.
+- Swept the rest of `ingest/` for the same shape (a literal `%` in a SQL
+  comment inside a parameterized query string). The other two real `LIKE
+  '...%'` wildcards found (`resolver.py`, `eol_match.py`) were already
+  correctly escaped as `%%` in the executed SQL; only the two enrichers had
+  the defect, both introduced by the same prose-with-percentages pattern.
+
 ## [0.119.2] — 2026-08-17 — Capability permission checks
 
 ### Fixed

@@ -76,6 +76,21 @@ def _enrich() -> int:
 
 
 def _titles_needing_refresh() -> list[str]:
+    # Most-installed first, not alphabetical. Same fix already proven for the
+    # Chocolatey enricher: measured 2026-08-12, alphabetical order processed
+    # 225 titles for 8 writes -- a low single-digit-percent hit rate -- while
+    # the titles carrying most of the fleet's installs sat untouched behind
+    # the digits. At 500 titles/run against 22,118 total, order decides which
+    # titles the first weeks of coverage reach.
+    #
+    # No literal '%' below: this string is passed to cur.execute() as a
+    # parameterized query, and psycopg scans the WHOLE string -- including
+    # SQL comments -- for %s placeholders. An unescaped '%' anywhere in it
+    # (a percentage in a comment, here originally) raises "incomplete
+    # placeholder" and fails the run before a single HTTP request goes out.
+    # Measured 2026-08-19: this exact mistake, in this exact query, in this
+    # file. Keep prose with numbers as a Python comment, never inside the
+    # SQL string.
     with db.transaction() as cur:
         cur.execute(
             """
@@ -94,12 +109,6 @@ def _titles_needing_refresh() -> list[str]:
               AND sic.canonical_name <> ''
               AND (ls.observed_at IS NULL OR ls.observed_at < %s)
             GROUP BY sic.canonical_name
-            -- Most-installed first, not alphabetical. Same fix already proven
-            -- for the Chocolatey enricher (measured 2026-08-12: 225 titles
-            -- processed for 8 writes, a 3.5% hit rate, alphabetically, while
-            -- the 544 titles carrying 73% of the fleet's installs sat
-            -- untouched). At 500 titles/run against 22,118 total, order
-            -- decides which titles the first weeks of coverage reach.
             ORDER BY COUNT(DISTINCT sic.device_id) DESC, sic.canonical_name
             """,
             (_TENANT_ID, _TENANT_ID, datetime.now(timezone.utc) - _STALE_AFTER),

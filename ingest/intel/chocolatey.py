@@ -69,6 +69,24 @@ def _enrich() -> int:
 
 
 def _titles_needing_refresh() -> list[str]:
+    # Most-installed first, not alphabetical. Each run is capped at
+    # _MAX_TITLES_PER_RUN, so the ordering decides what the cap buys.
+    # Alphabetical spent a whole run on '. .', '1.1.3.4' and '4500_help':
+    # measured 2026-08-12, ~225 titles processed for 8 writes -- a low
+    # single-digit-percent hit rate -- while the 544 titles that carry most
+    # of the fleet's installs sat untouched behind the digits.
+    #
+    # No literal '%' below: this string is passed to cur.execute() as a
+    # parameterized query, and psycopg scans the WHOLE string -- including
+    # SQL comments -- for %s placeholders. An unescaped '%' anywhere in it (a
+    # percentage in a comment, here originally) raises "incomplete
+    # placeholder" and fails the run before a single HTTP request goes out.
+    # Measured 2026-08-19: this exact mistake, copied into winget.py's
+    # version of this same query, failed there on its first live run --
+    # this file carried the identical defect since the comment was written,
+    # undiscovered only because the 24-hour cron had not re-fired it since.
+    # Keep prose with numbers as a Python comment, never inside the SQL
+    # string.
     with db.transaction() as cur:
         cur.execute(
             """
@@ -87,12 +105,6 @@ def _titles_needing_refresh() -> list[str]:
               AND sic.canonical_name <> ''
               AND (ls.observed_at IS NULL OR ls.observed_at < %s)
             GROUP BY sic.canonical_name
-            -- Most-installed first, not alphabetical. Each run is capped at
-            -- _MAX_TITLES_PER_RUN, so the ordering decides what the cap buys.
-            -- Alphabetical spent a whole run on '. .', '1.1.3.4' and
-            -- '4500_help': measured 2026-08-12, ~225 titles processed for 8
-            -- writes, a 3.5% hit rate, while the 544 titles that carry 73% of
-            -- the fleet's installs sat untouched behind the digits.
             ORDER BY COUNT(DISTINCT sic.device_id) DESC, sic.canonical_name
             """,
             (_TENANT_ID, _TENANT_ID, datetime.now(timezone.utc) - _STALE_AFTER),
