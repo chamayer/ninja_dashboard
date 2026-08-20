@@ -3246,6 +3246,34 @@ def _software_page_data(request: HttpRequest) -> dict:
     except ValueError:
         min_devices_int = 0
 
+    # Server-side sort + pagination. The page previously fetched only the
+    # top 500 rows by device_count DESC and let a client-side JS sort
+    # reorder just that fetched slice -- ascending "sort" only ever showed
+    # the 500th-highest count, never the fleet's real minimum, and every
+    # row past 500 (the majority: 21,600+ of 22,127 titles) was never
+    # reachable at all. A whitelist keeps the column expression out of the
+    # query string; direction and page are validated the same way.
+    _SORT_COLUMNS = {
+        "canonical_name": "sic.canonical_name",
+        "device_count": "sic.device_count",
+        "client_count": "sic.client_count",
+        "last_install": "sic.latest_install",
+    }
+    sort_key = request.GET.get("sort", "device_count")
+    if sort_key not in _SORT_COLUMNS:
+        sort_key = "device_count"
+    sort_dir = request.GET.get("dir", "desc")
+    if sort_dir not in ("asc", "desc"):
+        sort_dir = "desc"
+    sort_sql = f"{_SORT_COLUMNS[sort_key]} {sort_dir.upper()}, sic.canonical_name"
+
+    page_size = 500
+    try:
+        page_num = max(1, int(request.GET.get("page", "1")))
+    except ValueError:
+        page_num = 1
+    page_offset = (page_num - 1) * page_size
+
     # Intel layer availability probe — used to gate risk queries.
     intel_available = False
     try:
@@ -3561,14 +3589,15 @@ def _software_page_data(request: HttpRequest) -> dict:
                         FROM operations.software_decisions sd
                         WHERE sd.tenant_id = sic.tenant_id
                           AND sd.canonical_name = sic.canonical_name
-                       ) AS decision
+                       ) AS decision,
+                       COUNT(*) OVER ()::bigint AS total_filtered
                 FROM operations.software_title_current sic
                 LEFT JOIN category_by_title cbt ON cbt.canonical_name = sic.canonical_name
                 LEFT JOIN product_category_by_title pcbt ON pcbt.canonical_name = sic.canonical_name
                 WHERE {where_sql}
                   AND sic.device_count >= {min_devices_int}
-                ORDER BY sic.device_count DESC, sic.canonical_name
-                LIMIT 500
+                ORDER BY {sort_sql}
+                LIMIT {page_size} OFFSET {page_offset}
             )
             SELECT filtered.canonical_name,
                    filtered.publisher,
@@ -3579,7 +3608,8 @@ def _software_page_data(request: HttpRequest) -> dict:
                    filtered.product_categories,
                    filtered.decision,
                    totals.installations,
-                   totals.unique_titles
+                   totals.unique_titles,
+                   filtered.total_filtered
             FROM totals
             LEFT JOIN filtered ON TRUE
             """,
@@ -3588,6 +3618,7 @@ def _software_page_data(request: HttpRequest) -> dict:
         software_rows = cur.fetchall()
         installations = software_rows[0][8]
         unique_titles = software_rows[0][9]
+        total_filtered = software_rows[0][10] or 0
         title_rows = [row[:8] for row in software_rows if row[0] is not None]
 
         canonical_names = [row[0] for row in title_rows]
@@ -3837,6 +3868,29 @@ def _software_page_data(request: HttpRequest) -> dict:
         else 0,
         "descriptive_category_rows": descriptive_category_rows,
         "active_product_category": product_category_filter,
+        # Every active filter, pre-encoded, so sort/page links can reuse it
+        # without reconstructing the whole filter set inline in the
+        # template -- append &sort=<key>&dir=<asc|desc> or &page=<n>.
+        "filter_qs": urlencode({
+            k: v for k, v in {
+                "q": q_filter,
+                "publisher": publisher_filter,
+                "min_devices": min_devices_int or "",
+                "safety": safety_filter,
+                "decision": decision_filter,
+                "category": category_filter,
+                "product_category": product_category_filter,
+                "flagged": "1" if flagged_filter else "",
+            }.items() if v
+        }),
+        "total_filtered": total_filtered,
+        "page_num": page_num,
+        "page_size": page_size,
+        "total_pages": max(1, -(-total_filtered // page_size)),
+        "page_offset_display": (page_offset + 1) if total_filtered else 0,
+        "page_end_display": min(page_offset + page_size, total_filtered),
+        "active_sort": sort_key,
+        "active_dir": sort_dir,
         "approved_titles": approved_titles,
         "rejected_titles": rejected_titles,
         "investigate_titles": investigate_titles,
@@ -6089,6 +6143,80 @@ def devices_page(request: HttpRequest) -> HttpResponse:
             "coverage_issues": coverage_issues,
             "identity_issues": identity_issues,
             "delayed_sources": delayed_sources,
+        },
+    )
+
+
+@login_required
+def software_clients(request: HttpRequest) -> HttpResponse:
+    """Clients running a given software title/version/publisher.
+
+    The client-scoped counterpart to devices_page's device-scoped filter --
+    a client count on a software page should answer "which clients", not
+    dump a device-by-device list the operator has to tally by eye. Each row
+    links to org_software_devices (existing, client-scoped) for the actual
+    device list at that client.
+    """
+    software_filter = (request.GET.get("software") or "").strip()
+    version_filter = (request.GET.get("version") or "").strip()
+    software_publisher_filter = (request.GET.get("software_publisher") or "").strip()
+    if not software_filter and not software_publisher_filter:
+        return redirect("software_products")
+
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        where = [
+            "sic.tenant_id = 1", "sic.deleted_at IS NULL", "sic.stale_since IS NULL",
+        ]
+        params: list = []
+        if software_filter:
+            where.append("LOWER(sic.canonical_name) = LOWER(%s)")
+            params.append(software_filter)
+        if version_filter:
+            where.append("sic.version = %s")
+            params.append(version_filter)
+        if software_publisher_filter:
+            where.append("LOWER(sic.publisher) = LOWER(%s)")
+            params.append(software_publisher_filter)
+        where_sql = " AND ".join(where)
+        cur.execute(
+            f"""
+            SELECT c.id, c.display_name, c.slug,
+                   COUNT(DISTINCT sic.device_id)::int AS device_count
+            FROM operations.software_installations_current sic
+            JOIN operations.clients c ON c.id = sic.client_id
+            WHERE {where_sql}
+            GROUP BY c.id, c.display_name, c.slug
+            ORDER BY device_count DESC, c.display_name
+            """,
+            params,
+        )
+        client_rows = cur.fetchall()
+
+    clients = [
+        {"id": cid, "display_name": name, "slug": slug, "device_count": dc}
+        for cid, name, slug, dc in client_rows
+    ]
+
+    if wants_csv(request):
+        return csv_response(
+            clients,
+            columns=[
+                ("Client", "display_name"),
+                ("Devices", "device_count"),
+            ],
+            filename_stem="software_clients",
+        )
+
+    return render(
+        request,
+        "software_clients.html",
+        {
+            "clients": clients,
+            "total_devices": sum(c["device_count"] for c in clients),
+            "active_software": software_filter,
+            "active_version": version_filter,
+            "active_software_publisher": software_publisher_filter,
         },
     )
 

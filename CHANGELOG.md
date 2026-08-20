@@ -2,6 +2,27 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.120.9] — 2026-08-19 — Real sort/pagination on Products; client counts go to a client list
+
+### Fixed
+
+- The Products page fetched only the top 500 rows by device count from the
+  server; a client-side sort just reshuffled that fetched slice, so
+  "ascending" only ever showed the 500th-highest count (the real fleet
+  minimum is 1, and 8,989 of 22,127 titles have exactly one device — none
+  of them were ever reachable). Sort is now server-side (Product/Devices/
+  Clients columns, toggle asc/desc) with real pagination (500/page, First/
+  Previous/Next/Last), so every row in the fleet is reachable.
+
+### Changed
+
+- Client counts (Products page, title-detail, publisher-detail) now link to
+  a client list — which clients run this software, each linking to that
+  client's own device list — instead of dumping into the fleet-wide device
+  list the operator had to tally by client manually. Device counts still go
+  to the device list, unchanged. New `software_clients` view groups
+  `operations.software_installations_current` by client.
+
 ## [0.120.8] — 2026-08-19 — Device/client counts are now clickable
 
 ### Added

@@ -10,8 +10,8 @@
     <div>
         <h1>Products</h1>
         <div class="sub">
-            {{ titles|length }}{% if titles|length == 500 %}+{% endif %} product{{ titles|length|pluralize }}
-            shown from a fleet of {{ unique_titles }} unique product{{ unique_titles|pluralize }}.
+            Showing {{ page_offset_display }}–{{ page_end_display }} of {{ total_filtered }} matching product{{ total_filtered|pluralize }}
+            ({{ unique_titles }} total in the fleet).
         </div>
     </div>
     {% include "_csv_download.html" %}
@@ -111,6 +111,8 @@
     </div>
     {% if active_category %}<input type="hidden" name="category" value="{{ active_category }}">{% endif %}
     {% if active_product_category %}<input type="hidden" name="product_category" value="{{ active_product_category }}">{% endif %}
+    <input type="hidden" name="sort" value="{{ active_sort }}">
+    <input type="hidden" name="dir" value="{{ active_dir }}">
     <button type="submit">Apply</button>
     {% if active_q or active_publisher or active_min_devices or active_safety or active_decision %}
         <a class="clear" href="?{% if active_category %}category={{ active_category }}{% endif %}{% if active_category and active_product_category %}&{% endif %}{% if active_product_category %}product_category={{ active_product_category }}{% endif %}">Clear</a>
@@ -118,15 +120,27 @@
 </form>
 
 {# ── Products table ──────────────────────────────────────── #}
-<div class="sw-section-label">Products{% if titles|length == 500 %} (first 500) {% endif %}</div>
+<div class="sw-section-label">Products — page {{ page_num }} of {{ total_pages }}</div>
 <div class="sw-table-wrap">
     {% if titles %}
-    <table class="ops-table" data-sortable>
+    <table class="ops-table">
         <thead>
             <tr>
-                <th>Product</th>
-                <th class="num">Devices</th>
-                <th class="num">Clients</th>
+                <th>
+                    <a href="?{{ filter_qs }}&sort=canonical_name&dir={% if active_sort == 'canonical_name' and active_dir == 'asc' %}desc{% else %}asc{% endif %}">
+                        Product{% if active_sort == 'canonical_name' %}{% if active_dir == 'asc' %} ▲{% else %} ▼{% endif %}{% endif %}
+                    </a>
+                </th>
+                <th class="num">
+                    <a href="?{{ filter_qs }}&sort=device_count&dir={% if active_sort == 'device_count' and active_dir == 'asc' %}desc{% else %}asc{% endif %}">
+                        Devices{% if active_sort == 'device_count' %}{% if active_dir == 'asc' %} ▲{% else %} ▼{% endif %}{% endif %}
+                    </a>
+                </th>
+                <th class="num">
+                    <a href="?{{ filter_qs }}&sort=client_count&dir={% if active_sort == 'client_count' and active_dir == 'asc' %}desc{% else %}asc{% endif %}">
+                        Clients{% if active_sort == 'client_count' %}{% if active_dir == 'asc' %} ▲{% else %} ▼{% endif %}{% endif %}
+                    </a>
+                </th>
                 <th>Category</th>
                 <th>Type</th>
                 <th>Risk</th>
@@ -148,7 +162,7 @@
                     {% endif %}
                 </td>
                 <td class="num"><a href="{% url 'devices_page' %}?software={{ t.canonical_name|urlencode }}">{{ t.device_count }}</a></td>
-                <td class="num"><a href="{% url 'devices_page' %}?software={{ t.canonical_name|urlencode }}">{{ t.client_count }}</a></td>
+                <td class="num"><a href="{% url 'software_clients' %}?software={{ t.canonical_name|urlencode }}">{{ t.client_count }}</a></td>
                 <td>
                     {% if t.categories %}
                         {% for cat in t.categories %}{% if not forloop.first %}, {% endif %}{{ cat|humanize_label|default:cat|title }}{% endfor %}
@@ -208,4 +222,18 @@
     <div class="sw-empty">No products match the current filter.</div>
     {% endif %}
 </div>
+
+{% if total_pages > 1 %}
+<div class="sw-filterbar" style="justify-content:center; margin-top:0.6rem;">
+    {% if page_num > 1 %}
+        <a href="?{{ filter_qs }}&sort={{ active_sort }}&dir={{ active_dir }}&page=1">« First</a>
+        <a href="?{{ filter_qs }}&sort={{ active_sort }}&dir={{ active_dir }}&page={{ page_num|add:"-1" }}">‹ Previous</a>
+    {% endif %}
+    <span class="muted">Page {{ page_num }} of {{ total_pages }}</span>
+    {% if page_num < total_pages %}
+        <a href="?{{ filter_qs }}&sort={{ active_sort }}&dir={{ active_dir }}&page={{ page_num|add:"1" }}">Next ›</a>
+        <a href="?{{ filter_qs }}&sort={{ active_sort }}&dir={{ active_dir }}&page={{ total_pages }}">Last »</a>
+    {% endif %}
+</div>
+{% endif %}
 {% endblock %}

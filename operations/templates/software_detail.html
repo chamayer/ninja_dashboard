@@ -87,7 +87,7 @@
     <a class="sd-tile" style="text-decoration:none; color:inherit;" href="{% url 'devices_page' %}?software={{ canonical_name|urlencode }}">
         <div class="label">Devices</div><div class="value">{{ device_count }}</div>
     </a>
-    <a class="sd-tile" style="text-decoration:none; color:inherit;" href="{% url 'devices_page' %}?software={{ canonical_name|urlencode }}">
+    <a class="sd-tile" style="text-decoration:none; color:inherit;" href="{% url 'software_clients' %}?software={{ canonical_name|urlencode }}">
         <div class="label">Clients</div><div class="value">{{ client_count }}</div>
     </a>
     <div class="sd-tile"><div class="label">Versions observed</div><div class="value">{{ versions|length }}</div></div>
@@ -291,7 +291,7 @@
                     <td><code>{{ v.version }}</code></td>
                     <td class="num">{{ v.installs }}</td>
                     <td class="num"><a href="{% url 'devices_page' %}?software={{ canonical_name|urlencode }}&version={{ v.version|urlencode }}">{{ v.devices }}</a></td>
-                    <td class="num"><a href="{% url 'devices_page' %}?software={{ canonical_name|urlencode }}&version={{ v.version|urlencode }}">{{ v.clients }}</a></td>
+                    <td class="num"><a href="{% url 'software_clients' %}?software={{ canonical_name|urlencode }}&version={{ v.version|urlencode }}">{{ v.clients }}</a></td>
                     <td class="num muted">{{ v.last_observed|date:"Y-m-d"|default:"—" }}</td>
                 </tr>
                 {% endfor %}

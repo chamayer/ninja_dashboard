@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% load human_labels %}
+
+{% block title %}Clients — {{ active_software|default:active_software_publisher }} — Software{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:1rem;">
+        <h1 style="margin:0;">Clients running
+          <span class="muted" style="font-weight:400;">
+            {{ active_software|default:active_software_publisher|title }}{% if active_version %} {{ active_version }}{% endif %}{% if active_software and active_software_publisher %} · {{ active_software_publisher|title }}{% endif %}
+          </span>
+        </h1>
+        {% include "_csv_download.html" %}
+    </div>
+    <p class="muted" style="margin-top:0.5rem;">
+        {{ clients|length }} client{{ clients|length|pluralize }}, {{ total_devices }} device{{ total_devices|pluralize }} total.
+        {% if active_software %}<a href="{% url 'devices_page' %}?software={{ active_software|urlencode }}{% if active_version %}&version={{ active_version|urlencode }}{% endif %}{% if active_software_publisher %}&software_publisher={{ active_software_publisher|urlencode }}{% endif %}">See the device list instead →</a>{% endif %}
+    </p>
+</div>
+
+<div class="sw-table-wrap">
+    {% if clients %}
+    <table class="ops-table" data-sortable>
+        <thead>
+            <tr>
+                <th>Client</th>
+                <th class="num">Devices</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for c in clients %}
+            <tr>
+                <td class="primary-cell">{{ c.display_name }}</td>
+                <td class="num">
+                    {% if active_software %}
+                    <a href="{% url 'org_software_devices' org_slug=c.slug %}?name={{ active_software|urlencode }}{% if active_software_publisher %}&publisher={{ active_software_publisher|urlencode }}{% endif %}">
+                        {{ c.device_count }}
+                    </a>
+                    {% else %}
+                    {# Publisher-only, no single title -- org_software_devices needs one #}
+                    <a href="{% url 'org_devices' org_slug=c.slug %}">{{ c.device_count }}</a>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="sw-empty">No clients match this filter.</div>
+    {% endif %}
+</div>
+{% endblock %}
