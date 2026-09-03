@@ -97,8 +97,28 @@ read-model addition ran the Coverage requirement query in 1.280 seconds for
 13,419 device-platform rows; live read-model and page verification wait for an
 approved deployment.
 
-**Next action:** commit the Coverage-only files, push and redeploy the approved
-release (including migration 0146), then verify the live route and read model.
+**Deployment:** committed as `b1f6e27`, pushed to `origin` and the required
+secondary mirror, and redeployed through Portainer. Portainer reports that
+commit as the deployed configuration. Migration 0146 is applied; Operations,
+ingest, Postgres, and Metabase are healthy. `/healthz` returns 200 and the
+public Coverage route redirects to login (302). An in-container, runtime-role
+probe executed the actual Coverage query and result-building path with a 200
+result. The host has no active Django account suitable for an authenticated
+browser render, so a real signed-in UI session was not exercised from the host.
+
+**Follow-up scope:** replace the tall native multi-select controls with compact
+checkbox dropdowns. The submitted query parameter names and multi-select
+semantics stay unchanged. No migration or data change is involved.
+
+**Checkpoint:** the follow-up has the requested two visible filter rows with
+searchable checkbox dropdowns. Hudu presence, Hudu link availability, and
+SentinelOne exemption are independently filterable; cross-filter selections
+combine with AND. The Hudu column is width-constrained and wraps its card list.
+Focused Coverage tests, Django check, template loading, Python compilation,
+focused Ruff, and diff checks pass.
+
+**Next action:** commit and deploy the approved UI-only 0.121.1 follow-up.
+A Hudu section on device detail remains deferred by request.
 
 ## COMPLETED TASK — Descriptive category on the Products page
 

@@ -35,6 +35,7 @@ class _Cursor:
                 "Windows 11",
                 "workstation",
                 "Ninja",
+                False,
                 "Missing",
                 True,
                 "https://hudu.example/assets/1",
@@ -48,6 +49,7 @@ class _Cursor:
                 "Windows 11",
                 "workstation",
                 "SentinelOne",
+                False,
                 "Online",
                 True,
                 "https://hudu.example/assets/1",
@@ -61,6 +63,7 @@ class _Cursor:
                 "Ubuntu",
                 "server",
                 "Ninja",
+                True,
                 "Online",
                 False,
                 None,
@@ -90,7 +93,8 @@ def test_coverage_uses_effective_requirements_and_multiselect_filters(monkeypatc
     )
     request = RequestFactory().get(
         "/coverage/?client=acme&client=beta&platform=Ninja&platform=SentinelOne"
-        "&online_in=SentinelOne&state=Online&state=Missing"
+        "&online_in=SentinelOne&hudu=in_hudu&hudu_links=has_links"
+        "&s1_exemption=not_exempt&state=Online&state=Missing"
         "&os_family=Windows+11&device_type=workstation"
     )
     request.user = SimpleNamespace(is_authenticated=True)
@@ -112,6 +116,9 @@ def test_coverage_uses_effective_requirements_and_multiselect_filters(monkeypatc
     assert context["client_filters"] == ["acme", "beta"]
     assert context["platform_filters"] == ["Ninja", "SentinelOne"]
     assert context["online_filters"] == ["SentinelOne"]
+    assert context["hudu_filters"] == ["in_hudu"]
+    assert context["hudu_link_filters"] == ["has_links"]
+    assert context["s1_exemption_filters"] == ["not_exempt"]
     assert context["state_filters"] == ["Online", "Missing"]
     assert context["os_family_filters"] == ["Windows 11"]
     assert context["device_type_filters"] == ["workstation"]
@@ -129,9 +136,12 @@ def test_coverage_uses_effective_requirements_and_multiselect_filters(monkeypatc
 def test_coverage_template_has_clear_statuses_hudu_and_multiselect_filters():
     template = (Path(__file__).parents[3] / "templates/coverage.html").read_text(encoding="utf-8")
 
-    for label in ("Online in", "Required platform", "Status", "OS family", "Device type"):
+    for label in ("Online in", "Hudu links", "SentinelOne", "Required platform", "Status", "OS family", "Device type"):
         assert label in template
-    assert template.count(" multiple") >= 6
+    assert "Hudu" in template
+    assert template.count('type="checkbox"') >= 12
+    assert template.count('<details class="coverage-filter">') == 9
+    assert template.count('class="coverage-filter-search"') == 9
     assert "In Hudu" in template
     assert "Not in Hudu" in template
     assert "Online" in template

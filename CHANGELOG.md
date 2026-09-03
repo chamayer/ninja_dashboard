@@ -2,6 +2,17 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.121.1] — 2026-09-03 — Coverage filter controls
+
+### Changed
+
+- Coverage filters now use compact, searchable checkbox dropdowns in two rows
+  instead of tall native multi-select boxes. Added filters for Hudu presence,
+  Hudu link availability, and SentinelOne exemption status. Filter groups
+  combine with each other, so operators can select In Hudu and Has links.
+- The Hudu table column has a fixed width and wraps long linked-source names,
+  preserving room for agent-status columns.
+
 ## [0.121.0] — 2026-09-03 — Device-level Agent Coverage
 
 ### Added

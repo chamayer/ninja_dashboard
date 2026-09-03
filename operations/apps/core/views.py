@@ -7904,6 +7904,18 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
     client_filters = [value for value in request.GET.getlist("client") if value]
     platform_filters = [value for value in request.GET.getlist("platform") if value]
     online_filters = [value for value in request.GET.getlist("online_in") if value]
+    hudu_filters = [
+        value for value in request.GET.getlist("hudu")
+        if value in {"in_hudu", "not_in_hudu"}
+    ]
+    hudu_link_filters = [
+        value for value in request.GET.getlist("hudu_links")
+        if value in {"has_links", "no_links"}
+    ]
+    s1_exemption_filters = [
+        value for value in request.GET.getlist("s1_exemption")
+        if value in {"exempt", "not_exempt"}
+    ]
     os_family_filters = [value for value in request.GET.getlist("os_family") if value]
     device_type_filters = [value for value in request.GET.getlist("device_type") if value]
     state_filters = [
@@ -8105,6 +8117,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                            COALESCE(requirement.os_family, '') AS os_family,
                            requirement.device_type,
                            requirement.platform,
+                           requirement.exemptions ? 'agent.edr' AS s1_exempt,
                            CASE
                                WHEN gap.finding_type = 'missing_required_platform' THEN 'Missing'
                                WHEN gap.finding_type = 'stale_required_platform' THEN 'Stale'
@@ -8128,7 +8141,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                 )
                 SELECT
                     client_slug, client_name, device_id, hostname, os_family, device_type,
-                    platform, status,
+                    platform, s1_exempt, status,
                     hudu_present, hudu_url, hudu_links
                 FROM coverage
                 ORDER BY client_name, hostname, platform
@@ -8140,8 +8153,9 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         {
             "client_slug": row[0], "client_name": row[1], "device_id": row[2],
             "hostname": row[3], "os_family": row[4], "device_type": row[5],
-            "platform": row[6], "status": row[7], "hudu_present": row[8],
-            "hudu_url": _safe_external_http_url(row[9]), "hudu_links": row[10] or [],
+            "platform": row[6], "s1_exempt": row[7], "status": row[8],
+            "hudu_present": row[9], "hudu_url": _safe_external_http_url(row[10]),
+            "hudu_links": row[11] or [],
         }
         for row in rows
     ]
@@ -8163,6 +8177,20 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             return False
         if device_type_filters and row["device_type"] not in device_type_filters:
             return False
+        if hudu_filters:
+            hudu_value = "in_hudu" if row["hudu_present"] else "not_in_hudu"
+            if hudu_value not in hudu_filters:
+                return False
+        if hudu_link_filters:
+            if not row["hudu_present"]:
+                return False
+            hudu_link_value = "has_links" if row["hudu_links"] else "no_links"
+            if hudu_link_value not in hudu_link_filters:
+                return False
+        if s1_exemption_filters:
+            s1_value = "exempt" if row["s1_exempt"] else "not_exempt"
+            if s1_value not in s1_exemption_filters:
+                return False
         return not state_filters or row["status"] in state_filters
 
     filtered_rows = [row for row in coverage_rows if matches(row)]
@@ -8184,6 +8212,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                 "hudu_present": row["hudu_present"],
                 "hudu_url": row["hudu_url"],
                 "hudu_links": row["hudu_links"],
+                "s1_exempt": row["s1_exempt"],
                 "platform_states": {item["platform"]: item for item in all_platform_rows},
             }
 
@@ -8276,6 +8305,9 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             "client_filters": client_filters,
             "platform_filters": platform_filters,
             "online_filters": online_filters,
+            "hudu_filters": hudu_filters,
+            "hudu_link_filters": hudu_link_filters,
+            "s1_exemption_filters": s1_exemption_filters,
             "os_family_filters": os_family_filters,
             "device_type_filters": device_type_filters,
             "state_filters": state_filters,

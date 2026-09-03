@@ -17,9 +17,18 @@
 .coverage-offline { background:#fef3c7; color:#92400e; }
 .coverage-stale { background:#fed7aa; color:#9a3412; }
 .coverage-missing { background:#fee2e2; color:#991b1b; }
-.coverage-hudu { font-size:0.82rem; line-height:1.45; }
+.coverage-hudu { width:12rem; max-width:12rem; font-size:0.82rem; line-height:1.45; overflow-wrap:anywhere; }
 .coverage-hudu ul { margin:0.25rem 0 0; padding-left:1rem; }
-.coverage-filter { min-width:10rem; min-height:5.5rem; }
+.coverage-hudu li { overflow-wrap:anywhere; }
+.coverage-filter { position:relative; min-width:10rem; }
+.coverage-filter summary { cursor:pointer; list-style:none; border:1px solid var(--border); border-radius:4px; background:var(--surface); padding:0.45rem 0.65rem; font-size:0.85rem; }
+.coverage-filter summary::-webkit-details-marker { display:none; }
+.coverage-filter summary::after { content:"▾"; float:right; margin-left:1rem; color:var(--muted); }
+.coverage-filter-options { position:absolute; z-index:20; top:calc(100% + 0.2rem); left:0; min-width:14rem; max-height:18rem; overflow:auto; border:1px solid var(--border); border-radius:4px; background:var(--surface); box-shadow:0 3px 10px rgba(0,0,0,.14); padding:0.45rem; }
+.coverage-filter-search { box-sizing:border-box; width:100%; margin-bottom:0.35rem; padding:0.35rem 0.45rem; }
+.coverage-filter-options label { display:flex; align-items:center; gap:0.4rem; padding:0.25rem; font-size:0.84rem; white-space:nowrap; }
+.coverage-filter-row { display:flex; flex-wrap:wrap; align-items:end; gap:0.5rem; }
+.coverage-filter-row + .coverage-filter-row { margin-top:0.5rem; }
 </style>
 
 <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:1rem;">
@@ -50,13 +59,20 @@
 <div class="card" style="padding:0;">
     <div style="padding:1rem; border-bottom:1px solid var(--border);">
         <form method="get" class="filterbar">
-            <div><label for="coverage-client">Client</label><br><select class="coverage-filter" id="coverage-client" name="client" multiple>{% for client in filter_clients %}<option value="{{ client.slug }}"{% if client.slug in client_filters %} selected{% endif %}>{{ client.name }}</option>{% endfor %}</select></div>
-            <div><label for="coverage-online">Online in</label><br><select class="coverage-filter" id="coverage-online" name="online_in" multiple>{% for platform in platforms %}<option value="{{ platform }}"{% if platform in online_filters %} selected{% endif %}>{{ platform }}</option>{% endfor %}</select></div>
-            <div><label for="coverage-platform">Required platform</label><br><select class="coverage-filter" id="coverage-platform" name="platform" multiple>{% for platform in platforms %}<option value="{{ platform }}"{% if platform in platform_filters %} selected{% endif %}>{{ platform }}</option>{% endfor %}</select></div>
-            <div><label for="coverage-state">Status</label><br><select class="coverage-filter" id="coverage-state" name="state" multiple>{% for state in states %}<option value="{{ state }}"{% if state in state_filters %} selected{% endif %}>{{ state }}</option>{% endfor %}</select></div>
-            <div><label for="coverage-os">OS family</label><br><select class="coverage-filter" id="coverage-os" name="os_family" multiple>{% for family in os_families %}<option value="{{ family }}"{% if family in os_family_filters %} selected{% endif %}>{{ family }}</option>{% endfor %}</select></div>
-            <div><label for="coverage-type">Device type</label><br><select class="coverage-filter" id="coverage-type" name="device_type" multiple>{% for device_type in device_types %}<option value="{{ device_type }}"{% if device_type in device_type_filters %} selected{% endif %}>{{ device_type }}</option>{% endfor %}</select></div>
-            <div style="align-self:end;"><button type="submit">Filter</button>{% if client_filters or online_filters or platform_filters or state_filters or os_family_filters or device_type_filters %}<a class="clear" href="{% url 'fleet_coverage' %}">Clear</a>{% endif %}</div>
+            <div class="coverage-filter-row">
+                <details class="coverage-filter"><summary>Client</summary><div class="coverage-filter-options"><input class="coverage-filter-search" type="search" placeholder="Search clients" aria-label="Search clients">{% for client in filter_clients %}<label><input type="checkbox" name="client" value="{{ client.slug }}"{% if client.slug in client_filters %} checked{% endif %}>{{ client.name }}</label>{% endfor %}</div></details>
+                <details class="coverage-filter"><summary>Online in</summary><div class="coverage-filter-options"><input class="coverage-filter-search" type="search" placeholder="Search platforms" aria-label="Search platforms">{% for platform in platforms %}<label><input type="checkbox" name="online_in" value="{{ platform }}"{% if platform in online_filters %} checked{% endif %}>{{ platform }}</label>{% endfor %}</div></details>
+                <details class="coverage-filter"><summary>Required platform</summary><div class="coverage-filter-options"><input class="coverage-filter-search" type="search" placeholder="Search platforms" aria-label="Search required platforms">{% for platform in platforms %}<label><input type="checkbox" name="platform" value="{{ platform }}"{% if platform in platform_filters %} checked{% endif %}>{{ platform }}</label>{% endfor %}</div></details>
+                <details class="coverage-filter"><summary>Status</summary><div class="coverage-filter-options"><input class="coverage-filter-search" type="search" placeholder="Search statuses" aria-label="Search statuses">{% for state in states %}<label><input type="checkbox" name="state" value="{{ state }}"{% if state in state_filters %} checked{% endif %}>{{ state }}</label>{% endfor %}</div></details>
+                <div><button type="submit">Filter</button>{% if client_filters or online_filters or hudu_filters or hudu_link_filters or s1_exemption_filters or platform_filters or state_filters or os_family_filters or device_type_filters %}<a class="clear" href="{% url 'fleet_coverage' %}">Clear</a>{% endif %}</div>
+            </div>
+            <div class="coverage-filter-row">
+                <details class="coverage-filter"><summary>Hudu</summary><div class="coverage-filter-options"><input class="coverage-filter-search" type="search" placeholder="Search Hudu status" aria-label="Search Hudu status"><label><input type="checkbox" name="hudu" value="in_hudu"{% if "in_hudu" in hudu_filters %} checked{% endif %}>In Hudu</label><label><input type="checkbox" name="hudu" value="not_in_hudu"{% if "not_in_hudu" in hudu_filters %} checked{% endif %}>Not in Hudu</label></div></details>
+                <details class="coverage-filter"><summary>Hudu links</summary><div class="coverage-filter-options"><input class="coverage-filter-search" type="search" placeholder="Search link status" aria-label="Search Hudu link status"><label><input type="checkbox" name="hudu_links" value="has_links"{% if "has_links" in hudu_link_filters %} checked{% endif %}>Has links</label><label><input type="checkbox" name="hudu_links" value="no_links"{% if "no_links" in hudu_link_filters %} checked{% endif %}>No links</label></div></details>
+                <details class="coverage-filter"><summary>SentinelOne</summary><div class="coverage-filter-options"><input class="coverage-filter-search" type="search" placeholder="Search exemption" aria-label="Search SentinelOne exemption"><label><input type="checkbox" name="s1_exemption" value="exempt"{% if "exempt" in s1_exemption_filters %} checked{% endif %}>Exempt</label><label><input type="checkbox" name="s1_exemption" value="not_exempt"{% if "not_exempt" in s1_exemption_filters %} checked{% endif %}>Not exempt</label></div></details>
+                <details class="coverage-filter"><summary>OS family</summary><div class="coverage-filter-options"><input class="coverage-filter-search" type="search" placeholder="Search OS families" aria-label="Search OS families">{% for family in os_families %}<label><input type="checkbox" name="os_family" value="{{ family }}"{% if family in os_family_filters %} checked{% endif %}>{{ family }}</label>{% endfor %}</div></details>
+                <details class="coverage-filter"><summary>Device type</summary><div class="coverage-filter-options"><input class="coverage-filter-search" type="search" placeholder="Search device types" aria-label="Search device types">{% for device_type in device_types %}<label><input type="checkbox" name="device_type" value="{{ device_type }}"{% if device_type in device_type_filters %} checked{% endif %}>{{ device_type }}</label>{% endfor %}</div></details>
+            </div>
         </form>
         <p class="muted" style="margin:0.75rem 0 0; font-size:0.82rem;">Online: the platform reports the device online. Offline: it is in the platform but not online now. Stale: it has been offline longer than its threshold. Missing: it does not appear in the required platform.</p>
     </div>
@@ -64,7 +80,7 @@
     {% if device_rows %}
     <div style="overflow-x:auto;">
         <table class="ops-table" data-sortable>
-            <thead><tr><th>Client</th><th>Device</th><th>OS family</th><th>Type</th><th>Hudu</th>{% for platform in platforms %}<th>{{ platform }}</th>{% endfor %}</tr></thead>
+            <thead><tr><th>Client</th><th>Device</th><th>OS family</th><th>Type</th><th style="width:12rem;">Hudu</th>{% for platform in platforms %}<th>{{ platform }}</th>{% endfor %}</tr></thead>
             <tbody>
                 {% for row in device_rows %}
                 <tr>
@@ -80,4 +96,14 @@
     </div>
     {% else %}<p class="muted" style="padding:1.25rem 1rem;">No devices match the selected filters.</p>{% endif %}
 </div>
+<script>
+document.querySelectorAll('.coverage-filter-search').forEach((search) => {
+    search.addEventListener('input', () => {
+        const query = search.value.trim().toLowerCase();
+        search.parentElement.querySelectorAll('label').forEach((label) => {
+            label.hidden = query && !label.textContent.toLowerCase().includes(query);
+        });
+    });
+});
+</script>
 {% endblock %}
