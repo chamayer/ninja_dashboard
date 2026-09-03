@@ -2,6 +2,16 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.121.2] — 2026-09-03 — Coverage page render fix
+
+### Fixed
+
+- Coverage now paginates device rows (100 per page), preventing the full-fleet
+  table from exceeding the Operations worker timeout. The CSV export remains
+  complete.
+- Coverage filter controls render as two horizontal rows, with the second
+  directly below the first.
+
 ## [0.121.1] — 2026-09-03 — Coverage filter controls
 
 ### Changed

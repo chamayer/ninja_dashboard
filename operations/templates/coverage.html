@@ -29,6 +29,7 @@
 .coverage-filter-options label { display:flex; align-items:center; gap:0.4rem; padding:0.25rem; font-size:0.84rem; white-space:nowrap; }
 .coverage-filter-row { display:flex; flex-wrap:wrap; align-items:end; gap:0.5rem; }
 .coverage-filter-row + .coverage-filter-row { margin-top:0.5rem; }
+.coverage-filterbar { display:block; }
 </style>
 
 <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:1rem;">
@@ -58,7 +59,7 @@
 
 <div class="card" style="padding:0;">
     <div style="padding:1rem; border-bottom:1px solid var(--border);">
-        <form method="get" class="filterbar">
+        <form method="get" class="filterbar coverage-filterbar">
             <div class="coverage-filter-row">
                 <details class="coverage-filter"><summary>Client</summary><div class="coverage-filter-options"><input class="coverage-filter-search" type="search" placeholder="Search clients" aria-label="Search clients">{% for client in filter_clients %}<label><input type="checkbox" name="client" value="{{ client.slug }}"{% if client.slug in client_filters %} checked{% endif %}>{{ client.name }}</label>{% endfor %}</div></details>
                 <details class="coverage-filter"><summary>Online in</summary><div class="coverage-filter-options"><input class="coverage-filter-search" type="search" placeholder="Search platforms" aria-label="Search platforms">{% for platform in platforms %}<label><input type="checkbox" name="online_in" value="{{ platform }}"{% if platform in online_filters %} checked{% endif %}>{{ platform }}</label>{% endfor %}</div></details>
@@ -94,6 +95,7 @@
             </tbody>
         </table>
     </div>
+    {% include "_pagination.html" with page_obj=page_obj paginator=paginator page_query=page_query page_size=100 %}
     {% else %}<p class="muted" style="padding:1.25rem 1rem;">No devices match the selected filters.</p>{% endif %}
 </div>
 <script>

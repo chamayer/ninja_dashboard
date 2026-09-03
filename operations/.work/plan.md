@@ -40,7 +40,7 @@ then verify the affected live pages and Windows servicing ingest after deploy.
 
 ## ACTIVE TASK — Coverage triage filters
 
-**Status:** ready for approved commit, push, deployment, and live validation.
+**Status:** ready for approved corrective release, deployment, and live validation.
 
 **Goal:** replace the client/platform aggregate with a device-level Coverage
 surface that makes current agent status and current Hudu documentation visible.
@@ -114,10 +114,14 @@ semantics stay unchanged. No migration or data change is involved.
 searchable checkbox dropdowns. Hudu presence, Hudu link availability, and
 SentinelOne exemption are independently filterable; cross-filter selections
 combine with AND. The Hudu column is width-constrained and wraps its card list.
+The shared `filterbar` style initially placed the two row containers beside
+each other, so Coverage overrides it to stack them. The first live full-fleet
+render also produced a 3.9 MB response and exceeded Gunicorn's 30-second
+timeout; device rows now paginate at 100 while the CSV remains complete.
 Focused Coverage tests, Django check, template loading, Python compilation,
 focused Ruff, and diff checks pass.
 
-**Next action:** commit and deploy the approved UI-only 0.121.1 follow-up.
+**Next action:** commit and deploy the approved 0.121.2 corrective release.
 A Hudu section on device detail remains deferred by request.
 
 ## COMPLETED TASK — Descriptive category on the Products page

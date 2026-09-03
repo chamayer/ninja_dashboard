@@ -123,6 +123,7 @@ def test_coverage_uses_effective_requirements_and_multiselect_filters(monkeypatc
     assert context["os_family_filters"] == ["Windows 11"]
     assert context["device_type_filters"] == ["workstation"]
     assert len(context["device_rows"]) == 1
+    assert context["paginator"].count == 1
     row = context["device_rows"][0]
     assert row["hudu_present"] is True
     assert row["hudu_links"] == ["Ninja #296", "Auvik #42"]
@@ -142,6 +143,8 @@ def test_coverage_template_has_clear_statuses_hudu_and_multiselect_filters():
     assert template.count('type="checkbox"') >= 12
     assert template.count('<details class="coverage-filter">') == 9
     assert template.count('class="coverage-filter-search"') == 9
+    assert "coverage-filterbar" in template
+    assert '_pagination.html' in template
     assert "In Hudu" in template
     assert "Not in Hudu" in template
     assert "Online" in template

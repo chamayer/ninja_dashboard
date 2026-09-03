@@ -8226,19 +8226,6 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             )
         ]
 
-    for row in device_rows:
-        row["platform_cells"] = [
-            {
-                "platform": platform,
-                "status": row["platform_states"].get(platform, {}).get("status", ""),
-                "url": _coverage_filter_url(
-                    platform=platform,
-                    state=row["platform_states"].get(platform, {}).get("status", ""),
-                ),
-            }
-            for platform in platforms
-        ]
-
     visible_devices = {(row["client_slug"], row["device_id"]) for row in device_rows}
     summary_rows = [
         row for row in filtered_rows
@@ -8289,6 +8276,26 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             filename_stem="fleet_coverage",
         )
 
+    paginator = Paginator(device_rows, 100)
+    page_obj = paginator.get_page(request.GET.get("page"))
+    page_query = request.GET.copy()
+    page_query.pop("page", None)
+    page_query = page_query.urlencode()
+    device_rows = list(page_obj.object_list)
+
+    for row in device_rows:
+        row["platform_cells"] = [
+            {
+                "platform": platform,
+                "status": row["platform_states"].get(platform, {}).get("status", ""),
+                "url": _coverage_filter_url(
+                    platform=platform,
+                    state=row["platform_states"].get(platform, {}).get("status", ""),
+                ),
+            }
+            for platform in platforms
+        ]
+
     return render(
         request,
         "coverage.html",
@@ -8296,6 +8303,9 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             "admin_group": "integrations",
             "admin_tab": "coverage",
             "device_rows": device_rows,
+            "page_obj": page_obj,
+            "paginator": paginator,
+            "page_query": page_query,
             "platform_cards": platform_cards,
             "platforms": platforms,
             "os_families": os_families,
