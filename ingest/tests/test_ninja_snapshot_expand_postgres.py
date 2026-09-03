@@ -35,6 +35,9 @@ def test_expand_schema_rollup_and_shadow_views(postgres_connection) -> None:
     scope_migration = importlib.import_module(
         "operations.apps.core.migrations.0099_ninja_shadow_scope_correction"
     )
+    safe_cast_migration = importlib.import_module(
+        "operations.apps.core.migrations.0145_safe_ninja_shadow_ids"
+    )
     source_record_id = uuid.uuid4()
     health_record_id = uuid.uuid4()
     historical_record_id = uuid.uuid4()
@@ -48,6 +51,8 @@ def test_expand_schema_rollup_and_shadow_views(postgres_connection) -> None:
             CREATE ROLE operations_readonly;
             CREATE ROLE ninja_ingest;
             CREATE ROLE operations_migrate;
+            CREATE ROLE operations_view_owner;
+            CREATE ROLE metabase_ro;
             CREATE SCHEMA operations;
             CREATE SCHEMA ninja_core;
             GRANT USAGE ON SCHEMA operations
@@ -162,6 +167,25 @@ def test_expand_schema_rollup_and_shadow_views(postgres_connection) -> None:
             """,
             (health_record_id, source_instance_id),
         )
+        # A foreign source can legitimately use a nonnumeric external ID.
+        # The Ninja compatibility views must never attempt to cast it merely
+        # because the planner evaluates the target list before its filters.
+        cursor.execute(
+            """
+            INSERT INTO operations.entity_observation_current
+              (observation_id, tenant_id, source_instance_id,
+               external_namespace, external_id, platform, observed_at, active,
+               snapshot_scope,
+               raw_data, canonical_data, raw_hash, material_hash,
+               material_projection_version)
+            VALUES
+              (%s, 1, %s, 'access-session', 'not-a-ninja-id', 'ScreenConnect',
+               clock_timestamp(), TRUE, 'ScreenConnect', '{}', '{}',
+               decode(repeat('0d', 32), 'hex'),
+               decode(repeat('0e', 32), 'hex'), 1)
+            """,
+            (uuid.uuid4(), other_source_instance_id),
+        )
         cursor.execute("SET LOCAL operations.tenant_id = '1'")
         cursor.execute(
             """
@@ -182,6 +206,7 @@ def test_expand_schema_rollup_and_shadow_views(postgres_connection) -> None:
             (historical_record_id,),
         )
         cursor.execute(scope_migration.FORWARD_SQL)
+        cursor.execute(safe_cast_migration.FORWARD_SQL)
         cursor.execute(
             """
             SELECT has_table_privilege(

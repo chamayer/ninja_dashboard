@@ -2,6 +2,17 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.120.10] — 2026-09-03 — Restore Ninja-backed coverage refreshes
+
+### Fixed
+
+- Ninja collection could write fresh observations and then be marked failed
+  because an unrelated source's nonnumeric external ID was cast as an integer
+  by a Ninja compatibility view during derived-view refresh. The compatibility
+  views now guard numeric conversion, so foreign source identifiers are
+  preserved without breaking Ninja device, device-health, or custom-field
+  refreshes and the Operations coverage source-health path.
+
 ## [0.120.9] — 2026-08-19 — Real sort/pagination on Products; client counts go to a client list
 
 ### Fixed
