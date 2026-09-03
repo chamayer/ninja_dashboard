@@ -7,6 +7,14 @@
 .coverage-cards { display:grid; grid-template-columns:repeat(auto-fit, minmax(250px, 1fr)); gap:0.8rem; margin-bottom:1rem; }
 .coverage-card { border:1px solid var(--border); border-radius:6px; background:var(--surface); padding:0.9rem; }
 .coverage-card h2 { margin:0 0 0.65rem; font-size:1rem; }
+.coverage-result-heading { display:flex; justify-content:space-between; align-items:baseline; margin:0.1rem 0 0.45rem; }
+.coverage-result-heading h2 { margin:0; font-size:0.95rem; }
+.coverage-result-heading p { margin:0; color:var(--muted); font-size:0.78rem; }
+.coverage-result-summary { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:0.8rem; margin:-0.2rem 0 1rem; }
+.coverage-result-card { border:1px solid var(--border); border-radius:6px; background:var(--surface); padding:0.7rem 0.9rem; }
+.coverage-result-card span { display:block; color:var(--muted); font-size:0.78rem; }
+.coverage-result-card strong { display:block; margin-top:0.2rem; font-size:1.35rem; }
+@media (max-width:700px) { .coverage-result-summary { grid-template-columns:repeat(2, minmax(0, 1fr)); } }
 .coverage-counts { display:grid; grid-template-columns:repeat(4, 1fr); gap:0.35rem; }
 .coverage-count { display:block; border-radius:4px; padding:0.4rem 0.25rem; text-align:center; text-decoration:none; color:inherit; }
 .coverage-count:hover { background:var(--surface-hover, #f3f4f6); }
@@ -57,6 +65,17 @@
     <section class="coverage-card"><p class="muted" style="margin:0;">No required agent platforms are configured.</p></section>
     {% endfor %}
 </div>
+
+<div class="coverage-result-heading">
+    <h2>Filtered results</h2>
+    <p>Counts reflect the current filter selections.</p>
+</div>
+<section class="coverage-result-summary" aria-label="Filtered Coverage results">
+    <div class="coverage-result-card"><span>Clients</span><strong>{{ filtered_summary.clients }}</strong></div>
+    <div class="coverage-result-card"><span>Devices</span><strong>{{ filtered_summary.devices }}</strong></div>
+    <div class="coverage-result-card"><span>Agent checks</span><strong>{{ filtered_summary.agent_checks }}</strong></div>
+    <div class="coverage-result-card"><span>Online devices</span><strong>{{ filtered_summary.online_devices }}</strong></div>
+</section>
 
 <div class="card" style="padding:0;">
     <div style="padding:1rem; border-bottom:1px solid var(--border);">

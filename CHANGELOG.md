@@ -2,6 +2,15 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.121.4] — 2026-09-03 — Coverage filtered-result counts
+
+### Added
+
+- Coverage now shows a clearly labeled **Filtered results** row below the
+  platform cards. It reports the matching clients, devices, agent checks, and
+  online devices, with an explicit note that every value follows the current
+  filter selections.
+
 ## [0.121.3] — 2026-09-03 — Faster Coverage Hudu lookup
 
 ### Fixed

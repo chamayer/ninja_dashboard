@@ -133,6 +133,30 @@ Operations or Postgres failure was present.
 **Next action:** none. A Hudu section on device detail remains deferred by
 request.
 
+### Filtered Coverage summary follow-up
+
+**Goal:** make the scope of the currently filtered Coverage result obvious
+without requiring an export or manual counting.
+
+**Scope:** Coverage view, template, focused tests, and this plan only. No
+migration, data change, or filter-semantics change.
+
+**Decision:** add one compact result-summary card row directly below the
+per-platform status cards. It will show matching Clients, Devices, Agent
+checks (device-platform rows), and Online devices. Each value is calculated
+after every active filter, including Hudu, Hudu link, SentinelOne exemption,
+OS/type, status, required platform, and Online in.
+
+**Checkpoint:** added the four-card row below the platform cards, headed
+**Filtered results** with an explicit note that the values reflect the current
+filter selections. It is responsive (two columns on narrow screens) and uses
+the post-filter device and coverage-row sets, so pagination does not affect
+its counts. Focused Coverage tests pass (3), Django system check passes,
+focused Ruff/format and Python compilation pass, and `git diff --check` pass.
+
+**Next action:** obtain separate approval to commit, push, redeploy, and
+verify the new Coverage summary row.
+
 ### Performance follow-up — Coverage load time
 
 **Goal:** measure and reduce the live Coverage page load time without changing
@@ -160,8 +184,17 @@ passes, and `git diff --check` passes. The exact deployed Hudu attachment
 query returned 7,276 rows in 0.265 seconds; combined with the 0.655-second
 no-Hudu Coverage query, this removes the measured 8.399-second join shape.
 
-**Next action:** obtain separate approval to prepare the Coverage corrective
-release, commit, push, redeploy, and verify an authenticated live render.
+**Deployment:** released as 0.121.3 / `d241afe`; pushed to `origin` and the
+required `a-m-rose` mirror. Portainer restarted the stack. Operations and
+Postgres are healthy, `/healthz` returns 200, and the public Coverage route
+correctly redirects unauthenticated users to login (302). An authorized
+in-container probe confirmed the deployed second-query implementation and
+completed the complete Coverage request path with a 200 result in 1.645
+seconds. Metabase was still completing its normal health check immediately
+after the stack restart; it does not participate in the Operations page path.
+
+**Next action:** none. A Hudu section on device detail remains deferred by
+request.
 
 ## COMPLETED TASK — Descriptive category on the Products page
 

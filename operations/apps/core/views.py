@@ -8256,6 +8256,17 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             ],
         })
 
+    filtered_summary = {
+        "clients": len({row["client_slug"] for row in device_rows}),
+        "devices": len(device_rows),
+        "agent_checks": len(summary_rows),
+        "online_devices": len({
+            (row["client_slug"], row["device_id"])
+            for row in summary_rows
+            if row["status"] == "Online"
+        }),
+    }
+
     if wants_csv(request):
         return csv_response(
             [
@@ -8314,6 +8325,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             "paginator": paginator,
             "page_query": page_query,
             "platform_cards": platform_cards,
+            "filtered_summary": filtered_summary,
             "platforms": platforms,
             "os_families": os_families,
             "device_types": device_types,
