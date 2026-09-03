@@ -8080,35 +8080,6 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                       AND type.name IN ('missing_required_platform', 'stale_required_platform')
                       AND finding.status IN ('open', 'acknowledged', 'investigating')
                     GROUP BY finding.subject_id, finding.finding_details->>'platform'
-                ), hudu AS (
-                    SELECT hudu_link.device_id,
-                           TRUE AS hudu_present,
-                           MAX(hudu_link.hudu_url) AS hudu_url,
-                           ARRAY_REMOVE(
-                               ARRAY_AGG(
-                                   DISTINCT CASE
-                                       WHEN hudu_link.card_source IS NOT NULL
-                                        AND hudu_link.card_id IS NOT NULL
-                                       THEN CASE
-                                           WHEN LOWER(hudu_link.card_source) = 'ninja'
-                                            AND hudu_link.card_resolved_device_id
-                                                = hudu_link.device_id::text
-                                            AND NULLIF(device.canonical_hostname, '') IS NOT NULL
-                                           THEN 'Ninja — ' || device.canonical_hostname
-                                           ELSE COALESCE(alias.canonical,
-                                                         INITCAP(hudu_link.card_source))
-                                                || ' #' || hudu_link.card_id
-                                       END
-                                   END
-                               ),
-                               NULL
-                           ) AS hudu_links
-                    FROM operations.v_device_hudu_link_current hudu_link
-                    JOIN devices device ON device.id = hudu_link.device_id
-                    LEFT JOIN operations.platform_aliases alias
-                      ON alias.alias = LOWER(hudu_link.card_source)
-                    WHERE hudu_link.tenant_id = 1
-                    GROUP BY hudu_link.device_id
                 ), coverage AS (
                     SELECT requirement.slug AS client_slug,
                            requirement.display_name AS client_name,
@@ -8125,9 +8096,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                                WHEN presence.device_id IS NOT NULL THEN 'Offline'
                                ELSE 'Missing'
                            END AS status,
-                           COALESCE(hudu.hudu_present, FALSE) AS hudu_present,
-                           hudu.hudu_url,
-                           hudu.hudu_links
+                           FALSE AS hudu_present
                     FROM required_agents requirement
                     LEFT JOIN presence_by_requirement presence
                       ON presence.tenant_id = requirement.tenant_id
@@ -8137,25 +8106,63 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                     LEFT JOIN active_gaps gap
                       ON gap.subject_id = requirement.id
                      AND gap.platform = requirement.platform
-                    LEFT JOIN hudu ON hudu.device_id = requirement.id
                 )
                 SELECT
                     client_slug, client_name, device_id, hostname, os_family, device_type,
-                    platform, s1_exempt, status,
-                    hudu_present, hudu_url, hudu_links
+                    platform, s1_exempt, status, hudu_present
                 FROM coverage
                 ORDER BY client_name, hostname, platform
             """,
             )
             rows = cur.fetchall()
+            cur.execute(
+                """
+                SELECT hudu_link.device_id, hudu_link.hudu_url,
+                       hudu_link.card_source, hudu_link.card_id,
+                       hudu_link.card_resolved_device_id, alias.canonical
+                FROM operations.v_device_hudu_link_current hudu_link
+                LEFT JOIN operations.platform_aliases alias
+                  ON alias.alias = LOWER(hudu_link.card_source)
+                WHERE hudu_link.tenant_id = 1
+                """,
+            )
+            hudu_rows = cur.fetchall()
+
+    hostnames_by_device = {row[2]: row[3] for row in rows}
+    hudu_by_device: dict = {}
+    for device_id, hudu_url, card_source, card_id, resolved_device_id, canonical in hudu_rows:
+        hostname = hostnames_by_device.get(device_id)
+        if hostname is None:
+            continue
+        hudu = hudu_by_device.setdefault(
+            device_id,
+            {"hudu_url": None, "hudu_links": []},
+        )
+        if hudu_url and (hudu["hudu_url"] is None or hudu_url > hudu["hudu_url"]):
+            hudu["hudu_url"] = hudu_url
+        if card_source is None or card_id is None:
+            continue
+        if (
+            card_source.lower() == "ninja"
+            and resolved_device_id == str(device_id)
+            and hostname
+        ):
+            label = f"Ninja — {hostname}"
+        else:
+            label = f"{canonical or card_source.title()} #{card_id}"
+        if label not in hudu["hudu_links"]:
+            hudu["hudu_links"].append(label)
 
     coverage_rows = [
         {
             "client_slug": row[0], "client_name": row[1], "device_id": row[2],
             "hostname": row[3], "os_family": row[4], "device_type": row[5],
             "platform": row[6], "s1_exempt": row[7], "status": row[8],
-            "hudu_present": row[9], "hudu_url": _safe_external_http_url(row[10]),
-            "hudu_links": row[11] or [],
+            "hudu_present": row[9] or row[2] in hudu_by_device,
+            "hudu_url": _safe_external_http_url(
+                hudu_by_device.get(row[2], {}).get("hudu_url")
+            ),
+            "hudu_links": hudu_by_device.get(row[2], {}).get("hudu_links", []),
         }
         for row in rows
     ]

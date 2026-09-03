@@ -15,6 +15,64 @@ from apps.core import views
 class _Cursor:
     def __init__(self):
         self.queries: list[tuple[str, dict | None]] = []
+        self._results = [
+            [
+                (
+                    "acme",
+                    "Acme",
+                    "device-1",
+                    "host-1",
+                    "Windows 11",
+                    "workstation",
+                    "Ninja",
+                    False,
+                    "Missing",
+                    False,
+                ),
+                (
+                    "acme",
+                    "Acme",
+                    "device-1",
+                    "host-1",
+                    "Windows 11",
+                    "workstation",
+                    "SentinelOne",
+                    False,
+                    "Online",
+                    False,
+                ),
+                (
+                    "beta",
+                    "Beta",
+                    "device-2",
+                    "host-2",
+                    "Ubuntu",
+                    "server",
+                    "Ninja",
+                    True,
+                    "Online",
+                    False,
+                ),
+            ],
+            [
+                (
+                    "device-1",
+                    "https://hudu.example/assets/1",
+                    "ninja",
+                    "296",
+                    "device-1",
+                    "Ninja",
+                ),
+                (
+                    "device-1",
+                    "https://hudu.example/assets/1",
+                    "auvik",
+                    "42",
+                    None,
+                    "Auvik",
+                ),
+            ],
+        ]
 
     def __enter__(self):
         return self
@@ -26,50 +84,7 @@ class _Cursor:
         self.queries.append((statement, params))
 
     def fetchall(self):
-        return [
-            (
-                "acme",
-                "Acme",
-                "device-1",
-                "host-1",
-                "Windows 11",
-                "workstation",
-                "Ninja",
-                False,
-                "Missing",
-                True,
-                "https://hudu.example/assets/1",
-                ["Ninja #296", "Auvik #42"],
-            ),
-            (
-                "acme",
-                "Acme",
-                "device-1",
-                "host-1",
-                "Windows 11",
-                "workstation",
-                "SentinelOne",
-                False,
-                "Online",
-                True,
-                "https://hudu.example/assets/1",
-                ["Ninja #296", "Auvik #42"],
-            ),
-            (
-                "beta",
-                "Beta",
-                "device-2",
-                "host-2",
-                "Ubuntu",
-                "server",
-                "Ninja",
-                True,
-                "Online",
-                False,
-                None,
-                [],
-            ),
-        ]
+        return self._results.pop(0)
 
 
 class _Connection:
@@ -105,12 +120,13 @@ def test_coverage_uses_effective_requirements_and_multiselect_filters(monkeypatc
     assert "requirement_profile_items" in statement
     assert "coverage_requirements" in statement
     assert "device_operator_decisions" in statement
-    assert "v_device_hudu_link_current" in statement
-    assert "platform_aliases" in statement
-    assert "Ninja — " in statement
     assert "missing_required_platform" in statement
     assert "stale_required_platform" in statement
     assert params is None
+    hudu_statement, hudu_params = cursor.queries[2]
+    assert "v_device_hudu_link_current" in hudu_statement
+    assert "platform_aliases" in hudu_statement
+    assert hudu_params is None
 
     context = captured["context"]
     assert context["client_filters"] == ["acme", "beta"]
@@ -126,7 +142,7 @@ def test_coverage_uses_effective_requirements_and_multiselect_filters(monkeypatc
     assert context["paginator"].count == 1
     row = context["device_rows"][0]
     assert row["hudu_present"] is True
-    assert row["hudu_links"] == ["Ninja #296", "Auvik #42"]
+    assert row["hudu_links"] == ["Ninja — host-1", "Auvik #42"]
     assert [(cell["platform"], cell["status"]) for cell in row["platform_cells"]] == [
         ("Ninja", "Missing"),
         ("SentinelOne", "Online"),
@@ -137,14 +153,22 @@ def test_coverage_uses_effective_requirements_and_multiselect_filters(monkeypatc
 def test_coverage_template_has_clear_statuses_hudu_and_multiselect_filters():
     template = (Path(__file__).parents[3] / "templates/coverage.html").read_text(encoding="utf-8")
 
-    for label in ("Online in", "Hudu links", "SentinelOne", "Required platform", "Status", "OS family", "Device type"):
+    for label in (
+        "Online in",
+        "Hudu links",
+        "SentinelOne",
+        "Required platform",
+        "Status",
+        "OS family",
+        "Device type",
+    ):
         assert label in template
     assert "Hudu" in template
     assert template.count('type="checkbox"') >= 12
     assert template.count('<details class="coverage-filter">') == 9
     assert template.count('class="coverage-filter-search"') == 9
     assert "coverage-filterbar" in template
-    assert '_pagination.html' in template
+    assert "_pagination.html" in template
     assert "In Hudu" in template
     assert "Not in Hudu" in template
     assert "Online" in template
@@ -156,8 +180,7 @@ def test_coverage_template_has_clear_statuses_hudu_and_multiselect_filters():
 
 def test_hudu_device_link_read_model_is_tenant_scoped_and_read_only():
     migration = (
-        Path(__file__).parents[1]
-        / "migrations/0146_hudu_device_links_read_model.py"
+        Path(__file__).parents[1] / "migrations/0146_hudu_device_links_read_model.py"
     ).read_text(encoding="utf-8")
 
     assert "v_device_hudu_link_current" in migration

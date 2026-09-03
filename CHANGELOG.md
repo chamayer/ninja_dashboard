@@ -2,6 +2,18 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.121.3] — 2026-09-03 — Faster Coverage Hudu lookup
+
+### Fixed
+
+- Coverage no longer repeats Hudu card aggregation for every required
+  device-platform row. It retrieves the current Hudu attachment and card data
+  once per device, preserving Hudu presence/link filters and friendly Ninja
+  device labels while substantially reducing page-query time.
+- Coverage filter controls force both configured filter rows to render flat,
+  with their dropdowns side by side and the second row directly below the
+  first.
+
 ## [0.121.2] — 2026-09-03 — Coverage page render fix
 
 ### Fixed

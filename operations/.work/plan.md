@@ -40,7 +40,7 @@ then verify the affected live pages and Windows servicing ingest after deploy.
 
 ## ACTIVE TASK — Coverage triage filters
 
-**Status:** ready for approved corrective release, deployment, and live validation.
+**Status:** performance follow-up in progress; 0.121.2 (`9141a19`) is deployed.
 
 **Goal:** replace the client/platform aggregate with a device-level Coverage
 surface that makes current agent status and current Hudu documentation visible.
@@ -121,8 +121,47 @@ timeout; device rows now paginate at 100 while the CSV remains complete.
 Focused Coverage tests, Django check, template loading, Python compilation,
 focused Ruff, and diff checks pass.
 
-**Next action:** commit and deploy the approved 0.121.2 corrective release.
-A Hudu section on device detail remains deferred by request.
+**Deployment:** committed as `9141a19`, pushed to `origin` and the required
+secondary mirror, and redeployed through Portainer. Operations and Postgres are
+healthy; `/healthz` returns 200 and the public Hudu-filtered Coverage URL
+redirects to login (302). An in-container deployed-path probe for
+`?hudu=in_hudu` returns 200 with 4,527 matching devices and exactly 100 rows
+rendered, confirming pagination prevents the prior full-fleet timeout. Metabase
+was still in its ordinary startup health check at the final short poll; no
+Operations or Postgres failure was present.
+
+**Next action:** none. A Hudu section on device detail remains deferred by
+request.
+
+### Performance follow-up — Coverage load time
+
+**Goal:** measure and reduce the live Coverage page load time without changing
+its current coverage or Hudu-filter semantics.
+
+**Scope:** read-only live timing first, then the smallest page-query or render
+change supported by the measurement. No raw credential inspection, data
+change, or migration is in scope.
+
+**Decision:** keep the Hudu read model and all existing Hudu filters, but read
+and aggregate its card data once after the device-platform coverage query. The
+existing query repeats the Hudu aggregation on every required platform row.
+An authorized, tenant-aware live timing probe returned 13,416 coverage rows in
+8.399 seconds with that join and 0.655 seconds with the same query minus the
+Hudu CTE/join. The standalone Hudu read-model aggregation completes in about
+0.2 seconds, so separate device-level attachment is the smallest safe fix.
+
+**Checkpoint:** the Coverage query now returns required device-platform state
+without Hudu repetition; a second tenant-scoped query retrieves each Hudu
+attachment/card once and attaches it by canonical device ID before the existing
+filters run. The Ninja card label remains `Ninja — <canonical hostname>` when
+the card resolves to that device. Focused Coverage tests pass (3), Django
+system check passes, focused Ruff and format checks pass, Python compilation
+passes, and `git diff --check` passes. The exact deployed Hudu attachment
+query returned 7,276 rows in 0.265 seconds; combined with the 0.655-second
+no-Hudu Coverage query, this removes the measured 8.399-second join shape.
+
+**Next action:** obtain separate approval to prepare the Coverage corrective
+release, commit, push, redeploy, and verify an authenticated live render.
 
 ## COMPLETED TASK — Descriptive category on the Products page
 
