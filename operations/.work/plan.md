@@ -1,5 +1,105 @@
 # Active Operations implementation plan
 
+## ACTIVE TASK — Guard remaining Ninja external-ID casts
+
+**Status:** implemented and locally validated; pending commit/push approval.
+
+**Goal:** prevent malformed or out-of-range `external_id` values from raising
+Postgres cast errors in the remaining Operations and ingest queries that join
+Ninja source links.
+
+**Scope:** `apps/core/client_workspace.py`, `apps/core/views.py`,
+`ingest/intel/windows_servicing.py`, and focused regression tests. No source
+data changes, compatibility-schema changes, or dashboard changes.
+
+**Decision:** retain the existing Ninja-source and numeric-syntax predicates,
+but make each projected numeric value a range-checked `CASE` expression. The
+predicate alone is insufficient because the planner can evaluate a cast before
+the predicate. Invalid values therefore join nothing rather than failing a
+page render or ingest run.
+
+**Steps:** replace the four casts; add a regression test for the guarded
+expressions; run focused lint/tests, Django checks, and diff checks.
+
+**Validation:** source-level regression coverage plus proportional Python and
+Django checks. Live deployment verification requires a separately approved
+commit/push/deploy.
+
+**Checkpoint:** all four callers now make the conversion inside a
+range-checked `CASE`: two shared Operations page queries use one helper,
+Client workspace guards the integer Ninja location join, and Windows servicing
+guards the bigint Ninja-device join. Malformed, blank, and oversized IDs now
+produce NULL and cannot abort a request or source run. Focused pytest: 21
+passed; Python compilation, Django check, migration drift, changed-file Ruff,
+and `git diff --check` passed. Full `views.py` Ruff remains blocked by its
+pre-existing findings (including the duplicate `timezone` import and an
+unrelated f-string at line 979); this change adds none.
+
+**Next action:** obtain separate approval to commit and push the scoped fix,
+then verify the affected live pages and Windows servicing ingest after deploy.
+
+## ACTIVE TASK — Coverage triage filters
+
+**Status:** ready for approved commit, push, deployment, and live validation.
+
+**Goal:** replace the client/platform aggregate with a device-level Coverage
+surface that makes current agent status and current Hudu documentation visible.
+
+**Scope:** `apps/core/views.py`, `templates/coverage.html`, focused view/
+template tests, and migration `0146_hudu_device_links_read_model.py`. The
+pending external-ID guard remains a separate logical release change and will
+not be folded into a Coverage commit. No finding lifecycle change or data
+rebuild is in scope.
+
+**Decision:** each required device/platform pair is classified as **Online**,
+**Offline**, **Stale**, or **Missing**. Missing/stale use the native evaluator
+findings; online/offline use current agent presence. The page will have one
+summary card per required platform, with clickable Online/Offline/Stale/Missing
+counts, and an ungrouped device table. Client, Online in, Required platform,
+and Status filters are multi-select; selections inside a filter are ORed and
+filters are combined with AND. The Hudu column says only **In Hudu** or **Not
+in Hudu**, then lists existing Hudu cards by source and ID. Hudu data is shown
+only when its current asset is safely attached to the canonical device; an
+unresolved Hudu asset cannot be joined by hostname and remains in the existing
+CMDB findings workflow. The platform-less lifecycle-only “Missing from Ninja”
+section is removed because it cannot identify Ninja truthfully.
+
+**Steps:** derive effective requirements in the page query, build statuses and
+platform summaries, add filtered links and Hudu display data, then run focused
+request/template tests, Django check, changed-file lint, and diff check.
+
+**Validation:** focused request/query-shape and template tests, migration SQL
+review (tenant guard, view ownership, grants, and explicit DML revokes), Django
+check, migration-drift check, changed-file lint, and diff check. Deployment
+and live read-model verification require separate approval.
+
+**Checkpoint:** implemented the approved page. It resolves profile/global
+requirements with per-client overrides and device exemptions, classifies each
+required platform as Online/Offline/Stale/Missing, provides clickable
+per-platform count cards, and renders an ungrouped device table with Hudu,
+OS family, and device type. All six filters are multi-select. Migration 0146
+adds a tenant-scoped `security_barrier` read model, owned by
+`operations_view_owner`, that exposes only a device-attached Hudu asset URL
+and card source/ID; it has an explicit runtime DML revoke and a grant limited
+to SELECT. Coverage consumes it, using the existing platform-alias registry to
+write known names such as SentinelOne correctly. A Ninja card that resolves to
+the displayed device uses that device's name rather than a raw Ninja ID.
+Unresolved Hudu assets remain outside this page because they cannot be safely
+attached to a device. A Hudu section on device detail is explicitly deferred.
+
+Focused pytest (3 tests), Django check, migration-drift check, migration SQL
+render review, Python compilation, template load, changed-test/migration Ruff,
+and `git diff --check` pass. Full-file Ruff has 48 established findings in the
+large views module; this work adds none (the previous baseline had 50). Ruff
+does not parse Django templates. The local SQLite database cannot execute this
+Postgres-only view. An authorized read-only live `EXPLAIN ANALYZE` before the
+read-model addition ran the Coverage requirement query in 1.280 seconds for
+13,419 device-platform rows; live read-model and page verification wait for an
+approved deployment.
+
+**Next action:** commit the Coverage-only files, push and redeploy the approved
+release (including migration 0146), then verify the live route and read model.
+
 ## COMPLETED TASK — Descriptive category on the Products page
 
 **Status:** implemented, validated read-only against production, pending

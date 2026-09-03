@@ -1,168 +1,83 @@
 {% extends "base.html" %}
 
-{% block title %}Coverage{% endblock %}
+{% block title %}Agent Coverage{% endblock %}
 
 {% block content %}
 <style>
-.conf-bar { display: flex; gap: 0.3rem; font-size: 0.78rem; }
-    .conf-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; }
-    .conf-confirmed { background: #dc2626; }
-    .conf-probable  { background: #f59e0b; }
+.coverage-cards { display:grid; grid-template-columns:repeat(auto-fit, minmax(250px, 1fr)); gap:0.8rem; margin-bottom:1rem; }
+.coverage-card { border:1px solid var(--border); border-radius:6px; background:var(--surface); padding:0.9rem; }
+.coverage-card h2 { margin:0 0 0.65rem; font-size:1rem; }
+.coverage-counts { display:grid; grid-template-columns:repeat(4, 1fr); gap:0.35rem; }
+.coverage-count { display:block; border-radius:4px; padding:0.4rem 0.25rem; text-align:center; text-decoration:none; color:inherit; }
+.coverage-count:hover { background:var(--surface-hover, #f3f4f6); }
+.coverage-count span { display:block; font-size:0.72rem; color:var(--muted); }
+.coverage-count strong { font-size:1.1rem; }
+.coverage-status { display:inline-block; border-radius:999px; font-size:0.75rem; font-weight:600; padding:0.18rem 0.5rem; text-decoration:none; }
+.coverage-online { background:#dcfce7; color:#166534; }
+.coverage-offline { background:#fef3c7; color:#92400e; }
+.coverage-stale { background:#fed7aa; color:#9a3412; }
+.coverage-missing { background:#fee2e2; color:#991b1b; }
+.coverage-hudu { font-size:0.82rem; line-height:1.45; }
+.coverage-hudu ul { margin:0.25rem 0 0; padding-left:1rem; }
+.coverage-filter { min-width:10rem; min-height:5.5rem; }
 </style>
 
 <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:1rem;">
     <div>
-        <h1 style="margin:0;">Coverage</h1>
-        <p class="muted" style="margin:0.25rem 0 0;">Devices missing required agents — active issues</p>
+        <h1 style="margin:0;">Agent Coverage</h1>
+        <p class="muted" style="margin:0.25rem 0 0;">Required agents and their current status.</p>
     </div>
-    <div style="display:flex; align-items:center; gap:0.75rem;">
-      {% if critical_count %}
-      <span class="badge badge-critical">{{ critical_count }} critical gap{{ critical_count|pluralize }}</span>
-      {% elif total_gaps %}
-      <span class="badge badge-high">{{ total_gaps }} gap{{ total_gaps|pluralize }}</span>
-      {% else %}
-      <span class="badge badge-low">All compliant</span>
-      {% endif %}
-      {% include "_csv_download.html" %}
-    </div>
+    {% include "_csv_download.html" %}
 </div>
 
-<div class="tile-grid">
-    <div class="tile {% if critical_count %}tile-alert{% endif %}">
-        <div class="tile-label">Critical gaps</div>
-        <div class="tile-value">{{ critical_count|default:"0" }}</div>
-        <div class="tile-note">missing required agents</div>
-    </div>
-    <div class="tile">
-        <div class="tile-label">Total gaps</div>
-        <div class="tile-value">{{ total_gaps|default:"0" }}</div>
-        <div class="tile-note">across all platforms</div>
-    </div>
-    <div class="tile">
-        <div class="tile-label">Clients affected</div>
-        <div class="tile-value">{{ clients_affected|default:"0" }}</div>
-        <div class="tile-note">with open issues</div>
-    </div>
-    {% if missing_devices %}
-    <div class="tile">
-        <div class="tile-label">Missing from Ninja</div>
-        <div class="tile-value">{{ missing_devices|length }}</div>
-        <div class="tile-note">client{{ missing_devices|length|pluralize }} with vanished devices</div>
-    </div>
-    {% endif %}
+<div class="coverage-cards">
+    {% for card in platform_cards %}
+    <section class="coverage-card">
+        <h2>{{ card.platform }}</h2>
+        <div class="coverage-counts">
+            {% for count in card.counts %}
+            <a class="coverage-count coverage-{{ count.name|lower }}" href="{{ count.url }}">
+                <span>{{ count.name }}</span><strong>{{ count.count }}</strong>
+            </a>
+            {% endfor %}
+        </div>
+    </section>
+    {% empty %}
+    <section class="coverage-card"><p class="muted" style="margin:0;">No required agent platforms are configured.</p></section>
+    {% endfor %}
 </div>
 
-{% if gap_rows or platform_filter or client_filter or conf_filter %}
 <div class="card" style="padding:0;">
-    <div style="padding:1rem 1rem 0.75rem; border-bottom:1px solid var(--border);">
+    <div style="padding:1rem; border-bottom:1px solid var(--border);">
         <form method="get" class="filterbar">
-            <select name="client">
-                <option value="">All clients</option>
-                {% for fc in filter_clients %}
-                <option value="{{ fc.slug }}"{% if fc.slug == client_filter %} selected{% endif %}>{{ fc.name }}</option>
-                {% endfor %}
-            </select>
-            <select name="platform">
-                <option value="">All platforms</option>
-                {% for p in platforms %}
-                <option value="{{ p }}"{% if p == platform_filter %} selected{% endif %}>{{ p }}</option>
-                {% endfor %}
-            </select>
-            <select name="confidence">
-                <option value="">Any confidence</option>
-                <option value="confirmed"{% if conf_filter == "confirmed" %} selected{% endif %}>Confirmed</option>
-                <option value="probable"{% if conf_filter == "probable" %} selected{% endif %}>Probable</option>
-                <option value="possible"{% if conf_filter == "possible" %} selected{% endif %}>Possible</option>
-            </select>
-            <button type="submit">Filter</button>
-            {% if client_filter or platform_filter or conf_filter %}
-            <a class="clear" href="{% url 'fleet_coverage' %}">✕ Clear</a>
-            {% endif %}
+            <div><label for="coverage-client">Client</label><br><select class="coverage-filter" id="coverage-client" name="client" multiple>{% for client in filter_clients %}<option value="{{ client.slug }}"{% if client.slug in client_filters %} selected{% endif %}>{{ client.name }}</option>{% endfor %}</select></div>
+            <div><label for="coverage-online">Online in</label><br><select class="coverage-filter" id="coverage-online" name="online_in" multiple>{% for platform in platforms %}<option value="{{ platform }}"{% if platform in online_filters %} selected{% endif %}>{{ platform }}</option>{% endfor %}</select></div>
+            <div><label for="coverage-platform">Required platform</label><br><select class="coverage-filter" id="coverage-platform" name="platform" multiple>{% for platform in platforms %}<option value="{{ platform }}"{% if platform in platform_filters %} selected{% endif %}>{{ platform }}</option>{% endfor %}</select></div>
+            <div><label for="coverage-state">Status</label><br><select class="coverage-filter" id="coverage-state" name="state" multiple>{% for state in states %}<option value="{{ state }}"{% if state in state_filters %} selected{% endif %}>{{ state }}</option>{% endfor %}</select></div>
+            <div><label for="coverage-os">OS family</label><br><select class="coverage-filter" id="coverage-os" name="os_family" multiple>{% for family in os_families %}<option value="{{ family }}"{% if family in os_family_filters %} selected{% endif %}>{{ family }}</option>{% endfor %}</select></div>
+            <div><label for="coverage-type">Device type</label><br><select class="coverage-filter" id="coverage-type" name="device_type" multiple>{% for device_type in device_types %}<option value="{{ device_type }}"{% if device_type in device_type_filters %} selected{% endif %}>{{ device_type }}</option>{% endfor %}</select></div>
+            <div style="align-self:end;"><button type="submit">Filter</button>{% if client_filters or online_filters or platform_filters or state_filters or os_family_filters or device_type_filters %}<a class="clear" href="{% url 'fleet_coverage' %}">Clear</a>{% endif %}</div>
         </form>
+        <p class="muted" style="margin:0.75rem 0 0; font-size:0.82rem;">Online: the platform reports the device online. Offline: it is in the platform but not online now. Stale: it has been offline longer than its threshold. Missing: it does not appear in the required platform.</p>
     </div>
 
-    {% if gap_rows %}
-    <table class="ops-table" data-sortable>
-        <thead>
-            <tr>
-                <th>Client</th>
-                <th>Platform</th>
-                <th>Severity</th>
-                <th class="num">Devices</th>
-                <th>Confidence</th>
-                <th>Oldest</th>
-                <th></th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for row in gap_rows %}
-            <tr>
-                <td><a href="{% url 'org_index' org_slug=row.client_slug %}">{{ row.client_name }}</a></td>
-                <td>{{ row.platform }}</td>
-                <td><span class="badge badge-{{ row.severity }}">{{ row.severity }}</span></td>
-                <td class="num" style="font-weight:600;">{{ row.total }}</td>
-                <td>
-                    <div class="conf-bar">
-                        {% if row.confirmed %}
-                        <span class="conf-dot conf-confirmed"></span>
-                        <span>{{ row.confirmed }} confirmed</span>
-                        {% endif %}
-                        {% if row.probable %}
-                        <span class="conf-dot conf-probable" style="margin-left:0.4rem;"></span>
-                        <span>{{ row.probable }} probable</span>
-                        {% endif %}
-                    </div>
-                </td>
-                <td class="muted">{{ row.oldest_at|date:"Y-m-d" }}</td>
-                <td>
-                    <a href="{% url 'findings_queue' %}?client={{ row.client_slug }}&type=missing_required_platform"
-                       style="font-size:0.78rem; white-space:nowrap;">View →</a>
-                </td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-    {% else %}
-    <p class="muted" style="padding:1.25rem 1rem;">No coverage gaps match the selected filters.</p>
-    {% endif %}
+    {% if device_rows %}
+    <div style="overflow-x:auto;">
+        <table class="ops-table" data-sortable>
+            <thead><tr><th>Client</th><th>Device</th><th>OS family</th><th>Type</th><th>Hudu</th>{% for platform in platforms %}<th>{{ platform }}</th>{% endfor %}</tr></thead>
+            <tbody>
+                {% for row in device_rows %}
+                <tr>
+                    <td><a href="{% url 'org_index' org_slug=row.client_slug %}">{{ row.client_name }}</a></td>
+                    <td><a href="{% url 'device_detail' org_slug=row.client_slug device_id=row.device_id %}">{{ row.hostname|default:"Unnamed device" }}</a></td>
+                    <td>{{ row.os_family|default:"—" }}</td><td>{{ row.device_type|default:"—" }}</td>
+                    <td class="coverage-hudu">{% if row.hudu_present %}{% if row.hudu_url %}<a href="{{ row.hudu_url }}" rel="noopener" target="_blank">In Hudu</a>{% else %}In Hudu{% endif %}{% if row.hudu_links %}<ul>{% for link in row.hudu_links %}<li>{{ link }}</li>{% endfor %}</ul>{% endif %}{% else %}<span class="muted">Not in Hudu</span>{% endif %}</td>
+                    {% for cell in row.platform_cells %}<td>{% if cell.status %}<a class="coverage-status coverage-{{ cell.status|lower }}" href="{{ cell.url }}">{{ cell.status }}</a>{% else %}—{% endif %}</td>{% endfor %}
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}<p class="muted" style="padding:1.25rem 1rem;">No devices match the selected filters.</p>{% endif %}
 </div>
-{% else %}
-<div class="card">
-    <p class="muted">
-        No active coverage gaps detected.
-        {% if not gap_rows %}Run an agent ingest from <a href="{% url 'sources_status' %}">Sources</a> to populate items.{% endif %}
-    </p>
-</div>
-{% endif %}
-
-{% if missing_devices %}
-<div class="card">
-    <h2 style="margin-top:0;">Devices Missing from Ninja</h2>
-    <p class="muted" style="font-size:0.85rem; margin-top:-0.5rem;">
-        Devices that were previously tracked in Ninja but have disappeared — may indicate decommission or agent removal.
-    </p>
-    <table class="ops-table" data-sortable>
-        <thead>
-            <tr>
-                <th>Client</th>
-                <th class="num">Devices</th>
-                <th></th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for r in missing_devices %}
-            <tr>
-                <td><a href="{% url 'org_index' org_slug=r.client_slug %}">{{ r.client_name }}</a></td>
-                <td class="num" style="font-weight:600;">{{ r.count }}</td>
-                <td>
-                    <a href="{% url 'findings_queue' %}?client={{ r.client_slug }}&type=device_missing_from_source"
-                       style="font-size:0.78rem;">View →</a>
-                </td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-</div>
-{% endif %}
-
 {% endblock %}

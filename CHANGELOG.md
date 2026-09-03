@@ -2,6 +2,28 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.121.0] — 2026-09-03 — Device-level Agent Coverage
+
+### Added
+
+- Coverage now presents each required agent per device as Online, Offline,
+  Stale, or Missing, with per-platform summary cards and multi-select filters
+  for client, required platform, online platform, status, OS family, and
+  device type. Client, device, platform status, and summary counts link to the
+  related Operations view.
+- Coverage shows whether the current device is in Hudu. For a safely attached
+  Hudu asset it links to the asset and lists its linked source cards; confirmed
+  Ninja cards use the matched device name instead of an internal Ninja ID.
+- Migration 0146 adds the tenant-scoped, read-only Hudu card projection used
+  by Coverage. It exposes only the asset URL plus card source and ID for a
+  Hudu asset already attached to a device.
+
+### Changed
+
+- SentinelOne per-device exemptions are honored in Coverage. The ambiguous
+  platform-less "Missing from Ninja" section is removed; it remains an issue
+  workflow rather than an agent-coverage status.
+
 ## [0.120.10] — 2026-09-03 — Restore Ninja-backed coverage refreshes
 
 ### Fixed

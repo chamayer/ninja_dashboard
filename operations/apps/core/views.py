@@ -8,7 +8,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from urllib import request as _urllib_request
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -7880,122 +7880,384 @@ _SEV_RANK = (
     "CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END"
 )
 
+_COVERAGE_STATES = ("Online", "Offline", "Stale", "Missing")
+
+
+def _safe_external_http_url(value: str | None) -> str:
+    """Return an external Hudu URL only when it has a safe web scheme."""
+    if not value:
+        return ""
+    parsed = urlsplit(value)
+    if parsed.scheme in {"http", "https"} and parsed.netloc:
+        return value
+    return ""
+
+
+def _coverage_filter_url(**filters: str) -> str:
+    """Build a Coverage URL from non-empty filter values."""
+    return "?" + urlencode({key: value for key, value in filters.items() if value})
+
 
 @login_required
 def fleet_coverage(request: HttpRequest) -> HttpResponse:
-    """Compliance page: active missing-agent findings per client × platform."""
-    client_filter = request.GET.get("client", "")
-    platform_filter = request.GET.get("platform", "")
-    conf_filter = request.GET.get("confidence", "")
+    """Show each required agent's current Coverage status by device."""
+    client_filters = [value for value in request.GET.getlist("client") if value]
+    platform_filters = [value for value in request.GET.getlist("platform") if value]
+    online_filters = [value for value in request.GET.getlist("online_in") if value]
+    os_family_filters = [value for value in request.GET.getlist("os_family") if value]
+    device_type_filters = [value for value in request.GET.getlist("device_type") if value]
+    state_filters = [
+        value for value in request.GET.getlist("state") if value in _COVERAGE_STATES
+    ]
 
-    with transaction.atomic():
+    with transaction.atomic():  # noqa: SIM117 -- tenant GUC must remain local
         with connection.cursor() as cur:
             cur.execute("SET LOCAL operations.tenant_id = 1")
 
-            # Active missing-required-platform findings grouped by client + platform
+            # This mirrors the evaluator's requirement resolution: profile
+            # (or global) baseline, then client all/role overrides.  The page
+            # reads current state only; it does not infer a requirement from a
+            # historical observation.
             cur.execute(
                 """
+                WITH devices AS MATERIALIZED (
+                    SELECT d.id, d.tenant_id, d.client_id, d.canonical_hostname,
+                           d.device_role, d.os_group, d.os_family, d.device_type,
+                           c.slug, c.display_name,
+                           c.requirement_profile_id,
+                           COALESCE(decision.value, '{}'::jsonb) AS exemptions
+                    FROM operations.devices d
+                    JOIN operations.clients c ON c.id = d.client_id
+                    LEFT JOIN operations.device_operator_decisions decision
+                      ON decision.tenant_id = d.tenant_id
+                     AND decision.device_id = d.id
+                     AND decision.dimension = 'exemptions'
+                    WHERE d.tenant_id = 1
+                      AND d.deleted_at IS NULL
+                      AND d.lifecycle_status <> 'retired'
+                      AND EXISTS (
+                          SELECT 1
+                          FROM operations.device_agent_presence_current presence
+                          WHERE presence.tenant_id = d.tenant_id
+                            AND presence.device_id = d.id
+                            AND presence.entity_type LIKE 'agent.%%'
+                      )
+                ), baseline AS MATERIALIZED (
+                    SELECT d.*, requirement.agent_id, requirement.entity_type,
+                           requirement.platform, requirement.applicable_os_groups
+                    FROM devices d
+                    JOIN LATERAL (
+                        SELECT profile.agent_id, profile.entity_type, profile.platform,
+                               profile.device_scope, profile.applicable_os_groups
+                        FROM operations.requirement_profile_items profile
+                        WHERE profile.tenant_id = d.tenant_id
+                          AND profile.profile_id = d.requirement_profile_id
+                          AND d.requirement_profile_id IS NOT NULL
+                          AND (
+                              profile.device_scope = d.device_role
+                              OR (
+                                  profile.device_scope = 'all'
+                                  AND NOT EXISTS (
+                                      SELECT 1
+                                      FROM operations.requirement_profile_items role_item
+                                      WHERE role_item.tenant_id = d.tenant_id
+                                        AND role_item.profile_id = d.requirement_profile_id
+                                        AND role_item.device_scope = d.device_role
+                                  )
+                              )
+                          )
+                        UNION ALL
+                        SELECT global.agent_id, global.entity_type, global.platform,
+                               global.device_scope, global.applicable_os_groups
+                        FROM operations.coverage_requirements global
+                        WHERE global.tenant_id = d.tenant_id
+                          AND global.client_id IS NULL
+                          AND global.enabled
+                          AND d.requirement_profile_id IS NULL
+                          AND (
+                              global.device_scope = d.device_role
+                              OR (
+                                  global.device_scope = 'all'
+                                  AND NOT EXISTS (
+                                      SELECT 1
+                                      FROM operations.coverage_requirements role_requirement
+                                      WHERE role_requirement.tenant_id = d.tenant_id
+                                        AND role_requirement.client_id IS NULL
+                                        AND role_requirement.enabled
+                                        AND role_requirement.device_scope = d.device_role
+                                  )
+                              )
+                          )
+                    ) requirement ON TRUE
+                ), overrides AS MATERIALIZED (
+                    SELECT DISTINCT ON (
+                        d.id,
+                        COALESCE(requirement.agent_id::text,
+                                 requirement.entity_type || ':' || requirement.platform)
+                    )
+                           d.id AS device_id, requirement.agent_id,
+                           requirement.entity_type, requirement.platform,
+                           requirement.applicable_os_groups, requirement.enabled
+                    FROM devices d
+                    JOIN operations.coverage_requirements requirement
+                      ON requirement.tenant_id = d.tenant_id
+                     AND requirement.client_id = d.client_id
+                     AND requirement.device_scope IN ('all', d.device_role)
+                    ORDER BY d.id,
+                             COALESCE(requirement.agent_id::text,
+                                      requirement.entity_type || ':' || requirement.platform),
+                             CASE WHEN requirement.device_scope = d.device_role THEN 0 ELSE 1 END
+                ), effective_requirements AS (
+                    SELECT baseline.*
+                    FROM baseline
+                    WHERE NOT EXISTS (
+                        SELECT 1
+                        FROM overrides override
+                        WHERE override.device_id = baseline.id
+                          AND (
+                              (override.agent_id IS NOT NULL
+                               AND override.agent_id = baseline.agent_id)
+                              OR (
+                                  override.agent_id IS NULL
+                                  AND baseline.agent_id IS NULL
+                                  AND override.entity_type = baseline.entity_type
+                                  AND override.platform = baseline.platform
+                              )
+                          )
+                    )
+                    UNION ALL
+                    SELECT d.*, override.agent_id, override.entity_type,
+                           override.platform, override.applicable_os_groups
+                    FROM overrides override
+                    JOIN devices d ON d.id = override.device_id
+                    WHERE override.enabled
+                ), required_agents AS MATERIALIZED (
+                    SELECT requirement.*
+                    FROM effective_requirements requirement
+                    LEFT JOIN operations.agents agent ON agent.id = requirement.agent_id
+                    WHERE NOT (requirement.exemptions ? requirement.entity_type)
+                      AND (
+                          COALESCE(requirement.applicable_os_groups,
+                                   agent.supported_os_groups) IS NULL
+                          OR COALESCE(requirement.applicable_os_groups,
+                                      agent.supported_os_groups) ? requirement.os_group
+                      )
+                ), agent_presence AS MATERIALIZED (
+                    SELECT presence.tenant_id, presence.device_id,
+                           presence.entity_type, presence.platform,
+                           BOOL_OR(presence.reported_online) AS online
+                    FROM operations.device_agent_presence_current presence
+                    WHERE presence.tenant_id = 1
+                      AND presence.entity_type LIKE 'agent.%%'
+                    GROUP BY presence.tenant_id, presence.device_id,
+                             presence.entity_type, presence.platform
+                ), presence_by_requirement AS MATERIALIZED (
+                    SELECT tenant_id, device_id, entity_type, platform, online
+                    FROM agent_presence
+                    UNION ALL
+                    SELECT tenant_id, device_id, entity_type, 'any' AS platform,
+                           BOOL_OR(online) AS online
+                    FROM agent_presence
+                    GROUP BY tenant_id, device_id, entity_type
+                ), active_gaps AS MATERIALIZED (
+                    SELECT finding.subject_id, finding.finding_details->>'platform' AS platform,
+                           MAX(type.name) AS finding_type
+                    FROM operations.findings finding
+                    JOIN operations.finding_types type ON type.id = finding.finding_type_id
+                    WHERE finding.tenant_id = 1
+                      AND type.name IN ('missing_required_platform', 'stale_required_platform')
+                      AND finding.status IN ('open', 'acknowledged', 'investigating')
+                    GROUP BY finding.subject_id, finding.finding_details->>'platform'
+                ), hudu AS (
+                    SELECT hudu_link.device_id,
+                           TRUE AS hudu_present,
+                           MAX(hudu_link.hudu_url) AS hudu_url,
+                           ARRAY_REMOVE(
+                               ARRAY_AGG(
+                                   DISTINCT CASE
+                                       WHEN hudu_link.card_source IS NOT NULL
+                                        AND hudu_link.card_id IS NOT NULL
+                                       THEN CASE
+                                           WHEN LOWER(hudu_link.card_source) = 'ninja'
+                                            AND hudu_link.card_resolved_device_id
+                                                = hudu_link.device_id::text
+                                            AND NULLIF(device.canonical_hostname, '') IS NOT NULL
+                                           THEN 'Ninja — ' || device.canonical_hostname
+                                           ELSE COALESCE(alias.canonical,
+                                                         INITCAP(hudu_link.card_source))
+                                                || ' #' || hudu_link.card_id
+                                       END
+                                   END
+                               ),
+                               NULL
+                           ) AS hudu_links
+                    FROM operations.v_device_hudu_link_current hudu_link
+                    JOIN devices device ON device.id = hudu_link.device_id
+                    LEFT JOIN operations.platform_aliases alias
+                      ON alias.alias = LOWER(hudu_link.card_source)
+                    WHERE hudu_link.tenant_id = 1
+                    GROUP BY hudu_link.device_id
+                ), coverage AS (
+                    SELECT requirement.slug AS client_slug,
+                           requirement.display_name AS client_name,
+                           requirement.id AS device_id,
+                           COALESCE(requirement.canonical_hostname, '') AS hostname,
+                           COALESCE(requirement.os_family, '') AS os_family,
+                           requirement.device_type,
+                           requirement.platform,
+                           CASE
+                               WHEN gap.finding_type = 'missing_required_platform' THEN 'Missing'
+                               WHEN gap.finding_type = 'stale_required_platform' THEN 'Stale'
+                               WHEN COALESCE(presence.online, FALSE) THEN 'Online'
+                               WHEN presence.device_id IS NOT NULL THEN 'Offline'
+                               ELSE 'Missing'
+                           END AS status,
+                           COALESCE(hudu.hudu_present, FALSE) AS hudu_present,
+                           hudu.hudu_url,
+                           hudu.hudu_links
+                    FROM required_agents requirement
+                    LEFT JOIN presence_by_requirement presence
+                      ON presence.tenant_id = requirement.tenant_id
+                     AND presence.device_id = requirement.id
+                     AND presence.entity_type = requirement.entity_type
+                     AND presence.platform = requirement.platform
+                    LEFT JOIN active_gaps gap
+                      ON gap.subject_id = requirement.id
+                     AND gap.platform = requirement.platform
+                    LEFT JOIN hudu ON hudu.device_id = requirement.id
+                )
                 SELECT
-                    c.display_name,
-                    c.slug,
-                    f.finding_details->>'platform'    AS platform,
-                    f.severity,
-                    COUNT(*)::int                     AS total,
-                    COUNT(*) FILTER (WHERE f.confidence = 'confirmed')::int  AS confirmed,
-                    COUNT(*) FILTER (WHERE f.confidence = 'probable')::int   AS probable,
-                    MIN(f.first_seen_at)              AS oldest_at
-                FROM operations.findings f
-                JOIN operations.clients c ON c.id = f.client_id
-                JOIN operations.finding_types ft ON ft.id = f.finding_type_id
-                WHERE f.tenant_id = 1
-                  AND ft.name = 'missing_required_platform'
-                  AND f.status IN ('open', 'acknowledged', 'investigating')
-                  AND (%(client)s = '' OR c.slug = %(client)s)
-                  AND (%(platform)s = '' OR f.finding_details->>'platform' = %(platform)s)
-                  AND (%(confidence)s = '' OR f.confidence = %(confidence)s)
-                GROUP BY c.display_name, c.slug, f.finding_details->>'platform', f.severity
-                ORDER BY
-                    CASE f.severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
-                    COUNT(*) DESC,
-                    c.display_name,
-                    f.finding_details->>'platform'
+                    client_slug, client_name, device_id, hostname, os_family, device_type,
+                    platform, status,
+                    hudu_present, hudu_url, hudu_links
+                FROM coverage
+                ORDER BY client_name, hostname, platform
             """,
-                {"client": client_filter, "platform": platform_filter, "confidence": conf_filter},
             )
             rows = cur.fetchall()
 
-            # Devices missing from Ninja per client (secondary signal)
-            cur.execute("""
-                SELECT c.display_name, c.slug, COUNT(*)::int
-                FROM operations.findings f
-                JOIN operations.clients c ON c.id = f.client_id
-                JOIN operations.finding_types ft ON ft.id = f.finding_type_id
-                WHERE f.tenant_id = 1
-                  AND ft.name = 'device_missing_from_source'
-                  AND f.status IN ('open', 'acknowledged', 'investigating')
-                GROUP BY c.display_name, c.slug
-                ORDER BY COUNT(*) DESC, c.display_name
-            """)
-            missing_rows = cur.fetchall()
-
-            # Available platforms for filter dropdown
-            cur.execute("""
-                SELECT DISTINCT f.finding_details->>'platform'
-                FROM operations.findings f
-                JOIN operations.finding_types ft ON ft.id = f.finding_type_id
-                WHERE f.tenant_id = 1 AND ft.name = 'missing_required_platform'
-                  AND f.status IN ('open', 'acknowledged', 'investigating')
-                  AND (f.finding_details->>'platform') IS NOT NULL
-                ORDER BY 1
-            """)
-            platforms = [r[0] for r in cur.fetchall()]
-
-            # Client list for filter dropdown
-            cur.execute("""
-                SELECT DISTINCT c.display_name, c.slug
-                FROM operations.findings f
-                JOIN operations.clients c ON c.id = f.client_id
-                JOIN operations.finding_types ft ON ft.id = f.finding_type_id
-                WHERE f.tenant_id = 1 AND ft.name = 'missing_required_platform'
-                  AND f.status IN ('open', 'acknowledged', 'investigating')
-                ORDER BY c.display_name
-            """)
-            filter_clients = [{"name": r[0], "slug": r[1]} for r in cur.fetchall()]
-
-    gap_rows = [
+    coverage_rows = [
         {
-            "client_name": r[0],
-            "client_slug": r[1],
-            "platform": r[2],
-            "severity": r[3],
-            "total": r[4],
-            "confirmed": r[5],
-            "probable": r[6],
-            "oldest_at": r[7],
+            "client_slug": row[0], "client_name": row[1], "device_id": row[2],
+            "hostname": row[3], "os_family": row[4], "device_type": row[5],
+            "platform": row[6], "status": row[7], "hudu_present": row[8],
+            "hudu_url": _safe_external_http_url(row[9]), "hudu_links": row[10] or [],
         }
-        for r in rows
+        for row in rows
     ]
-    missing_devices = [
-        {"client_name": r[0], "client_slug": r[1], "count": r[2]} for r in missing_rows
-    ]
+    platforms = sorted({row["platform"] for row in coverage_rows})
+    os_families = sorted({row["os_family"] for row in coverage_rows if row["os_family"]})
+    device_types = sorted({row["device_type"] for row in coverage_rows if row["device_type"]})
+    filter_clients = sorted(
+        ({"slug": row["client_slug"], "name": row["client_name"]} for row in coverage_rows),
+        key=lambda row: row["name"],
+    )
+    filter_clients = list({row["slug"]: row for row in filter_clients}.values())
 
-    clients_affected = len({r["client_slug"] for r in gap_rows})
-    total_gaps = sum(r["total"] for r in gap_rows)
-    critical_count = sum(r["total"] for r in gap_rows if r["severity"] == "critical")
+    def matches(row: dict) -> bool:
+        if client_filters and row["client_slug"] not in client_filters:
+            return False
+        if platform_filters and row["platform"] not in platform_filters:
+            return False
+        if os_family_filters and row["os_family"] not in os_family_filters:
+            return False
+        if device_type_filters and row["device_type"] not in device_type_filters:
+            return False
+        return not state_filters or row["status"] in state_filters
+
+    filtered_rows = [row for row in coverage_rows if matches(row)]
+    device_rows_by_id: dict[tuple, dict] = {}
+    all_rows_by_device: dict[tuple, list[dict]] = {}
+    for row in coverage_rows:
+        all_rows_by_device.setdefault((row["client_slug"], row["device_id"]), []).append(row)
+    for row in filtered_rows:
+        key = (row["client_slug"], row["device_id"])
+        if key not in device_rows_by_id:
+            all_platform_rows = all_rows_by_device[key]
+            device_rows_by_id[key] = {
+                "client_slug": row["client_slug"],
+                "client_name": row["client_name"],
+                "device_id": row["device_id"],
+                "hostname": row["hostname"],
+                "os_family": row["os_family"],
+                "device_type": row["device_type"],
+                "hudu_present": row["hudu_present"],
+                "hudu_url": row["hudu_url"],
+                "hudu_links": row["hudu_links"],
+                "platform_states": {item["platform"]: item for item in all_platform_rows},
+            }
+
+    device_rows = list(device_rows_by_id.values())
+    if online_filters:
+        device_rows = [
+            row for row in device_rows
+            if any(
+                item["platform"] in online_filters and item["status"] == "Online"
+                for item in row["platform_states"].values()
+            )
+        ]
+
+    for row in device_rows:
+        row["platform_cells"] = [
+            {
+                "platform": platform,
+                "status": row["platform_states"].get(platform, {}).get("status", ""),
+                "url": _coverage_filter_url(
+                    platform=platform,
+                    state=row["platform_states"].get(platform, {}).get("status", ""),
+                ),
+            }
+            for platform in platforms
+        ]
+
+    visible_devices = {(row["client_slug"], row["device_id"]) for row in device_rows}
+    summary_rows = [
+        row for row in filtered_rows
+        if (row["client_slug"], row["device_id"]) in visible_devices
+    ]
+    platform_cards = []
+    for platform in platforms:
+        counts = {state: 0 for state in _COVERAGE_STATES}
+        for row in summary_rows:
+            if row["platform"] == platform:
+                counts[row["status"]] += 1
+        platform_cards.append({
+            "platform": platform,
+            "counts": [
+                {
+                    "name": state,
+                    "count": counts[state],
+                    "url": _coverage_filter_url(platform=platform, state=state),
+                }
+                for state in _COVERAGE_STATES
+            ],
+        })
 
     if wants_csv(request):
         return csv_response(
-            gap_rows,
+            [
+                {
+                    "client_name": row["client_name"], "hostname": row["hostname"],
+                    "os_family": row["os_family"], "device_type": row["device_type"],
+                    "hudu": "In Hudu" if row["hudu_present"] else "Not in Hudu",
+                    "hudu_links": ", ".join(row["hudu_links"]),
+                    "platform_statuses": ", ".join(
+                        f"{platform}: {item['status']}"
+                        for platform, item in sorted(row["platform_states"].items())
+                    ),
+                }
+                for row in device_rows
+            ],
             columns=[
                 ("Client", "client_name"),
-                ("Platform", "platform"),
-                ("Severity", "severity"),
-                ("Total", "total"),
-                ("Confirmed", "confirmed"),
-                ("Probable", "probable"),
-                ("Oldest at", "oldest_at"),
+                ("Device", "hostname"),
+                ("OS family", "os_family"),
+                ("Device type", "device_type"),
+                ("Hudu", "hudu"),
+                ("Hudu links", "hudu_links"),
+                ("Platform statuses", "platform_statuses"),
             ],
-            filename_stem="fleet_coverage_gaps",
+            filename_stem="fleet_coverage",
         )
 
     return render(
@@ -8004,16 +8266,19 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         {
             "admin_group": "integrations",
             "admin_tab": "coverage",
-            "gap_rows": gap_rows,
-            "missing_devices": missing_devices,
-            "clients_affected": clients_affected,
-            "total_gaps": total_gaps,
-            "critical_count": critical_count,
+            "device_rows": device_rows,
+            "platform_cards": platform_cards,
             "platforms": platforms,
+            "os_families": os_families,
+            "device_types": device_types,
             "filter_clients": filter_clients,
-            "client_filter": client_filter,
-            "platform_filter": platform_filter,
-            "conf_filter": conf_filter,
+            "states": _COVERAGE_STATES,
+            "client_filters": client_filters,
+            "platform_filters": platform_filters,
+            "online_filters": online_filters,
+            "os_family_filters": os_family_filters,
+            "device_type_filters": device_type_filters,
+            "state_filters": state_filters,
         },
     )
 
