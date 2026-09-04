@@ -135,8 +135,7 @@ request.
 
 ### Inventory Computers — expand Coverage into the master computer inventory
 
-**Status:** implementation in progress; this supersedes the small filtered
-Coverage-summary follow-up.
+**Status:** complete; released as 0.122.0 / `6c138f2`.
 
 **Goal:** turn Coverage into the master Computers inventory, under top-level
 Inventory navigation, while retaining coverage state only where a computer has
@@ -194,9 +193,41 @@ is 0.313 seconds.
 changes, Python compilation passes, scoped Ruff/format checks pass, and
 `git diff --check` passes. No additional data probes or test scripts were run.
 
-**Next action:** obtain separate approval to prepare the release, commit,
-push, apply migration through the approved deployment path, and validate the
-live Computers page.
+**Deployment:** `6c138f2` was pushed to `origin` and the required
+`a-m-rose` mirror. Portainer rebuilt the stack; Operations and ingest are
+healthy, Operations `/healthz` returns OK, migration 0147 is applied, and the
+unauthenticated `/inventory/computers/` route returns its expected login
+redirect (302). The explicit Portainer Git-redeploy endpoint returned HTTP 400
+because the stack had already picked up the current commit through its Git
+update; the observed container restart and applied migration confirm the
+deployment completed.
+
+**Next action:** none.
+
+### Inventory Computers CSV follow-up
+
+**Status:** implementation in progress.
+
+**Goal:** make the Computers CSV export contain the same current per-platform
+columns as the rendered table, and make Hudu archive status visible without
+mixing archived records into the normal current-inventory result.
+
+**Scope:** the Computers view/template/tests and one additive read-model
+migration exposing source archive state. No source writes or identity changes.
+
+**Decision:** export one column for each current table platform, preserving the
+table's value order: possible Ninja match, coverage state, direct source
+Online/Offline state, then Not applicable. Hide archived Hudu evidence by
+default, expose it with a Hudu checkbox toggle, and label it clearly in the
+Hudu cell. Attached non-archived Hudu evidence belongs to Computers regardless
+of Hudu layout; unattached Computer Assets and Servers records are computer
+candidates.
+
+**Validation:** focused Coverage/migration tests, Django check, migration-drift
+review, compilation, and diff check.
+
+**Next action:** add archive-state evidence, apply the current/archived Hudu
+rules, and validate the CSV plus rendered data contract.
 
 ### Performance follow-up — Coverage load time
 

@@ -45,11 +45,10 @@ class Settings(BaseSettings):
     PATCH_INGEST_SCHEDULE_HOURS: int | None = Field(default=None, ge=1, le=24)
     AGENT_COMPLIANCE_ENABLED: bool = False
     AGENT_COMPLIANCE_SCHEDULE_HOURS: int = Field(default=4, ge=1, le=24)
-    # Documentation sources (Hudu) collect on their own slower cycle —
-    # they change daily at most and are request-heavy. Setting this equal to
-    # AGENT_COMPLIANCE_SCHEDULE_HOURS restores a single effective cadence
-    # without a code change. See `.work/backlog.md`.
-    DOCUMENTATION_SCHEDULE_HOURS: int = Field(default=24, ge=1, le=168)
+    # Documentation sources (Hudu) collect independently from agent telemetry.
+    # The scheduler caps the effective interval at four hours so inventory
+    # evidence does not remain stale across normal deployment activity.
+    DOCUMENTATION_SCHEDULE_HOURS: int = Field(default=4, ge=1, le=168)
     SOFTWARE_INGEST_SCHEDULE_HOURS: int = Field(default=24, ge=1, le=168)
     # The classifier's dominant input is installed software, which changes
     # daily at most, so it shares the software ingest cadence rather than the

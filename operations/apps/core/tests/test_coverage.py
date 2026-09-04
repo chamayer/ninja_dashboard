@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import csv as csv_module
 from contextlib import nullcontext
+from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -67,6 +69,7 @@ class _Cursor:
                     "ninja",
                     "296",
                     "device-1",
+                    False,
                     "Ninja",
                 ),
                 (
@@ -81,6 +84,7 @@ class _Cursor:
                     "auvik",
                     "42",
                     None,
+                    False,
                     "Auvik",
                 ),
                 (
@@ -94,6 +98,7 @@ class _Cursor:
                     "unlinked",
                     None,
                     None,
+                    False,
                     None,
                     None,
                 ),
@@ -182,8 +187,8 @@ def test_coverage_uses_effective_requirements_and_multiselect_filters(monkeypatc
     assert "v_cmdb_inventory_evidence_current" in hudu_statement
     assert "platform_aliases" in hudu_statement
     assert "hudu.source_name = 'Hudu'" in hudu_statement
-    assert "hudu.source_layout = 'Computer Assets'" in hudu_statement
-    assert hudu_params is None
+    assert "hudu.source_layout = ANY(%s)" in hudu_statement
+    assert hudu_params == (False, ["Computer Assets", "Servers"])
 
     context = captured["context"]
     assert context["client_filters"] == ["acme", "beta"]
@@ -237,6 +242,50 @@ def test_coverage_includes_an_unattached_hudu_computer_as_its_own_row(monkeypatc
     assert hudu_only["platform_cells"][0]["possible_match"]["device_id"] == "device-2"
 
 
+def test_computers_csv_has_the_current_table_platform_columns(monkeypatch):
+    cursor = _Cursor()
+    monkeypatch.setattr(views, "connection", _Connection(cursor))
+    monkeypatch.setattr(views.transaction, "atomic", nullcontext)
+    request = RequestFactory().get("/inventory/computers/?format=csv")
+    request.user = SimpleNamespace(is_authenticated=True)
+
+    response = views.fleet_coverage(request)
+
+    csv = response.content.decode("utf-8-sig")
+    rows = list(csv_module.reader(StringIO(csv)))
+    assert "Platform statuses" not in csv
+    assert rows[0] == [
+        "Client",
+        "Device",
+        "OS family",
+        "Device type",
+        "Hudu",
+        "Hudu links",
+        "Ninja",
+        "SentinelOne",
+    ]
+    assert [
+        "Acme",
+        "host-1",
+        "Windows 11",
+        "workstation",
+        "In Hudu",
+        "Ninja — host-1, Auvik #42",
+        "Missing",
+        "Online",
+    ] in rows
+    assert [
+        "Beta",
+        "host-2",
+        "",
+        "",
+        "In Hudu",
+        "",
+        "Possible: host-2",
+        "Not applicable",
+    ] in rows
+
+
 def test_coverage_template_has_clear_statuses_hudu_and_multiselect_filters():
     template = (Path(__file__).parents[3] / "templates/coverage.html").read_text(encoding="utf-8")
 
@@ -259,6 +308,8 @@ def test_coverage_template_has_clear_statuses_hudu_and_multiselect_filters():
     assert "Filtered results" in template
     assert "Counts reflect the current filter selections." in template
     assert "No linked cards" in template
+    assert "Show archived Hudu records" in template
+    assert "row.hudu_status" in template
     assert "Computer inventory from all sources" in template
     for label in ("Clients", "Devices", "Agent checks", "Online devices"):
         assert label in template
@@ -308,4 +359,15 @@ def test_cmdb_inventory_evidence_read_model_includes_unattached_assets():
     assert "observation.platform = 'Hudu'" not in migration
     assert "observation.device_id IS NOT NULL" not in migration
     assert "security_barrier" in migration
+    assert "REVOKE INSERT, UPDATE, DELETE, TRUNCATE" in migration
+
+
+def test_cmdb_inventory_archive_state_is_read_only():
+    migration = (
+        Path(__file__).parents[1] / "migrations/0148_cmdb_inventory_evidence_archive_state.py"
+    ).read_text(encoding="utf-8")
+
+    assert "CREATE OR REPLACE VIEW operations.v_cmdb_inventory_evidence_current" in migration
+    assert "END AS is_archived" in migration
+    assert "OWNER TO operations_view_owner" in migration
     assert "REVOKE INSERT, UPDATE, DELETE, TRUNCATE" in migration

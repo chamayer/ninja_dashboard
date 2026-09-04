@@ -7879,6 +7879,7 @@ def org_software_decide(request: HttpRequest, org_slug: str) -> HttpResponse:
 _SEV_RANK = (
     "CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END"
 )
+_COMPUTER_HUDU_LAYOUTS = ("Computer Assets", "Servers")
 
 _COVERAGE_STATES = ("Online", "Offline", "Stale", "Missing")
 
@@ -7912,6 +7913,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         value for value in request.GET.getlist("hudu_links")
         if value in {"has_links", "no_links"}
     ]
+    show_archived_hudu = request.GET.get("show_archived_hudu") == "1"
     s1_exemption_filters = [
         value for value in request.GET.getlist("s1_exemption")
         if value in {"exempt", "not_exempt"}
@@ -8114,14 +8116,20 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                        hudu.hostname, hudu.source_layout, hudu.source_url,
                        hudu.serial_number, hudu.link_verdict,
                        hudu.card_source, hudu.card_id,
-                       hudu.card_resolved_device_id, alias.canonical
+                       hudu.card_resolved_device_id, hudu.is_archived,
+                       alias.canonical
                 FROM operations.v_cmdb_inventory_evidence_current hudu
                 LEFT JOIN operations.platform_aliases alias
                   ON alias.alias = LOWER(hudu.card_source)
                 WHERE hudu.tenant_id = 1
                   AND hudu.source_name = 'Hudu'
-                  AND hudu.source_layout = 'Computer Assets'
+                  AND (%s OR NOT hudu.is_archived)
+                  AND (
+                      hudu.device_id IS NOT NULL
+                      OR hudu.source_layout = ANY(%s)
+                  )
                 """,
+                (show_archived_hudu, list(_COMPUTER_HUDU_LAYOUTS)),
             )
             hudu_rows = cur.fetchall()
             cur.execute(
@@ -8181,7 +8189,8 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
     hudu_by_observation: dict = {}
     for (
         observation_id, device_id, client_id, hostname, layout, hudu_url,
-        serial_number, link_verdict, card_source, card_id, resolved_device_id, canonical,
+        serial_number, link_verdict, card_source, card_id, resolved_device_id,
+        is_archived, canonical,
     ) in hudu_rows:
         hudu = hudu_by_observation.setdefault(
             observation_id,
@@ -8193,6 +8202,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                 "layout": layout or "",
                 "serial_number": serial_number or "",
                 "link_verdict": link_verdict or "",
+                "is_archived": is_archived,
                 "hudu_url": None,
                 "hudu_links": [],
             },
@@ -8247,7 +8257,13 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
     )
 
     def aggregate_hudu(records: list[dict]) -> dict:
-        hudu = {"hudu_present": bool(records), "hudu_url": None, "hudu_links": []}
+        hudu = {
+            "hudu_present": bool(records),
+            "hudu_archived": bool(records) and all(record["is_archived"] for record in records),
+            "hudu_has_archived": any(record["is_archived"] for record in records),
+            "hudu_url": None,
+            "hudu_links": [],
+        }
         for record in records:
             hudu_url = record["hudu_url"]
             if hudu_url and (hudu["hudu_url"] is None or hudu_url > hudu["hudu_url"]):
@@ -8256,6 +8272,11 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                 if link not in hudu["hudu_links"]:
                     hudu["hudu_links"].append(link)
         hudu["hudu_url"] = _safe_external_http_url(hudu["hudu_url"])
+        hudu["hudu_status"] = (
+            "Archived in Hudu" if hudu["hudu_archived"]
+            else "In Hudu (also archived)" if hudu["hudu_has_archived"]
+            else "In Hudu"
+        ) if hudu["hudu_present"] else "Not in Hudu"
         return hudu
 
     inventory_rows = []
@@ -8398,17 +8419,23 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
     }
 
     if wants_csv(request):
+        def inventory_platform_value(row: dict, platform: str) -> str:
+            possible_match = row["possible_match"] if platform == "Ninja" else None
+            if possible_match:
+                return f"Possible: {possible_match['hostname']}"
+            coverage_state = row["platform_states"].get(platform, {}).get("status")
+            if coverage_state:
+                return coverage_state
+            return row["source_states"].get(platform, "Not applicable")
+
         return csv_response(
             [
                 {
                     "client_name": row["client_name"], "hostname": row["hostname"],
                     "os_family": row["os_family"], "device_type": row["device_type"],
-                    "hudu": "In Hudu" if row["hudu_present"] else "Not in Hudu",
+                    "hudu": row["hudu_status"],
                     "hudu_links": ", ".join(row["hudu_links"]),
-                    "platform_statuses": ", ".join(
-                        f"{platform}: {item['status']}"
-                        for platform, item in sorted(row["platform_states"].items())
-                    ),
+                    "inventory_row": row,
                 }
                 for row in device_rows
             ],
@@ -8419,7 +8446,15 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                 ("Device type", "device_type"),
                 ("Hudu", "hudu"),
                 ("Hudu links", "hudu_links"),
-                ("Platform statuses", "platform_statuses"),
+            ] + [
+                (
+                    platform,
+                    lambda export_row, platform=platform: inventory_platform_value(
+                        export_row["inventory_row"],
+                        platform,
+                    ),
+                )
+                for platform in platforms
             ],
             filename_stem="fleet_coverage",
         )
@@ -8473,6 +8508,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             "online_filters": online_filters,
             "hudu_filters": hudu_filters,
             "hudu_link_filters": hudu_link_filters,
+            "show_archived_hudu": show_archived_hudu,
             "s1_exemption_filters": s1_exemption_filters,
             "os_family_filters": os_family_filters,
             "device_type_filters": device_type_filters,

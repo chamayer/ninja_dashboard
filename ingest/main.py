@@ -216,9 +216,9 @@ def run_documentation_observations_once() -> None:
     INTERIM alongside `run_agent_observations_once` — see that docstring and
     the backlog entry for the revert path.
 
-    Deliberately NOT given a startup catch-up thread: Portainer restarts this
-    container on every push, and a kick would refetch the full asset set on
-    every deploy.
+    Startup catch-up is conditional on source freshness, so an ordinary
+    deploy does not refetch a current asset set but cannot postpone an overdue
+    reconciliation indefinitely.
     """
     try:
         sources = [s for s in load_sources() if not is_identity_source(s)]
@@ -234,6 +234,54 @@ def run_documentation_observations_once() -> None:
     except Exception:
         log.exception("Documentation observations run failed")
         raise
+
+
+def documentation_observations_overdue(sources: list, schedule_hours: int) -> bool:
+    """Return whether any enabled documentation source lacks a recent success.
+
+    APScheduler starts an interval from process startup. Without this check,
+    an otherwise ordinary deployment can keep moving a documentation source's
+    next run into the future. Source observations write to ``operations``
+    run_log, not the legacy Ninja run log used by ``should_catch_up``.
+    """
+    documentation_sources = [
+        source for source in sources if not is_identity_source(source)
+    ]
+    if not documentation_sources:
+        return False
+
+    source_kinds = [
+        f"source.{source.platform}.{source.source_key}".rstrip(".")
+        for source in documentation_sources
+    ]
+    try:
+        with db.transaction() as cur:
+            cur.execute(
+                """
+                SELECT kind, MAX(ended_at)
+                FROM operations.run_log
+                WHERE tenant_id = 1
+                  AND ok
+                  AND kind = ANY(%s)
+                GROUP BY kind
+                """,
+                (source_kinds,),
+            )
+            latest_by_kind = dict(cur.fetchall())
+    except Exception:
+        log.exception("Documentation catch-up status probe failed; scheduling run")
+        return True
+
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=schedule_hours)
+    for kind in source_kinds:
+        last_success = latest_by_kind.get(kind)
+        if last_success is None:
+            return True
+        if last_success.tzinfo is None:
+            last_success = last_success.replace(tzinfo=timezone.utc)
+        if last_success < cutoff:
+            return True
+    return False
 
 
 def _run_platform_findings() -> None:
@@ -2432,6 +2480,14 @@ def main() -> None:
     # forever and make "is this domain healthy?" unanswerable.
     runlog.reap_orphaned()
 
+    documentation_schedule_hours = min(settings.DOCUMENTATION_SCHEDULE_HOURS, 4)
+    if settings.DOCUMENTATION_SCHEDULE_HOURS > documentation_schedule_hours:
+        log.warning(
+            "Documentation interval configured for %dh; capping it at %dh",
+            settings.DOCUMENTATION_SCHEDULE_HOURS,
+            documentation_schedule_hours,
+        )
+
     scheduler = BackgroundScheduler()
     scheduler.add_job(
         run_patching_once,
@@ -2452,7 +2508,7 @@ def main() -> None:
     scheduler.add_job(
         run_documentation_observations_once,
         "interval",
-        hours=settings.DOCUMENTATION_SCHEDULE_HOURS,
+        hours=documentation_schedule_hours,
         id="documentation_observations_cycle",
         max_instances=1,
     )
@@ -2684,6 +2740,10 @@ def main() -> None:
         "Agent observations scheduler started (every %dh)",
         settings.AGENT_COMPLIANCE_SCHEDULE_HOURS,
     )
+    log.info(
+        "Documentation observations scheduler started (every %dh)",
+        documentation_schedule_hours,
+    )
     log.info("Legacy agent compliance auto-scheduler disabled")
 
     if should_catch_up("patches", settings.patch_ingest_schedule_hours):
@@ -2697,6 +2757,30 @@ def main() -> None:
 
     threading.Thread(target=run_agent_observations_once, daemon=True).start()
     log.info("Agent observations: firing immediately on startup")
+
+    try:
+        documentation_sources = load_sources()
+        documentation_overdue = documentation_observations_overdue(
+            documentation_sources,
+            documentation_schedule_hours,
+        )
+    except Exception:
+        log.exception("Documentation catch-up source discovery failed; scheduling run")
+        documentation_overdue = True
+    if documentation_overdue:
+        log.info(
+            "Catch-up: documentation source has no successful run in %dh; "
+            "firing run_once",
+            documentation_schedule_hours,
+        )
+        threading.Thread(
+            target=run_documentation_observations_once,
+            daemon=True,
+        ).start()
+    else:
+        log.info(
+            "No documentation-observations catch-up needed (recent successful run)"
+        )
 
     log.info("Legacy agent compliance catch-up disabled")
 

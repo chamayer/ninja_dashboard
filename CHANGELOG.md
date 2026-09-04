@@ -2,6 +2,24 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.122.1] — 2026-09-04 — Current Hudu inventory
+
+### Fixed
+
+- Documentation-source ingest now runs at least every four hours and performs
+  a safe overdue catch-up after restart, preventing deployments from
+  indefinitely delaying Hudu reconciliation.
+- Computers now uses active attached Hudu evidence from any layout, including
+  Servers; unattached Hudu Computer Assets and Servers records are computer
+  candidates. Archived Hudu evidence is hidden by default. The Hudu filter can
+  include archived records and the Hudu column labels their status.
+- Computers CSV exports the same individual platform columns as the table.
+
+### Added
+
+- Migration 0148 exposes source archive state through the CMDB inventory
+  evidence read model.
+
 ## [0.122.0] — 2026-09-04 — Inventory Computers
 
 ### Added

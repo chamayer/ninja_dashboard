@@ -1,61 +1,45 @@
 # Active root implementation plan
 
-## CURRENT TASK — Restore healthy Ninja-backed Operations coverage
+## CURRENT TASK — Restore durable Hudu documentation ingest scheduling
 
-**Status:** release approved; pending commit, deployment, and verification.
+**Status:** implementation in progress.
 
-**Goal:** determine why the current Operations-native Ninja source run is
-marked failed despite fresh observations, restore a healthy run path with the
-smallest compatible change, and preserve the legacy Agent Compliance Metabase
-ingest decision as a separate follow-up.
+**Goal:** ensure Hudu and future non-identity documentation sources run at
+least every four hours and catch up when overdue after an ingest restart, so
+repeated deployments cannot indefinitely postpone inventory reconciliation.
 
-**Scope / affected files:** `operations` migration 0145 rewrites the three
-Ninja compatibility shadow views; the existing optional PostgreSQL shadow-view
-test now includes a malformed foreign source ID; root `VERSION` and
-`CHANGELOG.md` prepare patch release 0.120.10. No legacy scheduler enablement,
-manual production run, or data rebuild is in scope.
+**Scope / affected files:** the ingest startup scheduler and its focused
+tests, plus this plan. No source-data writes occur locally. A deployed
+catch-up will invoke the ordinary Hudu collection and its existing snapshot
+reconciliation; it will not create an alternate write path.
 
-**Decision:** treat the native Operations coverage pipeline and legacy
-Metabase Agent Compliance dashboards as separate paths. The latter stays
-disabled pending a distinct approval; no change will be made merely because
-the native source-health guard reports a failure.
+**Decision:** cap the effective documentation cadence at four hours, even if
+an older host setting requests a slower value, and add one startup catch-up
+only when an enabled documentation source is overdue. The check must use
+`operations.run_log`, which records source runs, rather than the unrelated
+legacy `ninja_core.run_log` helper.
 
-**Validation plan:** inspect the failed run's non-sensitive diagnostic
-fingerprint, source-run behavior, and evaluator/coverage-finding freshness;
-then run focused tests and static checks. Production validation after a future
-deploy or manual rerun requires separate approval.
+**Checkpoint:** Hudu last completed successfully on 2026-09-02 16:15 UTC.
+Two active Hudu Computer Asset observations for `VDR-20-PC07` remain current
+from that run, including one linked to the canonical computer, even though the
+asset was deleted in Hudu. The current 24-hour APScheduler job resets after
+each Portainer deployment and intentionally has no startup catch-up, which is
+why Hudu has not run since repeated deployments.
 
-**Checkpoint:** at 2026-09-03, the platform evaluator last succeeded at
-12:13 UTC and refreshed coverage findings. LogMeIn, ScreenConnect, and
-SentinelOne source runs are current and successful. Ninja observations were
-written at 14:13 UTC, but its 14:14 UTC source run is failed; its last recorded
-successful run is 2026-08-31. The evaluator's source-failure guard will skip
-Ninja rather than emit misleading missing-platform coverage findings.
+**Validation plan:** focused scheduler predicate tests, Python compilation,
+and diff check. After an approved deployment, confirm a Hudu source run and
+that the source health advances; validate the reported asset only after the
+collection completes.
 
-Diagnosis: the Ninja device collection and authoritative observation write
-complete, then `REFRESH MATERIALIZED VIEW ninja_core.v_active_devices` fails.
-The materialized view reads `operations.ninja_device_detail_current_shadow`,
-whose target-list `external_id::integer` can be evaluated before its
-Ninja-only filter. A non-Ninja observation may therefore poison the refresh;
-the live source data includes nonnumeric LogMeIn and ScreenConnect external
-IDs. The same shadow-view defect also breaks the device-health and
-custom-fields refreshes.
+**Checkpoint:** the scheduler now caps `DOCUMENTATION_SCHEDULE_HOURS` at four
+hours and performs one startup freshness check against the exact enabled
+documentation-source run kinds in `operations.run_log`. Any missing, late, or
+unreadable source status schedules the ordinary documentation collection;
+recent sources are not refetched. Python compilation, undefined-name lint,
+the existing ingest scheduler-test import path, and `git diff --check` pass.
 
-Implementation: migration 0145 replaces all three Ninja shadow-view casts
-with a range-checked `CASE` expression. It retains the existing Ninja contract
-filters, security/ownership modes, SELECT grants, and explicit runtime DML
-revokes. It does not modify observations or other source records. The
-optional PostgreSQL test now inserts a nonnumeric ScreenConnect ID and verifies
-the Ninja views still return their numeric Ninja records.
-
-Validation: Python compilation, `manage.py check`, migration-drift check, and
-`git diff --check` pass. The targeted PostgreSQL test is correctly skipped
-without `RUN_POSTGRES_INTEGRATION_TESTS=1` and a container runtime; no local
-database-backed execution or production migration has occurred.
-
-**Next action:** commit the scoped release, push it to `origin` then the
-secondary mirror, trigger the coupled deployment, and verify the migration,
-next scheduled Ninja run, and Operations coverage health.
+**Next action:** obtain separate approval to prepare the release, commit,
+push, redeploy, and verify the resulting Hudu collection and withdrawal.
 
 ## COMPLETED TASK — Wire winget_tag/chocolatey_tag into the capability model
 
