@@ -133,29 +133,70 @@ Operations or Postgres failure was present.
 **Next action:** none. A Hudu section on device detail remains deferred by
 request.
 
-### Filtered Coverage summary follow-up
+### Inventory Computers — expand Coverage into the master computer inventory
 
-**Goal:** make the scope of the currently filtered Coverage result obvious
-without requiring an export or manual counting.
+**Status:** implementation in progress; this supersedes the small filtered
+Coverage-summary follow-up.
 
-**Scope:** Coverage view, template, focused tests, and this plan only. No
-migration, data change, or filter-semantics change.
+**Goal:** turn Coverage into the master Computers inventory, under top-level
+Inventory navigation, while retaining coverage state only where a computer has
+an agent requirement.
 
-**Decision:** add one compact result-summary card row directly below the
-per-platform status cards. It will show matching Clients, Devices, Agent
-checks (device-platform rows), and Online devices. Each value is calculated
-after every active filter, including Hudu, Hudu link, SentinelOne exemption,
-OS/type, status, required platform, and Online in.
+**Scope:** Coverage view/template/tests, primary navigation and URL routing,
+and one additive tenant-scoped read-model migration. No source writes,
+automatic identity merges, or data rebuild.
 
-**Checkpoint:** added the four-card row below the platform cards, headed
-**Filtered results** with an explicit note that the values reflect the current
-filter selections. It is responsive (two columns on narrow screens) and uses
-the post-filter device and coverage-row sets, so pagination does not affect
-its counts. Focused Coverage tests pass (3), Django system check passes,
-focused Ruff/format and Python compilation pass, and `git diff --check` pass.
+**Decision:** Inventory is organized by asset class, not source. The first
+page is **Inventory → Computers**. Hudu is evidence about a computer, never a
+navigation category or authority. The page will include active canonical
+computers and active Hudu **Computer Assets** records. A confirmed Hudu card
+attachment decorates its canonical computer row. An unattached Hudu record
+gets its own inventory row; an exact same-client/name match is displayed only
+as a possible match and never changes identity. Hudu data remains in its Hudu
+column: present/no linked cards or its listed card references. Source columns
+show current source status. Agent coverage cells apply only where a
+requirement exists; otherwise they say Not applicable.
 
-**Next action:** obtain separate approval to commit, push, redeploy, and
-verify the new Coverage summary row.
+**Boundary:** Hudu also reports non-computer assets (for example servers,
+printing, network devices, and locations). They are not dropped or recast as
+computers; they need their own future Inventory asset-class pages. This change
+implements only Computers and does not create a Hudu source-owned inventory
+section.
+
+**Validation:** focused request/template/migration tests, Django check,
+migration-drift review, Python compilation, scoped lint/format, diff check,
+and authorized live read-only row/count checks after an approved deployment.
+
+**Checkpoint:** current production Hudu source data has a `Computer Assets`
+layout (4,484 active observations in the authorized read-only check). The
+existing `v_device_hudu_link_current` intentionally exposes only Hudu rows
+already attached to a canonical device, so it cannot render an unlinked
+computer such as Test-Asset. A new narrow inventory read model is required.
+
+**Checkpoint:** implementation adds migration 0147 with a tenant-scoped,
+read-only `v_cmdb_inventory_evidence_current` projection for all current
+`cmdb.asset` observations, including unattached records and their card
+references. It is source-neutral; Computers is its first consumer and filters
+to Hudu's `Computer Assets` layout. The Coverage reader now starts from all
+active canonical computers, adds unattached Hudu computer rows, overlays
+confirmed Hudu attachments, and shows a unique same-client/name Ninja result
+only as a possible match. `/inventory/computers/` is the primary route under
+Inventory → Computers; `/coverage/` remains compatible. Hudu shows No linked
+cards explicitly, source columns remain separate, and non-required coverage
+is Not applicable. Focused tests pass (6), Django system/migration-drift
+checks, Python compilation, template loading, focused Ruff/format, and diff
+checks pass. Authorized production-scale timing: the expanded requirement
+query is 0.736 seconds for 13,666 rows and the Hudu Computer Assets projection
+is 0.313 seconds.
+
+**Validation:** after generalizing migration 0147, focused Coverage tests pass
+(6), `manage.py check` passes, `makemigrations --check --dry-run` reports no
+changes, Python compilation passes, scoped Ruff/format checks pass, and
+`git diff --check` passes. No additional data probes or test scripts were run.
+
+**Next action:** obtain separate approval to prepare the release, commit,
+push, apply migration through the approved deployment path, and validate the
+live Computers page.
 
 ### Performance follow-up — Coverage load time
 

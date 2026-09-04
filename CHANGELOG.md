@@ -2,6 +2,24 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.122.0] — 2026-09-04 — Inventory Computers
+
+### Added
+
+- Inventory now has a Computers page that shows active canonical computers
+  alongside current, unattached Hudu Computer Assets. Hudu remains source
+  evidence: an exact client-and-name Ninja result is shown only as a possible
+  match and never merges the records.
+- Migration 0147 adds a tenant-scoped, read-only CMDB inventory-evidence view
+  for all current `cmdb.asset` observations. Future Inventory asset-class pages
+  can reuse it without creating source-owned asset models.
+
+### Changed
+
+- Coverage is rebranded as Inventory → Computers. Current agent coverage
+  remains visible where a requirement exists; source presence remains separate
+  as Online or Offline, and non-required platforms are Not applicable.
+
 ## [0.121.4] — 2026-09-03 — Coverage filtered-result counts
 
 ### Added

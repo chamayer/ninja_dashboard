@@ -307,8 +307,8 @@
                 <a class="nav-link {% if active_section == 'clients' %}active{% endif %}"
                    href="{% url 'org_index' org_slug='all' %}">Clients</a>
 
-                <a class="nav-link {% if active_section == 'devices' %}active{% endif %}"
-                   href="{% url 'devices_page' %}">Devices</a>
+                <a class="nav-link {% if active_section == 'inventory' %}active{% endif %}"
+                   href="{% url 'inventory_computers' %}">Inventory</a>
 
                 <a class="nav-link {% if active_section == 'patching' %}active{% endif %}"
                    href="{% url 'patching_queue' %}">Patching{% if nav_patching_open %} <span class="nav-badge">{{ nav_patching_open }}</span>{% endif %}</a>
@@ -336,6 +336,13 @@
                 <a class="nav-link nav-context" href="{% url 'org_index' org_slug=current_client.slug %}#client-locations">Locations</a>
                 <a class="nav-link nav-context" href="{% url 'org_index' org_slug=current_client.slug %}#recent-changes">History</a>
                 <a class="nav-link nav-context {% if request.resolver_match.url_name == 'org_policies' %}active{% endif %}" href="{% url 'org_policies' org_slug=current_client.slug %}">Policies</a>
+                <div class="nav-fill"></div>
+            </div>
+            {% elif active_section == 'inventory' %}
+            <div class="nav-row nav-context-row" aria-label="Inventory navigation">
+                <span class="nav-client-crumb">Inventory ›</span>
+                <a class="nav-link nav-context {% if request.resolver_match.url_name == 'inventory_computers' or request.resolver_match.url_name == 'fleet_coverage' %}active{% endif %}"
+                   href="{% url 'inventory_computers' %}">Computers</a>
                 <div class="nav-fill"></div>
             </div>
             {% elif active_section == 'software' %}

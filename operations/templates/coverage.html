@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Agent Coverage{% endblock %}
+{% block title %}Computers{% endblock %}
 
 {% block content %}
 <style>
@@ -43,8 +43,8 @@
 
 <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:1rem;">
     <div>
-        <h1 style="margin:0;">Agent Coverage</h1>
-        <p class="muted" style="margin:0.25rem 0 0;">Required agents and their current status.</p>
+        <h1 style="margin:0;">Computers</h1>
+        <p class="muted" style="margin:0.25rem 0 0;">Computer inventory from all sources, with current agent coverage where required.</p>
     </div>
     {% include "_csv_download.html" %}
 </div>
@@ -85,7 +85,7 @@
                 <details class="coverage-filter"><summary>Online in</summary><div class="coverage-filter-options"><input class="coverage-filter-search" type="search" placeholder="Search platforms" aria-label="Search platforms">{% for platform in platforms %}<label><input type="checkbox" name="online_in" value="{{ platform }}"{% if platform in online_filters %} checked{% endif %}>{{ platform }}</label>{% endfor %}</div></details>
                 <details class="coverage-filter"><summary>Required platform</summary><div class="coverage-filter-options"><input class="coverage-filter-search" type="search" placeholder="Search platforms" aria-label="Search required platforms">{% for platform in platforms %}<label><input type="checkbox" name="platform" value="{{ platform }}"{% if platform in platform_filters %} checked{% endif %}>{{ platform }}</label>{% endfor %}</div></details>
                 <details class="coverage-filter"><summary>Status</summary><div class="coverage-filter-options"><input class="coverage-filter-search" type="search" placeholder="Search statuses" aria-label="Search statuses">{% for state in states %}<label><input type="checkbox" name="state" value="{{ state }}"{% if state in state_filters %} checked{% endif %}>{{ state }}</label>{% endfor %}</div></details>
-                <div><button type="submit">Filter</button>{% if client_filters or online_filters or hudu_filters or hudu_link_filters or s1_exemption_filters or platform_filters or state_filters or os_family_filters or device_type_filters %}<a class="clear" href="{% url 'fleet_coverage' %}">Clear</a>{% endif %}</div>
+                <div><button type="submit">Filter</button>{% if client_filters or online_filters or hudu_filters or hudu_link_filters or s1_exemption_filters or platform_filters or state_filters or os_family_filters or device_type_filters %}<a class="clear" href="{% url 'inventory_computers' %}">Clear</a>{% endif %}</div>
             </div>
             <div class="coverage-filter-row">
                 <details class="coverage-filter"><summary>Hudu</summary><div class="coverage-filter-options"><input class="coverage-filter-search" type="search" placeholder="Search Hudu status" aria-label="Search Hudu status"><label><input type="checkbox" name="hudu" value="in_hudu"{% if "in_hudu" in hudu_filters %} checked{% endif %}>In Hudu</label><label><input type="checkbox" name="hudu" value="not_in_hudu"{% if "not_in_hudu" in hudu_filters %} checked{% endif %}>Not in Hudu</label></div></details>
@@ -105,11 +105,11 @@
             <tbody>
                 {% for row in device_rows %}
                 <tr>
-                    <td><a href="{% url 'org_index' org_slug=row.client_slug %}">{{ row.client_name }}</a></td>
-                    <td><a href="{% url 'device_detail' org_slug=row.client_slug device_id=row.device_id %}">{{ row.hostname|default:"Unnamed device" }}</a></td>
+                    <td>{% if row.client_slug %}<a href="{% url 'org_index' org_slug=row.client_slug %}">{{ row.client_name }}</a>{% else %}{{ row.client_name }}{% endif %}</td>
+                    <td>{% if row.device_id %}<a href="{% url 'device_detail' org_slug=row.client_slug device_id=row.device_id %}">{{ row.hostname|default:"Unnamed computer" }}</a>{% else %}{{ row.hostname|default:"Unnamed computer" }}{% endif %}</td>
                     <td>{{ row.os_family|default:"—" }}</td><td>{{ row.device_type|default:"—" }}</td>
-                    <td class="coverage-hudu">{% if row.hudu_present %}{% if row.hudu_url %}<a href="{{ row.hudu_url }}" rel="noopener" target="_blank">In Hudu</a>{% else %}In Hudu{% endif %}{% if row.hudu_links %}<ul>{% for link in row.hudu_links %}<li>{{ link }}</li>{% endfor %}</ul>{% endif %}{% else %}<span class="muted">Not in Hudu</span>{% endif %}</td>
-                    {% for cell in row.platform_cells %}<td>{% if cell.status %}<a class="coverage-status coverage-{{ cell.status|lower }}" href="{{ cell.url }}">{{ cell.status }}</a>{% else %}—{% endif %}</td>{% endfor %}
+                    <td class="coverage-hudu">{% if row.hudu_present %}{% if row.hudu_url %}<a href="{{ row.hudu_url }}" rel="noopener" target="_blank">In Hudu</a>{% else %}In Hudu{% endif %}{% if row.hudu_links %}<ul>{% for link in row.hudu_links %}<li>{{ link }}</li>{% endfor %}</ul>{% else %}<span class="muted">No linked cards</span>{% endif %}{% else %}<span class="muted">Not in Hudu</span>{% endif %}</td>
+                    {% for cell in row.platform_cells %}<td>{% if cell.possible_match %}<span class="muted">Possible:</span> <a href="{% url 'device_detail' org_slug=cell.possible_match.client_slug device_id=cell.possible_match.device_id %}">{{ cell.possible_match.hostname }}</a>{% elif cell.status == "Not applicable" %}<span class="muted">Not applicable</span>{% elif cell.url %}<a class="coverage-status coverage-{{ cell.status|lower }}" href="{{ cell.url }}">{{ cell.status }}</a>{% else %}<span class="coverage-status coverage-{{ cell.status|lower }}">{{ cell.status }}</span>{% endif %}</td>{% endfor %}
                 </tr>
                 {% endfor %}
             </tbody>

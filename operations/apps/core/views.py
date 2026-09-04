@@ -7874,7 +7874,7 @@ def org_software_decide(request: HttpRequest, org_slug: str) -> HttpResponse:
     return redirect("org_software", org_slug=org_slug)
 
 
-# ── Compliance / fleet coverage page ─────────────────────────────────────────
+# ── Inventory / Computers page ───────────────────────────────────────────────
 
 _SEV_RANK = (
     "CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END"
@@ -7900,7 +7900,7 @@ def _coverage_filter_url(**filters: str) -> str:
 
 @login_required
 def fleet_coverage(request: HttpRequest) -> HttpResponse:
-    """Show each required agent's current Coverage status by device."""
+    """Show the master Computers inventory with current agent coverage."""
     client_filters = [value for value in request.GET.getlist("client") if value]
     platform_filters = [value for value in request.GET.getlist("platform") if value]
     online_filters = [value for value in request.GET.getlist("online_in") if value]
@@ -7947,13 +7947,6 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                     WHERE d.tenant_id = 1
                       AND d.deleted_at IS NULL
                       AND d.lifecycle_status <> 'retired'
-                      AND EXISTS (
-                          SELECT 1
-                          FROM operations.device_agent_presence_current presence
-                          WHERE presence.tenant_id = d.tenant_id
-                            AND presence.device_id = d.id
-                            AND presence.entity_type LIKE 'agent.%%'
-                      )
                 ), baseline AS MATERIALIZED (
                     SELECT d.*, requirement.agent_id, requirement.entity_type,
                            requirement.platform, requirement.applicable_os_groups
@@ -8117,68 +8110,226 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             rows = cur.fetchall()
             cur.execute(
                 """
-                SELECT hudu_link.device_id, hudu_link.hudu_url,
-                       hudu_link.card_source, hudu_link.card_id,
-                       hudu_link.card_resolved_device_id, alias.canonical
-                FROM operations.v_device_hudu_link_current hudu_link
+                SELECT hudu.observation_id, hudu.device_id, hudu.client_id,
+                       hudu.hostname, hudu.source_layout, hudu.source_url,
+                       hudu.serial_number, hudu.link_verdict,
+                       hudu.card_source, hudu.card_id,
+                       hudu.card_resolved_device_id, alias.canonical
+                FROM operations.v_cmdb_inventory_evidence_current hudu
                 LEFT JOIN operations.platform_aliases alias
-                  ON alias.alias = LOWER(hudu_link.card_source)
-                WHERE hudu_link.tenant_id = 1
+                  ON alias.alias = LOWER(hudu.card_source)
+                WHERE hudu.tenant_id = 1
+                  AND hudu.source_name = 'Hudu'
+                  AND hudu.source_layout = 'Computer Assets'
                 """,
             )
             hudu_rows = cur.fetchall()
+            cur.execute(
+                """
+                SELECT d.id, d.client_id, c.slug, c.display_name,
+                       COALESCE(d.canonical_hostname, ''),
+                       COALESCE(d.os_family, ''), d.device_type
+                FROM operations.devices d
+                JOIN operations.clients c ON c.id = d.client_id
+                WHERE d.tenant_id = 1
+                  AND d.deleted_at IS NULL
+                  AND d.lifecycle_status <> 'retired'
+                ORDER BY c.display_name, d.canonical_hostname
+                """,
+            )
+            computer_rows = cur.fetchall()
+            cur.execute(
+                """
+                SELECT id, slug, display_name
+                FROM operations.clients
+                WHERE tenant_id = 1
+                  AND deleted_at IS NULL
+                """,
+            )
+            client_rows = cur.fetchall()
+            cur.execute(
+                """
+                SELECT presence.device_id, presence.platform,
+                       BOOL_OR(presence.reported_online) AS online
+                FROM operations.device_agent_presence_current presence
+                WHERE presence.tenant_id = 1
+                  AND presence.entity_type LIKE 'agent.%%'
+                GROUP BY presence.device_id, presence.platform
+                """,
+            )
+            source_presence_rows = cur.fetchall()
 
-    hostnames_by_device = {row[2]: row[3] for row in rows}
-    hudu_by_device: dict = {}
-    for device_id, hudu_url, card_source, card_id, resolved_device_id, canonical in hudu_rows:
-        hostname = hostnames_by_device.get(device_id)
-        if hostname is None:
-            continue
-        hudu = hudu_by_device.setdefault(
-            device_id,
-            {"hudu_url": None, "hudu_links": []},
+    devices_by_id = {
+        row[0]: {
+            "device_id": row[0], "client_id": row[1], "client_slug": row[2],
+            "client_name": row[3], "hostname": row[4], "os_family": row[5],
+            "device_type": row[6],
+        }
+        for row in computer_rows
+    }
+    hostnames_by_device = {
+        **{row[2]: row[3] for row in rows},
+        **{device_id: row["hostname"] for device_id, row in devices_by_id.items()},
+    }
+    clients_by_id = {row[0]: {"slug": row[1], "name": row[2]} for row in client_rows}
+    source_states_by_device: dict = {}
+    for device_id, platform, online in source_presence_rows:
+        source_states_by_device.setdefault(device_id, {})[platform] = (
+            "Online" if online else "Offline"
+        )
+
+    hudu_by_observation: dict = {}
+    for (
+        observation_id, device_id, client_id, hostname, layout, hudu_url,
+        serial_number, link_verdict, card_source, card_id, resolved_device_id, canonical,
+    ) in hudu_rows:
+        hudu = hudu_by_observation.setdefault(
+            observation_id,
+            {
+                "observation_id": observation_id,
+                "device_id": device_id,
+                "client_id": client_id,
+                "hostname": hostname or "",
+                "layout": layout or "",
+                "serial_number": serial_number or "",
+                "link_verdict": link_verdict or "",
+                "hudu_url": None,
+                "hudu_links": [],
+            },
         )
         if hudu_url and (hudu["hudu_url"] is None or hudu_url > hudu["hudu_url"]):
             hudu["hudu_url"] = hudu_url
         if card_source is None or card_id is None:
             continue
+        linked_hostname = hostnames_by_device.get(device_id)
         if (
             card_source.lower() == "ninja"
             and resolved_device_id == str(device_id)
-            and hostname
+            and linked_hostname
         ):
-            label = f"Ninja — {hostname}"
+            label = f"Ninja — {linked_hostname}"
         else:
             label = f"{canonical or card_source.title()} #{card_id}"
         if label not in hudu["hudu_links"]:
             hudu["hudu_links"].append(label)
+
+    hudu_by_device: dict = {}
+    for hudu in hudu_by_observation.values():
+        if hudu["device_id"] is not None:
+            hudu_by_device.setdefault(hudu["device_id"], []).append(hudu)
 
     coverage_rows = [
         {
             "client_slug": row[0], "client_name": row[1], "device_id": row[2],
             "hostname": row[3], "os_family": row[4], "device_type": row[5],
             "platform": row[6], "s1_exempt": row[7], "status": row[8],
-            "hudu_present": row[9] or row[2] in hudu_by_device,
-            "hudu_url": _safe_external_http_url(
-                hudu_by_device.get(row[2], {}).get("hudu_url")
-            ),
-            "hudu_links": hudu_by_device.get(row[2], {}).get("hudu_links", []),
         }
         for row in rows
     ]
-    platforms = sorted({row["platform"] for row in coverage_rows})
-    os_families = sorted({row["os_family"] for row in coverage_rows if row["os_family"]})
-    device_types = sorted({row["device_type"] for row in coverage_rows if row["device_type"]})
+    coverage_by_device: dict = {}
+    for row in coverage_rows:
+        coverage_by_device.setdefault(row["device_id"], {})[row["platform"]] = row
+
+    coverage_platforms = sorted({row["platform"] for row in coverage_rows})
+    platforms = sorted(
+        set(coverage_platforms)
+        | {platform for states in source_states_by_device.values() for platform in states}
+    )
+    os_families = sorted(
+        {row["os_family"] for row in devices_by_id.values() if row["os_family"]}
+    )
+    device_types = sorted(
+        {row["device_type"] for row in devices_by_id.values() if row["device_type"]}
+    )
     filter_clients = sorted(
-        ({"slug": row["client_slug"], "name": row["client_name"]} for row in coverage_rows),
+        clients_by_id.values(),
         key=lambda row: row["name"],
     )
-    filter_clients = list({row["slug"]: row for row in filter_clients}.values())
+
+    def aggregate_hudu(records: list[dict]) -> dict:
+        hudu = {"hudu_present": bool(records), "hudu_url": None, "hudu_links": []}
+        for record in records:
+            hudu_url = record["hudu_url"]
+            if hudu_url and (hudu["hudu_url"] is None or hudu_url > hudu["hudu_url"]):
+                hudu["hudu_url"] = hudu_url
+            for link in record["hudu_links"]:
+                if link not in hudu["hudu_links"]:
+                    hudu["hudu_links"].append(link)
+        hudu["hudu_url"] = _safe_external_http_url(hudu["hudu_url"])
+        return hudu
+
+    inventory_rows = []
+    for device_id, computer in devices_by_id.items():
+        coverage_states = coverage_by_device.get(device_id, {})
+        s1_exempt = any(row["s1_exempt"] for row in coverage_states.values())
+        inventory_rows.append({
+            **computer,
+            "inventory_key": f"device:{device_id}",
+            "hudu_records": hudu_by_device.get(device_id, []),
+            "source_states": source_states_by_device.get(device_id, {}),
+            "platform_states": coverage_states,
+            "s1_exempt": s1_exempt,
+            "possible_match": None,
+        })
+
+    for hudu in hudu_by_observation.values():
+        if hudu["device_id"] is not None and hudu["device_id"] in devices_by_id:
+            continue
+        client = clients_by_id.get(hudu["client_id"], {"slug": "", "name": "Unassigned"})
+        inventory_rows.append({
+            "inventory_key": f"hudu:{hudu['observation_id']}",
+            # A linked-but-retired/deleted device is not an active inventory
+            # computer. Keep this source record separate rather than linking
+            # a user to a stale device-detail route.
+            "device_id": None,
+            "client_id": hudu["client_id"],
+            "client_slug": client["slug"],
+            "client_name": client["name"],
+            "hostname": hudu["hostname"],
+            "os_family": "",
+            "device_type": "",
+            "hudu_records": [hudu],
+            "source_states": {},
+            "platform_states": {},
+            "s1_exempt": False,
+            "possible_match": None,
+        })
+
+    devices_by_client_hostname: dict = {}
+    for row in inventory_rows:
+        if row["device_id"] is None or not row["hostname"]:
+            continue
+        devices_by_client_hostname.setdefault(
+            (row["client_id"], row["hostname"].strip().lower()),
+            [],
+        ).append(row)
+    for row in inventory_rows:
+        if row["device_id"] is not None or not row["hostname"]:
+            continue
+        candidates = devices_by_client_hostname.get(
+            (row["client_id"], row["hostname"].strip().lower()),
+            [],
+        )
+        ninja_candidates = [
+            candidate for candidate in candidates if "Ninja" in candidate["source_states"]
+        ]
+        if len(ninja_candidates) == 1:
+            row["possible_match"] = ninja_candidates[0]
+
+    for row in inventory_rows:
+        row.update(aggregate_hudu(row.pop("hudu_records")))
 
     def matches(row: dict) -> bool:
         if client_filters and row["client_slug"] not in client_filters:
             return False
-        if platform_filters and row["platform"] not in platform_filters:
+        matching_coverage = list(row["platform_states"].values())
+        if platform_filters:
+            matching_coverage = [
+                item for item in matching_coverage if item["platform"] in platform_filters
+            ]
+            if not matching_coverage:
+                return False
+        if state_filters and not any(item["status"] in state_filters for item in matching_coverage):
             return False
         if os_family_filters and row["os_family"] not in os_family_filters:
             return False
@@ -8198,48 +8349,27 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             s1_value = "exempt" if row["s1_exempt"] else "not_exempt"
             if s1_value not in s1_exemption_filters:
                 return False
-        return not state_filters or row["status"] in state_filters
+        return True
 
-    filtered_rows = [row for row in coverage_rows if matches(row)]
-    device_rows_by_id: dict[tuple, dict] = {}
-    all_rows_by_device: dict[tuple, list[dict]] = {}
-    for row in coverage_rows:
-        all_rows_by_device.setdefault((row["client_slug"], row["device_id"]), []).append(row)
-    for row in filtered_rows:
-        key = (row["client_slug"], row["device_id"])
-        if key not in device_rows_by_id:
-            all_platform_rows = all_rows_by_device[key]
-            device_rows_by_id[key] = {
-                "client_slug": row["client_slug"],
-                "client_name": row["client_name"],
-                "device_id": row["device_id"],
-                "hostname": row["hostname"],
-                "os_family": row["os_family"],
-                "device_type": row["device_type"],
-                "hudu_present": row["hudu_present"],
-                "hudu_url": row["hudu_url"],
-                "hudu_links": row["hudu_links"],
-                "s1_exempt": row["s1_exempt"],
-                "platform_states": {item["platform"]: item for item in all_platform_rows},
-            }
-
-    device_rows = list(device_rows_by_id.values())
+    device_rows = [row for row in inventory_rows if matches(row)]
     if online_filters:
         device_rows = [
             row for row in device_rows
             if any(
-                item["platform"] in online_filters and item["status"] == "Online"
-                for item in row["platform_states"].values()
+                platform in online_filters and status == "Online"
+                for platform, status in row["source_states"].items()
             )
         ]
 
-    visible_devices = {(row["client_slug"], row["device_id"]) for row in device_rows}
+    visible_devices = {row["device_id"] for row in device_rows if row["device_id"] is not None}
     summary_rows = [
-        row for row in filtered_rows
-        if (row["client_slug"], row["device_id"]) in visible_devices
+        row for row in coverage_rows
+        if row["device_id"] in visible_devices
+        and (not platform_filters or row["platform"] in platform_filters)
+        and (not state_filters or row["status"] in state_filters)
     ]
     platform_cards = []
-    for platform in platforms:
+    for platform in coverage_platforms:
         counts = {state: 0 for state in _COVERAGE_STATES}
         for row in summary_rows:
             if row["platform"] == platform:
@@ -8261,9 +8391,9 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         "devices": len(device_rows),
         "agent_checks": len(summary_rows),
         "online_devices": len({
-            (row["client_slug"], row["device_id"])
-            for row in summary_rows
-            if row["status"] == "Online"
+            row["inventory_key"]
+            for row in device_rows
+            if any(status == "Online" for status in row["source_states"].values())
         }),
     }
 
@@ -8305,11 +8435,19 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         row["platform_cells"] = [
             {
                 "platform": platform,
-                "status": row["platform_states"].get(platform, {}).get("status", ""),
+                "status": (
+                    row["platform_states"].get(platform, {}).get("status")
+                    or row["source_states"].get(platform)
+                    or "Not applicable"
+                ),
+                "is_coverage": platform in row["platform_states"],
+                "possible_match": (
+                    row["possible_match"] if platform == "Ninja" else None
+                ),
                 "url": _coverage_filter_url(
                     platform=platform,
                     state=row["platform_states"].get(platform, {}).get("status", ""),
-                ),
+                ) if platform in row["platform_states"] else "",
             }
             for platform in platforms
         ]
@@ -8318,8 +8456,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         request,
         "coverage.html",
         {
-            "admin_group": "integrations",
-            "admin_tab": "coverage",
+            "active_section": "inventory",
             "device_rows": device_rows,
             "page_obj": page_obj,
             "paginator": paginator,

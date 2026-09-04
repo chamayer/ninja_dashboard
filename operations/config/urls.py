@@ -190,6 +190,7 @@ urlpatterns = [
         name="admin_finding_apply_client_rename",
     ),
     path("coverage/", fleet_coverage, name="fleet_coverage"),
+    path("inventory/computers/", fleet_coverage, name="inventory_computers"),
     path("sources/", sources_status, name="sources_status"),
     path("merge-candidates/", merge_candidates_queue, name="merge_candidates_queue"),
     path("clients/candidates/", client_candidates_queue, name="client_candidates_queue"),
