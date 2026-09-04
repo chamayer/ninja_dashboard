@@ -1,6 +1,19 @@
 # Changelog
 
-All notable changes to this project follow [Semantic Versioning](https://semver.org/).
+All notable changes in this project follow [Semantic Versioning](https://semver.org/).
+
+## [0.122.6] — 2026-09-04 — Related Hudu records
+
+### Changed
+
+- Computers now presents an unlinked Hudu record beside a confirmed Hudu
+  record only when exactly one same-client/name computer already has that
+  confirmed record. Each record retains its own type, archive state, cards,
+  and direct Hudu link; the display creates no source identity or coverage
+  change.
+- Device Sources now presents linked, same-client/name, and name-only Hudu
+  records together, so an operator can see the complete Hudu picture without
+  treating related records as confirmed identities.
 
 ## [0.122.5] — 2026-09-04 — Computers filter correction
 

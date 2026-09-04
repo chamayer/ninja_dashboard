@@ -394,11 +394,11 @@
 </div>
 
 <div class="card">
-    <h2 style="margin-top:0;">Possible Hudu matches</h2>
+    <h2 style="margin-top:0;">Hudu records</h2>
     <p class="muted" style="margin-top:-0.4rem;">
-        These records are not linked to this device. A same-client and name match is a stronger clue than a name-only match; neither changes the current source list.
+        Each row is a separate Hudu record. Same-client/name and name-only rows are related records, not source identities for this device.
     </p>
-    {% if possible_hudu_matches %}
+    {% if hudu_records %}
     <table data-sortable style="width:100%;">
         <thead>
             <tr>
@@ -410,19 +410,19 @@
             </tr>
         </thead>
         <tbody>
-            {% for match in possible_hudu_matches %}
+            {% for record in hudu_records %}
             <tr>
-                <td>{% if match.same_client %}<strong>Same client and name</strong>{% else %}<span class="muted">Name only</span>{% endif %}</td>
-                <td>{{ match.layout }}</td>
-                <td>{% if match.is_archived %}<span class="muted">Archived in Hudu</span>{% else %}Current in Hudu{% endif %}</td>
-                <td>{% if match.card_count %}{{ match.card_count }}{% else %}<span class="muted">No cards reported</span>{% endif %}</td>
-                <td>{% if match.url %}<a href="{{ match.url }}" target="_blank" rel="noopener">Open in Hudu</a>{% endif %}</td>
+                <td>{% if record.is_linked %}<strong>{{ record.relationship }}</strong>{% else %}{{ record.relationship }}{% endif %}</td>
+                <td>{{ record.layout }}</td>
+                <td>{% if record.is_archived %}<span class="muted">Archived in Hudu</span>{% else %}Current in Hudu{% endif %}</td>
+                <td>{% if record.card_count %}{{ record.card_count }}{% else %}<span class="muted">No cards reported</span>{% endif %}</td>
+                <td>{% if record.url %}<a href="{{ record.url }}" target="_blank" rel="noopener">Open in Hudu</a>{% endif %}</td>
             </tr>
             {% endfor %}
         </tbody>
     </table>
     {% else %}
-    <p class="muted">No unlinked Hudu records with this device name.</p>
+    <p class="muted">No Hudu records are linked to or share this device name.</p>
     {% endif %}
 </div>
 

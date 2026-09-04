@@ -1,38 +1,39 @@
 # Active Operations implementation plan
 
-## ACTIVE TASK — Restore Computers filter semantics and layout
+## ACTIVE TASK — Group related Hudu records in device and inventory views
 
-**Status:** in progress.
+**Status:** complete; pending release commit and push approval.
 
-**Goal:** restore the Computers filter bar and ensure Hudu presence and link
-availability selections combine with AND.
+**Goal:** show a confirmed current Hudu record and an archived same-client/name
+Hudu record together, clearly and without changing source identity.
 
-**Scope:** `apps/core/views.py` and `templates/coverage.html`. No migration,
-source write, data-model change, or identity merge.
+**Scope:** `apps/core/views.py`, `templates/coverage.html`, and
+`templates/device_detail.html`. No migration, source write, data-model change,
+or identity merge.
 
-**Decision:** retain the existing two-row searchable checkbox filter bar and
-add matching controls to the table headers. Header and top-bar controls submit
-the same filter fields. Hudu presence and Hudu link availability remain
-separate fields in both places, so choosing In Hudu and No links requires both
-conditions. Per-platform header filters use a platform-specific status field;
-values within one platform are ORed, while different platform columns combine
-with AND.
+**Decision:** a Hudu record remains its own source record. When exactly one
+canonical computer has the same client/name as an unlinked Hudu record and it
+already has a confirmed Hudu record, display the unlinked record beside the
+confirmed one. Do not create a source link, change Hudu presence, or suppress
+the record when the grouping condition is not met. The device Sources tab
+shows linked, same-client/name, and name-only Hudu records together with their
+individual record links, archive state, and card counts.
 
 **Validation:** basic Django check, template load, Python compilation, and
 diff check. No new test scripts. Commit, push, and deployment require
 separate approval.
 
-**Checkpoint:** release 0.122.4 incorrectly collapsed Hudu presence and link
-availability into one OR group and moved the controls into headers. The user
-reported that In Hudu plus No links returns linked rows, confirming the
-semantic regression. The two-row searchable filter bar and separate Hudu /
-Hudu links predicates are retained, with matching header controls added. Hudu
-header controls submit the existing `hudu` and `hudu_links` fields separately;
-the existing predicate combines those fields with AND. Basic Django check,
-template load, Python compilation, and diff check pass; no new tests were
-added.
+**Checkpoint:** implemented the presentation grouping. Computers now places an
+unlinked Hudu record beside a canonical computer only when exactly one
+same-client/name computer already has a linked Hudu record; otherwise the
+record remains its own row. The Hudu cell lists each record independently with
+layout, current/archive state, cards, and its direct Hudu link. Device Sources
+now lists linked, same-client/name, and name-only Hudu records together, still
+marking which are actually linked. Python compilation and Django system checks
+pass; both changed templates load under the development settings; `git diff
+--check` passes. No tests or test scripts were added.
 
-**Next action:** obtain separate approval to commit and push the correction.
+**Next action:** none.
 
 ## COMPLETED TASK — Device issue drill-through and source-match visibility
 

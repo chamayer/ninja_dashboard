@@ -28,6 +28,8 @@
 .coverage-hudu { width:12rem; max-width:12rem; font-size:0.82rem; line-height:1.45; overflow-wrap:anywhere; }
 .coverage-hudu ul { margin:0.25rem 0 0; padding-left:1rem; }
 .coverage-hudu li { overflow-wrap:anywhere; }
+.coverage-hudu-record + .coverage-hudu-record { border-top:1px solid var(--border); margin-top:0.45rem; padding-top:0.45rem; }
+.coverage-hudu-status { color:var(--muted); font-size:0.75rem; }
 .coverage-filter { position:relative; min-width:10rem; }
 .coverage-filter summary { cursor:pointer; list-style:none; border:1px solid var(--border); border-radius:4px; background:var(--surface); padding:0.45rem 0.65rem; font-size:0.85rem; }
 .coverage-filter summary::-webkit-details-marker { display:none; }
@@ -122,7 +124,7 @@
                     <td>{% if row.client_slug %}<a href="{% url 'org_index' org_slug=row.client_slug %}">{{ row.client_name }}</a>{% else %}{{ row.client_name }}{% endif %}</td>
                     <td>{% if row.device_id %}<a href="{% url 'device_detail' org_slug=row.client_slug device_id=row.device_id %}">{{ row.hostname|default:"Unnamed computer" }}</a>{% else %}{{ row.hostname|default:"Unnamed computer" }}{% endif %}</td>
                     <td>{{ row.os_family|default:"—" }}</td><td>{{ row.device_type|default:"—" }}</td>
-                    <td class="coverage-hudu">{% if row.hudu_present %}{% if row.hudu_url %}<a href="{{ row.hudu_url }}" rel="noopener" target="_blank">{{ row.hudu_status }}</a>{% else %}{{ row.hudu_status }}{% endif %}{% if row.hudu_links %}<ul>{% for link in row.hudu_links %}<li>{{ link }}</li>{% endfor %}</ul>{% else %}<span class="muted">No linked cards</span>{% endif %}{% else %}<span class="muted">Not in Hudu</span>{% endif %}</td>
+                    <td class="coverage-hudu">{% if row.hudu_records %}{% for record in row.hudu_records %}<div class="coverage-hudu-record">{% if record.url %}<a href="{{ record.url }}" rel="noopener" target="_blank">{{ record.layout }}</a>{% else %}{{ record.layout }}{% endif %} <span class="coverage-hudu-status">{% if record.is_archived %}Archived{% else %}Current{% endif %}</span>{% if record.links %}<ul>{% for link in record.links %}<li>{{ link }}</li>{% endfor %}</ul>{% else %}<span class="muted">No linked cards</span>{% endif %}</div>{% endfor %}{% else %}<span class="muted">Not in Hudu</span>{% endif %}</td>
                     {% for cell in row.platform_cells %}<td>{% if cell.possible_match %}<span class="muted">Possible:</span> <a href="{% url 'device_detail' org_slug=cell.possible_match.client_slug device_id=cell.possible_match.device_id %}">{{ cell.possible_match.hostname }}</a>{% elif cell.status == "Not applicable" %}<span class="muted">Not applicable</span>{% elif cell.url %}<a class="coverage-status coverage-{{ cell.status|lower }}" href="{{ cell.url }}">{{ cell.status }}</a>{% else %}<span class="coverage-status coverage-{{ cell.status|lower }}">{{ cell.status }}</span>{% endif %}</td>{% endfor %}
                 </tr>
                 {% endfor %}

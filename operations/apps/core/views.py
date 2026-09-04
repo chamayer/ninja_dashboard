@@ -1991,12 +1991,10 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
     if active_tab not in ("overview", "sources", "activity", "software", "identity"):
         active_tab = "overview"
 
-    # Hudu evidence that has not resolved to this device remains distinct from
-    # a source identity. It is still useful to surface on Sources when the
-    # source record has the same normalized hostname: client-and-name is a
-    # stronger clue than a name shared by another client, but neither attaches
-    # a record or changes coverage.
-    possible_hudu_matches = []
+    # Show each Hudu record that is either linked to this device or is an
+    # unlinked name match. The latter remains distinct from a source identity:
+    # it is useful context, but never attaches a record or changes coverage.
+    hudu_records = []
     if active_tab == "sources" and device.canonical_hostname:
         with transaction.atomic(), connection.cursor() as cur:
             cur.execute("SET LOCAL operations.tenant_id = 1")
@@ -2006,32 +2004,53 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
                        hudu.source_layout,
                        hudu.source_url,
                        hudu.is_archived,
-                       hudu.client_id = %s::uuid AS same_client,
+                       CASE
+                           WHEN hudu.device_id = %s::uuid THEN 0
+                           WHEN hudu.client_id = %s::uuid THEN 1
+                           ELSE 2
+                       END AS relationship_rank,
                        COUNT(DISTINCT hudu.card_source || ':' || hudu.card_id)
                            FILTER (WHERE hudu.card_id IS NOT NULL) AS card_count
                   FROM operations.v_cmdb_inventory_evidence_current hudu
                  WHERE hudu.tenant_id = 1
                    AND hudu.source_name = 'Hudu'
-                   AND hudu.device_id IS NULL
-                   AND LOWER(hudu.hostname) = LOWER(%s)
+                   AND (
+                        hudu.device_id = %s::uuid
+                        OR (
+                            hudu.device_id IS NULL
+                            AND LOWER(hudu.hostname) = LOWER(%s)
+                        )
+                   )
                  GROUP BY hudu.observation_id,
                           hudu.source_layout,
                           hudu.source_url,
                           hudu.is_archived,
-                          hudu.client_id
-                 ORDER BY (hudu.client_id = %s::uuid) DESC,
+                          hudu.client_id,
+                          hudu.device_id
+                 ORDER BY relationship_rank,
                           hudu.is_archived ASC,
                           hudu.source_layout,
                           hudu.observation_id
                 """,
-                [str(device.client_id), device.canonical_hostname, str(device.client_id)],
+                [
+                    str(device.id),
+                    str(device.client_id),
+                    str(device.id),
+                    device.canonical_hostname,
+                ],
             )
-            possible_hudu_matches = [
+            relationship_labels = {
+                0: "Linked to this device",
+                1: "Same client and name",
+                2: "Name only",
+            }
+            hudu_records = [
                 {
                     "layout": row[1] or "Asset",
-                    "url": row[2],
+                    "url": _safe_external_http_url(row[2]),
                     "is_archived": row[3],
-                    "same_client": row[4],
+                    "relationship": relationship_labels[row[4]],
+                    "is_linked": row[4] == 0,
                     "card_count": row[5],
                 }
                 for row in cur.fetchall()
@@ -2310,7 +2329,7 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
         {
             "device": device,
             "links": links,
-            "possible_hudu_matches": possible_hudu_matches,
+            "hudu_records": hudu_records,
             "active_findings": active_findings,
             "agent_presence": agent_presence,
             "software_rows": software_view,
@@ -8305,6 +8324,34 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         if hudu["device_id"] is not None:
             hudu_by_device.setdefault(hudu["device_id"], []).append(hudu)
 
+    # An unlinked Hudu record is not a source identity merely because its name
+    # resembles a computer. When there is exactly one same-client/name
+    # canonical computer that already has a linked Hudu record, however, show
+    # that unlinked record beside the confirmed one. This is presentation-only:
+    # it neither creates a link nor changes Hudu presence or coverage.
+    canonical_devices_by_client_hostname: dict = {}
+    for device_id, computer in devices_by_id.items():
+        hostname = computer["hostname"].strip().lower()
+        if hostname:
+            canonical_devices_by_client_hostname.setdefault(
+                (computer["client_id"], hostname), []
+            ).append(device_id)
+    grouped_hudu_observation_ids = set()
+    for hudu in hudu_by_observation.values():
+        if hudu["device_id"] is not None or not hudu["hostname"]:
+            continue
+        candidates = canonical_devices_by_client_hostname.get(
+            (hudu["client_id"], hudu["hostname"].strip().lower()),
+            [],
+        )
+        if len(candidates) != 1:
+            continue
+        device_id = candidates[0]
+        if not hudu_by_device.get(device_id):
+            continue
+        hudu_by_device.setdefault(device_id, []).append(hudu)
+        grouped_hudu_observation_ids.add(hudu["observation_id"])
+
     coverage_rows = [
         {
             "client_slug": row[0], "client_name": row[1], "device_id": row[2],
@@ -8350,14 +8397,28 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             "hudu_has_archived": any(record["is_archived"] for record in records),
             "hudu_url": None,
             "hudu_links": [],
+            "hudu_records": [],
         }
-        for record in records:
+        for record in sorted(
+            records,
+            key=lambda record: (
+                record["is_archived"],
+                record["layout"].lower(),
+                str(record["observation_id"]),
+            ),
+        ):
             hudu_url = record["hudu_url"]
             if hudu_url and (hudu["hudu_url"] is None or hudu_url > hudu["hudu_url"]):
                 hudu["hudu_url"] = hudu_url
             for link in record["hudu_links"]:
                 if link not in hudu["hudu_links"]:
                     hudu["hudu_links"].append(link)
+            hudu["hudu_records"].append({
+                "layout": record["layout"] or "Asset",
+                "is_archived": record["is_archived"],
+                "url": _safe_external_http_url(record["hudu_url"]),
+                "links": record["hudu_links"],
+            })
         hudu["hudu_url"] = _safe_external_http_url(hudu["hudu_url"])
         hudu["hudu_status"] = (
             "Archived in Hudu" if hudu["hudu_archived"]
@@ -8381,6 +8442,8 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         })
 
     for hudu in hudu_by_observation.values():
+        if hudu["observation_id"] in grouped_hudu_observation_ids:
+            continue
         if hudu["device_id"] is not None and hudu["device_id"] in devices_by_id:
             continue
         client = clients_by_id.get(hudu["client_id"], {"slug": "", "name": "Unassigned"})
