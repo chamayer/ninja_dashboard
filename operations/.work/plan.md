@@ -206,14 +206,17 @@ deployment completed.
 
 ### Inventory Computers CSV follow-up
 
-**Status:** implementation in progress.
+**Status:** archive/CSV behavior released as 0.122.1 / `aa3afac`; filter-close
+behavior is implementation in progress.
 
 **Goal:** make the Computers CSV export contain the same current per-platform
 columns as the rendered table, and make Hudu archive status visible without
 mixing archived records into the normal current-inventory result.
 
 **Scope:** the Computers view/template/tests and one additive read-model
-migration exposing source archive state. No source writes or identity changes.
+migration exposing source archive state. Includes closing an open filter
+dropdown when the user clicks elsewhere on the page. No source writes or
+identity changes.
 
 **Decision:** export one column for each current table platform, preserving the
 table's value order: possible Ninja match, coverage state, direct source
@@ -226,8 +229,15 @@ candidates.
 **Validation:** focused Coverage/migration tests, Django check, migration-drift
 review, compilation, and diff check.
 
-**Next action:** add archive-state evidence, apply the current/archived Hudu
-rules, and validate the CSV plus rendered data contract.
+**Checkpoint:** migration 0148 is applied in production. Active attached Hudu
+evidence from any layout and unattached Computer Assets/Servers candidates are
+included in Computers; archived Hudu evidence is hidden by default and can be
+included from the Hudu filter. The CSV includes the current individual
+platform columns. The remaining small UI follow-up closes filter dropdowns on
+an outside click.
+
+**Next action:** validate, commit, push, redeploy, and verify the filter-close
+behavior.
 
 ### Performance follow-up — Coverage load time
 

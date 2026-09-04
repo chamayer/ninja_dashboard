@@ -127,5 +127,11 @@ document.querySelectorAll('.coverage-filter-search').forEach((search) => {
         });
     });
 });
+document.addEventListener('click', (event) => {
+    if (event.target.closest('details.coverage-filter')) return;
+    document.querySelectorAll('details.coverage-filter[open]').forEach((filter) => {
+        filter.removeAttribute('open');
+    });
+});
 </script>
 {% endblock %}

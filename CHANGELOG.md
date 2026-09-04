@@ -2,6 +2,13 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.122.2] — 2026-09-04 — Computers filter behavior
+
+### Fixed
+
+- Computers filter dropdowns now close when the user clicks elsewhere on the
+  page, while clicks inside a dropdown leave it open for multi-selection.
+
 ## [0.122.1] — 2026-09-04 — Current Hudu inventory
 
 ### Fixed

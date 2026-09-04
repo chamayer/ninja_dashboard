@@ -304,6 +304,8 @@ def test_coverage_template_has_clear_statuses_hudu_and_multiselect_filters():
     assert template.count('<details class="coverage-filter">') == 9
     assert template.count('class="coverage-filter-search"') == 9
     assert "coverage-filterbar" in template
+    assert "details.coverage-filter[open]" in template
+    assert "event.target.closest('details.coverage-filter')" in template
     assert "coverage-result-summary" in template
     assert "Filtered results" in template
     assert "Counts reflect the current filter selections." in template

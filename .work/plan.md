@@ -2,7 +2,7 @@
 
 ## CURRENT TASK — Restore durable Hudu documentation ingest scheduling
 
-**Status:** implementation in progress.
+**Status:** complete; released as 0.122.1 / `aa3afac`.
 
 **Goal:** ensure Hudu and future non-identity documentation sources run at
 least every four hours and catch up when overdue after an ingest restart, so
@@ -38,8 +38,13 @@ unreadable source status schedules the ordinary documentation collection;
 recent sources are not refetched. Python compilation, undefined-name lint,
 the existing ingest scheduler-test import path, and `git diff --check` pass.
 
-**Next action:** obtain separate approval to prepare the release, commit,
-push, redeploy, and verify the resulting Hudu collection and withdrawal.
+**Deployment:** `aa3afac` was pushed to `origin` and the required
+`a-m-rose` mirror. Portainer deployed the commit, Operations migration 0148
+is applied, Operations and ingest are healthy, and ingest reports the effective
+four-hour documentation scheduler with no catch-up needed after the manually
+completed Hudu collection.
+
+**Next action:** none.
 
 ## COMPLETED TASK — Wire winget_tag/chocolatey_tag into the capability model
 
