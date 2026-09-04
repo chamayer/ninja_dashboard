@@ -1,37 +1,34 @@
 # Active Operations implementation plan
 
-## ACTIVE TASK — Group related Hudu records in device and inventory views
+## ACTIVE TASK — Complete Computers Hudu record grouping
 
 **Status:** complete; pending release commit and push approval.
 
-**Goal:** show a confirmed current Hudu record and an archived same-client/name
-Hudu record together, clearly and without changing source identity.
+**Goal:** make each Computers row show the full set of current and archived
+Hudu records for the same client/name without creating source identities.
 
-**Scope:** `apps/core/views.py`, `templates/coverage.html`, and
-`templates/device_detail.html`. No migration, source write, data-model change,
-or identity merge.
+**Scope:** `apps/core/views.py`, `templates/coverage.html`, and this active
+plan. No migration, source write, data-model change, or filter-semantics
+change.
 
-**Decision:** a Hudu record remains its own source record. When exactly one
-canonical computer has the same client/name as an unlinked Hudu record and it
-already has a confirmed Hudu record, display the unlinked record beside the
-confirmed one. Do not create a source link, change Hudu presence, or suppress
-the record when the grouping condition is not met. The device Sources tab
-shows linked, same-client/name, and name-only Hudu records together with their
-individual record links, archive state, and card counts.
+**Decision:** preserve Hudu records as separate source evidence. A display
+group may include an unlinked same-client/name record even when the current
+record resolves to a different canonical computer; it must be visibly a
+related record and cannot create a link or alter coverage.
 
 **Validation:** basic Django check, template load, Python compilation, and
 diff check. No new test scripts. Commit, push, and deployment require
 separate approval.
 
-**Checkpoint:** implemented the presentation grouping. Computers now places an
-unlinked Hudu record beside a canonical computer only when exactly one
-same-client/name computer already has a linked Hudu record; otherwise the
-record remains its own row. The Hudu cell lists each record independently with
-layout, current/archive state, cards, and its direct Hudu link. Device Sources
-now lists linked, same-client/name, and name-only Hudu records together, still
-marking which are actually linked. Python compilation and Django system checks
-pass; both changed templates load under the development settings; `git diff
---check` passes. No tests or test scripts were added.
+**Checkpoint:** live read-only inspection confirmed a current linked Hudu
+Servers record with five cards and an unlinked archived Computer Assets record
+with no cards for the same client/name. Two canonical computers share that
+client/name, so the original exact-one-canonical condition correctly declined
+to select an identity. Computers now keeps the Hudu-only row and aggregates
+all Hudu records with that source client/name there in this ambiguous case.
+It does not create a source link or alter the existing possible-Ninja label.
+Python compilation, Django system checks, coverage-template loading, and diff
+checks pass. No tests or test scripts were added.
 
 **Next action:** none.
 

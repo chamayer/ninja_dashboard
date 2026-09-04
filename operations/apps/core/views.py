@@ -8320,9 +8320,15 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             hudu["hudu_links"].append(label)
 
     hudu_by_device: dict = {}
+    hudu_by_client_hostname: dict = {}
     for hudu in hudu_by_observation.values():
         if hudu["device_id"] is not None:
             hudu_by_device.setdefault(hudu["device_id"], []).append(hudu)
+        if hudu["hostname"]:
+            hudu_by_client_hostname.setdefault(
+                (hudu["client_id"], hudu["hostname"].strip().lower()),
+                [],
+            ).append(hudu)
 
     # An unlinked Hudu record is not a source identity merely because its name
     # resembles a computer. When there is exactly one same-client/name
@@ -8441,11 +8447,31 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             "possible_match": None,
         })
 
+    emitted_hudu_groups = set()
     for hudu in hudu_by_observation.values():
         if hudu["observation_id"] in grouped_hudu_observation_ids:
             continue
         if hudu["device_id"] is not None and hudu["device_id"] in devices_by_id:
             continue
+        hudu_group_key = (
+            (hudu["client_id"], hudu["hostname"].strip().lower())
+            if hudu["hostname"] else None
+        )
+        if hudu_group_key and hudu_group_key in emitted_hudu_groups:
+            continue
+        hudu_records = [hudu]
+        if hudu["device_id"] is None and hudu_group_key:
+            # If multiple canonical computers share this client/name, choosing
+            # one would imply an identity decision. Keep the Hudu-only row,
+            # but show every Hudu record for the same client/name together so
+            # the operator can see the current and archived source picture.
+            canonical_candidates = canonical_devices_by_client_hostname.get(
+                hudu_group_key,
+                [],
+            )
+            if len(canonical_candidates) != 1:
+                hudu_records = hudu_by_client_hostname[hudu_group_key]
+                emitted_hudu_groups.add(hudu_group_key)
         client = clients_by_id.get(hudu["client_id"], {"slug": "", "name": "Unassigned"})
         inventory_rows.append({
             "inventory_key": f"hudu:{hudu['observation_id']}",
@@ -8459,7 +8485,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             "hostname": hudu["hostname"],
             "os_family": "",
             "device_type": "",
-            "hudu_records": [hudu],
+            "hudu_records": hudu_records,
             "source_states": {},
             "platform_states": {},
             "s1_exempt": False,

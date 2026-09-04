@@ -2,6 +2,15 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.122.7] — 2026-09-04 — Ambiguous Hudu computer records
+
+### Fixed
+
+- Computers now shows all Hudu records with the same client and computer name
+  on the Hudu-only row when multiple canonical computers make a single identity
+  choice ambiguous. Current and archived records remain separate source
+  records; this display does not create a source link or change coverage.
+
 ## [0.122.6] — 2026-09-04 — Related Hudu records
 
 ### Changed
