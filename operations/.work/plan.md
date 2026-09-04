@@ -1,39 +1,38 @@
 # Active Operations implementation plan
 
-## ACTIVE TASK — Inventory Computers column filters
+## ACTIVE TASK — Restore Computers filter semantics and layout
 
-**Status:** implemented locally; pending commit/push approval.
+**Status:** in progress.
 
-**Goal:** let an operator filter the Computers table by every displayed
-column without adding more stacked filter rows.
+**Goal:** restore the Computers filter bar and ensure Hudu presence and link
+availability selections combine with AND.
 
 **Scope:** `apps/core/views.py` and `templates/coverage.html`. No migration,
 source write, data-model change, or identity merge.
 
-**Decision:** move the existing multi-select controls into the matching table
-headers. Client, OS family, device type, Hudu, and every platform use the
-existing searchable checkbox dropdown style. Device uses a text search. A
-platform-header selection filters that platform's shown state, rather than a
-state on an unrelated platform. All selected column filters combine with AND;
-multiple values in one column combine with OR. A platform card with no
-applicable agent checks in the selected result set says so instead of showing
-four unexplained zeroes.
+**Decision:** retain the existing two-row searchable checkbox filter bar and
+add matching controls to the table headers. Header and top-bar controls submit
+the same filter fields. Hudu presence and Hudu link availability remain
+separate fields in both places, so choosing In Hudu and No links requires both
+conditions. Per-platform header filters use a platform-specific status field;
+values within one platform are ORed, while different platform columns combine
+with AND.
 
 **Validation:** basic Django check, template load, Python compilation, and
 diff check. No new test scripts. Commit, push, and deployment require
 separate approval.
 
-**Checkpoint:** current page has table-header filters for Client, Device, OS
-family, Type, Hudu, and every displayed platform. Platform values filter the
-status displayed in that exact platform column. Hudu combines presence,
-archive/current state, and card-link availability in its own column filter.
-Basic Django check, template loading, Python compilation, and diff check pass;
-no tests were added. The live unfiltered inventory has nonzero platform-card
-counts. A filtered result with no applicable agent checks now says that rather
-than showing four zeroes.
+**Checkpoint:** release 0.122.4 incorrectly collapsed Hudu presence and link
+availability into one OR group and moved the controls into headers. The user
+reported that In Hudu plus No links returns linked rows, confirming the
+semantic regression. The two-row searchable filter bar and separate Hudu /
+Hudu links predicates are retained, with matching header controls added. Hudu
+header controls submit the existing `hudu` and `hudu_links` fields separately;
+the existing predicate combines those fields with AND. Basic Django check,
+template load, Python compilation, and diff check pass; no new tests were
+added.
 
-**Next action:** obtain separate approval to commit and push, then verify the
-live Computers filters after deployment.
+**Next action:** obtain separate approval to commit and push the correction.
 
 ## COMPLETED TASK — Device issue drill-through and source-match visibility
 

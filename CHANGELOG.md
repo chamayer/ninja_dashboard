@@ -2,6 +2,19 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.122.5] — 2026-09-04 — Computers filter correction
+
+### Fixed
+
+- Restored the two-row Computers filter bar and preserved Hudu presence and
+  Hudu card-link filtering as separate conditions. Selecting In Hudu and No
+  links now requires both conditions.
+
+### Added
+
+- Added matching filters to Computers table headers without removing the
+  existing filter bar. Platform headers filter their own displayed state.
+
 ## [0.122.4] — 2026-09-04 — Computers column filters
 
 ### Changed

@@ -7983,15 +7983,13 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
     online_filters = [value for value in request.GET.getlist("online_in") if value]
     hudu_filters = [
         value for value in request.GET.getlist("hudu")
-        if value in {"in_hudu", "not_in_hudu", "archived", "current", "has_links", "no_links"}
+        if value in {"in_hudu", "not_in_hudu"}
     ]
     hudu_link_filters = [
         value for value in request.GET.getlist("hudu_links")
         if value in {"has_links", "no_links"}
     ]
-    show_archived_hudu = (
-        request.GET.get("show_archived_hudu") == "1" or "archived" in hudu_filters
-    )
+    show_archived_hudu = request.GET.get("show_archived_hudu") == "1"
     s1_exemption_filters = [
         value for value in request.GET.getlist("s1_exemption")
         if value in {"exempt", "not_exempt"}
@@ -8448,16 +8446,8 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         if device_type_filters and row["device_type"] not in device_type_filters:
             return False
         if hudu_filters:
-            hudu_values = {"in_hudu"} if row["hudu_present"] else {"not_in_hudu"}
-            if row["hudu_archived"]:
-                hudu_values.add("archived")
-            elif row["hudu_present"]:
-                hudu_values.add("current")
-            if row["hudu_links"]:
-                hudu_values.add("has_links")
-            elif row["hudu_present"]:
-                hudu_values.add("no_links")
-            if not hudu_values.intersection(hudu_filters):
+            hudu_value = "in_hudu" if row["hudu_present"] else "not_in_hudu"
+            if hudu_value not in hudu_filters:
                 return False
         if hudu_link_filters:
             if not row["hudu_present"]:
@@ -8507,7 +8497,6 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                 counts[row["status"]] += 1
         platform_cards.append({
             "platform": platform,
-            "total": sum(counts.values()),
             "counts": [
                 {
                     "name": state,
