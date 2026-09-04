@@ -1991,6 +1991,52 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
     if active_tab not in ("overview", "sources", "activity", "software", "identity"):
         active_tab = "overview"
 
+    # Hudu evidence that has not resolved to this device remains distinct from
+    # a source identity. It is still useful to surface on Sources when the
+    # source record has the same normalized hostname: client-and-name is a
+    # stronger clue than a name shared by another client, but neither attaches
+    # a record or changes coverage.
+    possible_hudu_matches = []
+    if active_tab == "sources" and device.canonical_hostname:
+        with transaction.atomic(), connection.cursor() as cur:
+            cur.execute("SET LOCAL operations.tenant_id = 1")
+            cur.execute(
+                """
+                SELECT hudu.observation_id,
+                       hudu.source_layout,
+                       hudu.source_url,
+                       hudu.is_archived,
+                       hudu.client_id = %s::uuid AS same_client,
+                       COUNT(DISTINCT hudu.card_source || ':' || hudu.card_id)
+                           FILTER (WHERE hudu.card_id IS NOT NULL) AS card_count
+                  FROM operations.v_cmdb_inventory_evidence_current hudu
+                 WHERE hudu.tenant_id = 1
+                   AND hudu.source_name = 'Hudu'
+                   AND hudu.device_id IS NULL
+                   AND LOWER(hudu.hostname) = LOWER(%s)
+                 GROUP BY hudu.observation_id,
+                          hudu.source_layout,
+                          hudu.source_url,
+                          hudu.is_archived,
+                          hudu.client_id
+                 ORDER BY (hudu.client_id = %s::uuid) DESC,
+                          hudu.is_archived ASC,
+                          hudu.source_layout,
+                          hudu.observation_id
+                """,
+                [str(device.client_id), device.canonical_hostname, str(device.client_id)],
+            )
+            possible_hudu_matches = [
+                {
+                    "layout": row[1] or "Asset",
+                    "url": row[2],
+                    "is_archived": row[3],
+                    "same_client": row[4],
+                    "card_count": row[5],
+                }
+                for row in cur.fetchall()
+            ]
+
     # Software decisions map — key by canonical_name, prefer per-client
     # over global.
     software_titles = [row[0] for row in software_rows]
@@ -2264,6 +2310,7 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
         {
             "device": device,
             "links": links,
+            "possible_hudu_matches": possible_hudu_matches,
             "active_findings": active_findings,
             "agent_presence": agent_presence,
             "software_rows": software_view,
@@ -2464,6 +2511,8 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     platform_filter = request.GET.get("platform", "")
     online_filter = request.GET.get("online", "")
     subject_id_filter = (request.GET.get("subject_id") or "").strip()
+    requested_device_id_filter = (request.GET.get("device_id") or "").strip()
+    device_id_filter = ""
     group_key_filter = (request.GET.get("group_key") or "").strip()
     group_value_filter = (request.GET.get("group_value") or "").strip()
     q_filter = (request.GET.get("q") or "").strip()
@@ -2509,6 +2558,31 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             subject_id_filter = ""
         else:
             qs = qs.filter(subject_id=subject_id_filter)
+    if requested_device_id_filter:
+        # Device Detail counts both a device's direct findings and the
+        # software findings it inherits through current installations. This
+        # filter gives the Issues queue that same scope. A malformed value
+        # fails closed rather than widening an operator's result set.
+        try:
+            uuid.UUID(requested_device_id_filter)
+        except (ValueError, TypeError):
+            qs = qs.none()
+        else:
+            device_id_filter = requested_device_id_filter
+            with connection.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT DISTINCT finding_id
+                      FROM operations.v_device_software_exposure
+                     WHERE tenant_id = 1 AND device_id = %s::uuid
+                    """,
+                    [device_id_filter],
+                )
+                exposed_finding_ids = [row[0] for row in cur.fetchall()]
+            qs = qs.filter(
+                Q(subject_type=Finding.SubjectType.DEVICE, subject_id=device_id_filter)
+                | Q(id__in=exposed_finding_ids)
+            )
     active_group_key = ""
     if group_key_filter or group_value_filter:
         configured_key = (

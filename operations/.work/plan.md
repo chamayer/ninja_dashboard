@@ -1,6 +1,49 @@
 # Active Operations implementation plan
 
-## ACTIVE TASK — Guard remaining Ninja external-ID casts
+## ACTIVE TASK — Device issue drill-through and source-match visibility
+
+**Status:** implemented locally; pending commit/push approval.
+
+**Goal:** make the device header's issue count open the same combined set of
+direct and installed-software issues that it counts, and make unresolved Hudu
+records discoverable on the device Sources tab without presenting them as
+confirmed source identities.
+
+**Scope:** `apps/core/views.py` and the device-detail/Issues templates. No
+migration, source write, identity merge, or change to source-link derivation.
+
+**Decision:** the header uses an explicit device-impact filter in the existing
+Issues queue: direct device findings plus active software findings exposed to
+that device. The Sources tab retains its current confirmed-source table, then
+adds a separate Hudu match section for *unlinked* current Hudu observations
+with the same normalized hostname. Same-client/name rows are shown first;
+name-only rows are visibly lower confidence. Archived state and the number of
+currently reported Hudu cards are disclosed. These rows never count as a
+source identity or Hudu presence and cannot create a link.
+
+**Steps:** add the queue's device-impact filter and point the header to it;
+load unlinked Hudu name matches for the device view; render the distinct
+Sources section; run basic checks.
+
+**Validation:** basic Django check, template load, Python compilation, and
+diff check. Commit, push, and deployment require separate approval.
+
+**Checkpoint:** live inspection of `md0421-1` shows three confirmed links
+(Ninja, SentinelOne, LogMeIn) and one unlinked, archived Hudu Computer Assets
+record with the same client/name and no relayed cards. Its 15 displayed active
+issues comprise one direct device issue and fourteen inherited software
+issues; the header previously sent `subject_id`, which returned only the one
+direct issue. The header now sends `device_id` with snoozed records included;
+the Issues queue resolves direct device findings plus the current software
+exposure findings. The Sources tab now has a separate possible-Hudu-matches
+section for unlinked same-name records, ordered same-client/name before
+name-only and showing archive/card state. Basic Django check, template loading,
+Python compilation, and diff check pass. No new tests were added.
+
+**Next action:** obtain separate approval to commit and push, then verify the
+live device Sources tab and issue drill-through after deployment.
+
+## PENDING TASK — Guard remaining Ninja external-ID casts
 
 **Status:** implemented and locally validated; pending commit/push approval.
 

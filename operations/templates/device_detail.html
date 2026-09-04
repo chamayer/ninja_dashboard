@@ -117,7 +117,7 @@
             {% endif %}
         {% endif %}
         &nbsp;·&nbsp;
-        <a href="{% url 'findings_queue' %}?subject_id={{ device.id }}">
+        <a href="{% url 'findings_queue' %}?device_id={{ device.id }}&amp;snoozed=1">
             {{ active_findings|length }} open issue{{ active_findings|length|pluralize }}
         </a>
         {% if severe_open %}
@@ -390,6 +390,39 @@
     </table>
     {% else %}
     <p class="muted">No source identities linked.</p>
+    {% endif %}
+</div>
+
+<div class="card">
+    <h2 style="margin-top:0;">Possible Hudu matches</h2>
+    <p class="muted" style="margin-top:-0.4rem;">
+        These records are not linked to this device. A same-client and name match is a stronger clue than a name-only match; neither changes the current source list.
+    </p>
+    {% if possible_hudu_matches %}
+    <table data-sortable style="width:100%;">
+        <thead>
+            <tr>
+                <th>Match</th>
+                <th>Hudu record type</th>
+                <th>Status</th>
+                <th>Hudu cards</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for match in possible_hudu_matches %}
+            <tr>
+                <td>{% if match.same_client %}<strong>Same client and name</strong>{% else %}<span class="muted">Name only</span>{% endif %}</td>
+                <td>{{ match.layout }}</td>
+                <td>{% if match.is_archived %}<span class="muted">Archived in Hudu</span>{% else %}Current in Hudu{% endif %}</td>
+                <td>{% if match.card_count %}{{ match.card_count }}{% else %}<span class="muted">No cards reported</span>{% endif %}</td>
+                <td>{% if match.url %}<a href="{{ match.url }}" target="_blank" rel="noopener">Open in Hudu</a>{% endif %}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="muted">No unlinked Hudu records with this device name.</p>
     {% endif %}
 </div>
 

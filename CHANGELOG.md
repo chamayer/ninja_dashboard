@@ -2,6 +2,21 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.122.3] — 2026-09-04 — Device source and issue visibility
+
+### Fixed
+
+- A device's issue-count link now includes both direct findings and findings
+  inherited through its current installed software, matching the displayed
+  count.
+
+### Added
+
+- Device Sources now shows unlinked Hudu records with the same device name,
+  prioritizing same-client matches over name-only matches and clearly keeping
+  them separate from confirmed source identities. Archive state and reported
+  Hudu-card count are shown for each record.
+
 ## [0.122.2] — 2026-09-04 — Computers filter behavior
 
 ### Fixed
