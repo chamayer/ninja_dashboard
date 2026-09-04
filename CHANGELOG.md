@@ -2,6 +2,16 @@
 
 All notable changes to this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.122.4] — 2026-09-04 — Computers column filters
+
+### Changed
+
+- Computers filters now live in the matching table headers. Operators can
+  filter Client, Device, OS family, Type, Hudu state/card links, and each
+  platform column's displayed status independently.
+- Platform cards with no applicable agent checks in the selected results now
+  state that condition instead of displaying four unexplained zeroes.
+
 ## [0.122.3] — 2026-09-04 — Device source and issue visibility
 
 ### Fixed

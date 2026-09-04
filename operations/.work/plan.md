@@ -1,8 +1,43 @@
 # Active Operations implementation plan
 
-## ACTIVE TASK — Device issue drill-through and source-match visibility
+## ACTIVE TASK — Inventory Computers column filters
 
 **Status:** implemented locally; pending commit/push approval.
+
+**Goal:** let an operator filter the Computers table by every displayed
+column without adding more stacked filter rows.
+
+**Scope:** `apps/core/views.py` and `templates/coverage.html`. No migration,
+source write, data-model change, or identity merge.
+
+**Decision:** move the existing multi-select controls into the matching table
+headers. Client, OS family, device type, Hudu, and every platform use the
+existing searchable checkbox dropdown style. Device uses a text search. A
+platform-header selection filters that platform's shown state, rather than a
+state on an unrelated platform. All selected column filters combine with AND;
+multiple values in one column combine with OR. A platform card with no
+applicable agent checks in the selected result set says so instead of showing
+four unexplained zeroes.
+
+**Validation:** basic Django check, template load, Python compilation, and
+diff check. No new test scripts. Commit, push, and deployment require
+separate approval.
+
+**Checkpoint:** current page has table-header filters for Client, Device, OS
+family, Type, Hudu, and every displayed platform. Platform values filter the
+status displayed in that exact platform column. Hudu combines presence,
+archive/current state, and card-link availability in its own column filter.
+Basic Django check, template loading, Python compilation, and diff check pass;
+no tests were added. The live unfiltered inventory has nonzero platform-card
+counts. A filtered result with no applicable agent checks now says that rather
+than showing four zeroes.
+
+**Next action:** obtain separate approval to commit and push, then verify the
+live Computers filters after deployment.
+
+## COMPLETED TASK — Device issue drill-through and source-match visibility
+
+**Status:** complete; released as 0.122.3 / `be93ffa`.
 
 **Goal:** make the device header's issue count open the same combined set of
 direct and installed-software issues that it counts, and make unresolved Hudu
@@ -40,8 +75,15 @@ section for unlinked same-name records, ordered same-client/name before
 name-only and showing archive/card state. Basic Django check, template loading,
 Python compilation, and diff check pass. No new tests were added.
 
-**Next action:** obtain separate approval to commit and push, then verify the
-live device Sources tab and issue drill-through after deployment.
+**Deployment:** `be93ffa` was pushed to `origin` and the required `a-m-rose`
+mirror. Portainer deployed that exact configuration; Operations and ingest
+restarted healthy and Operations `/healthz` returns OK. The public device and
+Issues routes return their expected login redirects (302) without an
+authenticated browser session. Metabase was still in its normal startup health
+check at the final poll; no Operations, ingest, or Postgres failure was
+present.
+
+**Next action:** none.
 
 ## PENDING TASK — Guard remaining Ninja external-ID casts
 

@@ -3113,6 +3113,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             "active_confidence": confidence_filter,
             "active_client": client_filter,
             "active_subject_id": subject_id_filter,
+            "active_device_id": device_id_filter,
             "active_group_key": active_group_key,
             "show_snoozed": show_snoozed,
             "severity_tiles": severity_tiles,
@@ -7977,17 +7978,20 @@ def _coverage_filter_url(**filters: str) -> str:
 def fleet_coverage(request: HttpRequest) -> HttpResponse:
     """Show the master Computers inventory with current agent coverage."""
     client_filters = [value for value in request.GET.getlist("client") if value]
+    device_query = (request.GET.get("device") or "").strip().lower()
     platform_filters = [value for value in request.GET.getlist("platform") if value]
     online_filters = [value for value in request.GET.getlist("online_in") if value]
     hudu_filters = [
         value for value in request.GET.getlist("hudu")
-        if value in {"in_hudu", "not_in_hudu"}
+        if value in {"in_hudu", "not_in_hudu", "archived", "current", "has_links", "no_links"}
     ]
     hudu_link_filters = [
         value for value in request.GET.getlist("hudu_links")
         if value in {"has_links", "no_links"}
     ]
-    show_archived_hudu = request.GET.get("show_archived_hudu") == "1"
+    show_archived_hudu = (
+        request.GET.get("show_archived_hudu") == "1" or "archived" in hudu_filters
+    )
     s1_exemption_filters = [
         value for value in request.GET.getlist("s1_exemption")
         if value in {"exempt", "not_exempt"}
@@ -7997,6 +8001,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
     state_filters = [
         value for value in request.GET.getlist("state") if value in _COVERAGE_STATES
     ]
+    requested_platform_status_filters = request.GET.getlist("platform_status")
 
     with transaction.atomic():  # noqa: SIM117 -- tenant GUC must remain local
         with connection.cursor() as cur:
@@ -8319,6 +8324,16 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         set(coverage_platforms)
         | {platform for states in source_states_by_device.values() for platform in states}
     )
+    platform_status_filters: dict[str, list[str]] = {}
+    allowed_platform_states = {*_COVERAGE_STATES, "Not applicable", "Possible match"}
+    for value in requested_platform_status_filters:
+        platform, separator, status = value.partition("|")
+        if separator and platform in platforms and status in allowed_platform_states:
+            platform_status_filters.setdefault(platform, []).append(status)
+    platform_filter_columns = [
+        {"name": platform, "selected_states": platform_status_filters.get(platform, [])}
+        for platform in platforms
+    ]
     os_families = sorted(
         {row["os_family"] for row in devices_by_id.values() if row["os_family"]}
     )
@@ -8417,6 +8432,8 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
     def matches(row: dict) -> bool:
         if client_filters and row["client_slug"] not in client_filters:
             return False
+        if device_query and device_query not in row["hostname"].lower():
+            return False
         matching_coverage = list(row["platform_states"].values())
         if platform_filters:
             matching_coverage = [
@@ -8431,8 +8448,16 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         if device_type_filters and row["device_type"] not in device_type_filters:
             return False
         if hudu_filters:
-            hudu_value = "in_hudu" if row["hudu_present"] else "not_in_hudu"
-            if hudu_value not in hudu_filters:
+            hudu_values = {"in_hudu"} if row["hudu_present"] else {"not_in_hudu"}
+            if row["hudu_archived"]:
+                hudu_values.add("archived")
+            elif row["hudu_present"]:
+                hudu_values.add("current")
+            if row["hudu_links"]:
+                hudu_values.add("has_links")
+            elif row["hudu_present"]:
+                hudu_values.add("no_links")
+            if not hudu_values.intersection(hudu_filters):
                 return False
         if hudu_link_filters:
             if not row["hudu_present"]:
@@ -8443,6 +8468,17 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         if s1_exemption_filters:
             s1_value = "exempt" if row["s1_exempt"] else "not_exempt"
             if s1_value not in s1_exemption_filters:
+                return False
+        for platform, statuses in platform_status_filters.items():
+            if row["possible_match"] and platform == "Ninja":
+                cell_status = "Possible match"
+            else:
+                cell_status = (
+                    row["platform_states"].get(platform, {}).get("status")
+                    or row["source_states"].get(platform)
+                    or "Not applicable"
+                )
+            if cell_status not in statuses:
                 return False
         return True
 
@@ -8471,6 +8507,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                 counts[row["status"]] += 1
         platform_cards.append({
             "platform": platform,
+            "total": sum(counts.values()),
             "counts": [
                 {
                     "name": state,
@@ -8573,11 +8610,13 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             "platform_cards": platform_cards,
             "filtered_summary": filtered_summary,
             "platforms": platforms,
+            "platform_filter_columns": platform_filter_columns,
             "os_families": os_families,
             "device_types": device_types,
             "filter_clients": filter_clients,
             "states": _COVERAGE_STATES,
             "client_filters": client_filters,
+            "device_query": device_query,
             "platform_filters": platform_filters,
             "online_filters": online_filters,
             "hudu_filters": hudu_filters,
@@ -8587,6 +8626,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             "os_family_filters": os_family_filters,
             "device_type_filters": device_type_filters,
             "state_filters": state_filters,
+            "platform_status_filters": platform_status_filters,
         },
     )
 
