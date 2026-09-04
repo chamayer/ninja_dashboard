@@ -8419,11 +8419,16 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             for link in record["hudu_links"]:
                 if link not in hudu["hudu_links"]:
                     hudu["hudu_links"].append(link)
+            linked_device = devices_by_id.get(record["device_id"])
             hudu["hudu_records"].append({
                 "layout": record["layout"] or "Asset",
                 "is_archived": record["is_archived"],
                 "url": _safe_external_http_url(record["hudu_url"]),
                 "links": record["hudu_links"],
+                "device_id": linked_device["device_id"] if linked_device else None,
+                "device_client_slug": (
+                    linked_device["client_slug"] if linked_device else ""
+                ),
             })
         hudu["hudu_url"] = _safe_external_http_url(hudu["hudu_url"])
         hudu["hudu_status"] = (
@@ -8461,17 +8466,12 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             continue
         hudu_records = [hudu]
         if hudu["device_id"] is None and hudu_group_key:
-            # If multiple canonical computers share this client/name, choosing
-            # one would imply an identity decision. Keep the Hudu-only row,
-            # but show every Hudu record for the same client/name together so
-            # the operator can see the current and archived source picture.
-            canonical_candidates = canonical_devices_by_client_hostname.get(
-                hudu_group_key,
-                [],
-            )
-            if len(canonical_candidates) != 1:
-                hudu_records = hudu_by_client_hostname[hudu_group_key]
-                emitted_hudu_groups.add(hudu_group_key)
+            # Keep a Hudu-only row when no record has a confirmed placement,
+            # but show every Hudu record with the same source client/name
+            # together. This lets an operator see current and archived Hudu
+            # records without treating either as a canonical source link.
+            hudu_records = hudu_by_client_hostname[hudu_group_key]
+            emitted_hudu_groups.add(hudu_group_key)
         client = clients_by_id.get(hudu["client_id"], {"slug": "", "name": "Unassigned"})
         inventory_rows.append({
             "inventory_key": f"hudu:{hudu['observation_id']}",

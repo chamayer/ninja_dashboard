@@ -1,34 +1,34 @@
 # Active Operations implementation plan
 
-## ACTIVE TASK — Complete Computers Hudu record grouping
+## ACTIVE TASK — Group Hudu-only computer records
 
 **Status:** complete; pending release commit and push approval.
 
-**Goal:** make each Computers row show the full set of current and archived
-Hudu records for the same client/name without creating source identities.
+**Goal:** make every Hudu-only computer name/client group visible as one
+Computers row with each current and archived Hudu record listed separately.
 
 **Scope:** `apps/core/views.py`, `templates/coverage.html`, and this active
 plan. No migration, source write, data-model change, or filter-semantics
 change.
 
-**Decision:** preserve Hudu records as separate source evidence. A display
-group may include an unlinked same-client/name record even when the current
-record resolves to a different canonical computer; it must be visibly a
-related record and cannot create a link or alter coverage.
+**Decision:** Hudu records sharing a source client/name may be grouped for
+presentation even when none resolves to a canonical computer. They remain
+separate Hudu records; the display does not establish a device identity,
+source link, or coverage state.
 
 **Validation:** basic Django check, template load, Python compilation, and
 diff check. No new test scripts. Commit, push, and deployment require
 separate approval.
 
-**Checkpoint:** live read-only inspection confirmed a current linked Hudu
-Servers record with five cards and an unlinked archived Computer Assets record
-with no cards for the same client/name. Two canonical computers share that
-client/name, so the original exact-one-canonical condition correctly declined
-to select an identity. Computers now keeps the Hudu-only row and aggregates
-all Hudu records with that source client/name there in this ambiguous case.
-It does not create a source link or alter the existing possible-Ninja label.
-Python compilation, Django system checks, coverage-template loading, and diff
-checks pass. No tests or test scripts were added.
+**Checkpoint:** Hudu-only rows now group every Hudu record with the same
+source client/name, including `RD-QB`’s current and archived Servers records.
+The existing confirmed-placement rule remains unchanged: an unlinked record
+with one confirmed canonical Hudu record is shown on that canonical computer.
+Each Hudu record in the Computers column now has its own explicit “Open in
+Hudu” link and, when that exact record has an active canonical device link,
+an “Open device in Operations” link. Python compilation, Django system checks,
+coverage-template loading, and diff checks pass. No tests or test scripts were
+added.
 
 **Next action:** none.
 

@@ -2,6 +2,16 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.122.8] — 2026-09-04 — Hudu record navigation
+
+### Changed
+
+- Computers now groups Hudu-only records with the same source client/name even
+  when no canonical computer is resolved. Each record remains separate in the
+  display and has its own explicit Hudu link.
+- A Hudu record with an active canonical device link now also offers an
+  Operations device link. Unlinked records do not receive that link.
+
 ## [0.122.7] — 2026-09-04 — Ambiguous Hudu computer records
 
 ### Fixed
