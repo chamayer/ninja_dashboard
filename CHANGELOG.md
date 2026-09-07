@@ -2,6 +2,17 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.122.21] — 2026-09-07 — Computer observations and field details
+
+### Changed
+
+- Computer pages now distinguish OS agents, VM guest records, CMDB records,
+  and other source observations. Approved values show their reporting source
+  records and surface differing values without silently choosing one.
+- Operations administrators can manage normalized field visibility under
+  Admin → Config → Fields. MAC addresses are now normal internal device
+  fields rather than redacted values.
+
 ## [0.122.20] — 2026-09-07 — Source-neutral computer review
 
 ### Fixed

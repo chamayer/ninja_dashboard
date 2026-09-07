@@ -138,14 +138,14 @@
     {% with base=device.get_absolute_url|default:"" %}
     <a class="dd-tab {% if active_tab == 'overview' %}active{% endif %}"
        href="?tab=overview">Overview</a>
-    <a class="dd-tab {% if active_tab == 'sources' %}active{% endif %}"
-       href="?tab=sources">Sources</a>
+    <a class="dd-tab {% if active_tab == 'observations' %}active{% endif %}"
+       href="?tab=observations">Observations</a>
     <a class="dd-tab {% if active_tab == 'activity' %}active{% endif %}"
        href="?tab=activity">Activity</a>
     <a class="dd-tab {% if active_tab == 'software' %}active{% endif %}"
        href="?tab=software">Software</a>
-    <a class="dd-tab {% if active_tab == 'identity' %}active{% endif %}"
-       href="?tab=identity">Identity</a>
+    <a class="dd-tab {% if active_tab == 'details' %}active{% endif %}"
+       href="?tab=details">Details</a>
     {% endwith %}
 </div>
 
@@ -230,6 +230,20 @@
         <div class="val">{{ software_rows|length }}</div>
         <div class="sub">installed on this device</div>
     </div>
+</div>
+
+<div class="card">
+    <h2 style="margin-top:0;">Basic computer fields</h2>
+    <table style="width:auto;">
+        <tbody>
+            <tr><th style="text-align:left; padding-right:1rem;">Hostname</th><td><code>{{ device.canonical_hostname|default:"—" }}</code></td></tr>
+            <tr><th style="text-align:left; padding-right:1rem;">Serial</th><td><code>{{ device.canonical_serial|default:"—" }}</code></td></tr>
+            <tr><th style="text-align:left; padding-right:1rem;">VM UUID</th><td><code>{{ device.canonical_vm_uuid|default:"—" }}</code></td></tr>
+            <tr><th style="text-align:left; padding-right:1rem;">Role</th><td>{{ device.device_role|humanize_label|default:"—" }}</td></tr>
+            <tr><th style="text-align:left; padding-right:1rem;">Type</th><td>{{ device.get_device_type_display }}</td></tr>
+            <tr><th style="text-align:left; padding-right:1rem;">Lifecycle</th><td>{{ device.lifecycle_status|humanize_label|default:"—" }}</td></tr>
+        </tbody>
+    </table>
 </div>
 
 <div class="card">
@@ -334,24 +348,34 @@
     {% endif %}
 </div>
 
-{% elif active_tab == 'sources' %}
+{% elif active_tab == 'observations' %}
 <div class="card">
-    <h2 style="margin-top:0;">Where this device is known</h2>
-    {% if agent_presence %}
+    <h2 style="margin-top:0;">Current observations</h2>
+    <p class="muted" style="margin-top:-0.4rem;">
+        Each row is one record describing this computer. An OS agent and a VM
+        guest record can both describe the same computer.
+    </p>
+    {% if observations %}
     <table data-sortable style="width:100%;">
         <thead>
             <tr>
-                <th>Platform</th>
-                <th>Entity type</th>
-                <th class="num">Last observed</th>
+                <th>Source</th>
+                <th>What it is</th>
+                <th>State</th>
+                <th>Reported status</th>
+                <th>Record ID</th>
+                <th class="num">Last seen</th>
                 <th class="num">Last contact</th>
             </tr>
         </thead>
         <tbody>
-            {% for platform, entity_type, last_seen, last_contact in agent_presence %}
+            {% for source, entity_type, external_id, active, last_seen, reported_online, last_contact in observations %}
             <tr>
-                <td style="font-weight:600;">{{ platform }}</td>
-                <td class="muted">{{ entity_type|humanize_label }}</td>
+                <td style="font-weight:600;">{{ source }}</td>
+                <td>{{ entity_type|humanize_label }}</td>
+                <td>{% if active %}<span class="badge badge-low">Current</span>{% else %}<span class="badge badge-high">Withdrawn</span>{% endif %}</td>
+                <td>{% if reported_online is True %}<span style="color:#16a34a;">Online</span>{% elif reported_online is False %}<span style="color:#dc2626;">Offline</span>{% else %}<span class="muted">Not reported</span>{% endif %}</td>
+                <td><code>{{ external_id|default:"—" }}</code></td>
                 <td class="muted num">{{ last_seen|date:"Y-m-d H:i"|default:"—" }}</td>
                 <td class="muted num">{{ last_contact|date:"Y-m-d H:i"|default:"—" }}</td>
             </tr>
@@ -359,37 +383,7 @@
         </tbody>
     </table>
     {% else %}
-    <p class="muted">No agent observations recorded.</p>
-    {% endif %}
-</div>
-
-<div class="card">
-    <h2 style="margin-top:0;">Source identities</h2>
-    {% if links %}
-    <table data-sortable style="width:100%;">
-        <thead>
-            <tr>
-                <th>Source</th>
-                <th>Name in that system</th>
-                <th>External ID</th>
-                <th>Matched by</th>
-                <th class="num">Last seen</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for link in links %}
-            <tr>
-                <td>{{ link.source.name }}</td>
-                <td>{{ link.external_name }}</td>
-                <td><code>{{ link.external_id }}</code></td>
-                <td class="muted">{{ link.get_match_method_display }} ({{ link.match_confidence }})</td>
-                <td class="muted num">{{ link.last_seen_at|date:"Y-m-d H:i"|default:"—" }}</td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-    {% else %}
-    <p class="muted">No source identities linked.</p>
+    <p class="muted">No observations recorded for this computer.</p>
     {% endif %}
 </div>
 
@@ -526,58 +520,56 @@ function swFilter(q) {
 }
 </script>
 
-{% elif active_tab == 'identity' %}
+{% elif active_tab == 'details' %}
 <div class="card">
-    <h2 style="margin-top:0;">Canonical identity</h2>
-    <table style="width:auto;">
-        <tbody>
-            <tr><th style="text-align:left; padding-right:1rem;">Hostname</th><td><code>{{ device.canonical_hostname|default:"—" }}</code></td></tr>
-            <tr><th style="text-align:left; padding-right:1rem;">Serial</th><td><code>{{ device.canonical_serial|default:"—" }}</code></td></tr>
-            <tr><th style="text-align:left; padding-right:1rem;">VM UUID</th><td><code>{{ device.canonical_vm_uuid|default:"—" }}</code></td></tr>
-            <tr><th style="text-align:left; padding-right:1rem;">Role</th><td>{{ device.device_role|humanize_label|default:"—" }}</td></tr>
-            <tr><th style="text-align:left; padding-right:1rem;">Type</th><td>{{ device.get_device_type_display }}</td></tr>
-            <tr><th style="text-align:left; padding-right:1rem;">Lifecycle</th><td>{{ device.lifecycle_status|humanize_label|default:"—" }}</td></tr>
-            <tr><th style="text-align:left; padding-right:1rem;">First seen</th><td class="muted num">{{ device.first_seen_at|date:"Y-m-d H:i"|default:"—" }}</td></tr>
-            <tr><th style="text-align:left; padding-right:1rem;">Device UUID</th><td><code>{{ device.id }}</code></td></tr>
-        </tbody>
-    </table>
-</div>
-
-<div class="card">
-    <h2 style="margin-top:0;">Per-source identifiers</h2>
-    {% if links %}
+    <h2 style="margin-top:0;">Reported fields</h2>
+    <p class="muted" style="margin-top:-0.4rem;">
+        A value lists every source that currently reports it. Different values
+        are shown separately; nothing is silently chosen as the truth.
+    </p>
+    {% if attribute_fields %}
     <table style="width:100%;">
         <thead>
             <tr>
-                <th>Source</th>
-                <th>External ID</th>
-                <th>External name</th>
-                <th class="num">First seen</th>
-                <th class="num">Last seen</th>
+                <th>Field</th>
+                <th>Reported value</th>
             </tr>
         </thead>
         <tbody>
-        {% for link in links %}
+        {% for field in attribute_fields %}
             <tr>
-                <td>{{ link.source.name }}</td>
-                <td><code>{{ link.external_id }}</code></td>
-                <td class="muted">{{ link.external_name }}</td>
-                <td class="muted num">{{ link.first_seen_at|date:"Y-m-d"|default:"—" }}</td>
-                <td class="muted num">{{ link.last_seen_at|date:"Y-m-d"|default:"—" }}</td>
+                <td>{% if field.differs %}<strong>{{ field.name }}</strong><br><span class="badge badge-high">Different values reported</span>{% else %}{{ field.name }}{% endif %}</td>
+                <td>{% for group in field.value_groups %}<div><code>{{ group.value|default:"—" }}</code> <span class="muted">— {% for source in group.sources %}{{ source.name }} · {{ source.entity_type|humanize_label }}{% if not forloop.last %}, {% endif %}{% endfor %}</span></div>{% endfor %}</td>
             </tr>
         {% endfor %}
         </tbody>
     </table>
     {% else %}
-    <p class="muted">No source identities.</p>
+    <p class="muted">No approved source fields are available yet.</p>
     {% endif %}
 </div>
 
 <div class="card">
-    <h2 style="margin-top:0;">Source evidence</h2>
+    <h2 style="margin-top:0;">Details from each source</h2>
+    {% if source_attribute_details %}
+    {% for source in source_attribute_details %}
+    <details style="margin-bottom:0.6rem; border:1px solid var(--border); border-radius:5px;">
+        <summary style="cursor:pointer; padding:0.55rem 0.75rem; background:#f8f9fb;"><strong>{{ source.source }}</strong> · {{ source.entity_type|humanize_label }}{% if source.external_id %} · <code>{{ source.external_id }}</code>{% endif %} — {{ source.fields|length }} approved field{{ source.fields|length|pluralize }}</summary>
+        <table style="width:100%; margin:0.5rem 0;">
+            <tbody>{% for field in source.fields %}<tr><th style="text-align:left; padding:0.35rem 0.7rem;">{{ field.name }}</th><td><code>{{ field.value|default:"—" }}</code></td><td class="muted num">{{ field.observed_at|date:"Y-m-d H:i" }}</td></tr>{% endfor %}</tbody>
+        </table>
+    </details>
+    {% endfor %}
+    {% else %}
+    <p class="muted">No approved source fields are available yet.</p>
+    {% endif %}
+</div>
+
+<div class="card">
+    <h2 style="margin-top:0;">Protected source evidence</h2>
     <p class="muted">
-        Collected payloads are restricted evidence. They are no longer loaded on an
-        ordinary device-page request or included in exports.
+        Raw vendor payloads and restricted values are not loaded on this page
+        or included in exports.
     </p>
     {% if can_view_entity_evidence %}
     <p><a class="btn btn-secondary" href="{% url 'entity_admin_detail' device.entity_id %}">Open redacted entity evidence</a></p>
@@ -585,120 +577,6 @@ function swFilter(q) {
     <p class="muted">An Operations administrator can review the redacted evidence summary. Raw values require a separate reveal permission and are audited.</p>
     {% endif %}
 </div>
-
-{% if raw_identity_summary %}
-<div class="card">
-    <h2 style="margin-top:0;">Combined record
-        <span class="muted" style="font-weight:400; font-size:0.85rem;">
-            — normalized values grouped by meaning; source names show where each value was reported.
-        </span>
-    </h2>
-    {% if raw_canonical_by_category %}
-    <style>
-      .raw-cat-heading {
-        padding: 0.35rem 0.65rem; margin: 0.9rem 0 0.15rem;
-        background: #eef2f7; color: #1e3a8a; font-size: 0.72rem;
-        font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em;
-        border-radius: 4px;
-      }
-      .raw-cat-heading:first-child { margin-top: 0; }
-      table.raw-common { width: 100%; border-collapse: collapse; font-size: 0.83rem; }
-      table.raw-common td, table.raw-common th {
-        padding: 0.4rem 0.55rem; vertical-align: top;
-        border-bottom: 1px solid var(--border);
-      }
-      table.raw-common th { text-align: left; font-weight: 600; color: #374151; width: 22%; }
-      .raw-value-group { display: block; margin-bottom: 0.15rem; }
-      .raw-value-group:last-child { margin-bottom: 0; }
-      .raw-value { font-family: ui-monospace, monospace; font-size: 0.78rem;
-                    color: #1a1a2e; word-break: break-all; }
-      .raw-value-sources { color: var(--muted); font-size: 0.72rem; margin-left: 0.4rem; }
-      .raw-single-source-badge {
-        display: inline-block; margin-left: 0.4rem;
-        padding: 0.05rem 0.3rem; border-radius: 3px;
-        background: #eef2f7; color: var(--muted); font-size: 0.65rem;
-        font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
-      }
-    </style>
-    {% for cat_name, fields in raw_canonical_by_category %}
-    <div class="raw-cat-heading">{{ cat_name }}</div>
-    <table class="raw-common">
-        <tbody>
-            {% for f in fields %}
-            <tr>
-                <td class="field-name">
-                    <code>{{ f.field }}</code>
-                    {% if f.single_source %}<span class="raw-single-source-badge">1 source</span>{% endif %}
-                </td>
-                <td>
-                    {% for vg in f.value_groups %}
-                    <span class="raw-value-group">
-                        <span class="raw-value">{{ vg.value }}</span>
-                        <span class="raw-value-sources">— {{ vg.sources|join:", " }}</span>
-                    </span>
-                    {% endfor %}
-                </td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-    {% endfor %}
-    {% else %}
-    <p class="muted" style="font-size:0.85rem;">
-        No canonical fields recorded for this device.
-    </p>
-    {% endif %}
-</div>
-
-<div class="card">
-    <h2 style="margin-top:0;">Source details
-        <span class="muted" style="font-weight:400; font-size:0.85rem;">
-            — every field collected from each source, grouped in collapsed panels
-        </span>
-    </h2>
-    {% if raw_source_specific %}
-    {% for s in raw_source_specific %}
-    <details style="margin-bottom:0.6rem; border:1px solid var(--border); border-radius:5px;">
-        <summary style="cursor:pointer; padding:0.55rem 0.75rem; background:#f8f9fb; display:flex; align-items:center; gap:0.55rem; font-size:0.85rem;">
-            <strong>{{ s.platform }}</strong>
-            <span class="muted">{{ s.entity_type|humanize_label }}</span>
-            <span class="muted" style="font-size:0.75rem;">{{ s.extras|length }} collected field{{ s.extras|length|pluralize }}</span>
-            <span class="muted num" style="margin-left:auto; font-size:0.78rem;">observed {{ s.observed_at|date:"Y-m-d H:i" }}</span>
-        </summary>
-        <div style="padding:0.7rem 0.9rem;">
-            {% if s.fallback_note %}
-            <p class="muted" style="font-size:0.75rem; margin:0 0 0.5rem;">ⓘ {{ s.fallback_note }}</p>
-            {% endif %}
-            {% if s.extras %}
-            <table class="raw-common" style="margin-bottom:0.7rem;">
-                <tbody>
-                    {% for f in s.extras %}
-                    <tr>
-                        <td><code>{{ f.field }}</code>
-                            <span class="muted" style="font-size:0.7rem;">— {{ f.category }}</span>
-                        </td>
-                        <td><span class="raw-value">{{ f.value }}</span></td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-            {% else %}
-            <p class="muted" style="font-size:0.8rem; margin:0 0 0.5rem;">No fields recorded for this source.</p>
-            {% endif %}
-            <details>
-                <summary style="cursor:pointer; font-size:0.78rem; color:var(--muted);">Show full raw payload</summary>
-                <pre style="margin:0.4rem 0 0; padding:0.7rem 0.9rem; background:#0f172a; color:#e2e8f0; font-size:0.75rem; overflow:auto; max-height:520px; border-radius:4px;">{{ s.pretty }}</pre>
-            </details>
-        </div>
-    </details>
-    {% endfor %}
-    {% else %}
-    <p class="muted" style="font-size:0.85rem;">
-        No source observations recorded for this device.
-    </p>
-    {% endif %}
-</div>
-{% endif %}
 {% endif %}
 
 {% endblock %}

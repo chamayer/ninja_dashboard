@@ -35,6 +35,7 @@ from .forms import ClientPolicyForm
 from .models import (
     AdminFinding,
     Agent,
+    AttributeDefinition,
     AuditLog,
     Client,
     ClientCandidate,
@@ -1828,6 +1829,12 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
     )
     links = list(device.source_links.select_related("source").order_by("source__name"))
     ninja_patch_device_ids = _ninja_patch_device_ids(links)
+    requested_tab = request.GET.get("tab") or "overview"
+    # Preserve existing Identity bookmarks while giving the tab a name that
+    # describes what operators find there.
+    active_tab = "details" if requested_tab == "identity" else requested_tab
+    if active_tab not in ("overview", "observations", "activity", "software", "details"):
+        active_tab = "overview"
 
     # Software findings are subjects on the title or release, so they no longer
     # carry this device's id. The device inherits them through the installation
@@ -1856,7 +1863,7 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
         .order_by("severity", "-last_seen_at")[:50]
     )
 
-    agent_presence = []
+    observations = []
     software_rows = []
     patching = None
     windows_servicing = None
@@ -1865,17 +1872,25 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
             cur.execute("SET LOCAL operations.tenant_id = 1")
             cur.execute(
                 """
-                SELECT platform, entity_type,
-                       MAX(last_observed_at) AS last_seen,
-                       MAX(last_contact_at)  AS last_contact
-                FROM operations.device_agent_presence_current
-                WHERE tenant_id = %s AND device_id = %s
-                GROUP BY platform, entity_type
-                ORDER BY platform
+            SELECT source.name, observation.entity_type, observation.external_id,
+                   observation.active, observation.last_seen_at,
+                   presence.reported_online, presence.last_contact_at
+              FROM operations.entity_observation_current observation
+              JOIN operations.source_instances source_instance
+                ON source_instance.tenant_id = observation.tenant_id
+               AND source_instance.id = observation.source_instance_id
+              JOIN operations.sources source ON source.id = source_instance.source_id
+              LEFT JOIN operations.device_agent_presence_current presence
+                ON presence.tenant_id = observation.tenant_id
+               AND presence.device_id = observation.device_id
+               AND presence.platform = observation.platform
+               AND presence.entity_type = observation.entity_type
+             WHERE observation.tenant_id = %s AND observation.device_id = %s
+             ORDER BY source.name, observation.entity_type, observation.last_seen_at DESC
                 """,
                 [1, str(device.id)],
             )
-            agent_presence = cur.fetchall()
+            observations = cur.fetchall()
 
             cur.execute(
                 """
@@ -2008,11 +2023,6 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
             )
             entity_type_choices = [r[0] for r in cur.fetchall()]
 
-    # ── Extras for 5-tab layout ──
-    active_tab = request.GET.get("tab") or "overview"
-    if active_tab not in ("overview", "sources", "activity", "software", "identity"):
-        active_tab = "overview"
-
     # Show each Hudu record that is either linked to this device or is an
     # unlinked name match. The latter remains distinct from a source identity:
     # it is useful context, but never attaches a record or changes coverage.
@@ -2077,6 +2087,98 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
                 }
                 for row in cur.fetchall()
             ]
+
+    attribute_fields = []
+    source_attribute_details = []
+    if active_tab == "details":
+        with transaction.atomic(), connection.cursor() as cur:
+            cur.execute("SET LOCAL operations.tenant_id = 1")
+            cur.execute(
+                """
+                SELECT claim.attribute_key, claim.attribute_display_name,
+                       claim.sensitivity, claim.value_display, source.name,
+                       observation.entity_type, observation.external_id,
+                       claim.last_observed_at
+                  FROM operations.v_entity_attribute_claim_current claim
+                  JOIN operations.entity_observation_current observation
+                    ON observation.tenant_id = claim.tenant_id
+                   AND observation.observation_id = claim.observation_id
+                  JOIN operations.source_instances source_instance
+                    ON source_instance.tenant_id = claim.tenant_id
+                   AND source_instance.id = claim.source_instance_id
+                  JOIN operations.sources source ON source.id = source_instance.source_id
+                 WHERE claim.tenant_id = 1 AND claim.entity_id = %s
+                 ORDER BY claim.attribute_display_name, claim.value_display,
+                          source.name
+                """,
+                [str(device.entity_id)],
+            )
+            claim_rows = cur.fetchall()
+
+        fields_by_key: dict[str, dict] = {}
+        source_details_by_record: dict[tuple[str, str, str], list[dict]] = {}
+        for (
+            key,
+            display_name,
+            sensitivity,
+            value,
+            source_name,
+            entity_type,
+            external_id,
+            observed_at,
+        ) in claim_rows:
+            source_record_key = (source_name, entity_type, external_id)
+            source_record = {
+                "name": source_name,
+                "entity_type": entity_type,
+                "external_id": external_id,
+            }
+            field = fields_by_key.setdefault(
+                key,
+                {
+                    "name": display_name,
+                    "sensitivity": sensitivity,
+                    "values": {},
+                },
+            )
+            field["values"].setdefault(value, {})[source_record_key] = source_record
+            source_details_by_record.setdefault(source_record_key, []).append(
+                {
+                    "name": display_name,
+                    "value": value,
+                    "sensitivity": sensitivity,
+                    "observed_at": observed_at,
+                }
+            )
+        for field in fields_by_key.values():
+            value_groups = [
+                {
+                    "value": value,
+                    "sources": [
+                        sources[source_key] for source_key in sorted(sources)
+                    ],
+                }
+                for value, sources in field["values"].items()
+            ]
+            value_groups.sort(key=lambda group: (group["value"] or "").lower())
+            attribute_fields.append(
+                {
+                    "name": field["name"],
+                    "sensitivity": field["sensitivity"],
+                    "value_groups": value_groups,
+                    "differs": len(value_groups) > 1,
+                }
+            )
+        attribute_fields.sort(key=lambda field: field["name"].lower())
+        source_attribute_details = [
+            {
+                "source": source_key[0],
+                "entity_type": source_key[1],
+                "external_id": source_key[2],
+                "fields": fields,
+            }
+            for source_key, fields in sorted(source_details_by_record.items())
+        ]
 
     # Software decisions map — key by canonical_name, prefer per-client
     # over global.
@@ -2338,13 +2440,6 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
     activity.sort(key=lambda e: (e["at"] or timezone.now()), reverse=True)
     activity = activity[:100]
 
-    # Raw evidence is never fetched on GET. It is available only through the
-    # permission-checked, audited POST reveal on the generic entity surface.
-    raw_snapshots: list[dict] = []
-    raw_canonical_by_category: list[tuple[str, list[dict]]] = []
-    raw_source_specific: list[dict] = []
-    raw_identity_summary: dict = {}
-
     return render(
         request,
         "device_detail.html",
@@ -2353,7 +2448,7 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
             "links": links,
             "hudu_records": hudu_records,
             "active_findings": active_findings,
-            "agent_presence": agent_presence,
+            "observations": observations,
             "software_rows": software_view,
             "patching": patching,
             "windows_servicing": windows_servicing,
@@ -2364,10 +2459,8 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
             "activity": activity,
             "exemptions": exemptions,
             "entity_type_choices": entity_type_choices,
-            "raw_snapshots": raw_snapshots,
-            "raw_canonical_by_category": raw_canonical_by_category,
-            "raw_source_specific": raw_source_specific,
-            "raw_identity_summary": raw_identity_summary,
+            "attribute_fields": attribute_fields,
+            "source_attribute_details": source_attribute_details,
             "can_view_entity_evidence": bool(
                 device.entity_id
                 and (
@@ -10672,6 +10765,49 @@ def device_status_config(request: HttpRequest) -> HttpResponse:
             "defaults": DEVICE_STATUS_DEFAULTS,
             "updated_at": row.updated_at,
             "updated_by": row.updated_by,
+        },
+    )
+
+
+@login_required
+@require_admin
+def attribute_visibility_config(request: HttpRequest) -> HttpResponse:
+    """Manage which normalized fields are visible without a raw-data reveal."""
+    if request.method == "POST":
+        definition = get_object_or_404(
+            AttributeDefinition,
+            id=request.POST.get("definition_id"),
+            enabled=True,
+        )
+        sensitivity = (request.POST.get("sensitivity") or "").strip()
+        allowed = set(AttributeDefinition.Sensitivity.values)
+        if sensitivity not in allowed:
+            messages.error(request, "Choose a valid visibility level.")
+            return redirect("attribute_visibility_config")
+        before = {"sensitivity": definition.sensitivity}
+        definition.sensitivity = sensitivity
+        definition.save(update_fields=["sensitivity"])
+        _audit(
+            request,
+            "attribute_definition.visibility.update",
+            definition.id,
+            before,
+            {"sensitivity": sensitivity},
+        )
+        messages.success(request, f"Visibility saved for {definition.display_name}.")
+        return redirect("attribute_visibility_config")
+
+    definitions = AttributeDefinition.objects.filter(enabled=True).select_related(
+        "entity_class"
+    )
+    return render(
+        request,
+        "attribute_visibility_config.html",
+        {
+            "admin_group": "config",
+            "admin_tab": "fields",
+            "definitions": definitions,
+            "sensitivity_choices": AttributeDefinition.Sensitivity.choices,
         },
     )
 

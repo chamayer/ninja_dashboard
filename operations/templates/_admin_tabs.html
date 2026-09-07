@@ -60,6 +60,8 @@ Config / Integrations page. Views must set:
        href="{% url 'classifier_config' %}">Classifier</a>
     <a class="at-tab {% if admin_tab == 'device-status' %}active{% endif %}"
        href="{% url 'device_status_config' %}">Device status</a>
+    <a class="at-tab {% if admin_tab == 'fields' %}active{% endif %}"
+       href="{% url 'attribute_visibility_config' %}">Fields</a>
   {% elif admin_group == 'integrations' %}
     <span class="at-group">Integrations</span>
     <a class="at-tab {% if admin_tab == 'sources' %}active{% endif %}"

@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+
+{% block title %}Field visibility{% endblock %}
+
+{% block content %}
+{% include "_admin_tabs.html" %}
+<div class="card">
+  <h1 style="margin-top:0;">Field visibility</h1>
+  <p class="muted">Choose whether each normalized field is shown normally, redacted, or restricted to an audited reveal. This changes presentation only; it does not delete collected data.</p>
+  <table data-sortable style="width:100%;">
+    <thead><tr><th>Entity</th><th>Field</th><th>Description</th><th>Visibility</th><th></th></tr></thead>
+    <tbody>
+    {% for definition in definitions %}
+      <tr>
+        <td>{{ definition.entity_class.display_name }}</td>
+        <td><strong>{{ definition.display_name }}</strong><br><code>{{ definition.key }}</code></td>
+        <td class="muted">{{ definition.description|default:"—" }}</td>
+        <td>
+          <form method="post" style="display:flex; gap:0.4rem; align-items:center;">
+            {% csrf_token %}
+            <input type="hidden" name="definition_id" value="{{ definition.id }}">
+            <select name="sensitivity">
+              {% for value, label in sensitivity_choices %}<option value="{{ value }}"{% if definition.sensitivity == value %} selected{% endif %}>{{ label }}</option>{% endfor %}
+            </select>
+            <button type="submit">Save</button>
+          </form>
+        </td>
+        <td class="muted">{{ definition.value_type }} · {{ definition.cardinality }}</td>
+      </tr>
+    {% empty %}<tr><td colspan="5" class="muted">No field definitions configured.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

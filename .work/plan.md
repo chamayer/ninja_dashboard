@@ -1,5 +1,21 @@
 # Active root implementation plan
 
+## CURRENT TASK — Computer observations and field details
+
+**Status:** release preparation.
+
+**Goal:** release the five-tab computer-page reorganization and the
+admin-managed normalized-field visibility setting.
+
+**Scope:** Operations device detail UI, attribute visibility configuration,
+Operations migration 0151, and 0.122.21 patch-release metadata. No ingest or
+identity-resolution change.
+
+**Validation:** Django and migration checks, template load, compilation, diff
+check, focused tests, and read-only production query plans passed. Commit,
+push, automatic Portainer deployment, migration application, and health
+verification are next.
+
 ## CURRENT TASK — Source-neutral computer review
 
 **Status:** release preparation.

@@ -1,5 +1,55 @@
 # Active Operations implementation plan
 
+## ACTIVE TASK — Reorganize the computer detail page around observations
+
+**Status:** ready for review.
+
+**Goal:** preserve the current five device-page workflows while making the
+computer the subject, showing every current source observation (including OS
+agents and VM guests), and showing approved attributes as value plus reporting
+source(s).
+
+**Scope:** `device_detail` data reads and template organization; normalized
+field-visibility configuration; and the MAC-address visibility correction. The
+tabs stay five: Overview, Observations, Details, Activity, and Software. No
+ingest, identity-resolution, or raw-evidence permission change.
+
+**Decision:** source observations are distinct evidence of one computer.
+Online/coverage remains agent-derived. Details uses the existing typed
+attribute-claim read model, which already redacts sensitive/restricted values;
+raw payloads remain accessible only through the existing audited admin reveal.
+MAC address is an internal operational identity field, not redacted. Admins
+manage the visibility classification through Operations → Admin → Config →
+Fields; the setting changes presentation only.
+
+**Validation:** read-only sample of available observation and claim data;
+Django check, template load, focused existing device-detail tests where
+available, compilation, and diff check. No new test scripts.
+
+**Checkpoint:** Overview retains operational cards, controls, exemptions, and
+issues and now adds Basic computer fields. Sources is now Observations and
+lists every attached current/withdrawn source record with its plain-language
+kind, reported status, record ID, and timestamps. Details shows each approved
+typed value with the exact source record(s) that report it, flags conflicting
+values, and provides separate expandable source-record sections. Legacy
+`?tab=identity` bookmarks route to Details. Raw payload access is unchanged.
+
+**Checkpoint:** migration 0151 changes `device.mac_address` from `sensitive`
+to `internal`. Operations → Admin → Config → Fields now lets an authorized
+admin set each normalized field's visibility level; changes are audited and
+do not alter collected data.
+
+**Validation:** Django check, migration-drift check, template loading, Python
+compilation, diff check, and the existing focused `test_findings_queue` suite
+pass (10 tests). The new observation and typed-claim queries were planned
+read-only against production with tenant context and use the device/claim
+indexes. Earlier attempts to run that focused suite from the wrong directory
+failed only because its relative fixture paths were not present.
+
+**Next action:** review the page locally, then commit and deploy only with
+explicit approval. Migration 0151 is pending and must be included in that
+approval.
+
 ## ACTIVE TASK — Make strong-device review source-neutral and lossless
 
 **Status:** release preparation.
