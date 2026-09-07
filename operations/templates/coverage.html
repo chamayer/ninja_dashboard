@@ -66,7 +66,6 @@
     {% for card in platform_cards %}
     <section class="coverage-card">
         <h2>{{ card.platform }}</h2>
-        {% if card.applicable_count %}
         <div class="coverage-counts">
             {% for count in card.counts %}
             <a class="coverage-count coverage-{{ count.name|lower }}" href="{{ count.url }}">
@@ -74,9 +73,6 @@
             </a>
             {% endfor %}
         </div>
-        {% else %}
-        <p class="muted" style="margin:0;">No agent checks in matching rows.</p>
-        {% endif %}
     </section>
     {% empty %}
     <section class="coverage-card"><p class="muted" style="margin:0;">No required agent platforms are configured.</p></section>
@@ -102,7 +98,7 @@
                 <details class="coverage-filter"><summary>Online in</summary><div class="coverage-filter-options"><input class="coverage-filter-search" type="search" placeholder="Search platforms" aria-label="Search platforms">{% for platform in platforms %}<label><input type="checkbox" name="online_in" value="{{ platform }}"{% if platform in online_filters %} checked{% endif %}>{{ platform }}</label>{% endfor %}</div></details>
                 <details class="coverage-filter"><summary>Required platform</summary><div class="coverage-filter-options"><input class="coverage-filter-search" type="search" placeholder="Search platforms" aria-label="Search required platforms">{% for platform in platforms %}<label><input type="checkbox" name="platform" value="{{ platform }}"{% if platform in platform_filters %} checked{% endif %}>{{ platform }}</label>{% endfor %}</div></details>
                 <details class="coverage-filter"><summary>Status</summary><div class="coverage-filter-options"><input class="coverage-filter-search" type="search" placeholder="Search statuses" aria-label="Search statuses">{% for state in states %}<label><input type="checkbox" name="state" value="{{ state }}"{% if state in state_filters %} checked{% endif %}>{{ state }}</label>{% endfor %}</div></details>
-                <div><button type="submit">Filter</button>{% if client_filters or online_filters or hudu_filters or hudu_link_filters or hudu_record_filter != "any" or s1_exemption_filters or platform_filters or state_filters or os_family_filters or device_type_filters %}<a class="clear" href="{% url 'inventory_computers' %}">Clear</a>{% endif %}</div>
+                <div><button type="submit">Filter</button>{% if client_filters or online_filters or hudu_filters or hudu_link_filters or hudu_record_filter != "any" or s1_exemption_filters or platform_filters or state_filters or os_family_filters or device_type_filters %}<a class="clear" data-clear-filters href="{% url 'inventory_computers' %}">Clear</a>{% endif %}</div>
             </div>
             <div class="coverage-filter-row">
                 <details class="coverage-filter"><summary>Hudu</summary><div class="coverage-filter-options"><input class="coverage-filter-search" type="search" placeholder="Search Hudu status" aria-label="Search Hudu status"><label><input type="checkbox" name="hudu" value="in_hudu"{% if "in_hudu" in hudu_filters %} checked{% endif %}>In Hudu</label><label><input type="checkbox" name="hudu" value="not_in_hudu"{% if "not_in_hudu" in hudu_filters %} checked{% endif %}>Not in Hudu</label><div class="coverage-hudu-record-filter"{% if not hudu_record_filter_active %} hidden{% endif %}><hr><label>Record filter <select name="hudu_record_filter"{% if not hudu_record_filter_active %} disabled{% endif %}><option value="any"{% if hudu_record_filter == "any" %} selected{% endif %}>Any Hudu record</option><option value="has_current"{% if hudu_record_filter == "has_current" %} selected{% endif %}>Has current record</option><option value="has_archived"{% if hudu_record_filter == "has_archived" %} selected{% endif %}>Has archived record</option><option value="current_only"{% if hudu_record_filter == "current_only" %} selected{% endif %}>Current records only</option><option value="archived_only"{% if hudu_record_filter == "archived_only" %} selected{% endif %}>Archived records only</option></select></label></div></div></details>
@@ -149,6 +145,12 @@ document.querySelectorAll('.coverage-filter-search').forEach((search) => {
         search.parentElement.querySelectorAll('label').forEach((label) => {
             label.hidden = query && !label.textContent.toLowerCase().includes(query);
         });
+    });
+});
+document.querySelectorAll('[data-clear-filters]').forEach((clear) => {
+    clear.addEventListener('click', (event) => {
+        event.preventDefault();
+        window.location.assign(window.location.pathname);
     });
 });
 document.querySelectorAll('.coverage-filterbar input[type="checkbox"][name]').forEach((input) => {

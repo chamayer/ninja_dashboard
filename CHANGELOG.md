@@ -2,6 +2,12 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.122.17] — 2026-09-07 — Reliable Computers filter reset
+
+### Fixed
+
+- Computers Clear now reliably removes every query-string filter.
+
 ## [0.122.16] — 2026-09-07 — Cleaner Computers Hudu cells
 
 ### Changed

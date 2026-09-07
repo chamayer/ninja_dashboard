@@ -1,8 +1,34 @@
 # Active Operations implementation plan
 
-## ACTIVE TASK — Simplify Computers Hudu cell content
+## ACTIVE TASK — Make Computers Clear reliably reset filters
 
 **Status:** implementation complete; pending commit and push approval.
+
+**Goal:** make the Computers Clear control reliably remove every filter.
+
+**Scope:** Computers filter template behavior and this plan. No query,
+migration, or data change.
+
+**Decision:** Clear explicitly navigates to the current path without its query
+string, rather than relying on form/link interaction with duplicated controls.
+
+**Validation:** template load, Django check, and diff check. No new test
+scripts.
+
+**Checkpoint:** Clear is rendered as an ordinary link inside the filter form,
+but the user reports it does not reset the active filters.
+
+**Checkpoint:** Clear now prevents the form interaction and explicitly reloads
+the current path without query parameters.
+
+**Validation:** Django check, template loading, and diff check pass. No new
+test scripts were added.
+
+**Next action:** commit and push when approved.
+
+## ACTIVE TASK — Simplify Computers Hudu cell content
+
+**Status:** complete; released as 0.122.16 / `73d1a45`.
 
 **Goal:** remove repeated Hudu archive/link information and replace technical
 card wording with human-facing link wording.
@@ -22,7 +48,7 @@ and direct links. Multiple records retain the compact summary/Details view.
 **Validation:** focused coverage tests (8 passed), Django check, template
 load, and diff check pass. No new test scripts were added.
 
-**Next action:** commit and push when approved.
+**Next action:** none.
 
 ## ACTIVE TASK — Simplify Computers Hudu record filtering
 
