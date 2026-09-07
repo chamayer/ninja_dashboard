@@ -8230,8 +8230,24 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             """,
             )
             rows = cur.fetchall()
-            cur.execute(
-                """
+            if set(hudu_link_filters) == {"no_links"}:
+                cur.execute(
+                    """
+                    SELECT hudu.observation_id, hudu.device_id, hudu.client_id,
+                           hudu.hostname, hudu.source_layout, hudu.source_url,
+                           hudu.serial_number, hudu.link_verdict,
+                           NULL::text AS card_source, NULL::text AS card_id,
+                           NULL::text AS card_resolved_device_id, hudu.is_archived,
+                           NULL::text AS canonical
+                    FROM operations.v_hudu_computer_inventory_observation_current hudu
+                    WHERE (%s OR NOT hudu.is_archived)
+                      AND NOT hudu.has_relayed_cards
+                    """,
+                    (show_archived_hudu,),
+                )
+            else:
+                cur.execute(
+                    """
                 SELECT hudu.observation_id, hudu.device_id, hudu.client_id,
                        hudu.hostname, hudu.source_layout, hudu.source_url,
                        hudu.serial_number, hudu.link_verdict,
@@ -8250,7 +8266,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                   )
                 """,
                 (show_archived_hudu, list(_COMPUTER_HUDU_LAYOUTS)),
-            )
+                )
             hudu_rows = cur.fetchall()
             cur.execute(
                 """

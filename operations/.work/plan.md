@@ -1,8 +1,35 @@
 # Active Operations implementation plan
 
+## ACTIVE TASK — Prevent archived Hudu no-link filter timeouts
+
+**Status:** implementation complete; pending commit and push approval.
+
+**Goal:** keep Computers usable when archived Hudu records and the `No links`
+filter are selected together.
+
+**Scope:** the Computers Hudu query, a read-only Operations migration, and this
+plan. No source-data or identity-link changes.
+
+**Decision:** use a narrow, security-barrier Hudu-computer observation view for
+the no-link filter. It determines whether relayed cards exist without expanding
+one SQL row per card; other filter paths retain their detailed-card read model.
+
+**Validation:** Python compilation, Django checks, migration review, template
+load, and diff check. No new test scripts.
+
+**Checkpoint:** production logs show the exact URL exceeds Gunicorn's
+30-second worker timeout in the card-expanded evidence query. The duplicate
+query parameters are harmless; archived evidence makes the expansion too slow.
+The conditional no-link read now uses the new compact view and returns NULL
+card fields, preserving the existing Python rendering path without expanding
+cards. Compilation, Django checks, template loading, migration SQL review, and
+diff checks pass; no test scripts were added.
+
+**Next action:** commit and push the migration-backed fix when approved.
+
 ## ACTIVE TASK — Simplify Computers Hudu details and filter menus
 
-**Status:** complete; pending release commit and push approval.
+**Status:** complete; released as 0.122.10 / `e4dd249`.
 
 **Goal:** make the Hudu column compact while retaining record-level detail,
 and make Computers filter menus close predictably.

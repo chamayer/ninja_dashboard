@@ -2,6 +2,13 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.122.12] — 2026-09-07 — Archived Hudu inventory filter reliability
+
+### Fixed
+
+- Computers no longer times out when filtering archived Hudu records to those
+  without links.
+
 ## [0.122.11] — 2026-09-07 — Safe Ninja external-ID handling
 
 ### Fixed
