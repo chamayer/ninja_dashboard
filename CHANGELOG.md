@@ -2,6 +2,13 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.122.14] — 2026-09-07 — Computers Hudu archive scope
+
+### Changed
+
+- Computers now lets operators choose current-only, archived-only, or combined
+  Hudu records while retaining the separate In Hudu and Not in Hudu filters.
+
 ## [0.122.13] — 2026-09-07 — Computers filter consistency
 
 ### Fixed

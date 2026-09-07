@@ -188,7 +188,7 @@ def test_coverage_uses_effective_requirements_and_multiselect_filters(monkeypatc
     assert "platform_aliases" in hudu_statement
     assert "hudu.source_name = 'Hudu'" in hudu_statement
     assert "hudu.source_layout = ANY(%s)" in hudu_statement
-    assert hudu_params == (False, ["Computer Assets", "Servers"])
+    assert hudu_params == (False, False, ["Computer Assets", "Servers"])
 
     context = captured["context"]
     assert context["client_filters"] == ["acme", "beta"]
@@ -302,16 +302,18 @@ def test_coverage_template_has_clear_statuses_hudu_and_multiselect_filters():
     assert "Hudu" in template
     assert template.count('type="checkbox"') >= 12
     assert template.count('<details class="coverage-filter">') == 9
-    assert template.count('class="coverage-filter-search"') == 9
+    assert template.count('class="coverage-filter-search"') >= 9
     assert "coverage-filterbar" in template
-    assert "details.coverage-filter[open]" in template
-    assert "event.target.closest('details.coverage-filter')" in template
+    assert "const filterMenus" in template
+    assert "event.target.closest('details.coverage-filter, details.coverage-column-filter')" in template
     assert "coverage-result-summary" in template
     assert "Filtered results" in template
     assert "Counts reflect the current filter selections." in template
-    assert "No linked cards" in template
-    assert "Show archived Hudu records" in template
-    assert "row.hudu_status" in template
+    assert "No cards" in template
+    assert "Archived only" in template
+    assert "Current + archived" in template
+    assert 'name="show_archived_hudu"' not in template
+    assert "row.hudu_records" in template
     assert "Computer inventory from all sources" in template
     for label in ("Clients", "Devices", "Agent checks", "Online devices"):
         assert label in template

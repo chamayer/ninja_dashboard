@@ -1,8 +1,35 @@
 # Active Operations implementation plan
 
-## ACTIVE TASK — Synchronize duplicate Computers filter controls
+## ACTIVE TASK — Make Hudu archive scope an explicit filter choice
 
 **Status:** implementation complete; pending commit and push approval.
+
+**Goal:** replace the additive archived-Hudu checkbox with clear current,
+archived-only, and combined record scopes.
+
+**Scope:** Computers Hudu filter parsing, query conditions, template controls,
+and this plan. No migration or data change.
+
+**Decision:** Hudu uses one archive-scope selection: `Current only` (default),
+`Archived only`, or `Current + archived`. The legacy checkbox query parameter
+continues to map to `Current + archived` for bookmarked links.
+
+**Validation:** focused existing coverage test, Django check, template load,
+and diff check. No new test scripts.
+
+**Checkpoint:** current behavior exposed archived records as an additive
+checkbox, so it could not express an archived-only view. The new archive mode
+selects current-only, archived-only, or both, and the two duplicate controls
+stay synchronized. Legacy archived-checkbox URLs map to `both`.
+
+**Validation:** focused coverage tests (8 passed), Django check, template
+load, compilation, and diff check pass. No new test scripts were added.
+
+**Next action:** commit and push when approved.
+
+## ACTIVE TASK — Synchronize duplicate Computers filter controls
+
+**Status:** complete; released as 0.122.13 / `fd14a3b`.
 
 **Goal:** ensure changing a filter in the top row or matching table-column menu
 produces one consistent submitted value.
@@ -25,7 +52,7 @@ the other checked and still submitted the filter.
 state before form submission. Django checks, template loading, and diff checks
 pass; no test scripts were added.
 
-**Next action:** commit and push when approved.
+**Next action:** none.
 
 ## ACTIVE TASK — Prevent archived Hudu no-link filter timeouts
 

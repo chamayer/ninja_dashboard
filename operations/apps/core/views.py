@@ -8032,7 +8032,13 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         value for value in request.GET.getlist("hudu_links")
         if value in {"has_links", "no_links"}
     ]
-    show_archived_hudu = request.GET.get("show_archived_hudu") == "1"
+    hudu_archive_mode = request.GET.get("hudu_archive")
+    if hudu_archive_mode not in {"current", "archived", "both"}:
+        hudu_archive_mode = (
+            "both" if request.GET.get("show_archived_hudu") == "1" else "current"
+        )
+    hudu_is_archived = hudu_archive_mode == "archived"
+    hudu_includes_archived = hudu_archive_mode == "both"
     s1_exemption_filters = [
         value for value in request.GET.getlist("s1_exemption")
         if value in {"exempt", "not_exempt"}
@@ -8240,10 +8246,10 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                            NULL::text AS card_resolved_device_id, hudu.is_archived,
                            NULL::text AS canonical
                     FROM operations.v_hudu_computer_inventory_observation_current hudu
-                    WHERE (%s OR NOT hudu.is_archived)
+                    WHERE (hudu.is_archived = %s OR %s)
                       AND NOT hudu.has_relayed_cards
                     """,
-                    (show_archived_hudu,),
+                    (hudu_is_archived, hudu_includes_archived),
                 )
             else:
                 cur.execute(
@@ -8259,13 +8265,13 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                   ON alias.alias = LOWER(hudu.card_source)
                 WHERE hudu.tenant_id = 1
                   AND hudu.source_name = 'Hudu'
-                  AND (%s OR NOT hudu.is_archived)
+                  AND (hudu.is_archived = %s OR %s)
                   AND (
                       hudu.device_id IS NOT NULL
                       OR hudu.source_layout = ANY(%s)
                   )
                 """,
-                (show_archived_hudu, list(_COMPUTER_HUDU_LAYOUTS)),
+                (hudu_is_archived, hudu_includes_archived, list(_COMPUTER_HUDU_LAYOUTS)),
                 )
             hudu_rows = cur.fetchall()
             cur.execute(
@@ -8328,6 +8334,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         serial_number, link_verdict, card_source, card_id, resolved_device_id,
         is_archived, canonical,
     ) in hudu_rows:
+        is_archived = bool(is_archived)
         hudu = hudu_by_observation.setdefault(
             observation_id,
             {
@@ -8726,7 +8733,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             "online_filters": online_filters,
             "hudu_filters": hudu_filters,
             "hudu_link_filters": hudu_link_filters,
-            "show_archived_hudu": show_archived_hudu,
+            "hudu_archive_mode": hudu_archive_mode,
             "s1_exemption_filters": s1_exemption_filters,
             "os_family_filters": os_family_filters,
             "device_type_filters": device_type_filters,
