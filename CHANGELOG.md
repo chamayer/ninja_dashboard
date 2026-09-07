@@ -2,6 +2,13 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.122.22] — 2026-09-07 — Computer page evidence access repair
+
+### Fixed
+
+- Computer Observations and Details now use the Operations read-only evidence
+  views, restoring device-page access for the runtime database role.
+
 ## [0.122.21] — 2026-09-07 — Computer observations and field details
 
 ### Changed

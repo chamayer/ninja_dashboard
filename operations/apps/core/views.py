@@ -1872,23 +1872,20 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
             cur.execute("SET LOCAL operations.tenant_id = 1")
             cur.execute(
                 """
-            SELECT source.name, observation.entity_type, observation.external_id,
-                   observation.active, observation.last_seen_at,
+            SELECT evidence.source_name, evidence.entity_type, evidence.external_id,
+                   evidence.observation_active, evidence.observation_last_seen_at,
                    presence.reported_online, presence.last_contact_at
-              FROM operations.entity_observation_current observation
-              JOIN operations.source_instances source_instance
-                ON source_instance.tenant_id = observation.tenant_id
-               AND source_instance.id = observation.source_instance_id
-              JOIN operations.sources source ON source.id = source_instance.source_id
+              FROM operations.v_entity_source_evidence evidence
               LEFT JOIN operations.device_agent_presence_current presence
-                ON presence.tenant_id = observation.tenant_id
-               AND presence.device_id = observation.device_id
-               AND presence.platform = observation.platform
-               AND presence.entity_type = observation.entity_type
-             WHERE observation.tenant_id = %s AND observation.device_id = %s
-             ORDER BY source.name, observation.entity_type, observation.last_seen_at DESC
+                ON presence.tenant_id = evidence.tenant_id
+               AND presence.device_id = %s
+               AND presence.platform = evidence.source_name
+               AND presence.entity_type = evidence.entity_type
+             WHERE evidence.tenant_id = %s AND evidence.entity_id = %s
+             ORDER BY evidence.source_name, evidence.entity_type,
+                      evidence.observation_last_seen_at DESC
                 """,
-                [1, str(device.id)],
+                [str(device.id), 1, str(device.entity_id)],
             )
             observations = cur.fetchall()
 
@@ -2097,12 +2094,12 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
                 """
                 SELECT claim.attribute_key, claim.attribute_display_name,
                        claim.sensitivity, claim.value_display, source.name,
-                       observation.entity_type, observation.external_id,
+                       evidence.entity_type, evidence.external_id,
                        claim.last_observed_at
                   FROM operations.v_entity_attribute_claim_current claim
-                  JOIN operations.entity_observation_current observation
-                    ON observation.tenant_id = claim.tenant_id
-                   AND observation.observation_id = claim.observation_id
+                  LEFT JOIN operations.v_entity_source_evidence evidence
+                    ON evidence.tenant_id = claim.tenant_id
+                   AND evidence.observation_id = claim.observation_id
                   JOIN operations.source_instances source_instance
                     ON source_instance.tenant_id = claim.tenant_id
                    AND source_instance.id = claim.source_instance_id
