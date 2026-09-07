@@ -2,6 +2,14 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.122.11] — 2026-09-07 — Safe Ninja external-ID handling
+
+### Fixed
+
+- Ninja external IDs that are malformed or exceed the target numeric range no
+  longer cause cast failures in Windows servicing, Client Workspace, software
+  risk, or patching queue reads.
+
 ## [0.122.10] — 2026-09-07 — Compact Computers Hudu details
 
 ### Changed

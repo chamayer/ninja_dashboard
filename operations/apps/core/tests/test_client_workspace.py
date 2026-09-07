@@ -1,6 +1,10 @@
 import pytest
 
-from apps.core.client_workspace import _display_state, _issue_state
+from apps.core.client_workspace import (
+    _SAFE_NINJA_LOCATION_ID_SQL,
+    _display_state,
+    _issue_state,
+)
 
 
 @pytest.mark.parametrize(
@@ -38,3 +42,9 @@ def test_known_problem_remains_visible_when_data_is_delayed():
 def test_known_problem_remains_visible_when_current_data_is_unavailable():
     state = _display_state({"severities": {"high": 1}}, has_data=False)
     assert state == ("review", "Watch")
+
+
+def test_ninja_location_cast_is_total_for_invalid_and_out_of_range_ids():
+    assert "CASE" in _SAFE_NINJA_LOCATION_ID_SQL
+    assert "cl.external_id <= '2147483647'" in _SAFE_NINJA_LOCATION_ID_SQL
+    assert "ELSE NULL::integer" in _SAFE_NINJA_LOCATION_ID_SQL

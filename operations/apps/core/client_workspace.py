@@ -48,6 +48,16 @@ STATE_PRIORITY = {
 }
 SEVERITY_RANK = {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0}
 
+_SAFE_NINJA_LOCATION_ID_SQL = """CASE
+    WHEN cl.external_id ~ '^\\d+$'
+     AND (
+         length(cl.external_id) < 10
+         OR (length(cl.external_id) = 10 AND cl.external_id <= '2147483647')
+     )
+    THEN cl.external_id::integer
+    ELSE NULL::integer
+END"""
+
 
 def _empty_stats() -> dict:
     return {"severities": {}, "types": {}, "subjects": {}, "total": 0, "new": 0}
@@ -256,14 +266,14 @@ def _shared_context() -> tuple[dict, dict, dict]:
     with transaction.atomic(), connection.cursor() as cur:
         cur.execute("SET LOCAL operations.tenant_id = 1")
         cur.execute(
-            """
+            f"""
             SELECT cl.client_id, COUNT(DISTINCT l.id)::int
             FROM operations.v_client_source_link cl
             JOIN operations.sources s ON s.id = cl.source_id
             JOIN ninja_core.locations l
               ON s.name = 'Ninja'
              AND cl.external_id ~ '^[0-9]+$'
-             AND l.organization_id = cl.external_id::integer
+             AND l.organization_id = {_SAFE_NINJA_LOCATION_ID_SQL}
             WHERE cl.tenant_id = 1
             GROUP BY cl.client_id
             """

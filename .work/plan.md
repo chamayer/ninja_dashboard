@@ -1,5 +1,31 @@
 # Active root implementation plan
 
+## CURRENT TASK — Make Ninja external-ID casts safe
+
+**Status:** implementation complete; release preparation in progress.
+
+**Goal:** prevent malformed or out-of-range Ninja external IDs from causing
+PostgreSQL cast failures in servicing and Operations read paths.
+
+**Scope / affected files:** Ninja ID joins in Windows servicing, Client
+Workspace, software risk, and patching queue; their focused tests; version and
+changelog. No migration or source-data change.
+
+**Decision:** use a `CASE` expression with digit and integer-range checks,
+rather than relying on a regex predicate before a direct cast. PostgreSQL may
+evaluate a projected cast before applying a join predicate; invalid values must
+therefore yield a typed NULL safely.
+
+**Validation:** focused existing tests, changed-module compilation, Django
+system check, and staged diff check.
+
+**Checkpoint:** all four read paths now use total casts (`bigint` for Ninja
+device IDs, `integer` for Ninja location/device IDs) and the focused tests
+exercise the emitted SQL safeguards. Next: run the listed checks, commit, and
+push after the separate Computers Hudu UI release.
+
+**Next action:** validate and release the cast fix.
+
 ## CURRENT TASK — Restore durable Hudu documentation ingest scheduling
 
 **Status:** complete; released as 0.122.1 / `aa3afac`.

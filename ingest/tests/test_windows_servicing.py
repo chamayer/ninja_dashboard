@@ -4,10 +4,31 @@ from datetime import date
 from ingest.intel.windows_servicing import (
     Release,
     Rule,
+    _SAFE_NINJA_DEVICE_ID_BIGINT_SQL,
     _extract_build,
+    _load_devices,
     classify_windows,
     rollout_summary,
 )
+
+
+def test_ninja_device_cast_is_total_and_is_interpolated_into_device_query():
+    class Cursor:
+        sql = ""
+
+        def execute(self, sql, _params):
+            self.sql = sql
+
+        def fetchall(self):
+            return []
+
+    cursor = Cursor()
+    assert _load_devices(cursor, 1, None) == []
+
+    assert "CASE" in _SAFE_NINJA_DEVICE_ID_BIGINT_SQL
+    assert "link.external_id <= '9223372036854775807'" in _SAFE_NINJA_DEVICE_ID_BIGINT_SQL
+    assert "ELSE NULL::bigint" in _SAFE_NINJA_DEVICE_ID_BIGINT_SQL
+    assert _SAFE_NINJA_DEVICE_ID_BIGINT_SQL in cursor.sql
 
 
 def _release(

@@ -22,6 +22,16 @@ from ingest import db
 
 log = logging.getLogger(__name__)
 
+_SAFE_NINJA_DEVICE_ID_BIGINT_SQL = """CASE
+    WHEN link.external_id ~ '^\\d+$'
+     AND (
+         length(link.external_id) < 19
+         OR (length(link.external_id) = 19 AND link.external_id <= '9223372036854775807')
+     )
+    THEN link.external_id::bigint
+    ELSE NULL::bigint
+END"""
+
 
 @dataclass(frozen=True)
 class Release:
@@ -217,7 +227,7 @@ def _load_releases(cur: Any) -> list[Release]:
 
 def _load_devices(cur: Any, tenant_id: int, device_id: uuid.UUID | None) -> list[tuple]:
     cur.execute(
-        """
+        f"""
         SELECT d.id, d.client_id,
                COALESCE(attr.os_name, d.os_name, ninja.os_name, ''),
                COALESCE(attr.os_build_number, ninja.os_build_number, ''),
@@ -252,7 +262,7 @@ def _load_devices(cur: Any, tenant_id: int, device_id: uuid.UUID | None) -> list
               ON source.id = link.source_id AND source.name = 'Ninja'
             JOIN ninja_core.devices nd
               ON link.external_id ~ '^[0-9]+$'
-             AND nd.id = link.external_id::bigint
+             AND nd.id = {_SAFE_NINJA_DEVICE_ID_BIGINT_SQL}
             WHERE link.tenant_id = d.tenant_id
               AND link.device_id = d.id
             ORDER BY nd.is_current DESC, nd.last_seen_at DESC NULLS LAST

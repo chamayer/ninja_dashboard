@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from apps.core.views import _ninja_patch_device_ids
+from apps.core.views import _ninja_patch_device_ids, _safe_ninja_external_id_integer_sql
 
 
 def _link(source_name: str, external_id: str):
@@ -25,3 +25,12 @@ def test_patch_signal_ids_ignore_unrelated_and_out_of_range_source_links() -> No
     ]
 
     assert _ninja_patch_device_ids(links) == [12345]
+
+
+def test_ninja_sql_cast_is_total_for_invalid_and_out_of_range_ids() -> None:
+    sql = _safe_ninja_external_id_integer_sql("dl")
+
+    assert "CASE" in sql
+    assert "dl.external_id ~ '^\\d+$'" in sql
+    assert "dl.external_id <= '2147483647'" in sql
+    assert "ELSE NULL::integer" in sql

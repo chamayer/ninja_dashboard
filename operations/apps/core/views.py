@@ -87,6 +87,28 @@ _NINJA_PATCH_DEVICE_ID_MAX = 2_147_483_647
 _FINDING_DETAIL_KEY_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 
 
+def _safe_ninja_external_id_integer_sql(alias: str) -> str:
+    """Return a total SQL cast for a Ninja-owned numeric external ID.
+
+    A regex predicate on its own is not safe: PostgreSQL may evaluate a
+    projected cast before applying the predicate.  The range check also keeps
+    a numeric but oversized foreign ID out of Ninja's integer-keyed tables.
+    ``alias`` is internal, fixed SQL supplied by the caller.
+    """
+    return f"""CASE
+        WHEN {alias}.external_id ~ '^\\d+$'
+         AND (
+             length({alias}.external_id) < 10
+             OR (
+                 length({alias}.external_id) = 10
+                 AND {alias}.external_id <= '2147483647'
+             )
+         )
+        THEN {alias}.external_id::integer
+        ELSE NULL::integer
+    END"""
+
+
 def _ninja_patch_device_ids(links) -> list[int]:
     """Return patch-table-compatible IDs from this device's Ninja links.
 
@@ -5009,7 +5031,8 @@ def software_user_risk(request: HttpRequest) -> HttpResponse:
         -- filtered a single time) then hash-joining against latest_user drops
         -- it to 4.6 s for identical results.
         ninja_links AS MATERIALIZED (
-            SELECT dl.device_id, dl.external_id::integer AS ninja_device_id
+            SELECT dl.device_id,
+                   {_safe_ninja_external_id_integer_sql("dl")} AS ninja_device_id
             FROM operations.v_device_source_link dl
             JOIN operations.sources s ON s.id = dl.source_id
             WHERE dl.tenant_id = 1
@@ -6490,7 +6513,8 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
             FROM operations.v_device v
             WHERE {posture_where_sql}
         ), ninja_links AS (
-            SELECT DISTINCT dl.device_id, dl.external_id::integer AS ninja_device_id
+            SELECT DISTINCT dl.device_id,
+                   {_safe_ninja_external_id_integer_sql("dl")} AS ninja_device_id
             FROM operations.v_device_source_link dl
             JOIN operations.sources s ON s.id = dl.source_id
             WHERE dl.tenant_id = 1 AND LOWER(s.name) = 'ninja'
@@ -8572,6 +8596,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                 counts[row["status"]] += 1
         platform_cards.append({
             "platform": platform,
+            "applicable_count": sum(counts.values()),
             "counts": [
                 {
                     "name": state,
