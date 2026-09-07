@@ -2,6 +2,13 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.122.16] — 2026-09-07 — Cleaner Computers Hudu cells
+
+### Changed
+
+- Computers renders a single Hudu record directly and reserves Details for
+  multiple records; user-facing Hudu link status now says links, not cards.
+
 ## [0.122.15] — 2026-09-07 — Simpler Computers Hudu filtering
 
 ### Changed

@@ -1,8 +1,32 @@
 # Active Operations implementation plan
 
-## ACTIVE TASK — Simplify Computers Hudu record filtering
+## ACTIVE TASK — Simplify Computers Hudu cell content
 
 **Status:** implementation complete; pending commit and push approval.
+
+**Goal:** remove repeated Hudu archive/link information and replace technical
+card wording with human-facing link wording.
+
+**Scope:** Computers Hudu table-cell template and this plan. No query,
+migration, or data change.
+
+**Decision:** render one Hudu record directly; reserve the summary/Details
+expander for multiple records. Use `links` / `No links` instead of `cards`.
+
+**Validation:** template load, Django check, and diff check. No new test
+scripts.
+
+**Checkpoint:** one record now renders directly as type, state, link status,
+and direct links. Multiple records retain the compact summary/Details view.
+
+**Validation:** focused coverage tests (8 passed), Django check, template
+load, and diff check pass. No new test scripts were added.
+
+**Next action:** commit and push when approved.
+
+## ACTIVE TASK — Simplify Computers Hudu record filtering
+
+**Status:** complete; released as 0.122.15 / `42e4d87`.
 
 **Goal:** expose the useful Hudu record combinations as one plain-language
 filter while keeping total Hudu presence separate.
@@ -27,11 +51,12 @@ Archived only while details retain all records.
 load, compilation, migration SQL review, and diff check pass. No new test
 scripts were added.
 
-**Next action:** commit and push when approved.
+**Next action:** none.
 
-## ACTIVE TASK — Make Hudu record-state filters multi-select with full context
+## COMPLETED SUBTASK — Make Hudu record-state filters multi-select with full context
 
-**Status:** implementation complete; pending commit and push approval.
+**Status:** superseded by the simpler record-filter choices above; included in
+0.122.15 / `42e4d87`.
 
 **Goal:** allow Current and Archived Hudu state filters to combine while every
 matching row retains its full Hudu record context.
@@ -39,10 +64,9 @@ matching row retains its full Hudu record context.
 **Scope:** Computers Hudu query/view, state-filter behavior, template controls,
 and this plan. No source-data or identity-link changes.
 
-**Decision:** Current and Archived are independent checkboxes. They determine
-whether a row matches, but the Hudu cell displays all records attached to that
-computer. A narrow Hudu-computer evidence view applies the source restriction
-before card expansion, avoiding the archived-query timeout.
+**Decision:** retained the full-record display and narrow Hudu-computer
+evidence view, then replaced the intermediate checkboxes with the simpler
+plain-language record-filter choices above.
 
 **Validation:** focused coverage tests, Django check, migration SQL review,
 template load, compilation, and diff check. No new test scripts.
@@ -56,7 +80,7 @@ before card expansion.
 **Validation:** focused coverage tests (8 passed), Django check, migration SQL
 review, template load, compilation, and diff check are in progress.
 
-**Next action:** finish basic validation, then commit and push when approved.
+**Next action:** none.
 
 ## ACTIVE TASK — Make Hudu archive scope an explicit filter choice
 

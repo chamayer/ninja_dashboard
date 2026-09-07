@@ -308,7 +308,7 @@ def test_coverage_template_has_clear_statuses_hudu_and_multiselect_filters():
     assert "coverage-result-summary" in template
     assert "Filtered results" in template
     assert "Counts reflect the current filter selections." in template
-    assert "No cards" in template
+    assert "No links" in template
     assert 'name="hudu_record_filter"' in template
     assert "Has current record" in template
     assert "Has archived record" in template
