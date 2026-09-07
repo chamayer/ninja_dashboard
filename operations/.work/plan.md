@@ -1,8 +1,35 @@
 # Active Operations implementation plan
 
-## ACTIVE TASK — Prevent archived Hudu no-link filter timeouts
+## ACTIVE TASK — Synchronize duplicate Computers filter controls
 
 **Status:** implementation complete; pending commit and push approval.
+
+**Goal:** ensure changing a filter in the top row or matching table-column menu
+produces one consistent submitted value.
+
+**Scope:** Computers template filter behavior and this plan. No query,
+migration, or data change.
+
+**Decision:** controls with the same checkbox name and value synchronize on
+change. This fixes archived-Hudu state and avoids the same discrepancy for
+other duplicated filter controls.
+
+**Validation:** template load, Django check, and diff check. No new test
+scripts.
+
+**Checkpoint:** the top and column Hudu menus each render
+`show_archived_hudu=1` inside the same GET form. Unchecking one therefore left
+the other checked and still submitted the filter.
+
+**Checkpoint:** matching duplicate checkboxes now synchronize their checked
+state before form submission. Django checks, template loading, and diff checks
+pass; no test scripts were added.
+
+**Next action:** commit and push when approved.
+
+## ACTIVE TASK — Prevent archived Hudu no-link filter timeouts
+
+**Status:** complete; released as 0.122.12 / `ebdaccc`.
 
 **Goal:** keep Computers usable when archived Hudu records and the `No links`
 filter are selected together.
@@ -25,7 +52,7 @@ card fields, preserving the existing Python rendering path without expanding
 cards. Compilation, Django checks, template loading, migration SQL review, and
 diff checks pass; no test scripts were added.
 
-**Next action:** commit and push the migration-backed fix when approved.
+**Next action:** none.
 
 ## ACTIVE TASK — Simplify Computers Hudu details and filter menus
 

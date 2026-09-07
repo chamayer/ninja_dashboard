@@ -147,6 +147,15 @@ document.querySelectorAll('.coverage-filter-search').forEach((search) => {
         });
     });
 });
+document.querySelectorAll('.coverage-filterbar input[type="checkbox"][name]').forEach((input) => {
+    input.addEventListener('change', () => {
+        document.querySelectorAll('.coverage-filterbar input[type="checkbox"][name]').forEach((other) => {
+            if (other !== input && other.name === input.name && other.value === input.value) {
+                other.checked = input.checked;
+            }
+        });
+    });
+});
 const filterMenus = [...document.querySelectorAll('details.coverage-filter, details.coverage-column-filter')];
 const huduDetails = [...document.querySelectorAll('details.coverage-hudu-details')];
 filterMenus.forEach((menu) => menu.addEventListener('toggle', () => {

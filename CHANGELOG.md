@@ -2,6 +2,13 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.122.13] — 2026-09-07 — Computers filter consistency
+
+### Fixed
+
+- Matching top-row and table-column filter checkboxes now stay synchronized,
+  so clearing archived Hudu records clears the submitted filter.
+
 ## [0.122.12] — 2026-09-07 — Archived Hudu inventory filter reliability
 
 ### Fixed
