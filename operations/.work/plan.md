@@ -1,34 +1,30 @@
 # Active Operations implementation plan
 
-## ACTIVE TASK — Group Hudu-only computer records
+## ACTIVE TASK — Restrict Computers Hudu grouping to confirmed records
 
 **Status:** complete; pending release commit and push approval.
 
-**Goal:** make every Hudu-only computer name/client group visible as one
-Computers row with each current and archived Hudu record listed separately.
+**Goal:** prevent name-only Hudu matches from being presented as one combined
+computer record.
 
 **Scope:** `apps/core/views.py`, `templates/coverage.html`, and this active
 plan. No migration, source write, data-model change, or filter-semantics
 change.
 
-**Decision:** Hudu records sharing a source client/name may be grouped for
-presentation even when none resolves to a canonical computer. They remain
-separate Hudu records; the display does not establish a device identity,
-source link, or coverage state.
+**Decision:** group Hudu records only when an unlinked record shares a
+client/name with exactly one canonical computer that already has a confirmed
+Hudu record. A name-only record remains an independent inventory row, even if
+another Hudu record has the same visible name.
 
 **Validation:** basic Django check, template load, Python compilation, and
 diff check. No new test scripts. Commit, push, and deployment require
 separate approval.
 
-**Checkpoint:** Hudu-only rows now group every Hudu record with the same
-source client/name, including `RD-QB`’s current and archived Servers records.
-The existing confirmed-placement rule remains unchanged: an unlinked record
-with one confirmed canonical Hudu record is shown on that canonical computer.
-Each Hudu record in the Computers column now has its own explicit “Open in
-Hudu” link and, when that exact record has an active canonical device link,
-an “Open device in Operations” link. Python compilation, Django system checks,
-coverage-template loading, and diff checks pass. No tests or test scripts were
-added.
+**Checkpoint:** removed the broad Hudu-only client/name grouping introduced in
+`663d065`. Only the pre-existing confirmed-device grouping remains; all
+name-only records stay separate, preserving their individual direct links.
+Python compilation, Django system checks, coverage-template loading, and diff
+checks pass. No tests or test scripts were added.
 
 **Next action:** none.
 

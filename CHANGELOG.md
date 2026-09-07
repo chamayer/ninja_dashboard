@@ -2,6 +2,14 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.122.9] — 2026-09-07 — Confirmed Hudu grouping
+
+### Fixed
+
+- Computers no longer groups Hudu records solely because they share a visible
+  client and name. Name-only records remain separate unless the existing
+  confirmed-device grouping rule applies.
+
 ## [0.122.8] — 2026-09-04 — Hudu record navigation
 
 ### Changed
