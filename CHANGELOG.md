@@ -2,6 +2,18 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.122.15] — 2026-09-07 — Simpler Computers Hudu filtering
+
+### Changed
+
+- Computers now keeps total Hudu presence separate from a plain-language
+  current/archive record filter, shown only when In Hudu is selected.
+
+### Fixed
+
+- Hudu computer evidence is scoped before relayed-card expansion, keeping
+  archived record filtering responsive while retaining complete row details.
+
 ## [0.122.14] — 2026-09-07 — Computers Hudu archive scope
 
 ### Changed

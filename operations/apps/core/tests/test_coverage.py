@@ -184,11 +184,10 @@ def test_coverage_uses_effective_requirements_and_multiselect_filters(monkeypatc
     assert "stale_required_platform" in statement
     assert params is None
     hudu_statement, hudu_params = cursor.queries[2]
-    assert "v_cmdb_inventory_evidence_current" in hudu_statement
+    assert "v_hudu_computer_inventory_evidence_current" in hudu_statement
     assert "platform_aliases" in hudu_statement
-    assert "hudu.source_name = 'Hudu'" in hudu_statement
-    assert "hudu.source_layout = ANY(%s)" in hudu_statement
-    assert hudu_params == (False, False, ["Computer Assets", "Servers"])
+    assert "hudu.source_name = 'Hudu'" not in hudu_statement
+    assert hudu_params is None
 
     context = captured["context"]
     assert context["client_filters"] == ["acme", "beta"]
@@ -310,8 +309,11 @@ def test_coverage_template_has_clear_statuses_hudu_and_multiselect_filters():
     assert "Filtered results" in template
     assert "Counts reflect the current filter selections." in template
     assert "No cards" in template
-    assert "Archived only" in template
-    assert "Current + archived" in template
+    assert 'name="hudu_record_filter"' in template
+    assert "Has current record" in template
+    assert "Has archived record" in template
+    assert "Current records only" in template
+    assert "Archived records only" in template
     assert 'name="show_archived_hudu"' not in template
     assert "row.hudu_records" in template
     assert "Computer inventory from all sources" in template

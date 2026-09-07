@@ -1,8 +1,66 @@
 # Active Operations implementation plan
 
-## ACTIVE TASK — Make Hudu archive scope an explicit filter choice
+## ACTIVE TASK — Simplify Computers Hudu record filtering
 
 **Status:** implementation complete; pending commit and push approval.
+
+**Goal:** expose the useful Hudu record combinations as one plain-language
+filter while keeping total Hudu presence separate.
+
+**Scope:** Computers Hudu filter parsing, matching behavior, template controls,
+and this plan. No migration or data change beyond the pending performance view.
+
+**Decision:** keep In Hudu and Not in Hudu as total presence. Add one record
+filter with Any, Has current, Has archived, Current only, and Archived only.
+The result row always retains all Hudu records.
+
+**Validation:** focused coverage tests, Django check, template load,
+compilation, migration SQL review, and diff check. No new test scripts.
+
+**Checkpoint:** multi-select Current/Archived state controls did not clearly
+express the requested four useful record searches. The record filter is now
+hidden and disabled unless In Hudu is selected, and the backend ignores it
+otherwise. It supports Any, Has current, Has archived, Current only, and
+Archived only while details retain all records.
+
+**Validation:** focused coverage tests (8 passed), Django check, template
+load, compilation, migration SQL review, and diff check pass. No new test
+scripts were added.
+
+**Next action:** commit and push when approved.
+
+## ACTIVE TASK — Make Hudu record-state filters multi-select with full context
+
+**Status:** implementation complete; pending commit and push approval.
+
+**Goal:** allow Current and Archived Hudu state filters to combine while every
+matching row retains its full Hudu record context.
+
+**Scope:** Computers Hudu query/view, state-filter behavior, template controls,
+and this plan. No source-data or identity-link changes.
+
+**Decision:** Current and Archived are independent checkboxes. They determine
+whether a row matches, but the Hudu cell displays all records attached to that
+computer. A narrow Hudu-computer evidence view applies the source restriction
+before card expansion, avoiding the archived-query timeout.
+
+**Validation:** focused coverage tests, Django check, migration SQL review,
+template load, compilation, and diff check. No new test scripts.
+
+**Checkpoint:** the previous archive scope hid the counterpart record, making
+an archived match unable to disclose an existing current Hudu record. Current
+and Archived now qualify a row independently, while every matching row retains
+both record types in its Hudu details. Migration 0150 scopes Hudu computers
+before card expansion.
+
+**Validation:** focused coverage tests (8 passed), Django check, migration SQL
+review, template load, compilation, and diff check are in progress.
+
+**Next action:** finish basic validation, then commit and push when approved.
+
+## ACTIVE TASK — Make Hudu archive scope an explicit filter choice
+
+**Status:** complete; released as 0.122.14 / `1cc567b`.
 
 **Goal:** replace the additive archived-Hudu checkbox with clear current,
 archived-only, and combined record scopes.
@@ -25,7 +83,7 @@ stay synchronized. Legacy archived-checkbox URLs map to `both`.
 **Validation:** focused coverage tests (8 passed), Django check, template
 load, compilation, and diff check pass. No new test scripts were added.
 
-**Next action:** commit and push when approved.
+**Next action:** none.
 
 ## ACTIVE TASK — Synchronize duplicate Computers filter controls
 
