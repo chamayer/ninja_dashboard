@@ -1,5 +1,17 @@
 # Active root implementation plan
 
+## CURRENT TASK — Restore device merge review route
+
+**Status:** release preparation.
+
+**Goal:** repair the device-merge review page's obsolete breadcrumb route.
+
+**Scope:** one Operations template route reference, its plan, and patch
+release metadata. No data, schema, or identity behavior change.
+
+**Validation:** Django check, template load, and diff check passed. Commit,
+push, Portainer deployment, and health verification are next.
+
 ## CURRENT TASK — Strengthen device identity resolution
 
 **Status:** release preparation.

@@ -47,7 +47,7 @@
 
 <div class="dm-wrap">
     <div class="dm-crumbs">
-        <a href="{% url 'client_detail' client_slug=device_a.client.slug %}">{{ device_a.client.display_name }}</a>
+        <a href="{% url 'org_index' org_slug=device_a.client.slug %}">{{ device_a.client.display_name }}</a>
         &rsaquo; Merge devices
     </div>
     <h1 class="dm-title">Merge devices</h1>

@@ -1,5 +1,27 @@
 # Active Operations implementation plan
 
+## ACTIVE TASK — Restore device merge review route
+
+**Status:** release preparation.
+
+**Goal:** make merge-candidate review links open the existing device merge
+screen without a server error.
+
+**Scope:** one obsolete template route name and this plan. No device-data,
+identity, schema, or merge-behavior change.
+
+**Decision:** use the current `org_index` route and its `org_slug` parameter
+for the merge page's client breadcrumb; `client_detail` no longer exists.
+
+**Validation:** template load, Django check, and diff check. No new test
+scripts.
+
+**Checkpoint:** production traceback identifies `device_merge.html` reversing
+the retired `client_detail` route before it can render the review page. The
+breadcrumb now targets `org_index`.
+
+**Next action:** commit and deploy the approved 0.122.19 patch release.
+
 ## ACTIVE TASK — Strengthen device identity creation and resolution
 
 **Status:** release preparation.

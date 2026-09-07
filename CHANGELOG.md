@@ -2,6 +2,13 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.122.19] — 2026-09-07 — Merge review route repair
+
+### Fixed
+
+- Device merge review now renders its client breadcrumb through the current
+  Operations organization route instead of failing with a server error.
+
 ## [0.122.18] — 2026-09-07 — Strong device identity resolution
 
 ### Fixed
