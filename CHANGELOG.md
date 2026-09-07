@@ -2,6 +2,15 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.122.10] — 2026-09-07 — Compact Computers Hudu details
+
+### Changed
+
+- Computers now summarizes Hudu evidence in the table and reveals individual
+  Hudu records, cards, and direct links only when Details is expanded.
+- Computers filter menus now close when another menu opens, on outside-click,
+  or with Escape while retaining checkbox multi-selection.
+
 ## [0.122.9] — 2026-09-07 — Confirmed Hudu grouping
 
 ### Fixed

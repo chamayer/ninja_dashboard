@@ -25,11 +25,14 @@
 .coverage-offline { background:#fef3c7; color:#92400e; }
 .coverage-stale { background:#fed7aa; color:#9a3412; }
 .coverage-missing { background:#fee2e2; color:#991b1b; }
-.coverage-hudu { width:12rem; max-width:12rem; font-size:0.82rem; line-height:1.45; overflow-wrap:anywhere; }
+.coverage-hudu { width:11rem; max-width:11rem; font-size:0.82rem; line-height:1.45; overflow-wrap:anywhere; }
 .coverage-hudu ul { margin:0.25rem 0 0; padding-left:1rem; }
 .coverage-hudu li { overflow-wrap:anywhere; }
 .coverage-hudu-record + .coverage-hudu-record { border-top:1px solid var(--border); margin-top:0.45rem; padding-top:0.45rem; }
 .coverage-hudu-status { color:var(--muted); font-size:0.75rem; }
+.coverage-hudu-details summary { cursor:pointer; color:var(--link, #0b69a3); }
+.coverage-hudu-details[open] summary { margin-bottom:0.45rem; }
+.coverage-hudu-links a + a::before { content:" · "; color:var(--muted); }
 .coverage-filter { position:relative; min-width:10rem; }
 .coverage-filter summary { cursor:pointer; list-style:none; border:1px solid var(--border); border-radius:4px; background:var(--surface); padding:0.45rem 0.65rem; font-size:0.85rem; }
 .coverage-filter summary::-webkit-details-marker { display:none; }
@@ -115,7 +118,7 @@
                 <th><details class="coverage-column-filter"><summary>Device</summary><div class="coverage-column-filter-options"><input type="search" name="device" value="{{ device_query }}" placeholder="Device name" aria-label="Device name"><button type="submit">Apply</button></div></details></th>
                 <th><details class="coverage-column-filter"><summary>OS family</summary><div class="coverage-column-filter-options"><input class="coverage-filter-search" type="search" placeholder="Search OS families" aria-label="Search OS families">{% for family in os_families %}<label><input type="checkbox" name="os_family" value="{{ family }}"{% if family in os_family_filters %} checked{% endif %}>{{ family }}</label>{% endfor %}<button type="submit">Apply</button></div></details></th>
                 <th><details class="coverage-column-filter"><summary>Type</summary><div class="coverage-column-filter-options"><input class="coverage-filter-search" type="search" placeholder="Search device types" aria-label="Search device types">{% for device_type in device_types %}<label><input type="checkbox" name="device_type" value="{{ device_type }}"{% if device_type in device_type_filters %} checked{% endif %}>{{ device_type }}</label>{% endfor %}<button type="submit">Apply</button></div></details></th>
-                <th style="width:12rem;"><details class="coverage-column-filter"><summary>Hudu</summary><div class="coverage-column-filter-options"><strong>Presence</strong><label><input type="checkbox" name="hudu" value="in_hudu"{% if "in_hudu" in hudu_filters %} checked{% endif %}>In Hudu</label><label><input type="checkbox" name="hudu" value="not_in_hudu"{% if "not_in_hudu" in hudu_filters %} checked{% endif %}>Not in Hudu</label><hr><strong>Links</strong><label><input type="checkbox" name="hudu_links" value="has_links"{% if "has_links" in hudu_link_filters %} checked{% endif %}>Has links</label><label><input type="checkbox" name="hudu_links" value="no_links"{% if "no_links" in hudu_link_filters %} checked{% endif %}>No links</label><hr><label><input type="checkbox" name="show_archived_hudu" value="1"{% if show_archived_hudu %} checked{% endif %}>Show archived records</label><button type="submit">Apply</button></div></details></th>
+                <th style="width:11rem;"><details class="coverage-column-filter"><summary>Hudu</summary><div class="coverage-column-filter-options"><strong>Presence</strong><label><input type="checkbox" name="hudu" value="in_hudu"{% if "in_hudu" in hudu_filters %} checked{% endif %}>In Hudu</label><label><input type="checkbox" name="hudu" value="not_in_hudu"{% if "not_in_hudu" in hudu_filters %} checked{% endif %}>Not in Hudu</label><hr><strong>Links</strong><label><input type="checkbox" name="hudu_links" value="has_links"{% if "has_links" in hudu_link_filters %} checked{% endif %}>Has links</label><label><input type="checkbox" name="hudu_links" value="no_links"{% if "no_links" in hudu_link_filters %} checked{% endif %}>No links</label><hr><label><input type="checkbox" name="show_archived_hudu" value="1"{% if show_archived_hudu %} checked{% endif %}>Show archived records</label><button type="submit">Apply</button></div></details></th>
                 {% for column in platform_filter_columns %}<th><details class="coverage-column-filter"><summary>{{ column.name }}</summary><div class="coverage-column-filter-options">{% for state in states %}<label><input type="checkbox" name="platform_status" value="{{ column.name }}|{{ state }}"{% if state in column.selected_states %} checked{% endif %}>{{ state }}</label>{% endfor %}<label><input type="checkbox" name="platform_status" value="{{ column.name }}|Not applicable"{% if "Not applicable" in column.selected_states %} checked{% endif %}>Not applicable</label>{% if column.name == "Ninja" %}<label><input type="checkbox" name="platform_status" value="{{ column.name }}|Possible match"{% if "Possible match" in column.selected_states %} checked{% endif %}>Possible match</label>{% endif %}<button type="submit">Apply</button></div></details></th>{% endfor %}
             </tr></thead>
             <tbody>
@@ -124,7 +127,7 @@
                     <td>{% if row.client_slug %}<a href="{% url 'org_index' org_slug=row.client_slug %}">{{ row.client_name }}</a>{% else %}{{ row.client_name }}{% endif %}</td>
                     <td>{% if row.device_id %}<a href="{% url 'device_detail' org_slug=row.client_slug device_id=row.device_id %}">{{ row.hostname|default:"Unnamed computer" }}</a>{% else %}{{ row.hostname|default:"Unnamed computer" }}{% endif %}</td>
                     <td>{{ row.os_family|default:"—" }}</td><td>{{ row.device_type|default:"—" }}</td>
-                    <td class="coverage-hudu">{% if row.hudu_records %}{% for record in row.hudu_records %}<div class="coverage-hudu-record">{{ record.layout }} <span class="coverage-hudu-status">{% if record.is_archived %}Archived{% else %}Current{% endif %}</span>{% if record.url %}<br><a href="{{ record.url }}" rel="noopener" target="_blank">Open in Hudu</a>{% endif %}{% if record.device_id %}<br><a href="{% url 'device_detail' org_slug=record.device_client_slug device_id=record.device_id %}">Open device in Operations</a>{% endif %}{% if record.links %}<ul>{% for link in record.links %}<li>{{ link }}</li>{% endfor %}</ul>{% else %}<span class="muted">No linked cards</span>{% endif %}</div>{% endfor %}{% else %}<span class="muted">Not in Hudu</span>{% endif %}</td>
+                    <td class="coverage-hudu">{% if row.hudu_records %}<details class="coverage-hudu-details"><summary>{% if row.hudu_records|length == 1 %}{% if row.hudu_current_count %}Current{% else %}Archived{% endif %}{% if row.hudu_card_count %} · {{ row.hudu_card_count }} cards{% else %} · No cards{% endif %}{% else %}{{ row.hudu_records|length }} records · {{ row.hudu_current_count }} current · {{ row.hudu_archived_count }} archived{% endif %}</summary>{% for record in row.hudu_records %}<div class="coverage-hudu-record">{{ record.layout }} <span class="coverage-hudu-status">{% if record.is_archived %}Archived{% else %}Current{% endif %}</span>{% if record.links %}<div>{{ record.links|length }} cards</div>{% else %}<span class="muted">No cards</span>{% endif %}<div class="coverage-hudu-links">{% if record.url %}<a href="{{ record.url }}" rel="noopener" target="_blank">Hudu</a>{% endif %}{% if record.device_id %}<a href="{% url 'device_detail' org_slug=record.device_client_slug device_id=record.device_id %}">Operations device</a>{% endif %}</div></div>{% endfor %}</details>{% else %}<span class="muted">Not in Hudu</span>{% endif %}</td>
                     {% for cell in row.platform_cells %}<td>{% if cell.possible_match %}<span class="muted">Possible:</span> <a href="{% url 'device_detail' org_slug=cell.possible_match.client_slug device_id=cell.possible_match.device_id %}">{{ cell.possible_match.hostname }}</a>{% elif cell.status == "Not applicable" %}<span class="muted">Not applicable</span>{% elif cell.url %}<a class="coverage-status coverage-{{ cell.status|lower }}" href="{{ cell.url }}">{{ cell.status }}</a>{% else %}<span class="coverage-status coverage-{{ cell.status|lower }}">{{ cell.status }}</span>{% endif %}</td>{% endfor %}
                 </tr>
                 {% endfor %}
@@ -144,11 +147,31 @@ document.querySelectorAll('.coverage-filter-search').forEach((search) => {
         });
     });
 });
-document.addEventListener('click', (event) => {
-    if (event.target.closest('details.coverage-filter, details.coverage-column-filter')) return;
-    document.querySelectorAll('details.coverage-filter[open], details.coverage-column-filter[open]').forEach((filter) => {
-        filter.removeAttribute('open');
+const filterMenus = [...document.querySelectorAll('details.coverage-filter, details.coverage-column-filter')];
+const huduDetails = [...document.querySelectorAll('details.coverage-hudu-details')];
+filterMenus.forEach((menu) => menu.addEventListener('toggle', () => {
+    if (!menu.open) return;
+    filterMenus.forEach((other) => {
+        if (other !== menu) other.removeAttribute('open');
     });
+}));
+huduDetails.forEach((detail) => detail.addEventListener('toggle', () => {
+    if (!detail.open) return;
+    huduDetails.forEach((other) => {
+        if (other !== detail) other.removeAttribute('open');
+    });
+}));
+document.addEventListener('click', (event) => {
+    if (!event.target.closest('details.coverage-filter, details.coverage-column-filter')) {
+        filterMenus.forEach((menu) => menu.removeAttribute('open'));
+    }
+    if (!event.target.closest('details.coverage-hudu-details')) {
+        huduDetails.forEach((detail) => detail.removeAttribute('open'));
+    }
+});
+document.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape') return;
+    filterMenus.concat(huduDetails).forEach((detail) => detail.removeAttribute('open'));
 });
 </script>
 {% endblock %}

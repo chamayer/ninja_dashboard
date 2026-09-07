@@ -1,30 +1,34 @@
 # Active Operations implementation plan
 
-## ACTIVE TASK — Restrict Computers Hudu grouping to confirmed records
+## ACTIVE TASK — Simplify Computers Hudu details and filter menus
 
 **Status:** complete; pending release commit and push approval.
 
-**Goal:** prevent name-only Hudu matches from being presented as one combined
-computer record.
+**Goal:** make the Hudu column compact while retaining record-level detail,
+and make Computers filter menus close predictably.
 
 **Scope:** `apps/core/views.py`, `templates/coverage.html`, and this active
 plan. No migration, source write, data-model change, or filter-semantics
 change.
 
-**Decision:** group Hudu records only when an unlinked record shares a
-client/name with exactly one canonical computer that already has a confirmed
-Hudu record. A name-only record remains an independent inventory row, even if
-another Hudu record has the same visible name.
+**Decision:** the Hudu cell shows a short current/archive/card summary with a
+Details expander containing each separate record and its links. Filter menus
+allow multi-selection but only one filter menu is open at a time; click-outside
+and Escape close menus. Hudu detail expanders close other Hudu detail
+expanders, but do not affect filters.
 
 **Validation:** basic Django check, template load, Python compilation, and
 diff check. No new test scripts. Commit, push, and deployment require
 separate approval.
 
-**Checkpoint:** removed the broad Hudu-only client/name grouping introduced in
-`663d065`. Only the pre-existing confirmed-device grouping remains; all
-name-only records stay separate, preserving their individual direct links.
-Python compilation, Django system checks, coverage-template loading, and diff
-checks pass. No tests or test scripts were added.
+**Checkpoint:** the Hudu cell now summarizes a single record as its
+current/archive state and card count, or multiple records as current/archive
+counts. Its Details expander retains each individual record and direct links;
+only one Hudu expander is open at a time. Filter menus now coordinate so one
+is open at a time, outside-click and Escape close them, and checkbox clicks
+preserve multi-select. Python compilation, Django system checks,
+coverage-template loading, and diff checks pass. No tests or test scripts were
+added.
 
 **Next action:** none.
 

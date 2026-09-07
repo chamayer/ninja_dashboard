@@ -8425,6 +8425,13 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                 ),
             })
         hudu["hudu_url"] = _safe_external_http_url(hudu["hudu_url"])
+        hudu["hudu_current_count"] = sum(
+            not record["is_archived"] for record in records
+        )
+        hudu["hudu_archived_count"] = sum(
+            record["is_archived"] for record in records
+        )
+        hudu["hudu_card_count"] = len(hudu["hudu_links"])
         hudu["hudu_status"] = (
             "Archived in Hudu" if hudu["hudu_archived"]
             else "In Hudu (also archived)" if hudu["hudu_has_archived"]
