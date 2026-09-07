@@ -1,5 +1,30 @@
 # Active root implementation plan
 
+## CURRENT TASK — Strengthen device identity resolution
+
+**Status:** release preparation.
+
+**Goal:** strengthen the existing Operations device resolver so source records
+that strongly identify the same endpoint attach consistently regardless of
+arrival order, while existing split devices remain manual review decisions.
+
+**Scope:** `ingest` identity matching and Ninja observation writing; the
+Operations merge-review template and plan; release metadata. Hudu remains
+explicit-link documentation evidence. No schema migration, automatic merge,
+or production data repair is included.
+
+**Decision:** exact source identity, usable same-client serial, and same-client
+normalized hostname plus a shared valid MAC are strong automatic attachment
+proof. Name-only remains review-only. Existing attached records never move
+automatically; strong split pairs become 0.9900 merge proposals.
+
+**Validation:** compilation, Django check, template load, Ruff, formatting,
+diff check, and read-only production validation of the strong-pair query and
+candidate-statement plan passed. Commit/push/deploy validation remains next.
+
+**Next action:** commit the approved release, push both remotes, trigger the
+coupled Portainer redeploy, and verify health and the expected review proposals.
+
 ## CURRENT TASK — Make Ninja external-ID casts safe
 
 **Status:** complete; released as 0.122.11 / `1dd9271`.

@@ -9,8 +9,8 @@
         {% include "_csv_download.html" %}
     </div>
     <p class="muted">
-        Devices that look like one machine, proposed for review. Each row groups
-        every device sharing a normalized hostname within one client.
+        Devices that may be one machine, proposed for review. Some rows are
+        name-only collisions; strong rows include matching hardware evidence.
     </p>
     {% if key_filter %}
     <p style="margin-top:0.5rem;">
@@ -57,6 +57,7 @@
                 <th style="padding: 0.5rem;">Canonical key</th>
                 <th style="padding: 0.5rem;">Client</th>
                 <th style="padding: 0.5rem;">Members</th>
+                <th style="padding: 0.5rem;">Why it matches</th>
                 <th style="padding: 0.5rem;">Confidence</th>
                 <th style="padding: 0.5rem;">Status</th>
             </tr>
@@ -67,7 +68,15 @@
                 <td style="padding: 0.5rem;"><code>{{ c.entity_type }}</code></td>
                 <td style="padding: 0.5rem;">{{ c.canonical_key }}</td>
                 <td style="padding: 0.5rem;">{{ c.client.display_name|default:"—" }}</td>
-                <td style="padding: 0.5rem;">{{ c.member_snapshots|length }}</td>
+                <td style="padding: 0.5rem;">
+                    {% for member in c.member_snapshots %}
+                    {% if c.client %}<a href="{% url 'device_detail' c.client.slug member.device_id %}">{{ member.hostname|default:member.device_id }}</a>{% else %}{{ member.hostname|default:member.device_id }}{% endif %}{% if not forloop.last %}, {% endif %}
+                    {% endfor %}
+                    {% if c.client and c.member_snapshots|length == 2 %}
+                    <br><a href="{% url 'device_merge' c.client.slug c.member_snapshots.0.device_id c.member_snapshots.1.device_id %}">Review merge →</a>
+                    {% endif %}
+                </td>
+                <td style="padding: 0.5rem;">{{ c.match_reason|default:"—" }}</td>
                 <td style="padding: 0.5rem;">{{ c.confidence|default:"—" }}</td>
                 <td style="padding: 0.5rem;">{{ c.get_status_display }}</td>
             </tr>

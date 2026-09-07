@@ -73,7 +73,15 @@ def drain_resolution(batch_size: int = 200, *, refresh_current: bool = True) -> 
 
         identity_conflict_ft_id = _load_finding_type_id(cur, "identity_conflict")
 
-        for obs_id, entity_type, entity_key, platform, client_id, observed_at, canonical_data in rows:
+        for (
+            obs_id,
+            entity_type,
+            entity_key,
+            platform,
+            client_id,
+            observed_at,
+            canonical_data,
+        ) in rows:
             cd = canonical_data or {}
 
             # Try serial number first (high confidence, unique hardware ID).
@@ -91,7 +99,9 @@ def drain_resolution(batch_size: int = 200, *, refresh_current: bool = True) -> 
                 if device_id is not None:
                     _attach_observation(cur, obs_id, device_id)
                     resolved_count += 1
-                    log.debug("resolver: serial match %s → device %s", entity_key, device_id)
+                    log.debug(
+                        "resolver: serial match %s → device %s", entity_key, device_id
+                    )
                     continue
 
             vm_uuid = cd.get("vm_uuid")
@@ -100,7 +110,9 @@ def drain_resolution(batch_size: int = 200, *, refresh_current: bool = True) -> 
                 if device_id is not None:
                     _attach_observation(cur, obs_id, device_id)
                     resolved_count += 1
-                    log.debug("resolver: vm_uuid match %s → device %s", entity_key, device_id)
+                    log.debug(
+                        "resolver: vm_uuid match %s → device %s", entity_key, device_id
+                    )
                     continue
 
             # Fall back to normalized hostname
@@ -111,21 +123,46 @@ def drain_resolution(batch_size: int = 200, *, refresh_current: bool = True) -> 
             if not norm:
                 continue
 
+            device_id = _resolve_by_hostname_mac(
+                cur, norm, cd.get("macs") or [], client_id
+            )
+            if device_id is not None:
+                _attach_observation(cur, obs_id, device_id)
+                resolved_count += 1
+                log.debug(
+                    "resolver: hostname+MAC match %s → device %s", entity_key, device_id
+                )
+                continue
+
             device_id = _resolve_by_hostname(cur, norm, client_id)
             if device_id is not None and (
-                not _same_stream_conflict(cur, device_id, platform, entity_type, entity_key)
-                or _same_machine_on_device(cur, device_id, platform, entity_type, entity_key, cd)
+                not _same_stream_conflict(
+                    cur, device_id, platform, entity_type, entity_key
+                )
+                or _same_machine_on_device(
+                    cur, device_id, platform, entity_type, entity_key, cd
+                )
             ):
                 _attach_observation(cur, obs_id, device_id)
                 resolved_count += 1
-                log.debug("resolver: hostname match %s → device %s", entity_key, device_id)
+                log.debug(
+                    "resolver: hostname match %s → device %s", entity_key, device_id
+                )
             elif device_id is None:
                 _maybe_create_candidate(
-                    cur, obs_id, entity_key, norm, client_id,
+                    cur,
+                    obs_id,
+                    entity_key,
+                    norm,
+                    client_id,
                     identity_conflict_ft_id=identity_conflict_ft_id,
                 )
 
-    log.info("resolver: resolved %d / %d observations", resolved_count, len(rows) if rows else 0)
+    log.info(
+        "resolver: resolved %d / %d observations",
+        resolved_count,
+        len(rows) if rows else 0,
+    )
 
     promoted_count = 0
     try:
@@ -169,16 +206,23 @@ def drain_resolution(batch_size: int = 200, *, refresh_current: bool = True) -> 
         try:
             with db.transaction() as cur:
                 cur.execute("SELECT operations.refresh_device_agent_presence_current()")
-            log.info("resolver: refreshed device_agent_presence_current after %d resolutions", resolved_count)
+            log.info(
+                "resolver: refreshed device_agent_presence_current after %d resolutions",
+                resolved_count,
+            )
         except Exception:
-            log.exception("resolver: device_agent_presence_current refresh failed — continuing")
+            log.exception(
+                "resolver: device_agent_presence_current refresh failed — continuing"
+            )
         else:
             try:
                 with db.transaction() as cur:
                     cur.execute("SELECT operations.refresh_device_session_current()")
                 log.info("resolver: refreshed device_session_current")
             except Exception:
-                log.exception("resolver: device_session_current refresh failed — continuing")
+                log.exception(
+                    "resolver: device_session_current refresh failed — continuing"
+                )
 
     return resolved_count
 
@@ -204,7 +248,9 @@ def _load_finding_type_id(cur, name: str) -> int | None:
     return row[0] if row else None
 
 
-def _resolve_by_serial(cur, serial: str, client_id: uuid.UUID | None) -> uuid.UUID | None:
+def _resolve_by_serial(
+    cur, serial: str, client_id: uuid.UUID | None
+) -> uuid.UUID | None:
     if client_id is None:
         return None
     cur.execute(
@@ -221,7 +267,9 @@ def _resolve_by_serial(cur, serial: str, client_id: uuid.UUID | None) -> uuid.UU
     return None
 
 
-def _resolve_by_vm_uuid(cur, vm_uuid: str, client_id: uuid.UUID | None) -> uuid.UUID | None:
+def _resolve_by_vm_uuid(
+    cur, vm_uuid: str, client_id: uuid.UUID | None
+) -> uuid.UUID | None:
     if client_id is None:
         return None
     cur.execute(
@@ -231,6 +279,49 @@ def _resolve_by_vm_uuid(cur, vm_uuid: str, client_id: uuid.UUID | None) -> uuid.
           AND (%s::uuid IS NULL OR client_id = %s)
         """,
         (TENANT_ID, vm_uuid, client_id, client_id),
+    )
+    rows = cur.fetchall()
+    if len(rows) == 1:
+        return rows[0][0]
+    return None
+
+
+def _resolve_by_hostname_mac(
+    cur,
+    hostname: str,
+    macs: list[str],
+    client_id: uuid.UUID | None,
+) -> uuid.UUID | None:
+    """Resolve same-client evidence with both a name and a shared valid MAC.
+
+    This is deliberately a pair of signals. A MAC alone is not a durable
+    device identity, while an exact normalized hostname plus a MAC shared by
+    two source records is strong enough to join an agent and its hypervisor
+    inventory record. More than one matching device fails closed.
+    """
+    if client_id is None or not hostname or not macs:
+        return None
+    cur.execute(
+        """
+        SELECT DISTINCT d.id
+        FROM operations.devices d
+        JOIN operations.entity_observation_current eo
+          ON eo.tenant_id = d.tenant_id
+         AND eo.device_id = d.id
+         AND eo.active = TRUE
+        WHERE d.tenant_id = %s
+          AND d.client_id = %s
+          AND d.canonical_hostname = %s
+          AND d.deleted_at IS NULL
+          AND EXISTS (
+              SELECT 1
+              FROM jsonb_array_elements_text(
+                  COALESCE(eo.canonical_data -> 'macs', '[]'::jsonb)
+              ) AS known(mac)
+              WHERE known.mac = ANY(%s)
+          )
+        """,
+        (TENANT_ID, client_id, hostname, macs),
     )
     rows = cur.fetchall()
     if len(rows) == 1:
@@ -267,7 +358,8 @@ def _entries_same_machine(cd_a: dict, cd_b: dict) -> bool:
     serial, equal vm_uuid, or a shared MAC address."""
     sa, sb = cd_a.get("serial_number"), cd_b.get("serial_number")
     if (
-        is_usable_serial(sa) and is_usable_serial(sb)
+        is_usable_serial(sa)
+        and is_usable_serial(sb)
         and sa.strip().lower() == sb.strip().lower()
     ):
         return True
@@ -280,8 +372,12 @@ def _entries_same_machine(cd_a: dict, cd_b: dict) -> bool:
 
 
 def _same_machine_on_device(
-    cur, device_id: uuid.UUID, platform: str, entity_type: str,
-    entity_key: str, cd: dict,
+    cur,
+    device_id: uuid.UUID,
+    platform: str,
+    entity_type: str,
+    entity_key: str,
+    cd: dict,
 ) -> bool:
     """True when a conflicting same-stream record on the device is provably
     the same machine as the incoming observation (reprovisioned agent)."""
@@ -320,7 +416,9 @@ def _group_same_machine(stream_entries: list[tuple]) -> list[list[tuple]]:
     return groups
 
 
-def _resolve_by_hostname(cur, norm: str, client_id: uuid.UUID | None) -> uuid.UUID | None:
+def _resolve_by_hostname(
+    cur, norm: str, client_id: uuid.UUID | None
+) -> uuid.UUID | None:
     if client_id is None:
         return None
     cur.execute(
@@ -417,16 +515,17 @@ def _maybe_create_candidate(
                 identity_conflict_ft_id,
                 client_id,
                 device_id_a,
-                Json({
-                    "hostname": norm,
-                    "candidate_count": len(rows),
-                    "candidate_device_ids": [str(x) for x in candidate_ids],
-                    "trigger_observation_id": str(obs_id),
-                }),
+                Json(
+                    {
+                        "hostname": norm,
+                        "candidate_count": len(rows),
+                        "candidate_device_ids": [str(x) for x in candidate_ids],
+                        "trigger_observation_id": str(obs_id),
+                    }
+                ),
                 f"identity_conflict:{norm}",
             ),
         )
-
 
 
 _MERGE_CANDIDATE_UPSERT = """
@@ -504,9 +603,157 @@ def project_merge_candidates(cur) -> dict[str, int]:
     longer holds — after a merge, a rename or a deletion — are closed, so the
     queue reflects what is true now rather than accumulating stale rows.
     """
-    cur.execute(_MERGE_CANDIDATE_UPSERT, (TENANT_ID, _MIN_IDENTITY_CANDIDATES, TENANT_ID))
+    cur.execute(
+        _MERGE_CANDIDATE_UPSERT, (TENANT_ID, _MIN_IDENTITY_CANDIDATES, TENANT_ID)
+    )
     upserted = cur.rowcount or 0
     cur.execute(_MERGE_CANDIDATE_CLOSE, (TENANT_ID, _MIN_IDENTITY_CANDIDATES))
+    closed = cur.rowcount or 0
+    strong = _project_strong_identity_candidates(cur)
+    return {
+        "upserted": upserted,
+        "closed": closed,
+        "strong_upserted": strong["upserted"],
+        "strong_closed": strong["closed"],
+    }
+
+
+_STRONG_IDENTITY_CANDIDATE_CTE = """
+WITH device_evidence AS (
+    SELECT d.id AS device_id,
+           d.client_id,
+           d.canonical_hostname,
+           d.canonical_serial,
+           d.canonical_vm_uuid,
+           d.device_type,
+           d.device_role,
+           d.os_name,
+           ARRAY_REMOVE(ARRAY_AGG(DISTINCT mac.value), NULL) AS macs,
+           ARRAY_AGG(DISTINCT o.observation_id::text) AS observation_ids
+      FROM operations.devices d
+      JOIN operations.entity_observation_current o
+        ON o.tenant_id = d.tenant_id
+       AND o.device_id = d.id
+       AND o.active
+      LEFT JOIN LATERAL jsonb_array_elements_text(
+          COALESCE(o.canonical_data -> 'macs', '[]'::jsonb)
+      ) AS mac(value) ON TRUE
+     WHERE d.tenant_id = %s
+       AND d.deleted_at IS NULL
+       AND d.client_id IS NOT NULL
+       AND d.canonical_hostname <> ''
+       AND o.entity_type = ANY(%s)
+     GROUP BY d.id, d.client_id, d.canonical_hostname, d.canonical_serial,
+              d.canonical_vm_uuid, d.device_type, d.device_role, d.os_name
+), strong_pairs AS (
+    SELECT a.client_id,
+           a.device_id AS device_a_id,
+           b.device_id AS device_b_id,
+           a.canonical_hostname,
+           a.canonical_serial AS serial_a,
+           b.canonical_serial AS serial_b,
+           a.canonical_vm_uuid AS vm_uuid_a,
+           b.canonical_vm_uuid AS vm_uuid_b,
+           a.device_type AS device_type_a,
+           b.device_type AS device_type_b,
+           a.device_role AS device_role_a,
+           b.device_role AS device_role_b,
+           a.os_name AS os_name_a,
+           b.os_name AS os_name_b,
+           a.observation_ids || b.observation_ids AS observation_ids,
+           'identity_strong:' || md5(
+               a.client_id::text || ':' || a.device_id::text || ':' || b.device_id::text
+           ) AS canonical_key
+      FROM device_evidence a
+      JOIN device_evidence b
+        ON b.client_id = a.client_id
+       AND b.canonical_hostname = a.canonical_hostname
+       AND a.device_id::text < b.device_id::text
+       AND cardinality(a.macs) > 0
+       AND cardinality(b.macs) > 0
+       AND a.macs && b.macs
+)
+"""
+
+
+_STRONG_MERGE_CANDIDATE_UPSERT = (
+    _STRONG_IDENTITY_CANDIDATE_CTE
+    + """
+INSERT INTO operations.merge_candidates
+    (id, version, tenant_id, client_id, entity_type, canonical_key,
+     member_snapshots, member_observation_ids, match_reason, confidence, status)
+SELECT gen_random_uuid(), 1, %s, pair.client_id, 'device', pair.canonical_key,
+       jsonb_build_array(
+           jsonb_build_object(
+               'device_id', pair.device_a_id,
+               'hostname', pair.canonical_hostname,
+               'serial', COALESCE(pair.serial_a, ''),
+               'vm_uuid', COALESCE(pair.vm_uuid_a, ''),
+               'device_type', pair.device_type_a,
+               'device_role', pair.device_role_a,
+               'os_name', COALESCE(pair.os_name_a, '')
+           ),
+           jsonb_build_object(
+               'device_id', pair.device_b_id,
+               'hostname', pair.canonical_hostname,
+               'serial', COALESCE(pair.serial_b, ''),
+               'vm_uuid', COALESCE(pair.vm_uuid_b, ''),
+               'device_type', pair.device_type_b,
+               'device_role', pair.device_role_b,
+               'os_name', COALESCE(pair.os_name_b, '')
+           )
+       ),
+       to_jsonb(pair.observation_ids),
+       'Strong identity: same client, normalized hostname, and a shared MAC address.',
+       0.9900, 'open'
+  FROM strong_pairs pair
+ON CONFLICT (tenant_id, canonical_key) WHERE status = 'open'
+DO UPDATE SET
+    member_snapshots = EXCLUDED.member_snapshots,
+    member_observation_ids = EXCLUDED.member_observation_ids,
+    match_reason = EXCLUDED.match_reason,
+    confidence = EXCLUDED.confidence,
+    client_id = EXCLUDED.client_id
+"""
+)
+
+
+_STRONG_MERGE_CANDIDATE_CLOSE = (
+    _STRONG_IDENTITY_CANDIDATE_CTE
+    + """
+UPDATE operations.merge_candidates candidate
+   SET status = 'merged'
+ WHERE candidate.tenant_id = %s
+   AND candidate.status = 'open'
+   AND candidate.entity_type = 'device'
+   AND candidate.canonical_key LIKE 'identity_strong:%%'
+   AND NOT EXISTS (
+       SELECT 1
+         FROM strong_pairs pair
+        WHERE pair.canonical_key = candidate.canonical_key
+   )
+"""
+)
+
+
+def _project_strong_identity_candidates(cur) -> dict[str, int]:
+    """Propose, but never automatically merge, already split strong matches.
+
+    Attachment is deliberately sticky: moving a source observation between
+    two existing devices is a merge operation with findings and software
+    consequences. This projection makes the strong proof visible in the
+    existing review queue instead of treating it as permission to move data.
+    """
+    identity_types = sorted(identity_entity_types(cur))
+    cur.execute(
+        _STRONG_MERGE_CANDIDATE_UPSERT,
+        (TENANT_ID, identity_types, TENANT_ID),
+    )
+    upserted = cur.rowcount or 0
+    cur.execute(
+        _STRONG_MERGE_CANDIDATE_CLOSE,
+        (TENANT_ID, identity_types, TENANT_ID),
+    )
     closed = cur.rowcount or 0
     return {"upserted": upserted, "closed": closed}
 
@@ -584,7 +831,8 @@ def _collapse_prefix_variants(
     for client_id, norms in norms_by_client.items():
         for norm in norms:
             candidates = [
-                other for other in norms
+                other
+                for other in norms
                 if other != norm
                 and min(len(other), len(norm)) >= 10
                 and (other.startswith(norm) or norm.startswith(other))
@@ -678,7 +926,15 @@ def _promote_unmatched_clusters(cur) -> int:
 
     # (client_id, norm) → list of (platform, entity_type, entity_key, first, last, cd)
     clusters: dict[tuple, list[tuple]] = {}
-    for client_id, platform, entity_type, entity_key, first_seen, last_seen, raw_cd in unresolved:
+    for (
+        client_id,
+        platform,
+        entity_type,
+        entity_key,
+        first_seen,
+        last_seen,
+        raw_cd,
+    ) in unresolved:
         cd = raw_cd or {}
         hostname = cd.get("hostname") or cd.get("guest_name")
         norm = normalize_hostname(hostname)
@@ -760,11 +1016,17 @@ def _promote_unmatched_clusters(cur) -> int:
         serial = latest_cd.get("serial_number")
         if not is_usable_serial(serial):
             serial = None
-        existing_device_id = _resolve_by_serial(cur, serial, client_id) if serial else None
+        existing_device_id = (
+            _resolve_by_serial(cur, serial, client_id) if serial else None
+        )
         if existing_device_id is None:
             vm_uuid = latest_cd.get("vm_uuid")
             existing_device_id = (
                 _resolve_by_vm_uuid(cur, vm_uuid, client_id) if vm_uuid else None
+            )
+        if existing_device_id is None:
+            existing_device_id = _resolve_by_hostname_mac(
+                cur, norm, latest_cd.get("macs") or [], client_id
             )
         if existing_device_id is None:
             existing_device_id = _resolve_by_hostname(cur, norm, client_id)
@@ -805,8 +1067,11 @@ def _promote_unmatched_clusters(cur) -> int:
         # the next cycle.
         device_type = _infer_form_factor(primary)
         os_name = next(
-            (e[5].get("os_name") for e in sorted(primary, key=lambda e: e[4], reverse=True)
-             if e[5].get("os_name")),
+            (
+                e[5].get("os_name")
+                for e in sorted(primary, key=lambda e: e[4], reverse=True)
+                if e[5].get("os_name")
+            ),
             None,
         )
         platforms = sorted({e[0] for e in primary})
@@ -833,7 +1098,12 @@ def _promote_unmatched_clusters(cur) -> int:
                     NOW(), %s, NOW(), '', '', '')
             """,
             (
-                device_id, TENANT_ID, client_id, device_id, norm, serial or "",
+                device_id,
+                TENANT_ID,
+                client_id,
+                device_id,
+                norm,
+                serial or "",
                 latest_cd.get("vm_uuid") or "",
                 promote_reason[:120],
             ),
@@ -873,11 +1143,12 @@ def _promote_unmatched_clusters(cur) -> int:
         promoted += 1
         log.info(
             "resolver: promoted device %s hostname=%s client=%s platforms=%s",
-            device_id, norm, client_id, platforms,
+            device_id,
+            norm,
+            client_id,
+            platforms,
         )
-        promoted += _promote_entry_groups(
-            cur, agent_ids, client_id, norm, extra_groups
-        )
+        promoted += _promote_entry_groups(cur, agent_ids, client_id, norm, extra_groups)
 
     if promoted:
         log.info("resolver: promoted %d new devices", promoted)
@@ -930,7 +1201,12 @@ def _promote_entry_groups(
                     NOW(), %s, NOW(), '', '', '')
             """,
             (
-                device_id, TENANT_ID, client_id, device_id, norm, serial or "",
+                device_id,
+                TENANT_ID,
+                client_id,
+                device_id,
+                norm,
+                serial or "",
                 cd.get("vm_uuid") or "",
                 reason[:120],
             ),
@@ -967,7 +1243,10 @@ def _promote_entry_groups(
         promoted += 1
         log.info(
             "resolver: promoted duplicate-record device %s hostname=%s platform=%s records=%d",
-            device_id, norm, platform, len(group),
+            device_id,
+            norm,
+            platform,
+            len(group),
         )
     return promoted
 
@@ -1310,9 +1589,9 @@ def _sync_device_attributes(cur) -> None:
     # admin page or (worse) only in logs. Idempotent via condition_key.
 
     ft_placeholder = _load_finding_type_id(cur, "placeholder_serial")
-    ft_shared      = _load_finding_type_id(cur, "shared_serial")
+    ft_shared = _load_finding_type_id(cur, "shared_serial")
     ft_cross_client_serial = _load_finding_type_id(cur, "cross_client_serial")
-    ft_unmatched   = _load_finding_type_id(cur, "unmatched_source_group")
+    ft_unmatched = _load_finding_type_id(cur, "unmatched_source_group")
     ft_placeholder_mac = _load_finding_type_id(cur, "placeholder_mac")
 
     # placeholder_serial — devices whose canonical_serial is rejected by the
@@ -1597,9 +1876,14 @@ def _write_layer_entities_for_new_device(
         DO NOTHING
         """,
         (
-            TENANT_ID, device_id, form_factor,
-            serial or "", vm_uuid or "",
-            first_seen, first_seen, last_seen,
+            TENANT_ID,
+            device_id,
+            form_factor,
+            serial or "",
+            vm_uuid or "",
+            first_seen,
+            first_seen,
+            last_seen,
         ),
     )
     if os_name or form_factor in ("physical", "vm"):
@@ -1625,8 +1909,14 @@ def _write_layer_entities_for_new_device(
             DO NOTHING
             """,
             (
-                TENANT_ID, device_id, os_name or "", os_fam or "",
-                os_group or "Unknown", first_seen, first_seen, last_seen,
+                TENANT_ID,
+                device_id,
+                os_name or "",
+                os_fam or "",
+                os_group or "Unknown",
+                first_seen,
+                first_seen,
+                last_seen,
             ),
         )
     if entries and agent_ids:
@@ -1664,8 +1954,13 @@ def _write_layer_entities_for_new_device(
                 DO NOTHING
                 """,
                 (
-                    TENANT_ID, device_id, agent_id,
-                    install_token, agent_ver,
-                    e_first, e_first, e_last,
+                    TENANT_ID,
+                    device_id,
+                    agent_id,
+                    install_token,
+                    agent_ver,
+                    e_first,
+                    e_first,
+                    e_last,
                 ),
             )

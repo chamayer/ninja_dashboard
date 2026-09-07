@@ -41,6 +41,7 @@ def resolve_device_fast(
     entity_type: str,
     serial: str | None = None,
     hostname: str | None = None,
+    macs: list[str] | None = None,
     client_id: uuid.UUID | None = None,
 ) -> uuid.UUID | None:
     """Return the operations.devices UUID for a source observation, or None.
@@ -52,7 +53,8 @@ def resolve_device_fast(
     Resolution order:
       1. Exact source + external_id match on an existing observation (certain).
       2. Unique serial match on devices within client scope (high confidence).
-      3. Unique hostname match on devices within client scope (medium-high confidence).
+      3. Exact hostname plus a shared valid MAC within client scope (high confidence).
+      4. Unique hostname match on devices within client scope (medium-high confidence).
 
     A usable serial match (step 2) is proof of the same machine, so it may
     attach even alongside another record of the same (platform, entity_type)
@@ -98,7 +100,9 @@ def resolve_device_fast(
     if client_id is None:
         log.debug(
             "fast_path clientless miss: source=%s external_id=%s hostname=%s",
-            source_name, external_id, hostname,
+            source_name,
+            external_id,
+            hostname,
         )
         return None
 
@@ -117,7 +121,39 @@ def resolve_device_fast(
         if len(rows) == 1:
             return rows[0][0]
 
-    # Step 3 — hostname match (only when unique and the device carries no
+    # Step 3 — same normalized hostname plus shared MAC.  A MAC on its own
+    # is not enough (adapters can move or be duplicated), but this pair is
+    # strong identity evidence for the same client.  Query current source
+    # evidence rather than the device cache: MACs are a set claim and do not
+    # have one canonical cache column.
+    if hostname and macs:
+        cur.execute(
+            """
+            SELECT DISTINCT d.id
+            FROM operations.devices d
+            JOIN operations.entity_observation_current eo
+              ON eo.tenant_id = d.tenant_id
+             AND eo.device_id = d.id
+             AND eo.active = TRUE
+            WHERE d.tenant_id = %s
+              AND d.canonical_hostname = %s
+              AND d.deleted_at IS NULL
+              AND d.client_id = %s
+              AND EXISTS (
+                  SELECT 1
+                  FROM jsonb_array_elements_text(
+                      COALESCE(eo.canonical_data -> 'macs', '[]'::jsonb)
+                  ) AS known(mac)
+                  WHERE known.mac = ANY(%s)
+              )
+            """,
+            (tenant_id, hostname, client_id, macs),
+        )
+        rows = cur.fetchall()
+        if len(rows) == 1:
+            return rows[0][0]
+
+    # Step 4 — hostname match (only when unique and the device carries no
     # other record of this same stream — same-stream dups never merge)
     if hostname:
         cur.execute(
@@ -134,8 +170,15 @@ def resolve_device_fast(
                     AND eo.entity_key <> %s
               )
             """,
-            (tenant_id, hostname, client_id, client_id,
-             source_name, entity_type, external_id),
+            (
+                tenant_id,
+                hostname,
+                client_id,
+                client_id,
+                source_name,
+                entity_type,
+                external_id,
+            ),
         )
         rows = cur.fetchall()
         if len(rows) == 1:
@@ -143,6 +186,8 @@ def resolve_device_fast(
 
     log.debug(
         "fast_path miss: source=%s external_id=%s hostname=%s",
-        source_name, external_id, hostname,
+        source_name,
+        external_id,
+        hostname,
     )
     return None

@@ -1,8 +1,68 @@
 # Active Operations implementation plan
 
+## ACTIVE TASK — Strengthen device identity creation and resolution
+
+**Status:** release preparation.
+
+**Goal:** make the existing source-observation-to-device resolver apply the
+same strong identity proof irrespective of arrival order, while retaining
+review rather than automatic merging for existing split devices.
+
+**Scope:** resolver matching and promotion, strong duplicate proposals, and
+the existing merge-review presentation. Hudu remains non-identity
+documentation evidence and continues to attach only through explicit relayed
+source cards. No automatic merge, production-data repair, or schema change is
+in scope.
+
+**Affected areas:** `ingest/identity/`, Ninja observation writing, generic
+source observation writing, merge-candidate projection, and review UI.
+
+**Decisions:** source observations stay individually visible. Exact source ID,
+usable same-client serial, and same-client normalized hostname plus a shared
+valid MAC are automatic identity proof. Name-only remains a review candidate.
+The resolver never moves an observation already attached to a different
+device; it produces a high-confidence duplicate proposal instead. Existing
+source-link match labels are unchanged because persisting identity-decision
+provenance needs its own reviewed schema change; the review queue now shows
+the actual strong-match reason.
+
+**Validation:** read-only production query validation of the strong-pair SQL,
+Django check, template loading, Python compilation, Ruff, formatting, and
+diff check. No new test scripts.
+
+**Checkpoint:** the reported pair is an active `WINDOWS_WORKSTATION` agent
+and active `HYPERV_VMM_GUEST` record with the same client, normalized name,
+and MAC; the guest record has no serial and Ninja assigns it a different
+record UUID. Current production has 507 active Ninja agent/guest pairs with
+the same client/name/MAC: 491 are correctly one device and 16 are split.
+The resolver only applies MAC proof while grouping *unresolved* observations;
+its fast and existing-device paths do not use MAC, and already attached
+observations are never reconsidered. Canonical merge candidates are currently
+hostname-only, so they cannot distinguish these strong pairs from weak
+collisions. The review is now mapping a unified evidence tier and safe
+remediation path.
+
+**Checkpoint:** the fast path, delayed resolver, Ninja writer, and promotion
+recheck now all use the same same-client normalized-name-plus-MAC proof before
+the weaker hostname fallback. The existing merge queue receives a 0.9900
+strong-identity proposal for every already-split pair and exposes both device
+links plus the manual merge review. Read-only production validation found 40
+current strong pairs across identity sources, including the 16 split Ninja
+agent/guest pairs; they remain review-only.
+
+**Validation:** Python compilation, Django check, template loading, Ruff,
+Ruff formatting, and diff check pass. The read-only strong-pair query and the
+full candidate `INSERT … ON CONFLICT` statement's `EXPLAIN` both ran against
+production successfully without writing data. No new test scripts were added.
+
+**Next action:** commit and deploy the approved 0.122.18 release. Identity-
+decision provenance on the Source identities tab remains a separately reviewed
+schema change; it is not needed for safe attachment or review of strong
+duplicates.
+
 ## ACTIVE TASK — Make Computers Clear reliably reset filters
 
-**Status:** implementation complete; pending commit and push approval.
+**Status:** complete; released as 0.122.17 / `d3b652d`.
 
 **Goal:** make the Computers Clear control reliably remove every filter.
 
@@ -24,7 +84,7 @@ the current path without query parameters.
 **Validation:** Django check, template loading, and diff check pass. No new
 test scripts were added.
 
-**Next action:** commit and push when approved.
+**Next action:** none.
 
 ## ACTIVE TASK — Simplify Computers Hudu cell content
 

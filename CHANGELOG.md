@@ -2,6 +2,20 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.122.18] — 2026-09-07 — Strong device identity resolution
+
+### Fixed
+
+- Operations now consistently joins same-client source records with the same
+  normalized hostname and a shared valid MAC, including Ninja OS-agent and
+  Hyper-V guest records that arrive in different collection cycles.
+
+### Changed
+
+- Existing strong duplicate devices are proposed for manual review rather than
+  automatically merged; the review queue explains the evidence and links to
+  both device records and the existing merge workflow.
+
 ## [0.122.17] — 2026-09-07 — Reliable Computers filter reset
 
 ### Fixed

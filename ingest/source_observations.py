@@ -54,10 +54,10 @@ _TENANT_ID = 1
 _INTERNAL_COLLECTOR_INSTANCE_ID = uuid.UUID("00000000-0000-4000-8000-000000000001")
 
 _FETCHERS = {
-    "SentinelOne":   sentinelone.fetch,
+    "SentinelOne": sentinelone.fetch,
     "ScreenConnect": screenconnect.fetch,
-    "LogMeIn":       logmein.fetch,
-    "Hudu":          hudu.fetch,
+    "LogMeIn": logmein.fetch,
+    "Hudu": hudu.fetch,
 }
 
 # Sources outside the identity-signal set carry no independent identity
@@ -216,7 +216,13 @@ def _record_unmatched_groups(
                 device_count  = EXCLUDED.device_count,
                 last_seen_at  = now()
             """,
-            (_TENANT_ID, source.ops_source_id, group_id, group_name or "", device_count),
+            (
+                _TENANT_ID,
+                source.ops_source_id,
+                group_id,
+                group_name or "",
+                device_count,
+            ),
         )
 
 
@@ -231,7 +237,7 @@ def _write_observations(
 
     obs_rows: list[dict[str, Any]] = []
     resolved_groups: dict[str, tuple[uuid.UUID, str]] = {}  # group_id → (client, name)
-    unmatched_groups: dict[str, tuple[str, int]] = {}       # group_id → (name, count)
+    unmatched_groups: dict[str, tuple[str, int]] = {}  # group_id → (name, count)
     # group_id -> [name, count, external namespace, stable external id]
     all_groups: dict[str, list] = {}
     container_contracts: set[tuple[str, str]] = set()
@@ -239,11 +245,17 @@ def _write_observations(
         cur.execute(f"SET LOCAL operations.tenant_id = {_TENANT_ID}")
         snapshot_scope = source.source_key or source.source_name
         run_id, source_instance_id = begin_run(
-            cur, _TENANT_ID, source.source_binding_id, snapshot_scope,
-            observed_at, expected_rows=len(rows),
+            cur,
+            _TENANT_ID,
+            source.source_binding_id,
+            snapshot_scope,
+            observed_at,
+            expected_rows=len(rows),
         )
         if source_instance_id != source.source_instance_id:
-            raise RuntimeError("source binding resolved to an unexpected source instance")
+            raise RuntimeError(
+                "source binding resolved to an unexpected source instance"
+            )
         link_map = _load_client_links(cur, source)
         placeholder_names = _load_placeholder_names(cur)
         for row in rows:
@@ -262,12 +274,13 @@ def _write_observations(
                     raise ValueError(
                         "container-only rows require a stable namespace and external ID"
                     )
-                container_contracts.add(
-                    (container_namespace, container_external_id)
-                )
+                container_contracts.add((container_namespace, container_external_id))
                 if gid and gid not in all_groups:
                     all_groups[gid] = [
-                        gname, 0, container_namespace, container_external_id
+                        gname,
+                        0,
+                        container_namespace,
+                        container_external_id,
                     ]
                 continue
             entity_key = str(row.get("platform_device_id") or "")
@@ -282,7 +295,9 @@ def _write_observations(
                 raw = raw.obj  # connectors wrap payloads for the legacy writer
             if not isinstance(raw, dict):
                 raw = {}
-            guest_info = raw.get("GuestInfo") if isinstance(raw.get("GuestInfo"), dict) else {}
+            guest_info = (
+                raw.get("GuestInfo") if isinstance(raw.get("GuestInfo"), dict) else {}
+            )
             serial = (
                 raw.get("serialNumber")
                 or raw.get("biosSerialNumber")
@@ -292,28 +307,28 @@ def _write_observations(
             )
             os_name = row.get("os_name") or None
             canonical_data: dict[str, Any] = {
-                "hostname":      hostname,
-                "platform":      source.platform,
-                "entity_type":   source.entity_type,
+                "hostname": hostname,
+                "platform": source.platform,
+                "entity_type": source.entity_type,
                 # platform_group_id lets the client resolver backfill
                 # device observations once the org attaches to a client.
                 "platform_group_id": str(row.get("platform_group_id") or ""),
-                "last_seen_at":  (
+                "last_seen_at": (
                     row["last_seen_at"].isoformat() if row.get("last_seen_at") else None
                 ),
-                "is_online":     row.get("is_online"),
+                "is_online": row.get("is_online"),
                 "serial_number": serial,
-                "macs":          extract_macs(raw),
+                "macs": extract_macs(raw),
                 # None when the source gives no explicit signal — never guessed.
-                "device_role":   row.get("device_type"),
-                "os_name":       os_name,
+                "device_role": row.get("device_type"),
+                "os_name": os_name,
                 # os_family() returns "Unknown" for a null os_name. Calling it
                 # unconditionally turned that fallback into a source claim:
                 # 7,920 claims of "Unknown" across two sources, winning
                 # authority for 488 devices whose real family was known.
                 # A source that states no OS asserts nothing about its family.
-                "os_family":     os_family(os_name) if os_name else None,
-                "domain":        row.get("domain_name"),
+                "os_family": os_family(os_name) if os_name else None,
+                "domain": row.get("domain_name"),
             }
             if raw.get("IsDup") is not None:
                 canonical_data["is_dup"] = bool(raw["IsDup"])
@@ -341,9 +356,7 @@ def _write_observations(
                     raise ValueError(
                         "connector row is missing its stable container identity"
                     )
-                container_contracts.add(
-                    (container_namespace, container_external_id)
-                )
+                container_contracts.add((container_namespace, container_external_id))
 
             # 1. Client-scoped instance wins.
             client_id = source.client_id
@@ -353,10 +366,14 @@ def _write_observations(
 
             if source.entity_type in identity_entity_types(cur):
                 device_id = resolve_device_fast(
-                    cur, _TENANT_ID, source.platform, entity_key,
+                    cur,
+                    _TENANT_ID,
+                    source.platform,
+                    entity_key,
                     entity_type=source.entity_type,
                     serial=serial,
                     hostname=normalize_hostname(hostname) or None,
+                    macs=canonical_data["macs"],
                     client_id=client_id,
                 )
             else:
@@ -388,35 +405,39 @@ def _write_observations(
                     [group_name, 0, container_namespace, container_external_id],
                 )
                 if entry[2:] != [container_namespace, container_external_id]:
-                    raise ValueError("connector emitted conflicting container identities")
+                    raise ValueError(
+                        "connector emitted conflicting container identities"
+                    )
                 entry[0] = entry[0] or group_name
                 entry[1] += 1
 
-            obs_rows.append({
-                "observation_id":        uuid.uuid4(),
-                "tenant_id":             _TENANT_ID,
-                "client_id":             client_id,
-                "device_id":             device_id,
-                "collector_instance_id": _INTERNAL_COLLECTOR_INSTANCE_ID,
-                "source_binding_id":     source.source_binding_id,
-                "source_instance_id":    source_instance_id,
-                "last_seen_binding_id":  source.source_binding_id,
-                "external_namespace":    external_namespace,
-                "parent_external_namespace": "",
-                "parent_external_id":    "",
-                "external_id":           entity_key,
-                "entity_type":           source.entity_type,
-                "entity_key":            entity_key,
-                "platform":              source.platform,
-                "subplatform":           "",
-                "observed_at":           observed_at,
-                "raw_data":              Json(raw),
-                "canonical_data":        Json(canonical_data),
-                "batch_id":              batch_id,
-                "observation_hash":      obs_hash,
-                "collector_version":     "",
-                "schema_version":        1,
-            })
+            obs_rows.append(
+                {
+                    "observation_id": uuid.uuid4(),
+                    "tenant_id": _TENANT_ID,
+                    "client_id": client_id,
+                    "device_id": device_id,
+                    "collector_instance_id": _INTERNAL_COLLECTOR_INSTANCE_ID,
+                    "source_binding_id": source.source_binding_id,
+                    "source_instance_id": source_instance_id,
+                    "last_seen_binding_id": source.source_binding_id,
+                    "external_namespace": external_namespace,
+                    "parent_external_namespace": "",
+                    "parent_external_id": "",
+                    "external_id": entity_key,
+                    "entity_type": source.entity_type,
+                    "entity_key": entity_key,
+                    "platform": source.platform,
+                    "subplatform": "",
+                    "observed_at": observed_at,
+                    "raw_data": Json(raw),
+                    "canonical_data": Json(canonical_data),
+                    "batch_id": batch_id,
+                    "observation_hash": obs_hash,
+                    "collector_version": "",
+                    "schema_version": 1,
+                }
+            )
 
         # One `org` observation per container per run (BLUEPRINT Track C.2).
         # entity_key = stable group id (never the display name). Attachment
@@ -428,62 +449,69 @@ def _write_observations(
                 raise ValueError(
                     "client-scoped source must emit one stable container identity"
                 )
-            container_namespace, container_external_id = next(
-                iter(container_contracts)
-            )
+            container_namespace, container_external_id = next(iter(container_contracts))
             org_containers = {
                 source.source_key or source.source_name: [
-                    source.source_name, device_row_count,
-                    container_namespace, container_external_id,
+                    source.source_name,
+                    device_row_count,
+                    container_namespace,
+                    container_external_id,
                 ]
             }
         else:
             org_containers = all_groups
-        for gid, (gname, gcount, container_namespace, container_external_id) in (
-            org_containers.items()
-        ):
+        for gid, (
+            gname,
+            gcount,
+            container_namespace,
+            container_external_id,
+        ) in org_containers.items():
             if not gid:
                 continue
             org_client_id = (
                 source.client_id if not source.is_shared else link_map.get(gid)
             )
             normalized = normalize_org_name(gname)
-            obs_rows.append({
-                "observation_id":        uuid.uuid4(),
-                "tenant_id":             _TENANT_ID,
-                "client_id":             org_client_id,
-                "device_id":             None,
-                "collector_instance_id": _INTERNAL_COLLECTOR_INSTANCE_ID,
-                "source_binding_id":     source.source_binding_id,
-                "source_instance_id":    source_instance_id,
-                "last_seen_binding_id":  source.source_binding_id,
-                "external_namespace":    container_namespace,
-                "parent_external_namespace": "",
-                "parent_external_id":    "",
-                "external_id":           container_external_id,
-                "entity_type":           "org",
-                "entity_key":            gid,
-                "platform":              source.platform,
-                "subplatform":           "",
-                "observed_at":           observed_at,
-                "raw_data":              Json({}),
-                "canonical_data":        Json({
-                    "name":            gname,
-                    "normalized_name": normalized,
-                    "platform":        source.platform,
-                    "entity_type":     "org",
-                    "device_count":    gcount,
-                    "is_placeholder":  normalized in placeholder_names,
-                }),
-                "batch_id":              batch_id,
-                # entity_type prefixed so an org key can never collide with a
-                # device key in the same batch.
-                "observation_hash":      hashlib.sha256(
-                    f"org:{gid}:{observed_at.isoformat()}".encode()
-                ).digest(),
-                "collector_version":     "",
-                "schema_version":        1,
-            })
+            obs_rows.append(
+                {
+                    "observation_id": uuid.uuid4(),
+                    "tenant_id": _TENANT_ID,
+                    "client_id": org_client_id,
+                    "device_id": None,
+                    "collector_instance_id": _INTERNAL_COLLECTOR_INSTANCE_ID,
+                    "source_binding_id": source.source_binding_id,
+                    "source_instance_id": source_instance_id,
+                    "last_seen_binding_id": source.source_binding_id,
+                    "external_namespace": container_namespace,
+                    "parent_external_namespace": "",
+                    "parent_external_id": "",
+                    "external_id": container_external_id,
+                    "entity_type": "org",
+                    "entity_key": gid,
+                    "platform": source.platform,
+                    "subplatform": "",
+                    "observed_at": observed_at,
+                    "raw_data": Json({}),
+                    "canonical_data": Json(
+                        {
+                            "name": gname,
+                            "normalized_name": normalized,
+                            "platform": source.platform,
+                            "entity_type": "org",
+                            "device_count": gcount,
+                            "is_placeholder": normalized in placeholder_names,
+                        }
+                    ),
+                    "batch_id": batch_id,
+                    # entity_type prefixed so an org key can never collide with a
+                    # device key in the same batch.
+                    "observation_hash": hashlib.sha256(
+                        f"org:{gid}:{observed_at.isoformat()}".encode()
+                    ).digest(),
+                    "collector_version": "",
+                    "schema_version": 1,
+                }
+            )
 
         written = 0
         current_rows = []

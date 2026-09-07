@@ -25,12 +25,14 @@ import psycopg
 from psycopg.types.json import Json
 
 from ingest import db
+from ingest.identity.fast_path import resolve_device_fast
 from ingest.ninja_client import NinjaClient
 from ingest.normalize import (
     entity_type_for_node_class,
     form_factor_for_node_class,
     infer_device_role,
     normalize_mac,
+    normalize_hostname,
     normalize_org_name,
     os_family,
 )
@@ -493,7 +495,8 @@ def _write_ninja_observations(
                     # serial number: a service tag may establish a
                     # cross-client review conflict, but never a merge by
                     # itself.
-                    "service_tag": raw.get("serviceTag") or raw_system.get("serviceTag"),
+                    "service_tag": raw.get("serviceTag")
+                    or raw_system.get("serviceTag"),
                     "macs": sorted(
                         {
                             m
@@ -526,6 +529,23 @@ def _write_ninja_observations(
                 vm_extras = (vm_tracking or {}).get(r["id"])
                 if vm_extras:
                     _add_vm_canonical_measurements(canonical_data, vm_extras)
+                # The legacy source-link lookup above is certain for a known
+                # Ninja record.  New Ninja records use the same fast resolver
+                # as the other sources, so a VM inventory record arriving a
+                # cycle after its OS agent can still attach on strong hardware
+                # proof instead of waiting to be promoted as a second device.
+                if ops_device_id is None:
+                    ops_device_id = resolve_device_fast(
+                        cur,
+                        _TENANT_ID,
+                        "Ninja",
+                        entity_key,
+                        entity_type=entity_type,
+                        serial=canonical_data["serial_number"],
+                        hostname=normalize_hostname(canonical_data["hostname"]) or None,
+                        macs=canonical_data["macs"],
+                        client_id=client_id,
+                    )
                 obs_rows.append(
                     {
                         "observation_id": uuid.uuid4(),
