@@ -73,7 +73,7 @@
                     {% if c.client %}<a href="{% url 'device_detail' c.client.slug member.device_id %}">{{ member.hostname|default:member.device_id }}</a>{% else %}{{ member.hostname|default:member.device_id }}{% endif %}{% if not forloop.last %}, {% endif %}
                     {% endfor %}
                     {% if c.client and c.member_snapshots|length == 2 %}
-                    <br><a href="{% url 'device_merge' c.client.slug c.member_snapshots.0.device_id c.member_snapshots.1.device_id %}">Review merge →</a>
+                    <br><a href="{% url 'device_merge' c.client.slug c.member_snapshots.0.device_id c.member_snapshots.1.device_id %}">Review same computer →</a>
                     {% endif %}
                 </td>
                 <td style="padding: 0.5rem;">{{ c.match_reason|default:"—" }}</td>

@@ -1,5 +1,22 @@
 # Active root implementation plan
 
+## CURRENT TASK — Source-neutral computer review
+
+**Status:** release preparation.
+
+**Goal:** release the Operations change that confirms a strong device pair as
+one computer without choosing a source winner or dropping current software
+inventory.
+
+**Scope:** Operations review/action UI and current-software reconciliation,
+the Operations plan, and the 0.122.20 patch-release metadata. No migration,
+automatic merge, or production data repair.
+
+**Validation:** read-only production sampling, Django check, changed-template
+load, Python compilation, diff check, and a rolled-back production SQL plan
+check passed. Commit, push, Portainer automatic deployment, and health check
+are next.
+
 ## CURRENT TASK — Restore device merge review route
 
 **Status:** release preparation.

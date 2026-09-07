@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Merge devices — {{ device_a.client.display_name }}{% endblock %}
+{% block title %}Confirm same computer — {{ device_a.client.display_name }}{% endblock %}
 
 {% block content %}
 <style>
@@ -16,9 +16,6 @@
         padding: 1rem; background: var(--surface);
         border: 1px solid var(--border); border-radius: 6px;
     }
-    .dm-card.selected { border-color: #1e40af; box-shadow: 0 0 0 2px #dbeafe; }
-    .dm-card label { display: flex; align-items: center; gap: 0.5rem; cursor: pointer; }
-    .dm-card label strong { color: #1e40af; }
     .dm-card h3 { margin: 0.5rem 0 0.6rem; font-size: 1rem; }
     .dm-attr { font-size: 0.85rem; margin: 0.2rem 0; display: flex; gap: 0.5rem; }
     .dm-attr .lbl {
@@ -48,27 +45,19 @@
 <div class="dm-wrap">
     <div class="dm-crumbs">
         <a href="{% url 'org_index' org_slug=device_a.client.slug %}">{{ device_a.client.display_name }}</a>
-        &rsaquo; Merge devices
+        &rsaquo; Confirm same computer
     </div>
-    <h1 class="dm-title">Merge devices</h1>
+    <h1 class="dm-title">Are these the same computer?</h1>
     <p class="dm-lede">
-        Pick the survivor. The loser's observations and findings transfer to
-        the survivor, and the loser is tombstoned (soft-deleted, still
-        queryable). Source links are derived from the observations, so they
-        move with them on the next collection cycle.
+        Confirm only when the two sets of source records describe one computer.
+        No source wins: all observations stay attached to the combined computer.
     </p>
 
     <form method="post" id="dm-form">
         {% csrf_token %}
         <div class="dm-cards">
             {% for dev in devices %}
-            <div class="dm-card{% if dev.id == default_survivor.id %} selected{% endif %}"
-                 data-device-id="{{ dev.id }}">
-                <label>
-                    <input type="radio" name="survivor" value="{{ dev.id }}"
-                           {% if dev.id == default_survivor.id %}checked{% endif %}>
-                    <strong>Keep this device</strong>
-                </label>
+            <div class="dm-card">
                 <h3><code>{{ dev.canonical_hostname }}</code></h3>
                 <div class="dm-attr"><span class="lbl">Serial</span><span class="val"><code>{{ dev.canonical_serial|default:"—" }}</code></span></div>
                 <div class="dm-attr"><span class="lbl">VM UUID</span><span class="val"><code>{{ dev.canonical_vm_uuid|default:"—" }}</code></span></div>
@@ -78,7 +67,8 @@
                 <div class="dm-attr"><span class="lbl">Lifecycle</span><span class="val">{{ dev.get_lifecycle_status_display }}</span></div>
                 <div class="dm-attr"><span class="lbl">Created</span><span class="val">{{ dev.created_at|date:"Y-m-d H:i" }}</span></div>
                 <div class="dm-attr"><span class="lbl">Sources</span><span class="val dm-src-badges">
-                    {% for link in dev.source_links.all %}<span class="dm-src-badge">{{ link.source.name }}</span>{% empty %}<span class="lbl">—</span>{% endfor %}
+                    {% regroup dev.source_links.all by source.name as source_groups %}
+                    {% for source_group in source_groups %}<span class="dm-src-badge">{{ source_group.grouper }}{% if source_group.list|length > 1 %} · {{ source_group.list|length }} records{% endif %}</span>{% empty %}<span class="lbl">—</span>{% endfor %}
                 </span></div>
                 <div class="dm-attr" style="margin-top:0.5rem;">
                     <a href="{% url 'device_detail' org_slug=dev.client.slug device_id=dev.id %}" style="font-size:0.8rem;">Open device detail →</a>
@@ -88,16 +78,18 @@
         </div>
 
         <div class="dm-warn">
-            <strong>This action is destructive but not irreversible</strong> —
-            the loser is soft-deleted (deleted_at set) and remains queryable.
-            Findings, links, and observations are cascaded to the survivor;
-            software rows on the loser are dropped.
+            <strong>What happens next</strong> — the older Operations record is
+            retained only as the technical anchor. The other anchor is
+            soft-deleted, while its observations and findings move to the
+            combined computer. Current software inventory is moved too; matching
+            software entries are reconciled rather than dropped.
         </div>
 
         <div class="dm-actions">
+            <input type="hidden" name="confirmation" value="same_computer">
             <button type="submit" class="dm-btn-primary"
-                    onclick="return confirm('Merge devices? The loser will be tombstoned.');">
-                Confirm merge
+                    onclick="return confirm('Confirm that these are the same computer? Both sets of source observations will be kept.');">
+                Yes, same computer
             </button>
             <a href="{% url 'device_detail' org_slug=device_a.client.slug device_id=device_a.id %}"
                class="dm-btn-cancel">Cancel</a>
@@ -105,13 +97,4 @@
     </form>
 </div>
 
-<script>
-document.querySelectorAll('input[name="survivor"]').forEach(function(input) {
-    input.addEventListener('change', function() {
-        document.querySelectorAll('.dm-card').forEach(function(card) {
-            card.classList.toggle('selected', card.dataset.deviceId === input.value);
-        });
-    });
-});
-</script>
 {% endblock %}

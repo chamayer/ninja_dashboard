@@ -9958,8 +9958,12 @@ def software_decision_create(request: HttpRequest) -> HttpResponse:
 
 
 def _merge_devices(cur, survivor_id, loser_id: str, reason: str) -> dict:
-    """Cascade merge: re-point every reference from loser → survivor,
-    tombstone loser. Returns a summary dict of what was moved."""
+    """Combine two anchors for one computer without discarding current data.
+
+    ``survivor_id`` is a stable technical anchor, never a winning source.  The
+    caller selects it deterministically; all source observations remain
+    evidence for the resulting computer.
+    """
     counts = {}
     # 1. Source links are no longer repointed here.
     #
@@ -10005,15 +10009,66 @@ def _merge_devices(cur, survivor_id, loser_id: str, reason: str) -> dict:
     )
     counts["findings_moved"] = cur.rowcount
 
-    # 4. software_installations_current (composite PK includes device_id)
+    # 4. Current software inventory has one row per device/product.  Fold a
+    # collision into the survivor's row first, then move the remaining rows.
+    # The old merge action deleted the loser rows outright, which could make a
+    # confirmed identity decision erase inventory.
     cur.execute(
         """
-        DELETE FROM operations.software_installations_current
-        WHERE tenant_id=1 AND device_id=%s
+        UPDATE operations.software_installations_current winner
+           SET publisher = COALESCE(winner.publisher, losing.publisher),
+               version = CASE
+                   WHEN losing.last_observed_at > winner.last_observed_at
+                   THEN COALESCE(losing.version, winner.version)
+                   ELSE winner.version
+               END,
+               install_location = COALESCE(
+                   winner.install_location, losing.install_location
+               ),
+               install_date = COALESCE(winner.install_date, losing.install_date),
+               first_observed_at = LEAST(
+                   winner.first_observed_at, losing.first_observed_at
+               ),
+               last_observed_at = GREATEST(
+                   winner.last_observed_at, losing.last_observed_at
+               ),
+               refreshed_at = GREATEST(winner.refreshed_at, losing.refreshed_at)
+          FROM operations.software_installations_current losing
+         WHERE winner.tenant_id = 1
+           AND winner.tenant_id = losing.tenant_id
+           AND winner.client_id = losing.client_id
+           AND winner.device_id = %s
+           AND losing.device_id = %s
+           AND winner.canonical_name = losing.canonical_name
         """,
-        (loser_id,),
+        (survivor_id, loser_id),
     )
-    counts["software_rows_deleted"] = cur.rowcount
+    counts["software_rows_reconciled"] = cur.rowcount
+    cur.execute(
+        """
+        DELETE FROM operations.software_installations_current losing
+         WHERE losing.tenant_id = 1
+           AND losing.device_id = %s
+           AND EXISTS (
+               SELECT 1
+                 FROM operations.software_installations_current winner
+                WHERE winner.tenant_id = losing.tenant_id
+                  AND winner.client_id = losing.client_id
+                  AND winner.device_id = %s
+                  AND winner.canonical_name = losing.canonical_name
+           )
+        """,
+        (loser_id, survivor_id),
+    )
+    cur.execute(
+        """
+        UPDATE operations.software_installations_current
+           SET device_id = %s
+         WHERE tenant_id = 1 AND device_id = %s
+        """,
+        (survivor_id, loser_id),
+    )
+    counts["software_rows_moved"] = cur.rowcount
 
     # 5. Tombstone loser
     cur.execute(
@@ -10039,20 +10094,23 @@ def device_merge(
     Device IDs (identity_conflict Finding evidence, admin manual link,
     future device-detail action, etc.).
 
-    GET renders a side-by-side confirmation with a radio-button
-    survivor selector (default suggests the Ninja-linked device, else
-    the older by created_at). POST performs the merge and redirects to
-    the survivor's detail page.
+    GET asks whether the anchors are observations of one computer. POST keeps
+    the older anchor as a stable technical identifier (UUID breaks a timestamp
+    tie), moves both evidence sets to it, and redirects to the computer.
     """
     device_a = get_object_or_404(
-        Device.objects.select_related("client"),
+        Device.objects.select_related("client").prefetch_related(
+            "source_links__source"
+        ),
         tenant_id=1,
         id=device_id,
         client__slug=org_slug,
         deleted_at__isnull=True,
     )
     device_b = get_object_or_404(
-        Device.objects.select_related("client"),
+        Device.objects.select_related("client").prefetch_related(
+            "source_links__source"
+        ),
         tenant_id=1,
         id=target_id,
         deleted_at__isnull=True,
@@ -10069,33 +10127,30 @@ def device_merge(
         return redirect("device_detail", org_slug=org_slug, device_id=device_id)
 
     if request.method == "POST":
-        survivor_id = request.POST.get("survivor") or ""
-        if survivor_id not in (str(device_a.id), str(device_b.id)):
-            messages.error(request, "Pick a survivor.")
+        if request.POST.get("confirmation") != "same_computer":
+            messages.error(request, "Confirm that these are the same computer.")
             return redirect(
                 "device_merge",
                 org_slug=org_slug,
                 device_id=device_id,
                 target_id=target_id,
             )
-        if survivor_id == str(device_a.id):
-            survivor, loser = device_a, device_b
-        else:
-            survivor, loser = device_b, device_a
+        survivor, loser = sorted(
+            (device_a, device_b), key=lambda device: (device.created_at, str(device.id))
+        )
         with transaction.atomic(), connection.cursor() as cur:
             cur.execute("SET LOCAL operations.tenant_id = 1")
             counts = _merge_devices(cur, survivor.id, loser.id, "operator.merged")
         _audit(
             request,
-            "device.merge",
+            "device.combine",
             survivor.id,
             {"survivor_id": str(survivor.id), "loser_id": str(loser.id)},
             {"counts": counts},
         )
         messages.success(
             request,
-            f"Merged {loser.canonical_hostname} into "
-            f"{survivor.canonical_hostname}. "
+            f"Combined observations for {survivor.canonical_hostname}. "
             f"Moved {counts.get('observations_moved', 0)} observations and "
             f"{counts.get('findings_moved', 0)} findings. "
             "Source links follow the observations and update on the next "
@@ -10107,25 +10162,6 @@ def device_merge(
             device_id=survivor.id,
         )
 
-    # GET — default-survivor rule mirrors legacy identity_candidate_confirm:
-    # Ninja-linked device wins, else older by created_at.
-    with connection.cursor() as cur:
-        cur.execute("SET LOCAL operations.tenant_id = 1")
-        cur.execute(
-            """
-            SELECT dl.device_id FROM operations.v_device_source_link dl
-            JOIN operations.sources s ON s.id = dl.source_id AND s.name = 'Ninja'
-            WHERE dl.tenant_id = 1 AND dl.device_id IN (%s, %s)
-            """,
-            (device_a.id, device_b.id),
-        )
-        ninja_owners = {row[0] for row in cur.fetchall()}
-    if device_a.id in ninja_owners and device_b.id not in ninja_owners:
-        default_survivor = device_a
-    elif device_b.id in ninja_owners and device_a.id not in ninja_owners:
-        default_survivor = device_b
-    else:
-        default_survivor = device_a if device_a.created_at <= device_b.created_at else device_b
     return render(
         request,
         "device_merge.html",
@@ -10133,7 +10169,6 @@ def device_merge(
             "device_a": device_a,
             "device_b": device_b,
             "devices": [device_a, device_b],
-            "default_survivor": default_survivor,
         },
     )
 

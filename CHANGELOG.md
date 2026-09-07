@@ -2,6 +2,22 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.122.20] — 2026-09-07 — Source-neutral computer review
+
+### Fixed
+
+- Device identity review no longer asks an operator to select a source-backed
+  device as the winner. It now confirms whether the records are the same
+  computer and retains a deterministic technical anchor.
+- Combining device anchors now reconciles matching current software inventory
+  and moves the remaining rows instead of dropping the losing anchor's
+  software rows.
+
+### Changed
+
+- The review groups repeated records from the same source and the candidate
+  queue now says “Review same computer.”
+
 ## [0.122.19] — 2026-09-07 — Merge review route repair
 
 ### Fixed

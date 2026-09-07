@@ -1,5 +1,52 @@
 # Active Operations implementation plan
 
+## ACTIVE TASK — Make strong-device review source-neutral and lossless
+
+**Status:** release preparation.
+
+**Goal:** let an operator confirm that two strong-evidence device anchors are
+the same computer without choosing a source as the winner or discarding the
+losing anchor's software inventory.
+
+**Scope:** the existing two-device merge review, its merge helper, the strong
+candidate entry point, and this plan. No automatic merge, production data
+repair, schema migration, or host-to-guest relationship model is in scope.
+
+**Decision:** a confirmed pair retains the older canonical anchor solely as a
+stable technical identifier (UUID tie-breaker), moves both sets of current
+observations to it, and presents that as combining observations of one
+computer. It is not a source winner. Current software rows are reconciled by
+their current-table identity before the remaining rows are moved; no software
+row is simply dropped. The page groups repeated source-link rows by source.
+
+**Validation:** sample current production strong proposals read-only; Django
+check, template load, focused existing tests where applicable, formatting, and
+diff check. No new diagnostic or test scripts.
+
+**Checkpoint:** production sampling found 40 open `identity_strong` proposals.
+Every sampled profile contains an agent observation and none includes a
+`vm.host`; the Ninja `vm.guest` records are observations of the guest computer,
+not observations of the physical host. The old UI asks the operator to choose
+a survivor and defaults to Ninja. Its merge helper also deletes every current
+software row on the losing anchor, so it does not meet this goal.
+
+**Checkpoint:** the review now asks “Are these the same computer?” and uses
+the older anchor only as a deterministic technical identifier, without a
+source preference. Repeated source links are grouped by source. The current
+software merge path reconciles same-product rows, then moves remaining rows;
+it no longer drops the losing anchor's inventory.
+
+**Validation:** read-only production query grouped all 40 open strong
+proposals. Every profile contains an agent observation and none contains a
+`vm.host`. Django check, changed-template loading, Python compilation, and
+diff check pass. The new current-software reconciliation statements were
+parsed and planned against production inside a rolled-back transaction; each
+uses the existing device/product index. Repository-wide Ruff reports existing
+violations in `views.py`; it is not a clean baseline.
+
+**Next action:** commit the approved 0.122.20 release, push both deployment
+remotes, monitor Portainer's automatic update, and verify health.
+
 ## ACTIVE TASK — Restore device merge review route
 
 **Status:** release preparation.
