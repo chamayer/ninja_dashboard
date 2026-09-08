@@ -47,6 +47,7 @@ from .models import (
     Device,
     DeviceOperatorDecision,
     DevicePatchingOverride,
+    Entity,
     EntityType,
     EvaluatorConfig,
     Finding,
@@ -85,6 +86,7 @@ _SOFTWARE_POLICY_CANDIDATE_TYPES = ("whitelist_suggestion",)
 log = logging.getLogger(__name__)
 
 _NINJA_PATCH_DEVICE_ID_MAX = 2_147_483_647
+_LIFECYCLE_REASON_MAX_LENGTH = 120
 _FINDING_DETAIL_KEY_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 _DEVICE_DETAILS_ATTRIBUTE_KEYS = (
     "hostname",
@@ -1852,6 +1854,21 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
     active_tab = "details" if requested_tab == "identity" else requested_tab
     if active_tab not in ("overview", "observations", "activity", "software", "details"):
         active_tab = "overview"
+    same_name_devices = []
+    same_name_device_count = 0
+    if active_tab == "overview":
+        same_name_devices_qs = (
+            Device.objects.filter(
+                tenant_id=1,
+                client_id=device.client_id,
+                canonical_hostname__iexact=device.canonical_hostname,
+                deleted_at__isnull=True,
+            )
+            .exclude(id=device.id)
+            .order_by("-updated_at", "-created_at")
+        )
+        same_name_device_count = same_name_devices_qs.count()
+        same_name_devices = list(same_name_devices_qs[:20])
 
     # Software findings are subjects on the title or release, so they no longer
     # carry this device's id. The device inherits them through the installation
@@ -2481,6 +2498,8 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
         "device_detail.html",
         {
             "device": device,
+            "same_name_devices": same_name_devices,
+            "same_name_device_count": same_name_device_count,
             "links": links,
             "hudu_records": hudu_records,
             "active_findings": active_findings,
@@ -2505,8 +2524,103 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
                     or request.user.has_perm("operations.manage_catalog")
                 )
             ),
+            "can_manage_lifecycle": bool(
+                request.user.is_superuser
+                or request.user.has_perm("operations.manage_catalog")
+            ),
         },
     )
+
+
+@login_required
+@require_admin
+@require_POST
+@transaction.atomic
+def device_lifecycle_set(
+    request: HttpRequest, org_slug: str, device_id: str, target: str
+) -> HttpResponse:
+    """Retire or restore a Computer without deleting its evidence."""
+    if target not in ("retired", "active"):
+        messages.error(request, "That lifecycle action is not available.")
+        return redirect("device_detail", org_slug=org_slug, device_id=device_id)
+
+    reason = (request.POST.get("reason") or "").strip()
+    if not reason:
+        messages.warning(request, "A reason is required.")
+        return redirect("device_detail", org_slug=org_slug, device_id=device_id)
+    if len(reason) > _LIFECYCLE_REASON_MAX_LENGTH:
+        messages.warning(
+            request,
+            f"Keep the reason to {_LIFECYCLE_REASON_MAX_LENGTH} characters or fewer.",
+        )
+        return redirect("device_detail", org_slug=org_slug, device_id=device_id)
+
+    device = get_object_or_404(
+        Device.objects.select_for_update(),
+        tenant_id=1,
+        id=device_id,
+        client__slug=org_slug,
+        deleted_at__isnull=True,
+    )
+    entity = get_object_or_404(
+        Entity.objects.select_for_update(),
+        tenant_id=1,
+        id=device.entity_id,
+        deleted_at__isnull=True,
+    )
+    desired_status = (
+        Device.LifecycleStatus.RETIRED
+        if target == "retired"
+        else Device.LifecycleStatus.ACTIVE
+    )
+    if device.lifecycle_status == desired_status:
+        messages.info(
+            request,
+            f"This Computer is already {device.get_lifecycle_status_display().lower()}.",
+        )
+        return redirect("device_detail", org_slug=org_slug, device_id=device_id)
+
+    before = {
+        "lifecycle_status": device.lifecycle_status,
+        "entity_retired_at": entity.retired_at.isoformat() if entity.retired_at else None,
+        "entity_retired_reason": entity.retired_reason,
+    }
+    now = timezone.now()
+    device.lifecycle_status = desired_status
+    device.updated_at = now
+    device.updated_reason = f"operator.lifecycle_{target}"
+    device.save(update_fields=["lifecycle_status", "updated_at", "updated_reason"])
+
+    entity.retired_at = now if target == "retired" else None
+    entity.retired_reason = reason if target == "retired" else ""
+    entity.updated_at = now
+    entity.updated_reason = f"operator.lifecycle_{target}"
+    entity.save(
+        update_fields=["retired_at", "retired_reason", "updated_at", "updated_reason"]
+    )
+    _audit(
+        request,
+        f"device.lifecycle.{target}",
+        device.id,
+        before,
+        {
+            "lifecycle_status": device.lifecycle_status,
+            "reason": reason,
+            "entity_retired_at": entity.retired_at.isoformat() if entity.retired_at else None,
+        },
+        entity_type="device",
+    )
+    if target == "retired":
+        messages.success(
+            request,
+            "Computer retired. Its source records and history were kept.",
+        )
+    else:
+        messages.success(
+            request,
+            "Computer restored to the active inventory. Its current source status will refresh normally.",
+        )
+    return redirect("device_detail", org_slug=org_slug, device_id=device_id)
 
 
 @login_required
@@ -2625,14 +2739,22 @@ def search(request: HttpRequest) -> HttpResponse:
     - Ambiguous or empty → render a results page.
     """
     q = (request.GET.get("q") or "").strip()
+    include_retired = request.GET.get("include_retired") == "1"
     if not q:
-        return render(request, "search_results.html", {"q": "", "devices": [], "clients": []})
-
-    devices = list(
-        Device.objects.filter(
-            tenant_id=1,
-            deleted_at__isnull=True,
+        return render(
+            request,
+            "search_results.html",
+            {"q": "", "devices": [], "clients": [], "include_retired": include_retired},
         )
+
+    devices_qs = Device.objects.filter(
+        tenant_id=1,
+        deleted_at__isnull=True,
+    )
+    if not include_retired:
+        devices_qs = devices_qs.exclude(lifecycle_status=Device.LifecycleStatus.RETIRED)
+    devices = list(
+        devices_qs
         .filter(Q(canonical_hostname__icontains=q) | Q(canonical_serial__icontains=q))
         .select_related("client")
         .order_by("canonical_hostname")[:100]
@@ -2662,6 +2784,7 @@ def search(request: HttpRequest) -> HttpResponse:
             "q": q,
             "devices": devices,
             "clients": clients,
+            "include_retired": include_retired,
         },
     )
 
@@ -6135,7 +6258,7 @@ def devices_page(request: HttpRequest) -> HttpResponse:
                    COUNT(*) FILTER (WHERE last_contact_at IS NULL
                                     OR last_contact_at < NOW() - INTERVAL '{active_device_days} days') AS stale
             FROM operations.v_device
-            WHERE tenant_id = 1
+            WHERE tenant_id = 1 AND lifecycle_status <> 'retired'
             """
         )
         row = cur.fetchone()
@@ -6179,13 +6302,14 @@ def devices_page(request: HttpRequest) -> HttpResponse:
         cur.execute(
             """
             SELECT os_group, COUNT(*) FROM operations.v_device
-            WHERE tenant_id = 1 GROUP BY os_group ORDER BY COUNT(*) DESC
+            WHERE tenant_id = 1 AND lifecycle_status <> 'retired'
+            GROUP BY os_group ORDER BY COUNT(*) DESC
             """
         )
         os_rows = cur.fetchall()
 
         # Device table — v_device + client name. Apply filters.
-        where = ["v.tenant_id = 1"]
+        where = ["v.tenant_id = 1", "v.lifecycle_status <> 'retired'"]
         params: list = []
         if q_filter:
             where.append("(v.canonical_hostname ILIKE %s OR v.canonical_serial ILIKE %s)")
@@ -9257,14 +9381,14 @@ def client_candidate_detail(request: HttpRequest, candidate_id) -> HttpResponse:
 # ── Candidate actions (Track C.4) — all audited ─────────────────────────────
 
 
-def _audit(request, action: str, entity_id, before, after) -> None:
+def _audit(request, action: str, entity_id, before, after, *, entity_type: str = "client_candidate") -> None:
     AuditLog.objects.create(
         tenant_id=1,
         actor=request.user if request.user.is_authenticated else None,
         actor_kind=AuditLog.ActorKind.USER,
         source=AuditLog.Source.UI,
         action=action,
-        entity_type="client_candidate",
+        entity_type=entity_type,
         entity_id=entity_id,
         before_state=before,
         after_state=after,

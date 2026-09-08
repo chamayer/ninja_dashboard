@@ -2,6 +2,18 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.122.26] — 2026-09-08 — Computer retirement workflow
+
+### Changed
+
+- Operations administrators can retire or restore a Computer from its detail
+  page with a required reason and an audit record. Retirement preserves all
+  source evidence and history while removing the Computer from normal
+  inventory, coverage, and search.
+- Normal search and the Devices page now exclude retired Computers by default.
+  Search can explicitly include them, and Computer details show other records
+  with the same client and hostname as separate context.
+
 ## [0.122.25] — 2026-09-08 — Operator-managed Computer identity matching
 
 ### Changed

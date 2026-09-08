@@ -7,6 +7,11 @@
     <h1>Search</h1>
     {% if q %}
         <p class="muted">Results for <code>{{ q }}</code></p>
+        <form method="get" style="display:flex; gap:0.5rem; align-items:center; font-size:0.85rem;">
+            <input type="hidden" name="q" value="{{ q }}">
+            <label><input type="checkbox" name="include_retired" value="1"{% if include_retired %} checked{% endif %}> Include retired Computers</label>
+            <button type="submit">Update</button>
+        </form>
     {% else %}
         <p class="muted">Enter a hostname, serial number, client name, or slug in the search box above.</p>
     {% endif %}
@@ -50,6 +55,7 @@
                     <th>Hostname</th>
                     <th>Serial</th>
                     <th>Client</th>
+                    <th>Lifecycle</th>
                 </tr>
             </thead>
             <tbody>
@@ -70,6 +76,7 @@
                             <span class="muted">—</span>
                         {% endif %}
                     </td>
+                    <td>{{ d.get_lifecycle_status_display }}</td>
                 </tr>
                 {% endfor %}
             </tbody>

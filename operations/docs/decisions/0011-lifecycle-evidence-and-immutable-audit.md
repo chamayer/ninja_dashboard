@@ -121,3 +121,18 @@ This decision supersedes lifecycle semantics inferred from
 ADR-0005's typed Device layers and ADR-0007's content-hashed observation
 history. It does not alter the separately tracked stable-source-identity or
 unified-entity-ecosystem designs.
+
+## Amendment — 2026-09-08: operator retirement workflow
+
+An administrator may retire or restore a Computer from its detail page. Both
+actions require a reason, update the typed Computer lifecycle and its generic
+entity anchor in one transaction, and append an audit event. Retirement keeps
+all source observations, links, findings, and history; it is neither a merge
+nor a deletion. Restore clears only the retirement marker and returns the
+Computer to the active lifecycle so the normal evaluator can assess its current
+source evidence again.
+
+Normal Computer browse and search exclude retired Computers. Search has an
+explicit include-retired control, and a Computer detail shows same-client/name
+records as context only. A shared name is not proof of identity and never
+causes an automatic retirement or merge.

@@ -44,6 +44,7 @@ from apps.core.views import (
     device_detail,
     device_exemption_add,
     device_exemption_clear,
+    device_lifecycle_set,
     device_merge,
     device_patch_scope_clear,
     device_patch_scope_set,
@@ -121,6 +122,11 @@ urlpatterns = [
         "orgs/<slug:org_slug>/devices/<uuid:device_id>/exemption/clear/",
         device_exemption_clear,
         name="device_exemption_clear",
+    ),
+    path(
+        "orgs/<slug:org_slug>/devices/<uuid:device_id>/lifecycle/<str:target>/",
+        device_lifecycle_set,
+        name="device_lifecycle_set",
     ),
     path(
         "orgs/<slug:org_slug>/devices/<uuid:device_id>/merge/<uuid:target_id>/",

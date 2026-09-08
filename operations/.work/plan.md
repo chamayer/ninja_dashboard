@@ -1,5 +1,52 @@
 # Active Operations implementation plan
 
+## ACTIVE TASK — Retire Computers and keep historical rebuilds out of normal search
+
+**Status:** release prepared; commit, push, and Portainer deployment approved.
+
+**Goal:** give operators a reversible, audited way to retire a Computer and
+make normal search present current Computers rather than every retired rebuild
+with a reused name.
+
+**Scope:** Computer-detail lifecycle action, audit/anchor synchronization,
+normal search filtering with an explicit include-retired option, and compact
+same-client/name history context on the Computer detail. No automatic
+retirement, source-observation rewrite, merge, or production bulk change.
+
+**Decision:** retirement is an operator-owned lifecycle decision, not a source
+assertion and not a soft delete. Retiring sets the Computer lifecycle to
+`retired`, marks its generic anchor retired with the same reason/time, writes
+an audit event, retains all source evidence, and removes it from normal
+inventory/coverage/search. Restore is the inverse, also reasoned and audited.
+Only an administrator may make either decision. Name reuse supplies history
+context only; it never retires or merges another Computer automatically.
+
+**Affected areas:** detail/search and current-Devices views and templates, URL
+routing, existing entity/device lifecycle stores, lifecycle decision record,
+and this plan. No migration is expected.
+
+**Validation:** Django check/migration drift, Python compilation, focused
+existing tests and template loading, scoped lint/format where applicable, and
+diff check. No new test scripts and no production writes.
+
+**Checkpoint:** detail pages now offer an admin-only retire/restore action with
+a required reason. It updates the Computer and generic anchor atomically and
+writes a `device.lifecycle.*` audit event. Normal search and the current
+Devices page exclude retired Computers; search can explicitly include them.
+The Overview tab shows other same-client/name Computers as separate records
+for operator context. No records were retired automatically.
+
+**Validation completed:** focused existing lifecycle/detail/findings tests
+passed (15); Django check, migration drift, Python compilation, and the three
+changed templates loading all pass; `git diff --check` passes. Docker-based
+checks could not run because Docker Desktop is unavailable locally. Whole-file
+Ruff/format still reports pre-existing issues and line-ending formatting beyond
+this scope.
+
+**Next action:** commit the 0.122.26 release, push `origin` then the required
+mirror, trigger the coupled Portainer deployment, and verify basic health. No
+migration is included.
+
 ## ACTIVE TASK — Separate Computer inventory from OS-installation history
 
 **Status:** deployed in 0.122.24. Follow-on identity-policy work is active below.

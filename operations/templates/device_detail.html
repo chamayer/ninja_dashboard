@@ -246,7 +246,51 @@
             <tr><th style="text-align:left; padding-right:1rem;">Lifecycle</th><td>{{ device.lifecycle_status|humanize_label|default:"—" }}</td></tr>
         </tbody>
     </table>
+    {% if same_name_device_count %}
+    <details style="margin-top:0.9rem;">
+        <summary style="cursor:pointer; color:var(--muted);">Other Computers with this name ({{ same_name_device_count }})</summary>
+        <p class="muted" style="font-size:0.82rem;">These share this client and hostname. They are separate Computers until an operator decides otherwise.</p>
+        <table class="ops-table" style="font-size:0.85rem;">
+            <thead><tr><th>Lifecycle</th><th>Serial</th><th>VM UUID</th><th>Created</th><th></th></tr></thead>
+            <tbody>
+                {% for other in same_name_devices %}
+                <tr>
+                    <td>{{ other.get_lifecycle_status_display }}</td>
+                    <td><code>{{ other.canonical_serial|default:"—" }}</code></td>
+                    <td><code>{{ other.canonical_vm_uuid|default:"—" }}</code></td>
+                    <td class="muted">{{ other.created_at|date:"Y-m-d" }}</td>
+                    <td><a href="{% url 'device_detail' org_slug=device.client.slug device_id=other.id %}">Open</a></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% if same_name_device_count > same_name_devices|length %}
+        <p class="muted" style="font-size:0.8rem;">Showing the 20 most recently updated records.</p>
+        {% endif %}
+    </details>
+    {% endif %}
 </div>
+
+{% if can_manage_lifecycle %}
+<div class="card">
+    <h2 style="margin-top:0;">Computer lifecycle</h2>
+    {% if device.lifecycle_status == 'retired' %}
+    <p class="muted">This Computer is retired. Its source records and history are kept, but it is out of normal inventory, coverage, and search.</p>
+    <form method="post" action="{% url 'device_lifecycle_set' org_slug=device.client.slug device_id=device.id target='active' %}" style="display:flex; gap:0.4rem; flex-wrap:wrap; align-items:center;">
+        {% csrf_token %}
+        <input type="text" name="reason" required maxlength="120" placeholder="Why restore this Computer?" style="padding:0.35rem 0.6rem; min-width:260px;">
+        <button type="submit">Restore to inventory</button>
+    </form>
+    {% else %}
+    <p class="muted">Retire a Computer only when it should no longer be counted in normal inventory or coverage. This keeps all source records and can be reversed.</p>
+    <form method="post" action="{% url 'device_lifecycle_set' org_slug=device.client.slug device_id=device.id target='retired' %}" style="display:flex; gap:0.4rem; flex-wrap:wrap; align-items:center;" onsubmit="return confirm('Retire this Computer? Its source records will be kept.');">
+        {% csrf_token %}
+        <input type="text" name="reason" required maxlength="120" placeholder="Why retire this Computer?" style="padding:0.35rem 0.6rem; min-width:260px;">
+        <button type="submit" style="color:#991b1b;">Retire Computer</button>
+    </form>
+    {% endif %}
+</div>
+{% endif %}
 
 <div class="card">
     <h2 style="margin-top:0;">Coverage exemptions
