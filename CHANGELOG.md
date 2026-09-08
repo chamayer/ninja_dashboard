@@ -2,6 +2,14 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.122.33] — 2026-09-08 — Compact inventory platform cells
+
+### Changed
+
+- Platform cells now show presence and its meaning on separate lines, avoiding
+  wider inventory columns while distinguishing absent-required from
+  absent-not-required.
+
 ## [0.122.32] — 2026-09-08 — No-platform inventory filter
 
 ### Changed

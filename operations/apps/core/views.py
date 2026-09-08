@@ -9066,12 +9066,14 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
 
     for row in device_rows:
         row["platform_cells"] = [
-            {
+            (lambda coverage, present: {
                 "platform": platform,
-                "status": (
-                    row["platform_states"].get(platform, {}).get("status")
-                    or row["source_states"].get(platform)
-                    or "Not applicable"
+                "presence": "Present" if present else "Absent",
+                "meaning": (
+                    "Stale" if coverage and coverage.get("status") == "Stale"
+                    else row["source_states"].get(platform, "Online" if coverage and coverage.get("status") == "Online" else "Offline")
+                    if present
+                    else "Required" if coverage else "Not required"
                 ),
                 "is_coverage": platform in row["platform_states"],
                 "possible_match": (
@@ -9084,7 +9086,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                         f"{row['platform_states'].get(platform, {}).get('status', '')}"
                     ),
                 ) if platform in row["platform_states"] else "",
-            }
+            })(row["platform_states"].get(platform), platform in row["source_states"] or (platform in row["platform_states"] and row["platform_states"][platform]["status"] != "Missing"))
             for platform in platforms
         ]
 
