@@ -524,8 +524,9 @@ function swFilter(q) {
 <div class="card">
     <h2 style="margin-top:0;">Reported fields</h2>
     <p class="muted" style="margin-top:-0.4rem;">
-        A value lists every source that currently reports it. Different values
-        are shown separately; nothing is silently chosen as the truth.
+        Hardware, operating-system, and network values reported by each source.
+        Different values are shown separately; nothing is silently chosen as
+        the truth.
     </p>
     {% if attribute_fields %}
     <table style="width:100%;">
@@ -554,7 +555,7 @@ function swFilter(q) {
     {% if source_attribute_details %}
     {% for source in source_attribute_details %}
     <details style="margin-bottom:0.6rem; border:1px solid var(--border); border-radius:5px;">
-        <summary style="cursor:pointer; padding:0.55rem 0.75rem; background:#f8f9fb;"><strong>{{ source.source }}</strong> · {{ source.entity_type|humanize_label }}{% if source.external_id %} · <code>{{ source.external_id }}</code>{% endif %} — {{ source.fields|length }} approved field{{ source.fields|length|pluralize }}</summary>
+        <summary style="cursor:pointer; padding:0.55rem 0.75rem; background:#f8f9fb;"><strong>{{ source.source }}</strong> · {{ source.entity_type|humanize_label }}{% if source.external_id %} · <code>{{ source.external_id }}</code>{% endif %} — {{ source.fields|length }} relevant field{{ source.fields|length|pluralize }}</summary>
         <table style="width:100%; margin:0.5rem 0;">
             <tbody>{% for field in source.fields %}<tr><th style="text-align:left; padding:0.35rem 0.7rem;">{{ field.name }}</th><td><code>{{ field.value|default:"—" }}</code></td><td class="muted num">{{ field.observed_at|date:"Y-m-d H:i" }}</td></tr>{% endfor %}</tbody>
         </table>

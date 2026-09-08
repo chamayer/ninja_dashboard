@@ -2,7 +2,7 @@
 
 ## ACTIVE TASK — Reorganize the computer detail page around observations
 
-**Status:** ready for review.
+**Status:** implementation.
 
 **Goal:** preserve the current five device-page workflows while making the
 computer the subject, showing every current source observation (including OS
@@ -46,9 +46,13 @@ read-only against production with tenant context and use the device/claim
 indexes. Earlier attempts to run that focused suite from the wrong directory
 failed only because its relative fixture paths were not present.
 
-**Next action:** review the page locally, then commit and deploy only with
-explicit approval. Migration 0151 is pending and must be included in that
-approval.
+**Checkpoint:** the deployed page exposed a regression: its source-evidence
+view is derived and waits for the next source-link sync after a manual merge,
+so it cannot immediately show combined observations. Details also included
+operational counters that belong on Overview/Activity.
+
+**Next action:** add a safe current-observation read model, limit Details to
+hardware/OS/network attributes, then validate and request release approval.
 
 ## ACTIVE TASK — Make strong-device review source-neutral and lossless
 

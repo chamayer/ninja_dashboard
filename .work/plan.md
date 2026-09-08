@@ -1,5 +1,20 @@
 # Active root implementation plan
 
+## CURRENT TASK — Immediate computer observations
+
+**Status:** release preparation.
+
+**Goal:** release the safe current-observation read model so manual combines
+appear immediately, and limit computer Details to hardware, OS, and network
+facts.
+
+**Scope:** Operations migration 0152, device-detail query/filtering, and
+0.122.23 release metadata. No ingest or identity-resolution change.
+
+**Validation:** Django and migration checks, template load, compilation,
+focused tests, and diff check pass. Commit, push, Portainer deployment,
+migration application, and health verification are next.
+
 ## CURRENT TASK — Computer observations and field details
 
 **Status:** release preparation.

@@ -2,6 +2,18 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.122.23] — 2026-09-08 — Immediate computer observations
+
+### Fixed
+
+- Computer observations now read current attached source records, so a manual
+  merge appears immediately rather than waiting for source-link synchronization.
+
+### Changed
+
+- Computer Details now focuses on hardware, operating-system, and network
+  fields instead of operational counters.
+
 ## [0.122.22] — 2026-09-07 — Computer page evidence access repair
 
 ### Fixed

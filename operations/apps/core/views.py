@@ -86,6 +86,23 @@ log = logging.getLogger(__name__)
 
 _NINJA_PATCH_DEVICE_ID_MAX = 2_147_483_647
 _FINDING_DETAIL_KEY_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+_DEVICE_DETAILS_ATTRIBUTE_KEYS = (
+    "hostname",
+    "serial_number",
+    "mac_address",
+    "vm_uuid",
+    "is_virtual_machine",
+    "node_class",
+    "device_role",
+    "os_name",
+    "os_family",
+    "os_build_number",
+    "os_release_id",
+    "domain",
+    "ip_address",
+    "network_adapter",
+    "gateway",
+)
 
 
 def _safe_ninja_external_id_integer_sql(alias: str) -> str:
@@ -1875,17 +1892,17 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
             SELECT evidence.source_name, evidence.entity_type, evidence.external_id,
                    evidence.observation_active, evidence.observation_last_seen_at,
                    presence.reported_online, presence.last_contact_at
-              FROM operations.v_entity_source_evidence evidence
+              FROM operations.v_device_observation_current evidence
               LEFT JOIN operations.device_agent_presence_current presence
                 ON presence.tenant_id = evidence.tenant_id
                AND presence.device_id = %s
                AND presence.platform = evidence.source_name
                AND presence.entity_type = evidence.entity_type
-             WHERE evidence.tenant_id = %s AND evidence.entity_id = %s
+             WHERE evidence.tenant_id = %s AND evidence.device_id = %s
              ORDER BY evidence.source_name, evidence.entity_type,
                       evidence.observation_last_seen_at DESC
                 """,
-                [str(device.id), 1, str(device.entity_id)],
+                [str(device.id), 1, str(device.id)],
             )
             observations = cur.fetchall()
 
@@ -2097,18 +2114,20 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
                        evidence.entity_type, evidence.external_id,
                        claim.last_observed_at
                   FROM operations.v_entity_attribute_claim_current claim
-                  LEFT JOIN operations.v_entity_source_evidence evidence
+                  LEFT JOIN operations.v_device_observation_current evidence
                     ON evidence.tenant_id = claim.tenant_id
                    AND evidence.observation_id = claim.observation_id
                   JOIN operations.source_instances source_instance
                     ON source_instance.tenant_id = claim.tenant_id
                    AND source_instance.id = claim.source_instance_id
                   JOIN operations.sources source ON source.id = source_instance.source_id
-                 WHERE claim.tenant_id = 1 AND claim.entity_id = %s
+                 WHERE claim.tenant_id = 1
+                   AND claim.entity_id = %s
+                   AND claim.attribute_key = ANY(%s)
                  ORDER BY claim.attribute_display_name, claim.value_display,
                           source.name
                 """,
-                [str(device.entity_id)],
+                [str(device.entity_id), list(_DEVICE_DETAILS_ATTRIBUTE_KEYS)],
             )
             claim_rows = cur.fetchall()
 
