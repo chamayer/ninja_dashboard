@@ -2,6 +2,13 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.122.31] — 2026-09-08 — Consistent platform filter rows
+
+### Changed
+
+- Added the Any platform checkbox to the Platforms filter, matching the
+  platform rows and allowing an all-platform filter with or without statuses.
+
 ## [0.122.30] — 2026-09-08 — Simpler inventory filters
 
 ### Changed

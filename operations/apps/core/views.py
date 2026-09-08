@@ -8299,6 +8299,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         value for value in request.GET.getlist("any_platform_status")
         if value in _COVERAGE_STATES
     ]
+    any_platform_selected = request.GET.get("any_platform") == "1"
     hudu_filters = [
         value for value in request.GET.getlist("hudu")
         if value in {"in_hudu", "not_in_hudu"}
@@ -8914,11 +8915,13 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             return False
         if device_query and device_query not in row["hostname"].lower():
             return False
-        if any_platform_filters:
+        if any_platform_selected or any_platform_filters:
             row_states = {
                 item["status"] for item in row["platform_states"].values()
             } | set(row["source_states"].values())
-            if not row_states.intersection(any_platform_filters):
+            if not row_states or (
+                any_platform_filters and not row_states.intersection(any_platform_filters)
+            ):
                 return False
         for platform in coverage_source_filters:
             status = (
@@ -9107,6 +9110,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             "coverage_source_filters": coverage_source_filters,
             "coverage_status_filters": coverage_status_filters,
             "any_platform_filters": any_platform_filters,
+            "any_platform_selected": any_platform_selected,
             "hudu_filters": hudu_filters,
             "hudu_link_filters": hudu_link_filters,
             "hudu_record_filter": hudu_record_filter,
