@@ -2,6 +2,13 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.122.32] — 2026-09-08 — No-platform inventory filter
+
+### Changed
+
+- Added a No platform records option to Computers → Platforms, showing
+  Computers without a current management or security platform record.
+
 ## [0.122.31] — 2026-09-08 — Consistent platform filter rows
 
 ### Changed
