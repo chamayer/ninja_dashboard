@@ -155,7 +155,7 @@ class _Connection:
         return self._cursor
 
 
-def test_coverage_uses_effective_requirements_and_multiselect_filters(monkeypatch):
+def test_coverage_uses_effective_requirements_and_source_specific_filters(monkeypatch):
     cursor = _Cursor()
     captured = {}
     monkeypatch.setattr(views, "connection", _Connection(cursor))
@@ -167,9 +167,10 @@ def test_coverage_uses_effective_requirements_and_multiselect_filters(monkeypatc
         or HttpResponse(),
     )
     request = RequestFactory().get(
-        "/coverage/?client=acme&client=beta&platform=Ninja&platform=SentinelOne"
-        "&online_in=SentinelOne&hudu=in_hudu&hudu_links=has_links"
-        "&s1_exemption=not_exempt&state=Online&state=Missing"
+        "/coverage/?client=acme&client=beta&coverage_source=Ninja"
+        "&coverage_status=Ninja%7CMissing&coverage_source=SentinelOne"
+        "&coverage_status=SentinelOne%7COnline&hudu=in_hudu&hudu_links=has_links"
+        "&s1_exemption=not_exempt"
         "&os_family=Windows+11&device_type=workstation"
     )
     request.user = SimpleNamespace(is_authenticated=True)
@@ -191,12 +192,15 @@ def test_coverage_uses_effective_requirements_and_multiselect_filters(monkeypatc
 
     context = captured["context"]
     assert context["client_filters"] == ["acme", "beta"]
-    assert context["platform_filters"] == ["Ninja", "SentinelOne"]
-    assert context["online_filters"] == ["SentinelOne"]
+    assert context["coverage_source_filters"] == {"Ninja", "SentinelOne"}
+    assert context["coverage_status_filters"] == {
+        "Ninja": ["Missing"],
+        "SentinelOne": ["Online"],
+    }
     assert context["hudu_filters"] == ["in_hudu"]
     assert context["hudu_link_filters"] == ["has_links"]
     assert context["s1_exemption_filters"] == ["not_exempt"]
-    assert context["state_filters"] == ["Online", "Missing"]
+    assert context["state_filters"] == []
     assert context["os_family_filters"] == ["Windows 11"]
     assert context["device_type_filters"] == ["workstation"]
     assert len(context["device_rows"]) == 1
@@ -204,9 +208,11 @@ def test_coverage_uses_effective_requirements_and_multiselect_filters(monkeypatc
     assert context["filtered_summary"] == {
         "clients": 1,
         "devices": 1,
-        "agent_checks": 2,
-        "online_devices": 1,
+        "in_hudu": 1,
+        "not_in_hudu": 0,
     }
+    ninja_card = next(card for card in context["platform_cards"] if card["platform"] == "Ninja")
+    assert [count["count"] for count in ninja_card["counts"]] == [1, 0, 0, 1]
     row = context["device_rows"][0]
     assert row["hudu_present"] is True
     assert row["hudu_links"] == ["Ninja — host-1", "Auvik #42"]
@@ -214,7 +220,9 @@ def test_coverage_uses_effective_requirements_and_multiselect_filters(monkeypatc
         ("Ninja", "Missing"),
         ("SentinelOne", "Online"),
     ]
-    assert row["platform_cells"][0]["url"] == "?platform=Ninja&state=Missing"
+    assert row["platform_cells"][0]["url"] == (
+        "?coverage_source=Ninja&coverage_status=Ninja%7CMissing"
+    )
 
 
 def test_coverage_includes_an_unattached_hudu_computer_as_its_own_row(monkeypatch):
@@ -289,19 +297,19 @@ def test_coverage_template_has_clear_statuses_hudu_and_multiselect_filters():
     template = (Path(__file__).parents[3] / "templates/coverage.html").read_text(encoding="utf-8")
 
     for label in (
-        "Online in",
+        "Platform status",
         "Hudu links",
         "SentinelOne",
-        "Required platform",
-        "Status",
         "OS family",
         "Device type",
     ):
         assert label in template
+    assert "Online in" not in template
+    assert "Required platform" not in template
     assert "Hudu" in template
     assert template.count('type="checkbox"') >= 12
-    assert template.count('<details class="coverage-filter">') == 9
-    assert template.count('class="coverage-filter-search"') >= 9
+    assert template.count('<details class="coverage-filter">') == 7
+    assert template.count('class="coverage-filter-search"') >= 7
     assert "coverage-filterbar" in template
     assert "const filterMenus" in template
     assert "event.target.closest('details.coverage-filter, details.coverage-column-filter')" in template
@@ -316,9 +324,10 @@ def test_coverage_template_has_clear_statuses_hudu_and_multiselect_filters():
     assert "Archived records only" in template
     assert 'name="show_archived_hudu"' not in template
     assert "row.hudu_records" in template
-    assert "Computer inventory from all sources" in template
-    for label in ("Clients", "Devices", "Agent checks", "Online devices"):
+    assert "Computer inventory from all platforms" in template
+    for label in ("Clients", "Computers", "In Hudu", "Not in Hudu"):
         assert label in template
+    assert "Agent checks" not in template
     assert "_pagination.html" in template
     assert "In Hudu" in template
     assert "Not in Hudu" in template

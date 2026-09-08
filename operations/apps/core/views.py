@@ -3196,11 +3196,23 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     device_context_by_id: dict = {}
     if device_subject_ids:
         device_context_by_id = {
-            device_id: {"hostname": hostname, "os_name": os_name}
-            for device_id, hostname, os_name in Device.objects.filter(
+            device_id: {
+                "hostname": hostname,
+                "os_name": os_name,
+                "client_slug": client_slug,
+                "client_name": client_name,
+            }
+            for device_id, hostname, os_name, client_slug, client_name in Device.objects.filter(
                 tenant_id=1,
                 id__in=device_subject_ids,
-            ).values_list("id", "canonical_hostname", "os_name")
+                deleted_at__isnull=True,
+            ).values_list(
+                "id",
+                "canonical_hostname",
+                "os_name",
+                "client__slug",
+                "client__display_name",
+            )
         }
 
     windows_context_by_device_id: dict[str, dict[str, str]] = {}
@@ -3251,12 +3263,14 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
 
         if f.subject_type == Finding.SubjectType.DEVICE:
             subject_label = device_context.get("hostname") or "(unnamed device)"
-            if f.client and f.subject_id:
+            if device_context.get("client_slug") and f.subject_id:
                 subject_url = reverse(
                     "device_detail",
-                    kwargs={"org_slug": f.client.slug, "device_id": f.subject_id},
+                    kwargs={"org_slug": device_context["client_slug"], "device_id": f.subject_id},
                 )
-            if f.client:
+            if device_context.get("client_name"):
+                context_parts.append(device_context["client_name"])
+            elif f.client:
                 context_parts.append(f.client.display_name)
             os_parts = [
                 device_context.get("os_name", ""),
@@ -8274,8 +8288,13 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
     """Show the master Computers inventory with current agent coverage."""
     client_filters = [value for value in request.GET.getlist("client") if value]
     device_query = (request.GET.get("device") or "").strip().lower()
+    # ``platform``, ``state``, and ``online_in`` are retained as legacy query
+    # parameters for existing drill-through URLs.  New controls express a
+    # condition as one source plus that source's selected statuses.
     platform_filters = [value for value in request.GET.getlist("platform") if value]
     online_filters = [value for value in request.GET.getlist("online_in") if value]
+    requested_coverage_sources = request.GET.getlist("coverage_source")
+    requested_coverage_statuses = request.GET.getlist("coverage_status")
     hudu_filters = [
         value for value in request.GET.getlist("hudu")
         if value in {"in_hudu", "not_in_hudu"}
@@ -8640,9 +8659,19 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         }
         for row in rows
     ]
+    # A Computer can have more than one requirement within one platform.  The
+    # inventory card must still count that Computer once, using the status an
+    # operator should address first.
+    coverage_status_rank = {"Missing": 0, "Stale": 1, "Offline": 2, "Online": 3}
     coverage_by_device: dict = {}
     for row in coverage_rows:
-        coverage_by_device.setdefault(row["device_id"], {})[row["platform"]] = row
+        platform_states = coverage_by_device.setdefault(row["device_id"], {})
+        existing = platform_states.get(row["platform"])
+        if (
+            existing is None
+            or coverage_status_rank[row["status"]] < coverage_status_rank[existing["status"]]
+        ):
+            platform_states[row["platform"]] = row
 
     coverage_platforms = sorted({row["platform"] for row in coverage_rows})
     platforms = sorted(
@@ -8655,8 +8684,37 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         platform, separator, status = value.partition("|")
         if separator and platform in platforms and status in allowed_platform_states:
             platform_status_filters.setdefault(platform, []).append(status)
+    coverage_source_filters = {
+        platform for platform in requested_coverage_sources if platform in platforms
+    }
+    # Keep historical required-platform URLs useful during the transition.
+    coverage_source_filters.update(
+        platform for platform in platform_filters if platform in platforms
+    )
+    coverage_status_filters: dict[str, list[str]] = {
+        platform: [] for platform in coverage_source_filters
+    }
+    for value in requested_coverage_statuses:
+        platform, separator, status = value.partition("|")
+        if separator and platform in platforms and status in _COVERAGE_STATES:
+            coverage_source_filters.add(platform)
+            coverage_status_filters.setdefault(platform, []).append(status)
+    for platform in online_filters:
+        if platform in platforms:
+            coverage_source_filters.add(platform)
+            coverage_status_filters.setdefault(platform, []).append("Online")
+    for platform in coverage_source_filters:
+        coverage_status_filters.setdefault(platform, [])
     platform_filter_columns = [
         {"name": platform, "selected_states": platform_status_filters.get(platform, [])}
+        for platform in platforms
+    ]
+    coverage_filter_sources = [
+        {
+            "name": platform,
+            "selected": platform in coverage_source_filters,
+            "statuses": coverage_status_filters.get(platform, []),
+        }
         for platform in platforms
     ]
     os_families = sorted(
@@ -8809,6 +8867,17 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             return False
         if device_query and device_query not in row["hostname"].lower():
             return False
+        for platform in coverage_source_filters:
+            status = (
+                row["platform_states"].get(platform, {}).get("status")
+                or row["source_states"].get(platform)
+                or "Not applicable"
+            )
+            selected_statuses = coverage_status_filters[platform]
+            if status == "Not applicable" or (
+                selected_statuses and status not in selected_statuses
+            ):
+                return False
         matching_coverage = list(row["platform_states"].values())
         if platform_filters:
             matching_coverage = [
@@ -8852,27 +8921,11 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         return True
 
     device_rows = [row for row in inventory_rows if matches(row)]
-    if online_filters:
-        device_rows = [
-            row for row in device_rows
-            if any(
-                platform in online_filters and status == "Online"
-                for platform, status in row["source_states"].items()
-            )
-        ]
-
-    visible_devices = {row["device_id"] for row in device_rows if row["device_id"] is not None}
-    summary_rows = [
-        row for row in coverage_rows
-        if row["device_id"] in visible_devices
-        and (not platform_filters or row["platform"] in platform_filters)
-        and (not state_filters or row["status"] in state_filters)
-    ]
     platform_cards = []
     for platform in coverage_platforms:
         counts = {state: 0 for state in _COVERAGE_STATES}
-        for row in summary_rows:
-            if row["platform"] == platform:
+        for platform_states in coverage_by_device.values():
+            if row := platform_states.get(platform):
                 counts[row["status"]] += 1
         platform_cards.append({
             "platform": platform,
@@ -8881,7 +8934,10 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                 {
                     "name": state,
                     "count": counts[state],
-                    "url": _coverage_filter_url(platform=platform, state=state),
+                    "url": _coverage_filter_url(
+                        coverage_source=platform,
+                        coverage_status=f"{platform}|{state}",
+                    ),
                 }
                 for state in _COVERAGE_STATES
             ],
@@ -8890,12 +8946,8 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
     filtered_summary = {
         "clients": len({row["client_slug"] for row in device_rows}),
         "devices": len(device_rows),
-        "agent_checks": len(summary_rows),
-        "online_devices": len({
-            row["inventory_key"]
-            for row in device_rows
-            if any(status == "Online" for status in row["source_states"].values())
-        }),
+        "in_hudu": sum(row["hudu_present"] for row in device_rows),
+        "not_in_hudu": sum(not row["hudu_present"] for row in device_rows),
     }
 
     if wants_csv(request):
@@ -8960,8 +9012,11 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                     row["possible_match"] if platform == "Ninja" else None
                 ),
                 "url": _coverage_filter_url(
-                    platform=platform,
-                    state=row["platform_states"].get(platform, {}).get("status", ""),
+                    coverage_source=platform,
+                    coverage_status=(
+                        f"{platform}|"
+                        f"{row['platform_states'].get(platform, {}).get('status', '')}"
+                    ),
                 ) if platform in row["platform_states"] else "",
             }
             for platform in platforms
@@ -8980,6 +9035,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             "filtered_summary": filtered_summary,
             "platforms": platforms,
             "platform_filter_columns": platform_filter_columns,
+            "coverage_filter_sources": coverage_filter_sources,
             "os_families": os_families,
             "device_types": device_types,
             "filter_clients": filter_clients,
@@ -8988,6 +9044,8 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             "device_query": device_query,
             "platform_filters": platform_filters,
             "online_filters": online_filters,
+            "coverage_source_filters": coverage_source_filters,
+            "coverage_status_filters": coverage_status_filters,
             "hudu_filters": hudu_filters,
             "hudu_link_filters": hudu_link_filters,
             "hudu_record_filter": hudu_record_filter,

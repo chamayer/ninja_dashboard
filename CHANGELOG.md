@@ -2,6 +2,23 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.122.27] — 2026-09-08 — Computer inventory status clarity
+
+### Fixed
+
+- Device-subject findings now link through the Computer's current client URL,
+  avoiding stale routes after client reassignment. Internal implementation
+  comments no longer appear in the Computer issue table.
+
+### Changed
+
+- Computers now shows stable all-active-Computer counts by platform and status,
+  independent of the current filters. Each platform/status count represents a
+  Computer, not an internal agent check.
+- The filtered summary now shows clients, Computers, In Hudu, and Not in Hudu.
+  Platform status selection is source-specific, allowing conditions such as
+  Ninja Missing together with SentinelOne Online.
+
 ## [0.122.26] — 2026-09-08 — Computer retirement workflow
 
 ### Changed

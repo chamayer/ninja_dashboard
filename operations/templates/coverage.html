@@ -52,20 +52,31 @@
 .coverage-column-filter-options label { display:flex; align-items:center; gap:0.4rem; padding:0.25rem; font-size:0.84rem; white-space:nowrap; }
 .coverage-column-filter-options hr { border:0; border-top:1px solid var(--border); margin:0.45rem 0; }
 .coverage-column-filter-options button { margin-top:0.4rem; }
+.coverage-source-filter { display:grid; grid-template-columns:minmax(8rem, 1fr) auto; align-items:center; gap:0.75rem; padding:0.25rem; }
+.coverage-source-filter > label { display:flex; align-items:center; gap:0.4rem; }
+.coverage-source-status { position:relative; }
+.coverage-source-status summary { cursor:pointer; color:var(--muted); white-space:nowrap; }
+.coverage-source-status > div { position:absolute; z-index:25; top:calc(100% + 0.3rem); right:0; min-width:9rem; border:1px solid var(--border); border-radius:4px; background:var(--surface); box-shadow:0 3px 10px rgba(0,0,0,.14); padding:0.45rem; }
+.coverage-source-status label { display:flex; align-items:center; gap:0.4rem; padding:0.25rem; font-size:0.84rem; white-space:nowrap; }
 </style>
 
 <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:1rem;">
     <div>
         <h1 style="margin:0;">Computers</h1>
-        <p class="muted" style="margin:0.25rem 0 0;">Computer inventory from all sources, with current agent coverage where required.</p>
+        <p class="muted" style="margin:0.25rem 0 0;">Computer inventory from all platforms, with current platform status where required.</p>
     </div>
     {% include "_csv_download.html" %}
 </div>
 
+<div class="coverage-result-heading">
+    <h2>All active Computers by platform</h2>
+    <p>These counts are not changed by the filters below.</p>
+</div>
 <div class="coverage-cards">
     {% for card in platform_cards %}
     <section class="coverage-card">
-        <h2>{{ card.platform }}</h2>
+        <h2>{{ card.platform }} computers</h2>
+        {% if card.applicable_count %}
         <div class="coverage-counts">
             {% for count in card.counts %}
             <a class="coverage-count coverage-{{ count.name|lower }}" href="{{ count.url }}">
@@ -73,9 +84,12 @@
             </a>
             {% endfor %}
         </div>
+        {% else %}
+        <p class="muted" style="margin:0;">No Computers are tracked for this platform.</p>
+        {% endif %}
     </section>
     {% empty %}
-    <section class="coverage-card"><p class="muted" style="margin:0;">No required agent platforms are configured.</p></section>
+    <section class="coverage-card"><p class="muted" style="margin:0;">No platforms are configured.</p></section>
     {% endfor %}
 </div>
 
@@ -83,11 +97,11 @@
     <h2>Filtered results</h2>
     <p>Counts reflect the current filter selections.</p>
 </div>
-<section class="coverage-result-summary" aria-label="Filtered Coverage results">
+<section class="coverage-result-summary" aria-label="Filtered Computers results">
     <div class="coverage-result-card"><span>Clients</span><strong>{{ filtered_summary.clients }}</strong></div>
-    <div class="coverage-result-card"><span>Devices</span><strong>{{ filtered_summary.devices }}</strong></div>
-    <div class="coverage-result-card"><span>Agent checks</span><strong>{{ filtered_summary.agent_checks }}</strong></div>
-    <div class="coverage-result-card"><span>Online devices</span><strong>{{ filtered_summary.online_devices }}</strong></div>
+    <div class="coverage-result-card"><span>Computers</span><strong>{{ filtered_summary.devices }}</strong></div>
+    <div class="coverage-result-card"><span>In Hudu</span><strong>{{ filtered_summary.in_hudu }}</strong></div>
+    <div class="coverage-result-card"><span>Not in Hudu</span><strong>{{ filtered_summary.not_in_hudu }}</strong></div>
 </section>
 
 <div class="card" style="padding:0;">
@@ -95,10 +109,8 @@
     <div style="padding:1rem; border-bottom:1px solid var(--border);">
             <div class="coverage-filter-row">
                 <details class="coverage-filter"><summary>Client</summary><div class="coverage-filter-options"><input class="coverage-filter-search" type="search" placeholder="Search clients" aria-label="Search clients">{% for client in filter_clients %}<label><input type="checkbox" name="client" value="{{ client.slug }}"{% if client.slug in client_filters %} checked{% endif %}>{{ client.name }}</label>{% endfor %}</div></details>
-                <details class="coverage-filter"><summary>Online in</summary><div class="coverage-filter-options"><input class="coverage-filter-search" type="search" placeholder="Search platforms" aria-label="Search platforms">{% for platform in platforms %}<label><input type="checkbox" name="online_in" value="{{ platform }}"{% if platform in online_filters %} checked{% endif %}>{{ platform }}</label>{% endfor %}</div></details>
-                <details class="coverage-filter"><summary>Required platform</summary><div class="coverage-filter-options"><input class="coverage-filter-search" type="search" placeholder="Search platforms" aria-label="Search required platforms">{% for platform in platforms %}<label><input type="checkbox" name="platform" value="{{ platform }}"{% if platform in platform_filters %} checked{% endif %}>{{ platform }}</label>{% endfor %}</div></details>
-                <details class="coverage-filter"><summary>Status</summary><div class="coverage-filter-options"><input class="coverage-filter-search" type="search" placeholder="Search statuses" aria-label="Search statuses">{% for state in states %}<label><input type="checkbox" name="state" value="{{ state }}"{% if state in state_filters %} checked{% endif %}>{{ state }}</label>{% endfor %}</div></details>
-                <div><button type="submit">Filter</button>{% if client_filters or online_filters or hudu_filters or hudu_link_filters or hudu_record_filter != "any" or s1_exemption_filters or platform_filters or state_filters or os_family_filters or device_type_filters %}<a class="clear" data-clear-filters href="{% url 'inventory_computers' %}">Clear</a>{% endif %}</div>
+                <details class="coverage-filter"><summary>Platform status</summary><div class="coverage-filter-options"><input class="coverage-filter-search" type="search" placeholder="Search platforms" aria-label="Search platforms">{% for source in coverage_filter_sources %}<div class="coverage-source-filter"><label><input data-coverage-source type="checkbox" name="coverage_source" value="{{ source.name }}"{% if source.selected %} checked{% endif %}>{{ source.name }}</label><details class="coverage-source-status"><summary>{% if source.statuses %}{{ source.statuses|join:", " }}{% else %}Any status{% endif %}</summary><div>{% for state in states %}<label><input data-coverage-status="{{ source.name }}" type="checkbox" name="coverage_status" value="{{ source.name }}|{{ state }}"{% if state in source.statuses %} checked{% endif %}>{{ state }}</label>{% endfor %}</div></details></div>{% endfor %}</div></details>
+                <div><button type="submit">Filter</button>{% if client_filters or coverage_source_filters or hudu_filters or hudu_link_filters or hudu_record_filter != "any" or s1_exemption_filters or platform_filters or state_filters or platform_status_filters or os_family_filters or device_type_filters %}<a class="clear" data-clear-filters href="{% url 'inventory_computers' %}">Clear</a>{% endif %}</div>
             </div>
             <div class="coverage-filter-row">
                 <details class="coverage-filter"><summary>Hudu</summary><div class="coverage-filter-options"><input class="coverage-filter-search" type="search" placeholder="Search Hudu status" aria-label="Search Hudu status"><label><input type="checkbox" name="hudu" value="in_hudu"{% if "in_hudu" in hudu_filters %} checked{% endif %}>In Hudu</label><label><input type="checkbox" name="hudu" value="not_in_hudu"{% if "not_in_hudu" in hudu_filters %} checked{% endif %}>Not in Hudu</label><div class="coverage-hudu-record-filter"{% if not hudu_record_filter_active %} hidden{% endif %}><hr><label>Record filter <select name="hudu_record_filter"{% if not hudu_record_filter_active %} disabled{% endif %}><option value="any"{% if hudu_record_filter == "any" %} selected{% endif %}>Any Hudu record</option><option value="has_current"{% if hudu_record_filter == "has_current" %} selected{% endif %}>Has current record</option><option value="has_archived"{% if hudu_record_filter == "has_archived" %} selected{% endif %}>Has archived record</option><option value="current_only"{% if hudu_record_filter == "current_only" %} selected{% endif %}>Current records only</option><option value="archived_only"{% if hudu_record_filter == "archived_only" %} selected{% endif %}>Archived records only</option></select></label></div></div></details>
@@ -159,6 +171,22 @@ document.querySelectorAll('.coverage-filterbar input[type="checkbox"][name]').fo
             if (other !== input && other.name === input.name && other.value === input.value) {
                 other.checked = input.checked;
             }
+        });
+    });
+});
+document.querySelectorAll('[data-coverage-source]').forEach((source) => {
+    source.addEventListener('change', () => {
+        if (source.checked) return;
+        document.querySelectorAll(`[data-coverage-status="${source.value}"]`).forEach((status) => {
+            status.checked = false;
+        });
+    });
+});
+document.querySelectorAll('[data-coverage-status]').forEach((status) => {
+    status.addEventListener('change', () => {
+        if (!status.checked) return;
+        document.querySelectorAll('[data-coverage-source]').forEach((source) => {
+            if (source.value === status.dataset.coverageStatus) source.checked = true;
         });
     });
 });

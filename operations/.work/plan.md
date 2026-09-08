@@ -1,8 +1,57 @@
 # Active Operations implementation plan
 
+## ACTIVE TASK — Clarify Computers inventory summaries, coverage filtering, and Findings links
+
+**Status:** implementation and local validation complete; approved release
+preparation in progress for 0.122.27.
+
+**Goal:** make a device-subject finding open the live Computer detail URL even
+when the finding retains an earlier client reference; remove internal
+implementation comments from the device issue table; and make the Computers
+page distinguish stable all-inventory source counts from filtered inventory
+results with source-specific status selection.
+
+**Scope:** Findings queue read-model context, the Computer-detail template,
+and the Computers inventory view/template. No finding data rewrite,
+source/evaluator change, migration, or changes to finding semantics.
+
+**Decision:** a finding retains its recorded client as historical context, but
+its device-detail link must use the current live Computer's client slug. If
+that Computer is no longer live, show no link rather than constructing a stale
+route. Operator-facing templates contain no internal implementation comments.
+Computers source cards are an unfiltered, one-Computer-per-source view using
+the worst applicable coverage status. The filtered summary is separate and
+shows inventory scope plus Hudu presence. Source-specific coverage conditions
+are selected together so different sources can have different statuses.
+
+**Affected areas:** Findings queue view, Computer-detail template, Computers
+inventory view/template, and this plan. No migration is expected.
+
+**Validation:** Django check/migration drift, Python compilation, template
+loading, relevant existing findings and inventory tests, and diff check. No
+new test scripts and no production writes.
+
+**Checkpoint:** device-subject finding links now use the live Computer's
+client slug and name, while retaining the finding client only as fallback
+historical context. Removed internal comments from the Computer issue table.
+No finding rows or source data were changed. Computers now shows an unfiltered
+source summary that counts each Computer once per source using its worst
+applicable status; its filtered summary shows clients, Computers, In Hudu, and
+Not in Hudu. The Coverage menu has one row per source with source-specific
+status selection; selected source rows are combined with AND semantics.
+
+**Validation completed:** existing Findings/device-detail tests passed (12);
+the focused Computers coverage suite passed (8); Django check, migration
+drift, Python compilation, changed-template loading, and `git diff --check`
+pass. No migration is included.
+
+**Next action:** stage the reviewed 0.122.27 files, commit, and push to origin
+then the required mirror. No migration is included.
+
 ## ACTIVE TASK — Retire Computers and keep historical rebuilds out of normal search
 
-**Status:** release prepared; commit, push, and Portainer deployment approved.
+**Status:** committed and pushed as 0.122.26 / `bb6c304`; deployment not
+manually triggered at operator direction.
 
 **Goal:** give operators a reversible, audited way to retire a Computer and
 make normal search present current Computers rather than every retired rebuild
@@ -43,9 +92,9 @@ checks could not run because Docker Desktop is unavailable locally. Whole-file
 Ruff/format still reports pre-existing issues and line-ending formatting beyond
 this scope.
 
-**Next action:** commit the 0.122.26 release, push `origin` then the required
-mirror, trigger the coupled Portainer deployment, and verify basic health. No
-migration is included.
+**Next action:** no further action in this scope. Portainer deployment and
+live validation remain external state, not inferred from the push. No migration
+is included.
 
 ## ACTIVE TASK — Separate Computer inventory from OS-installation history
 
