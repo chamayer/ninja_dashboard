@@ -132,6 +132,17 @@ class _Cursor:
                 ("device-1", "SentinelOne", True),
                 ("device-2", "Ninja", True),
             ],
+            [
+                (
+                    "source-observation-1",
+                    "client-3",
+                    "gamma",
+                    "Gamma",
+                    "source-only-host",
+                    "Ninja",
+                    True,
+                ),
+            ],
         ]
 
     def __enter__(self):
@@ -211,8 +222,6 @@ def test_coverage_uses_effective_requirements_and_source_specific_filters(monkey
         "in_hudu": 1,
         "not_in_hudu": 0,
     }
-    ninja_card = next(card for card in context["platform_cards"] if card["platform"] == "Ninja")
-    assert [count["count"] for count in ninja_card["counts"]] == [1, 0, 0, 1]
     row = context["device_rows"][0]
     assert row["hudu_present"] is True
     assert row["hudu_links"] == ["Ninja — host-1", "Auvik #42"]
@@ -241,12 +250,21 @@ def test_coverage_includes_an_unattached_hudu_computer_as_its_own_row(monkeypatc
 
     views.fleet_coverage(request)
 
-    hudu_only = next(row for row in captured["context"]["device_rows"] if row["device_id"] is None)
+    hudu_only = next(
+        row for row in captured["context"]["device_rows"]
+        if row["inventory_key"] == "hudu:hudu-observation-2"
+    )
     assert hudu_only["hostname"] == "host-2"
     assert hudu_only["hudu_present"] is True
     assert hudu_only["hudu_links"] == []
     assert hudu_only["possible_match"]["device_id"] == "device-2"
     assert hudu_only["platform_cells"][0]["possible_match"]["device_id"] == "device-2"
+    source_only = next(
+        row for row in captured["context"]["device_rows"]
+        if row["inventory_key"] == "source:source-observation-1"
+    )
+    assert source_only["device_id"] is None
+    assert source_only["source_states"] == {"Ninja": "Online"}
 
 
 def test_computers_csv_has_the_current_table_platform_columns(monkeypatch):

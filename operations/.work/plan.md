@@ -3,13 +3,15 @@
 ## ACTIVE TASK — Clarify Computers inventory summaries, coverage filtering, and Findings links
 
 **Status:** implementation and local validation complete; approved release
-preparation in progress for 0.122.27.
+preparation in progress for 0.122.28.
 
 **Goal:** make a device-subject finding open the live Computer detail URL even
 when the finding retains an earlier client reference; remove internal
 implementation comments from the device issue table; and make the Computers
 page distinguish stable all-inventory source counts from filtered inventory
-results with source-specific status selection.
+results with source-specific status selection; and make the Computers
+population include every current computer-capable platform record rather than
+hiding records that have not resolved to a Computer.
 
 **Scope:** Findings queue read-model context, the Computer-detail template,
 and the Computers inventory view/template. No finding data rewrite,
@@ -23,9 +25,14 @@ Computers source cards are an unfiltered, one-Computer-per-source view using
 the worst applicable coverage status. The filtered summary is separate and
 shows inventory scope plus Hudu presence. Source-specific coverage conditions
 are selected together so different sources can have different statuses.
+The inventory population is the union of active Operations Computers and all
+current computer-capable source records. A source record is grouped only when
+it already has a live resolved Computer; otherwise it remains a visible
+source-only row. Requirement evaluation remains unchanged, so Missing retains
+its existing meaning and unrequired platforms remain Not applicable.
 
 **Affected areas:** Findings queue view, Computer-detail template, Computers
-inventory view/template, and this plan. No migration is expected.
+inventory view/template and tests, and this plan. No migration is expected.
 
 **Validation:** Django check/migration drift, Python compilation, template
 loading, relevant existing findings and inventory tests, and diff check. No
@@ -43,10 +50,14 @@ status selection; selected source rows are combined with AND semantics.
 **Validation completed:** existing Findings/device-detail tests passed (12);
 the focused Computers coverage suite passed (8); Django check, migration
 drift, Python compilation, changed-template loading, and `git diff --check`
-pass. No migration is included.
+pass. No migration is included. Release 0.122.27 was committed and pushed as
+`f1744be`; Portainer rejected direct redeploy requests, and the operator then
+directed that no further redeploy requests be made.
 
-**Next action:** stage the reviewed 0.122.27 files, commit, and push to origin
-then the required mirror. No migration is included.
+**Next action:** inspect current platform record types and implement the
+complete source-record inventory population; run focused local validation. No
+migration is included. Commit and push the approved release; do not manually
+request a Portainer redeploy.
 
 ## ACTIVE TASK — Retire Computers and keep historical rebuilds out of normal search
 

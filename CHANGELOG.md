@@ -2,6 +2,16 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.122.28] — 2026-09-08 — Complete source-record inventory
+
+### Changed
+
+- Computers inventory now includes current agent and VM-guest records that do
+  not yet resolve to an active Operations Computer, rather than hiding them.
+  They remain separate until identity is proven.
+- Platform status cards include current platform presence even where a
+  platform is not required; Missing and Stale remain requirement-based.
+
 ## [0.122.27] — 2026-09-08 — Computer inventory status clarity
 
 ### Fixed

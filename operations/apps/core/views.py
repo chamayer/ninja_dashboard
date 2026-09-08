@@ -8555,11 +8555,50 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                        BOOL_OR(presence.reported_online) AS online
                 FROM operations.device_agent_presence_current presence
                 WHERE presence.tenant_id = 1
-                  AND presence.entity_type LIKE 'agent.%%'
+                  AND (presence.entity_type LIKE 'agent.%%' OR presence.entity_type = 'vm.guest')
                 GROUP BY presence.device_id, presence.platform
                 """,
             )
             source_presence_rows = cur.fetchall()
+            # Do not hide a current agent/VM record merely because it has not
+            # resolved to a live Computer.  Hudu has its dedicated inventory
+            # evidence reader above; these are the other computer-capable
+            # platform records.
+            cur.execute(
+                """
+                SELECT o.observation_id, o.client_id, c.slug, c.display_name,
+                       COALESCE(
+                           NULLIF(o.canonical_data->>'hostname', ''),
+                           NULLIF(o.canonical_data->>'name', ''),
+                           NULLIF(o.canonical_data->>'system_name', ''),
+                           NULLIF(o.canonical_data->>'dns_name', ''),
+                           NULLIF(o.canonical_data->>'netbios_name', ''),
+                           NULLIF(o.canonical_data->>'display_name', ''),
+                           ''
+                       ) AS hostname,
+                       o.platform,
+                       CASE
+                           WHEN lower(o.canonical_data->>'is_online') IN ('true', 't', '1', 'yes', 'online') THEN TRUE
+                           WHEN lower(o.canonical_data->>'is_online') IN ('false', 'f', '0', 'no', 'offline') THEN FALSE
+                           WHEN lower(o.canonical_data->>'offline') IN ('true', 't', '1', 'yes') THEN FALSE
+                           WHEN lower(o.canonical_data->>'offline') IN ('false', 'f', '0', 'no') THEN TRUE
+                           WHEN o.entity_type = 'vm.guest'
+                                AND lower(o.canonical_data->>'power_state') = 'poweredon' THEN TRUE
+                           ELSE FALSE
+                       END AS reported_online
+                  FROM operations.entity_observation_current o
+                  LEFT JOIN operations.devices d
+                    ON d.id = o.device_id
+                   AND d.deleted_at IS NULL
+                   AND d.lifecycle_status <> 'retired'
+                  LEFT JOIN operations.clients c ON c.id = o.client_id
+                 WHERE o.tenant_id = 1
+                   AND o.active
+                   AND (o.entity_type LIKE 'agent.%%' OR o.entity_type = 'vm.guest')
+                   AND d.id IS NULL
+                """,
+            )
+            source_only_rows = cur.fetchall()
 
     devices_by_id = {
         row[0]: {
@@ -8813,6 +8852,29 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             "possible_match": None,
         })
 
+    for (
+        observation_id, client_id, client_slug, client_name, hostname,
+        platform, reported_online,
+    ) in source_only_rows:
+        # A source-only record is deliberately not name-grouped.  A matching
+        # name is useful evidence, but is not proof that it is the same
+        # Computer as an existing row.
+        inventory_rows.append({
+            "inventory_key": f"source:{observation_id}",
+            "device_id": None,
+            "client_id": client_id,
+            "client_slug": client_slug or "",
+            "client_name": client_name or "Unassigned",
+            "hostname": hostname or "",
+            "os_family": "",
+            "device_type": "",
+            "hudu_records": [],
+            "source_states": {platform: "Online" if reported_online else "Offline"},
+            "platform_states": {},
+            "s1_exempt": False,
+            "possible_match": None,
+        })
+
     for hudu in hudu_by_observation.values():
         if hudu["observation_id"] in grouped_hudu_observation_ids:
             continue
@@ -8924,9 +8986,16 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
     platform_cards = []
     for platform in coverage_platforms:
         counts = {state: 0 for state in _COVERAGE_STATES}
-        for platform_states in coverage_by_device.values():
-            if row := platform_states.get(platform):
-                counts[row["status"]] += 1
+        for inventory_row in inventory_rows:
+            # Present platform records count even when the platform is not a
+            # requirement.  Missing/Stale remains requirement-driven because
+            # only a requirement makes absence meaningful.
+            status = (
+                inventory_row["source_states"].get(platform)
+                or inventory_row["platform_states"].get(platform, {}).get("status")
+            )
+            if status in counts:
+                counts[status] += 1
         platform_cards.append({
             "platform": platform,
             "applicable_count": sum(counts.values()),
