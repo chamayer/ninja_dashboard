@@ -267,3 +267,36 @@ with the ~70x recorded a day earlier.
 - **The columns question reopens only if** an effective-contract source is
   built for `os_group` and `device_type`. Until then it is not a decision, it
   is unavailable.
+
+## Amendment — 2026-09-08: OS installations can have an independent life
+
+The original identity test concluded that an OS installation could not move
+between Devices. That premise is false: a proven OS move to replacement
+hardware, or between virtual and physical Computers, needs a continuous
+history distinct from either Computer. The prior model also has no truthful
+way to show that an MCS rebuild is a new OS installation on a new Computer
+while retaining the reused computer name only as history.
+
+### Amended position
+
+- `Device` remains the canonical **Computer** implementation and the only
+  record counted by Inventory → Computers. A Computer may be physical or
+  virtual; vendor and virtualization are attributes, not model branches.
+- An **OS installation** is a client-owned entity when a stable agent-record
+  identity establishes it. It is not a Computer and never contributes another
+  row to the Computer inventory denominator.
+- `os_installation_runs_on_computer` is a directed, dated relationship. The
+  shared relationship evidence/projector owns its effective current state and
+  retains source-evidence history. A move changes this relationship, not the
+  Computer identity.
+- An `agent.*` observation supplies OS-installation evidence and may also
+  supply Computer attributes. A `vm.guest` observation supplies Computer
+  evidence only. This is source-record semantics, not a VM special case.
+- The legacy `assets` and `os_instances` tables remain compatibility
+  projections. They are not reused as canonical anchors.
+- Hostname reuse is a name-history/navigation signal, never automatic identity
+  proof. An MCS rebuild therefore creates a new Computer and OS installation.
+
+When a source does not preserve a stable agent/installation identity across a
+purported move, Operations must not invent continuity. It shows separate OS
+installations until an operator records a supported relationship decision.

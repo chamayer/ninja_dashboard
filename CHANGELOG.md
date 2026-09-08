@@ -2,6 +2,17 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.122.24] — 2026-09-08 — Computer and OS-installation history
+
+### Changed
+
+- Operations now keeps Computers as the single counted inventory population
+  while tracking OS installations separately through a dated “runs on
+  Computer” relationship. Ninja VM-guest records provide Computer evidence;
+  Ninja OS-agent records also establish OS-installation evidence.
+- Computer details show when a current OS installation is tracked. Reused
+  computer names remain history context and do not merge Computers.
+
 ## [0.122.23] — 2026-09-08 — Immediate computer observations
 
 ### Fixed

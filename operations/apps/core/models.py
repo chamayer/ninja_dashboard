@@ -742,6 +742,94 @@ class Device(UUIDTenantScopedModel):
         return self.canonical_hostname
 
 
+class OperatingSystemInstallation(UUIDTenantScopedModel):
+    """A durable OS installation that may be observed on different Computers.
+
+    ``Device`` remains the Computer inventory anchor.  This model is never a
+    second inventory Computer: it provides the OS-side endpoint for the dated
+    ``os_installation_runs_on_computer`` relationship.
+    """
+
+    entity = models.OneToOneField(
+        Entity,
+        on_delete=models.PROTECT,
+        related_name="operating_system_installation_record",
+    )
+    client = models.ForeignKey(
+        Client,
+        on_delete=models.PROTECT,
+        related_name="operating_system_installations",
+    )
+    first_observed_at = models.DateTimeField()
+    last_observed_at = models.DateTimeField()
+    retired_at = models.DateTimeField(null=True, blank=True)
+    retired_reason = models.CharField(max_length=120, blank=True, default="")
+
+    class Meta:
+        db_table = "operating_system_installations"
+        constraints = (
+            models.UniqueConstraint(
+                fields=("tenant", "id"),
+                name="uq_os_installation_tenant_id",
+            ),
+        )
+        indexes = (
+            models.Index(
+                fields=("tenant", "client", "retired_at"),
+                name="idx_os_installation_current",
+            ),
+        )
+
+    def __str__(self) -> str:
+        return str(self.entity_id)
+
+
+class OperatingSystemInstallationSourceIdentity(UUIDTenantScopedModel):
+    """Stable agent-record identity that supplies evidence about one OS install."""
+
+    installation = models.ForeignKey(
+        OperatingSystemInstallation,
+        on_delete=models.PROTECT,
+        related_name="source_identities",
+    )
+    source_instance = models.ForeignKey(
+        "SourceInstance",
+        on_delete=models.PROTECT,
+        related_name="operating_system_installation_identities",
+    )
+    external_namespace = models.CharField(max_length=120)
+    parent_external_namespace = models.CharField(max_length=120, blank=True, default="")
+    parent_external_id = models.TextField(blank=True, default="")
+    external_id = models.TextField()
+    first_observed_at = models.DateTimeField()
+    last_observed_at = models.DateTimeField()
+
+    class Meta:
+        db_table = "operating_system_installation_source_identities"
+        constraints = (
+            models.UniqueConstraint(
+                fields=(
+                    "tenant",
+                    "source_instance",
+                    "external_namespace",
+                    "parent_external_namespace",
+                    "parent_external_id",
+                    "external_id",
+                ),
+                name="uq_os_installation_source_identity",
+            ),
+        )
+        indexes = (
+            models.Index(
+                fields=("tenant", "installation"),
+                name="idx_os_installation_identity",
+            ),
+        )
+
+    def __str__(self) -> str:
+        return f"{self.source_instance_id}:{self.external_id}"
+
+
 class DeviceSourceLink(models.Model):
     """Read-only view of the device rows of ``entity_source_links``.
 

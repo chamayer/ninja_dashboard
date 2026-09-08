@@ -1,5 +1,80 @@
 # Active Operations implementation plan
 
+## ACTIVE TASK — Separate Computer inventory from OS-installation history
+
+**Status:** release preparation.
+
+**Goal:** keep one counted Computer inventory record for each physical machine
+or VM, while recording an OS installation separately when it has a distinct
+life across Computers. A Ninja VM-guest observation is evidence only about the
+Computer; a Ninja OS-agent observation is evidence about the OS installation
+and may also contribute hardware evidence to the Computer it runs on.
+
+**Scope:** additive Operations entity/relationship contracts, their
+projector-owned evidence path, and Computer-detail presentation needed to show
+the current OS and its hosting/name history. The existing `Device` table and
+its entity anchor remain the Computer implementation during transition. No
+production data repair, automatic merge, historical rebuild, or change to the
+main Computers denominator is included.
+
+**Decision:** use the following vocabulary. `Entity` is the generic storage
+term. `Asset` is the broad inventory category. `Computer` is the physical or
+virtual asset counted by Inventory and is currently represented internally by
+`Device`. `OS installation` is a client-owned canonical entity only when its
+own continuity is established; it is never another Computer inventory row.
+`runs_on` is a dated relationship from OS installation to Computer. A source
+observation remains evidence, not any of these entities. Computer-name reuse
+is a cross-record history/navigation signal, never identity proof. An MCS
+rebuild therefore creates a new Computer and OS installation; a proven OS move
+closes one `runs_on` relationship and opens another.
+
+**Constraints:** do not reuse the old `assets` / `os_instances` compatibility
+tables as canonical identity anchors. ADR-0013 must be amended because its
+assertion that an OS installation cannot move is contradicted by the approved
+model. Relationship state must be produced through the shared evidence and
+relationship projector; no connector, resolver, or UI route writes
+source-derived relationship state. Source-free historical continuity must be
+explicitly operator-authored and audited.
+
+**Affected areas:** entity-class and relationship-type registry migration;
+OS-installation canonical model and tenant/RLS constraints; Ninja observation
+classification/projector; safe detail read model and template; ADR-0013;
+model vocabulary; relevant focused existing tests.
+
+**Validation:** Django check, migration drift/SQL review including RLS and
+runtime grants, Python compilation, focused existing tests and template load,
+and `git diff --check`. No new test scripts and no production writes.
+
+**Checkpoint:** the repository already has `operations.assets` and
+`operations.os_instances`, but ADR-0013 correctly identifies them as
+projector-written compatibility caches, not canonical entities. Generic
+`Entity`, relationship evidence history, and effective relationship projection
+already exist. `Device` is a one-to-one `Entity` anchor and will remain the
+Computer inventory anchor initially. The relationship registry has no
+OS-to-Computer contract yet.
+
+**Checkpoint:** migration 0153 adds the client-scoped `os_installation` entity
+class, an OS-installation anchor and stable agent-record identity map, and the
+one-to-many `os_installation_runs_on_computer` relationship. The database
+trigger enforces the entity class/client match. The new projector groups agent
+records already observed on the same Computer into one OS installation; a
+stable agent identity moving to a different Computer changes the dated
+relationship. `vm.guest` records never create an OS installation. The Computer
+detail page displays the current tracked OS installation through a
+security-barrier view. Existing Computer queries and counts are untouched.
+
+**Validation:** root Python compilation passes; Django check and migration
+drift pass; the device-detail template loads; the existing focused
+`test_findings_queue` suite passes (10 tests); and diff check passes. Scoped
+Ruff found only the migration's standard typing/import issues, which were
+corrected; repository-wide views/models diagnostics predate this change.
+
+**Next action:** commit the approved 0.122.24 release, push both deployment
+remotes, trigger Portainer deployment, and verify migration 0153 plus service
+health. The pending migration will create
+canonical OS-installation anchors from current agent observations on its first
+post-deploy projection; it does not change Computer inventory counts.
+
 ## ACTIVE TASK — Reorganize the computer detail page around observations
 
 **Status:** implementation.

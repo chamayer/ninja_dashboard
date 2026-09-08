@@ -5,7 +5,14 @@ from __future__ import annotations
 import logging
 import time
 
-from ingest import attribute_claims, db, effective_attributes, entity_candidates, relationships
+from ingest import (
+    attribute_claims,
+    db,
+    effective_attributes,
+    entity_candidates,
+    os_installations,
+    relationships,
+)
 
 log = logging.getLogger(__name__)
 
@@ -47,6 +54,11 @@ def refresh_after_collection(reason: str) -> None:
         candidate_sync = {"status": "failed"}
         log.exception("Operations generic candidate projection failed — continuing")
     try:
+        os_installation_sync = os_installations.project_all()
+    except Exception:
+        os_installation_sync = {"status": "failed"}
+        log.exception("Operations OS-installation projection failed — continuing")
+    try:
         relationship_sync = relationships.project_all()
     except Exception:
         relationship_sync = {"status": "failed"}
@@ -56,12 +68,13 @@ def refresh_after_collection(reason: str) -> None:
     log.info(
         "Operations entity links synced (%s), attribute claims synced (%s), "
         "effective attributes synced (%s), generic candidates synced (%s), "
-        "relationships synced (%s), and derived state refreshed after "
+        "OS installations synced (%s), relationships synced (%s), and derived state refreshed after "
         "%s in %.2fs",
         entity_link_sync,
         claim_sync,
         effective_sync,
         candidate_sync,
+        os_installation_sync,
         relationship_sync,
         reason,
         time.monotonic() - started,

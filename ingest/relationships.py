@@ -279,7 +279,8 @@ def resolve_current_evidence() -> int:
             """
             WITH resolved AS (
                 SELECT evidence.id,
-                       source_link.entity_id AS source_entity_id,
+                       COALESCE(os_identity_installation.entity_id, source_link.entity_id)
+                           AS source_entity_id,
                        target_link.entity_id AS target_entity_id
                   FROM operations.entity_relationship_evidence_current evidence
                   LEFT JOIN operations.entity_source_links source_link
@@ -293,6 +294,18 @@ def resolve_current_evidence() -> int:
                    AND source_link.parent_external_id =
                        evidence.source_parent_external_id
                    AND source_link.external_id = evidence.source_external_id
+                  LEFT JOIN operations.operating_system_installation_source_identities os_identity
+                    ON evidence.source_external_namespace = 'os_installation'
+                   AND os_identity.tenant_id = evidence.tenant_id
+                   AND os_identity.source_instance_id =
+                       evidence.source_endpoint_source_instance_id
+                   AND os_identity.parent_external_namespace =
+                       evidence.source_parent_external_namespace
+                   AND os_identity.parent_external_id = evidence.source_parent_external_id
+                   AND os_identity.external_id = evidence.source_external_id
+                  LEFT JOIN operations.operating_system_installations os_identity_installation
+                    ON os_identity_installation.tenant_id = os_identity.tenant_id
+                   AND os_identity_installation.id = os_identity.installation_id
                   LEFT JOIN operations.entity_source_links target_link
                     ON target_link.tenant_id = evidence.tenant_id
                    AND target_link.source_instance_id =
@@ -307,7 +320,8 @@ def resolve_current_evidence() -> int:
                  WHERE evidence.active
                    AND evidence.resolution_status <> 'invalid'
                    AND (
-                       evidence.source_entity_id IS DISTINCT FROM source_link.entity_id
+                       evidence.source_entity_id IS DISTINCT FROM
+                           COALESCE(os_identity_installation.entity_id, source_link.entity_id)
                        OR evidence.target_entity_id IS DISTINCT FROM target_link.entity_id
                    )
             )

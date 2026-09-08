@@ -1,5 +1,23 @@
 # Active root implementation plan
 
+## CURRENT TASK — Computer and OS-installation history
+
+**Status:** release preparation.
+
+**Goal:** release the Operations OS-installation relationship model from
+`operations/.work/plan.md`. Computers remain the single inventory denominator;
+the pending Operations migration 0153 adds OS-installation anchors and their
+dated relationship to Computers.
+
+**Scope:** `ingest/` projection and relationship resolution, Operations schema
+and Computer-detail read surface, ADR-0013, and 0.122.24 release metadata.
+No production data repair, historical rebuild, or automatic Computer merge.
+
+**Validation:** Django check, migration drift, root compilation, scoped Ruff,
+template load, focused existing tests, and diff check pass. Next: commit,
+push both deployment remotes, trigger Portainer deployment, and verify the
+migration and service health.
+
 ## CURRENT TASK — Immediate computer observations
 
 **Status:** release preparation.

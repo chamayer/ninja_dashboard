@@ -1884,6 +1884,7 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
     software_rows = []
     patching = None
     windows_servicing = None
+    operating_system_installation = None
     with transaction.atomic():
         with connection.cursor() as cur:
             cur.execute("SET LOCAL operations.tenant_id = 1")
@@ -1905,6 +1906,25 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
                 [str(device.id), 1, str(device.id)],
             )
             observations = cur.fetchall()
+
+            cur.execute(
+                """
+                SELECT installation_id, first_observed_at, last_observed_at, projected_at
+                  FROM operations.v_computer_os_installation_current
+                 WHERE tenant_id = %s AND device_id = %s
+                 ORDER BY last_observed_at DESC
+                 LIMIT 1
+                """,
+                [1, str(device.id)],
+            )
+            os_installation_row = cur.fetchone()
+            if os_installation_row:
+                operating_system_installation = {
+                    "id": os_installation_row[0],
+                    "first_observed_at": os_installation_row[1],
+                    "last_observed_at": os_installation_row[2],
+                    "projected_at": os_installation_row[3],
+                }
 
             cur.execute(
                 """
@@ -2468,6 +2488,7 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
             "software_rows": software_view,
             "patching": patching,
             "windows_servicing": windows_servicing,
+            "operating_system_installation": operating_system_installation,
             "active_tab": active_tab,
             "sev_counts": sev_counts,
             "severe_open": severe_open,

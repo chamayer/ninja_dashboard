@@ -239,6 +239,8 @@
             <tr><th style="text-align:left; padding-right:1rem;">Hostname</th><td><code>{{ device.canonical_hostname|default:"—" }}</code></td></tr>
             <tr><th style="text-align:left; padding-right:1rem;">Serial</th><td><code>{{ device.canonical_serial|default:"—" }}</code></td></tr>
             <tr><th style="text-align:left; padding-right:1rem;">VM UUID</th><td><code>{{ device.canonical_vm_uuid|default:"—" }}</code></td></tr>
+            <tr><th style="text-align:left; padding-right:1rem;">Current OS</th><td>{{ device.os_name|default:"—" }}</td></tr>
+            <tr><th style="text-align:left; padding-right:1rem;">OS installation</th><td>{% if operating_system_installation %}Tracked since {{ operating_system_installation.first_observed_at|date:"Y-m-d" }}{% else %}<span class="muted">Not yet identified from an OS agent</span>{% endif %}</td></tr>
             <tr><th style="text-align:left; padding-right:1rem;">Role</th><td>{{ device.device_role|humanize_label|default:"—" }}</td></tr>
             <tr><th style="text-align:left; padding-right:1rem;">Type</th><td>{{ device.get_device_type_display }}</td></tr>
             <tr><th style="text-align:left; padding-right:1rem;">Lifecycle</th><td>{{ device.lifecycle_status|humanize_label|default:"—" }}</td></tr>
