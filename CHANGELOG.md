@@ -2,6 +2,14 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.122.29] — 2026-09-08 — Source-only inventory read-model repair
+
+### Fixed
+
+- Restored the Computers page after the source-only inventory reader attempted
+  to read a protected raw table. It now uses a tenant-scoped, read-only
+  Operations view for those records.
+
 ## [0.122.28] — 2026-09-08 — Complete source-record inventory
 
 ### Changed

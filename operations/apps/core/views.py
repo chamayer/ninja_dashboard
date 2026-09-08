@@ -8566,36 +8566,17 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             # platform records.
             cur.execute(
                 """
-                SELECT o.observation_id, o.client_id, c.slug, c.display_name,
-                       COALESCE(
-                           NULLIF(o.canonical_data->>'hostname', ''),
-                           NULLIF(o.canonical_data->>'name', ''),
-                           NULLIF(o.canonical_data->>'system_name', ''),
-                           NULLIF(o.canonical_data->>'dns_name', ''),
-                           NULLIF(o.canonical_data->>'netbios_name', ''),
-                           NULLIF(o.canonical_data->>'display_name', ''),
-                           ''
-                       ) AS hostname,
-                       o.platform,
+                SELECT o.observation_id, o.client_id, o.client_slug, o.client_name,
+                       o.hostname, o.platform,
                        CASE
                            WHEN lower(o.canonical_data->>'is_online') IN ('true', 't', '1', 'yes', 'online') THEN TRUE
                            WHEN lower(o.canonical_data->>'is_online') IN ('false', 'f', '0', 'no', 'offline') THEN FALSE
                            WHEN lower(o.canonical_data->>'offline') IN ('true', 't', '1', 'yes') THEN FALSE
                            WHEN lower(o.canonical_data->>'offline') IN ('false', 'f', '0', 'no') THEN TRUE
-                           WHEN o.entity_type = 'vm.guest'
-                                AND lower(o.canonical_data->>'power_state') = 'poweredon' THEN TRUE
+                           WHEN o.entity_type = 'vm.guest' AND lower(o.canonical_data->>'power_state') = 'poweredon' THEN TRUE
                            ELSE FALSE
                        END AS reported_online
-                  FROM operations.entity_observation_current o
-                  LEFT JOIN operations.devices d
-                    ON d.id = o.device_id
-                   AND d.deleted_at IS NULL
-                   AND d.lifecycle_status <> 'retired'
-                  LEFT JOIN operations.clients c ON c.id = o.client_id
-                 WHERE o.tenant_id = 1
-                   AND o.active
-                   AND (o.entity_type LIKE 'agent.%%' OR o.entity_type = 'vm.guest')
-                   AND d.id IS NULL
+                  FROM operations.v_computer_inventory_source_record_current o
                 """,
             )
             source_only_rows = cur.fetchall()

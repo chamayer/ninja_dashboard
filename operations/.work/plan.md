@@ -3,7 +3,7 @@
 ## ACTIVE TASK — Clarify Computers inventory summaries, coverage filtering, and Findings links
 
 **Status:** implementation and local validation complete; approved release
-preparation in progress for 0.122.28.
+preparation in progress for 0.122.29.
 
 **Goal:** make a device-subject finding open the live Computer detail URL even
 when the finding retains an earlier client reference; remove internal
@@ -56,8 +56,8 @@ directed that no further redeploy requests be made.
 
 **Next action:** inspect current platform record types and implement the
 complete source-record inventory population; run focused local validation. No
-migration is included. Commit and push the approved release; do not manually
-request a Portainer redeploy.
+migration 0155 is included. Commit and push the approved release; do not
+manually request a Portainer redeploy.
 
 ## ACTIVE TASK — Retire Computers and keep historical rebuilds out of normal search
 
