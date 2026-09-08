@@ -2,6 +2,14 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.122.30] — 2026-09-08 — Simpler inventory filters
+
+### Changed
+
+- Replaced nested platform-status menus with a flat Platforms filter, including
+  an Any platform status row. Combined Hudu presence, links, and record-state
+  filters into one menu while keeping SentinelOne exemption independent.
+
 ## [0.122.29] — 2026-09-08 — Source-only inventory read-model repair
 
 ### Fixed
