@@ -300,3 +300,23 @@ while retaining the reused computer name only as history.
 When a source does not preserve a stable agent/installation identity across a
 purported move, Operations must not invent continuity. It shows separate OS
 installations until an operator records a supported relationship decision.
+
+## Amendment — 2026-09-08: automatic Computer matching is policy data
+
+The resolver previously encoded its ordered automatic matching behavior in
+separate collection-time and delayed-resolution branches. That made a new
+conflict condition look like a code exception and allowed the paths to drift.
+
+`operations.identity_match_policies` is now the tenant-scoped authority for
+automatic Computer matching. Each enabled rule selects one generic evidence
+matcher, its order, client/unique-candidate requirements, confidence, and the
+strong signals that block it. The initial policy expresses the existing general
+order: stable source record, usable serial, VM UUID, name plus MAC, then name.
+The name-based rules are blocked by a contradictory VM UUID.
+
+The implementation still enforces non-policy safety invariants: a policy can
+never cross tenant scope, attach a soft-deleted Computer, treat a rejected
+placeholder serial as usable, or make an ambiguous candidate automatic. An
+invalid or empty enabled policy set fails closed. The collector fast path,
+delayed resolver, and promotion recheck consume the same policy reader; the
+evaluator consumes their resolved evidence and does not make identity matches.

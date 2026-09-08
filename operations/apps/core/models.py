@@ -1791,6 +1791,44 @@ class IdentityAuthorityPolicy(UUIDTenantScopedModel):
         return f"{self.source_instance_id}:{self.native_record_type}"
 
 
+class IdentityMatchPolicy(UUIDTenantScopedModel):
+    """Ordered, tenant-owned policy for automatic Computer matching."""
+
+    class Matcher(models.TextChoices):
+        SOURCE_IDENTITY = "source_identity", "Source record identity"
+        SERIAL = "serial", "Matching serial number"
+        VM_UUID = "vm_uuid", "Matching VM UUID"
+        HOSTNAME_MAC = "hostname_mac", "Matching name and MAC address"
+        HOSTNAME = "hostname", "Matching name"
+
+    matcher = models.CharField(max_length=32, choices=Matcher.choices)
+    display_name = models.CharField(max_length=120)
+    description = models.CharField(max_length=300, blank=True, default="")
+    priority = models.PositiveSmallIntegerField()
+    requires_client_scope = models.BooleanField(default=True)
+    requires_unique_candidate = models.BooleanField(default=True)
+    avoid_same_stream_duplicates = models.BooleanField(default=False)
+    blocking_signal_keys = models.JSONField(default=list, blank=True)
+    confidence = models.DecimalField(max_digits=4, decimal_places=3)
+    enabled = models.BooleanField(default=True)
+    reason = models.CharField(max_length=160, blank=True, default="")
+
+    class Meta:
+        db_table = "identity_match_policies"
+        ordering = ("tenant", "priority", "matcher")
+        constraints = (
+            models.UniqueConstraint(
+                fields=("tenant", "matcher"), name="uq_identity_match_policy"
+            ),
+            models.UniqueConstraint(
+                fields=("tenant", "priority"), name="uq_identity_match_policy_priority"
+            ),
+        )
+
+    def __str__(self) -> str:
+        return self.display_name
+
+
 class AttributeAuthorityPolicy(UUIDTenantScopedModel):
     """Independent effective-value eligibility and authority rank."""
 

@@ -26,6 +26,7 @@ from psycopg.types.json import Json
 
 from ingest import db
 from ingest.identity.fast_path import resolve_device_fast
+from ingest.identity.matching import load_identity_match_policies
 from ingest.ninja_client import NinjaClient
 from ingest.normalize import (
     entity_type_for_node_class,
@@ -402,6 +403,7 @@ def _write_ninja_observations(
     try:
         with db.transaction() as cur:
             cur.execute(f"SET LOCAL operations.tenant_id = {_TENANT_ID}")
+            identity_policies = load_identity_match_policies(cur, _TENANT_ID)
             run_id, source_instance_id = begin_run(
                 cur,
                 _TENANT_ID,
@@ -542,9 +544,11 @@ def _write_ninja_observations(
                         entity_key,
                         entity_type=entity_type,
                         serial=canonical_data["serial_number"],
+                        vm_uuid=canonical_data.get("vm_uuid"),
                         hostname=normalize_hostname(canonical_data["hostname"]) or None,
                         macs=canonical_data["macs"],
                         client_id=client_id,
+                        policies=identity_policies,
                     )
                 obs_rows.append(
                     {

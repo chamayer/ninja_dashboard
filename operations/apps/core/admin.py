@@ -32,6 +32,7 @@ from .models import (
     Finding,
     FindingType,
     IdentityAuthorityPolicy,
+    IdentityMatchPolicy,
     IdentityValueRejection,
     IntelMatcherHint,
     MergeCandidate,
@@ -245,6 +246,31 @@ class IdentityAuthorityPolicyAdmin(ReadOnlyEvidenceAdmin):
     )
     list_filter = ("tenant", "may_establish_identity", "may_create_canonical", "enabled")
     search_fields = ("native_record_type", "reason")
+
+
+@admin.register(IdentityMatchPolicy)
+class IdentityMatchPolicyAdmin(admin.ModelAdmin):
+    """The small, editable policy set controlling automatic Computer matching."""
+
+    list_display = (
+        "display_name",
+        "matcher",
+        "priority",
+        "requires_client_scope",
+        "requires_unique_candidate",
+        "avoid_same_stream_duplicates",
+        "confidence",
+        "enabled",
+        "tenant",
+    )
+    list_filter = ("tenant", "matcher", "enabled", "requires_client_scope")
+    search_fields = ("display_name", "description", "reason")
+    ordering = ("tenant", "priority")
+    readonly_fields = ("id", "version")
+
+    def has_delete_permission(self, request, obj=None):
+        # Disabling preserves a clear record of why a rule stopped applying.
+        return False
 
 
 @admin.register(AttributeAuthorityPolicy)

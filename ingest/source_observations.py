@@ -38,6 +38,7 @@ from ingest import db
 from ingest.connectors import hudu, logmein, screenconnect, sentinelone
 from ingest.identity import identity_entity_types
 from ingest.identity.fast_path import resolve_device_fast
+from ingest.identity.matching import load_identity_match_policies
 from ingest.normalize import (
     extract_macs,
     normalize_hostname,
@@ -258,6 +259,7 @@ def _write_observations(
             )
         link_map = _load_client_links(cur, source)
         placeholder_names = _load_placeholder_names(cur)
+        identity_policies = load_identity_match_policies(cur, _TENANT_ID)
         for row in rows:
             if row.get("_org_only"):
                 # Container-only record (e.g. a group with zero devices) —
@@ -372,9 +374,11 @@ def _write_observations(
                     entity_key,
                     entity_type=source.entity_type,
                     serial=serial,
+                    vm_uuid=canonical_data.get("vm_uuid"),
                     hostname=normalize_hostname(hostname) or None,
                     macs=canonical_data["macs"],
                     client_id=client_id,
+                    policies=identity_policies,
                 )
             else:
                 # Non-identity source: the connector already knows its device

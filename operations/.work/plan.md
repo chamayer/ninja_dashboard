@@ -2,7 +2,7 @@
 
 ## ACTIVE TASK — Separate Computer inventory from OS-installation history
 
-**Status:** release preparation.
+**Status:** deployed in 0.122.24. Follow-on identity-policy work is active below.
 
 **Goal:** keep one counted Computer inventory record for each physical machine
 or VM, while recording an OS installation separately when it has a distinct
@@ -74,6 +74,58 @@ remotes, trigger Portainer deployment, and verify migration 0153 plus service
 health. The pending migration will create
 canonical OS-installation anchors from current agent observations on its first
 post-deploy projection; it does not change Computer inventory counts.
+
+## ACTIVE TASK — Make automatic Computer identity rules operator-managed
+
+**Status:** implementation complete; awaiting release approval.
+
+**Goal:** move every automatic Computer matching decision currently embedded in
+the resolver into visible, ordered policy data, so an administrator can review
+and adjust matching confidence, required signals, and conflict blockers without
+adding source-specific code exclusions.
+
+**Scope:** an additive tenant-scoped identity-match policy registry, writable
+Operations Admin surface, its seeded general rules, and resolver/fast-path
+consumption. The existing stable source-record identity, usable-serial
+normalization, tenant boundary, deleted-anchor rejection, and unique-candidate
+checks remain non-bypassable implementation safeguards. No automatic merge,
+production-data repair, historical rebuild, or source-specific policy is in
+scope.
+
+**Decision:** policy selects the ordered matcher (`source_identity`, `serial`,
+`vm_uuid`, `hostname_mac`, or `hostname`), whether client scope and a unique
+candidate are required, confidence, and which strong signals block that rule.
+Code exposes and safely executes only these generic evidence primitives; it
+does not contain a per-platform, virtualization, or customer exception. A
+known conflicting configured signal blocks auto-attachment; no applicable
+policy fails closed rather than promoting a Computer.
+
+**Affected areas:** Operations model/admin/migration, `ingest.identity` policy
+reader, fast path and resolver/promotion integration, ADR-0013 amendment, and
+this plan.
+
+**Validation:** migration review (tenant/RLS/grants/seed), Django check and
+migration drift, Python compile, relevant existing tests, template/admin import
+smoke check, and `git diff --check`. No new test or diagnostic scripts and no
+production writes.
+
+**Checkpoint:** migration 0154 adds `identity_match_policies`, RLS, explicit
+runtime/ingest grants, and five seeded general rules. Operations Admin exposes
+the policies as editable rows; deletion is disabled so a rule can be disabled
+without losing its rationale. The collector fast path, delayed resolver, and
+promotion recheck use one validated policy reader. Stable source identity now
+selects only a live Computer. The evaluator's strong name+MAC review proposals
+also require the enabled policy and honor its configured VM-UUID blocker.
+
+**Validation completed:** Python compilation, Django check, migration drift,
+focused existing ingest tests (2 passed; 3 existing Postgres tests skipped),
+scoped Ruff, formatter check for files in scope, migration SQL review, and
+`git diff --check` all pass. Whole-file Operations Admin formatting is not an
+acceptance gate because it has pre-existing formatting outside this change.
+
+**Next action:** obtain explicit approval to prepare the release (version and
+changelog), commit, and push the reviewed migration. Deployment will apply
+migration 0154; it does not repair or merge existing Computers.
 
 ## ACTIVE TASK — Reorganize the computer detail page around observations
 

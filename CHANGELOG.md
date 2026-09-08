@@ -2,6 +2,17 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.122.25] — 2026-09-08 — Operator-managed Computer identity matching
+
+### Changed
+
+- Operations administrators can now review and manage the ordered automatic
+  Computer identity rules. Collection-time matching, delayed resolution,
+  promotion rechecks, and duplicate review use the same policy.
+- The seeded name-based rules refuse an automatic match or strong duplicate
+  proposal when the records report conflicting VM UUIDs. Soft-deleted
+  Computers are no longer eligible for source-record reattachment.
+
 ## [0.122.24] — 2026-09-08 — Computer and OS-installation history
 
 ### Changed
