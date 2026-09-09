@@ -47,6 +47,7 @@ from .models import (
     Source,
     SourceBinding,
     SourceFieldMapping,
+    SourceRecordLifecycleMapping,
     SourceInstance,
     SuppressionRule,
     Tenant,
@@ -231,6 +232,26 @@ class SourceFieldMappingAdmin(ReadOnlyEvidenceAdmin):
     )
     list_filter = ("source", "document_kind", "enabled")
     search_fields = ("source_field", "external_namespace", "native_record_type")
+
+
+@admin.register(SourceRecordLifecycleMapping)
+class SourceRecordLifecycleMappingAdmin(admin.ModelAdmin):
+    """Editable policy registry for source-record lifecycle interpretation."""
+
+    list_display = (
+        "source",
+        "external_namespace",
+        "entity_type",
+        "canonical_field",
+        "match_value",
+        "lifecycle",
+        "counts_as_current_computer_evidence",
+        "priority",
+        "enabled",
+    )
+    list_filter = ("source", "lifecycle", "counts_as_current_computer_evidence", "enabled")
+    search_fields = ("external_namespace", "entity_type", "canonical_field")
+    ordering = ("source", "external_namespace", "entity_type", "priority")
 
 
 @admin.register(IdentityAuthorityPolicy)

@@ -71,7 +71,7 @@ _LABELS: dict[str, str] = {
     "device_unenrolled": "No management agent installed",
     "duplicate_platform_record": "Duplicate device record",
     "source_failure": "Data source not responding",
-    "device_missing_from_source": "Device removed from inventory",
+    "device_missing_from_source": "No sources currently report this Computer",
     "device_source_record_withdrawn": "Source record withdrawn",
     "device_role_conflict": "Device role changed",
     "device_long_offline": "Offline for an extended period",

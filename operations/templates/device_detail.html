@@ -406,20 +406,20 @@
             <tr>
                 <th>Source</th>
                 <th>What it is</th>
-                <th>State</th>
-                <th>Reported status</th>
+                <th>Record state</th>
+                <th>Source status</th>
                 <th>Record ID</th>
                 <th class="num">Last seen</th>
                 <th class="num">Last contact</th>
             </tr>
         </thead>
         <tbody>
-            {% for observation_id, source, entity_type, external_id, active, last_seen, reported_online, last_contact in observations %}
+            {% for observation_id, source, entity_type, external_id, active, last_seen, reported_online, last_contact, record_lifecycle in observations %}
             <tr>
                 <td style="font-weight:600;">{{ source }}{% if can_view_entity_evidence %} <a href="{% url 'entity_admin_detail' device.entity_id %}?observation={{ observation_id }}#source-identities" style="font-weight:400; margin-left:.35rem;">Evidence</a>{% endif %}</td>
                 <td>{{ entity_type|humanize_label }}</td>
                 <td>{% if active %}<span class="badge badge-low">Current</span>{% else %}<span class="badge badge-high">Withdrawn</span>{% endif %}</td>
-                <td>{% if reported_online is True %}<span style="color:#16a34a;">Online</span>{% elif reported_online is False %}<span style="color:#dc2626;">Offline</span>{% else %}<span class="muted">Not reported</span>{% endif %}</td>
+                <td>{% if record_lifecycle == "archived" %}<span class="muted">Archived</span>{% elif record_lifecycle == "retired" %}<span class="muted">Retired</span>{% elif record_lifecycle == "decommissioned" %}<span class="muted">Decommissioned</span>{% elif reported_online is True %}<span style="color:#16a34a;">Online</span>{% elif reported_online is False %}<span style="color:#dc2626;">Offline</span>{% else %}<span class="muted">Not reported</span>{% endif %}</td>
                 <td><code>{{ external_id|default:"—" }}</code></td>
                 <td class="muted num">{{ last_seen|date:"Y-m-d H:i"|default:"—" }}</td>
                 <td class="muted num">{{ last_contact|date:"Y-m-d H:i"|default:"—" }}</td>
@@ -444,7 +444,7 @@
                 <th>Match</th>
                 <th>Hudu record type</th>
                 <th>Status</th>
-                <th>Hudu cards</th>
+                <th>Linked records</th>
                 <th></th>
             </tr>
         </thead>
@@ -453,8 +453,8 @@
             <tr>
                 <td>{% if record.is_linked %}<strong>{{ record.relationship }}</strong>{% else %}{{ record.relationship }}{% endif %}</td>
                 <td>{{ record.layout }}</td>
-                <td>{% if record.is_archived %}<span class="muted">Archived in Hudu</span>{% else %}Current in Hudu{% endif %}</td>
-                <td>{% if record.card_count %}{{ record.card_count }}{% else %}<span class="muted">No cards reported</span>{% endif %}</td>
+                <td>{% if record.is_archived %}<span class="muted">Archived</span>{% else %}Current{% endif %}</td>
+                <td>{% if record.card_count %}{{ record.card_count }}{% else %}<span class="muted">No linked records</span>{% endif %}</td>
                 <td>{% if record.url %}<a href="{{ record.url }}" target="_blank" rel="noopener">Open in Hudu</a>{% endif %}</td>
             </tr>
             {% endfor %}

@@ -185,7 +185,7 @@
                     <th>Evidence</th>
                     <th>Context</th>
                     <th>Status</th>
-                    <th class="num">Last detected</th>
+                    <th class="num">Evidence date</th>
                     <th>Manage</th>
                 </tr>
             </thead>
@@ -219,7 +219,7 @@
                         <span class="badge badge-{{ f.status }}">{{ f.get_status_display }}</span>
                         {% if f.snoozed_until %}<br><span class="muted" style="font-size:0.7rem;">snoozed → {{ f.snoozed_until|date:"Y-m-d" }}</span>{% endif %}
                     </td>
-                    <td class="muted num">{{ f.last_detected_at|default:f.last_seen_at|date:"Y-m-d H:i" }}</td>
+                    <td class="muted num">{% if row.evidence_date %}<span style="font-size:0.7rem;">{{ row.evidence_label }}</span><br>{{ row.evidence_date|date:"Y-m-d H:i" }}{% endif %}</td>
                     <td>
                         <details>
                             <summary style="cursor:pointer; white-space:nowrap;">Manage</summary>

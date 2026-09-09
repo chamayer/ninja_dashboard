@@ -2,6 +2,29 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.122.37] — 2026-09-09 — Source-record lifecycle qualification
+
+### Fixed
+
+- Archived Hudu records remain visible as source evidence but no longer count
+  as current Computer evidence. This correctly places Computers whose other
+  sources are withdrawn into Needs review and updates their lifecycle finding
+  with the relevant source-evidence date.
+- The Computer Observations tab now loads related Hudu records, separates
+  record presence from source status, and labels archived records cleanly.
+- Findings no longer present evaluator refresh time as source activity; source
+  withdrawal and no-current-sources findings show their relevant evidence date
+  when one is available.
+
+### Changed
+
+- Added an administrator-managed source-record lifecycle mapping registry for
+  Active, Archived, Retired, Decommissioned, and Unknown source states. Hudu
+  archived records are its first mapping; future sources use the same contract.
+- Moved No platform records into a separate bottom section of the Computers
+  Platforms filter and renamed the Computer-level review finding to No sources
+  currently report this Computer.
+
 ## [0.122.36] — 2026-09-09 — Clear platform-cell states
 
 ### Changed

@@ -20,6 +20,7 @@ from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from django.utils.text import slugify
 from django.views.decorators.http import require_GET, require_POST
 
@@ -1909,8 +1910,12 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
                 """
             SELECT evidence.observation_id, evidence.source_name, evidence.entity_type, evidence.external_id,
                    evidence.observation_active, evidence.observation_last_seen_at,
-                   presence.reported_online, presence.last_contact_at
+                   presence.reported_online, presence.last_contact_at,
+                   lifecycle.record_lifecycle
               FROM operations.v_device_observation_current evidence
+              LEFT JOIN operations.v_device_source_record_lifecycle_current lifecycle
+                ON lifecycle.tenant_id = evidence.tenant_id
+               AND lifecycle.observation_id = evidence.observation_id
               LEFT JOIN operations.device_agent_presence_current presence
                 ON presence.tenant_id = evidence.tenant_id
                AND presence.device_id = %s
@@ -2078,7 +2083,7 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
     # unlinked name match. The latter remains distinct from a source identity:
     # it is useful context, but never attaches a record or changes coverage.
     hudu_records = []
-    if active_tab == "sources" and device.canonical_hostname:
+    if active_tab == "observations" and device.canonical_hostname:
         with transaction.atomic(), connection.cursor() as cur:
             cur.execute("SET LOCAL operations.tenant_id = 1")
             cur.execute(
@@ -3321,6 +3326,21 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             subject_label = f.get_subject_type_display()
             context_parts.append("platform or source context")
 
+        evidence_date = None
+        if f.finding_type.name == "device_missing_from_source":
+            raw_evidence_date = details.get("last_seen_at")
+            evidence_label = "Last source evidence"
+        elif f.finding_type.name == "device_source_record_withdrawn":
+            raw_evidence_date = details.get("withdrawn_at")
+            evidence_label = "Source withdrawn"
+        else:
+            raw_evidence_date = None
+            evidence_label = ""
+        if isinstance(raw_evidence_date, datetime):
+            evidence_date = raw_evidence_date
+        elif isinstance(raw_evidence_date, str):
+            evidence_date = parse_datetime(raw_evidence_date)
+
         return {
             "f": f,
             "detail": _detail_string(f),
@@ -3334,6 +3354,8 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             "publisher": details.get("publisher", ""),
             "fleet_device_count": details.get("fleet_device_count"),
             "threshold": details.get("threshold"),
+            "evidence_date": evidence_date,
+            "evidence_label": evidence_label,
         }
 
     findings_with_detail = [_display_row(f) for f in findings]
@@ -8539,9 +8561,13 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                        hudu.hostname, hudu.source_layout, hudu.source_url,
                        hudu.serial_number, hudu.link_verdict,
                        hudu.card_source, hudu.card_id,
-                       hudu.card_resolved_device_id, hudu.is_archived,
+                       hudu.card_resolved_device_id,
+                       lifecycle.record_lifecycle = 'archived' AS is_archived,
                        alias.canonical
                 FROM operations.v_hudu_computer_inventory_evidence_current hudu
+                LEFT JOIN operations.v_device_source_record_lifecycle_current lifecycle
+                  ON lifecycle.tenant_id = hudu.tenant_id
+                 AND lifecycle.observation_id = hudu.observation_id
                 LEFT JOIN operations.platform_aliases alias
                   ON alias.alias = LOWER(hudu.card_source)
                 """,

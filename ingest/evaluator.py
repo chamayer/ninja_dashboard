@@ -564,23 +564,25 @@ def _sync_source_withdrawal_lifecycle(
     evaluator_run_id: uuid.UUID,
     device_id: uuid.UUID | None,
 ) -> int:
-    """Move a known Computer to review only when every source record is withdrawn.
+    """Move a known Computer to review when no source record qualifies as current.
 
     This is review state, not retirement.  Any active observation, including
     CMDB evidence, restores the Computer to active before qualified lifecycle
     evidence can refine it to offline aging.  A source record's withdrawal is
     evidence; the derived lifecycle transition and audit event remain owned by
-    this evaluator's lifecycle policy.
+    this evaluator's lifecycle policy.  A current source record that is
+    reported as archived/retired remains visible evidence, but its lifecycle
+    mapping does not qualify it as current Computer evidence.
     """
     cur.execute(
         """
         SELECT d.id, d.lifecycle_status,
                EXISTS (
                    SELECT 1
-                     FROM operations.entity_observation_current observation
-                    WHERE observation.tenant_id = d.tenant_id
-                      AND observation.device_id = d.id
-                      AND observation.active
+                     FROM operations.v_device_source_record_lifecycle_current record
+                    WHERE record.tenant_id = d.tenant_id
+                      AND record.device_id = d.id
+                      AND record.counts_as_current_computer_evidence
                ) AS has_current_evidence
           FROM operations.devices d
          WHERE d.tenant_id = %s
@@ -589,9 +591,9 @@ def _sync_source_withdrawal_lifecycle(
            AND (%s::uuid IS NULL OR d.id = %s)
            AND EXISTS (
                SELECT 1
-                 FROM operations.entity_observation_current observation
-                WHERE observation.tenant_id = d.tenant_id
-                  AND observation.device_id = d.id
+                 FROM operations.v_device_source_record_lifecycle_current record
+                WHERE record.tenant_id = d.tenant_id
+                  AND record.device_id = d.id
            )
         """,
         (tenant_id, device_id, device_id),
@@ -638,7 +640,7 @@ def _sync_source_withdrawal_lifecycle(
                         "evidence_kind": (
                             "source_evidence_restored"
                             if has_current_evidence
-                            else "all_source_records_withdrawn"
+                            else "no_current_source_evidence"
                         ),
                         "policy_version": _LIFECYCLE_POLICY_VERSION,
                         "evaluator_run_id": str(evaluator_run_id),
@@ -1510,31 +1512,28 @@ def _evaluate_device_lifecycle(
             SELECT d.id, d.client_id, source.name, last_observation.last_seen_at
               FROM operations.devices d
               LEFT JOIN LATERAL (
-                  SELECT source.name, observation.last_seen_at
-                    FROM operations.entity_observation_current observation
-                    JOIN operations.source_instances source_instance
-                      ON source_instance.tenant_id = observation.tenant_id
-                     AND source_instance.id = observation.source_instance_id
-                    JOIN operations.sources source ON source.id = source_instance.source_id
-                   WHERE observation.tenant_id = d.tenant_id
-                     AND observation.device_id = d.id
-                   ORDER BY observation.last_seen_at DESC NULLS LAST,
-                            observation.observation_id DESC
+                  SELECT record.source_name, record.last_seen_at
+                    FROM operations.v_device_source_record_lifecycle_current record
+                   WHERE record.tenant_id = d.tenant_id
+                     AND record.device_id = d.id
+                     AND record.record_lifecycle IN ('active', 'unknown')
+                   ORDER BY record.last_seen_at DESC NULLS LAST,
+                            record.observation_id DESC
                    LIMIT 1
               ) last_observation ON TRUE
              WHERE d.tenant_id = %s
               AND d.deleted_at IS NULL
               AND (%s::uuid IS NULL OR d.id = %s)
               AND EXISTS (
-                  SELECT 1 FROM operations.entity_observation_current observation
-                   WHERE observation.tenant_id = d.tenant_id
-                     AND observation.device_id = d.id
+                  SELECT 1 FROM operations.v_device_source_record_lifecycle_current record
+                   WHERE record.tenant_id = d.tenant_id
+                     AND record.device_id = d.id
               )
               AND NOT EXISTS (
-                  SELECT 1 FROM operations.entity_observation_current observation
-                   WHERE observation.tenant_id = d.tenant_id
-                     AND observation.device_id = d.id
-                     AND observation.active
+                  SELECT 1 FROM operations.v_device_source_record_lifecycle_current record
+                   WHERE record.tenant_id = d.tenant_id
+                     AND record.device_id = d.id
+                     AND record.counts_as_current_computer_evidence
               )
             """,
             (tenant_id, device_id, device_id),
@@ -1919,9 +1918,9 @@ def _auto_resolve(
         )
         count += cur.rowcount or 0
 
-    # Resolve device_missing_from_source once the source link's
-    # missing_since clears. Maintained for every source since migration 0121;
-    # it was previously Ninja-only, so this could not resolve for the rest.
+    # Resolve the Computer-level review finding only after a source record
+    # qualifies as current Computer evidence.  Raw source presence alone is
+    # not enough: a current archived/retired record remains historical.
     missing_ft_id = _get_finding_type_id(cur, "device_missing_from_source")
     if missing_ft_id:
         cur.execute(
@@ -1933,11 +1932,12 @@ def _auto_resolve(
               AND f.finding_type_id = %s
               AND f.status IN ('open', 'acknowledged')
               AND (%s::uuid IS NULL OR f.subject_id = %s)
-              AND NOT EXISTS (
-                  SELECT 1 FROM operations.v_device_source_link dl
-                  WHERE dl.device_id = f.subject_id
-                    AND dl.tenant_id = f.tenant_id
-                    AND dl.missing_since IS NOT NULL
+              AND EXISTS (
+                  SELECT 1
+                    FROM operations.v_device_source_record_lifecycle_current record
+                   WHERE record.device_id = f.subject_id
+                     AND record.tenant_id = f.tenant_id
+                     AND record.counts_as_current_computer_evidence
               )
             """,
             (now, tenant_id, missing_ft_id, device_id, device_id),

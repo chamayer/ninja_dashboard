@@ -1754,6 +1754,62 @@ class SourceFieldMapping(models.Model):
         return f"{source}:{namespace}:{record_type}:{self.source_field}"
 
 
+class SourceRecordLifecycleMapping(models.Model):
+    """Map a normalized source-record value to its record lifecycle.
+
+    This is deliberately separate from coverage policy and source-record
+    presence.  It lets Operations interpret an archived/retired record without
+    putting a source-specific exception into the evaluator.
+    """
+
+    class Lifecycle(models.TextChoices):
+        ACTIVE = "active", "Active"
+        ARCHIVED = "archived", "Archived"
+        RETIRED = "retired", "Retired"
+        DECOMMISSIONED = "decommissioned", "Decommissioned"
+        UNKNOWN = "unknown", "Unknown"
+
+    id = models.BigAutoField(primary_key=True)
+    source = models.ForeignKey(
+        Source,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="record_lifecycle_mappings",
+    )
+    external_namespace = models.CharField(max_length=120, blank=True, default="")
+    entity_type = models.CharField(max_length=80, blank=True, default="")
+    canonical_field = models.CharField(max_length=160)
+    match_value = models.JSONField()
+    lifecycle = models.CharField(max_length=24, choices=Lifecycle.choices)
+    counts_as_current_computer_evidence = models.BooleanField(default=True)
+    priority = models.PositiveIntegerField(default=100)
+    enabled = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = "source_record_lifecycle_mappings"
+        ordering = ("source", "external_namespace", "entity_type", "priority", "id")
+        constraints = (
+            models.UniqueConstraint(
+                fields=(
+                    "source",
+                    "external_namespace",
+                    "entity_type",
+                    "canonical_field",
+                    "match_value",
+                ),
+                nulls_distinct=False,
+                name="uq_source_record_lifecycle_mapping",
+            ),
+        )
+
+    def __str__(self) -> str:
+        source = self.source_id or "*"
+        namespace = self.external_namespace or "*"
+        entity_type = self.entity_type or "*"
+        return f"{source}:{namespace}:{entity_type}:{self.canonical_field}={self.match_value}"
+
+
 class IdentityAuthorityPolicy(UUIDTenantScopedModel):
     """Independent deny-by-default identity authority for one source type."""
 

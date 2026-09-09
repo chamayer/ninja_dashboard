@@ -153,3 +153,39 @@ That finding does not change the Computer lifecycle. Both conditions are
 auto-resolved only when their respective evidence returns. Every automatic
 lifecycle transition remains in the immutable audit log with its policy
 version and evidence kind.
+
+## Amendment — 2026-09-09: source-record lifecycle qualification
+
+Source-record **presence** and a source's reported record lifecycle are
+separate facts. A record can remain Current because a source still returns it,
+while its source-reported status is Archived, Retired, or Decommissioned. Such
+a record remains visible, linked, and historically useful, but must not keep a
+Computer out of Needs review.
+
+`operations.source_record_lifecycle_mappings` is the editable policy registry
+for this interpretation. A mapping identifies a normalized source field/value,
+optionally scoped to a source, namespace, and entity type; it assigns a
+record-lifecycle value and whether that state counts as current Computer
+evidence. The safe shared read model
+`v_device_source_record_lifecycle_current` exposes both record presence and
+the derived qualification. No connector, evaluator, or UI reader may embed a
+source-name exception for this purpose.
+
+Unmapped current records are `Unknown` and qualify conservatively, preserving
+the existing behavior until an administrator defines a source mapping. Hudu's
+normalized `archived=true` record is the first mapping: it is Archived and
+does not qualify. Future sources use the same registry for retired or
+decommissioned signals. The withdrawal review, Computer-level no-current-
+sources finding, Hudu archive filtering, and Observations display consume this
+contract. The finding queue presents the relevant source-evidence date when
+available; evaluator refresh time is not presented as source activity.
+
+### Finding action boundary
+
+The existing Computer retirement/restore control is the only lifecycle action
+in this scope. It is explicit, reason-required, confirmed by the operator,
+permission-checked, and audited. A future finding-action registry must define
+each action type's eligible finding states, form fields, authorization,
+confirmation text, audit payload, and any specific source API target. It must
+not become a generic "call a source API" mechanism, and it must not change
+source-record lifecycle interpretation.

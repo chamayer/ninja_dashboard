@@ -69,6 +69,76 @@ push the platform-cell clarification. No new migration is included; migration
 configured coverage-template loading, focused Computers inventory tests (8
 passed), and `git diff --check` pass.
 
+**Latest checkpoint:** the Platforms dropdown behavior is unchanged; No
+platform records now appears in its own bottom Other section. Validation next.
+
+**Latest scope:** complete the universal source-record lifecycle follow-up.
+Migration 0158 adds an editable source-record lifecycle mapping registry and
+the safe lifecycle read model. Hudu archived records are its first seeded
+mapping: they remain current source records and visible history, but do not
+qualify as current Computer evidence. The evaluator, review finding, Hudu
+archive reader, Observations tab, and Findings evidence date consume the
+shared contract. No new operator action or generic lifecycle filter is added.
+
+**Current checkpoint:** the Observations Hudu-record section now runs on the
+Observations tab. Its source table separates Record state from Source status.
+The existing Hudu archive filters derive their archive fact through the shared
+lifecycle mapping. The lifecycle evaluator moves a Computer to Needs review
+and maintains the no-current-sources finding only when no record qualifies as
+current Computer evidence; archived records no longer suppress review. The
+finding queue displays a source evidence/withdrawal date when the finding has
+one, instead of showing evaluator refresh time as device activity.
+
+**Decision record:** ADR-0011 now records the source-record lifecycle
+qualification contract, including the default treatment of unmapped records
+and the prohibition on source-specific evaluator exceptions.
+
+**Validation completed:** Python compilation of all changed Python and
+migration files; Django check; migration-drift check; Django-configured
+loading of the changed templates; focused existing findings, Computer
+inventory, detail-helper, and lifecycle-policy tests (23 passed); SQL review
+of migration 0158; and `git diff --check` all pass. The local SQLite migration
+preview renders PostgreSQL-only policy/view SQL without executing it; no
+production migration or data change was run.
+
+**Next action:** obtain explicit approval to prepare a release, including the
+pending 0157 and 0158 migrations, then commit and push. Do not manually
+redeploy.
+
+## Source-record lifecycle follow-up checklist
+
+- [x] Add an Evidence link beside each source observation, opening the exact
+  redacted source record. Released in 0.122.35.
+- [x] Show source-observation state in Computers inventory and surface a
+  Computer-level Needs review state when every current source record is gone.
+  Released in 0.122.35.
+- [x] Keep platform cells compact and use source state before requirement
+  policy. Released in 0.122.36.
+- [x] Keep current Platforms filter behavior unchanged and move No platform
+  records into a bottom Other section. Implemented locally; not released.
+- [x] Rename the Computer-level finding to No sources currently report this
+  Computer. Implemented locally with migration 0157; not released.
+- [x] Correct the Observations Hudu reader so its Hudu-record section runs on
+  the Observations tab and shows the linked archived record.
+- [x] Change the Observations table labels to Record state and Source status;
+  a Hudu row must read Current / Archived without repeating the source name.
+- [x] Add a universal source-record lifecycle contract, distinct from source
+  record presence: Active, Archived, Retired/decommissioned, or Unknown.
+- [x] Derive whether each source record counts as current Computer evidence
+  from that contract through administrator-managed mappings, rather than
+  source-specific evaluator code.
+- [x] Move lifecycle review and the Computer-level no-current-sources finding
+  to the derived qualification. Archived/retired records remain visible and
+  linked but do not keep a Computer out of Needs review.
+- [x] Display a finding's relevant evidence date, such as Last source
+  evidence, rather than presenting evaluator refresh time as device activity.
+- [x] Align Hudu's existing archive filters with the universal record-lifecycle
+  contract; do not add a generic lifecycle filter until other sources expose a
+  useful operator-facing lifecycle state.
+- [x] Record the broader finding-action boundary separately: only explicit,
+  permission-checked, confirmed, audited actions per finding type; no generic
+  arbitrary source-API action. No new source API action is implemented here.
+
 ## ACTIVE TASK — Clarify Computers inventory summaries, coverage filtering, and Findings links
 
 **Status:** implementation and local validation complete; approved release
