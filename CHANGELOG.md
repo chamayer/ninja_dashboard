@@ -2,6 +2,33 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.122.43] — 2026-09-09 — Source-aware Computer details and software risk
+
+### Changed
+
+- Made every Computer Overview card and actionable field open its relevant
+  working surface, restored the per-Computer Include/Exclude patch-policy
+  override, and gave source status consistent Online, Offline, and
+  Not reported badges.
+- Kept Overview compact while expanding Details to all normalized source
+  fields. Field visibility remains administrator-managed in Configuration →
+  Fields; source evidence remains separately controlled.
+- Added evidence state to the Computer software inventory. Inventory retains
+  reported software while identifying its supporting evidence as Current,
+  Offline, Stale, or Withdrawn.
+
+### Fixed
+
+- Patch findings now require a current online Ninja record. When that support
+  disappears, the finding leaves the active queue with its history and a
+  traceable no-longer-actionable resolution.
+- Added a source-specific software-installation evidence view. Active software
+  exposure, including all existing risk/finding consumers, now requires current
+  or offline supporting evidence; stale and withdrawn evidence remains visible
+  in inventory and history but no longer drives an active device alert.
+- Switched Operations Gunicorn to bounded threaded workers so an incomplete
+  client connection cannot monopolize a worker.
+
 ## [0.122.42] — 2026-09-09 — Computer Overview posture and evidence
 
 ### Changed

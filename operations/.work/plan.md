@@ -1,46 +1,68 @@
 # Active Operations implementation plan
 
-## ACTIVE TASK — Reuse observation state in Computer inventory
+## ACTIVE TASK — Finish Computer details and source-aware findings
 
 **Status:** complete.
 
-**Current scope:** rework the Computer Overview into a consistent six-card
-summary strip plus grouped, plain-language Computer details. Cards summarize
-current status, issues, patching, Windows support, software inventory, and
-agent presence without treating absent evidence as a negative value. Details
-are grouped as Identity, Operating system, and Management; the existing Agent
-requirements panel remains alongside them. The released Observations lifecycle
-change remains in the same pending UI-only release.
+**Goal:** finish the Computer detail experience and source-state handling as a
+single release: keep Overview compact and actionable, make Details show all
+normalized source fields under the existing Admin field-visibility policy, and
+ensure patch findings are active only for online Computers.
 
-**Affected files:** `apps/core/views.py`, `templates/device_detail.html`, and
-this plan.
+**Scope:** `templates/device_detail.html` retains clickable cards, the
+per-Computer Include/Exclude patch override, and colored observation status;
+`views.py` removes the Details whitelist while preserving configured
+visibility and adds source evidence state to the Computer software inventory;
+`patch_findings.py` limits patch findings to online Ninja-backed Computers;
+the reviewed SQL migration derives source-specific software evidence state and
+filters active software exposure; `entrypoint.sh` uses bounded threaded
+Gunicorn workers. No raw-payload exposure, data rewrite, or new test script.
 
-**Validation plan:** configured template loading, Django check, the focused
-existing device-detail/lifecycle tests, and `git diff --check`. No migration,
-new test script, production query, or deployment.
+**Affected files:** `entrypoint.sh`, `templates/device_detail.html`,
+`apps/core/views.py`, `../../ingest/patch_findings.py`,
+`../../sql/migrations/107_software_installation_evidence_state.sql`, root
+`VERSION`, `CHANGELOG.md`, and this plan.
 
-**Current checkpoint:** complete locally. Overview now has fixed Current
-status, Open issues, Patching, Windows support, Software inventory, and Agent
-status cards. Missing reboot, Windows-support, and software evidence is shown
-as Not reported rather than No/0. Computer details is grouped as Identity,
-Operating system, Hardware, and Management beside Agent requirements. The
-pending Observations lifecycle change remains: the duplicate Overview Review
-& lifecycle card is removed, and its finding/recommendation with
-Retire/Restore action lives beside full source evidence.
+**Decision:** Details renders every normalized, display-safe attribute claim;
+Admin → Configuration → Fields remains the authority for which values are
+visible. Overview remains a concise operational summary. Patch findings require
+an online current Ninja observation. Software installation history is the
+source-specific evidence store; a security-barrier view derives current,
+offline, stale, or withdrawn state from it and the shared source lifecycle
+contract. Software exposure requires current or offline evidence.
 
-**Decision:** every summary card remains visible for a consistent layout, but
-unknown source evidence is explicitly "Not reported." No score is introduced.
-Agent presence counts only non-exempt effective requirements whose source has
-a current observation; archived/withdrawn records do not count as present.
+**Validation plan:** Python compilation, Django check, configured template
+loading, focused existing device-detail/lifecycle and findings tests, SQL
+migration review, and `git diff --check`. No custom diagnostic script.
+
+**Current checkpoint:** complete locally. The software evidence view uses the
+existing per-source SCD-2 installation evidence rather than adding a second
+source field to the combined current row. It preserves software inventory and
+history while limiting active exposure to current or offline supporting
+evidence. Pre-existing user work under `.work/` is excluded from staging.
+
+**Validation completed:** Python compilation of changed modules; `python
+manage.py check`; configured loading of `device_detail.html`; focused existing
+device-detail, lifecycle, and findings tests (15 passed); `docker compose
+config --quiet`; SQL migration/read-model review; and `git diff --check`.
+The test environment emitted pre-existing Python 3.14/Django async deprecation
+warnings only. Compose reported its existing obsolete top-level `version`
+warning. The Windows development host has no POSIX `sh`, so entrypoint shell
+syntax was not separately checked.
+
+**Release:** approved for version 0.122.43, including SQL migration
+`107_software_installation_evidence_state`. Commit, both pushes, Portainer
+deployment, and live health verification are next.
 
 **Validation completed:** `python manage.py check`; Django-configured loading
 of `device_detail.html`; focused existing device-detail/lifecycle tests (5
 passed); and `git diff --check`. The test environment emitted pre-existing
 Python 3.14/Django async deprecation warnings only.
 
-**Next action:** approved for release commit/push as version 0.122.42. No
-migration is included; the approved `origin` push triggers the normal
-Portainer deployment.
+**Release:** version 0.122.42, commit `01732f4` (Refine Computer overview
+posture), pushed to `origin` and `a-m-rose` on 2026-09-09. No migration was
+included. Portainer deployed commit `01732f4` successfully and the Operations
+health endpoint returned `ok`.
 
 **Validation plan:** Django check, configured template loading, focused
 existing device-detail/lifecycle tests, and `git diff --check`. No migration,

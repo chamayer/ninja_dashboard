@@ -60,6 +60,10 @@ _DEFAULT_CONFIG: dict = {
     "known_malicious_hint_enabled": True,
     "known_malicious_hint_min_hits": 3,
     "known_malicious_hint_severity": "low",
+    # Source-specific installation evidence remains current for this many
+    # hours. The SQL evidence view reads the same operator-managed value when
+    # deciding whether an inherited device exposure is actionable.
+    "installation_evidence_max_age_hours": 24,
 }
 
 

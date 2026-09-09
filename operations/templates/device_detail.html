@@ -45,6 +45,8 @@
         padding: 0.75rem 1rem; background: var(--surface);
         border: 1px solid var(--border); border-radius: 6px;
     }
+    a.dd-card { color: inherit; text-decoration: none; }
+    a.dd-card:hover { border-color: #93c5fd; box-shadow: 0 1px 3px rgba(30, 64, 175, 0.12); }
     .dd-card .lbl {
         font-size: 0.72rem; font-weight: 700; text-transform: uppercase;
         letter-spacing: 0.06em; color: var(--muted); margin-bottom: 0.2rem;
@@ -159,14 +161,12 @@
 
 {% if active_tab == 'overview' %}
 <div class="dd-cards">
-    <div class="dd-card {% if device.lifecycle_status == 'pending_cleanup' or not patching.is_online_any %}alert{% endif %}">
+    <a class="dd-card {% if device.lifecycle_status == 'pending_cleanup' or not patching.is_online_any %}alert{% endif %}" href="?tab=observations">
         <div class="lbl">Current status</div>
         <div class="val">{% if device.lifecycle_status == 'pending_cleanup' %}Needs review{% elif patching.is_online_any %}Online{% else %}Offline{% endif %}</div>
-        <div class="sub">
-            {% if device.lifecycle_status == 'pending_cleanup' %}no source currently reports this Computer{% elif patching.online_sources %}{{ patching.online_sources|join:", " }}{% else %}no source checked in{% endif %}
-        </div>
-    </div>
-    <div class="dd-card {% if sev_counts.critical %}alert{% elif sev_counts.high %}warn{% endif %}">
+        <div class="sub">{% if device.lifecycle_status == 'pending_cleanup' %}no source currently reports this Computer{% elif patching.online_sources %}{{ patching.online_sources|join:", " }}{% else %}no source checked in{% endif %}</div>
+    </a>
+    <a class="dd-card {% if sev_counts.critical %}alert{% elif sev_counts.high %}warn{% endif %}" href="{% url 'findings_queue' %}?status=all&amp;subject_id={{ device.id }}">
         <div class="lbl">Open issues</div>
         <div class="val">{{ active_findings|length }}</div>
         <div class="sev-mini">
@@ -175,33 +175,27 @@
             {% if sev_counts.medium %}<span class="med">{{ sev_counts.medium }} med</span>{% endif %}
             {% if sev_counts.low %}<span class="low">{{ sev_counts.low }} low</span>{% endif %}
         </div>
-    </div>
-    <div class="dd-card">
+    </a>
+    <a class="dd-card" href="#management">
         <div class="lbl">Patching</div>
         <div class="val" style="font-size:1.05rem;">{{ patching.effective_scope|default:"—" }}</div>
-        <div class="sub">
-            {% if patching.needs_reboot %}reboot needed{% elif patching.last_boot_at %}last boot {{ patching.last_boot_at|date:"Y-m-d" }}{% else %}patch and boot status not reported{% endif %}
-        </div>
-    </div>
-    <div class="dd-card {% if windows_servicing.support_state == 'eol' or windows_servicing.support_state == 'eol_esu_available' %}alert{% elif windows_servicing.support_state == 'approaching_eol' %}warn{% endif %}">
+        <div class="sub">{% if patching.needs_reboot %}reboot needed{% elif patching.last_boot_at %}last boot {{ patching.last_boot_at|date:"Y-m-d" }}{% else %}patch and boot status not reported{% endif %}</div>
+    </a>
+    <a class="dd-card {% if windows_servicing.support_state == 'eol' or windows_servicing.support_state == 'eol_esu_available' %}alert{% elif windows_servicing.support_state == 'approaching_eol' %}warn{% endif %}" href="?tab=details">
         <div class="lbl">Windows support</div>
         <div class="val" style="font-size:1.05rem;">{% if windows_servicing and windows_servicing.support_state != 'unknown' %}{{ windows_servicing.support_state|humanize_label }}{% else %}Not reported{% endif %}</div>
-        <div class="sub">
-            {% if windows_servicing and windows_servicing.os_build_number %}build {{ windows_servicing.os_build_number }}{% if windows_servicing.cycle %} · {{ windows_servicing.cycle }}{% endif %}
-            {% elif windows_servicing and windows_servicing.security_support_ends_on %}security support {{ windows_servicing.security_support_ends_on|date:"Y-m-d" }}
-            {% else %}no current Windows servicing data{% endif %}
-        </div>
-    </div>
-    <div class="dd-card">
+        <div class="sub">{% if windows_servicing and windows_servicing.os_build_number %}build {{ windows_servicing.os_build_number }}{% if windows_servicing.cycle %} · {{ windows_servicing.cycle }}{% endif %}{% elif windows_servicing and windows_servicing.security_support_ends_on %}security support {{ windows_servicing.security_support_ends_on|date:"Y-m-d" }}{% else %}no current Windows servicing data{% endif %}</div>
+    </a>
+    <a class="dd-card" href="?tab=software">
         <div class="lbl">Software inventory</div>
         <div class="val">{% if software_rows %}{{ software_rows|length }}{% if software_rows|length == 300 %}+{% endif %} titles{% else %}Not reported{% endif %}</div>
         <div class="sub">{% if software_rows %}current installed software{% else %}no current software scan{% endif %}</div>
-    </div>
-    <div class="dd-card {% if agent_summary.present < agent_summary.required %}warn{% endif %}">
+    </a>
+    <a class="dd-card {% if agent_summary.present < agent_summary.required %}warn{% endif %}" href="#agent-requirements">
         <div class="lbl">Agent status</div>
         <div class="val">{% if agent_summary.required %}{{ agent_summary.present }} of {{ agent_summary.required }} present{% else %}Not required{% endif %}</div>
         <div class="sub">{% if agent_summary.required %}current source records{% else %}no agent requirement applies{% endif %}</div>
-    </div>
+    </a>
 </div>
 
 <div class="card">
@@ -215,31 +209,31 @@
                 <div class="field-row"><dt>Name</dt><dd><code>{{ device.canonical_hostname|default:"Not reported" }}</code><span class="dd-field-note">Computer record</span></dd></div>
                 <div class="field-row"><dt>Role</dt><dd>{{ device.device_role|humanize_label|default:"Not reported" }}</dd></div>
                 <div class="field-row"><dt>Computer type</dt><dd>{{ device.get_device_type_display|default:"Not reported" }}</dd></div>
-                <div class="field-row"><dt>Inventory state</dt><dd>{% if device.lifecycle_status == 'pending_cleanup' %}<span style="color:#b45309;">Needs review</span>{% else %}{{ device.lifecycle_status|humanize_label|default:"Not reported" }}{% endif %}</dd></div>
+                <div class="field-row"><dt>Inventory state</dt><dd><a href="?tab=observations">{% if device.lifecycle_status == 'pending_cleanup' %}<span style="color:#b45309;">Needs review</span>{% else %}{{ device.lifecycle_status|humanize_label|default:"Not reported" }}{% endif %}</a></dd></div>
             </dl>
         </section>
         <section class="dd-field-group">
             <h3>Operating system</h3>
             <dl>
-                <div class="field-row"><dt>Operating system</dt><dd>{{ device.os_name|default:"Not reported" }}<span class="dd-field-note">Source evidence</span></dd></div>
+                <div class="field-row"><dt>Operating system</dt><dd><a href="?tab=details">{{ device.os_name|default:"Not reported" }}</a><span class="dd-field-note">Source evidence</span></dd></div>
                 <div class="field-row"><dt>OS installation</dt><dd>{% if operating_system_installation %}Tracked since {{ operating_system_installation.first_observed_at|date:"Y-m-d" }}{% else %}<span class="muted">Not reported</span>{% endif %}</dd></div>
-                <div class="field-row"><dt>Windows support</dt><dd>{% if windows_servicing and windows_servicing.support_state != 'unknown' %}{{ windows_servicing.support_state|humanize_label }}{% else %}<span class="muted">Not reported</span>{% endif %}</dd></div>
+                <div class="field-row"><dt>Windows support</dt><dd><a href="?tab=details">{% if windows_servicing and windows_servicing.support_state != 'unknown' %}{{ windows_servicing.support_state|humanize_label }}{% else %}<span class="muted">Not reported</span>{% endif %}</a></dd></div>
                 <div class="field-row"><dt>Last boot</dt><dd>{% if patching.last_boot_at %}{{ patching.last_boot_at|date:"Y-m-d H:i" }}{% else %}<span class="muted">Not reported</span>{% endif %}</dd></div>
             </dl>
         </section>
-        <section class="dd-field-group">
+        <section class="dd-field-group" id="management">
             <h3>Hardware</h3>
             <dl>
                 <div class="field-row"><dt>Serial number</dt><dd><code>{{ device.canonical_serial|default:"Not reported" }}</code><span class="dd-field-note">Computer record</span></dd></div>
                 <div class="field-row"><dt>VM ID</dt><dd><code>{{ device.canonical_vm_uuid|default:"Not reported" }}</code><span class="dd-field-note">Computer record</span></dd></div>
             </dl>
         </section>
-        <section class="dd-field-group">
+        <section class="dd-field-group" id="management">
             <h3>Management</h3>
             <dl>
-                <div class="field-row"><dt>Patch policy</dt><dd>{{ patching.effective_scope|default:"Not reported" }}<span class="dd-field-note">{% if patching.override_scope %}Operator override{% elif patching.scope_reason %}{{ patching.scope_reason|humanize_label }}{% else %}Not reported{% endif %}</span></dd></div>
+                <div class="field-row"><dt>Patch policy</dt><dd>{{ patching.effective_scope|default:"Not reported" }}<span class="dd-field-note">{% if patching.override_scope %}Operator override{% elif patching.scope_reason %}{{ patching.scope_reason|humanize_label }}{% else %}Not reported{% endif %}</span><details style="margin-top:0.35rem;"><summary style="cursor:pointer; font-size:0.8rem;">Change patch policy</summary><form method="post" action="{% url 'device_patch_scope_set' org_slug=device.client.slug device_id=device.id %}" style="margin-top:0.4rem; display:flex; flex-direction:column; gap:0.25rem; font-size:0.8rem;">{% csrf_token %}<select name="scope" style="padding:0.25rem;"><option value="Included"{% if patching.override_scope == 'Included' %} selected{% endif %}>Included</option><option value="Excluded"{% if patching.override_scope == 'Excluded' %} selected{% endif %}>Excluded</option></select><input type="text" name="reason" placeholder="Reason (optional)" value="{{ patching.override_reason|default:'' }}" style="padding:0.25rem;"><div style="display:flex; gap:0.3rem;"><button type="submit" style="padding:0.2rem 0.5rem; font-size:0.75rem;">Save</button>{% if patching.override_scope %}<button type="submit" formaction="{% url 'device_patch_scope_clear' org_slug=device.client.slug device_id=device.id %}" style="padding:0.2rem 0.5rem; font-size:0.75rem;" onclick="return confirm('Remove operator override and revert to the derived policy?')">Clear</button>{% endif %}</div></form></details></dd></div>
                 <div class="field-row"><dt>Restart needed</dt><dd>{% if patching.needs_reboot %}Yes{% elif patching.last_boot_at %}No{% else %}<span class="muted">Not reported</span>{% endif %}</dd></div>
-                <div class="field-row"><dt>Software scan</dt><dd>{% if software_rows %}{{ software_rows|length }}{% if software_rows|length == 300 %}+{% endif %} titles{% else %}<span class="muted">Not reported</span>{% endif %}</dd></div>
+                <div class="field-row"><dt>Software scan</dt><dd><a href="?tab=software">{% if software_rows %}{{ software_rows|length }}{% if software_rows|length == 300 %}+{% endif %} titles{% else %}<span class="muted">Not reported</span>{% endif %}</a></dd></div>
             </dl>
         </section>
     </div>
@@ -268,7 +262,7 @@
     {% endif %}
     </section>
 
-    <aside class="dd-agent-requirements">
+    <aside class="dd-agent-requirements" id="agent-requirements">
         <h2 style="margin-top:0;">Agent requirements</h2>
         <p class="muted" style="font-size:0.82rem; margin-top:-0.4rem;">Required agents and deliberate exemptions.</p>
         {% if coverage_policy_rows %}
@@ -407,7 +401,7 @@
                 <td style="font-weight:600;">{{ source }}{% if can_view_entity_evidence %} <a href="{% url 'entity_admin_detail' device.entity_id %}?observation={{ observation_id }}#source-identities" style="font-weight:400; margin-left:.35rem;">Evidence</a>{% endif %}</td>
                 <td>{{ entity_type|humanize_label }}</td>
                 <td>{% if active %}<span class="badge badge-low">Current</span>{% else %}<span class="badge badge-high">Withdrawn</span>{% endif %}</td>
-                <td>{% if record_lifecycle == "archived" %}<span class="muted">Archived</span>{% elif record_lifecycle == "retired" %}<span class="muted">Retired</span>{% elif record_lifecycle == "decommissioned" %}<span class="muted">Decommissioned</span>{% elif reported_online is True %}<span style="color:#16a34a;">Online</span>{% elif reported_online is False %}<span style="color:#dc2626;">Offline</span>{% else %}<span class="muted">Not reported</span>{% endif %}</td>
+                <td>{% if record_lifecycle == "archived" %}<span class="badge" style="background:#f3f4f6; color:#6b7280;">Archived</span>{% elif record_lifecycle == "retired" %}<span class="badge" style="background:#f3f4f6; color:#6b7280;">Retired</span>{% elif record_lifecycle == "decommissioned" %}<span class="badge" style="background:#f3f4f6; color:#6b7280;">Decommissioned</span>{% elif reported_online is True %}<span class="badge badge-low">Online</span>{% elif reported_online is False %}<span class="badge badge-high">Offline</span>{% else %}<span class="badge" style="background:#f3f4f6; color:#6b7280;">Not reported</span>{% endif %}</td>
                 <td><code>{{ external_id|default:"—" }}</code></td>
                 <td class="muted num">{{ last_seen|date:"Y-m-d H:i"|default:"—" }}</td>
                 <td class="muted num">{{ last_contact|date:"Y-m-d H:i"|default:"—" }}</td>
@@ -510,6 +504,7 @@
                 <th>Name</th>
                 <th>Publisher</th>
                 <th>Version</th>
+                <th>Evidence state</th>
                 <th>Decision</th>
                 <th class="num">Installed</th>
                 <th class="num">Last seen</th>
@@ -522,6 +517,7 @@
                 <td>{{ s.name }}</td>
                 <td class="muted">{{ s.publisher|default:"—" }}</td>
                 <td class="muted">{{ s.version|default:"—" }}</td>
+                <td>{% if s.evidence_state == 'current' %}<span class="badge badge-low">Current</span>{% elif s.evidence_state == 'offline' %}<span class="badge badge-high">Offline</span>{% elif s.evidence_state == 'stale' %}<span class="badge badge-medium">Stale</span>{% else %}<span class="badge" style="background:#f3f4f6; color:#6b7280;">Withdrawn</span>{% endif %}</td>
                 <td>
                     {% if s.decision %}
                         <span class="badge-decision {{ s.decision }}">{{ s.decision|humanize_label }}</span>
@@ -557,9 +553,8 @@ function swFilter(q) {
 <div class="card">
     <h2 style="margin-top:0;">Reported fields</h2>
     <p class="muted" style="margin-top:-0.4rem;">
-        Hardware, operating-system, and network values reported by each source.
-        Different values are shown separately; nothing is silently chosen as
-        the truth.
+        All normalized values reported by each source. Different values are
+        shown separately; nothing is silently chosen as the truth.
     </p>
     {% if attribute_fields %}
     <table style="width:100%;">
@@ -579,7 +574,7 @@ function swFilter(q) {
         </tbody>
     </table>
     {% else %}
-    <p class="muted">No approved source fields are available yet.</p>
+    <p class="muted">No configured source fields are available yet.</p>
     {% endif %}
 </div>
 
@@ -595,20 +590,20 @@ function swFilter(q) {
     </details>
     {% endfor %}
     {% else %}
-    <p class="muted">No approved source fields are available yet.</p>
+    <p class="muted">No configured source fields are available yet.</p>
     {% endif %}
 </div>
 
 <div class="card">
-    <h2 style="margin-top:0;">Protected source evidence</h2>
+    <h2 style="margin-top:0;">Source evidence</h2>
     <p class="muted">
-        Raw vendor payloads and restricted values are not loaded on this page
-        or included in exports.
+        Field visibility is managed in Admin → Configuration → Fields. Raw
+        vendor payloads remain available only from the evidence surface.
     </p>
     {% if can_view_entity_evidence %}
-    <p><a class="btn btn-secondary" href="{% url 'entity_admin_detail' device.entity_id %}">Open redacted entity evidence</a></p>
+    <p><a class="btn btn-secondary" href="{% url 'entity_admin_detail' device.entity_id %}">Open source evidence</a></p>
     {% else %}
-    <p class="muted">An Operations administrator can review the redacted evidence summary. Raw values require a separate reveal permission and are audited.</p>
+    <p class="muted">An Operations administrator can review the source evidence. Raw-value access remains separately controlled and audited.</p>
     {% endif %}
 </div>
 {% endif %}

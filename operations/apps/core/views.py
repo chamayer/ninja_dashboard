@@ -89,25 +89,6 @@ log = logging.getLogger(__name__)
 _NINJA_PATCH_DEVICE_ID_MAX = 2_147_483_647
 _LIFECYCLE_REASON_MAX_LENGTH = 120
 _FINDING_DETAIL_KEY_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
-_DEVICE_DETAILS_ATTRIBUTE_KEYS = (
-    "hostname",
-    "serial_number",
-    "mac_address",
-    "vm_uuid",
-    "is_virtual_machine",
-    "node_class",
-    "device_role",
-    "os_name",
-    "os_family",
-    "os_build_number",
-    "os_release_id",
-    "domain",
-    "ip_address",
-    "network_adapter",
-    "gateway",
-)
-
-
 def _safe_ninja_external_id_integer_sql(alias: str) -> str:
     """Return a total SQL cast for a Ninja-owned numeric external ID.
 
@@ -2049,11 +2030,30 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
 
             cur.execute(
                 """
-                SELECT canonical_name, publisher, version,
-                       install_date, last_observed_at, install_location
-                FROM operations.software_installations_current
-                WHERE tenant_id = %s AND device_id = %s AND deleted_at IS NULL
-                ORDER BY canonical_name
+                SELECT installation.canonical_name, installation.publisher,
+                       installation.version, installation.install_date,
+                       installation.last_observed_at, installation.install_location,
+                       COALESCE(evidence.evidence_state, 'withdrawn')
+                  FROM operations.software_installations_current installation
+                  LEFT JOIN LATERAL (
+                      SELECT source_evidence.evidence_state
+                        FROM operations.v_software_installation_evidence_current source_evidence
+                       WHERE source_evidence.tenant_id = installation.tenant_id
+                         AND source_evidence.device_id = installation.device_id
+                         AND source_evidence.canonical_name = installation.canonical_name
+                       ORDER BY CASE source_evidence.evidence_state
+                                    WHEN 'current' THEN 0
+                                    WHEN 'offline' THEN 1
+                                    WHEN 'stale' THEN 2
+                                    ELSE 3
+                                END,
+                                source_evidence.last_seen_at DESC
+                       LIMIT 1
+                  ) evidence ON TRUE
+                 WHERE installation.tenant_id = %s
+                   AND installation.device_id = %s
+                   AND installation.deleted_at IS NULL
+                 ORDER BY installation.canonical_name
                 LIMIT 300
                 """,
                 [1, str(device.id)],
@@ -2264,11 +2264,10 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
                   JOIN operations.sources source ON source.id = source_instance.source_id
                  WHERE claim.tenant_id = 1
                    AND claim.entity_id = %s
-                   AND claim.attribute_key = ANY(%s)
                  ORDER BY claim.attribute_display_name, claim.value_display,
                           source.name
                 """,
-                [str(device.entity_id), list(_DEVICE_DETAILS_ATTRIBUTE_KEYS)],
+                [str(device.entity_id)],
             )
             claim_rows = cur.fetchall()
 
@@ -2420,6 +2419,7 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
             "install_date": r[3],
             "last_observed_at": r[4],
             "install_location": r[5],
+            "evidence_state": r[6],
             "decision": (decisions_map.get(r[0]) or {}).get("decision"),
             "decision_scope": (
                 None

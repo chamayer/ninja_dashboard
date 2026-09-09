@@ -143,6 +143,14 @@ _INSCOPE_SIGNAL_CTE = """
         LEFT JOIN ninja_patches.device_patch_signal dps
           ON dps.device_id = dl.external_id::int
         WHERE dl.tenant_id = %s
+          AND EXISTS (
+              SELECT 1
+                FROM operations.device_agent_presence_current ninja_presence
+               WHERE ninja_presence.tenant_id = dl.tenant_id
+                 AND ninja_presence.device_id = dl.device_id
+                 AND ninja_presence.platform = 'Ninja'
+                 AND ninja_presence.reported_online IS TRUE
+          )
         GROUP BY dl.tenant_id, dl.device_id
     )
 """
@@ -246,6 +254,14 @@ def _emit_reboot_pending(cur, tenant_id, ft_ids, now, keys, policy) -> int:
           AND v.effective_patching_scope = 'Included'
           AND v.lifecycle_status <> 'retired'
           AND v.needs_reboot = TRUE
+          AND EXISTS (
+              SELECT 1
+                FROM operations.device_agent_presence_current ninja_presence
+               WHERE ninja_presence.tenant_id = v.tenant_id
+                 AND ninja_presence.device_id = v.device_id
+                 AND ninja_presence.platform = 'Ninja'
+                 AND ninja_presence.reported_online IS TRUE
+          )
           AND (v.last_boot_at IS NULL
                OR v.last_boot_at < NOW() - INTERVAL '{policy['reboot_pending_days']} days')
         """,
@@ -295,6 +311,14 @@ def _emit_failing_repeatedly(cur, tenant_id, ft_ids, now, keys, policy) -> int:
             WHERE v.tenant_id = %s
               AND v.effective_patching_scope = 'Included'
               AND v.lifecycle_status <> 'retired'
+              AND EXISTS (
+                  SELECT 1
+                    FROM operations.device_agent_presence_current ninja_presence
+                   WHERE ninja_presence.tenant_id = v.tenant_id
+                     AND ninja_presence.device_id = v.device_id
+                     AND ninja_presence.platform = 'Ninja'
+                     AND ninja_presence.reported_online IS TRUE
+              )
         ),
         failing AS (
             SELECT i.ops_device_id, i.client_id, i.canonical_hostname,
@@ -355,6 +379,14 @@ def _emit_approval_backlog(cur, tenant_id, ft_ids, now, keys, policy) -> int:
             WHERE v.tenant_id = %s
               AND v.effective_patching_scope = 'Included'
               AND v.lifecycle_status <> 'retired'
+              AND EXISTS (
+                  SELECT 1
+                    FROM operations.device_agent_presence_current ninja_presence
+                   WHERE ninja_presence.tenant_id = v.tenant_id
+                     AND ninja_presence.device_id = v.device_id
+                     AND ninja_presence.platform = 'Ninja'
+                     AND ninja_presence.reported_online IS TRUE
+              )
         ),
         approved_latest AS (
             SELECT DISTINCT ON (pf.device_id, pf.patch_uid)
@@ -458,10 +490,25 @@ def _upsert(
 
 
 def _auto_resolve(cur, tenant_id, emitted_keys, now) -> None:
+    """Close findings that no longer meet the active patching criteria.
+
+    A patch condition is actionable only while Ninja currently reports the
+    Computer online.  Closing retains the complete finding history while
+    removing an offline, stale, or withdrawn source record from the active
+    queue until current evidence supports it again.
+    """
     cur.execute(
         """
         UPDATE operations.findings f
-        SET status = 'resolved', last_seen_at = %s
+        SET status = 'resolved',
+            last_seen_at = %s,
+            closed_at = COALESCE(f.closed_at, %s),
+            finding_details = f.finding_details || jsonb_build_object(
+                'resolution', jsonb_build_object(
+                    'reason', 'no_longer_actionable',
+                    'detail', 'The Computer no longer meets the active patching criteria.'
+                )
+            )
         FROM operations.finding_types ft
         WHERE ft.id = f.finding_type_id
           AND ft.source_module = 'platform.patch_findings'
@@ -469,5 +516,5 @@ def _auto_resolve(cur, tenant_id, emitted_keys, now) -> None:
           AND f.status IN ('open', 'acknowledged')
           AND NOT (f.condition_key = ANY(%s::text[]))
         """,
-        (now, tenant_id, list(emitted_keys) if emitted_keys else [""]),
+        (now, now, tenant_id, list(emitted_keys) if emitted_keys else [""]),
     )

@@ -74,7 +74,9 @@ echo "[operations] starting gunicorn on 3002 (LAN) + 8091 (internal)..."
 exec gunicorn config.wsgi:application \
     --bind 0.0.0.0:3002 \
     --bind 0.0.0.0:8091 \
+    --worker-class "${OPERATIONS_WORKER_CLASS:-gthread}" \
     --workers "${OPERATIONS_WORKERS:-3}" \
+    --threads "${OPERATIONS_THREADS:-4}" \
     --timeout "${OPERATIONS_TIMEOUT:-60}" \
     --keep-alive 2 \
     --access-logfile - \
