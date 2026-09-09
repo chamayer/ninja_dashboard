@@ -42,6 +42,21 @@
     {% csrf_token %}
 
     <div class="cc-section">
+        <h2 style="margin-top:0;">Software evidence freshness</h2>
+        <div class="cc-row">
+            <div class="lbl">Maximum evidence age (hours)
+                <div class="hint">After this age, a software record remains in inventory but no longer drives an active device finding.</div>
+            </div>
+            <div>
+                <input type="number" name="installation_evidence_max_age_hours"
+                       min="1" max="720"
+                       value="{{ effective.installation_evidence_max_age_hours }}">
+                <span class="cc-default">default: 24 · range 1–720</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="cc-section">
         <h2 style="margin-top:0;">Rare + recent installs</h2>
         <p class="muted" style="margin-top:0;">
             Flags software that showed up on very few devices in the last

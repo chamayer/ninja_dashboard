@@ -11181,6 +11181,7 @@ _CLASSIFIER_DEFAULTS = {
     "rare_recent_severity": "medium",
     "rare_recent_skip_categorized": True,
     "rare_recent_skip_decided": True,
+    "installation_evidence_max_age_hours": 24,
 }
 
 
@@ -11222,6 +11223,12 @@ def classifier_config(request: HttpRequest) -> HttpResponse:
             1,
             100,
             2,
+        )
+        new_cfg["installation_evidence_max_age_hours"] = _int(
+            "installation_evidence_max_age_hours",
+            1,
+            720,
+            24,
         )
         sev = (request.POST.get("rare_recent_severity") or "medium").strip()
         if sev not in {"info", "low", "medium", "high", "critical"}:

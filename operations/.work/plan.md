@@ -2,7 +2,7 @@
 
 ## ACTIVE TASK — Finish Computer details and source-aware findings
 
-**Status:** complete.
+**Status:** active.
 
 **Goal:** finish the Computer detail experience and source-state handling as a
 single release: keep Overview compact and actionable, make Details show all
@@ -35,7 +35,12 @@ contract. Software exposure requires current or offline evidence.
 loading, focused existing device-detail/lifecycle and findings tests, SQL
 migration review, and `git diff --check`. No custom diagnostic script.
 
-**Current checkpoint:** complete locally. The software evidence view uses the
+**Current checkpoint:** deployment exposed a migration error before any schema
+change: `evaluator_config.id` has no database default, so the migration must
+not create the optional administrator configuration row. The corrected
+migration relies on the code default and the existing Classifier configuration
+screen, which creates that row with the Django UUID default when an operator
+saves it. The software evidence view uses the
 existing per-source SCD-2 installation evidence rather than adding a second
 source field to the combined current row. It preserves software inventory and
 history while limiting active exposure to current or offline supporting
@@ -50,9 +55,9 @@ warnings only. Compose reported its existing obsolete top-level `version`
 warning. The Windows development host has no POSIX `sh`, so entrypoint shell
 syntax was not separately checked.
 
-**Release:** approved for version 0.122.43, including SQL migration
-`107_software_installation_evidence_state`. Commit, both pushes, Portainer
-deployment, and live health verification are next.
+**Release:** version 0.122.43 requires one corrective commit before its SQL
+migration can apply. No partial schema change occurred because the migration
+runner rolled back its transaction.
 
 **Validation completed:** `python manage.py check`; Django-configured loading
 of `device_detail.html`; focused existing device-detail/lifecycle tests (5

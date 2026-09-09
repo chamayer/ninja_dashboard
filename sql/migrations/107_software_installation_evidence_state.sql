@@ -13,19 +13,9 @@
 -- evidence (the source no longer has a current record for the Computer).
 -- The freshness threshold is operator-managed evaluator configuration, not a
 -- source-name rule in code.  Twenty-four hours is a conservative bootstrap
--- default until an administrator changes it.
-
-INSERT INTO operations.evaluator_config (tenant_id, evaluator_name, config)
-VALUES (1, 'software_classifier',
-        '{"installation_evidence_max_age_hours": 24}'::jsonb)
-ON CONFLICT (tenant_id, evaluator_name) DO UPDATE
-SET config = operations.evaluator_config.config || jsonb_build_object(
-    'installation_evidence_max_age_hours',
-    COALESCE(
-        operations.evaluator_config.config->'installation_evidence_max_age_hours',
-        '24'::jsonb
-    )
-);
+-- default until an administrator changes it. The existing Classifier
+-- configuration screen creates the optional evaluator_config row on first
+-- save; this migration does not manufacture an operator-authored row.
 
 CREATE OR REPLACE VIEW operations.v_software_installation_evidence_current
 WITH (security_barrier = true) AS
