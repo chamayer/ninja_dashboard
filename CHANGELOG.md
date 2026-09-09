@@ -2,6 +2,19 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.122.39] — 2026-09-09 — Computer Overview review workflow
+
+### Changed
+
+- Simplified the Computer Overview header to show identity, role, and OS
+  without mixing in unknown hardware type, serial, availability, issues, or
+  coverage exemptions.
+- Consolidated Needs review source-state summary, evidence navigation, and the
+  existing reason-required lifecycle action into Review & lifecycle.
+- Replaced the standalone exemption badge area with Coverage policy rows that
+  show each effective platform requirement, exemption reason, and removal
+  action. Exemptions whose requirements are no longer active remain visible.
+
 ## [0.122.38] — 2026-09-09 — Lifecycle evaluator correction
 
 ### Fixed

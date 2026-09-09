@@ -101,36 +101,10 @@
     <div class="dd-title">
         <div class="dd-health {{ device_health }}" title="{{ device_health|humanize_label }}"></div>
         <h1>{{ device.canonical_hostname }}</h1>
-        <span class="type-badge" data-type="{{ device.device_type }}">{{ device.get_device_type_display }}</span>
-        <span class="muted" style="font-size:0.85rem;">{{ device.device_role|humanize_label|default:"role unknown" }}</span>
+        <span class="muted" style="font-size:0.85rem;">{{ device.device_role|humanize_label|default:"Computer" }}{% if device.os_name %} · {{ device.os_name }}{% endif %}</span>
     </div>
     <div class="dd-meta">
-        {% if patching %}
-            {% if patching.is_online_any %}
-                <span style="color:#16a34a;">● online</span>
-                {% if patching.online_sources %}<span class="muted">({{ patching.online_sources|join:", " }})</span>{% endif %}
-            {% else %}
-                <span style="color:#dc2626;">● offline</span>
-            {% endif %}
-            {% if patching.last_contact_at %}
-                &nbsp;·&nbsp; last contact <span class="num">{{ patching.last_contact_at|date:"Y-m-d H:i" }}</span>
-            {% endif %}
-        {% endif %}
-        &nbsp;·&nbsp;
-        <a href="{% url 'findings_queue' %}?device_id={{ device.id }}&amp;snoozed=1">
-            {{ active_findings|length }} open issue{{ active_findings|length|pluralize }}
-        </a>
-        {% if severe_open %}
-            <strong style="color:#dc2626;">({{ severe_open }} severe)</strong>
-        {% endif %}
-        {% if device.canonical_serial %}&nbsp;·&nbsp; <code>{{ device.canonical_serial }}</code>{% endif %}
-        {% if exemptions %}&nbsp;·&nbsp;
-            <span style="padding:0.1rem 0.45rem; background:#fef3c7; border:1px solid #fbbf24; border-radius:999px; font-size:0.75rem; color:#92400e;"
-                  title="{% for etype, reason in exemptions.items %}{{ etype|humanize_exemption }}: {{ reason }}{% if not forloop.last %} · {% endif %}{% endfor %}">
-                Exempt from
-                {% for etype, reason in exemptions.items %}<strong>{{ etype|humanize_exemption }}</strong>{% if not forloop.last %}, {% endif %}{% endfor %}
-            </span>
-        {% endif %}
+        {% if device.lifecycle_status == 'pending_cleanup' %}<strong style="color:#b45309;">Needs review</strong>{% elif device.lifecycle_status == 'retired' %}<strong class="muted">Retired</strong>{% endif %}
     </div>
 </div>
 
@@ -271,9 +245,9 @@
     {% endif %}
 </div>
 
-{% if can_manage_lifecycle %}
-<div class="card">
-    <h2 style="margin-top:0;">Computer lifecycle</h2>
+{% if device.lifecycle_status == 'pending_cleanup' or can_manage_lifecycle %}
+<div class="card" id="review-lifecycle">
+    <h2 style="margin-top:0;">Review &amp; lifecycle</h2>
     {% if device.lifecycle_status == 'retired' %}
     <p class="muted">This Computer is retired. Its source records and history are kept, but it is out of normal inventory, coverage, and search.</p>
     <form method="post" action="{% url 'device_lifecycle_set' org_slug=device.client.slug device_id=device.id target='active' %}" style="display:flex; gap:0.4rem; flex-wrap:wrap; align-items:center;">
@@ -283,7 +257,14 @@
     </form>
     {% else %}
     {% if device.lifecycle_status == 'pending_cleanup' %}
-    <p class="muted">This Computer needs review because no source currently reports it. Review its withdrawn source records before retiring it; retirement keeps all history.</p>
+    <p>This Computer needs review because no source currently provides active Computer evidence. Archived and withdrawn records are kept below; retirement is an operator decision.</p>
+    <table style="width:100%; margin:0.6rem 0;">
+        <thead><tr><th>Source</th><th>Record state</th><th>Source status</th></tr></thead>
+        <tbody>{% for observation_id, source, entity_type, external_id, active, last_seen, reported_online, last_contact, record_lifecycle in observations %}
+            <tr><td>{{ source }} · {{ entity_type|humanize_label }}</td><td>{% if active %}Current{% else %}Withdrawn{% endif %}</td><td>{% if record_lifecycle != 'unknown' %}{{ record_lifecycle|humanize_label }}{% elif reported_online is True %}Online{% elif reported_online is False %}Offline{% else %}<span class="muted">Not reported</span>{% endif %}</td></tr>
+        {% endfor %}</tbody>
+    </table>
+    <p><a href="?tab=observations">Open source observations and evidence →</a></p>
     {% endif %}
     <p class="muted">Retire a Computer only when it should no longer be counted in normal inventory or coverage. This keeps all source records and can be reversed.</p>
     <form method="post" action="{% url 'device_lifecycle_set' org_slug=device.client.slug device_id=device.id target='retired' %}" style="display:flex; gap:0.4rem; flex-wrap:wrap; align-items:center;" onsubmit="return confirm('Retire this Computer? Its source records will be kept.');">
@@ -296,32 +277,14 @@
 {% endif %}
 
 <div class="card">
-    <h2 style="margin-top:0;">Coverage exemptions
-        <span class="muted" style="font-weight:400; font-size:0.85rem;">
-            — this device is excused from these requirements
-        </span>
-    </h2>
-    {% if exemptions %}
-    <div style="display:flex; flex-wrap:wrap; gap:0.4rem; margin-bottom:0.7rem;">
-        {% for etype, reason in exemptions.items %}
-        <span style="display:inline-flex; align-items:center; gap:0.4rem;
-                     padding:0.3rem 0.6rem; background:#fef3c7; border:1px solid #fbbf24;
-                     border-radius:999px; font-size:0.8rem;">
-            <span>Exempt from <strong>{{ etype|humanize_exemption }}</strong></span>
-            <span class="muted" style="font-size:0.75rem;">— {{ reason }}</span>
-            <form method="post" action="{% url 'device_exemption_clear' org_slug=device.client.slug device_id=device.id %}"
-                  style="display:inline; margin-left:0.2rem;"
-                  onsubmit="return confirm('Remove exemption for {{ etype }}?');">
-                {% csrf_token %}
-                <input type="hidden" name="entity_type" value="{{ etype }}">
-                <button type="submit" style="border:0; background:transparent; cursor:pointer; padding:0; font-size:0.9rem; color:#9a3412;">×</button>
-            </form>
-        </span>
-        {% endfor %}
-    </div>
-    {% else %}
-    <p class="muted" style="font-size:0.85rem;">No exemptions on this device.</p>
-    {% endif %}
+    <h2 style="margin-top:0;">Coverage policy</h2>
+    <p class="muted" style="margin-top:-0.4rem;">Requirements and deliberate exemptions are separate from source status.</p>
+    {% if coverage_policy_rows %}
+    <table style="width:100%; margin-bottom:0.7rem;"><thead><tr><th>Platform</th><th>Requirement</th><th>Exemption</th></tr></thead><tbody>
+        {% for row in coverage_policy_rows %}<tr><td>{{ row.platform }}</td><td>{{ row.entity_type|humanize_exemption }}</td><td>{% if row.exempt %}<strong>Exempt</strong> <span class="muted">— {{ row.reason }}</span>{% if can_manage_lifecycle %}<form method="post" action="{% url 'device_exemption_clear' org_slug=device.client.slug device_id=device.id %}" style="display:inline; margin-left:.5rem;">{% csrf_token %}<input type="hidden" name="entity_type" value="{{ row.entity_type }}"><button type="submit">Remove</button></form>{% endif %}{% else %}<span class="muted">None</span>{% endif %}</td></tr>{% endfor %}
+    </tbody></table>
+    {% else %}<p class="muted">No coverage requirement applies to this Computer.</p>{% endif %}
+    {% if can_manage_lifecycle %}
     <details>
         <summary style="cursor:pointer; font-size:0.85rem; color:var(--muted);">Add exemption</summary>
         <form method="post" action="{% url 'device_exemption_add' org_slug=device.client.slug device_id=device.id %}"
@@ -337,6 +300,7 @@
             <button type="submit" style="padding:0.35rem 0.8rem; font-size:0.85rem;">Add</button>
         </form>
     </details>
+    {% endif %}
 </div>
 
 <div class="card">

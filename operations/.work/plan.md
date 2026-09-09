@@ -2,7 +2,40 @@
 
 ## ACTIVE TASK — Reuse observation state in Computer inventory
 
-**Status:** release correction in progress.
+**Status:** implementation in progress.
+
+**Latest scope:** finish the Computer Overview as an operator surface. Remove
+identity/cache noise from the header; consolidate evidence review and the
+existing lifecycle action; and present coverage requirements and exemptions as
+separate policy rows. No change to source evidence, coverage evaluation,
+exemption storage, or lifecycle action permissions.
+
+**Decision:** the header contains only the Computer identity plus role/OS.
+Availability, lifecycle review, issues, hardware facts, and coverage policy
+remain separate. A Needs review Computer shows its source-record summary and
+the existing reason-required retirement control together. Coverage exemptions
+are displayed by required platform/entity type, with their existing add/remove
+actions retained.
+
+**Validation:** Django check, configured template loading, focused existing
+device-detail/lifecycle tests, Python compilation, and diff check. No new test
+scripts or production writes.
+
+**Current checkpoint:** the Overview header now shows only role and OS below
+the Computer name; availability and issue totals remain their own cards, while
+serial and type remain Basic computer fields. The Review & lifecycle card
+shows the source-record summary, routes to full observations/evidence, and
+retains the existing reason-required retirement action. Coverage policy lists
+effective requirements with exemption reason/removal controls and retains any
+exemption whose requirement is no longer active so policy data is not hidden.
+
+**Validation completed:** Python compilation, Django check, configured
+device-detail template loading, focused existing device-detail and lifecycle
+tests (5 passed), and `git diff --check` passed. The effective-policy query
+will be exercised against PostgreSQL after an approved deployment.
+
+**Next action:** obtain explicit approval for release commit/push and the
+resulting Portainer deployment; no migration is included.
 
 **Goal:** let an Operations administrator move directly from an observation on
 a Computer to that exact source-evidence record without exposing raw payloads;
@@ -109,6 +142,17 @@ redeploy.
 0.122.37 exposed one stale SQL alias in the no-current-sources query. The
 single query correction is prepared as 0.122.38. The failed evaluator
 transaction rolled back; migrations 0157 and 0158 remain successfully applied.
+
+**Release validation:** 0.122.37 (`6674d57`) and its evaluator correction
+0.122.38 (`11de195`) were pushed to `origin` and `a-m-rose`. Portainer's Git
+deployment applied Django migrations 0157 and 0158 and restarted healthy
+Operations and ingest services. The manual platform-evaluator run completed at
+2026-09-09 16:11 UTC with 10,061 findings affected. Ninja coverage evaluation
+was skipped because its collection was in progress; lifecycle qualification
+still ran. The initial failed evaluator transaction made no partial change.
+
+**Next action:** no remaining implementation work. Do not commit this
+post-release plan checkpoint alone.
 
 ## Source-record lifecycle follow-up checklist
 

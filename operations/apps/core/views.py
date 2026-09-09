@@ -1660,6 +1660,105 @@ def _raw_value_display(value) -> tuple[str, bool]:
     return str(value), False
 
 
+def _coverage_policy_rows(device: Device, exemptions: dict) -> list[dict]:
+    """Return the effective required platform rows for one Computer.
+
+    This intentionally follows the same profile/global/client precedence as
+    the Computers inventory reader.  Exemptions stay policy decisions; they
+    do not remove the requirement from this display.
+    """
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        cur.execute(
+            """
+            WITH device AS (
+                SELECT d.id, d.tenant_id, d.client_id, d.device_role, d.os_group,
+                       c.requirement_profile_id
+                  FROM operations.devices d
+                  JOIN operations.clients c ON c.id = d.client_id
+                 WHERE d.tenant_id = 1 AND d.id = %s
+            ), baseline AS (
+                SELECT item.entity_type, item.platform, item.applicable_os_groups
+                  FROM device d
+                  JOIN operations.requirement_profile_items item
+                    ON item.tenant_id = d.tenant_id
+                   AND item.profile_id = d.requirement_profile_id
+                   AND d.requirement_profile_id IS NOT NULL
+                   AND (item.device_scope = d.device_role OR (
+                        item.device_scope = 'all' AND NOT EXISTS (
+                            SELECT 1 FROM operations.requirement_profile_items role_item
+                             WHERE role_item.tenant_id = d.tenant_id
+                               AND role_item.profile_id = d.requirement_profile_id
+                               AND role_item.device_scope = d.device_role)))
+                UNION ALL
+                SELECT requirement.entity_type, requirement.platform,
+                       requirement.applicable_os_groups
+                  FROM device d
+                  JOIN operations.coverage_requirements requirement
+                    ON requirement.tenant_id = d.tenant_id
+                   AND requirement.client_id IS NULL AND requirement.enabled
+                   AND d.requirement_profile_id IS NULL
+                   AND (requirement.device_scope = d.device_role OR (
+                        requirement.device_scope = 'all' AND NOT EXISTS (
+                            SELECT 1 FROM operations.coverage_requirements role_requirement
+                             WHERE role_requirement.tenant_id = d.tenant_id
+                               AND role_requirement.client_id IS NULL
+                               AND role_requirement.enabled
+                               AND role_requirement.device_scope = d.device_role)))
+            ), client_override AS (
+                SELECT DISTINCT ON (requirement.entity_type, requirement.platform)
+                       requirement.entity_type, requirement.platform,
+                       requirement.applicable_os_groups, requirement.enabled
+                  FROM device d
+                  JOIN operations.coverage_requirements requirement
+                    ON requirement.tenant_id = d.tenant_id
+                   AND requirement.client_id = d.client_id
+                   AND requirement.device_scope IN ('all', d.device_role)
+                 ORDER BY requirement.entity_type, requirement.platform,
+                          CASE WHEN requirement.device_scope = d.device_role THEN 0 ELSE 1 END
+            ), effective AS (
+                SELECT * FROM baseline
+                 WHERE NOT EXISTS (
+                     SELECT 1 FROM client_override override
+                      WHERE override.entity_type = baseline.entity_type
+                        AND override.platform = baseline.platform)
+                UNION ALL
+                SELECT entity_type, platform, applicable_os_groups
+                  FROM client_override WHERE enabled
+            )
+            SELECT DISTINCT ON (effective.platform, effective.entity_type)
+                   effective.platform, effective.entity_type
+              FROM effective CROSS JOIN device d
+             WHERE effective.applicable_os_groups IS NULL
+                OR effective.applicable_os_groups ? d.os_group
+             ORDER BY effective.platform, effective.entity_type
+            """,
+            [str(device.id)],
+        )
+        rows = cur.fetchall()
+    policy_rows = [
+        {
+            "platform": platform or "Any platform",
+            "entity_type": entity_type,
+            "exempt": entity_type in exemptions,
+            "reason": exemptions.get(entity_type, ""),
+        }
+        for platform, entity_type in rows
+    ]
+    effective_types = {row["entity_type"] for row in policy_rows}
+    for entity_type, reason in exemptions.items():
+        if entity_type not in effective_types:
+            policy_rows.append(
+                {
+                    "platform": "—",
+                    "entity_type": entity_type,
+                    "exempt": True,
+                    "reason": reason,
+                }
+            )
+    return policy_rows
+
+
 def _raw_json_object(value) -> dict:
     """Return a JSON object for the raw-snapshot display surface.
 
@@ -2340,6 +2439,9 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
     ]
 
     # Aggregate open-issue counts (for header + Overview snapshot).
+    coverage_policy_rows = (
+        _coverage_policy_rows(device, exemptions) if active_tab == "overview" else []
+    )
     sev_counts = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
     for f in active_findings:
         sev_counts[f.severity] = sev_counts.get(f.severity, 0) + 1
@@ -2520,6 +2622,7 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
             "activity": activity,
             "exemptions": exemptions,
             "entity_type_choices": entity_type_choices,
+            "coverage_policy_rows": coverage_policy_rows,
             "attribute_fields": attribute_fields,
             "source_attribute_details": source_attribute_details,
             "can_view_entity_evidence": bool(
