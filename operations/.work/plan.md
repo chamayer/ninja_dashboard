@@ -4,6 +4,34 @@
 
 **Status:** implementation in progress.
 
+**Current scope:** make the Overview's Basic computer fields and agent
+requirements one compact two-column section. The basic fields remain the
+larger left column; requirements use a narrower right column and retain the
+existing administrator-only add/remove exemption actions. No policy,
+source-state, permission, or storage behavior changes.
+
+**Affected files:** `templates/device_detail.html` and this plan.
+
+**Validation plan:** configured template loading, Django check, the focused
+existing device-detail/lifecycle tests, and `git diff --check`. No migration,
+new test script, production query, or deployment.
+
+**Current checkpoint:** complete locally. Basic computer fields are the larger
+left column and Agent requirements is the narrower right column; narrow
+screens stack the two sections. The old standalone Coverage policy card is
+removed. The compact panel shows each required agent as Required or Exempt,
+keeps exemption reasons and removal controls, and retains the administrator
+Add exemption control.
+
+**Validation completed:** `python manage.py check`; Django-configured loading
+of `device_detail.html`; focused existing device-detail/lifecycle tests (5
+passed); and `git diff --check`. The test environment emitted pre-existing
+Python 3.14/Django async deprecation warnings only.
+
+**Next action:** approved for release commit/push as version 0.122.40. No
+migration is included; the approved `origin` push triggers the normal
+Portainer deployment.
+
 **Latest scope:** finish the Computer Overview as an operator surface. Remove
 identity/cache noise from the header; consolidate evidence review and the
 existing lifecycle action; and present coverage requirements and exemptions as

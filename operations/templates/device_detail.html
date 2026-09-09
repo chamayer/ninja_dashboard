@@ -54,6 +54,24 @@
     .dd-card.alert { border-left: 3px solid #dc2626; }
     .dd-card.alert .val { color: #dc2626; }
     .dd-card.warn { border-left: 3px solid #ea580c; }
+
+    .dd-basic-layout {
+        display: grid; grid-template-columns: minmax(0, 2fr) minmax(250px, 1fr);
+        gap: 1.25rem; align-items: start;
+    }
+    .dd-agent-requirements {
+        border-left: 1px solid var(--border); padding-left: 1.25rem;
+    }
+    .dd-agent-requirements table { font-size: 0.85rem; }
+    .dd-agent-requirements th,
+    .dd-agent-requirements td { vertical-align: top; }
+    @media (max-width: 850px) {
+        .dd-basic-layout { grid-template-columns: 1fr; }
+        .dd-agent-requirements {
+            border-left: 0; border-top: 1px solid var(--border);
+            padding: 1rem 0 0;
+        }
+    }
     .dd-card.warn .val { color: #ea580c; }
 
     .sev-mini { display: inline-flex; gap: 0.35rem; margin-top: 0.25rem; }
@@ -207,6 +225,8 @@
 </div>
 
 <div class="card">
+    <div class="dd-basic-layout">
+    <section>
     <h2 style="margin-top:0;">Basic computer fields</h2>
     <table style="width:auto;">
         <tbody>
@@ -243,6 +263,40 @@
         {% endif %}
     </details>
     {% endif %}
+    </section>
+
+    <aside class="dd-agent-requirements">
+        <h2 style="margin-top:0;">Agent requirements</h2>
+        <p class="muted" style="font-size:0.82rem; margin-top:-0.4rem;">Required agents and deliberate exemptions.</p>
+        {% if coverage_policy_rows %}
+        <table style="width:100%; margin-bottom:0.7rem;"><thead><tr><th>Agent</th><th>Status</th></tr></thead><tbody>
+            {% for row in coverage_policy_rows %}
+            <tr>
+                <td><strong>{{ row.platform }}</strong><br><span class="muted">{{ row.entity_type|humanize_exemption }}</span></td>
+                <td>{% if row.exempt %}<strong>Exempt</strong>{% if row.reason %}<br><span class="muted">{{ row.reason }}</span>{% endif %}{% if can_manage_lifecycle %}<form method="post" action="{% url 'device_exemption_clear' org_slug=device.client.slug device_id=device.id %}" style="margin-top:.35rem;">{% csrf_token %}<input type="hidden" name="entity_type" value="{{ row.entity_type }}"><button type="submit">Remove</button></form>{% endif %}{% else %}<strong>Required</strong>{% endif %}</td>
+            </tr>
+            {% endfor %}
+        </tbody></table>
+        {% else %}<p class="muted" style="font-size:0.85rem;">No agent requirement applies to this Computer.</p>{% endif %}
+        {% if can_manage_lifecycle %}
+        <details>
+            <summary style="cursor:pointer; font-size:0.85rem; color:var(--muted);">Add exemption</summary>
+            <form method="post" action="{% url 'device_exemption_add' org_slug=device.client.slug device_id=device.id %}"
+                  style="display:flex; gap:0.4rem; margin-top:0.5rem; flex-wrap:wrap; align-items:center;">
+                {% csrf_token %}
+                <select name="entity_type" style="padding:0.35rem 0.6rem; font-size:0.85rem;">
+                    {% for et in entity_type_choices %}
+                    <option value="{{ et }}">{{ et|humanize_exemption }}</option>
+                    {% endfor %}
+                </select>
+                <input type="text" name="reason" placeholder="Why is this Computer exempt?" required
+                       style="padding:0.35rem 0.6rem; font-size:0.85rem; min-width:180px;">
+                <button type="submit" style="padding:0.35rem 0.8rem; font-size:0.85rem;">Add</button>
+            </form>
+        </details>
+        {% endif %}
+    </aside>
+    </div>
 </div>
 
 {% if device.lifecycle_status == 'pending_cleanup' or can_manage_lifecycle %}
@@ -275,33 +329,6 @@
     {% endif %}
 </div>
 {% endif %}
-
-<div class="card">
-    <h2 style="margin-top:0;">Coverage policy</h2>
-    <p class="muted" style="margin-top:-0.4rem;">Requirements and deliberate exemptions are separate from source status.</p>
-    {% if coverage_policy_rows %}
-    <table style="width:100%; margin-bottom:0.7rem;"><thead><tr><th>Platform</th><th>Requirement</th><th>Exemption</th></tr></thead><tbody>
-        {% for row in coverage_policy_rows %}<tr><td>{{ row.platform }}</td><td>{{ row.entity_type|humanize_exemption }}</td><td>{% if row.exempt %}<strong>Exempt</strong> <span class="muted">— {{ row.reason }}</span>{% if can_manage_lifecycle %}<form method="post" action="{% url 'device_exemption_clear' org_slug=device.client.slug device_id=device.id %}" style="display:inline; margin-left:.5rem;">{% csrf_token %}<input type="hidden" name="entity_type" value="{{ row.entity_type }}"><button type="submit">Remove</button></form>{% endif %}{% else %}<span class="muted">None</span>{% endif %}</td></tr>{% endfor %}
-    </tbody></table>
-    {% else %}<p class="muted">No coverage requirement applies to this Computer.</p>{% endif %}
-    {% if can_manage_lifecycle %}
-    <details>
-        <summary style="cursor:pointer; font-size:0.85rem; color:var(--muted);">Add exemption</summary>
-        <form method="post" action="{% url 'device_exemption_add' org_slug=device.client.slug device_id=device.id %}"
-              style="display:flex; gap:0.4rem; margin-top:0.5rem; flex-wrap:wrap; align-items:center;">
-            {% csrf_token %}
-            <select name="entity_type" style="padding:0.35rem 0.6rem; font-size:0.85rem;">
-                {% for et in entity_type_choices %}
-                <option value="{{ et }}">{{ et|humanize_exemption }}</option>
-                {% endfor %}
-            </select>
-            <input type="text" name="reason" placeholder="Why is this device exempt?" required
-                   style="padding:0.35rem 0.6rem; font-size:0.85rem; min-width:260px;">
-            <button type="submit" style="padding:0.35rem 0.8rem; font-size:0.85rem;">Add</button>
-        </form>
-    </details>
-    {% endif %}
-</div>
 
 <div class="card">
     <h2 style="margin-top:0;">Top issues on this device</h2>

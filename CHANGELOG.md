@@ -2,6 +2,16 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.122.40] — 2026-09-09 — Compact Computer agent requirements
+
+### Changed
+
+- Moved Computer agent requirements beside Basic computer fields, using a
+  wider details column and a compact requirements column that stacks on narrow
+  screens.
+- Renamed the operator-facing section to Agent requirements and retained
+  administrator add/remove exemption controls in that panel.
+
 ## [0.122.39] — 2026-09-09 — Computer Overview review workflow
 
 ### Changed
