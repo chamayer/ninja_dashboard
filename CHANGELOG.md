@@ -2,6 +2,14 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.122.41] — 2026-09-09 — Clearer Computer review workflow
+
+### Changed
+
+- Reworked Review & lifecycle into a wider source-state summary and a narrower
+  lifecycle-action panel, replacing the dense review table with compact source
+  state cards.
+
 ## [0.122.40] — 2026-09-09 — Compact Computer agent requirements
 
 ### Changed

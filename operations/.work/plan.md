@@ -2,13 +2,13 @@
 
 ## ACTIVE TASK — Reuse observation state in Computer inventory
 
-**Status:** implementation in progress.
+**Status:** complete.
 
-**Current scope:** make the Overview's Basic computer fields and agent
-requirements one compact two-column section. The basic fields remain the
-larger left column; requirements use a narrower right column and retain the
-existing administrator-only add/remove exemption actions. No policy,
-source-state, permission, or storage behavior changes.
+**Current scope:** refine the Overview's Review & lifecycle card into a clear
+two-column operator workflow: why the Computer needs review and its concise
+source state summary on the left, with the existing reason-required lifecycle
+decision on the right. No lifecycle, source-state, permission, or storage
+behavior changes.
 
 **Affected files:** `templates/device_detail.html` and this plan.
 
@@ -16,21 +16,29 @@ source-state, permission, or storage behavior changes.
 existing device-detail/lifecycle tests, and `git diff --check`. No migration,
 new test script, production query, or deployment.
 
-**Current checkpoint:** complete locally. Basic computer fields are the larger
-left column and Agent requirements is the narrower right column; narrow
-screens stack the two sections. The old standalone Coverage policy card is
-removed. The compact panel shows each required agent as Required or Exempt,
-keeps exemption reasons and removal controls, and retains the administrator
-Add exemption control.
+**Current checkpoint:** complete locally. Needs review now opens with a short
+reason and compact source-state cards on the wider left. The narrower right
+side contains the existing reason-required Retire action. Retired Computers
+use the same layout for their explanation and Restore action. Normal active
+Computers retain the lifecycle action without the dense source table.
+
+**Validation plan:** Django check, configured template loading, focused
+existing device-detail/lifecycle tests, and `git diff --check`. No migration,
+new test script, production query, or deployment.
 
 **Validation completed:** `python manage.py check`; Django-configured loading
 of `device_detail.html`; focused existing device-detail/lifecycle tests (5
 passed); and `git diff --check`. The test environment emitted pre-existing
 Python 3.14/Django async deprecation warnings only.
 
-**Next action:** approved for release commit/push as version 0.122.40. No
+**Next action:** approved for release commit/push as version 0.122.41. No
 migration is included; the approved `origin` push triggers the normal
 Portainer deployment.
+
+**Release:** version 0.122.40, commit `a057b3f` (Compact Computer agent
+requirements), pushed to `origin` and `a-m-rose` on 2026-09-09. No migration
+was included. Portainer deployed commit `a057b3f` successfully and the
+Operations health endpoint returned `ok`.
 
 **Latest scope:** finish the Computer Overview as an operator surface. Remove
 identity/cache noise from the header; consolidate evidence review and the

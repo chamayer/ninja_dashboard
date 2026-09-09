@@ -72,6 +72,30 @@
             padding: 1rem 0 0;
         }
     }
+    .dd-review-layout {
+        display: grid; grid-template-columns: minmax(0, 2fr) minmax(270px, 1fr);
+        gap: 1.25rem; align-items: start;
+    }
+    .dd-review-action {
+        border-left: 1px solid var(--border); padding-left: 1.25rem;
+    }
+    .dd-source-states {
+        display: grid; grid-template-columns: repeat(auto-fit, minmax(165px, 1fr));
+        gap: 0.5rem; margin: 0.75rem 0;
+    }
+    .dd-source-state {
+        border: 1px solid var(--border); border-radius: 4px; padding: 0.55rem 0.65rem;
+        font-size: 0.85rem;
+    }
+    .dd-source-state .source { font-weight: 600; }
+    .dd-source-state .state { color: #92400e; margin-top: 0.15rem; }
+    @media (max-width: 850px) {
+        .dd-review-layout { grid-template-columns: 1fr; }
+        .dd-review-action {
+            border-left: 0; border-top: 1px solid var(--border);
+            padding: 1rem 0 0;
+        }
+    }
     .dd-card.warn .val { color: #ea580c; }
 
     .sev-mini { display: inline-flex; gap: 0.35rem; margin-top: 0.25rem; }
@@ -301,32 +325,48 @@
 
 {% if device.lifecycle_status == 'pending_cleanup' or can_manage_lifecycle %}
 <div class="card" id="review-lifecycle">
+    <div class="dd-review-layout">
+    <section>
     <h2 style="margin-top:0;">Review &amp; lifecycle</h2>
     {% if device.lifecycle_status == 'retired' %}
     <p class="muted">This Computer is retired. Its source records and history are kept, but it is out of normal inventory, coverage, and search.</p>
+    </section>
+    <aside class="dd-review-action">
+    <h3 style="margin-top:0;">Restore to inventory</h3>
     <form method="post" action="{% url 'device_lifecycle_set' org_slug=device.client.slug device_id=device.id target='active' %}" style="display:flex; gap:0.4rem; flex-wrap:wrap; align-items:center;">
         {% csrf_token %}
         <input type="text" name="reason" required maxlength="120" placeholder="Why restore this Computer?" style="padding:0.35rem 0.6rem; min-width:260px;">
         <button type="submit">Restore to inventory</button>
     </form>
+    </aside>
     {% else %}
     {% if device.lifecycle_status == 'pending_cleanup' %}
-    <p>This Computer needs review because no source currently provides active Computer evidence. Archived and withdrawn records are kept below; retirement is an operator decision.</p>
-    <table style="width:100%; margin:0.6rem 0;">
-        <thead><tr><th>Source</th><th>Record state</th><th>Source status</th></tr></thead>
-        <tbody>{% for observation_id, source, entity_type, external_id, active, last_seen, reported_online, last_contact, record_lifecycle in observations %}
-            <tr><td>{{ source }} · {{ entity_type|humanize_label }}</td><td>{% if active %}Current{% else %}Withdrawn{% endif %}</td><td>{% if record_lifecycle != 'unknown' %}{{ record_lifecycle|humanize_label }}{% elif reported_online is True %}Online{% elif reported_online is False %}Offline{% else %}<span class="muted">Not reported</span>{% endif %}</td></tr>
-        {% endfor %}</tbody>
-    </table>
-    <p><a href="?tab=observations">Open source observations and evidence →</a></p>
+    <p><strong style="color:#b45309;">Needs review.</strong> No source currently provides active Computer evidence.</p>
+    <div class="dd-source-states">
+        {% for observation_id, source, entity_type, external_id, active, last_seen, reported_online, last_contact, record_lifecycle in observations %}
+        <div class="dd-source-state">
+            <div class="source">{{ source }}</div>
+            <div class="muted">{{ entity_type|humanize_label }}</div>
+            <div class="state">{% if not active %}Withdrawn{% elif record_lifecycle != 'unknown' %}{{ record_lifecycle|humanize_label }}{% elif reported_online is True %}Online{% elif reported_online is False %}Offline{% else %}Current{% endif %}</div>
+        </div>
+        {% endfor %}
+    </div>
+    <p style="margin-bottom:0;"><a href="?tab=observations">Open source observations and evidence →</a></p>
+    {% else %}
+    <p class="muted">This Computer has active source evidence. Lifecycle actions are available to administrators.</p>
     {% endif %}
-    <p class="muted">Retire a Computer only when it should no longer be counted in normal inventory or coverage. This keeps all source records and can be reversed.</p>
+    </section>
+    <aside class="dd-review-action">
+    <h3 style="margin-top:0;">Retire Computer</h3>
+    <p class="muted" style="font-size:0.85rem;">Use only when this Computer should no longer count in inventory. Source records and history are kept.</p>
     <form method="post" action="{% url 'device_lifecycle_set' org_slug=device.client.slug device_id=device.id target='retired' %}" style="display:flex; gap:0.4rem; flex-wrap:wrap; align-items:center;" onsubmit="return confirm('Retire this Computer? Its source records will be kept.');">
         {% csrf_token %}
         <input type="text" name="reason" required maxlength="120" placeholder="Why retire this Computer?" style="padding:0.35rem 0.6rem; min-width:260px;">
         <button type="submit" style="color:#991b1b;">Retire Computer</button>
     </form>
+    </aside>
     {% endif %}
+    </div>
 </div>
 {% endif %}
 
