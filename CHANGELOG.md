@@ -2,6 +2,12 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.122.34] — 2026-09-09 — Compact not-applicable platform label
+
+### Changed
+
+- Shortened the Computers platform-cell label from “Not required” to “N/A.”
+
 ## [0.122.33] — 2026-09-08 — Compact inventory platform cells
 
 ### Changed

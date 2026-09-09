@@ -9073,7 +9073,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                     "Stale" if coverage and coverage.get("status") == "Stale"
                     else row["source_states"].get(platform, "Online" if coverage and coverage.get("status") == "Online" else "Offline")
                     if present
-                    else "Required" if coverage else "Not required"
+                    else "Required" if coverage else "N/A"
                 ),
                 "is_coverage": platform in row["platform_states"],
                 "possible_match": (
