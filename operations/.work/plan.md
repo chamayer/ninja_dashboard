@@ -1,5 +1,62 @@
 # Active Operations implementation plan
 
+## ACTIVE TASK — Reuse observation state in Computer inventory
+
+**Status:** release preparation approved for 0.122.35.
+
+**Goal:** let an Operations administrator move directly from an observation on
+a Computer to that exact source-evidence record without exposing raw payloads;
+and make each Computer inventory platform cell use the same compact source
+state rather than a separate Present/Absent interpretation.
+
+**Scope:** the Computer Observations tab, the existing redacted Entity evidence
+reader, the Computer inventory reader/template/CSV, and source-withdrawal
+lifecycle/finding evaluation. Migration 0156 seeds a source-record withdrawal
+finding and corrects the existing Computer-level removal finding. No resolver,
+source connector, external API action, or automatic retirement change.
+
+**Decision:** the Computer page retains its concise source-observation table.
+An adjacent **Evidence** link opens the existing administrator-only, redacted
+evidence page scoped to the selected observation. Raw payload access remains
+the separate audited reveal action. Inventory summarizes the same observation
+state by platform: Online has no age; Offline/Stale shows its evidence age;
+Withdrawn shows its removal age; and No record remains distinct. Requirement
+evaluation and filters stay intact, so source state is not mistaken for a
+coverage requirement. A source-record withdrawal is a source-specific finding;
+only no current source observations across the Computer moves it to Needs
+review and opens the existing Computer-level removal finding. The review link
+opens the Observations tab, where the existing reason-required retirement
+control is available.
+
+**Validation:** template loading, Django check, focused existing generic-admin
+and device-detail tests where applicable, Python compilation, and diff check.
+No new test scripts and no production queries or writes.
+
+**Checkpoint:** the Observations tab now carries each observation UUID in its
+safe read-model query. Administrators see an adjacent Evidence link that opens
+the existing redacted Entity evidence screen filtered to that source record;
+non-administrators do not receive a link to an administrator-only route.
+The inventory reader now summarizes current/withdrawn evidence and exposes a
+Needs review link for Computers with no current sources. The evaluator and
+migration are implemented; validation remains. Migration 0156 is included.
+
+**Validation completed so far:** Python compilation, Django check,
+migration-drift check, Django-configured template loading, the existing focused
+generic-admin and device-detail/finding tests (15 passed), and `git diff
+--check` passed for the evidence-link portion. The first standalone
+template-loader invocation was invalid because it did not configure Django
+settings; the same load passed through `manage.py shell`.
+
+**Validation completed:** Python compilation; Django check; migration-drift
+check; UTF-8 migration-plan review showing 0156; Django-configured loading of
+the four changed templates; focused inventory, generic-admin, finding, and
+lifecycle unit suites (35 passed); and `git diff --check` pass. SQLite warns
+that two pre-existing `NULLS DISTINCT` constraints cannot be represented; no
+database migration was applied locally.
+
+**Next action:** obtain separate approval to prepare the release, commit, and
+push. Deployment will apply migration 0156. Do not manually redeploy.
+
 ## ACTIVE TASK — Clarify Computers inventory summaries, coverage filtering, and Findings links
 
 **Status:** implementation and local validation complete; approved release

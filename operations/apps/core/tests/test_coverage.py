@@ -112,6 +112,7 @@ class _Cursor:
                     "host-1",
                     "Windows 11",
                     "workstation",
+                    "active",
                 ),
                 (
                     "device-2",
@@ -121,6 +122,7 @@ class _Cursor:
                     "host-2",
                     "Ubuntu",
                     "server",
+                    "active",
                 ),
             ],
             [
@@ -131,6 +133,11 @@ class _Cursor:
                 ("device-1", "Ninja", True),
                 ("device-1", "SentinelOne", True),
                 ("device-2", "Ninja", True),
+            ],
+            [
+                ("device-1", "Ninja", True, None, None),
+                ("device-1", "SentinelOne", True, None, None),
+                ("device-2", "Ninja", True, None, None),
             ],
             [
                 (
@@ -226,7 +233,7 @@ def test_coverage_uses_effective_requirements_and_source_specific_filters(monkey
     assert row["hudu_present"] is True
     assert row["hudu_links"] == ["Ninja — host-1", "Auvik #42"]
     assert [(cell["platform"], cell["status"]) for cell in row["platform_cells"]] == [
-        ("Ninja", "Missing"),
+        ("Ninja", "Online"),
         ("SentinelOne", "Online"),
     ]
     assert row["platform_cells"][0]["url"] == (
@@ -284,6 +291,7 @@ def test_computers_csv_has_the_current_table_platform_columns(monkeypatch):
         "Device",
         "OS family",
         "Device type",
+        "Lifecycle",
         "Hudu",
         "Hudu links",
         "Ninja",
@@ -294,9 +302,10 @@ def test_computers_csv_has_the_current_table_platform_columns(monkeypatch):
         "host-1",
         "Windows 11",
         "workstation",
+        "active",
         "In Hudu",
         "Ninja — host-1, Auvik #42",
-        "Missing",
+        "Online",
         "Online",
     ] in rows
     assert [
@@ -304,10 +313,11 @@ def test_computers_csv_has_the_current_table_platform_columns(monkeypatch):
         "host-2",
         "",
         "",
+        "",
         "In Hudu",
         "",
         "Possible: host-2",
-        "Not applicable",
+        "No record",
     ] in rows
 
 
@@ -315,8 +325,8 @@ def test_coverage_template_has_clear_statuses_hudu_and_multiselect_filters():
     template = (Path(__file__).parents[3] / "templates/coverage.html").read_text(encoding="utf-8")
 
     for label in (
-        "Platform status",
-        "Hudu links",
+        "Platform",
+        "Links",
         "SentinelOne",
         "OS family",
         "Device type",
@@ -326,7 +336,7 @@ def test_coverage_template_has_clear_statuses_hudu_and_multiselect_filters():
     assert "Required platform" not in template
     assert "Hudu" in template
     assert template.count('type="checkbox"') >= 12
-    assert template.count('<details class="coverage-filter">') == 7
+    assert template.count('<details class="coverage-filter">') == 6
     assert template.count('class="coverage-filter-search"') >= 7
     assert "coverage-filterbar" in template
     assert "const filterMenus" in template

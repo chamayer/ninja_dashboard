@@ -136,3 +136,20 @@ Normal Computer browse and search exclude retired Computers. Search has an
 explicit include-retired control, and a Computer detail shows same-client/name
 records as context only. A shared name is not proof of identity and never
 causes an automatic retirement or merge.
+
+## Amendment — 2026-09-09: source withdrawal is an operator review condition
+
+When every current source observation attached to a Computer is withdrawn, the
+lifecycle evaluator moves the Computer to `pending_cleanup` (shown to operators
+as **Needs review**) and opens the Computer-level `device_missing_from_source`
+finding. This is not retirement and does not hide or delete the Computer.
+The finding records the most recently seen source and time. Any current source
+observation, including CMDB evidence, restores the Computer to `active` before
+the normal qualified contact/power policy refines its state.
+
+One withdrawn source record is separately represented by the
+`device_source_record_withdrawn` finding, keyed by source and source record.
+That finding does not change the Computer lifecycle. Both conditions are
+auto-resolved only when their respective evidence returns. Every automatic
+lifecycle transition remains in the immutable audit log with its policy
+version and evidence kind.

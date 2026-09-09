@@ -1907,7 +1907,7 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
             cur.execute("SET LOCAL operations.tenant_id = 1")
             cur.execute(
                 """
-            SELECT evidence.source_name, evidence.entity_type, evidence.external_id,
+            SELECT evidence.observation_id, evidence.source_name, evidence.entity_type, evidence.external_id,
                    evidence.observation_active, evidence.observation_last_seen_at,
                    presence.reported_online, presence.last_contact_at
               FROM operations.v_device_observation_current evidence
@@ -3101,6 +3101,21 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             days = d.get("days_since_last_seen")
             via = d.get("observed_via") or "tracked"
             return f"{ps}" + (f" · {days}d" if days is not None else "") + f" · via {via}"
+        if name == "device_source_record_withdrawn":
+            source = d.get("source") or "source"
+            withdrawn_at = d.get("withdrawn_at")
+            return f"removed from {source}" + (
+                f" · {withdrawn_at[:10]}" if withdrawn_at else ""
+            )
+        if name == "device_missing_from_source":
+            source = d.get("last_source")
+            last_seen_at = d.get("last_seen_at")
+            pieces = ["no current sources"]
+            if source:
+                pieces.append(f"last: {source}")
+            if last_seen_at:
+                pieces.append(last_seen_at[:10])
+            return " · ".join(pieces)
         if name in ("device_offline", "device_long_offline"):
             since = (
                 d.get("fully_offline_since") or d.get("last_contact_at") or d.get("last_seen_at")
@@ -8536,7 +8551,8 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                 """
                 SELECT d.id, d.client_id, c.slug, c.display_name,
                        COALESCE(d.canonical_hostname, ''),
-                       COALESCE(d.os_family, ''), d.device_type
+                       COALESCE(d.os_family, ''), d.device_type,
+                       d.lifecycle_status
                 FROM operations.devices d
                 JOIN operations.clients c ON c.id = d.client_id
                 WHERE d.tenant_id = 1
@@ -8566,6 +8582,35 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                 """,
             )
             source_presence_rows = cur.fetchall()
+            # Use the same source-observation state shown on a Computer's
+            # Observations tab.  Presence supplies availability; observation
+            # state tells the inventory reader whether a record is current or
+            # withdrawn.  The source-link timestamp is the actual withdrawal
+            # time rather than the older last-seen timestamp.
+            cur.execute(
+                """
+                SELECT evidence.device_id, evidence.source_name,
+                       BOOL_OR(evidence.observation_active) AS has_current_record,
+                       MAX(evidence.observation_last_seen_at)
+                           FILTER (WHERE evidence.observation_active) AS current_seen_at,
+                       MAX(COALESCE(link.missing_since, evidence.observation_last_seen_at))
+                           FILTER (WHERE NOT evidence.observation_active) AS withdrawn_at
+                  FROM operations.v_device_observation_current evidence
+                  JOIN operations.source_instances source_instance
+                    ON source_instance.tenant_id = evidence.tenant_id
+                   AND source_instance.id = evidence.source_instance_id
+                  LEFT JOIN operations.v_device_source_link link
+                    ON link.tenant_id = evidence.tenant_id
+                   AND link.device_id = evidence.device_id
+                   AND link.source_id = source_instance.source_id
+                   AND link.external_id = evidence.external_id
+                 WHERE evidence.tenant_id = 1
+                   AND (evidence.entity_type LIKE 'agent.%%'
+                        OR evidence.entity_type = 'vm.guest')
+                 GROUP BY evidence.device_id, evidence.source_name
+                """,
+            )
+            source_observation_rows = cur.fetchall()
             # Do not hide a current agent/VM record merely because it has not
             # resolved to a live Computer.  Hudu has its dedicated inventory
             # evidence reader above; these are the other computer-capable
@@ -8591,7 +8636,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         row[0]: {
             "device_id": row[0], "client_id": row[1], "client_slug": row[2],
             "client_name": row[3], "hostname": row[4], "os_family": row[5],
-            "device_type": row[6],
+            "device_type": row[6], "lifecycle_status": row[7],
         }
         for row in computer_rows
     }
@@ -8605,6 +8650,13 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         source_states_by_device.setdefault(device_id, {})[platform] = (
             "Online" if online else "Offline"
         )
+    source_observations_by_device: dict = {}
+    for device_id, platform, has_current_record, current_seen_at, withdrawn_at in source_observation_rows:
+        source_observations_by_device.setdefault(device_id, {})[platform] = {
+            "state": "Current" if has_current_record else "Withdrawn",
+            "current_seen_at": current_seen_at,
+            "withdrawn_at": withdrawn_at,
+        }
 
     hudu_by_observation: dict = {}
     for (
@@ -8834,6 +8886,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             "inventory_key": f"device:{device_id}",
             "hudu_records": hudu_by_device.get(device_id, []),
             "source_states": source_states_by_device.get(device_id, {}),
+            "source_observations": source_observations_by_device.get(device_id, {}),
             "platform_states": coverage_states,
             "s1_exempt": s1_exempt,
             "possible_match": None,
@@ -8855,8 +8908,10 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             "hostname": hostname or "",
             "os_family": "",
             "device_type": "",
+            "lifecycle_status": "",
             "hudu_records": [],
             "source_states": {platform: "Online" if reported_online else "Offline"},
+            "source_observations": {},
             "platform_states": {},
             "s1_exempt": False,
             "possible_match": None,
@@ -8880,8 +8935,10 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             "hostname": hudu["hostname"],
             "os_family": "",
             "device_type": "",
+            "lifecycle_status": "",
             "hudu_records": [hudu],
             "source_states": {},
+            "source_observations": {},
             "platform_states": {},
             "s1_exempt": False,
             "possible_match": None,
@@ -8910,6 +8967,13 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
 
     for row in inventory_rows:
         row.update(aggregate_hudu(row.pop("hudu_records")))
+        if row["device_id"] and row["lifecycle_status"] == "pending_cleanup":
+            row["review_url"] = (
+                f"{reverse('findings_queue')}?"
+                f"{urlencode({'type': 'device_missing_from_source', 'status': 'all', 'subject_id': row['device_id']})}"
+            )
+        else:
+            row["review_url"] = ""
 
     def matches(row: dict) -> bool:
         if client_filters and row["client_slug"] not in client_filters:
@@ -9016,21 +9080,66 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         "not_in_hudu": sum(not row["hudu_present"] for row in device_rows),
     }
 
+    def observation_age_label(at: datetime | None) -> str:
+        if at is None:
+            return ""
+        seconds = max(0, int((timezone.now() - at).total_seconds()))
+        if seconds < 3600:
+            return f"{max(1, seconds // 60)}m"
+        if seconds < 86400:
+            return f"{seconds // 3600}h"
+        return f"{seconds // 86400}d"
+
+    def inventory_platform_cell(row: dict, platform: str) -> dict:
+        possible_match = row["possible_match"] if platform == "Ninja" else None
+        coverage = row["platform_states"].get(platform)
+        source_status = row["source_states"].get(platform)
+        observation = row["source_observations"].get(platform)
+        if possible_match:
+            return {
+                "platform": platform,
+                "status": "Possible match",
+                "age": "",
+                "possible_match": possible_match,
+                "url": "",
+                "attention": False,
+            }
+        if observation and observation["state"] == "Withdrawn":
+            status = "Withdrawn"
+            age = observation_age_label(observation["withdrawn_at"])
+        elif source_status:
+            status = "Stale" if coverage and coverage.get("status") == "Stale" else source_status
+            age = observation_age_label(observation["current_seen_at"]) if status in {"Offline", "Stale"} and observation else ""
+        else:
+            status = "No record"
+            age = ""
+        return {
+            "platform": platform,
+            "status": status,
+            "age": age,
+            "possible_match": None,
+            "url": _coverage_filter_url(
+                coverage_source=platform,
+                coverage_status=(
+                    f"{platform}|{coverage.get('status', '')}"
+                ),
+            ) if coverage else "",
+            "attention": bool(coverage and coverage.get("status") in {"Missing", "Stale"}),
+        }
+
     if wants_csv(request):
         def inventory_platform_value(row: dict, platform: str) -> str:
-            possible_match = row["possible_match"] if platform == "Ninja" else None
-            if possible_match:
-                return f"Possible: {possible_match['hostname']}"
-            coverage_state = row["platform_states"].get(platform, {}).get("status")
-            if coverage_state:
-                return coverage_state
-            return row["source_states"].get(platform, "Not applicable")
+            cell = inventory_platform_cell(row, platform)
+            if cell["possible_match"]:
+                return f"Possible: {cell['possible_match']['hostname']}"
+            return f"{cell['status']} ({cell['age']})" if cell["age"] else cell["status"]
 
         return csv_response(
             [
                 {
                     "client_name": row["client_name"], "hostname": row["hostname"],
                     "os_family": row["os_family"], "device_type": row["device_type"],
+                    "lifecycle_status": row["lifecycle_status"],
                     "hudu": row["hudu_status"],
                     "hudu_links": ", ".join(row["hudu_links"]),
                     "inventory_row": row,
@@ -9042,6 +9151,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                 ("Device", "hostname"),
                 ("OS family", "os_family"),
                 ("Device type", "device_type"),
+                ("Lifecycle", "lifecycle_status"),
                 ("Hudu", "hudu"),
                 ("Hudu links", "hudu_links"),
             ] + [
@@ -9065,30 +9175,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
     device_rows = list(page_obj.object_list)
 
     for row in device_rows:
-        row["platform_cells"] = [
-            (lambda coverage, present: {
-                "platform": platform,
-                "presence": "Present" if present else "Absent",
-                "meaning": (
-                    "Stale" if coverage and coverage.get("status") == "Stale"
-                    else row["source_states"].get(platform, "Online" if coverage and coverage.get("status") == "Online" else "Offline")
-                    if present
-                    else "Required" if coverage else "N/A"
-                ),
-                "is_coverage": platform in row["platform_states"],
-                "possible_match": (
-                    row["possible_match"] if platform == "Ninja" else None
-                ),
-                "url": _coverage_filter_url(
-                    coverage_source=platform,
-                    coverage_status=(
-                        f"{platform}|"
-                        f"{row['platform_states'].get(platform, {}).get('status', '')}"
-                    ),
-                ) if platform in row["platform_states"] else "",
-            })(row["platform_states"].get(platform), platform in row["source_states"] or (platform in row["platform_states"] and row["platform_states"][platform]["status"] != "Missing"))
-            for platform in platforms
-        ]
+        row["platform_cells"] = [inventory_platform_cell(row, platform) for platform in platforms]
 
     return render(
         request,

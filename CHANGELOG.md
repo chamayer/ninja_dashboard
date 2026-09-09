@@ -2,6 +2,22 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.122.35] — 2026-09-09 — Source withdrawal review
+
+### Changed
+
+- Computers now summarizes each platform from the same source-observation
+  evidence shown on the Computer detail: Online, Offline/Stale with an age,
+  Withdrawn with an age, or No record.
+- A Computer with no current source records remains visible as Needs review;
+  its Inventory indicator opens the removal finding, whose Review action opens
+  the source-observation timeline and retirement workflow.
+- Separated a single withdrawn source record from a Computer with no current
+  source evidence. The former raises Source record withdrawn; only the latter
+  raises Device removed from inventory and moves the Computer to Needs review.
+- Administrators can open the exact redacted source-evidence record from the
+  Computer Observations tab.
+
 ## [0.122.34] — 2026-09-09 — Compact not-applicable platform label
 
 ### Changed

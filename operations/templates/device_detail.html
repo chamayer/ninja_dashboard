@@ -243,7 +243,7 @@
             <tr><th style="text-align:left; padding-right:1rem;">OS installation</th><td>{% if operating_system_installation %}Tracked since {{ operating_system_installation.first_observed_at|date:"Y-m-d" }}{% else %}<span class="muted">Not yet identified from an OS agent</span>{% endif %}</td></tr>
             <tr><th style="text-align:left; padding-right:1rem;">Role</th><td>{{ device.device_role|humanize_label|default:"—" }}</td></tr>
             <tr><th style="text-align:left; padding-right:1rem;">Type</th><td>{{ device.get_device_type_display }}</td></tr>
-            <tr><th style="text-align:left; padding-right:1rem;">Lifecycle</th><td>{{ device.lifecycle_status|humanize_label|default:"—" }}</td></tr>
+            <tr><th style="text-align:left; padding-right:1rem;">Lifecycle</th><td>{% if device.lifecycle_status == 'pending_cleanup' %}<span style="color:#b45309;">Needs review</span>{% else %}{{ device.lifecycle_status|humanize_label|default:"—" }}{% endif %}</td></tr>
         </tbody>
     </table>
     {% if same_name_device_count %}
@@ -282,6 +282,9 @@
         <button type="submit">Restore to inventory</button>
     </form>
     {% else %}
+    {% if device.lifecycle_status == 'pending_cleanup' %}
+    <p class="muted">This Computer needs review because no source currently reports it. Review its withdrawn source records before retiring it; retirement keeps all history.</p>
+    {% endif %}
     <p class="muted">Retire a Computer only when it should no longer be counted in normal inventory or coverage. This keeps all source records and can be reversed.</p>
     <form method="post" action="{% url 'device_lifecycle_set' org_slug=device.client.slug device_id=device.id target='retired' %}" style="display:flex; gap:0.4rem; flex-wrap:wrap; align-items:center;" onsubmit="return confirm('Retire this Computer? Its source records will be kept.');">
         {% csrf_token %}
@@ -411,9 +414,9 @@
             </tr>
         </thead>
         <tbody>
-            {% for source, entity_type, external_id, active, last_seen, reported_online, last_contact in observations %}
+            {% for observation_id, source, entity_type, external_id, active, last_seen, reported_online, last_contact in observations %}
             <tr>
-                <td style="font-weight:600;">{{ source }}</td>
+                <td style="font-weight:600;">{{ source }}{% if can_view_entity_evidence %} <a href="{% url 'entity_admin_detail' device.entity_id %}?observation={{ observation_id }}#source-identities" style="font-weight:400; margin-left:.35rem;">Evidence</a>{% endif %}</td>
                 <td>{{ entity_type|humanize_label }}</td>
                 <td>{% if active %}<span class="badge badge-low">Current</span>{% else %}<span class="badge badge-high">Withdrawn</span>{% endif %}</td>
                 <td>{% if reported_online is True %}<span style="color:#16a34a;">Online</span>{% elif reported_online is False %}<span style="color:#dc2626;">Offline</span>{% else %}<span class="muted">Not reported</span>{% endif %}</td>

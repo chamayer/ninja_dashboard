@@ -16,7 +16,8 @@ Pipeline per run (device_id=None means full sweep):
      threshold). Requirements filter on device_scope and skip exempted
      entity_types. Confidence is capped at 'probable' unless another
      source saw the device online recently (corroboration).
-  4. Lifecycle — device_missing_from_source, device_offline,
+  4. Lifecycle — device_source_record_withdrawn,
+     device_missing_from_source, device_offline,
      device_stale_data. (cross_client_conflict removed 2026-07-14 —
      see BLUEPRINT §1.7.)
   5. Auto-resolve for all of the above once conditions clear.
@@ -88,6 +89,9 @@ def evaluate(tenant_id: int, device_id: uuid.UUID | None = None) -> int:
             with conn.cursor() as cur:
                 cur.execute(f"SET LOCAL operations.tenant_id = {tenant_id}")
                 skip_platforms = _source_failure_guard(cur, tenant_id, now)
+                affected += _sync_source_withdrawal_lifecycle(
+                    cur, tenant_id, now, evaluator_run_id, device_id
+                )
                 if device_id is None:
                     affected += _sync_device_roles(cur, tenant_id, now)
                     affected += _sync_lifecycle_status(
@@ -457,6 +461,7 @@ def _resolve_lifecycle_findings_absent(
     finding_type_id: int,
     condition_keys: set[str],
     now: datetime,
+    device_id: uuid.UUID | None = None,
 ) -> None:
     """Resolve only lifecycle findings no longer emitted in this evaluator run."""
     if condition_keys:
@@ -467,9 +472,10 @@ def _resolve_lifecycle_findings_absent(
              WHERE tenant_id = %s
                AND finding_type_id = %s
                AND status IN ('open', 'acknowledged', 'investigating', 'suppressed')
+               AND (%s::uuid IS NULL OR subject_id = %s)
                AND NOT (condition_key = ANY(%s))
             """,
-            (now, tenant_id, finding_type_id, list(condition_keys)),
+            (now, tenant_id, finding_type_id, device_id, device_id, list(condition_keys)),
         )
     else:
         cur.execute(
@@ -479,8 +485,9 @@ def _resolve_lifecycle_findings_absent(
              WHERE tenant_id = %s
                AND finding_type_id = %s
                AND status IN ('open', 'acknowledged', 'investigating', 'suppressed')
+               AND (%s::uuid IS NULL OR subject_id = %s)
             """,
-            (now, tenant_id, finding_type_id),
+            (now, tenant_id, finding_type_id, device_id, device_id),
         )
 
 
@@ -550,6 +557,100 @@ def _upsert_lifecycle_finding(
     )
 
 
+def _sync_source_withdrawal_lifecycle(
+    cur: Any,
+    tenant_id: int,
+    now: datetime,
+    evaluator_run_id: uuid.UUID,
+    device_id: uuid.UUID | None,
+) -> int:
+    """Move a known Computer to review only when every source record is withdrawn.
+
+    This is review state, not retirement.  Any active observation, including
+    CMDB evidence, restores the Computer to active before qualified lifecycle
+    evidence can refine it to offline aging.  A source record's withdrawal is
+    evidence; the derived lifecycle transition and audit event remain owned by
+    this evaluator's lifecycle policy.
+    """
+    cur.execute(
+        """
+        SELECT d.id, d.lifecycle_status,
+               EXISTS (
+                   SELECT 1
+                     FROM operations.entity_observation_current observation
+                    WHERE observation.tenant_id = d.tenant_id
+                      AND observation.device_id = d.id
+                      AND observation.active
+               ) AS has_current_evidence
+          FROM operations.devices d
+         WHERE d.tenant_id = %s
+           AND d.deleted_at IS NULL
+           AND d.lifecycle_status <> 'retired'
+           AND (%s::uuid IS NULL OR d.id = %s)
+           AND EXISTS (
+               SELECT 1
+                 FROM operations.entity_observation_current observation
+                WHERE observation.tenant_id = d.tenant_id
+                  AND observation.device_id = d.id
+           )
+        """,
+        (tenant_id, device_id, device_id),
+    )
+    affected = 0
+    for current_device_id, previous, has_current_evidence in cur.fetchall():
+        target = "active" if has_current_evidence else "pending_cleanup"
+        if target == previous:
+            continue
+        cur.execute(
+            """
+            UPDATE operations.devices
+               SET lifecycle_status = %s
+             WHERE id = %s
+               AND tenant_id = %s
+               AND deleted_at IS NULL
+               AND lifecycle_status = %s
+               AND lifecycle_status <> 'retired'
+            RETURNING id
+            """,
+            (target, current_device_id, tenant_id, previous),
+        )
+        if cur.fetchone() is None:
+            continue
+        cur.execute(
+            """
+            INSERT INTO operations.audit_log (
+                audit_id, tenant_id, actor_id, actor_kind, source, action,
+                entity_type, entity_id, before_state, after_state,
+                ip_address, user_agent, occurred_at
+            ) VALUES (
+                gen_random_uuid(), %s, NULL, 'system', 'ingest',
+                'lifecycle.transition', 'device', %s, %s::jsonb, %s::jsonb,
+                NULL, '', %s
+            )
+            """,
+            (
+                tenant_id,
+                current_device_id,
+                json.dumps({"lifecycle_status": previous}),
+                json.dumps(
+                    {
+                        "lifecycle_status": target,
+                        "evidence_kind": (
+                            "source_evidence_restored"
+                            if has_current_evidence
+                            else "all_source_records_withdrawn"
+                        ),
+                        "policy_version": _LIFECYCLE_POLICY_VERSION,
+                        "evaluator_run_id": str(evaluator_run_id),
+                    }
+                ),
+                now,
+            ),
+        )
+        affected += 1
+    return affected
+
+
 def _sync_lifecycle_status(
     cur: Any,
     tenant_id: int,
@@ -596,6 +697,13 @@ def _sync_lifecycle_status(
            AND d.deleted_at IS NULL
            AND d.lifecycle_status <> 'retired'
            AND et.lifecycle_evidence_mode <> 'none'
+           AND EXISTS (
+               SELECT 1
+                 FROM operations.entity_observation_current current_observation
+                WHERE current_observation.tenant_id = d.tenant_id
+                  AND current_observation.device_id = d.id
+                  AND current_observation.active
+           )
         """,
         (tenant_id,),
     )
@@ -1344,31 +1452,99 @@ def _evaluate_device_lifecycle(
     device_id: uuid.UUID | None,
     now: datetime,
 ) -> int:
-    """device_missing_from_source, device_offline, device_stale_data."""
+    """Withdrawal review, offline, and stale-data findings."""
     count = 0
 
-    missing_type_id = _get_finding_type_id(cur, "device_missing_from_source")
-    if missing_type_id:
+    source_withdrawn_type_id = _get_finding_type_id(
+        cur, "device_source_record_withdrawn"
+    )
+    source_withdrawn_keys: set[str] = set()
+    if source_withdrawn_type_id:
         threshold = now - timedelta(hours=_DEVICE_MISSING_MIN_AGE_HOURS)
         cur.execute(
             """
-            SELECT DISTINCT d.id, d.client_id, d.canonical_hostname
-            FROM operations.devices d
-            JOIN operations.v_device_source_link dl ON dl.device_id = d.id AND dl.tenant_id = d.tenant_id
-            JOIN operations.sources s ON s.id = dl.source_id
-            WHERE d.tenant_id = %s
-              AND d.deleted_at IS NULL
-              AND dl.missing_since IS NOT NULL
-              AND dl.missing_since <= %s
-              AND (%s::uuid IS NULL OR d.id = %s)
+            SELECT d.id, d.client_id, source.name, link.external_id, link.missing_since
+              FROM operations.devices d
+              JOIN operations.v_device_source_link link
+                ON link.device_id = d.id AND link.tenant_id = d.tenant_id
+              JOIN operations.sources source ON source.id = link.source_id
+             WHERE d.tenant_id = %s
+               AND d.deleted_at IS NULL
+               AND link.missing_since IS NOT NULL
+               AND link.missing_since <= %s
+               AND (%s::uuid IS NULL OR d.id = %s)
             """,
             (tenant_id, threshold, device_id, device_id),
         )
-        for dev_id, dev_client_id, hostname in cur.fetchall():
+        for dev_id, dev_client_id, source_name, external_id, withdrawn_at in cur.fetchall():
+            ckey = _condition_key(
+                tenant_id,
+                dev_client_id,
+                dev_id,
+                "device_source_record_withdrawn",
+                f"{source_name}:{external_id}",
+            )
+            source_withdrawn_keys.add(ckey)
+            count += _upsert_lifecycle_finding(
+                cur,
+                tenant_id,
+                source_withdrawn_type_id,
+                dev_client_id,
+                dev_id,
+                ckey,
+                "medium",
+                "confirmed",
+                now,
+                {
+                    "source": source_name,
+                    "external_id": external_id,
+                    "withdrawn_at": withdrawn_at.isoformat() if withdrawn_at else None,
+                },
+            )
+
+    missing_type_id = _get_finding_type_id(cur, "device_missing_from_source")
+    no_current_evidence_keys: set[str] = set()
+    if missing_type_id:
+        cur.execute(
+            """
+            SELECT d.id, d.client_id, source.name, last_observation.last_seen_at
+              FROM operations.devices d
+              LEFT JOIN LATERAL (
+                  SELECT source.name, observation.last_seen_at
+                    FROM operations.entity_observation_current observation
+                    JOIN operations.source_instances source_instance
+                      ON source_instance.tenant_id = observation.tenant_id
+                     AND source_instance.id = observation.source_instance_id
+                    JOIN operations.sources source ON source.id = source_instance.source_id
+                   WHERE observation.tenant_id = d.tenant_id
+                     AND observation.device_id = d.id
+                   ORDER BY observation.last_seen_at DESC NULLS LAST,
+                            observation.observation_id DESC
+                   LIMIT 1
+              ) last_observation ON TRUE
+             WHERE d.tenant_id = %s
+              AND d.deleted_at IS NULL
+              AND (%s::uuid IS NULL OR d.id = %s)
+              AND EXISTS (
+                  SELECT 1 FROM operations.entity_observation_current observation
+                   WHERE observation.tenant_id = d.tenant_id
+                     AND observation.device_id = d.id
+              )
+              AND NOT EXISTS (
+                  SELECT 1 FROM operations.entity_observation_current observation
+                   WHERE observation.tenant_id = d.tenant_id
+                     AND observation.device_id = d.id
+                     AND observation.active
+              )
+            """,
+            (tenant_id, device_id, device_id),
+        )
+        for dev_id, dev_client_id, last_source, last_seen_at in cur.fetchall():
             ckey = _condition_key(
                 tenant_id, dev_client_id, dev_id, "device_missing_from_source", ""
             )
-            count += _upsert_finding(
+            no_current_evidence_keys.add(ckey)
+            count += _upsert_lifecycle_finding(
                 cur,
                 tenant_id,
                 missing_type_id,
@@ -1378,8 +1554,20 @@ def _evaluate_device_lifecycle(
                 "high",
                 "confirmed",
                 now,
-                {"hostname": hostname},
+                {
+                    "last_source": last_source,
+                    "last_seen_at": last_seen_at.isoformat() if last_seen_at else None,
+                },
             )
+
+    if source_withdrawn_type_id:
+        _resolve_lifecycle_findings_absent(
+            cur, tenant_id, source_withdrawn_type_id, source_withdrawn_keys, now, device_id
+        )
+    if missing_type_id:
+        _resolve_lifecycle_findings_absent(
+            cur, tenant_id, missing_type_id, no_current_evidence_keys, now, device_id
+        )
 
     if device_id is None:
         count += _evaluate_device_offline(cur, tenant_id, now)

@@ -13,7 +13,7 @@
   {% if entity.conflict_count %}<span class="badge badge-high">{{ entity.conflict_count }} conflict{{ entity.conflict_count|pluralize }}</span>{% endif %}
 </div>
 
-<div class="card" style="margin-bottom:1rem;">
+<div class="card" id="source-identities" style="margin-bottom:1rem;">
   <h2 style="margin-top:0;">Source identities</h2>
   <table class="ops-table" data-sortable>
     <thead><tr><th>Source</th><th>Record type</th><th>Source identity</th><th>Observed</th><th>State</th><th>Protected fields</th>{% if can_reveal_evidence %}<th>Restricted evidence</th>{% endif %}</tr></thead>

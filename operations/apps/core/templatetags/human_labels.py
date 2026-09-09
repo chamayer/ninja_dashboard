@@ -72,6 +72,7 @@ _LABELS: dict[str, str] = {
     "duplicate_platform_record": "Duplicate device record",
     "source_failure": "Data source not responding",
     "device_missing_from_source": "Device removed from inventory",
+    "device_source_record_withdrawn": "Source record withdrawn",
     "device_role_conflict": "Device role changed",
     "device_long_offline": "Offline for an extended period",
     "cross_client_conflict": "Same hostname on two clients",
@@ -276,7 +277,15 @@ def finding_detail_text(finding):
             pieces.append(f"support ended {end}" if name.endswith("_eol") else f"ends {end}")
         return " · ".join(pieces)
     if name == "device_missing_from_source":
-        return f"removed from {d.get('platform', '?')}"
+        last_source = d.get("last_source")
+        last_seen = d.get("last_seen_at")
+        if last_source and last_seen:
+            return f"last seen in {last_source} on {last_seen[:10]}"
+        return f"last seen in {last_source}" if last_source else "no source currently reports it"
+    if name == "device_source_record_withdrawn":
+        source = d.get("source", "source")
+        withdrawn_at = d.get("withdrawn_at")
+        return f"removed from {source}{f' on {withdrawn_at[:10]}' if withdrawn_at else ''}"
     if name == "device_never_patched":
         return "no INSTALLED patches on record"
     if name == "patching_stalled":

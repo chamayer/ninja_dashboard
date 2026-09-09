@@ -169,6 +169,11 @@ def entity_admin_list(request: HttpRequest) -> HttpResponse:
 @require_GET
 def entity_admin_detail(request: HttpRequest, entity_id: uuid.UUID) -> HttpResponse:
     tenant_id = _tenant_id(request)
+    observation_id = request.GET.get("observation", "").strip()
+    try:
+        selected_observation_id = uuid.UUID(observation_id) if observation_id else None
+    except ValueError:
+        raise Http404("Observation evidence not found")
     with transaction.atomic(), connection.cursor() as cur:
         cur.execute("SET LOCAL operations.tenant_id = %s", (tenant_id,))
         cur.execute(
@@ -185,11 +190,14 @@ def entity_admin_detail(request: HttpRequest, entity_id: uuid.UUID) -> HttpRespo
             """
             SELECT * FROM operations.v_entity_source_evidence
              WHERE tenant_id = %s AND entity_id = %s
+               AND (%s::uuid IS NULL OR observation_id = %s::uuid)
              ORDER BY source_name, external_namespace, external_id
             """,
-            (tenant_id, entity_id),
+            (tenant_id, entity_id, selected_observation_id, selected_observation_id),
         )
         sources = _rows(cur)
+        if selected_observation_id is not None and not sources:
+            raise Http404("Observation evidence not found")
         cur.execute(
             """
             SELECT * FROM operations.v_entity_attribute_effective_current
