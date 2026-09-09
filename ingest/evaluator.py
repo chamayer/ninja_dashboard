@@ -1509,7 +1509,8 @@ def _evaluate_device_lifecycle(
     if missing_type_id:
         cur.execute(
             """
-            SELECT d.id, d.client_id, source.name, last_observation.last_seen_at
+            SELECT d.id, d.client_id, last_observation.source_name,
+                   last_observation.last_seen_at
               FROM operations.devices d
               LEFT JOIN LATERAL (
                   SELECT record.source_name, record.last_seen_at

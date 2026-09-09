@@ -2,7 +2,7 @@
 
 ## ACTIVE TASK — Reuse observation state in Computer inventory
 
-**Status:** implementation and local validation complete; awaiting release approval.
+**Status:** release correction in progress.
 
 **Goal:** let an Operations administrator move directly from an observation on
 a Computer to that exact source-evidence record without exposing raw payloads;
@@ -104,6 +104,11 @@ production migration or data change was run.
 **Next action:** obtain explicit approval to prepare a release, including the
 pending 0157 and 0158 migrations, then commit and push. Do not manually
 redeploy.
+
+**Release correction:** the first production evaluator invocation after
+0.122.37 exposed one stale SQL alias in the no-current-sources query. The
+single query correction is prepared as 0.122.38. The failed evaluator
+transaction rolled back; migrations 0157 and 0158 remain successfully applied.
 
 ## Source-record lifecycle follow-up checklist
 

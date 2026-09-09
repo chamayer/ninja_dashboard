@@ -2,6 +2,15 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.122.38] — 2026-09-09 — Lifecycle evaluator correction
+
+### Fixed
+
+- Corrected the no-current-sources lifecycle query to read the source name
+  from the shared source-record lifecycle view. This restores the evaluator
+  run introduced in 0.122.37; failed runs roll back without partial finding or
+  lifecycle changes.
+
 ## [0.122.37] — 2026-09-09 — Source-record lifecycle qualification
 
 ### Fixed
