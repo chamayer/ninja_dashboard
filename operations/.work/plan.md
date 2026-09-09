@@ -2,7 +2,7 @@
 
 ## ACTIVE TASK — Reuse observation state in Computer inventory
 
-**Status:** release preparation approved for 0.122.35.
+**Status:** implementation and local validation complete; awaiting release approval.
 
 **Goal:** let an Operations administrator move directly from an observation on
 a Computer to that exact source-evidence record without exposing raw payloads;
@@ -11,9 +11,11 @@ state rather than a separate Present/Absent interpretation.
 
 **Scope:** the Computer Observations tab, the existing redacted Entity evidence
 reader, the Computer inventory reader/template/CSV, and source-withdrawal
-lifecycle/finding evaluation. Migration 0156 seeds a source-record withdrawal
-finding and corrects the existing Computer-level removal finding. No resolver,
-source connector, external API action, or automatic retirement change.
+lifecycle/finding evaluation. This follow-up clarifies the one-line
+platform-cell precedence and tooltips only. Migration 0156 seeds a
+source-record withdrawal finding and corrects the existing Computer-level
+removal finding. No resolver, source connector, external API action, or
+automatic retirement change.
 
 **Decision:** the Computer page retains its concise source-observation table.
 An adjacent **Evidence** link opens the existing administrator-only, redacted
@@ -27,6 +29,11 @@ only no current source observations across the Computer moves it to Needs
 review and opens the existing Computer-level removal finding. The review link
 opens the Observations tab, where the existing reason-required retirement
 control is available.
+
+**Follow-up decision:** a real source state is never overwritten by requirement
+policy. Current records show Online, Offline, Stale, or Current; withdrawn
+records show Withdrawn. Only absent source evidence becomes Missing when the
+platform is required or N/A when it is not. Tooltips state the exact meaning.
 
 **Validation:** template loading, Django check, focused existing generic-admin
 and device-detail tests where applicable, Python compilation, and diff check.
@@ -55,7 +62,12 @@ that two pre-existing `NULLS DISTINCT` constraints cannot be represented; no
 database migration was applied locally.
 
 **Next action:** obtain separate approval to prepare the release, commit, and
-push. Deployment will apply migration 0156. Do not manually redeploy.
+push the platform-cell clarification. No new migration is included; migration
+0156 was released in 0.122.35. Do not manually redeploy.
+
+**Follow-up validation completed:** Python compilation, Django check,
+configured coverage-template loading, focused Computers inventory tests (8
+passed), and `git diff --check` pass.
 
 ## ACTIVE TASK — Clarify Computers inventory summaries, coverage filtering, and Findings links
 

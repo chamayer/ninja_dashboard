@@ -2,6 +2,16 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.122.36] — 2026-09-09 — Clear platform-cell states
+
+### Changed
+
+- Computers platform cells now preserve source state first: Online, Offline,
+  Stale, Current, or Withdrawn. Only no source record becomes Missing for a
+  required platform or N/A for an unrequired platform.
+- Added concise tooltips that explain each platform-cell state without adding a
+  second line to the inventory table.
+
 ## [0.122.35] — 2026-09-09 — Source withdrawal review
 
 ### Changed

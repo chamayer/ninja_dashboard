@@ -8648,7 +8648,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
     source_states_by_device: dict = {}
     for device_id, platform, online in source_presence_rows:
         source_states_by_device.setdefault(device_id, {})[platform] = (
-            "Online" if online else "Offline"
+            "Online" if online is True else "Offline" if online is False else "Current"
         )
     source_observations_by_device: dict = {}
     for device_id, platform, has_current_record, current_seen_at, withdrawn_at in source_observation_rows:
@@ -9103,16 +9103,27 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                 "possible_match": possible_match,
                 "url": "",
                 "attention": False,
+                "tooltip": "A same-client name suggests a possible match, but it is not a confirmed source record.",
             }
         if observation and observation["state"] == "Withdrawn":
             status = "Withdrawn"
             age = observation_age_label(observation["withdrawn_at"])
-        elif source_status:
+        elif observation and observation["state"] == "Current":
             status = "Stale" if coverage and coverage.get("status") == "Stale" else source_status
-            age = observation_age_label(observation["current_seen_at"]) if status in {"Offline", "Stale"} and observation else ""
+            status = status or "Current"
+            age = observation_age_label(observation["current_seen_at"]) if status in {"Offline", "Stale"} else ""
         else:
-            status = "No record"
+            status = "Missing" if coverage else "N/A"
             age = ""
+        tooltip = {
+            "Online": "This platform currently reports the Computer online.",
+            "Offline": "This platform still has the record but reports the Computer offline.",
+            "Stale": "This platform still has the record, but its required-agent status is stale.",
+            "Current": "This platform has the record but did not report online or offline status.",
+            "Withdrawn": "This platform previously had the record but no longer reports it.",
+            "Missing": "This platform is required for this Computer but has no current record.",
+            "N/A": "This platform is not required for this Computer and has no current record.",
+        }[status]
         return {
             "platform": platform,
             "status": status,
@@ -9125,6 +9136,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                 ),
             ) if coverage else "",
             "attention": bool(coverage and coverage.get("status") in {"Missing", "Stale"}),
+            "tooltip": tooltip,
         }
 
     if wants_csv(request):

@@ -317,7 +317,7 @@ def test_computers_csv_has_the_current_table_platform_columns(monkeypatch):
         "In Hudu",
         "",
         "Possible: host-2",
-        "No record",
+        "N/A",
     ] in rows
 
 
