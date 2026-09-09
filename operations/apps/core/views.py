@@ -2442,6 +2442,24 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
     coverage_policy_rows = (
         _coverage_policy_rows(device, exemptions) if active_tab == "overview" else []
     )
+    required_agent_rows = [
+        row
+        for row in coverage_policy_rows
+        if row["platform"] != "—" and not row["exempt"]
+    ]
+    current_agent_records = {
+        (source, entity_type)
+        for _observation_id, source, entity_type, _external_id, active, _last_seen,
+        _reported_online, _last_contact, record_lifecycle in observations
+        if active and record_lifecycle not in {"archived", "retired", "decommissioned"}
+    }
+    agent_summary = {
+        "required": len(required_agent_rows),
+        "present": sum(
+            (row["platform"], row["entity_type"]) in current_agent_records
+            for row in required_agent_rows
+        ),
+    }
     sev_counts = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
     for f in active_findings:
         sev_counts[f.severity] = sev_counts.get(f.severity, 0) + 1
@@ -2623,6 +2641,7 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
             "exemptions": exemptions,
             "entity_type_choices": entity_type_choices,
             "coverage_policy_rows": coverage_policy_rows,
+            "agent_summary": agent_summary,
             "attribute_fields": attribute_fields,
             "source_attribute_details": source_attribute_details,
             "can_view_entity_evidence": bool(

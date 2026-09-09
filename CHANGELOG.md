@@ -2,6 +2,19 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.122.42] — 2026-09-09 — Computer Overview posture and evidence
+
+### Changed
+
+- Replaced the mixed Computer Overview cards with a consistent summary of
+  current status, open issues, patching, Windows support, software inventory,
+  and required-agent presence. Missing evidence is now labeled Not reported.
+- Grouped supporting Computer details into Identity, Operating system,
+  Hardware, and Management instead of a single technical field list.
+- Made Observations the lifecycle review surface: it now contains the
+  no-current-source finding link and the existing Retire/Restore action beside
+  the complete source evidence. The duplicate Overview review section is gone.
+
 ## [0.122.41] — 2026-09-09 — Clearer Computer review workflow
 
 ### Changed

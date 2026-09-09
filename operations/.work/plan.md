@@ -4,23 +4,43 @@
 
 **Status:** complete.
 
-**Current scope:** refine the Overview's Review & lifecycle card into a clear
-two-column operator workflow: why the Computer needs review and its concise
-source state summary on the left, with the existing reason-required lifecycle
-decision on the right. No lifecycle, source-state, permission, or storage
-behavior changes.
+**Current scope:** rework the Computer Overview into a consistent six-card
+summary strip plus grouped, plain-language Computer details. Cards summarize
+current status, issues, patching, Windows support, software inventory, and
+agent presence without treating absent evidence as a negative value. Details
+are grouped as Identity, Operating system, and Management; the existing Agent
+requirements panel remains alongside them. The released Observations lifecycle
+change remains in the same pending UI-only release.
 
-**Affected files:** `templates/device_detail.html` and this plan.
+**Affected files:** `apps/core/views.py`, `templates/device_detail.html`, and
+this plan.
 
 **Validation plan:** configured template loading, Django check, the focused
 existing device-detail/lifecycle tests, and `git diff --check`. No migration,
 new test script, production query, or deployment.
 
-**Current checkpoint:** complete locally. Needs review now opens with a short
-reason and compact source-state cards on the wider left. The narrower right
-side contains the existing reason-required Retire action. Retired Computers
-use the same layout for their explanation and Restore action. Normal active
-Computers retain the lifecycle action without the dense source table.
+**Current checkpoint:** complete locally. Overview now has fixed Current
+status, Open issues, Patching, Windows support, Software inventory, and Agent
+status cards. Missing reboot, Windows-support, and software evidence is shown
+as Not reported rather than No/0. Computer details is grouped as Identity,
+Operating system, Hardware, and Management beside Agent requirements. The
+pending Observations lifecycle change remains: the duplicate Overview Review
+& lifecycle card is removed, and its finding/recommendation with
+Retire/Restore action lives beside full source evidence.
+
+**Decision:** every summary card remains visible for a consistent layout, but
+unknown source evidence is explicitly "Not reported." No score is introduced.
+Agent presence counts only non-exempt effective requirements whose source has
+a current observation; archived/withdrawn records do not count as present.
+
+**Validation completed:** `python manage.py check`; Django-configured loading
+of `device_detail.html`; focused existing device-detail/lifecycle tests (5
+passed); and `git diff --check`. The test environment emitted pre-existing
+Python 3.14/Django async deprecation warnings only.
+
+**Next action:** approved for release commit/push as version 0.122.42. No
+migration is included; the approved `origin` push triggers the normal
+Portainer deployment.
 
 **Validation plan:** Django check, configured template loading, focused
 existing device-detail/lifecycle tests, and `git diff --check`. No migration,
@@ -31,9 +51,10 @@ of `device_detail.html`; focused existing device-detail/lifecycle tests (5
 passed); and `git diff --check`. The test environment emitted pre-existing
 Python 3.14/Django async deprecation warnings only.
 
-**Next action:** approved for release commit/push as version 0.122.41. No
-migration is included; the approved `origin` push triggers the normal
-Portainer deployment.
+**Release:** version 0.122.41, commit `3e52d28` (Improve Computer review
+workflow), pushed to `origin` and `a-m-rose` on 2026-09-09. No migration was
+included. Portainer deployed commit `3e52d28` successfully and the Operations
+health endpoint returned `ok`.
 
 **Release:** version 0.122.40, commit `a057b3f` (Compact Computer agent
 requirements), pushed to `origin` and `a-m-rose` on 2026-09-09. No migration

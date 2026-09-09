@@ -65,33 +65,25 @@
     .dd-agent-requirements table { font-size: 0.85rem; }
     .dd-agent-requirements th,
     .dd-agent-requirements td { vertical-align: top; }
+    .dd-field-groups {
+        display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 1rem;
+    }
+    .dd-field-group h3 { margin: 0 0 0.5rem; font-size: 0.95rem; }
+    .dd-field-group dl { margin: 0; }
+    .dd-field-group .field-row {
+        display: grid; grid-template-columns: minmax(100px, 0.75fr) minmax(0, 1.25fr);
+        gap: 0.6rem; padding: 0.35rem 0; border-bottom: 1px solid var(--border);
+        font-size: 0.88rem;
+    }
+    .dd-field-group .field-row:last-child { border-bottom: 0; }
+    .dd-field-group dt { color: var(--muted); }
+    .dd-field-group dd { margin: 0; overflow-wrap: anywhere; }
+    .dd-field-note { display:block; margin-top:0.1rem; font-size:0.75rem; color:var(--muted); }
     @media (max-width: 850px) {
         .dd-basic-layout { grid-template-columns: 1fr; }
+        .dd-field-groups { grid-template-columns: 1fr; }
         .dd-agent-requirements {
-            border-left: 0; border-top: 1px solid var(--border);
-            padding: 1rem 0 0;
-        }
-    }
-    .dd-review-layout {
-        display: grid; grid-template-columns: minmax(0, 2fr) minmax(270px, 1fr);
-        gap: 1.25rem; align-items: start;
-    }
-    .dd-review-action {
-        border-left: 1px solid var(--border); padding-left: 1.25rem;
-    }
-    .dd-source-states {
-        display: grid; grid-template-columns: repeat(auto-fit, minmax(165px, 1fr));
-        gap: 0.5rem; margin: 0.75rem 0;
-    }
-    .dd-source-state {
-        border: 1px solid var(--border); border-radius: 4px; padding: 0.55rem 0.65rem;
-        font-size: 0.85rem;
-    }
-    .dd-source-state .source { font-weight: 600; }
-    .dd-source-state .state { color: #92400e; margin-top: 0.15rem; }
-    @media (max-width: 850px) {
-        .dd-review-layout { grid-template-columns: 1fr; }
-        .dd-review-action {
             border-left: 0; border-top: 1px solid var(--border);
             padding: 1rem 0 0;
         }
@@ -167,16 +159,11 @@
 
 {% if active_tab == 'overview' %}
 <div class="dd-cards">
-    <div class="dd-card">
-        <div class="lbl">Health</div>
-        <div class="val" style="text-transform:capitalize;">{{ device_health }}</div>
-        <div class="sub">{{ device_health|humanize_label }}</div>
-    </div>
-    <div class="dd-card {% if not patching.is_online_any %}alert{% endif %}">
-        <div class="lbl">Online now</div>
-        <div class="val">{% if patching.is_online_any %}Yes{% else %}No{% endif %}</div>
+    <div class="dd-card {% if device.lifecycle_status == 'pending_cleanup' or not patching.is_online_any %}alert{% endif %}">
+        <div class="lbl">Current status</div>
+        <div class="val">{% if device.lifecycle_status == 'pending_cleanup' %}Needs review{% elif patching.is_online_any %}Online{% else %}Offline{% endif %}</div>
         <div class="sub">
-            {% if patching.online_sources %}{{ patching.online_sources|join:", " }}{% else %}no source checked in{% endif %}
+            {% if device.lifecycle_status == 'pending_cleanup' %}no source currently reports this Computer{% elif patching.online_sources %}{{ patching.online_sources|join:", " }}{% else %}no source checked in{% endif %}
         </div>
     </div>
     <div class="dd-card {% if sev_counts.critical %}alert{% elif sev_counts.high %}warn{% endif %}">
@@ -190,80 +177,72 @@
         </div>
     </div>
     <div class="dd-card">
-        <div class="lbl">Patch scope</div>
+        <div class="lbl">Patching</div>
         <div class="val" style="font-size:1.05rem;">{{ patching.effective_scope|default:"—" }}</div>
         <div class="sub">
-            {% if patching.override_scope %}operator override
-            {% elif patching.scope_reason %}{{ patching.scope_reason|humanize_label }}
-            {% else %}&nbsp;{% endif %}
+            {% if patching.needs_reboot %}reboot needed{% elif patching.last_boot_at %}last boot {{ patching.last_boot_at|date:"Y-m-d" }}{% else %}patch and boot status not reported{% endif %}
         </div>
-        <details style="margin-top:0.4rem;">
-            <summary style="cursor:pointer; font-size:0.75rem; color:var(--muted);">Override</summary>
-            <form method="post" action="{% url 'device_patch_scope_set' org_slug=device.client.slug device_id=device.id %}"
-                  style="margin-top:0.4rem; display:flex; flex-direction:column; gap:0.25rem; font-size:0.8rem;">
-                {% csrf_token %}
-                <select name="scope" style="padding:0.25rem;">
-                    <option value="Included"{% if patching.override_scope == 'Included' %} selected{% endif %}>Included</option>
-                    <option value="Excluded"{% if patching.override_scope == 'Excluded' %} selected{% endif %}>Excluded</option>
-                </select>
-                <input type="text" name="reason" placeholder="reason (optional)"
-                       value="{{ patching.override_reason|default:'' }}"
-                       style="padding:0.25rem;">
-                <div style="display:flex; gap:0.3rem;">
-                    <button type="submit" style="padding:0.2rem 0.5rem; font-size:0.75rem;">Save</button>
-                    {% if patching.override_scope %}
-                    <button type="submit" formaction="{% url 'device_patch_scope_clear' org_slug=device.client.slug device_id=device.id %}"
-                            style="padding:0.2rem 0.5rem; font-size:0.75rem;"
-                            onclick="return confirm('Remove operator override and revert to derived scope?')">Clear</button>
-                    {% endif %}
-                </div>
-            </form>
-        </details>
     </div>
-    <div class="dd-card {% if patching.needs_reboot %}warn{% endif %}">
-        <div class="lbl">Needs reboot</div>
-        <div class="val">{% if patching.needs_reboot %}Yes{% else %}No{% endif %}</div>
-        <div class="sub">last boot {{ patching.last_boot_at|date:"Y-m-d"|default:"—" }}</div>
-    </div>
-    {% if windows_servicing %}
-    <div class="dd-card {% if windows_servicing.support_state == 'eol' or windows_servicing.support_state == 'eol_esu_available' %}alert{% elif windows_servicing.support_state == 'approaching_eol' or windows_servicing.support_state == 'unknown' %}warn{% endif %}">
+    <div class="dd-card {% if windows_servicing.support_state == 'eol' or windows_servicing.support_state == 'eol_esu_available' %}alert{% elif windows_servicing.support_state == 'approaching_eol' %}warn{% endif %}">
         <div class="lbl">Windows support</div>
-        <div class="val" style="font-size:1.05rem;">{{ windows_servicing.support_state|humanize_label }}</div>
+        <div class="val" style="font-size:1.05rem;">{% if windows_servicing and windows_servicing.support_state != 'unknown' %}{{ windows_servicing.support_state|humanize_label }}{% else %}Not reported{% endif %}</div>
         <div class="sub">
-            build {{ windows_servicing.os_build_number|default:"—" }}
-            {% if windows_servicing.cycle %} · {{ windows_servicing.cycle }}{% endif %}
-            {% if windows_servicing.security_support_ends_on %}
-                · security support {{ windows_servicing.security_support_ends_on|date:"Y-m-d" }}
-            {% endif %}
-            {% if windows_servicing.extended_security_available %}
-                · ESU available to {{ windows_servicing.extended_security_ends_on|date:"Y-m-d" }}; entitlement unknown
-            {% endif %}
+            {% if windows_servicing and windows_servicing.os_build_number %}build {{ windows_servicing.os_build_number }}{% if windows_servicing.cycle %} · {{ windows_servicing.cycle }}{% endif %}
+            {% elif windows_servicing and windows_servicing.security_support_ends_on %}security support {{ windows_servicing.security_support_ends_on|date:"Y-m-d" }}
+            {% else %}no current Windows servicing data{% endif %}
         </div>
     </div>
-    {% endif %}
     <div class="dd-card">
-        <div class="lbl">Software titles</div>
-        <div class="val">{{ software_rows|length }}</div>
-        <div class="sub">installed on this device</div>
+        <div class="lbl">Software inventory</div>
+        <div class="val">{% if software_rows %}{{ software_rows|length }}{% if software_rows|length == 300 %}+{% endif %} titles{% else %}Not reported{% endif %}</div>
+        <div class="sub">{% if software_rows %}current installed software{% else %}no current software scan{% endif %}</div>
+    </div>
+    <div class="dd-card {% if agent_summary.present < agent_summary.required %}warn{% endif %}">
+        <div class="lbl">Agent status</div>
+        <div class="val">{% if agent_summary.required %}{{ agent_summary.present }} of {{ agent_summary.required }} present{% else %}Not required{% endif %}</div>
+        <div class="sub">{% if agent_summary.required %}current source records{% else %}no agent requirement applies{% endif %}</div>
     </div>
 </div>
 
 <div class="card">
     <div class="dd-basic-layout">
     <section>
-    <h2 style="margin-top:0;">Basic computer fields</h2>
-    <table style="width:auto;">
-        <tbody>
-            <tr><th style="text-align:left; padding-right:1rem;">Hostname</th><td><code>{{ device.canonical_hostname|default:"—" }}</code></td></tr>
-            <tr><th style="text-align:left; padding-right:1rem;">Serial</th><td><code>{{ device.canonical_serial|default:"—" }}</code></td></tr>
-            <tr><th style="text-align:left; padding-right:1rem;">VM UUID</th><td><code>{{ device.canonical_vm_uuid|default:"—" }}</code></td></tr>
-            <tr><th style="text-align:left; padding-right:1rem;">Current OS</th><td>{{ device.os_name|default:"—" }}</td></tr>
-            <tr><th style="text-align:left; padding-right:1rem;">OS installation</th><td>{% if operating_system_installation %}Tracked since {{ operating_system_installation.first_observed_at|date:"Y-m-d" }}{% else %}<span class="muted">Not yet identified from an OS agent</span>{% endif %}</td></tr>
-            <tr><th style="text-align:left; padding-right:1rem;">Role</th><td>{{ device.device_role|humanize_label|default:"—" }}</td></tr>
-            <tr><th style="text-align:left; padding-right:1rem;">Type</th><td>{{ device.get_device_type_display }}</td></tr>
-            <tr><th style="text-align:left; padding-right:1rem;">Lifecycle</th><td>{% if device.lifecycle_status == 'pending_cleanup' %}<span style="color:#b45309;">Needs review</span>{% else %}{{ device.lifecycle_status|humanize_label|default:"—" }}{% endif %}</td></tr>
-        </tbody>
-    </table>
+    <h2 style="margin-top:0;">Computer details</h2>
+    <div class="dd-field-groups">
+        <section class="dd-field-group">
+            <h3>Identity</h3>
+            <dl>
+                <div class="field-row"><dt>Name</dt><dd><code>{{ device.canonical_hostname|default:"Not reported" }}</code><span class="dd-field-note">Computer record</span></dd></div>
+                <div class="field-row"><dt>Role</dt><dd>{{ device.device_role|humanize_label|default:"Not reported" }}</dd></div>
+                <div class="field-row"><dt>Computer type</dt><dd>{{ device.get_device_type_display|default:"Not reported" }}</dd></div>
+                <div class="field-row"><dt>Inventory state</dt><dd>{% if device.lifecycle_status == 'pending_cleanup' %}<span style="color:#b45309;">Needs review</span>{% else %}{{ device.lifecycle_status|humanize_label|default:"Not reported" }}{% endif %}</dd></div>
+            </dl>
+        </section>
+        <section class="dd-field-group">
+            <h3>Operating system</h3>
+            <dl>
+                <div class="field-row"><dt>Operating system</dt><dd>{{ device.os_name|default:"Not reported" }}<span class="dd-field-note">Source evidence</span></dd></div>
+                <div class="field-row"><dt>OS installation</dt><dd>{% if operating_system_installation %}Tracked since {{ operating_system_installation.first_observed_at|date:"Y-m-d" }}{% else %}<span class="muted">Not reported</span>{% endif %}</dd></div>
+                <div class="field-row"><dt>Windows support</dt><dd>{% if windows_servicing and windows_servicing.support_state != 'unknown' %}{{ windows_servicing.support_state|humanize_label }}{% else %}<span class="muted">Not reported</span>{% endif %}</dd></div>
+                <div class="field-row"><dt>Last boot</dt><dd>{% if patching.last_boot_at %}{{ patching.last_boot_at|date:"Y-m-d H:i" }}{% else %}<span class="muted">Not reported</span>{% endif %}</dd></div>
+            </dl>
+        </section>
+        <section class="dd-field-group">
+            <h3>Hardware</h3>
+            <dl>
+                <div class="field-row"><dt>Serial number</dt><dd><code>{{ device.canonical_serial|default:"Not reported" }}</code><span class="dd-field-note">Computer record</span></dd></div>
+                <div class="field-row"><dt>VM ID</dt><dd><code>{{ device.canonical_vm_uuid|default:"Not reported" }}</code><span class="dd-field-note">Computer record</span></dd></div>
+            </dl>
+        </section>
+        <section class="dd-field-group">
+            <h3>Management</h3>
+            <dl>
+                <div class="field-row"><dt>Patch policy</dt><dd>{{ patching.effective_scope|default:"Not reported" }}<span class="dd-field-note">{% if patching.override_scope %}Operator override{% elif patching.scope_reason %}{{ patching.scope_reason|humanize_label }}{% else %}Not reported{% endif %}</span></dd></div>
+                <div class="field-row"><dt>Restart needed</dt><dd>{% if patching.needs_reboot %}Yes{% elif patching.last_boot_at %}No{% else %}<span class="muted">Not reported</span>{% endif %}</dd></div>
+                <div class="field-row"><dt>Software scan</dt><dd>{% if software_rows %}{{ software_rows|length }}{% if software_rows|length == 300 %}+{% endif %} titles{% else %}<span class="muted">Not reported</span>{% endif %}</dd></div>
+            </dl>
+        </section>
+    </div>
     {% if same_name_device_count %}
     <details style="margin-top:0.9rem;">
         <summary style="cursor:pointer; color:var(--muted);">Other Computers with this name ({{ same_name_device_count }})</summary>
@@ -322,53 +301,6 @@
     </aside>
     </div>
 </div>
-
-{% if device.lifecycle_status == 'pending_cleanup' or can_manage_lifecycle %}
-<div class="card" id="review-lifecycle">
-    <div class="dd-review-layout">
-    <section>
-    <h2 style="margin-top:0;">Review &amp; lifecycle</h2>
-    {% if device.lifecycle_status == 'retired' %}
-    <p class="muted">This Computer is retired. Its source records and history are kept, but it is out of normal inventory, coverage, and search.</p>
-    </section>
-    <aside class="dd-review-action">
-    <h3 style="margin-top:0;">Restore to inventory</h3>
-    <form method="post" action="{% url 'device_lifecycle_set' org_slug=device.client.slug device_id=device.id target='active' %}" style="display:flex; gap:0.4rem; flex-wrap:wrap; align-items:center;">
-        {% csrf_token %}
-        <input type="text" name="reason" required maxlength="120" placeholder="Why restore this Computer?" style="padding:0.35rem 0.6rem; min-width:260px;">
-        <button type="submit">Restore to inventory</button>
-    </form>
-    </aside>
-    {% else %}
-    {% if device.lifecycle_status == 'pending_cleanup' %}
-    <p><strong style="color:#b45309;">Needs review.</strong> No source currently provides active Computer evidence.</p>
-    <div class="dd-source-states">
-        {% for observation_id, source, entity_type, external_id, active, last_seen, reported_online, last_contact, record_lifecycle in observations %}
-        <div class="dd-source-state">
-            <div class="source">{{ source }}</div>
-            <div class="muted">{{ entity_type|humanize_label }}</div>
-            <div class="state">{% if not active %}Withdrawn{% elif record_lifecycle != 'unknown' %}{{ record_lifecycle|humanize_label }}{% elif reported_online is True %}Online{% elif reported_online is False %}Offline{% else %}Current{% endif %}</div>
-        </div>
-        {% endfor %}
-    </div>
-    <p style="margin-bottom:0;"><a href="?tab=observations">Open source observations and evidence →</a></p>
-    {% else %}
-    <p class="muted">This Computer has active source evidence. Lifecycle actions are available to administrators.</p>
-    {% endif %}
-    </section>
-    <aside class="dd-review-action">
-    <h3 style="margin-top:0;">Retire Computer</h3>
-    <p class="muted" style="font-size:0.85rem;">Use only when this Computer should no longer count in inventory. Source records and history are kept.</p>
-    <form method="post" action="{% url 'device_lifecycle_set' org_slug=device.client.slug device_id=device.id target='retired' %}" style="display:flex; gap:0.4rem; flex-wrap:wrap; align-items:center;" onsubmit="return confirm('Retire this Computer? Its source records will be kept.');">
-        {% csrf_token %}
-        <input type="text" name="reason" required maxlength="120" placeholder="Why retire this Computer?" style="padding:0.35rem 0.6rem; min-width:260px;">
-        <button type="submit" style="color:#991b1b;">Retire Computer</button>
-    </form>
-    </aside>
-    {% endif %}
-    </div>
-</div>
-{% endif %}
 
 <div class="card">
     <h2 style="margin-top:0;">Top issues on this device</h2>
@@ -431,6 +363,31 @@
         Each row is one record describing this computer. An OS agent and a VM
         guest record can both describe the same computer.
     </p>
+    {% if device.lifecycle_status == 'pending_cleanup' %}
+    <div style="margin:0.85rem 0; padding:0.75rem 0.9rem; border-left:3px solid #b45309; background:#fffbeb;">
+        <strong style="color:#92400e;">Finding: No sources currently report this Computer</strong>
+        <p style="margin:0.35rem 0; font-size:0.9rem;">The source records below are withdrawn, archived, or otherwise no longer current. Review them before deciding whether this Computer should leave normal inventory.</p>
+        <p style="margin:0.35rem 0;"><a href="{% url 'findings_queue' %}?type=device_missing_from_source&amp;status=all&amp;subject_id={{ device.id }}">Open finding details →</a></p>
+        {% if can_manage_lifecycle %}
+        <form method="post" action="{% url 'device_lifecycle_set' org_slug=device.client.slug device_id=device.id target='retired' %}" style="display:flex; gap:0.4rem; flex-wrap:wrap; align-items:center; margin-top:0.65rem;" onsubmit="return confirm('Retire this Computer? Its source records will be kept.');">
+            {% csrf_token %}
+            <input type="text" name="reason" required maxlength="120" placeholder="Why retire this Computer?" style="padding:0.35rem 0.6rem; min-width:260px;">
+            <button type="submit" style="color:#991b1b;">Retire Computer</button>
+        </form>
+        {% endif %}
+    </div>
+    {% elif device.lifecycle_status == 'retired' %}
+    <div style="margin:0.85rem 0; padding:0.75rem 0.9rem; border-left:3px solid #6b7280; background:#f9fafb;">
+        <strong>Retired</strong> <span class="muted">This Computer is out of normal inventory, but its source records and history remain below.</span>
+        {% if can_manage_lifecycle %}
+        <form method="post" action="{% url 'device_lifecycle_set' org_slug=device.client.slug device_id=device.id target='active' %}" style="display:flex; gap:0.4rem; flex-wrap:wrap; align-items:center; margin-top:0.65rem;">
+            {% csrf_token %}
+            <input type="text" name="reason" required maxlength="120" placeholder="Why restore this Computer?" style="padding:0.35rem 0.6rem; min-width:260px;">
+            <button type="submit">Restore to inventory</button>
+        </form>
+        {% endif %}
+    </div>
+    {% endif %}
     {% if observations %}
     <table data-sortable style="width:100%;">
         <thead>
