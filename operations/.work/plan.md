@@ -1,8 +1,47 @@
 # Active Operations implementation plan
 
-## ACTIVE TASK — Finish Computer details and source-aware findings
+## ACTIVE TASK — Restore Computer Overview software access
 
 **Status:** active.
+
+**Goal:** restore Computer Overview rendering after the source-aware software
+release while preserving the secure view boundary.
+
+**Scope:** add one SQL migration that grants the dedicated
+`operations_view_owner` read access to the specific base tables used by the
+two source-aware software views. The application role continues to read only
+the views. No data rewrite, source-state change, privilege expansion for the
+application, or UI change.
+
+**Affected files:** `../../sql/migrations/108_software_evidence_view_owner_grants.sql`
+and this plan.
+
+**Decision:** security-barrier views execute with their owner’s privileges,
+not the caller’s. The view owner therefore needs SELECT on their explicit
+dependencies; granting that owner is the least-privileged fix, rather than
+granting `operations_app` direct table access.
+
+**Validation plan:** SQL dependency/grant review, migration-order review,
+configured Django check, and `git diff --check`. Validate the failed Overview
+route after an explicitly approved deployment.
+
+**Current checkpoint:** migration 108 now grants only the dedicated view owner
+the complete direct dependency set plus `USAGE` on `catalog`; the application
+role remains view-only. A live transaction applied those grants temporarily,
+ran the failing source-aware exposure query as `operations_app` with tenant
+context, returned successfully, and rolled back. `manage.py check` and
+`git diff --check` pass. Next action: obtain separate approval to commit and
+push the grant-only migration; its deployment will apply it automatically.
+
+**Initial diagnosis:** live Operations logs identify the failure as
+`permission denied for table software_installations_current` from
+`v_device_software_exposure`. Live privilege checks confirm
+`operations_view_owner` lacks SELECT on the two views’ direct software,
+source-binding, evaluator-configuration, and catalog dependencies. The
+runtime application role retains SELECT on the views and has no direct table
+grant.
+
+## Previous release — Finish Computer details and source-aware findings
 
 **Goal:** finish the Computer detail experience and source-state handling as a
 single release: keep Overview compact and actionable, make Details show all
@@ -55,9 +94,14 @@ warnings only. Compose reported its existing obsolete top-level `version`
 warning. The Windows development host has no POSIX `sh`, so entrypoint shell
 syntax was not separately checked.
 
-**Release:** version 0.122.43 requires one corrective commit before its SQL
-migration can apply. No partial schema change occurred because the migration
-runner rolled back its transaction.
+**Release:** version 0.122.43, commits `32708ac` (source-aware behavior) and
+`b5132cd` (migration startup correction), pushed to `origin` and `a-m-rose`
+on 2026-09-09. Portainer deployed `b5132cd`; SQL migration
+`107_software_installation_evidence_state` applied successfully, and both
+Operations and ingest health endpoints returned healthy. A separate startup
+Ninja device-collector refresh logged an invalid blank bigint in the legacy
+active-device materialized-view refresh; it did not affect this migration or
+service health and is outside this release scope.
 
 **Validation completed:** `python manage.py check`; Django-configured loading
 of `device_detail.html`; focused existing device-detail/lifecycle tests (5

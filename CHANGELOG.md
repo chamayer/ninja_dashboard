@@ -2,6 +2,15 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.122.44] — 2026-09-09 — Restore Computer Overview software access
+
+### Fixed
+
+- Restored Computer Overview pages that failed while loading inherited software
+  findings. The secure software read views now have the required read access
+  through their dedicated view owner; Operations users remain restricted to
+  the views rather than the underlying software tables.
+
 ## [0.122.43] — 2026-09-09 — Source-aware Computer details and software risk
 
 ### Changed
