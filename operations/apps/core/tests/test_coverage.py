@@ -113,6 +113,7 @@ class _Cursor:
                     "Windows 11",
                     "workstation",
                     "active",
+                    False,
                 ),
                 (
                     "device-2",
@@ -123,6 +124,7 @@ class _Cursor:
                     "Ubuntu",
                     "server",
                     "active",
+                    False,
                 ),
             ],
             [
@@ -317,7 +319,7 @@ def test_computers_csv_has_the_current_table_platform_columns(monkeypatch):
         "In Hudu",
         "",
         "Possible: host-2",
-        "N/A",
+        "No record",
     ] in rows
 
 
@@ -325,7 +327,7 @@ def test_coverage_template_has_clear_statuses_hudu_and_multiselect_filters():
     template = (Path(__file__).parents[3] / "templates/coverage.html").read_text(encoding="utf-8")
 
     for label in (
-        "Platform",
+        "Inventory sources",
         "Links",
         "SentinelOne",
         "OS family",
@@ -344,6 +346,7 @@ def test_coverage_template_has_clear_statuses_hudu_and_multiselect_filters():
     assert "coverage-result-summary" in template
     assert "Filtered results" in template
     assert "Counts reflect the current filter selections." in template
+    assert "{{ filter_logic }}" in template
     assert "No links" in template
     assert 'name="hudu_record_filter"' in template
     assert "Has current record" in template
@@ -352,7 +355,7 @@ def test_coverage_template_has_clear_statuses_hudu_and_multiselect_filters():
     assert "Archived records only" in template
     assert 'name="show_archived_hudu"' not in template
     assert "row.hudu_records" in template
-    assert "Computer inventory from all platforms" in template
+    assert "Everything known about Computers from every platform" in template
     for label in ("Clients", "Computers", "In Hudu", "Not in Hudu"):
         assert label in template
     assert "Agent checks" not in template
@@ -361,8 +364,13 @@ def test_coverage_template_has_clear_statuses_hudu_and_multiselect_filters():
     assert "Not in Hudu" in template
     assert "Online" in template
     assert "Offline" in template
-    assert "Stale" in template
-    assert "Missing" in template
+    assert "No record" in template
+    assert "Required" in template
+    assert "N/A" in template
+    assert "Possible match" in template
+    assert "No current source records" in template
+    assert 'name="platform_source_status"' in template
+    assert 'name="platform_rule"' in template
     assert "device_missing_from_source" not in template
 
 

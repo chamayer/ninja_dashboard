@@ -1,35 +1,51 @@
 # Active Operations implementation plan
 
-## ACTIVE TASK — Consolidate Computer information and source records
+## ACTIVE TASK — Separate Computer inventory source state from requirements
 
-**Status:** active.
+**Status:** complete.
 
-**Goal:** make Computer Details the complete, readable record of everything
-learned about a Computer and its provenance; eliminate the duplicate,
-technical Observations tab.
+**Goal:** make Computers an inventory-first page: source state answers what a
+platform currently knows, and the rule line answers whether that platform is
+Required, N/A, Exempt, or Stale.
 
-**Scope:** reorganize the existing Details reader and template into meaningful
-field sections with plain source labels; move the current source-record,
-Hudu-record, evidence-link, and lifecycle-review content from Observations
-into Details; remove the redundant tab; and add a concise Overview lifecycle
-banner that links directly to Source records only when attention is needed.
-Add a Computer Patching tab using the existing device patch signal and policy
-data; Overview retains only the compact patch posture. No schema, ingest,
-evaluator, lifecycle-state, source-data, or permission change.
+**Scope:** replace the top-level platform status matrix with a concise
+Inventory sources control, split each platform column filter into Source state
+and Rule sections, and preserve legacy query parameters. Keep Hudu-specific,
+client, OS, device-type, and SentinelOne controls. No schema, ingest,
+evaluator, source-record, lifecycle-decision, or permission change.
 
-**Affected files:** `apps/core/views.py`, `templates/device_detail.html`, and
-this plan.
+**Affected files:** `apps/core/views.py`, `templates/coverage.html`,
+`apps/core/tests/test_coverage.py`, and this plan.
 
-**Decision:** Details is the complete informational Computer record, not a
-technical claim dump. Every displayed value retains source provenance, actual
-disagreements remain explicit, and source records are shown once in Details.
-Overview remains concise and surfaces lifecycle only when a Computer needs
-review or is retired; ordinary Online/Offline is availability, not lifecycle.
+**Decision:** source cells show only Online, Offline, Unknown, No record, or
+Possible match. Their second line shows Required, N/A, Exempt, or Stale;
+coverage Missing is represented by the readable combination No record /
+Required instead of overwriting source state. The page continues to expose all
+known Computers; requirements narrow only when their explicit column filters
+are selected.
 
-**Validation plan:** Django check, configured template loading, focused
-existing device-detail/lifecycle tests, Python compilation, and
-`git diff --check`. No migration, custom test script, production data change,
-or deployment in this scope without separate approval.
+**Validation plan:** focused coverage tests, Django check, Python compilation,
+configured coverage and device-detail template loading, and `git diff --check`.
+No migration, custom test script, production data change, commit, push, or
+deployment in this scope without separate approval.
+
+**Checkpoint:** implemented the inventory-first presentation. The top matrix
+is now Inventory sources (has a current source record / no current source
+records). Each platform column filter has Source state and Rule sections;
+Ninja retains Possible match, Hudu retains its presence/link/archive controls,
+and legacy platform query URLs remain accepted. Retired Computers are now
+included in the inventory reader rather than discarded before display.
+
+**Validation completed:** focused coverage tests (8 passed), Django check,
+Python compilation, configured coverage and device-detail template loading,
+and `git diff --check` passed. A focused `ruff` run still reports existing
+whole-module findings; it also reports complexity warnings on the already-large
+`fleet_coverage` function and its local match predicate; reducing that legacy
+function's complexity is outside this UI-focused pass.
+
+**Final checkpoint:** release 0.122.47 is prepared with no migration. The
+inventory reader no longer excludes retired Computers; this is an intentional
+inventory-completeness change. Commit and push are explicitly approved.
 
 **Release:** version 0.122.45, commit `5bf5d07` (Reorganize Computer details
 and patching), pushed to `origin` and `a-m-rose` on 2026-09-10. Portainer
@@ -41,11 +57,29 @@ template loading, focused existing device-detail/lifecycle tests (5 passed),
 `git diff --check`, and deployed service-health checks. The test environment
 emitted only pre-existing Python 3.14/Django async deprecation warnings.
 
+**Hotfix release:** version 0.122.46, commit `9e3adc8` (Repair Computer details
+rendering), pushed to `origin` and `a-m-rose` on 2026-09-10. Portainer
+deployed the matching commit; no migration was included. Operations and ingest
+are healthy, and the Operations health endpoint returned `ok`.
+
+**Hotfix validation:** Django check, configured template loading, focused
+device-detail/lifecycle tests, Python compilation, and `git diff --check`
+passed before release. Post-deployment service health checks passed.
+
 **Hotfix checkpoint:** deployed Details exposed a missing `section` key while
 building the section list for rendered claims. The section was calculated but
 not copied into the final field object. The correction restores that key only;
-no query, data, schema, or layout behavior changes. Validate the failing
-Details route after release.
+no query, data, schema, or layout behavior changes. The lifecycle banner was
+also moved from the top of Overview to directly above Top issues on this
+device, while Details retains the full lifecycle action surface.
+
+**Follow-up checkpoint:** Overview repeated the same lifecycle condition in
+the availability card, a standalone banner, and its underlying finding. The
+standalone banner is removed. The clickable Current status card is now the
+concise lifecycle-aware summary (Needs review, Retired, Online, or Offline)
+and opens Details → Source records; the underlying finding remains the
+authoritative review item. Validate template rendering and request release
+approval.
 
 **Previous release checkpoint:** Details now organizes every normalized displayed
 claim into Identity and inventory, Operating system, Hardware and
