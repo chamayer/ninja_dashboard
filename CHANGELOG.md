@@ -2,6 +2,16 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.122.49] — 2026-09-10 — Clearer Computer card requirements
+
+### Changed
+
+- Reworked each platform card’s footer to show the total required population
+  as a denominator, followed by distinct Missing, Stale, and Exempt exception
+  counts. Source-record counts remain separate above it.
+- Increased the available vertical space in the Agents filter menu without
+  changing the other filter dropdowns.
+
 ## [0.122.48] — 2026-09-10 — Clearer Computers inventory filters
 
 ### Changed

@@ -9469,14 +9469,15 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
     platform_cards = []
     for platform in platforms:
         record_counts = {status: 0 for status in record_status_order}
-        rule_counts = {status: 0 for status in ("Required", "Missing", "Stale", "Exempt")}
+        requirement_total = 0
+        requirement_counts = {status: 0 for status in ("Missing", "Stale", "Exempt")}
         for inventory_row in inventory_rows:
             cell = inventory_row["platform_cells_by_name"][platform]
             record_counts[cell["record_status"]] += 1
             if cell["rule_status"] in {"Required", "Missing", "Stale"}:
-                rule_counts["Required"] += 1
-            if cell["rule_status"] in {"Missing", "Stale", "Exempt"}:
-                rule_counts[cell["rule_status"]] += 1
+                requirement_total += 1
+            if cell["rule_status"] in requirement_counts:
+                requirement_counts[cell["rule_status"]] += 1
         source_options = [
             status for status in record_status_order
             if record_counts[status] or status != "No status reported"
@@ -9491,14 +9492,16 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                 }
                 for status in source_options if status != "Possible match"
             ],
-            "rule_counts": [
+            "requirement_total": requirement_total,
+            "requirement_total_url": agent_filter_url(platform, requirement="Required"),
+            "requirement_exceptions": [
                 {
                     "name": status,
-                    "count": rule_counts[status],
+                    "count": requirement_counts[status],
                     "url": agent_filter_url(platform, requirement=status),
                 }
-                for status in ("Required", "Missing", "Stale", "Exempt")
-                if rule_counts[status]
+                for status in ("Missing", "Stale", "Exempt")
+                if requirement_counts[status]
             ],
         })
 

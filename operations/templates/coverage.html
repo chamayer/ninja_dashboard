@@ -25,9 +25,15 @@
 .coverage-count:hover { background:var(--surface-hover, #f3f4f6); }
 .coverage-count span { display:block; font-size:0.72rem; color:var(--muted); }
 .coverage-count strong { font-size:1.1rem; }
-.coverage-rule-counts { display:flex; flex-wrap:wrap; gap:0.35rem 0.75rem; border-top:1px solid var(--border); margin-top:0.55rem; padding-top:0.55rem; font-size:0.76rem; }
-.coverage-rule-counts a { color:var(--muted); text-decoration:none; }
-.coverage-rule-counts strong { color:var(--text); }
+.coverage-requirement-counts { display:flex; flex-wrap:wrap; align-items:center; gap:0.35rem 0.55rem; border-top:1px solid var(--border); margin-top:0.55rem; padding-top:0.55rem; font-size:0.76rem; }
+.coverage-requirement-label { color:var(--muted); margin-right:0.1rem; }
+.coverage-requirement-total { color:var(--text); text-decoration:none; white-space:nowrap; }
+.coverage-requirement-total strong { margin-right:0.15rem; }
+.coverage-requirement-count { border-radius:999px; padding:0.18rem 0.45rem; text-decoration:none; }
+.coverage-requirement-count strong { margin-left:0.2rem; }
+.coverage-requirement-missing { background:#fee2e2; color:#991b1b; }
+.coverage-requirement-stale { background:#fed7aa; color:#9a3412; }
+.coverage-requirement-exempt { background:#f3f4f6; color:#4b5563; }
 .coverage-status { display:inline-block; border-radius:999px; font-size:0.75rem; font-weight:600; padding:0.18rem 0.5rem; text-decoration:none; }
 .coverage-online { background:#dcfce7; color:#166534; }
 .coverage-offline { background:#fef3c7; color:#92400e; }
@@ -75,7 +81,7 @@
 .agent-state-online { color:#166534; }.agent-state-offline { color:#92400e; }.agent-state-withdrawn,.agent-state-no-record { color:var(--muted); }
 .agent-requirement { color:var(--muted); }.agent-requirement.attention { color:#b91c1c; font-weight:600; }
 .agent-match { grid-column:2 / -1; font-size:0.74rem; }
-.agent-builder { min-width:34rem; max-width:min(44rem, calc(100vw - 2rem)); }
+.agent-builder { min-width:34rem; max-width:min(44rem, calc(100vw - 2rem)); max-height:26rem; }
 .agent-condition { display:grid; grid-template-columns:8rem 1fr 1fr auto; gap:0.45rem; align-items:end; padding:0.55rem 0; border-bottom:1px solid var(--border); }
 .agent-condition label { display:flex; flex-direction:column; align-items:stretch; gap:0.18rem; padding:0; font-size:0.75rem; }
 .agent-condition select { min-width:0; padding:0.3rem; }
@@ -109,7 +115,7 @@
             </a>
             {% endfor %}
         </div>
-        {% if card.rule_counts %}<div class="coverage-rule-counts"><span class="muted">Requirement</span>{% for count in card.rule_counts %}<a href="{{ count.url }}">{{ count.name }} <strong>{{ count.count }}</strong></a>{% endfor %}</div>{% endif %}
+        {% if card.requirement_total or card.requirement_exceptions %}<div class="coverage-requirement-counts"><span class="coverage-requirement-label">Agent requirements</span>{% if card.requirement_total %}<a class="coverage-requirement-total" href="{{ card.requirement_total_url }}"><strong>{{ card.requirement_total }}</strong>required</a>{% endif %}{% for count in card.requirement_exceptions %}<a class="coverage-requirement-count coverage-requirement-{{ count.name|slugify }}" href="{{ count.url }}">{{ count.name }} <strong>{{ count.count }}</strong></a>{% endfor %}</div>{% endif %}
     </section>
     {% empty %}
     <section class="coverage-card"><p class="muted" style="margin:0;">No Computer records are available.</p></section>

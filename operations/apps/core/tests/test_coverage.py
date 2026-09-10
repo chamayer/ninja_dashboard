@@ -253,12 +253,12 @@ def test_coverage_uses_effective_requirements_and_source_specific_filters(monkey
         "Withdrawn": 0,
         "No record": 1,
     }
-    assert {item["name"]: item["count"] for item in cards["Ninja"]["rule_counts"]} == {
-        "Required": 2,
+    assert cards["Ninja"]["requirement_total"] == 2
+    assert {item["name"]: item["count"] for item in cards["Ninja"]["requirement_exceptions"]} == {
         "Missing": 1,
     }
-    assert {item["name"]: item["count"] for item in cards["SentinelOne"]["rule_counts"]} == {
-        "Required": 1,
+    assert cards["SentinelOne"]["requirement_total"] == 1
+    assert {item["name"]: item["count"] for item in cards["SentinelOne"]["requirement_exceptions"]} == {
         "Exempt": 1,
     }
     assert {item["name"]: item["count"] for item in context["hudu_card"]["counts"]} == {

@@ -15,7 +15,8 @@ with an Agents condition builder. Keep Hudu separate, preserve cards, Hudu,
 possible matches, legacy URLs, CSV, client, OS, and device-type behavior, and
 show the exact AND/OR expression in the filtered-results header. No schema,
 ingest, evaluator, lifecycle write, source-data write, permission, commit,
-push, or deployment.
+push, or deployment. Rework the footer of each platform card so inventory
+record counts remain separate from the concise agent-requirement exceptions.
 
 **Affected files:** `apps/core/views.py`, `templates/coverage.html`,
 `apps/core/tests/test_coverage.py`, and this plan.
@@ -28,7 +29,9 @@ choices within either field are OR and conditions are AND. The filtered-results
 header renders that exact parenthesized expression. New reporting agents are
 listed dynamically from the existing reader; Hudu remains a separate
 inventory-data column. Lifecycle is displayed but is not used as a proxy for
-current records.
+current records. Platform-card footers show the total policy population as
+“N required,” followed by distinct Missing, Stale, and Exempt exception
+counts. The total is the denominator for Missing and Stale, not a peer state.
 
 **Verified baseline:** the live reader currently returns 6,819 rows: 5,873
 canonical Computers plus 946 current source-only/Hudu-only rows. The old “No
@@ -61,7 +64,7 @@ were addressed. The normal results header now shows a short grouped filter
 summary; the full parenthesized expression is available only through “Show
 exact logic.”
 
-**Next action:** release the approved no-migration patch as `0.122.48`: commit
+**Next action:** release the approved no-migration patch as `0.122.49`: commit
 only the scoped files, push `origin` then `a-m-rose`, trigger the configured
 Portainer redeploy, and verify service health.
 
