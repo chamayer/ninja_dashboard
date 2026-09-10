@@ -32,6 +32,10 @@ inventory-data column. Lifecycle is displayed but is not used as a proxy for
 current records. Platform-card footers show the total policy population as
 “N required,” followed by distinct Missing, Stale, and Exempt exception
 counts. The total is the denominator for Missing and Stale, not a peer state.
+Card colors convey the equivalent inventory meaning for every source: current
+or online is green; offline and archived-only are amber; withdrawn is orange;
+and no record is red. Hudu’s current-plus-archived state is blue so it remains
+distinct without being framed as an exception.
 
 **Verified baseline:** the live reader currently returns 6,819 rows: 5,873
 canonical Computers plus 946 current source-only/Hudu-only rows. The old “No
@@ -64,7 +68,7 @@ were addressed. The normal results header now shows a short grouped filter
 summary; the full parenthesized expression is available only through “Show
 exact logic.”
 
-**Next action:** release the approved no-migration patch as `0.122.49`: commit
+**Next action:** release the approved no-migration patch as `0.122.50`: commit
 only the scoped files, push `origin` then `a-m-rose`, trigger the configured
 Portainer redeploy, and verify service health.
 

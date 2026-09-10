@@ -2,6 +2,15 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.122.50] — 2026-09-10 — Restore Computer card color cues
+
+### Changed
+
+- Restored clear state colors across Computer source cards and applied the
+  same treatment to Hudu: current is green, offline and archived-only are
+  amber, withdrawn is orange, no record is red, and current plus archived is
+  distinct blue.
+
 ## [0.122.49] — 2026-09-10 — Clearer Computer card requirements
 
 ### Changed
