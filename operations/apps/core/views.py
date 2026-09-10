@@ -9032,14 +9032,39 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
     for selections in (record_status_filters, rule_status_filters, coverage_status_filters):
         for platform, statuses in selections.items():
             selections[platform] = list(dict.fromkeys(statuses))
-    platform_filter_columns = [
-        {
-            "name": platform,
-            "selected_record_statuses": record_status_filters.get(platform, []),
-            "selected_rule_statuses": rule_status_filters.get(platform, []),
+    agent_filter_conditions = []
+    for index in range(12):
+        agent = request.GET.get(f"agent_{index}")
+        states = [
+            value for value in request.GET.getlist(f"agent_state_{index}")
+            if value in allowed_record_statuses
+        ]
+        requirements = [
+            value for value in request.GET.getlist(f"agent_requirement_{index}")
+            if value in allowed_rule_statuses
+        ]
+        if agent not in platforms or not (states or requirements):
+            continue
+        agent_filter_conditions.append({
+            "index": index,
+            "agent": agent,
+            "states": list(dict.fromkeys(states)),
+            "requirements": list(dict.fromkeys(requirements)),
+        })
+    # Existing links remain valid.  Treat their former per-column selections
+    # as builder conditions so old bookmarks retain the same AND semantics.
+    legacy_agent_conditions = {
+        platform: {
+            "agent": platform,
+            "states": record_status_filters.get(platform, []),
+            "requirements": rule_status_filters.get(platform, []),
         }
-        for platform in platforms
-    ]
+        for platform in set(record_status_filters) | set(rule_status_filters)
+    }
+    all_agent_conditions = agent_filter_conditions + list(legacy_agent_conditions.values())
+    agent_filter_forms = agent_filter_conditions or [{
+        "index": 0, "agent": "", "states": [], "requirements": [],
+    }]
     coverage_filter_sources = [
         {
             "name": platform,
@@ -9240,6 +9265,13 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             return f"{seconds // 3600}h"
         return f"{seconds // 86400}d"
 
+    def agent_filter_url(agent: str, *, state: str = "", requirement: str = "") -> str:
+        return _coverage_filter_url(
+            agent_0=agent,
+            agent_state_0=state,
+            agent_requirement_0=requirement,
+        )
+
     def inventory_platform_cell(row: dict, platform: str) -> dict:
         """Return the one product-cell model used by UI, filters, cards, and CSV."""
         possible_match = row["possible_match"] if platform == "Ninja" else None
@@ -9300,17 +9332,11 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             "platform": platform,
             "record_status": record_status,
             "record_age": record_age,
-            "record_url": _coverage_filter_url(
-                record_status=f"{platform}|{record_status}",
-            ),
+            "record_url": agent_filter_url(platform, state=record_status),
             "record_tooltip": record_tooltip,
             "rule_status": rule_status,
             "rule_label": rule_label,
-            "rule_url": (
-                _coverage_filter_url(s1_exemption="exempt")
-                if rule_status == "Exempt"
-                else _coverage_filter_url(rule_status=f"{platform}|{rule_status}")
-            ),
+            "rule_url": agent_filter_url(platform, requirement=rule_status),
             "rule_tooltip": rule_tooltip,
             "possible_match": possible_match,
             "attention": rule_status in {"Missing", "Stale"},
@@ -9320,6 +9346,25 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         row["platform_cells_by_name"] = {
             platform: inventory_platform_cell(row, platform) for platform in platforms
         }
+
+    def agent_condition_matches(row: dict, condition: dict) -> bool:
+        cell = row["platform_cells_by_name"][condition["agent"]]
+        states = condition["states"]
+        if states and not (
+            cell["record_status"] in states
+            or ("Possible match" in states and cell["possible_match"])
+        ):
+            return False
+        requirements = condition["requirements"]
+        if not requirements:
+            return True
+        return (
+            cell["rule_status"] in requirements
+            or (
+                "Required" in requirements
+                and cell["rule_status"] in {"Required", "Missing", "Stale"}
+            )
+        )
 
     def matches(row: dict) -> bool:
         if client_filters and row["client_slug"] not in client_filters:
@@ -9415,23 +9460,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                 return False
         if hudu_record_filter_active and not row["hudu_matches_record_filter"]:
             return False
-        for platform, statuses in record_status_filters.items():
-            cell = row["platform_cells_by_name"][platform]
-            record_matches = cell["record_status"] in statuses
-            if "Possible match" in statuses and cell["possible_match"]:
-                record_matches = True
-            if not record_matches:
-                return False
-        for platform, statuses in rule_status_filters.items():
-            cell = row["platform_cells_by_name"][platform]
-            rule_matches = cell["rule_status"] in statuses
-            if "Required" in statuses and cell["rule_status"] in {
-                "Required", "Missing", "Stale",
-            }:
-                rule_matches = True
-            if not rule_matches:
-                return False
-        return True
+        return all(agent_condition_matches(row, condition) for condition in all_agent_conditions)
 
     device_rows = [row for row in inventory_rows if matches(row)]
     record_status_order = (
@@ -9452,20 +9481,13 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             status for status in record_status_order
             if record_counts[status] or status != "No status reported"
         ]
-        if platform == "Ninja":
-            source_options.append("Possible match")
-        next(
-            column for column in platform_filter_columns if column["name"] == platform
-        )["record_statuses"] = source_options
         platform_cards.append({
             "platform": platform,
             "counts": [
                 {
                     "name": status,
                     "count": record_counts[status],
-                    "url": _coverage_filter_url(
-                        record_status=f"{platform}|{status}",
-                    ),
+                    "url": agent_filter_url(platform, state=status),
                 }
                 for status in source_options if status != "Possible match"
             ],
@@ -9473,11 +9495,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                 {
                     "name": status,
                     "count": rule_counts[status],
-                    "url": (
-                        _coverage_filter_url(s1_exemption="exempt")
-                        if status == "Exempt"
-                        else _coverage_filter_url(rule_status=f"{platform}|{status}")
-                    ),
+                    "url": agent_filter_url(platform, requirement=status),
                 }
                 for status in ("Required", "Missing", "Stale", "Exempt")
                 if rule_counts[status]
@@ -9520,14 +9538,19 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
     }
 
     filter_logic_parts = []
+    filter_summary_parts = []
     if client_filters:
         selected_client_names = [
             client["name"] for client in filter_clients
             if client["slug"] in client_filters
         ]
-        filter_logic_parts.append(f"Client: {' or '.join(selected_client_names)}")
+        filter_logic_parts.append(
+            "(" + " OR ".join(f"Client is {name}" for name in selected_client_names) + ")"
+        )
+        filter_summary_parts.append("Client: " + " or ".join(selected_client_names))
     if device_query:
-        filter_logic_parts.append(f"Computer name contains “{device_query}”")
+        filter_logic_parts.append(f"(Computer name contains “{device_query}”)")
+        filter_summary_parts.append(f"Name contains “{device_query}”")
     scope_labels = {
         "has_product_record": "Found now in Ninja, SentinelOne, ScreenConnect, or LogMeIn",
         "any_online": "Online in at least one of those four",
@@ -9539,16 +9562,46 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
     }
     if computer_scope_filters:
         filter_logic_parts.append(
-            "Find computers: "
-            + " or ".join(scope_labels[value] for value in computer_scope_filters)
+            "(" + " OR ".join(scope_labels[value] for value in computer_scope_filters) + ")"
         )
-    for platform, statuses in record_status_filters.items():
-        filter_logic_parts.append(f"{platform}: {' or '.join(statuses)}")
-    for platform, statuses in rule_status_filters.items():
-        filter_logic_parts.append(f"{platform} required: {' or '.join(statuses)}")
+        filter_summary_parts.append(" or ".join(scope_labels[value] for value in computer_scope_filters))
+    def condition_logic(condition: dict) -> str:
+        parts = []
+        if condition["states"]:
+            states = " OR ".join(
+                f"{condition['agent']} state is {state}"
+                for state in condition["states"]
+            )
+            parts.append(f"({states})" if len(condition["states"]) > 1 else states)
+        if condition["requirements"]:
+            requirements = " OR ".join(
+                f"{condition['agent']} requirement is {requirement}"
+                for requirement in condition["requirements"]
+            )
+            parts.append(
+                f"({requirements})" if len(condition["requirements"]) > 1 else requirements
+            )
+        return "(" + " AND ".join(parts) + ")"
+
+    for condition in all_agent_conditions:
+        filter_logic_parts.append(condition_logic(condition))
+        selected = [*condition["states"]]
+        selected.extend(
+            {
+                "Missing": "Required · Missing",
+                "Stale": "Required · Stale",
+            }.get(requirement, requirement)
+            for requirement in condition["requirements"]
+        )
+        filter_summary_parts.append(
+            f"{condition['agent']} — {', '.join(selected)}"
+        )
     if hudu_filters:
         labels = {"in_hudu": "In Hudu", "not_in_hudu": "Not in Hudu"}
-        filter_logic_parts.append("Hudu: " + " or ".join(labels[value] for value in hudu_filters))
+        filter_logic_parts.append(
+            "(" + " OR ".join(f"Hudu is {labels[value]}" for value in hudu_filters) + ")"
+        )
+        filter_summary_parts.append("Hudu: " + " or ".join(labels[value] for value in hudu_filters))
     if hudu_record_filter_active and hudu_record_filter != "any":
         hudu_record_labels = {
             "has_current": "has a current record",
@@ -9557,28 +9610,39 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             "archived_only": "archived records only",
             "both": "has current and archived records",
         }
-        filter_logic_parts.append(f"Hudu: {hudu_record_labels[hudu_record_filter]}")
+        filter_logic_parts.append(
+            f"(Hudu {hudu_record_labels[hudu_record_filter]})"
+        )
+        filter_summary_parts.append("Hudu: " + hudu_record_labels[hudu_record_filter])
     if hudu_link_filters:
         labels = {"has_links": "Has links", "no_links": "No links"}
         filter_logic_parts.append(
-            "Hudu links: " + " or ".join(labels[value] for value in hudu_link_filters)
+            "(" + " OR ".join(f"Hudu links: {labels[value]}" for value in hudu_link_filters) + ")"
         )
+        filter_summary_parts.append("Hudu links: " + " or ".join(labels[value] for value in hudu_link_filters))
     if s1_exemption_filters:
         labels = {"exempt": "Exempt", "not_exempt": "Not exempt"}
         filter_logic_parts.append(
-            "SentinelOne: "
-            + " or ".join(labels[value] for value in s1_exemption_filters)
+            "(" + " OR ".join(f"SentinelOne is {labels[value]}" for value in s1_exemption_filters) + ")"
         )
+        filter_summary_parts.append("SentinelOne: " + " or ".join(labels[value] for value in s1_exemption_filters))
     if os_family_filters:
-        filter_logic_parts.append("OS: " + " or ".join(os_family_filters))
+        filter_logic_parts.append(
+            "(" + " OR ".join(f"OS is {family}" for family in os_family_filters) + ")"
+        )
+        filter_summary_parts.append("OS: " + " or ".join(os_family_filters))
     if device_type_filters:
-        filter_logic_parts.append("Type: " + " or ".join(device_type_filters))
+        filter_logic_parts.append(
+            "(" + " OR ".join(f"Type is {device_type}" for device_type in device_type_filters) + ")"
+        )
+        filter_summary_parts.append("Type: " + " or ".join(device_type_filters))
     if not filter_logic_parts:
         filter_logic_parts.append("No filters selected — showing every known Computer")
     filter_logic = " AND ".join(filter_logic_parts)
+    filter_summary = "; ".join(filter_summary_parts) if filter_summary_parts else "None"
     filters_active = bool(
         client_filters or device_query or computer_scope_filters
-        or record_status_filters or rule_status_filters
+        or agent_filter_conditions or record_status_filters or rule_status_filters
         or any_platform_selected or no_platform_selected or any_platform_filters
         or coverage_source_filters or hudu_filters or hudu_link_filters
         or hudu_record_filter != "any" or s1_exemption_filters
@@ -9587,14 +9651,14 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
     )
 
     if wants_csv(request):
-        def inventory_platform_value(row: dict, platform: str) -> str:
+        def inventory_agent_value(row: dict, platform: str) -> str:
             cell = row["platform_cells_by_name"][platform]
             record = cell["record_status"]
             if cell["record_age"]:
                 record = f"{record} ({cell['record_age']})"
             if cell["possible_match"]:
                 record += f"; possible match: {cell['possible_match']['hostname']}"
-            return f"{record}; {cell['rule_label']}"
+            return f"{platform}: {record}; {cell['rule_label']}"
 
         return csv_response(
             [
@@ -9616,15 +9680,13 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                 ("Lifecycle", "lifecycle_status"),
                 ("Hudu", "hudu"),
                 ("Hudu links", "hudu_links"),
-            ] + [
                 (
-                    platform,
-                    lambda export_row, platform=platform: inventory_platform_value(
-                        export_row["inventory_row"],
-                        platform,
+                    "Agents",
+                    lambda export_row: " | ".join(
+                        inventory_agent_value(export_row["inventory_row"], platform)
+                        for platform in platforms
                     ),
-                )
-                for platform in platforms
+                ),
             ],
             filename_stem="inventory_computers",
         )
@@ -9637,7 +9699,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
     device_rows = list(page_obj.object_list)
 
     for row in device_rows:
-        row["platform_cells"] = [
+        row["agent_cells"] = [
             row["platform_cells_by_name"][platform] for platform in platforms
         ]
 
@@ -9659,9 +9721,15 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             },
             "filtered_summary": filtered_summary,
             "filter_logic": filter_logic,
+            "filter_summary": filter_summary,
             "filters_active": filters_active,
             "platforms": platforms,
-            "platform_filter_columns": platform_filter_columns,
+            "agent_filter_forms": agent_filter_forms,
+            "agent_filter_agents": platforms,
+            "agent_filter_states": (*record_status_order, "Possible match"),
+            "agent_filter_requirements": (
+                "Required", "Missing", "Stale", "N/A", "Exempt",
+            ),
             "coverage_filter_sources": coverage_filter_sources,
             "os_families": os_families,
             "device_types": device_types,
@@ -9677,6 +9745,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             "any_platform_selected": any_platform_selected,
             "no_platform_selected": no_platform_selected,
             "computer_scope_filters": computer_scope_filters,
+            "agent_filter_conditions": agent_filter_conditions,
             "hudu_filters": hudu_filters,
             "hudu_link_filters": hudu_link_filters,
             "hudu_record_filter": hudu_record_filter,

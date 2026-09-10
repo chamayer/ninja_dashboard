@@ -2,6 +2,20 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.122.48] — 2026-09-10 — Clearer Computers inventory filters
+
+### Changed
+
+- Replaced the dense per-platform table columns and long filter menu with one
+  readable Agents column and an Agent condition builder. Each agent line now
+  states its current record state and requirement state together.
+- Made filter choices within a condition alternatives and separate conditions
+  cumulative. Results now show a compact filter summary; the complete AND/OR
+  expression is available on demand through “Show exact logic.”
+- Kept Hudu as its own inventory column and aligned the summary cards into a
+  clean responsive row without changing source facts, requirements, Hudu
+  links, possible matches, CSV coverage, or legacy saved URLs.
+
 ## [0.122.47] — 2026-09-10 — Computers inventory-first rework
 
 ### Changed

@@ -2,34 +2,33 @@
 
 ## ACTIVE TASK — Correct the Computers inventory reader and filters
 
-**Status:** active.
+**Status:** ready for approved release.
 
 **Goal:** make Computers an inventory-first page that shows every known
 Computer record and keeps current source facts separate from authored agent
 requirements in cells, filters, summary cards, and CSV.
 
-**Scope:** normalize the existing Computers reader in `views.py`; replace the
-top matrix with a compact **Find computers** menu; make every product column
-filter its record status and required state independently; correct the
-SentinelOne exemption reader; make static cards inventory-first with a compact
-required-state summary; and preserve Hudu, possible-match, legacy URL, column,
-CSV, client, OS, and device-type behavior. Avoid umbrella terms such as
-platform, system, or agent in visible inventory copy. No schema, ingest,
-evaluator, lifecycle write, source-data write, permission, commit, push, or
-deployment.
+**Scope:** replace the separate Ninja, SentinelOne, ScreenConnect, and
+LogMeIn table columns with one readable **Agents** column: one named line per
+agent, showing record state and required state. Replace the long global filter
+with an Agents condition builder. Keep Hudu separate, preserve cards, Hudu,
+possible matches, legacy URLs, CSV, client, OS, and device-type behavior, and
+show the exact AND/OR expression in the filtered-results header. No schema,
+ingest, evaluator, lifecycle write, source-data write, permission, commit,
+push, or deployment.
 
 **Affected files:** `apps/core/views.py`, `templates/coverage.html`,
 `apps/core/tests/test_coverage.py`, and this plan.
 
-**Decision:** the record fact and the authored rule are independent axes,
-matching the existing entity-model decision. A product record is Online,
-Offline, Withdrawn, No record, or (only when real data requires it) No status
-reported. The second line is Required, Required · Missing, Required · Stale,
-N/A, or Exempt. “Missing” never replaces the record fact. A global “No current
-record in Ninja, SentinelOne, ScreenConnect, or LogMeIn” shortcut preserves the old
-no-platform predicate; “No current record anywhere” also counts current Hudu
-records. Lifecycle is displayed but is not used as a proxy for current
-records.
+**Decision:** record fact and authored rule remain independent. An Agents cell
+renders one line as `Agent · state · required state`; Missing and Stale stay
+in the required-state position rather than replacing the record state. A
+condition has one agent and optional record-state and required-state choices;
+choices within either field are OR and conditions are AND. The filtered-results
+header renders that exact parenthesized expression. New reporting agents are
+listed dynamically from the existing reader; Hudu remains a separate
+inventory-data column. Lifecycle is displayed but is not used as a proxy for
+current records.
 
 **Verified baseline:** the live reader currently returns 6,819 rows: 5,873
 canonical Computers plus 946 current source-only/Hudu-only rows. The old “No
@@ -47,19 +46,24 @@ Django check; template loading; Python compilation; `git diff --check`; and a
 read-only live count comparison only after an explicitly approved deployment.
 No custom test script.
 
-**Checkpoint:** the local implementation now uses one normalized record/rule
-cell model for display, filters, static cards, and CSV. The Find computers menu
-preserves the verified 1,365 no-current-records-in-the-four-products meaning
-separately from the 1,055 no-current-record-anywhere meaning. SentinelOne
-exemptions now come from saved operator decisions. Focused tests pass (10), as
-do Django check, configured template loading, Python compilation, and
-`git diff --check`. Full-file Ruff remains non-clean because of existing
-`views.py` findings; no new dependency, schema change, data write, commit,
-push, or deployment has been made.
+**Checkpoint:** release `785340b` is deployed after the user manually
+committed/pushed it, but the user rejected its visual design. Replace that UI
+locally before any further release. The prior reader calculation remains the
+authority for states and counts; no source data or schema change is needed.
+The local revision now has one Agents column, a multi-condition Agent/state/
+required-state builder, and an explicit AND/OR filter expression. The normal
+results header presents a compact summary; the full expression is available on
+demand. Focused
+coverage tests pass (11), as do Django check, template loading, compilation,
+and `git diff --check`. Full-file Ruff remains non-clean due pre-existing
+complexity and style findings in `views.py`; the new simple lint suggestions
+were addressed. The normal results header now shows a short grouped filter
+summary; the full parenthesized expression is available only through “Show
+exact logic.”
 
-**Next action:** obtain user visual-review/release direction. If approved,
-prepare the required version/changelog release changes, then request separate
-commit and push authorization.
+**Next action:** release the approved no-migration patch as `0.122.48`: commit
+only the scoped files, push `origin` then `a-m-rose`, trigger the configured
+Portainer redeploy, and verify service health.
 
 **Release:** version 0.122.45, commit `5bf5d07` (Reorganize Computer details
 and patching), pushed to `origin` and `a-m-rose` on 2026-09-10. Portainer

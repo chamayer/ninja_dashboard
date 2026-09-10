@@ -4,12 +4,17 @@
 
 {% block content %}
 <style>
-.coverage-cards { display:grid; grid-template-columns:repeat(auto-fit, minmax(250px, 1fr)); gap:0.8rem; margin-bottom:1rem; }
+.coverage-cards { display:grid; grid-template-columns:repeat(5, minmax(0, 1fr)); gap:0.8rem; margin-bottom:1rem; }
+@media (max-width:1400px) { .coverage-cards { grid-template-columns:repeat(3, minmax(0, 1fr)); } }
+@media (max-width:900px) { .coverage-cards { grid-template-columns:repeat(2, minmax(0, 1fr)); } }
 .coverage-card { border:1px solid var(--border); border-radius:6px; background:var(--surface); padding:0.9rem; }
 .coverage-card h2 { margin:0 0 0.65rem; font-size:1rem; }
 .coverage-result-heading { display:flex; justify-content:space-between; align-items:baseline; margin:0.1rem 0 0.45rem; }
 .coverage-result-heading h2 { margin:0; font-size:0.95rem; }
 .coverage-result-heading p { margin:0; color:var(--muted); font-size:0.78rem; }
+.coverage-filter-logic { display:inline; position:relative; margin-left:0.45rem; }
+.coverage-filter-logic summary { display:inline; cursor:pointer; color:var(--link, #0b69a3); }
+.coverage-filter-logic > div { position:absolute; z-index:20; right:0; top:1.3rem; width:min(38rem, calc(100vw - 2rem)); padding:0.55rem 0.7rem; border:1px solid var(--border); border-radius:4px; background:var(--surface); box-shadow:0 3px 10px rgba(0,0,0,.14); color:var(--text); line-height:1.4; }
 .coverage-result-summary { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:0.8rem; margin:-0.2rem 0 1rem; }
 .coverage-result-card { border:1px solid var(--border); border-radius:6px; background:var(--surface); padding:0.7rem 0.9rem; }
 .coverage-result-card span { display:block; color:var(--muted); font-size:0.78rem; }
@@ -28,6 +33,7 @@
 .coverage-offline { background:#fef3c7; color:#92400e; }
 .coverage-stale { background:#fed7aa; color:#9a3412; }
 .coverage-missing { background:#fee2e2; color:#991b1b; }
+.coverage-withdrawn, .coverage-no-record { background:#f3f4f6; color:#4b5563; }
 .coverage-hudu { width:11rem; max-width:11rem; font-size:0.82rem; line-height:1.45; overflow-wrap:anywhere; }
 .coverage-hudu ul { margin:0.25rem 0 0; padding-left:1rem; }
 .coverage-hudu li { overflow-wrap:anywhere; }
@@ -61,10 +67,23 @@
 .coverage-source-status summary { cursor:pointer; color:var(--muted); white-space:nowrap; }
 .coverage-source-status > div { position:absolute; z-index:25; top:calc(100% + 0.3rem); right:0; min-width:9rem; border:1px solid var(--border); border-radius:4px; background:var(--surface); box-shadow:0 3px 10px rgba(0,0,0,.14); padding:0.45rem; }
 .coverage-source-status label { display:flex; align-items:center; gap:0.4rem; padding:0.25rem; font-size:0.84rem; white-space:nowrap; }
-.coverage-cell-main, .coverage-cell-rule { display:block; white-space:nowrap; }
-.coverage-cell-rule { margin-top:0.12rem; color:var(--muted); font-size:0.74rem; }
-.coverage-cell-rule.attention { color:#b91c1c; font-weight:600; }
-.coverage-cell-match { display:block; margin-top:0.12rem; font-size:0.72rem; }
+.agents-column { min-width:25rem; font-size:0.8rem; }
+.agent-line { display:grid; grid-template-columns:8.5rem 7rem minmax(0, 1fr); gap:0.35rem; align-items:baseline; padding:0.16rem 0; }
+.agent-line + .agent-line { border-top:1px solid color-mix(in srgb, var(--border) 60%, transparent); }
+.agent-line a { text-decoration:none; }
+.agent-name { font-weight:600; }
+.agent-state-online { color:#166534; }.agent-state-offline { color:#92400e; }.agent-state-withdrawn,.agent-state-no-record { color:var(--muted); }
+.agent-requirement { color:var(--muted); }.agent-requirement.attention { color:#b91c1c; font-weight:600; }
+.agent-match { grid-column:2 / -1; font-size:0.74rem; }
+.agent-builder { min-width:34rem; max-width:min(44rem, calc(100vw - 2rem)); }
+.agent-condition { display:grid; grid-template-columns:8rem 1fr 1fr auto; gap:0.45rem; align-items:end; padding:0.55rem 0; border-bottom:1px solid var(--border); }
+.agent-condition label { display:flex; flex-direction:column; align-items:stretch; gap:0.18rem; padding:0; font-size:0.75rem; }
+.agent-condition select { min-width:0; padding:0.3rem; }
+.agent-choice summary { cursor:pointer; border:1px solid var(--border); border-radius:4px; padding:0.3rem; font-size:0.82rem; }
+.agent-choice-options { position:absolute; z-index:30; min-width:12rem; max-height:13rem; overflow:auto; border:1px solid var(--border); border-radius:4px; background:var(--surface); box-shadow:0 3px 10px rgba(0,0,0,.14); padding:0.35rem; }
+.agent-choice-options label { display:flex; flex-direction:row; align-items:center; gap:0.35rem; padding:0.2rem; }
+.agent-condition-remove { padding:0.3rem 0.45rem; }
+@media (max-width:760px) { .agent-condition { grid-template-columns:1fr 1fr; }.agent-condition-remove { grid-column:2; }.agents-column { min-width:21rem; } }
 </style>
 
 <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:1rem;">
@@ -85,7 +104,7 @@
         <h2>{{ card.platform }}</h2>
         <div class="coverage-counts">
             {% for count in card.counts %}
-            <a class="coverage-count coverage-{{ count.name|lower }}" href="{{ count.url }}">
+            <a class="coverage-count coverage-{{ count.name|slugify }}" href="{{ count.url }}">
                 <span>{{ count.name }}</span><strong>{{ count.count }}</strong>
             </a>
             {% endfor %}
@@ -103,7 +122,7 @@
 
 <div class="coverage-result-heading">
     <h2>Filtered results</h2>
-    <p>{{ filter_logic }}</p>
+    <p>Filters: {{ filter_summary }}{% if filters_active %}<details class="coverage-filter-logic"><summary>Show exact logic</summary><div>{{ filter_logic }}</div></details>{% endif %}</p>
 </div>
 <section class="coverage-result-summary" aria-label="Filtered Computers results">
     <div class="coverage-result-card"><span>Clients</span><strong>{{ filtered_summary.clients }}</strong></div>
@@ -117,7 +136,7 @@
     <div style="padding:1rem; border-bottom:1px solid var(--border);">
             <div class="coverage-filter-row">
                 <details class="coverage-filter"><summary>Client</summary><div class="coverage-filter-options"><input class="coverage-filter-search" type="search" placeholder="Search clients" aria-label="Search clients">{% for client in filter_clients %}<label><input type="checkbox" name="client" value="{{ client.slug }}"{% if client.slug in client_filters %} checked{% endif %}>{{ client.name }}</label>{% endfor %}</div></details>
-                <details class="coverage-filter"><summary>Find computers</summary><div class="coverage-filter-options"><input class="coverage-filter-search" type="search" placeholder="Search choices" aria-label="Search Find computers choices"><label><input type="checkbox" name="computer_scope" value="has_product_record"{% if "has_product_record" in computer_scope_filters %} checked{% endif %}>Found now in Ninja, SentinelOne, ScreenConnect, or LogMeIn</label><label><input type="checkbox" name="computer_scope" value="any_online"{% if "any_online" in computer_scope_filters %} checked{% endif %}>Online in at least one of those four</label><label><input type="checkbox" name="computer_scope" value="any_offline"{% if "any_offline" in computer_scope_filters %} checked{% endif %}>Offline in at least one of those four</label><hr><label><input type="checkbox" name="computer_scope" value="no_product_records"{% if "no_product_records" in computer_scope_filters %} checked{% endif %}>No current record in Ninja, SentinelOne, ScreenConnect, or LogMeIn</label><label><input type="checkbox" name="computer_scope" value="no_current_records"{% if "no_current_records" in computer_scope_filters %} checked{% endif %}>No current record anywhere</label><hr><label><input type="checkbox" name="computer_scope" value="missing_required"{% if "missing_required" in computer_scope_filters %} checked{% endif %}>Missing something required</label><label><input type="checkbox" name="computer_scope" value="stale_required"{% if "stale_required" in computer_scope_filters %} checked{% endif %}>Something required is stale</label></div></details>
+                <details class="coverage-filter"><summary>Agents</summary><div class="coverage-filter-options agent-builder"><strong>Show Computers where every condition below is true.</strong><div id="agent-conditions">{% for condition in agent_filter_forms %}<div class="agent-condition" data-agent-condition><label>Agent<select name="agent_{{ condition.index }}"><option value="">Choose</option>{% for agent in agent_filter_agents %}<option value="{{ agent }}"{% if agent == condition.agent %} selected{% endif %}>{{ agent }}</option>{% endfor %}</select></label><label>State<details class="agent-choice"><summary>Any</summary><div class="agent-choice-options">{% for state in agent_filter_states %}<label><input type="checkbox" name="agent_state_{{ condition.index }}" value="{{ state }}"{% if state in condition.states %} checked{% endif %}>{{ state }}</label>{% endfor %}</div></details></label><label>Required?<details class="agent-choice"><summary>Any</summary><div class="agent-choice-options">{% for requirement in agent_filter_requirements %}<label><input type="checkbox" name="agent_requirement_{{ condition.index }}" value="{{ requirement }}"{% if requirement in condition.requirements %} checked{% endif %}>{{ requirement }}</label>{% endfor %}</div></details></label><button class="agent-condition-remove" type="button">Remove</button></div>{% endfor %}</div><button id="add-agent-condition" type="button">Add condition</button></div></details>
                 <div><button type="submit">Filter</button>{% if filters_active %}<a class="clear" data-clear-filters href="{% url 'inventory_computers' %}">Clear</a>{% endif %}</div>
             </div>
             <div class="coverage-filter-row">
@@ -125,7 +144,7 @@
                 <details class="coverage-filter"><summary>OS family</summary><div class="coverage-filter-options"><input class="coverage-filter-search" type="search" placeholder="Search OS families" aria-label="Search OS families">{% for family in os_families %}<label><input type="checkbox" name="os_family" value="{{ family }}"{% if family in os_family_filters %} checked{% endif %}>{{ family }}</label>{% endfor %}</div></details>
                 <details class="coverage-filter"><summary>Device type</summary><div class="coverage-filter-options"><input class="coverage-filter-search" type="search" placeholder="Search device types" aria-label="Search device types">{% for device_type in device_types %}<label><input type="checkbox" name="device_type" value="{{ device_type }}"{% if device_type in device_type_filters %} checked{% endif %}>{{ device_type }}</label>{% endfor %}</div></details>
             </div>
-        <p class="muted" style="margin:0.75rem 0 0; font-size:0.82rem;">Each Ninja, SentinelOne, ScreenConnect, and LogMeIn column shows two separate facts: the record currently found there, and whether it is required for the Computer.</p>
+        <p class="muted" style="margin:0.75rem 0 0; font-size:0.82rem;">Agents lists each product on its own line: current state, then whether it is required.</p>
     </div>
 
     {% if device_rows %}
@@ -137,7 +156,7 @@
                 <th><details class="coverage-column-filter"><summary>OS family</summary><div class="coverage-column-filter-options"><input class="coverage-filter-search" type="search" placeholder="Search OS families" aria-label="Search OS families">{% for family in os_families %}<label><input type="checkbox" name="os_family" value="{{ family }}"{% if family in os_family_filters %} checked{% endif %}>{{ family }}</label>{% endfor %}<button type="submit">Apply</button></div></details></th>
                 <th><details class="coverage-column-filter"><summary>Type</summary><div class="coverage-column-filter-options"><input class="coverage-filter-search" type="search" placeholder="Search device types" aria-label="Search device types">{% for device_type in device_types %}<label><input type="checkbox" name="device_type" value="{{ device_type }}"{% if device_type in device_type_filters %} checked{% endif %}>{{ device_type }}</label>{% endfor %}<button type="submit">Apply</button></div></details></th>
                 <th style="width:11rem;"><details class="coverage-column-filter"><summary>Hudu</summary><div class="coverage-column-filter-options"><strong>Hudu record</strong><label><input type="checkbox" name="hudu" value="in_hudu"{% if "in_hudu" in hudu_filters %} checked{% endif %}>In Hudu</label><label><input type="checkbox" name="hudu" value="not_in_hudu"{% if "not_in_hudu" in hudu_filters %} checked{% endif %}>Not in Hudu</label><hr><strong>Links</strong><label><input type="checkbox" name="hudu_links" value="has_links"{% if "has_links" in hudu_link_filters %} checked{% endif %}>Has links</label><label><input type="checkbox" name="hudu_links" value="no_links"{% if "no_links" in hudu_link_filters %} checked{% endif %}>No links</label><div class="coverage-hudu-record-filter"{% if not hudu_record_filter_active %} hidden{% endif %}><hr><label>Which records? <select name="hudu_record_filter"{% if not hudu_record_filter_active %} disabled{% endif %}><option value="any"{% if hudu_record_filter == "any" %} selected{% endif %}>Any Hudu record</option><option value="has_current"{% if hudu_record_filter == "has_current" %} selected{% endif %}>Has current record</option><option value="has_archived"{% if hudu_record_filter == "has_archived" %} selected{% endif %}>Has archived record</option><option value="current_only"{% if hudu_record_filter == "current_only" %} selected{% endif %}>Current records only</option><option value="archived_only"{% if hudu_record_filter == "archived_only" %} selected{% endif %}>Archived records only</option><option value="both"{% if hudu_record_filter == "both" %} selected{% endif %}>Current and archived</option></select></label></div><button type="submit">Apply</button></div></details></th>
-                {% for column in platform_filter_columns %}<th><details class="coverage-column-filter"><summary>{{ column.name }}</summary><div class="coverage-column-filter-options"><input class="coverage-filter-search" type="search" placeholder="Search choices" aria-label="Search {{ column.name }} choices"><strong>{{ column.name }} record</strong>{% for status in column.record_statuses %}<label><input type="checkbox" name="record_status" value="{{ column.name }}|{{ status }}"{% if status in column.selected_record_statuses %} checked{% endif %}>{{ status }}</label>{% endfor %}<hr><strong>Requirement</strong><label><input type="checkbox" name="rule_status" value="{{ column.name }}|Required"{% if "Required" in column.selected_rule_statuses %} checked{% endif %}>Required</label><label><input type="checkbox" name="rule_status" value="{{ column.name }}|Missing"{% if "Missing" in column.selected_rule_statuses %} checked{% endif %}>Missing</label><label><input type="checkbox" name="rule_status" value="{{ column.name }}|Stale"{% if "Stale" in column.selected_rule_statuses %} checked{% endif %}>Stale</label><label><input type="checkbox" name="rule_status" value="{{ column.name }}|N/A"{% if "N/A" in column.selected_rule_statuses %} checked{% endif %}>N/A</label>{% if column.name == "SentinelOne" %}<hr><strong>Exemption</strong><label><input type="checkbox" name="s1_exemption" value="exempt"{% if "exempt" in s1_exemption_filters %} checked{% endif %}>Exempt</label><label><input type="checkbox" name="s1_exemption" value="not_exempt"{% if "not_exempt" in s1_exemption_filters %} checked{% endif %}>Not exempt</label>{% endif %}<button type="submit">Apply</button></div></details></th>{% endfor %}
+                <th>Agents</th>
             </tr></thead>
             <tbody>
                 {% for row in device_rows %}
@@ -146,7 +165,7 @@
                     <td>{% if row.device_id %}<a href="{% url 'device_detail' org_slug=row.client_slug device_id=row.device_id %}">{{ row.hostname|default:"Unnamed computer" }}</a>{% else %}{{ row.hostname|default:"Unnamed computer" }}{% endif %}{% if row.lifecycle_status == "pending_cleanup" %}<br><a href="{{ row.review_url }}" style="color:#b45309; font-size:0.78rem;">Needs review</a>{% endif %}</td>
                     <td>{{ row.os_family|default:"—" }}</td><td>{{ row.device_type|default:"—" }}</td>
                     <td class="coverage-hudu">{% if row.hudu_records %}{% if row.hudu_records|length == 1 %}{% with record=row.hudu_records.0 %}<div class="coverage-hudu-record"><div>{{ record.layout }} <span class="coverage-hudu-status">{% if record.is_archived %}Archived{% else %}Current{% endif %}</span></div><div>{% if record.links %}{{ record.links|length }} links{% else %}<span class="muted">No links</span>{% endif %}</div><div class="coverage-hudu-links">{% if record.url %}<a href="{{ record.url }}" rel="noopener" target="_blank">Hudu</a>{% endif %}{% if record.device_id %}<a href="{% url 'device_detail' org_slug=record.device_client_slug device_id=record.device_id %}">Operations device</a>{% endif %}</div></div>{% endwith %}{% else %}<details class="coverage-hudu-details"><summary>{{ row.hudu_records|length }} records · {{ row.hudu_current_count }} current · {{ row.hudu_archived_count }} archived</summary>{% for record in row.hudu_records %}<div class="coverage-hudu-record">{{ record.layout }} <span class="coverage-hudu-status">{% if record.is_archived %}Archived{% else %}Current{% endif %}</span><div>{% if record.links %}{{ record.links|length }} links{% else %}<span class="muted">No links</span>{% endif %}</div><div class="coverage-hudu-links">{% if record.url %}<a href="{{ record.url }}" rel="noopener" target="_blank">Hudu</a>{% endif %}{% if record.device_id %}<a href="{% url 'device_detail' org_slug=record.device_client_slug device_id=record.device_id %}">Operations device</a>{% endif %}</div></div>{% endfor %}</details>{% endif %}{% else %}<span class="muted">Not in Hudu</span>{% endif %}</td>
-                    {% for cell in row.platform_cells %}<td><a class="coverage-cell-main" href="{{ cell.record_url }}" title="{{ cell.record_tooltip }}">{{ cell.record_status }}{% if cell.record_age %}<small class="muted"> · {{ cell.record_age }}</small>{% endif %}</a><a class="coverage-cell-rule{% if cell.attention %} attention{% endif %}" href="{{ cell.rule_url }}" title="{{ cell.rule_tooltip }}">{{ cell.rule_label }}</a>{% if cell.possible_match %}<span class="coverage-cell-match"><span class="muted">Possible:</span> <a href="{% url 'device_detail' org_slug=cell.possible_match.client_slug device_id=cell.possible_match.device_id %}">{{ cell.possible_match.hostname }}</a></span>{% endif %}</td>{% endfor %}
+                    <td class="agents-column">{% for cell in row.agent_cells %}<div class="agent-line"><span class="agent-name">{{ cell.platform }}</span><a class="agent-state-{{ cell.record_status|slugify }}" href="{{ cell.record_url }}" title="{{ cell.record_tooltip }}">{{ cell.record_status }}{% if cell.record_age %} · {{ cell.record_age }}{% endif %}</a><a class="agent-requirement{% if cell.attention %} attention{% endif %}" href="{{ cell.rule_url }}" title="{{ cell.rule_tooltip }}">{{ cell.rule_label }}</a>{% if cell.possible_match %}<span class="agent-match"><span class="muted">Possible:</span> <a href="{% url 'device_detail' org_slug=cell.possible_match.client_slug device_id=cell.possible_match.device_id %}">{{ cell.possible_match.hostname }}</a></span>{% endif %}</div>{% endfor %}</td>
                 </tr>
                 {% endfor %}
             </tbody>
@@ -208,6 +227,46 @@ document.querySelectorAll('input[name="hudu"][value="in_hudu"]').forEach((input)
     input.addEventListener('change', syncHuduRecordFilter);
 });
 syncHuduRecordFilter();
+const updateAgentChoiceSummary = (choice) => {
+    const selected = [...choice.querySelectorAll('input:checked')]
+        .map((input) => input.parentElement.textContent.trim());
+    choice.querySelector('summary').textContent = selected.join(', ') || 'Any';
+};
+document.querySelectorAll('.agent-choice').forEach((choice) => {
+    updateAgentChoiceSummary(choice);
+    choice.addEventListener('change', () => updateAgentChoiceSummary(choice));
+});
+const agentConditions = document.getElementById('agent-conditions');
+document.getElementById('add-agent-condition')?.addEventListener('click', () => {
+    const source = agentConditions.querySelector('[data-agent-condition]');
+    const row = source.cloneNode(true);
+    const indexes = [...agentConditions.querySelectorAll('[data-agent-condition]')]
+        .map((item) => Number((item.querySelector('select[name^="agent_"]').name.match(/(\d+)$/) || [])[1] || 0));
+    const nextIndex = Math.max(...indexes) + 1;
+    row.querySelectorAll('[name]').forEach((input) => {
+        input.name = input.name.replace(/\d+$/, nextIndex);
+        input.checked = false;
+        if (input.tagName === 'SELECT') input.value = '';
+    });
+    row.querySelectorAll('.agent-choice summary').forEach((summary) => { summary.textContent = 'Any'; });
+    agentConditions.appendChild(row);
+});
+agentConditions?.addEventListener('change', (event) => {
+    const choice = event.target.closest('.agent-choice');
+    if (choice) updateAgentChoiceSummary(choice);
+});
+agentConditions?.addEventListener('click', (event) => {
+    if (!event.target.matches('.agent-condition-remove')) return;
+    const rows = agentConditions.querySelectorAll('[data-agent-condition]');
+    const row = event.target.closest('[data-agent-condition]');
+    if (rows.length > 1) {
+        row.remove();
+        return;
+    }
+    row.querySelectorAll('select').forEach((select) => { select.value = ''; });
+    row.querySelectorAll('input[type="checkbox"]').forEach((input) => { input.checked = false; });
+    row.querySelectorAll('.agent-choice summary').forEach((summary) => { summary.textContent = 'Any'; });
+});
 document.querySelectorAll('.coverage-filterbar select[name]').forEach((select) => {
     select.addEventListener('change', () => {
         document.querySelectorAll('.coverage-filterbar select[name]').forEach((other) => {

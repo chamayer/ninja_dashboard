@@ -187,9 +187,9 @@ def test_coverage_uses_effective_requirements_and_source_specific_filters(monkey
         or HttpResponse(),
     )
     request = RequestFactory().get(
-        "/coverage/?client=acme&client=beta&record_status=Ninja%7COnline"
-        "&rule_status=Ninja%7CMissing&record_status=SentinelOne%7COnline"
-        "&rule_status=SentinelOne%7CRequired&hudu=in_hudu&hudu_links=has_links"
+        "/coverage/?client=acme&client=beta&agent_0=Ninja&agent_state_0=Online"
+        "&agent_requirement_0=Missing&agent_1=SentinelOne&agent_state_1=Online"
+        "&agent_requirement_1=Required&hudu=in_hudu&hudu_links=has_links"
         "&s1_exemption=not_exempt"
         "&os_family=Windows+11&device_type=workstation"
     )
@@ -215,14 +215,10 @@ def test_coverage_uses_effective_requirements_and_source_specific_filters(monkey
 
     context = captured["context"]
     assert context["client_filters"] == ["acme", "beta"]
-    assert context["record_status_filters"] == {
-        "Ninja": ["Online"],
-        "SentinelOne": ["Online"],
-    }
-    assert context["rule_status_filters"] == {
-        "Ninja": ["Missing"],
-        "SentinelOne": ["Required"],
-    }
+    assert context["agent_filter_conditions"] == [
+        {"index": 0, "agent": "Ninja", "states": ["Online"], "requirements": ["Missing"]},
+        {"index": 1, "agent": "SentinelOne", "states": ["Online"], "requirements": ["Required"]},
+    ]
     assert context["hudu_filters"] == ["in_hudu"]
     assert context["hudu_link_filters"] == ["has_links"]
     assert context["s1_exemption_filters"] == ["not_exempt"]
@@ -242,13 +238,13 @@ def test_coverage_uses_effective_requirements_and_source_specific_filters(monkey
     assert row["hudu_links"] == ["Ninja — host-1", "Auvik #42"]
     assert [
         (cell["platform"], cell["record_status"], cell["rule_label"])
-        for cell in row["platform_cells"]
+        for cell in row["agent_cells"]
     ] == [
         ("Ninja", "Online", "Required · Missing"),
         ("SentinelOne", "Online", "Required"),
     ]
-    assert row["platform_cells"][0]["record_url"] == (
-        "?record_status=Ninja%7COnline"
+    assert row["agent_cells"][0]["record_url"] == (
+        "?agent_0=Ninja&agent_state_0=Online"
     )
     cards = {card["platform"]: card for card in context["platform_cards"]}
     assert {item["name"]: item["count"] for item in cards["Ninja"]["counts"]} == {
@@ -308,6 +304,21 @@ def test_required_filter_includes_missing_and_sentinelone_exempt_is_independent(
     assert exempt["device_rows"][0]["device_id"] == "device-2"
 
 
+def test_agents_condition_builder_shows_its_exact_and_or_logic(monkeypatch):
+    context = _render_coverage_context(
+        monkeypatch,
+        "agent_0=Ninja&agent_state_0=Online&agent_state_0=Offline"
+        "&agent_requirement_0=Required&agent_1=SentinelOne"
+        "&agent_requirement_1=Required",
+    )
+
+    assert context["paginator"].count == 1
+    assert context["filter_logic"] == (
+        "((Ninja state is Online OR Ninja state is Offline) AND Ninja requirement is Required)"
+        " AND (SentinelOne requirement is Required)"
+    )
+
+
 def test_coverage_includes_an_unattached_hudu_computer_as_its_own_row(monkeypatch):
     cursor = _Cursor()
     captured = {}
@@ -332,7 +343,7 @@ def test_coverage_includes_an_unattached_hudu_computer_as_its_own_row(monkeypatc
     assert hudu_only["hudu_present"] is True
     assert hudu_only["hudu_links"] == []
     assert hudu_only["possible_match"]["device_id"] == "device-2"
-    assert hudu_only["platform_cells"][0]["possible_match"]["device_id"] == "device-2"
+    assert hudu_only["agent_cells"][0]["possible_match"]["device_id"] == "device-2"
     source_only = next(
         row for row in captured["context"]["device_rows"]
         if row["inventory_key"] == "source:source-observation-1"
@@ -361,8 +372,7 @@ def test_computers_csv_has_the_current_table_platform_columns(monkeypatch):
         "Lifecycle",
         "Hudu",
         "Hudu links",
-        "Ninja",
-        "SentinelOne",
+        "Agents",
     ]
     assert [
         "Acme",
@@ -372,8 +382,7 @@ def test_computers_csv_has_the_current_table_platform_columns(monkeypatch):
         "active",
         "In Hudu",
         "Ninja — host-1, Auvik #42",
-        "Online; Required · Missing",
-        "Online; Required",
+        "Ninja: Online; Required · Missing | SentinelOne: Online; Required",
     ] in rows
     assert [
         "Beta",
@@ -383,8 +392,7 @@ def test_computers_csv_has_the_current_table_platform_columns(monkeypatch):
         "",
         "In Hudu",
         "",
-        "No record; possible match: host-2; N/A",
-        "No record; N/A",
+        "Ninja: No record; possible match: host-2; N/A | SentinelOne: No record; N/A",
     ] in rows
 
 
@@ -393,17 +401,17 @@ def test_coverage_template_has_clear_statuses_hudu_and_multiselect_filters():
 
     for label in (
         "Links",
-        "SentinelOne",
+        "Agents",
         "OS family",
         "Device type",
     ):
         assert label in template
-    assert "Online in at least one of those four" in template
+    assert "Show Computers where every condition below is true." in template
     assert "Required platform" not in template
     assert "Hudu" in template
     assert template.count('type="checkbox"') >= 12
     assert template.count('<details class="coverage-filter">') == 5
-    assert template.count('class="coverage-filter-search"') >= 8
+    assert template.count('class="coverage-filter-search"') >= 6
     assert "coverage-filterbar" in template
     assert "const filterMenus" in template
     assert "event.target.closest('details.coverage-filter, details.coverage-column-filter')" in template
@@ -419,21 +427,18 @@ def test_coverage_template_has_clear_statuses_hudu_and_multiselect_filters():
     assert 'name="show_archived_hudu"' not in template
     assert "row.hudu_records" in template
     assert "Every Computer known to Operations" in template
-    assert "Find computers" in template
-    assert "Ninja record" not in template  # Rendered dynamically from the product name.
-    assert "Requirement" in template
-    assert 'name="record_status"' in template
-    assert 'name="rule_status"' in template
+    assert "Agents" in template
+    assert "Add condition" in template
+    assert 'name="agent_{{ condition.index }}"' in template
+    assert 'name="agent_requirement_{{ condition.index }}"' in template
     for label in ("Clients", "Computers", "In Hudu", "Not in Hudu"):
         assert label in template
     assert "Agent checks" not in template
     assert "_pagination.html" in template
     assert "In Hudu" in template
     assert "Not in Hudu" in template
-    assert "Online" in template
-    assert "Offline" in template
-    assert "Stale" in template
-    assert "Missing" in template
+    assert "agent_filter_states" in template
+    assert "agent_filter_requirements" in template
     assert "device_missing_from_source" not in template
 
 
