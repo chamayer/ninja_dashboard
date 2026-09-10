@@ -5,7 +5,7 @@
 {% block content %}
 <style>
 .coverage-cards { display:grid; grid-template-columns:repeat(5, minmax(0, 1fr)); gap:0.8rem; margin-bottom:1rem; }
-@media (max-width:1750px) { .coverage-cards { grid-template-columns:repeat(3, minmax(0, 1fr)); } }
+@media (max-width:1400px) { .coverage-cards { grid-template-columns:repeat(3, minmax(0, 1fr)); } }
 @media (max-width:900px) { .coverage-cards { grid-template-columns:repeat(2, minmax(0, 1fr)); } }
 .coverage-card { border:1px solid var(--border); border-radius:6px; background:var(--surface); padding:0.9rem; }
 .coverage-card h2 { margin:0 0 0.65rem; font-size:1rem; }
@@ -20,7 +20,7 @@
 .coverage-result-card span { display:block; color:var(--muted); font-size:0.78rem; }
 .coverage-result-card strong { display:block; margin-top:0.2rem; font-size:1.35rem; }
 @media (max-width:700px) { .coverage-result-summary { grid-template-columns:repeat(2, minmax(0, 1fr)); } }
-.coverage-counts { display:grid; grid-template-columns:repeat(5, minmax(0, 1fr)); gap:0.35rem; }
+.coverage-counts { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:0.35rem; }
 .coverage-count { display:block; border-radius:4px; padding:0.4rem 0.25rem; text-align:center; text-decoration:none; color:inherit; }
 .coverage-count:hover { background:var(--surface-hover, #f3f4f6); }
 .coverage-count span { display:grid; min-height:2.35em; align-content:center; font-size:0.72rem; color:var(--muted); }
@@ -42,6 +42,7 @@
 .coverage-withdrawn { background:#fed7aa; color:#9a3412; }
 .coverage-no-record { background:#fee2e2; color:#991b1b; }
 .coverage-no-status-reported { background:#f3f4f6; color:#4b5563; }
+.coverage-total { background:#e5e7eb; color:#374151; }
 .coverage-current-only { background:#dcfce7; color:#166534; }
 .coverage-current-archived { background:#dbeafe; color:#1d4ed8; }
 .coverage-archived-only { background:#fef3c7; color:#92400e; }

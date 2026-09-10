@@ -2,6 +2,14 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.122.53] — 2026-09-10 — Normalize Computer card metrics
+
+### Changed
+
+- Replaced the compressed five-across source metric strip with a fixed two by
+  three layout: every agent now shows five source states plus a clickable
+  Total, and Hudu shows its record groups plus Total in the same layout.
+
 ## [0.122.52] — 2026-09-10 — Preserve Computer card count readability
 
 ### Fixed

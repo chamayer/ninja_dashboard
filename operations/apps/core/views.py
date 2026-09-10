@@ -9265,12 +9265,18 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             return f"{seconds // 3600}h"
         return f"{seconds // 86400}d"
 
-    def agent_filter_url(agent: str, *, state: str = "", requirement: str = "") -> str:
-        return _coverage_filter_url(
-            agent_0=agent,
-            agent_state_0=state,
-            agent_requirement_0=requirement,
-        )
+    def agent_filter_url(
+        agent: str,
+        *,
+        state: str = "",
+        states: tuple[str, ...] = (),
+        requirement: str = "",
+    ) -> str:
+        params: list[tuple[str, str]] = [("agent_0", agent)]
+        params.extend(("agent_state_0", value) for value in states or ((state,) if state else ()))
+        if requirement:
+            params.append(("agent_requirement_0", requirement))
+        return "?" + urlencode(params)
 
     def inventory_platform_cell(row: dict, platform: str) -> dict:
         """Return the one product-cell model used by UI, filters, cards, and CSV."""
@@ -9478,10 +9484,6 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                 requirement_total += 1
             if cell["rule_status"] in requirement_counts:
                 requirement_counts[cell["rule_status"]] += 1
-        source_options = [
-            status for status in record_status_order
-            if record_counts[status] or status != "No status reported"
-        ]
         platform_cards.append({
             "platform": platform,
             "counts": [
@@ -9490,8 +9492,12 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                     "count": record_counts[status],
                     "url": agent_filter_url(platform, state=status),
                 }
-                for status in source_options if status != "Possible match"
-            ],
+                for status in record_status_order
+            ] + [{
+                "name": "Total",
+                "count": sum(record_counts.values()),
+                "url": agent_filter_url(platform, states=record_status_order),
+            }],
             "requirement_total": requirement_total,
             "requirement_total_url": agent_filter_url(platform, requirement="Required"),
             "requirement_exceptions": [
@@ -9531,6 +9537,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             hudu="in_hudu", hudu_record_filter="archived_only",
         ),
         "No record": _coverage_filter_url(hudu="not_in_hudu"),
+        "Total": _coverage_filter_url(),
     }
 
     filtered_summary = {
@@ -9720,7 +9727,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                 "counts": [
                     {"name": name, "count": count, "url": hudu_urls[name]}
                     for name, count in hudu_counts.items()
-                ],
+                ] + [{"name": "Total", "count": len(inventory_rows), "url": hudu_urls["Total"]}],
             },
             "filtered_summary": filtered_summary,
             "filter_logic": filter_logic,

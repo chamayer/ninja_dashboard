@@ -36,11 +36,11 @@ Card colors convey the equivalent inventory meaning for every source: current
 or online is green; offline and archived-only are amber; withdrawn is orange;
 and no record is red. Hudu’s current-plus-archived state is blue so it remains
 distinct without being framed as an exception.
-Every platform card reserves five equally sized source-state positions and two
-label lines, so an occasional “No status reported” count cannot change card
-height or the count-grid alignment. Below a wide desktop viewport, cards move
-to three per row before five count positions would squeeze multi-digit values;
-count values never wrap.
+Every agent card presents its five source states plus Total in a fixed two
+column by three row grid. This makes “No status reported” visible even at zero,
+keeps cards equal, gives multi-digit values room, and makes Total clickable as
+the union of all source-record states. Hudu uses its four mutually exclusive
+record groups plus Total in the same two-column grid. Count values never wrap.
 The Agents menu does not clip its nested State or Required menus; those menus
 are positioned from their own controls, close on an outside click or Escape,
 and only one may remain open at a time.
@@ -78,7 +78,7 @@ were addressed. The normal results header now shows a short grouped filter
 summary; the full parenthesized expression is available only through “Show
 exact logic.”
 
-**Next action:** release the approved no-migration patch as `0.122.52`: commit
+**Next action:** release the approved no-migration patch as `0.122.53`: commit
 only the scoped files, push `origin` then `a-m-rose`, trigger the configured
 Portainer redeploy, and verify service health.
 
