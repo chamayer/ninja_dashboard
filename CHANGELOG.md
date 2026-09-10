@@ -2,6 +2,13 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.122.52] — 2026-09-10 — Preserve Computer card count readability
+
+### Fixed
+
+- Moved the Computer cards to three per row before the five count positions
+  would compress multi-digit values, and prevented count values from wrapping.
+
 ## [0.122.51] — 2026-09-10 — Repair Agents filter menus
 
 ### Fixed
