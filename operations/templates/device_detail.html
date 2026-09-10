@@ -82,9 +82,28 @@
     .dd-field-group dt { color: var(--muted); }
     .dd-field-group dd { margin: 0; overflow-wrap: anywhere; }
     .dd-field-note { display:block; margin-top:0.1rem; font-size:0.75rem; color:var(--muted); }
+    .dd-section-grid {
+        display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 1rem;
+    }
+    .dd-detail-section { padding: 0.85rem 1rem; }
+    .dd-detail-section h2 { margin: 0 0 0.65rem; font-size: 1rem; }
+    .dd-detail-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+    .dd-detail-table th, .dd-detail-table td {
+        padding: 0.42rem 0; border-bottom: 1px solid var(--border);
+        text-align: left; vertical-align: top;
+    }
+    .dd-detail-table th { width: 36%; color: var(--muted); font-weight: 500; }
+    .dd-provenance { display: block; margin-top: 0.16rem; color: var(--muted); font-size: 0.76rem; }
+    .dd-lifecycle-banner {
+        margin: 0 0 0.9rem; padding: 0.75rem 0.95rem; border-left: 3px solid #b45309;
+        background: #fffbeb;
+    }
+    .dd-lifecycle-banner.retired { border-left-color: #6b7280; background: #f9fafb; }
     @media (max-width: 850px) {
         .dd-basic-layout { grid-template-columns: 1fr; }
         .dd-field-groups { grid-template-columns: 1fr; }
+        .dd-section-grid { grid-template-columns: 1fr; }
         .dd-agent-requirements {
             border-left: 0; border-top: 1px solid var(--border);
             padding: 1rem 0 0;
@@ -148,24 +167,35 @@
     {% with base=device.get_absolute_url|default:"" %}
     <a class="dd-tab {% if active_tab == 'overview' %}active{% endif %}"
        href="?tab=overview">Overview</a>
-    <a class="dd-tab {% if active_tab == 'observations' %}active{% endif %}"
-       href="?tab=observations">Observations</a>
+    <a class="dd-tab {% if active_tab == 'details' %}active{% endif %}"
+       href="?tab=details">Details</a>
+    <a class="dd-tab {% if active_tab == 'patching' %}active{% endif %}"
+       href="?tab=patching">Patching</a>
     <a class="dd-tab {% if active_tab == 'activity' %}active{% endif %}"
        href="?tab=activity">Activity</a>
     <a class="dd-tab {% if active_tab == 'software' %}active{% endif %}"
        href="?tab=software">Software</a>
-    <a class="dd-tab {% if active_tab == 'details' %}active{% endif %}"
-       href="?tab=details">Details</a>
     {% endwith %}
 </div>
 
 {% if active_tab == 'overview' %}
+{% if device.lifecycle_status == 'pending_cleanup' %}
+<div class="dd-lifecycle-banner">
+    <strong>Needs review</strong> — no current source record reports this Computer.
+    <a href="?tab=details#source-records">Review source records →</a>
+</div>
+{% elif device.lifecycle_status == 'retired' %}
+<div class="dd-lifecycle-banner retired">
+    <strong>Retired</strong> — this Computer is outside normal inventory; its source records and history remain available.
+    <a href="?tab=details#source-records">View source records →</a>
+</div>
+{% endif %}
 <div class="dd-cards">
-    <a class="dd-card {% if device.lifecycle_status == 'pending_cleanup' or not patching.is_online_any %}alert{% endif %}" href="?tab=observations">
+    <div class="dd-card {% if device.lifecycle_status == 'pending_cleanup' or not patching.is_online_any %}alert{% endif %}">
         <div class="lbl">Current status</div>
         <div class="val">{% if device.lifecycle_status == 'pending_cleanup' %}Needs review{% elif patching.is_online_any %}Online{% else %}Offline{% endif %}</div>
         <div class="sub">{% if device.lifecycle_status == 'pending_cleanup' %}no source currently reports this Computer{% elif patching.online_sources %}{{ patching.online_sources|join:", " }}{% else %}no source checked in{% endif %}</div>
-    </a>
+    </div>
     <a class="dd-card {% if sev_counts.critical %}alert{% elif sev_counts.high %}warn{% endif %}" href="{% url 'findings_queue' %}?status=all&amp;subject_id={{ device.id }}">
         <div class="lbl">Open issues</div>
         <div class="val">{{ active_findings|length }}</div>
@@ -176,16 +206,16 @@
             {% if sev_counts.low %}<span class="low">{{ sev_counts.low }} low</span>{% endif %}
         </div>
     </a>
-    <a class="dd-card" href="#management">
+    <a class="dd-card" href="?tab=patching">
         <div class="lbl">Patching</div>
         <div class="val" style="font-size:1.05rem;">{{ patching.effective_scope|default:"—" }}</div>
         <div class="sub">{% if patching.needs_reboot %}reboot needed{% elif patching.last_boot_at %}last boot {{ patching.last_boot_at|date:"Y-m-d" }}{% else %}patch and boot status not reported{% endif %}</div>
     </a>
-    <a class="dd-card {% if windows_servicing.support_state == 'eol' or windows_servicing.support_state == 'eol_esu_available' %}alert{% elif windows_servicing.support_state == 'approaching_eol' %}warn{% endif %}" href="?tab=details">
+    <div class="dd-card {% if windows_servicing.support_state == 'eol' or windows_servicing.support_state == 'eol_esu_available' %}alert{% elif windows_servicing.support_state == 'approaching_eol' %}warn{% endif %}">
         <div class="lbl">Windows support</div>
         <div class="val" style="font-size:1.05rem;">{% if windows_servicing and windows_servicing.support_state != 'unknown' %}{{ windows_servicing.support_state|humanize_label }}{% else %}Not reported{% endif %}</div>
         <div class="sub">{% if windows_servicing and windows_servicing.os_build_number %}build {{ windows_servicing.os_build_number }}{% if windows_servicing.cycle %} · {{ windows_servicing.cycle }}{% endif %}{% elif windows_servicing and windows_servicing.security_support_ends_on %}security support {{ windows_servicing.security_support_ends_on|date:"Y-m-d" }}{% else %}no current Windows servicing data{% endif %}</div>
-    </a>
+    </div>
     <a class="dd-card" href="?tab=software">
         <div class="lbl">Software inventory</div>
         <div class="val">{% if software_rows %}{{ software_rows|length }}{% if software_rows|length == 300 %}+{% endif %} titles{% else %}Not reported{% endif %}</div>
@@ -209,15 +239,15 @@
                 <div class="field-row"><dt>Name</dt><dd><code>{{ device.canonical_hostname|default:"Not reported" }}</code><span class="dd-field-note">Computer record</span></dd></div>
                 <div class="field-row"><dt>Role</dt><dd>{{ device.device_role|humanize_label|default:"Not reported" }}</dd></div>
                 <div class="field-row"><dt>Computer type</dt><dd>{{ device.get_device_type_display|default:"Not reported" }}</dd></div>
-                <div class="field-row"><dt>Inventory state</dt><dd><a href="?tab=observations">{% if device.lifecycle_status == 'pending_cleanup' %}<span style="color:#b45309;">Needs review</span>{% else %}{{ device.lifecycle_status|humanize_label|default:"Not reported" }}{% endif %}</a></dd></div>
+                <div class="field-row"><dt>Inventory state</dt><dd><a href="?tab=details#source-records">{% if device.lifecycle_status == 'pending_cleanup' %}<span style="color:#b45309;">Needs review</span>{% else %}{{ device.lifecycle_status|humanize_label|default:"Not reported" }}{% endif %}</a></dd></div>
             </dl>
         </section>
         <section class="dd-field-group">
             <h3>Operating system</h3>
             <dl>
-                <div class="field-row"><dt>Operating system</dt><dd><a href="?tab=details">{{ device.os_name|default:"Not reported" }}</a><span class="dd-field-note">Source evidence</span></dd></div>
+                <div class="field-row"><dt>Operating system</dt><dd>{{ device.os_name|default:"Not reported" }}<span class="dd-field-note">See Details for reported values and sources</span></dd></div>
                 <div class="field-row"><dt>OS installation</dt><dd>{% if operating_system_installation %}Tracked since {{ operating_system_installation.first_observed_at|date:"Y-m-d" }}{% else %}<span class="muted">Not reported</span>{% endif %}</dd></div>
-                <div class="field-row"><dt>Windows support</dt><dd><a href="?tab=details">{% if windows_servicing and windows_servicing.support_state != 'unknown' %}{{ windows_servicing.support_state|humanize_label }}{% else %}<span class="muted">Not reported</span>{% endif %}</a></dd></div>
+                <div class="field-row"><dt>Windows support</dt><dd>{% if windows_servicing and windows_servicing.support_state != 'unknown' %}{{ windows_servicing.support_state|humanize_label }}{% else %}<span class="muted">Not reported</span>{% endif %}</dd></div>
                 <div class="field-row"><dt>Last boot</dt><dd>{% if patching.last_boot_at %}{{ patching.last_boot_at|date:"Y-m-d H:i" }}{% else %}<span class="muted">Not reported</span>{% endif %}</dd></div>
             </dl>
         </section>
@@ -231,7 +261,7 @@
         <section class="dd-field-group" id="management">
             <h3>Management</h3>
             <dl>
-                <div class="field-row"><dt>Patch policy</dt><dd>{{ patching.effective_scope|default:"Not reported" }}<span class="dd-field-note">{% if patching.override_scope %}Operator override{% elif patching.scope_reason %}{{ patching.scope_reason|humanize_label }}{% else %}Not reported{% endif %}</span><details style="margin-top:0.35rem;"><summary style="cursor:pointer; font-size:0.8rem;">Change patch policy</summary><form method="post" action="{% url 'device_patch_scope_set' org_slug=device.client.slug device_id=device.id %}" style="margin-top:0.4rem; display:flex; flex-direction:column; gap:0.25rem; font-size:0.8rem;">{% csrf_token %}<select name="scope" style="padding:0.25rem;"><option value="Included"{% if patching.override_scope == 'Included' %} selected{% endif %}>Included</option><option value="Excluded"{% if patching.override_scope == 'Excluded' %} selected{% endif %}>Excluded</option></select><input type="text" name="reason" placeholder="Reason (optional)" value="{{ patching.override_reason|default:'' }}" style="padding:0.25rem;"><div style="display:flex; gap:0.3rem;"><button type="submit" style="padding:0.2rem 0.5rem; font-size:0.75rem;">Save</button>{% if patching.override_scope %}<button type="submit" formaction="{% url 'device_patch_scope_clear' org_slug=device.client.slug device_id=device.id %}" style="padding:0.2rem 0.5rem; font-size:0.75rem;" onclick="return confirm('Remove operator override and revert to the derived policy?')">Clear</button>{% endif %}</div></form></details></dd></div>
+                <div class="field-row"><dt>Patch policy</dt><dd><a href="?tab=patching">{{ patching.effective_scope|default:"Not reported" }}</a><span class="dd-field-note">{% if patching.override_scope %}Operator override{% elif patching.scope_reason %}{{ patching.scope_reason|humanize_label }}{% else %}Not reported{% endif %}</span></dd></div>
                 <div class="field-row"><dt>Restart needed</dt><dd>{% if patching.needs_reboot %}Yes{% elif patching.last_boot_at %}No{% else %}<span class="muted">Not reported</span>{% endif %}</dd></div>
                 <div class="field-row"><dt>Software scan</dt><dd><a href="?tab=software">{% if software_rows %}{{ software_rows|length }}{% if software_rows|length == 300 %}+{% endif %} titles{% else %}<span class="muted">Not reported</span>{% endif %}</a></dd></div>
             </dl>
@@ -350,101 +380,32 @@
     {% endif %}
 </div>
 
-{% elif active_tab == 'observations' %}
+{% elif active_tab == 'patching' %}
 <div class="card">
-    <h2 style="margin-top:0;">Current observations</h2>
-    <p class="muted" style="margin-top:-0.4rem;">
-        Each row is one record describing this computer. An OS agent and a VM
-        guest record can both describe the same computer.
-    </p>
-    {% if device.lifecycle_status == 'pending_cleanup' %}
-    <div style="margin:0.85rem 0; padding:0.75rem 0.9rem; border-left:3px solid #b45309; background:#fffbeb;">
-        <strong style="color:#92400e;">Finding: No sources currently report this Computer</strong>
-        <p style="margin:0.35rem 0; font-size:0.9rem;">The source records below are withdrawn, archived, or otherwise no longer current. Review them before deciding whether this Computer should leave normal inventory.</p>
-        <p style="margin:0.35rem 0;"><a href="{% url 'findings_queue' %}?type=device_missing_from_source&amp;status=all&amp;subject_id={{ device.id }}">Open finding details →</a></p>
-        {% if can_manage_lifecycle %}
-        <form method="post" action="{% url 'device_lifecycle_set' org_slug=device.client.slug device_id=device.id target='retired' %}" style="display:flex; gap:0.4rem; flex-wrap:wrap; align-items:center; margin-top:0.65rem;" onsubmit="return confirm('Retire this Computer? Its source records will be kept.');">
-            {% csrf_token %}
-            <input type="text" name="reason" required maxlength="120" placeholder="Why retire this Computer?" style="padding:0.35rem 0.6rem; min-width:260px;">
-            <button type="submit" style="color:#991b1b;">Retire Computer</button>
-        </form>
-        {% endif %}
+    <h2 style="margin-top:0;">Patching</h2>
+    <p class="muted" style="margin-top:-0.4rem;">Current patch policy and patch evidence reported by Ninja.</p>
+    <div class="dd-field-groups">
+        <section class="dd-field-group"><h3>Policy</h3><dl>
+            <div class="field-row"><dt>Patch policy</dt><dd>{{ patching.effective_scope|default:"Not reported" }}{% if patching.override_scope %}<span class="dd-field-note">Operator override</span>{% elif patching.scope_reason %}<span class="dd-field-note">{{ patching.scope_reason|humanize_label }}</span>{% endif %}{% if can_manage_lifecycle %}<details style="margin-top:0.35rem;"><summary style="cursor:pointer; font-size:0.8rem;">Change patch policy</summary><form method="post" action="{% url 'device_patch_scope_set' org_slug=device.client.slug device_id=device.id %}" style="margin-top:0.4rem; display:flex; flex-direction:column; gap:0.25rem; font-size:0.8rem;">{% csrf_token %}<select name="scope" style="padding:0.25rem;"><option value="Included"{% if patching.override_scope == 'Included' %} selected{% endif %}>Included</option><option value="Excluded"{% if patching.override_scope == 'Excluded' %} selected{% endif %}>Excluded</option></select><input type="text" name="reason" placeholder="Reason (optional)" value="{{ patching.override_reason|default:'' }}" style="padding:0.25rem;"><div style="display:flex; gap:0.3rem;"><button type="submit" style="padding:0.2rem 0.5rem; font-size:0.75rem;">Save</button>{% if patching.override_scope %}<button type="submit" formaction="{% url 'device_patch_scope_clear' org_slug=device.client.slug device_id=device.id %}" style="padding:0.2rem 0.5rem; font-size:0.75rem;" onclick="return confirm('Remove operator override and revert to the derived policy?')">Clear</button>{% endif %}</div></form></details>{% endif %}</dd></div>
+            <div class="field-row"><dt>Restart needed</dt><dd>{% if patching.needs_reboot %}Yes{% elif patching.last_boot_at %}No{% else %}<span class="muted">Not reported</span>{% endif %}</dd></div>
+            <div class="field-row"><dt>Last boot</dt><dd>{{ patching.last_boot_at|date:"Y-m-d H:i"|default:"Not reported" }}</dd></div>
+        </dl></section>
+        <section class="dd-field-group"><h3>Patch activity</h3><dl>
+            <div class="field-row"><dt>Last installed</dt><dd>{{ patching.last_patch_installed_at|date:"Y-m-d H:i"|default:"Not reported" }}</dd></div>
+            <div class="field-row"><dt>Install attempts</dt><dd>{{ patching.install_attempts|default:"0" }}</dd></div>
+            <div class="field-row"><dt>Patch evidence</dt><dd>{% if patch_rows %}{{ patch_rows|length }}{% if patch_rows|length == 300 %}+{% endif %} current records{% else %}<span class="muted">Not reported</span>{% endif %}<span class="dd-field-note">Ninja</span></dd></div>
+        </dl></section>
     </div>
-    {% elif device.lifecycle_status == 'retired' %}
-    <div style="margin:0.85rem 0; padding:0.75rem 0.9rem; border-left:3px solid #6b7280; background:#f9fafb;">
-        <strong>Retired</strong> <span class="muted">This Computer is out of normal inventory, but its source records and history remain below.</span>
-        {% if can_manage_lifecycle %}
-        <form method="post" action="{% url 'device_lifecycle_set' org_slug=device.client.slug device_id=device.id target='active' %}" style="display:flex; gap:0.4rem; flex-wrap:wrap; align-items:center; margin-top:0.65rem;">
-            {% csrf_token %}
-            <input type="text" name="reason" required maxlength="120" placeholder="Why restore this Computer?" style="padding:0.35rem 0.6rem; min-width:260px;">
-            <button type="submit">Restore to inventory</button>
-        </form>
-        {% endif %}
-    </div>
-    {% endif %}
-    {% if observations %}
-    <table data-sortable style="width:100%;">
-        <thead>
-            <tr>
-                <th>Source</th>
-                <th>What it is</th>
-                <th>Record state</th>
-                <th>Source status</th>
-                <th>Record ID</th>
-                <th class="num">Last seen</th>
-                <th class="num">Last contact</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for observation_id, source, entity_type, external_id, active, last_seen, reported_online, last_contact, record_lifecycle in observations %}
-            <tr>
-                <td style="font-weight:600;">{{ source }}{% if can_view_entity_evidence %} <a href="{% url 'entity_admin_detail' device.entity_id %}?observation={{ observation_id }}#source-identities" style="font-weight:400; margin-left:.35rem;">Evidence</a>{% endif %}</td>
-                <td>{{ entity_type|humanize_label }}</td>
-                <td>{% if active %}<span class="badge badge-low">Current</span>{% else %}<span class="badge badge-high">Withdrawn</span>{% endif %}</td>
-                <td>{% if record_lifecycle == "archived" %}<span class="badge" style="background:#f3f4f6; color:#6b7280;">Archived</span>{% elif record_lifecycle == "retired" %}<span class="badge" style="background:#f3f4f6; color:#6b7280;">Retired</span>{% elif record_lifecycle == "decommissioned" %}<span class="badge" style="background:#f3f4f6; color:#6b7280;">Decommissioned</span>{% elif reported_online is True %}<span class="badge badge-low">Online</span>{% elif reported_online is False %}<span class="badge badge-high">Offline</span>{% else %}<span class="badge" style="background:#f3f4f6; color:#6b7280;">Not reported</span>{% endif %}</td>
-                <td><code>{{ external_id|default:"—" }}</code></td>
-                <td class="muted num">{{ last_seen|date:"Y-m-d H:i"|default:"—" }}</td>
-                <td class="muted num">{{ last_contact|date:"Y-m-d H:i"|default:"—" }}</td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-    {% else %}
-    <p class="muted">No observations recorded for this computer.</p>
-    {% endif %}
 </div>
-
 <div class="card">
-    <h2 style="margin-top:0;">Hudu records</h2>
-    <p class="muted" style="margin-top:-0.4rem;">
-        Each row is a separate Hudu record. Same-client/name and name-only rows are related records, not source identities for this device.
-    </p>
-    {% if hudu_records %}
-    <table data-sortable style="width:100%;">
-        <thead>
-            <tr>
-                <th>Match</th>
-                <th>Hudu record type</th>
-                <th>Status</th>
-                <th>Linked records</th>
-                <th></th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for record in hudu_records %}
-            <tr>
-                <td>{% if record.is_linked %}<strong>{{ record.relationship }}</strong>{% else %}{{ record.relationship }}{% endif %}</td>
-                <td>{{ record.layout }}</td>
-                <td>{% if record.is_archived %}<span class="muted">Archived</span>{% else %}Current{% endif %}</td>
-                <td>{% if record.card_count %}{{ record.card_count }}{% else %}<span class="muted">No linked records</span>{% endif %}</td>
-                <td>{% if record.url %}<a href="{{ record.url }}" target="_blank" rel="noopener">Open in Hudu</a>{% endif %}</td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-    {% else %}
-    <p class="muted">No Hudu records are linked to or share this device name.</p>
-    {% endif %}
+    <h2 style="margin-top:0;">Current patch evidence</h2>
+    {% if patch_rows %}
+    <table data-sortable style="width:100%;"><thead><tr><th>Update</th><th>KB</th><th>Status</th><th>Severity</th><th>Type</th><th>Installed</th><th>Reported</th></tr></thead><tbody>
+        {% for name, kb, status, severity, category, installed, observed in patch_rows %}
+        <tr><td>{{ name|default:"Not reported" }}</td><td>{{ kb|default:"—" }}</td><td>{{ status|humanize_label|default:"Not reported" }}</td><td>{{ severity|humanize_label|default:"—" }}</td><td>{{ category|humanize_label|default:"—" }}</td><td class="num">{{ installed|date:"Y-m-d H:i"|default:"—" }}</td><td class="num">{{ observed|date:"Y-m-d H:i"|default:"—" }}</td></tr>
+        {% endfor %}
+    </tbody></table>
+    {% else %}<p class="muted">No current patch evidence is reported for this Computer.</p>{% endif %}
 </div>
 
 {% elif active_tab == 'activity' %}
@@ -551,60 +512,83 @@ function swFilter(q) {
 
 {% elif active_tab == 'details' %}
 <div class="card">
-    <h2 style="margin-top:0;">Reported fields</h2>
+    <h2 style="margin-top:0;">Computer details</h2>
     <p class="muted" style="margin-top:-0.4rem;">
-        All normalized values reported by each source. Different values are
-        shown separately; nothing is silently chosen as the truth.
+        Everything currently learned about this Computer, grouped by meaning.
+        Each value identifies the source record that reported it.
     </p>
-    {% if attribute_fields %}
-    <table style="width:100%;">
-        <thead>
-            <tr>
-                <th>Field</th>
-                <th>Reported value</th>
-            </tr>
-        </thead>
-        <tbody>
-        {% for field in attribute_fields %}
-            <tr>
-                <td>{% if field.differs %}<strong>{{ field.name }}</strong><br><span class="badge badge-high">Different values reported</span>{% else %}{{ field.name }}{% endif %}</td>
-                <td>{% for group in field.value_groups %}<div><code>{{ group.value|default:"—" }}</code> <span class="muted">— {% for source in group.sources %}{{ source.name }} · {{ source.entity_type|humanize_label }}{% if not forloop.last %}, {% endif %}{% endfor %}</span></div>{% endfor %}</td>
-            </tr>
+    {% if attribute_sections %}
+    <div class="dd-section-grid">
+        {% for section in attribute_sections %}
+        {% if section.fields %}
+        <section class="dd-detail-section" style="border:1px solid var(--border); border-radius:6px;">
+            <h2>{{ section.name }}</h2>
+            <table class="dd-detail-table"><tbody>
+                {% for field in section.fields %}
+                <tr>
+                    <th>{% if field.differs %}<strong>{{ field.name }}</strong><br><span class="badge badge-high">Different values</span>{% else %}{{ field.name }}{% endif %}</th>
+                    <td>
+                        {% for group in field.value_groups %}
+                        <div{% if not forloop.first %} style="margin-top:0.45rem;"{% endif %}>{{ group.value|default:"Not reported" }}
+                            <span class="dd-provenance">{% for source in group.sources %}{{ source.name }} · {{ source.entity_type|humanize_label }}{% if not forloop.last %}; {% endif %}{% endfor %}</span>
+                        </div>
+                        {% endfor %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody></table>
+        </section>
+        {% endif %}
         {% endfor %}
-        </tbody>
-    </table>
+    </div>
     {% else %}
-    <p class="muted">No configured source fields are available yet.</p>
+    <p class="muted">No reported details are available yet.</p>
     {% endif %}
 </div>
 
 <div class="card">
-    <h2 style="margin-top:0;">Details from each source</h2>
-    {% if source_attribute_details %}
-    {% for source in source_attribute_details %}
-    <details style="margin-bottom:0.6rem; border:1px solid var(--border); border-radius:5px;">
-        <summary style="cursor:pointer; padding:0.55rem 0.75rem; background:#f8f9fb;"><strong>{{ source.source }}</strong> · {{ source.entity_type|humanize_label }}{% if source.external_id %} · <code>{{ source.external_id }}</code>{% endif %} — {{ source.fields|length }} relevant field{{ source.fields|length|pluralize }}</summary>
-        <table style="width:100%; margin:0.5rem 0;">
-            <tbody>{% for field in source.fields %}<tr><th style="text-align:left; padding:0.35rem 0.7rem;">{{ field.name }}</th><td><code>{{ field.value|default:"—" }}</code></td><td class="muted num">{{ field.observed_at|date:"Y-m-d H:i" }}</td></tr>{% endfor %}</tbody>
-        </table>
-    </details>
-    {% endfor %}
-    {% else %}
-    <p class="muted">No configured source fields are available yet.</p>
+    <h2 id="source-records" style="margin-top:0;">Source records</h2>
+    <p class="muted" style="margin-top:-0.4rem;">The source records behind this Computer and the information above.</p>
+    {% if device.lifecycle_status == 'pending_cleanup' %}
+    <div class="dd-lifecycle-banner">
+        <strong>Needs review</strong> — no current source record reports this Computer. Review the records before removing it from normal inventory.
+        <p style="margin:0.35rem 0;"><a href="{% url 'findings_queue' %}?type=device_missing_from_source&amp;status=all&amp;subject_id={{ device.id }}">Open related finding →</a></p>
+        {% if can_manage_lifecycle %}
+        <form method="post" action="{% url 'device_lifecycle_set' org_slug=device.client.slug device_id=device.id target='retired' %}" style="display:flex; gap:0.4rem; flex-wrap:wrap; align-items:center; margin-top:0.65rem;" onsubmit="return confirm('Retire this Computer? Its source records will be kept.');">
+            {% csrf_token %}<input type="text" name="reason" required maxlength="120" placeholder="Why retire this Computer?" style="padding:0.35rem 0.6rem; min-width:260px;"><button type="submit" style="color:#991b1b;">Retire Computer</button>
+        </form>
+        {% endif %}
+    </div>
+    {% elif device.lifecycle_status == 'retired' %}
+    <div class="dd-lifecycle-banner retired">
+        <strong>Retired</strong> — this Computer is outside normal inventory, but its source records remain available.
+        {% if can_manage_lifecycle %}
+        <form method="post" action="{% url 'device_lifecycle_set' org_slug=device.client.slug device_id=device.id target='active' %}" style="display:flex; gap:0.4rem; flex-wrap:wrap; align-items:center; margin-top:0.65rem;">
+            {% csrf_token %}<input type="text" name="reason" required maxlength="120" placeholder="Why restore this Computer?" style="padding:0.35rem 0.6rem; min-width:260px;"><button type="submit">Restore to inventory</button>
+        </form>
+        {% endif %}
+    </div>
     {% endif %}
-</div>
+    {% if observations %}
+    <table data-sortable style="width:100%;"><thead><tr><th>Source</th><th>What it reports</th><th>Record state</th><th>Status</th><th>Record ID</th><th class="num">Last updated</th><th class="num">Last contact</th></tr></thead><tbody>
+        {% for observation_id, source, entity_type, external_id, active, last_seen, reported_online, last_contact, record_lifecycle in observations %}
+        <tr>
+            <td style="font-weight:600;">{{ source }}{% if can_view_entity_evidence %} <a href="{% url 'entity_admin_detail' device.entity_id %}?observation={{ observation_id }}#source-identities" style="font-weight:400; margin-left:.35rem;">View evidence</a>{% endif %}</td>
+            <td>{{ entity_type|humanize_label }}</td>
+            <td>{% if active %}<span class="badge badge-low">Current</span>{% else %}<span class="badge badge-high">Withdrawn</span>{% endif %}</td>
+            <td>{% if record_lifecycle == "archived" %}<span class="badge" style="background:#f3f4f6; color:#6b7280;">Archived</span>{% elif record_lifecycle == "retired" %}<span class="badge" style="background:#f3f4f6; color:#6b7280;">Retired</span>{% elif record_lifecycle == "decommissioned" %}<span class="badge" style="background:#f3f4f6; color:#6b7280;">Decommissioned</span>{% elif reported_online is True %}<span class="badge badge-low">Online</span>{% elif reported_online is False %}<span class="badge badge-high">Offline</span>{% else %}<span class="badge" style="background:#f3f4f6; color:#6b7280;">Not reported</span>{% endif %}</td>
+            <td><code>{{ external_id|default:"—" }}</code></td><td class="muted num">{{ last_seen|date:"Y-m-d H:i"|default:"—" }}</td><td class="muted num">{{ last_contact|date:"Y-m-d H:i"|default:"—" }}</td>
+        </tr>{% endfor %}
+    </tbody></table>
+    {% else %}<p class="muted">No source records are available for this Computer.</p>{% endif %}
 
-<div class="card">
-    <h2 style="margin-top:0;">Source evidence</h2>
-    <p class="muted">
-        Field visibility is managed in Admin → Configuration → Fields. Raw
-        vendor payloads remain available only from the evidence surface.
-    </p>
-    {% if can_view_entity_evidence %}
-    <p><a class="btn btn-secondary" href="{% url 'entity_admin_detail' device.entity_id %}">Open source evidence</a></p>
-    {% else %}
-    <p class="muted">An Operations administrator can review the source evidence. Raw-value access remains separately controlled and audited.</p>
-    {% endif %}
+    <h3 style="margin:1.25rem 0 0.3rem;">Hudu related records</h3>
+    <p class="muted" style="margin-top:0; font-size:0.82rem;">Related records are shown for context. A same-name match is not automatically treated as the same Computer.</p>
+    {% if hudu_records %}
+    <table data-sortable style="width:100%;"><thead><tr><th>Relationship</th><th>Record type</th><th>State</th><th>Links</th><th></th></tr></thead><tbody>
+        {% for record in hudu_records %}<tr><td>{% if record.is_linked %}<strong>{{ record.relationship }}</strong>{% else %}{{ record.relationship }}{% endif %}</td><td>{{ record.layout }}</td><td>{% if record.is_archived %}<span class="muted">Archived</span>{% else %}Current{% endif %}</td><td>{% if record.card_count %}{{ record.card_count }}{% else %}<span class="muted">No links</span>{% endif %}</td><td>{% if record.url %}<a href="{{ record.url }}" target="_blank" rel="noopener">Open in Hudu</a>{% endif %}</td></tr>{% endfor %}
+    </tbody></table>
+    {% else %}<p class="muted">No Hudu records are linked to or share this Computer name.</p>{% endif %}
 </div>
 {% endif %}
 

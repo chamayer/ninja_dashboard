@@ -1,8 +1,50 @@
 # Active Operations implementation plan
 
-## ACTIVE TASK — Restore Computer Overview software access
+## ACTIVE TASK — Consolidate Computer information and source records
 
 **Status:** active.
+
+**Goal:** make Computer Details the complete, readable record of everything
+learned about a Computer and its provenance; eliminate the duplicate,
+technical Observations tab.
+
+**Scope:** reorganize the existing Details reader and template into meaningful
+field sections with plain source labels; move the current source-record,
+Hudu-record, evidence-link, and lifecycle-review content from Observations
+into Details; remove the redundant tab; and add a concise Overview lifecycle
+banner that links directly to Source records only when attention is needed.
+Add a Computer Patching tab using the existing device patch signal and policy
+data; Overview retains only the compact patch posture. No schema, ingest,
+evaluator, lifecycle-state, source-data, or permission change.
+
+**Affected files:** `apps/core/views.py`, `templates/device_detail.html`, and
+this plan.
+
+**Decision:** Details is the complete informational Computer record, not a
+technical claim dump. Every displayed value retains source provenance, actual
+disagreements remain explicit, and source records are shown once in Details.
+Overview remains concise and surfaces lifecycle only when a Computer needs
+review or is retired; ordinary Online/Offline is availability, not lifecycle.
+
+**Validation plan:** Django check, configured template loading, focused
+existing device-detail/lifecycle tests, Python compilation, and
+`git diff --check`. No migration, custom test script, production data change,
+or deployment in this scope without separate approval.
+
+**Current checkpoint:** Details now organizes every normalized displayed
+claim into Identity and inventory, Operating system, Hardware and
+virtualization, Network, Security and management, or Other reported
+information. Each value lists its reporting source and record type, and real
+conflicts retain both reported values. Source records now contains the former
+Observations table, Hudu related-record context, exact evidence links, and the
+existing lifecycle review/retire/restore actions. Old Observations bookmarks
+redirect directly to that section. Overview has an attention-only lifecycle
+banner and no longer makes dead-end links to Details; tabs are Overview,
+Details, Patching, Activity, Software. The new Patching tab shows existing
+policy/override, restart and install information, and current Ninja patch
+evidence. Next action: final focused validation and request release approval.
+
+## Previous release — Restore Computer Overview software access
 
 **Goal:** restore Computer Overview rendering after the source-aware software
 release while preserving the secure view boundary.
@@ -25,13 +67,23 @@ granting `operations_app` direct table access.
 configured Django check, and `git diff --check`. Validate the failed Overview
 route after an explicitly approved deployment.
 
-**Current checkpoint:** migration 108 now grants only the dedicated view owner
+**Release:** version 0.122.44, commit `daad050` (Restore software evidence
+view access), pushed to `origin` and `a-m-rose` on 2026-09-09. Portainer
+deployed the matching commit and applied
+`108_software_evidence_view_owner_grants`. Both Operations and ingest became
+healthy. The failed exposure query now succeeds as `operations_app` with
+tenant context; the unauthenticated host route correctly redirects to sign-in.
+
+**Validation completed:** `manage.py check`, `git diff --check`, SQL
+dependency/grant and migration-order review, a rolled-back live privilege
+trial, deployed migration-record verification, runtime-role query verification,
+and both service health checks passed.
+
+**Final checkpoint:** migration 108 now grants only the dedicated view owner
 the complete direct dependency set plus `USAGE` on `catalog`; the application
 role remains view-only. A live transaction applied those grants temporarily,
 ran the failing source-aware exposure query as `operations_app` with tenant
-context, returned successfully, and rolled back. `manage.py check` and
-`git diff --check` pass. Next action: obtain separate approval to commit and
-push the grant-only migration; its deployment will apply it automatically.
+context, returned successfully, and rolled back.
 
 **Initial diagnosis:** live Operations logs identify the failure as
 `permission denied for table software_installations_current` from

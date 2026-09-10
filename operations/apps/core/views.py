@@ -1930,10 +1930,17 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
     links = list(device.source_links.select_related("source").order_by("source__name"))
     ninja_patch_device_ids = _ninja_patch_device_ids(links)
     requested_tab = request.GET.get("tab") or "overview"
+    # The former Observations tab is now the Source records section of Details.
+    # Keep old bookmarks useful by taking an operator directly to that section.
+    if requested_tab == "observations":
+        return redirect(
+            f"{reverse('device_detail', kwargs={'org_slug': org_slug, 'device_id': device.id})}"
+            "?tab=details#source-records"
+        )
     # Preserve existing Identity bookmarks while giving the tab a name that
     # describes what operators find there.
     active_tab = "details" if requested_tab == "identity" else requested_tab
-    if active_tab not in ("overview", "observations", "activity", "software", "details"):
+    if active_tab not in ("overview", "activity", "software", "details", "patching"):
         active_tab = "overview"
     same_name_devices = []
     same_name_device_count = 0
@@ -1980,6 +1987,7 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
 
     observations = []
     software_rows = []
+    patch_rows = []
     patching = None
     windows_servicing = None
     operating_system_installation = None
@@ -2155,6 +2163,20 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
                     patching["last_patch_installed_at"] = None
                     patching["install_attempts"] = 0
 
+                if active_tab == "patching" and ninja_patch_device_ids:
+                    cur.execute(
+                        """
+                        SELECT patch_name, kb_number, status, severity,
+                               patch_category, installed_at, last_observed_at
+                        FROM ninja_patches.current_patch_state
+                        WHERE device_id = ANY(%s::integer[])
+                        ORDER BY last_observed_at DESC NULLS LAST, patch_name
+                        LIMIT 300
+                        """,
+                        [ninja_patch_device_ids],
+                    )
+                    patch_rows = cur.fetchall()
+
             # Exemptions dict {entity_type: reason} from operator decisions.
             cur.execute(
                 """
@@ -2182,7 +2204,7 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
     # unlinked name match. The latter remains distinct from a source identity:
     # it is useful context, but never attaches a record or changes coverage.
     hudu_records = []
-    if active_tab == "observations" and device.canonical_hostname:
+    if active_tab == "details" and device.canonical_hostname:
         with transaction.atomic(), connection.cursor() as cur:
             cur.execute("SET LOCAL operations.tenant_id = 1")
             cur.execute(
@@ -2244,7 +2266,6 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
             ]
 
     attribute_fields = []
-    source_attribute_details = []
     if active_tab == "details":
         with transaction.atomic(), connection.cursor() as cur:
             cur.execute("SET LOCAL operations.tenant_id = 1")
@@ -2272,7 +2293,31 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
             claim_rows = cur.fetchall()
 
         fields_by_key: dict[str, dict] = {}
-        source_details_by_record: dict[tuple[str, str, str], list[dict]] = {}
+        section_labels = {
+            "identity": "Identity and inventory",
+            "operating_system": "Operating system",
+            "hardware": "Hardware and virtualization",
+            "network": "Network",
+            "management": "Security and management",
+            "other": "Other reported information",
+        }
+
+        def _attribute_section(key: str, display_name: str) -> str:
+            """Place every normalized claim in an operator-readable section."""
+            text = f"{key} {display_name}".lower()
+            if any(term in text for term in ("ip", "mac", "network", "gateway", "dns", "adapter", "subnet")):
+                return "network"
+            if any(term in text for term in ("serial", "manufacturer", "model", "cpu", "processor", "memory", "ram", "disk", "storage", "bios", "chassis", "virtual", "vm ", "vm_", "hypervisor")):
+                return "hardware"
+            if any(term in text for term in ("operating system", "os_", "windows", "kernel", "boot", "uptime", "architecture", "release", "build")):
+                return "operating_system"
+            if any(term in text for term in ("name", "hostname", "domain", "fqdn", "asset tag", "role", "device type", "client")):
+                return "identity"
+            if any(term in text for term in ("patch", "reboot", "threat", "security", "antivirus", "agent", "maintenance", "health", "user", "power")):
+                return "management"
+            return "other"
+
+        fields_by_key: dict[str, dict] = {}
         for (
             key,
             display_name,
@@ -2281,7 +2326,7 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
             source_name,
             entity_type,
             external_id,
-            observed_at,
+            _observed_at,
         ) in claim_rows:
             source_record_key = (source_name, entity_type, external_id)
             source_record = {
@@ -2294,18 +2339,11 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
                 {
                     "name": display_name,
                     "sensitivity": sensitivity,
+                    "section": _attribute_section(key, display_name),
                     "values": {},
                 },
             )
             field["values"].setdefault(value, {})[source_record_key] = source_record
-            source_details_by_record.setdefault(source_record_key, []).append(
-                {
-                    "name": display_name,
-                    "value": value,
-                    "sensitivity": sensitivity,
-                    "observed_at": observed_at,
-                }
-            )
         for field in fields_by_key.values():
             value_groups = [
                 {
@@ -2326,15 +2364,17 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
                 }
             )
         attribute_fields.sort(key=lambda field: field["name"].lower())
-        source_attribute_details = [
+        attribute_sections = [
             {
-                "source": source_key[0],
-                "entity_type": source_key[1],
-                "external_id": source_key[2],
-                "fields": fields,
+                "name": section_labels[section],
+                "fields": [
+                    field for field in attribute_fields if field["section"] == section
+                ],
             }
-            for source_key, fields in sorted(source_details_by_record.items())
+            for section in section_labels
         ]
+    else:
+        attribute_sections = []
 
     # Software decisions map — key by canonical_name, prefer per-client
     # over global.
@@ -2630,6 +2670,7 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
             "active_findings": active_findings,
             "observations": observations,
             "software_rows": software_view,
+            "patch_rows": patch_rows,
             "patching": patching,
             "windows_servicing": windows_servicing,
             "operating_system_installation": operating_system_installation,
@@ -2643,7 +2684,7 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
             "coverage_policy_rows": coverage_policy_rows,
             "agent_summary": agent_summary,
             "attribute_fields": attribute_fields,
-            "source_attribute_details": source_attribute_details,
+            "attribute_sections": attribute_sections,
             "can_view_entity_evidence": bool(
                 device.entity_id
                 and (

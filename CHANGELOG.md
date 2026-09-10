@@ -2,6 +2,20 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.122.45] — 2026-09-10 — Clearer Computer information and patching
+
+### Changed
+
+- Rebuilt Computer Details as the complete organized record of reported
+  information, with every value showing its reporting source and record type.
+  Conflicting source values remain explicit.
+- Moved source records, Hudu related-record context, evidence links, and
+  lifecycle review actions into Details. The redundant Observations tab now
+  redirects to Details → Source records.
+- Added a Computer Patching tab for policy, restart and install context, and
+  current Ninja patch evidence. Overview retains only the concise patch
+  posture and shows lifecycle attention only when review is required.
+
 ## [0.122.44] — 2026-09-09 — Restore Computer Overview software access
 
 ### Fixed
