@@ -20,10 +20,10 @@
 .coverage-result-card span { display:block; color:var(--muted); font-size:0.78rem; }
 .coverage-result-card strong { display:block; margin-top:0.2rem; font-size:1.35rem; }
 @media (max-width:700px) { .coverage-result-summary { grid-template-columns:repeat(2, minmax(0, 1fr)); } }
-.coverage-counts { display:grid; grid-template-columns:repeat(auto-fit, minmax(4.5rem, 1fr)); gap:0.35rem; }
+.coverage-counts { display:grid; grid-template-columns:repeat(5, minmax(0, 1fr)); gap:0.35rem; }
 .coverage-count { display:block; border-radius:4px; padding:0.4rem 0.25rem; text-align:center; text-decoration:none; color:inherit; }
 .coverage-count:hover { background:var(--surface-hover, #f3f4f6); }
-.coverage-count span { display:block; font-size:0.72rem; color:var(--muted); }
+.coverage-count span { display:grid; min-height:2.35em; align-content:center; font-size:0.72rem; color:var(--muted); }
 .coverage-count strong { font-size:1.1rem; }
 .coverage-requirement-counts { display:flex; flex-wrap:wrap; align-items:center; gap:0.35rem 0.55rem; border-top:1px solid var(--border); margin-top:0.55rem; padding-top:0.55rem; font-size:0.76rem; }
 .coverage-requirement-label { color:var(--muted); margin-right:0.1rem; }
@@ -86,12 +86,13 @@
 .agent-state-online { color:#166534; }.agent-state-offline { color:#92400e; }.agent-state-withdrawn,.agent-state-no-record { color:var(--muted); }
 .agent-requirement { color:var(--muted); }.agent-requirement.attention { color:#b91c1c; font-weight:600; }
 .agent-match { grid-column:2 / -1; font-size:0.74rem; }
-.agent-builder { min-width:34rem; max-width:min(44rem, calc(100vw - 2rem)); max-height:26rem; }
+.agent-builder { min-width:34rem; max-width:min(44rem, calc(100vw - 2rem)); max-height:none; overflow:visible; }
 .agent-condition { display:grid; grid-template-columns:8rem 1fr 1fr auto; gap:0.45rem; align-items:end; padding:0.55rem 0; border-bottom:1px solid var(--border); }
 .agent-condition label { display:flex; flex-direction:column; align-items:stretch; gap:0.18rem; padding:0; font-size:0.75rem; }
 .agent-condition select { min-width:0; padding:0.3rem; }
+.agent-choice { position:relative; }
 .agent-choice summary { cursor:pointer; border:1px solid var(--border); border-radius:4px; padding:0.3rem; font-size:0.82rem; }
-.agent-choice-options { position:absolute; z-index:30; min-width:12rem; max-height:13rem; overflow:auto; border:1px solid var(--border); border-radius:4px; background:var(--surface); box-shadow:0 3px 10px rgba(0,0,0,.14); padding:0.35rem; }
+.agent-choice-options { position:absolute; z-index:30; top:calc(100% + 0.2rem); left:0; min-width:12rem; max-height:13rem; overflow:auto; border:1px solid var(--border); border-radius:4px; background:var(--surface); box-shadow:0 3px 10px rgba(0,0,0,.14); padding:0.35rem; }
 .agent-choice-options label { display:flex; flex-direction:row; align-items:center; gap:0.35rem; padding:0.2rem; }
 .agent-condition-remove { padding:0.3rem 0.45rem; }
 @media (max-width:760px) { .agent-condition { grid-template-columns:1fr 1fr; }.agent-condition-remove { grid-column:2; }.agents-column { min-width:21rem; } }
@@ -148,7 +149,7 @@
             <div class="coverage-filter-row">
                 <details class="coverage-filter"><summary>Client</summary><div class="coverage-filter-options"><input class="coverage-filter-search" type="search" placeholder="Search clients" aria-label="Search clients">{% for client in filter_clients %}<label><input type="checkbox" name="client" value="{{ client.slug }}"{% if client.slug in client_filters %} checked{% endif %}>{{ client.name }}</label>{% endfor %}</div></details>
                 <details class="coverage-filter"><summary>Agents</summary><div class="coverage-filter-options agent-builder"><strong>Show Computers where every condition below is true.</strong><div id="agent-conditions">{% for condition in agent_filter_forms %}<div class="agent-condition" data-agent-condition><label>Agent<select name="agent_{{ condition.index }}"><option value="">Choose</option>{% for agent in agent_filter_agents %}<option value="{{ agent }}"{% if agent == condition.agent %} selected{% endif %}>{{ agent }}</option>{% endfor %}</select></label><label>State<details class="agent-choice"><summary>Any</summary><div class="agent-choice-options">{% for state in agent_filter_states %}<label><input type="checkbox" name="agent_state_{{ condition.index }}" value="{{ state }}"{% if state in condition.states %} checked{% endif %}>{{ state }}</label>{% endfor %}</div></details></label><label>Required?<details class="agent-choice"><summary>Any</summary><div class="agent-choice-options">{% for requirement in agent_filter_requirements %}<label><input type="checkbox" name="agent_requirement_{{ condition.index }}" value="{{ requirement }}"{% if requirement in condition.requirements %} checked{% endif %}>{{ requirement }}</label>{% endfor %}</div></details></label><button class="agent-condition-remove" type="button">Remove</button></div>{% endfor %}</div><button id="add-agent-condition" type="button">Add condition</button></div></details>
-                <div><button type="submit">Filter</button>{% if filters_active %}<a class="clear" data-clear-filters href="{% url 'inventory_computers' %}">Clear</a>{% endif %}</div>
+                <div><button type="submit">Filter</button><a class="clear{% if not filters_active %} muted{% endif %}" data-clear-filters href="{% url 'inventory_computers' %}"{% if not filters_active %} aria-disabled="true"{% endif %}>Clear</a></div>
             </div>
             <div class="coverage-filter-row">
                 <details class="coverage-filter"><summary>Hudu</summary><div class="coverage-filter-options"><strong>Hudu record</strong><label><input type="checkbox" name="hudu" value="in_hudu"{% if "in_hudu" in hudu_filters %} checked{% endif %}>In Hudu</label><label><input type="checkbox" name="hudu" value="not_in_hudu"{% if "not_in_hudu" in hudu_filters %} checked{% endif %}>Not in Hudu</label><hr><strong>Links</strong><label><input type="checkbox" name="hudu_links" value="has_links"{% if "has_links" in hudu_link_filters %} checked{% endif %}>Has links</label><label><input type="checkbox" name="hudu_links" value="no_links"{% if "no_links" in hudu_link_filters %} checked{% endif %}>No links</label><div class="coverage-hudu-record-filter"{% if not hudu_record_filter_active %} hidden{% endif %}><hr><label>Which records? <select name="hudu_record_filter"{% if not hudu_record_filter_active %} disabled{% endif %}><option value="any"{% if hudu_record_filter == "any" %} selected{% endif %}>Any Hudu record</option><option value="has_current"{% if hudu_record_filter == "has_current" %} selected{% endif %}>Has current record</option><option value="has_archived"{% if hudu_record_filter == "has_archived" %} selected{% endif %}>Has archived record</option><option value="current_only"{% if hudu_record_filter == "current_only" %} selected{% endif %}>Current records only</option><option value="archived_only"{% if hudu_record_filter == "archived_only" %} selected{% endif %}>Archived records only</option><option value="both"{% if hudu_record_filter == "both" %} selected{% endif %}>Current and archived</option></select></label></div></div></details>
@@ -287,6 +288,16 @@ document.querySelectorAll('.coverage-filterbar select[name]').forEach((select) =
 });
 const filterMenus = [...document.querySelectorAll('details.coverage-filter, details.coverage-column-filter')];
 const huduDetails = [...document.querySelectorAll('details.coverage-hudu-details')];
+const closeAgentChoicesExcept = (activeChoice) => {
+    document.querySelectorAll('details.agent-choice').forEach((choice) => {
+        if (choice !== activeChoice) choice.removeAttribute('open');
+    });
+};
+document.addEventListener('toggle', (event) => {
+    if (event.target.matches('details.agent-choice') && event.target.open) {
+        closeAgentChoicesExcept(event.target);
+    }
+}, true);
 filterMenus.forEach((menu) => menu.addEventListener('toggle', () => {
     if (!menu.open) return;
     filterMenus.forEach((other) => {
@@ -306,10 +317,14 @@ document.addEventListener('click', (event) => {
     if (!event.target.closest('details.coverage-hudu-details')) {
         huduDetails.forEach((detail) => detail.removeAttribute('open'));
     }
+    if (!event.target.closest('details.agent-choice')) {
+        closeAgentChoicesExcept();
+    }
 });
 document.addEventListener('keydown', (event) => {
     if (event.key !== 'Escape') return;
-    filterMenus.concat(huduDetails).forEach((detail) => detail.removeAttribute('open'));
+    filterMenus.concat(huduDetails, [...document.querySelectorAll('details.agent-choice')])
+        .forEach((detail) => detail.removeAttribute('open'));
 });
 </script>
 {% endblock %}

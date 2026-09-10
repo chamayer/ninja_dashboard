@@ -36,6 +36,14 @@ Card colors convey the equivalent inventory meaning for every source: current
 or online is green; offline and archived-only are amber; withdrawn is orange;
 and no record is red. Hudu’s current-plus-archived state is blue so it remains
 distinct without being framed as an exception.
+Every platform card reserves five equally sized source-state positions and two
+label lines, so an occasional “No status reported” count cannot change card
+height or the count-grid alignment.
+The Agents menu does not clip its nested State or Required menus; those menus
+are positioned from their own controls, close on an outside click or Escape,
+and only one may remain open at a time.
+Clear is always visible next to Filter and muted when the page has no active
+filters, so operators do not have to infer where reset became available.
 
 **Verified baseline:** the live reader currently returns 6,819 rows: 5,873
 canonical Computers plus 946 current source-only/Hudu-only rows. The old “No
@@ -68,7 +76,7 @@ were addressed. The normal results header now shows a short grouped filter
 summary; the full parenthesized expression is available only through “Show
 exact logic.”
 
-**Next action:** release the approved no-migration patch as `0.122.50`: commit
+**Next action:** release the approved no-migration patch as `0.122.51`: commit
 only the scoped files, push `origin` then `a-m-rose`, trigger the configured
 Portainer redeploy, and verify service health.
 

@@ -2,6 +2,16 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.122.51] — 2026-09-10 — Repair Agents filter menus
+
+### Fixed
+
+- Allowed the Agents menu’s State and Required selection menus to extend
+  without clipping, close on an outside click or Escape, and close each other
+  when another selection menu opens.
+- Kept Clear visibly next to Filter at all times, muting it when there are no
+  active selections.
+
 ## [0.122.50] — 2026-09-10 — Restore Computer card color cues
 
 ### Changed
