@@ -113,6 +113,7 @@ class _Cursor:
                     "Windows 11",
                     "workstation",
                     "active",
+                    False,
                 ),
                 (
                     "device-2",
@@ -123,6 +124,7 @@ class _Cursor:
                     "Ubuntu",
                     "server",
                     "active",
+                    True,
                 ),
             ],
             [
@@ -185,9 +187,9 @@ def test_coverage_uses_effective_requirements_and_source_specific_filters(monkey
         or HttpResponse(),
     )
     request = RequestFactory().get(
-        "/coverage/?client=acme&client=beta&coverage_source=Ninja"
-        "&coverage_status=Ninja%7CMissing&coverage_source=SentinelOne"
-        "&coverage_status=SentinelOne%7COnline&hudu=in_hudu&hudu_links=has_links"
+        "/coverage/?client=acme&client=beta&record_status=Ninja%7COnline"
+        "&rule_status=Ninja%7CMissing&record_status=SentinelOne%7COnline"
+        "&rule_status=SentinelOne%7CRequired&hudu=in_hudu&hudu_links=has_links"
         "&s1_exemption=not_exempt"
         "&os_family=Windows+11&device_type=workstation"
     )
@@ -207,13 +209,19 @@ def test_coverage_uses_effective_requirements_and_source_specific_filters(monkey
     assert "platform_aliases" in hudu_statement
     assert "hudu.source_name = 'Hudu'" not in hudu_statement
     assert hudu_params is None
+    computer_statement, _ = cursor.queries[3]
+    assert "device_operator_decisions" in computer_statement
+    assert "AS s1_exempt" in computer_statement
 
     context = captured["context"]
     assert context["client_filters"] == ["acme", "beta"]
-    assert context["coverage_source_filters"] == {"Ninja", "SentinelOne"}
-    assert context["coverage_status_filters"] == {
-        "Ninja": ["Missing"],
+    assert context["record_status_filters"] == {
+        "Ninja": ["Online"],
         "SentinelOne": ["Online"],
+    }
+    assert context["rule_status_filters"] == {
+        "Ninja": ["Missing"],
+        "SentinelOne": ["Required"],
     }
     assert context["hudu_filters"] == ["in_hudu"]
     assert context["hudu_link_filters"] == ["has_links"]
@@ -232,13 +240,72 @@ def test_coverage_uses_effective_requirements_and_source_specific_filters(monkey
     row = context["device_rows"][0]
     assert row["hudu_present"] is True
     assert row["hudu_links"] == ["Ninja — host-1", "Auvik #42"]
-    assert [(cell["platform"], cell["status"]) for cell in row["platform_cells"]] == [
-        ("Ninja", "Online"),
-        ("SentinelOne", "Online"),
+    assert [
+        (cell["platform"], cell["record_status"], cell["rule_label"])
+        for cell in row["platform_cells"]
+    ] == [
+        ("Ninja", "Online", "Required · Missing"),
+        ("SentinelOne", "Online", "Required"),
     ]
-    assert row["platform_cells"][0]["url"] == (
-        "?coverage_source=Ninja&coverage_status=Ninja%7CMissing"
+    assert row["platform_cells"][0]["record_url"] == (
+        "?record_status=Ninja%7COnline"
     )
+    cards = {card["platform"]: card for card in context["platform_cards"]}
+    assert {item["name"]: item["count"] for item in cards["Ninja"]["counts"]} == {
+        "Online": 3,
+        "Offline": 0,
+        "Withdrawn": 0,
+        "No record": 1,
+    }
+    assert {item["name"]: item["count"] for item in cards["Ninja"]["rule_counts"]} == {
+        "Required": 2,
+        "Missing": 1,
+    }
+    assert {item["name"]: item["count"] for item in cards["SentinelOne"]["rule_counts"]} == {
+        "Required": 1,
+        "Exempt": 1,
+    }
+    assert {item["name"]: item["count"] for item in context["hudu_card"]["counts"]} == {
+        "Current only": 2,
+        "Current + archived": 0,
+        "Archived only": 0,
+        "No record": 2,
+    }
+
+
+def _render_coverage_context(monkeypatch, query: str) -> dict:
+    cursor = _Cursor()
+    captured = {}
+    monkeypatch.setattr(views, "connection", _Connection(cursor))
+    monkeypatch.setattr(views.transaction, "atomic", nullcontext)
+    monkeypatch.setattr(
+        views,
+        "render",
+        lambda _request, _template, context: captured.setdefault("context", context)
+        or HttpResponse(),
+    )
+    request = RequestFactory().get(f"/inventory/computers/?{query}")
+    request.user = SimpleNamespace(is_authenticated=True)
+    views.fleet_coverage(request)
+    return captured["context"]
+
+
+def test_computer_shortcuts_distinguish_other_records_from_hudu(monkeypatch):
+    no_four = _render_coverage_context(monkeypatch, "computer_scope=no_product_records")
+    assert no_four["paginator"].count == 1
+    assert no_four["device_rows"][0]["inventory_key"] == "hudu:hudu-observation-2"
+
+    no_current = _render_coverage_context(monkeypatch, "computer_scope=no_current_records")
+    assert no_current["paginator"].count == 0
+
+
+def test_required_filter_includes_missing_and_sentinelone_exempt_is_independent(monkeypatch):
+    required = _render_coverage_context(monkeypatch, "rule_status=Ninja%7CRequired")
+    assert required["paginator"].count == 2
+
+    exempt = _render_coverage_context(monkeypatch, "rule_status=SentinelOne%7CExempt")
+    assert exempt["paginator"].count == 1
+    assert exempt["device_rows"][0]["device_id"] == "device-2"
 
 
 def test_coverage_includes_an_unattached_hudu_computer_as_its_own_row(monkeypatch):
@@ -305,8 +372,8 @@ def test_computers_csv_has_the_current_table_platform_columns(monkeypatch):
         "active",
         "In Hudu",
         "Ninja — host-1, Auvik #42",
-        "Online",
-        "Online",
+        "Online; Required · Missing",
+        "Online; Required",
     ] in rows
     assert [
         "Beta",
@@ -316,8 +383,8 @@ def test_computers_csv_has_the_current_table_platform_columns(monkeypatch):
         "",
         "In Hudu",
         "",
-        "Possible: host-2",
-        "N/A",
+        "No record; possible match: host-2; N/A",
+        "No record; N/A",
     ] in rows
 
 
@@ -325,25 +392,24 @@ def test_coverage_template_has_clear_statuses_hudu_and_multiselect_filters():
     template = (Path(__file__).parents[3] / "templates/coverage.html").read_text(encoding="utf-8")
 
     for label in (
-        "Platform",
         "Links",
         "SentinelOne",
         "OS family",
         "Device type",
     ):
         assert label in template
-    assert "Online in" not in template
+    assert "Online in at least one of those four" in template
     assert "Required platform" not in template
     assert "Hudu" in template
     assert template.count('type="checkbox"') >= 12
-    assert template.count('<details class="coverage-filter">') == 6
-    assert template.count('class="coverage-filter-search"') >= 7
+    assert template.count('<details class="coverage-filter">') == 5
+    assert template.count('class="coverage-filter-search"') >= 8
     assert "coverage-filterbar" in template
     assert "const filterMenus" in template
     assert "event.target.closest('details.coverage-filter, details.coverage-column-filter')" in template
     assert "coverage-result-summary" in template
     assert "Filtered results" in template
-    assert "Counts reflect the current filter selections." in template
+    assert "{{ filter_logic }}" in template
     assert "No links" in template
     assert 'name="hudu_record_filter"' in template
     assert "Has current record" in template
@@ -352,7 +418,12 @@ def test_coverage_template_has_clear_statuses_hudu_and_multiselect_filters():
     assert "Archived records only" in template
     assert 'name="show_archived_hudu"' not in template
     assert "row.hudu_records" in template
-    assert "Computer inventory from all platforms" in template
+    assert "Every Computer known to Operations" in template
+    assert "Find computers" in template
+    assert "Ninja record" not in template  # Rendered dynamically from the product name.
+    assert "Requirement" in template
+    assert 'name="record_status"' in template
+    assert 'name="rule_status"' in template
     for label in ("Clients", "Computers", "In Hudu", "Not in Hudu"):
         assert label in template
     assert "Agent checks" not in template

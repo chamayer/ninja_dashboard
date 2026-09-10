@@ -1,35 +1,65 @@
 # Active Operations implementation plan
 
-## ACTIVE TASK — Consolidate Computer information and source records
+## ACTIVE TASK — Correct the Computers inventory reader and filters
 
 **Status:** active.
 
-**Goal:** make Computer Details the complete, readable record of everything
-learned about a Computer and its provenance; eliminate the duplicate,
-technical Observations tab.
+**Goal:** make Computers an inventory-first page that shows every known
+Computer record and keeps current source facts separate from authored agent
+requirements in cells, filters, summary cards, and CSV.
 
-**Scope:** reorganize the existing Details reader and template into meaningful
-field sections with plain source labels; move the current source-record,
-Hudu-record, evidence-link, and lifecycle-review content from Observations
-into Details; remove the redundant tab; and add a concise Overview lifecycle
-banner that links directly to Source records only when attention is needed.
-Add a Computer Patching tab using the existing device patch signal and policy
-data; Overview retains only the compact patch posture. No schema, ingest,
-evaluator, lifecycle-state, source-data, or permission change.
+**Scope:** normalize the existing Computers reader in `views.py`; replace the
+top matrix with a compact **Find computers** menu; make every product column
+filter its record status and required state independently; correct the
+SentinelOne exemption reader; make static cards inventory-first with a compact
+required-state summary; and preserve Hudu, possible-match, legacy URL, column,
+CSV, client, OS, and device-type behavior. Avoid umbrella terms such as
+platform, system, or agent in visible inventory copy. No schema, ingest,
+evaluator, lifecycle write, source-data write, permission, commit, push, or
+deployment.
 
-**Affected files:** `apps/core/views.py`, `templates/device_detail.html`, and
-this plan.
+**Affected files:** `apps/core/views.py`, `templates/coverage.html`,
+`apps/core/tests/test_coverage.py`, and this plan.
 
-**Decision:** Details is the complete informational Computer record, not a
-technical claim dump. Every displayed value retains source provenance, actual
-disagreements remain explicit, and source records are shown once in Details.
-Overview remains concise and surfaces lifecycle only when a Computer needs
-review or is retired; ordinary Online/Offline is availability, not lifecycle.
+**Decision:** the record fact and the authored rule are independent axes,
+matching the existing entity-model decision. A product record is Online,
+Offline, Withdrawn, No record, or (only when real data requires it) No status
+reported. The second line is Required, Required · Missing, Required · Stale,
+N/A, or Exempt. “Missing” never replaces the record fact. A global “No current
+record in Ninja, SentinelOne, ScreenConnect, or LogMeIn” shortcut preserves the old
+no-platform predicate; “No current record anywhere” also counts current Hudu
+records. Lifecycle is displayed but is not used as a proxy for current
+records.
 
-**Validation plan:** Django check, configured template loading, focused
-existing device-detail/lifecycle tests, Python compilation, and
-`git diff --check`. No migration, custom test script, production data change,
-or deployment in this scope without separate approval.
+**Verified baseline:** the live reader currently returns 6,819 rows: 5,873
+canonical Computers plus 946 current source-only/Hudu-only rows. The old “No
+platform records” predicate returns 1,365 rows. A source-neutral no-current-
+record predicate returns 1,055; the 310-row difference consists entirely of
+current Hudu evidence (54 canonical rows and 256 Hudu-only rows). Current agent
+records all report Online or Offline; there are zero live no-signal records.
+The page flags 37 SentinelOne exemptions while 84 operator decisions exist.
+Lifecycle is not current-evidence authority: 475 `pending_cleanup` Computers
+currently have qualifying source evidence.
+
+**Validation plan:** focused existing coverage tests plus cases for global
+scope, source/rule combinations, exemptions, possible matches, cards and CSV;
+Django check; template loading; Python compilation; `git diff --check`; and a
+read-only live count comparison only after an explicitly approved deployment.
+No custom test script.
+
+**Checkpoint:** the local implementation now uses one normalized record/rule
+cell model for display, filters, static cards, and CSV. The Find computers menu
+preserves the verified 1,365 no-current-records-in-the-four-products meaning
+separately from the 1,055 no-current-record-anywhere meaning. SentinelOne
+exemptions now come from saved operator decisions. Focused tests pass (10), as
+do Django check, configured template loading, Python compilation, and
+`git diff --check`. Full-file Ruff remains non-clean because of existing
+`views.py` findings; no new dependency, schema change, data write, commit,
+push, or deployment has been made.
+
+**Next action:** obtain user visual-review/release direction. If approved,
+prepare the required version/changelog release changes, then request separate
+commit and push authorization.
 
 **Release:** version 0.122.45, commit `5bf5d07` (Reorganize Computer details
 and patching), pushed to `origin` and `a-m-rose` on 2026-09-10. Portainer

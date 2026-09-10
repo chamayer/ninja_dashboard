@@ -2,6 +2,25 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.122.47] — 2026-09-10 — Computers inventory-first rework
+
+### Changed
+
+- Rebuilt the Computers coverage page around one normalized record/rule cell
+  model: a current source fact (Online, Offline, Withdrawn, No record, or No
+  status reported) and an independent authored-requirement line (Required,
+  Required · Missing, Required · Stale, N/A, or Exempt), applied consistently
+  across cells, filters, static summary cards, and CSV.
+- Replaced the top matrix with a compact "Find computers" menu; each product
+  column now filters its record status and required state independently.
+- Corrected the SentinelOne exemption reader to use saved operator decisions
+  instead of the prior source.
+- Preserved the existing "No current record in Ninja, SentinelOne,
+  ScreenConnect, or LogMeIn" shortcut alongside a new "No current record
+  anywhere" shortcut that also counts current Hudu-only records; kept Hudu,
+  possible-match, legacy URL, column, CSV, client, OS, and device-type
+  behavior otherwise unchanged.
+
 ## [0.122.46] — 2026-09-10 — Repair Computer Details
 
 ### Fixed

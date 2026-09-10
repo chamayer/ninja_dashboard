@@ -8486,14 +8486,20 @@ def _coverage_filter_url(**filters: str) -> str:
 
 @login_required
 def fleet_coverage(request: HttpRequest) -> HttpResponse:
-    """Show the master Computers inventory with current agent coverage."""
-    client_filters = [value for value in request.GET.getlist("client") if value]
+    """Show every known Computer with its product records and required state."""
+    client_filters = list(dict.fromkeys(
+        value for value in request.GET.getlist("client") if value
+    ))
     device_query = (request.GET.get("device") or "").strip().lower()
     # ``platform``, ``state``, and ``online_in`` are retained as legacy query
     # parameters for existing drill-through URLs.  New controls express a
     # condition as one source plus that source's selected statuses.
-    platform_filters = [value for value in request.GET.getlist("platform") if value]
-    online_filters = [value for value in request.GET.getlist("online_in") if value]
+    platform_filters = list(dict.fromkeys(
+        value for value in request.GET.getlist("platform") if value
+    ))
+    online_filters = list(dict.fromkeys(
+        value for value in request.GET.getlist("online_in") if value
+    ))
     requested_coverage_sources = request.GET.getlist("coverage_source")
     requested_coverage_statuses = request.GET.getlist("coverage_status")
     any_platform_filters = [
@@ -8502,18 +8508,28 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
     ]
     any_platform_selected = request.GET.get("any_platform") == "1"
     no_platform_selected = request.GET.get("no_platform") == "1"
-    hudu_filters = [
+    computer_scope_filters = list(dict.fromkeys(
+        value for value in request.GET.getlist("computer_scope")
+        if value in {
+            "has_product_record", "any_online", "any_offline",
+            "no_product_records", "no_current_records",
+            "missing_required", "stale_required",
+        }
+    ))
+    requested_record_status_filters = request.GET.getlist("record_status")
+    requested_rule_status_filters = request.GET.getlist("rule_status")
+    hudu_filters = list(dict.fromkeys(
         value for value in request.GET.getlist("hudu")
         if value in {"in_hudu", "not_in_hudu"}
-    ]
+    ))
     hudu_record_filter_active = "in_hudu" in hudu_filters
-    hudu_link_filters = [
+    hudu_link_filters = list(dict.fromkeys(
         value for value in request.GET.getlist("hudu_links")
         if value in {"has_links", "no_links"}
-    ]
+    ))
     hudu_record_filter = request.GET.get("hudu_record_filter")
     if hudu_record_filter not in {
-        "any", "has_current", "has_archived", "current_only", "archived_only",
+        "any", "has_current", "has_archived", "current_only", "archived_only", "both",
     }:
         legacy_mode = request.GET.get("hudu_archive")
         if legacy_mode == "archived":
@@ -8522,12 +8538,16 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             hudu_record_filter = "any"
         else:
             hudu_record_filter = "any"
-    s1_exemption_filters = [
+    s1_exemption_filters = list(dict.fromkeys(
         value for value in request.GET.getlist("s1_exemption")
         if value in {"exempt", "not_exempt"}
-    ]
-    os_family_filters = [value for value in request.GET.getlist("os_family") if value]
-    device_type_filters = [value for value in request.GET.getlist("device_type") if value]
+    ))
+    os_family_filters = list(dict.fromkeys(
+        value for value in request.GET.getlist("os_family") if value
+    ))
+    device_type_filters = list(dict.fromkeys(
+        value for value in request.GET.getlist("device_type") if value
+    ))
     state_filters = [
         value for value in request.GET.getlist("state") if value in _COVERAGE_STATES
     ]
@@ -8742,9 +8762,15 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                 SELECT d.id, d.client_id, c.slug, c.display_name,
                        COALESCE(d.canonical_hostname, ''),
                        COALESCE(d.os_family, ''), d.device_type,
-                       d.lifecycle_status
+                       d.lifecycle_status,
+                       COALESCE(decision.value, '{}'::jsonb) ? 'agent.edr'
+                           AS s1_exempt
                 FROM operations.devices d
                 JOIN operations.clients c ON c.id = d.client_id
+                LEFT JOIN operations.device_operator_decisions decision
+                  ON decision.tenant_id = d.tenant_id
+                 AND decision.device_id = d.id
+                 AND decision.dimension = 'exemptions'
                 WHERE d.tenant_id = 1
                   AND d.deleted_at IS NULL
                   AND d.lifecycle_status <> 'retired'
@@ -8827,6 +8853,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             "device_id": row[0], "client_id": row[1], "client_slug": row[2],
             "client_name": row[3], "hostname": row[4], "os_family": row[5],
             "device_type": row[6], "lifecycle_status": row[7],
+            "s1_exempt": bool(row[8]),
         }
         for row in computer_rows
     }
@@ -8945,13 +8972,42 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
     platforms = sorted(
         set(coverage_platforms)
         | {platform for states in source_states_by_device.values() for platform in states}
+        | {
+            platform
+            for observations in source_observations_by_device.values()
+            for platform in observations
+        }
     )
+    record_status_filters: dict[str, list[str]] = {}
+    rule_status_filters: dict[str, list[str]] = {}
+    allowed_record_statuses = {
+        "Online", "Offline", "Withdrawn", "No record",
+        "No status reported", "Possible match",
+    }
+    allowed_rule_statuses = {"Required", "Missing", "Stale", "N/A", "Exempt"}
+    for value in requested_record_status_filters:
+        product, separator, status = value.partition("|")
+        if separator and product in platforms and status in allowed_record_statuses:
+            record_status_filters.setdefault(product, []).append(status)
+    for value in requested_rule_status_filters:
+        product, separator, status = value.partition("|")
+        if separator and product in platforms and status in allowed_rule_statuses:
+            rule_status_filters.setdefault(product, []).append(status)
+
+    # Translate bookmarks made by the previous combined column filter.  The
+    # new controls keep the record fact separate from the authored rule.
     platform_status_filters: dict[str, list[str]] = {}
     allowed_platform_states = {*_COVERAGE_STATES, "Not applicable", "Possible match"}
     for value in requested_platform_status_filters:
         platform, separator, status = value.partition("|")
         if separator and platform in platforms and status in allowed_platform_states:
             platform_status_filters.setdefault(platform, []).append(status)
+            if status in {"Online", "Offline", "Possible match"}:
+                record_status_filters.setdefault(platform, []).append(status)
+            elif status in {"Missing", "Stale"}:
+                rule_status_filters.setdefault(platform, []).append(status)
+            elif status == "Not applicable":
+                rule_status_filters.setdefault(platform, []).append("N/A")
     coverage_source_filters = {
         platform for platform in requested_coverage_sources if platform in platforms
     }
@@ -8973,8 +9029,15 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             coverage_status_filters.setdefault(platform, []).append("Online")
     for platform in coverage_source_filters:
         coverage_status_filters.setdefault(platform, [])
+    for selections in (record_status_filters, rule_status_filters, coverage_status_filters):
+        for platform, statuses in selections.items():
+            selections[platform] = list(dict.fromkeys(statuses))
     platform_filter_columns = [
-        {"name": platform, "selected_states": platform_status_filters.get(platform, [])}
+        {
+            "name": platform,
+            "selected_record_statuses": record_status_filters.get(platform, []),
+            "selected_rule_statuses": rule_status_filters.get(platform, []),
+        }
         for platform in platforms
     ]
     coverage_filter_sources = [
@@ -9005,13 +9068,17 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             "has_archived": has_archived,
             "current_only": has_current and not has_archived,
             "archived_only": has_archived and not has_current,
+            "both": has_current and has_archived,
         }[hudu_record_filter]
         matching_records = records if not hudu_record_filter_active else [
             record for record in records
-            if hudu_record_filter in {"any", "has_current", "current_only"}
-            and not record["is_archived"]
-            or hudu_record_filter in {"any", "has_archived", "archived_only"}
-            and record["is_archived"]
+            if (
+                hudu_record_filter in {"any", "has_current", "current_only", "both"}
+                and not record["is_archived"]
+            ) or (
+                hudu_record_filter in {"any", "has_archived", "archived_only", "both"}
+                and record["is_archived"]
+            )
         ]
         hudu = {
             "hudu_present": bool(records),
@@ -9070,7 +9137,6 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
     inventory_rows = []
     for device_id, computer in devices_by_id.items():
         coverage_states = coverage_by_device.get(device_id, {})
-        s1_exempt = any(row["s1_exempt"] for row in coverage_states.values())
         inventory_rows.append({
             **computer,
             "inventory_key": f"device:{device_id}",
@@ -9078,7 +9144,6 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             "source_states": source_states_by_device.get(device_id, {}),
             "source_observations": source_observations_by_device.get(device_id, {}),
             "platform_states": coverage_states,
-            "s1_exempt": s1_exempt,
             "possible_match": None,
         })
 
@@ -9165,6 +9230,97 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         else:
             row["review_url"] = ""
 
+    def observation_age_label(at: datetime | None) -> str:
+        if at is None:
+            return ""
+        seconds = max(0, int((timezone.now() - at).total_seconds()))
+        if seconds < 3600:
+            return f"{max(1, seconds // 60)}m"
+        if seconds < 86400:
+            return f"{seconds // 3600}h"
+        return f"{seconds // 86400}d"
+
+    def inventory_platform_cell(row: dict, platform: str) -> dict:
+        """Return the one product-cell model used by UI, filters, cards, and CSV."""
+        possible_match = row["possible_match"] if platform == "Ninja" else None
+        coverage = row["platform_states"].get(platform)
+        source_status = row["source_states"].get(platform)
+        observation = row["source_observations"].get(platform)
+
+        if source_status == "Current" or (
+            not source_status and observation and observation["state"] == "Current"
+        ):
+            record_status = "No status reported"
+        elif source_status in {"Online", "Offline"}:
+            record_status = source_status
+        elif observation and observation["state"] == "Withdrawn":
+            record_status = "Withdrawn"
+        else:
+            record_status = "No record"
+
+        record_age = ""
+        if record_status == "Withdrawn" and observation:
+            record_age = observation_age_label(observation["withdrawn_at"])
+        elif record_status == "Offline" and observation:
+            record_age = observation_age_label(observation["current_seen_at"])
+
+        if platform == "SentinelOne" and row["s1_exempt"]:
+            rule_status = "Exempt"
+            rule_label = "Exempt"
+        elif coverage:
+            coverage_status = coverage.get("status")
+            if coverage_status == "Missing":
+                rule_status = "Missing"
+                rule_label = "Required · Missing"
+            elif coverage_status == "Stale":
+                rule_status = "Stale"
+                rule_label = "Required · Stale"
+            else:
+                rule_status = "Required"
+                rule_label = "Required"
+        else:
+            rule_status = "N/A"
+            rule_label = "N/A"
+
+        record_tooltip = {
+            "Online": f"{platform} currently reports this Computer online.",
+            "Offline": f"{platform} has a current record but reports it offline.",
+            "Withdrawn": f"{platform} previously reported this Computer but no longer does.",
+            "No record": f"No current {platform} record is linked to this Computer.",
+            "No status reported": f"{platform} has a current record without an online or offline status.",
+        }[record_status]
+        rule_tooltip = {
+            "Required": f"{platform} is required for this Computer.",
+            "Missing": f"{platform} is required, but no qualifying current record was found.",
+            "Stale": f"{platform} is required, but its qualifying record is stale.",
+            "N/A": f"{platform} is not required for this Computer.",
+            "Exempt": "This Computer has a saved SentinelOne exemption.",
+        }[rule_status]
+        return {
+            "platform": platform,
+            "record_status": record_status,
+            "record_age": record_age,
+            "record_url": _coverage_filter_url(
+                record_status=f"{platform}|{record_status}",
+            ),
+            "record_tooltip": record_tooltip,
+            "rule_status": rule_status,
+            "rule_label": rule_label,
+            "rule_url": (
+                _coverage_filter_url(s1_exemption="exempt")
+                if rule_status == "Exempt"
+                else _coverage_filter_url(rule_status=f"{platform}|{rule_status}")
+            ),
+            "rule_tooltip": rule_tooltip,
+            "possible_match": possible_match,
+            "attention": rule_status in {"Missing", "Stale"},
+        }
+
+    for row in inventory_rows:
+        row["platform_cells_by_name"] = {
+            platform: inventory_platform_cell(row, platform) for platform in platforms
+        }
+
     def matches(row: dict) -> bool:
         if client_filters and row["client_slug"] not in client_filters:
             return False
@@ -9172,6 +9328,45 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             return False
         if no_platform_selected and row["source_states"]:
             return False
+        if computer_scope_filters:
+            named_products = {
+                name: row["platform_cells_by_name"].get(name)
+                for name in ("Ninja", "SentinelOne", "ScreenConnect", "LogMeIn")
+            }
+            named_products = {
+                name: cell for name, cell in named_products.items() if cell is not None
+            }
+            has_named_record = any(
+                cell["record_status"] in {"Online", "Offline", "No status reported"}
+                for cell in named_products.values()
+            )
+            has_current_record = any(
+                cell["record_status"] in {"Online", "Offline", "No status reported"}
+                for cell in row["platform_cells_by_name"].values()
+            )
+            scope_matches = {
+                "has_product_record": has_named_record,
+                "any_online": any(
+                    cell["record_status"] == "Online" for cell in named_products.values()
+                ),
+                "any_offline": any(
+                    cell["record_status"] == "Offline" for cell in named_products.values()
+                ),
+                "no_product_records": not has_named_record,
+                "no_current_records": (
+                    not has_current_record and row["hudu_current_count"] == 0
+                ),
+                "missing_required": any(
+                    item.get("status") == "Missing"
+                    for item in row["platform_states"].values()
+                ),
+                "stale_required": any(
+                    item.get("status") == "Stale"
+                    for item in row["platform_states"].values()
+                ),
+            }
+            if not any(scope_matches[value] for value in computer_scope_filters):
+                return False
         if any_platform_selected or any_platform_filters:
             row_states = {
                 item["status"] for item in row["platform_states"].values()
@@ -9220,48 +9415,102 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                 return False
         if hudu_record_filter_active and not row["hudu_matches_record_filter"]:
             return False
-        for platform, statuses in platform_status_filters.items():
-            if row["possible_match"] and platform == "Ninja":
-                cell_status = "Possible match"
-            else:
-                cell_status = (
-                    row["platform_states"].get(platform, {}).get("status")
-                    or row["source_states"].get(platform)
-                    or "Not applicable"
-                )
-            if cell_status not in statuses:
+        for platform, statuses in record_status_filters.items():
+            cell = row["platform_cells_by_name"][platform]
+            record_matches = cell["record_status"] in statuses
+            if "Possible match" in statuses and cell["possible_match"]:
+                record_matches = True
+            if not record_matches:
+                return False
+        for platform, statuses in rule_status_filters.items():
+            cell = row["platform_cells_by_name"][platform]
+            rule_matches = cell["rule_status"] in statuses
+            if "Required" in statuses and cell["rule_status"] in {
+                "Required", "Missing", "Stale",
+            }:
+                rule_matches = True
+            if not rule_matches:
                 return False
         return True
 
     device_rows = [row for row in inventory_rows if matches(row)]
+    record_status_order = (
+        "Online", "Offline", "No status reported", "Withdrawn", "No record",
+    )
     platform_cards = []
-    for platform in coverage_platforms:
-        counts = {state: 0 for state in _COVERAGE_STATES}
+    for platform in platforms:
+        record_counts = {status: 0 for status in record_status_order}
+        rule_counts = {status: 0 for status in ("Required", "Missing", "Stale", "Exempt")}
         for inventory_row in inventory_rows:
-            # Present platform records count even when the platform is not a
-            # requirement.  Missing/Stale remains requirement-driven because
-            # only a requirement makes absence meaningful.
-            status = (
-                inventory_row["source_states"].get(platform)
-                or inventory_row["platform_states"].get(platform, {}).get("status")
-            )
-            if status in counts:
-                counts[status] += 1
+            cell = inventory_row["platform_cells_by_name"][platform]
+            record_counts[cell["record_status"]] += 1
+            if cell["rule_status"] in {"Required", "Missing", "Stale"}:
+                rule_counts["Required"] += 1
+            if cell["rule_status"] in {"Missing", "Stale", "Exempt"}:
+                rule_counts[cell["rule_status"]] += 1
+        source_options = [
+            status for status in record_status_order
+            if record_counts[status] or status != "No status reported"
+        ]
+        if platform == "Ninja":
+            source_options.append("Possible match")
+        next(
+            column for column in platform_filter_columns if column["name"] == platform
+        )["record_statuses"] = source_options
         platform_cards.append({
             "platform": platform,
-            "applicable_count": sum(counts.values()),
             "counts": [
                 {
-                    "name": state,
-                    "count": counts[state],
+                    "name": status,
+                    "count": record_counts[status],
                     "url": _coverage_filter_url(
-                        coverage_source=platform,
-                        coverage_status=f"{platform}|{state}",
+                        record_status=f"{platform}|{status}",
                     ),
                 }
-                for state in _COVERAGE_STATES
+                for status in source_options if status != "Possible match"
+            ],
+            "rule_counts": [
+                {
+                    "name": status,
+                    "count": rule_counts[status],
+                    "url": (
+                        _coverage_filter_url(s1_exemption="exempt")
+                        if status == "Exempt"
+                        else _coverage_filter_url(rule_status=f"{platform}|{status}")
+                    ),
+                }
+                for status in ("Required", "Missing", "Stale", "Exempt")
+                if rule_counts[status]
             ],
         })
+
+    hudu_counts = {
+        "Current only": sum(
+            bool(row["hudu_current_count"] and not row["hudu_archived_count"])
+            for row in inventory_rows
+        ),
+        "Current + archived": sum(
+            bool(row["hudu_current_count"] and row["hudu_archived_count"])
+            for row in inventory_rows
+        ),
+        "Archived only": sum(
+            bool(not row["hudu_current_count"] and row["hudu_archived_count"])
+            for row in inventory_rows
+        ),
+        "No record": sum(not row["hudu_present"] for row in inventory_rows),
+    }
+    hudu_urls = {
+        "Current only": _coverage_filter_url(
+            hudu="in_hudu", hudu_record_filter="current_only",
+        ),
+        "Current + archived": _coverage_filter_url(
+            hudu="in_hudu", hudu_record_filter="both",
+        ),
+        "Archived only": _coverage_filter_url(
+            hudu="in_hudu", hudu_record_filter="archived_only",
+        ),
+        "No record": _coverage_filter_url(hudu="not_in_hudu"),
+    }
 
     filtered_summary = {
         "clients": len({row["client_slug"] for row in device_rows}),
@@ -9270,71 +9519,82 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         "not_in_hudu": sum(not row["hudu_present"] for row in device_rows),
     }
 
-    def observation_age_label(at: datetime | None) -> str:
-        if at is None:
-            return ""
-        seconds = max(0, int((timezone.now() - at).total_seconds()))
-        if seconds < 3600:
-            return f"{max(1, seconds // 60)}m"
-        if seconds < 86400:
-            return f"{seconds // 3600}h"
-        return f"{seconds // 86400}d"
-
-    def inventory_platform_cell(row: dict, platform: str) -> dict:
-        possible_match = row["possible_match"] if platform == "Ninja" else None
-        coverage = row["platform_states"].get(platform)
-        source_status = row["source_states"].get(platform)
-        observation = row["source_observations"].get(platform)
-        if possible_match:
-            return {
-                "platform": platform,
-                "status": "Possible match",
-                "age": "",
-                "possible_match": possible_match,
-                "url": "",
-                "attention": False,
-                "tooltip": "A same-client name suggests a possible match, but it is not a confirmed source record.",
-            }
-        if observation and observation["state"] == "Withdrawn":
-            status = "Withdrawn"
-            age = observation_age_label(observation["withdrawn_at"])
-        elif observation and observation["state"] == "Current":
-            status = "Stale" if coverage and coverage.get("status") == "Stale" else source_status
-            status = status or "Current"
-            age = observation_age_label(observation["current_seen_at"]) if status in {"Offline", "Stale"} else ""
-        else:
-            status = "Missing" if coverage else "N/A"
-            age = ""
-        tooltip = {
-            "Online": "This platform currently reports the Computer online.",
-            "Offline": "This platform still has the record but reports the Computer offline.",
-            "Stale": "This platform still has the record, but its required-agent status is stale.",
-            "Current": "This platform has the record but did not report online or offline status.",
-            "Withdrawn": "This platform previously had the record but no longer reports it.",
-            "Missing": "This platform is required for this Computer but has no current record.",
-            "N/A": "This platform is not required for this Computer and has no current record.",
-        }[status]
-        return {
-            "platform": platform,
-            "status": status,
-            "age": age,
-            "possible_match": None,
-            "url": _coverage_filter_url(
-                coverage_source=platform,
-                coverage_status=(
-                    f"{platform}|{coverage.get('status', '')}"
-                ),
-            ) if coverage else "",
-            "attention": bool(coverage and coverage.get("status") in {"Missing", "Stale"}),
-            "tooltip": tooltip,
+    filter_logic_parts = []
+    if client_filters:
+        selected_client_names = [
+            client["name"] for client in filter_clients
+            if client["slug"] in client_filters
+        ]
+        filter_logic_parts.append(f"Client: {' or '.join(selected_client_names)}")
+    if device_query:
+        filter_logic_parts.append(f"Computer name contains “{device_query}”")
+    scope_labels = {
+        "has_product_record": "Found now in Ninja, SentinelOne, ScreenConnect, or LogMeIn",
+        "any_online": "Online in at least one of those four",
+        "any_offline": "Offline in at least one of those four",
+        "no_product_records": "No current record in Ninja, SentinelOne, ScreenConnect, or LogMeIn",
+        "no_current_records": "No current record anywhere",
+        "missing_required": "Missing something required",
+        "stale_required": "Something required is stale",
+    }
+    if computer_scope_filters:
+        filter_logic_parts.append(
+            "Find computers: "
+            + " or ".join(scope_labels[value] for value in computer_scope_filters)
+        )
+    for platform, statuses in record_status_filters.items():
+        filter_logic_parts.append(f"{platform}: {' or '.join(statuses)}")
+    for platform, statuses in rule_status_filters.items():
+        filter_logic_parts.append(f"{platform} required: {' or '.join(statuses)}")
+    if hudu_filters:
+        labels = {"in_hudu": "In Hudu", "not_in_hudu": "Not in Hudu"}
+        filter_logic_parts.append("Hudu: " + " or ".join(labels[value] for value in hudu_filters))
+    if hudu_record_filter_active and hudu_record_filter != "any":
+        hudu_record_labels = {
+            "has_current": "has a current record",
+            "has_archived": "has an archived record",
+            "current_only": "current records only",
+            "archived_only": "archived records only",
+            "both": "has current and archived records",
         }
+        filter_logic_parts.append(f"Hudu: {hudu_record_labels[hudu_record_filter]}")
+    if hudu_link_filters:
+        labels = {"has_links": "Has links", "no_links": "No links"}
+        filter_logic_parts.append(
+            "Hudu links: " + " or ".join(labels[value] for value in hudu_link_filters)
+        )
+    if s1_exemption_filters:
+        labels = {"exempt": "Exempt", "not_exempt": "Not exempt"}
+        filter_logic_parts.append(
+            "SentinelOne: "
+            + " or ".join(labels[value] for value in s1_exemption_filters)
+        )
+    if os_family_filters:
+        filter_logic_parts.append("OS: " + " or ".join(os_family_filters))
+    if device_type_filters:
+        filter_logic_parts.append("Type: " + " or ".join(device_type_filters))
+    if not filter_logic_parts:
+        filter_logic_parts.append("No filters selected — showing every known Computer")
+    filter_logic = " AND ".join(filter_logic_parts)
+    filters_active = bool(
+        client_filters or device_query or computer_scope_filters
+        or record_status_filters or rule_status_filters
+        or any_platform_selected or no_platform_selected or any_platform_filters
+        or coverage_source_filters or hudu_filters or hudu_link_filters
+        or hudu_record_filter != "any" or s1_exemption_filters
+        or platform_filters or state_filters or platform_status_filters
+        or os_family_filters or device_type_filters
+    )
 
     if wants_csv(request):
         def inventory_platform_value(row: dict, platform: str) -> str:
-            cell = inventory_platform_cell(row, platform)
+            cell = row["platform_cells_by_name"][platform]
+            record = cell["record_status"]
+            if cell["record_age"]:
+                record = f"{record} ({cell['record_age']})"
             if cell["possible_match"]:
-                return f"Possible: {cell['possible_match']['hostname']}"
-            return f"{cell['status']} ({cell['age']})" if cell["age"] else cell["status"]
+                record += f"; possible match: {cell['possible_match']['hostname']}"
+            return f"{record}; {cell['rule_label']}"
 
         return csv_response(
             [
@@ -9366,7 +9626,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                 )
                 for platform in platforms
             ],
-            filename_stem="fleet_coverage",
+            filename_stem="inventory_computers",
         )
 
     paginator = Paginator(device_rows, 100)
@@ -9377,7 +9637,9 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
     device_rows = list(page_obj.object_list)
 
     for row in device_rows:
-        row["platform_cells"] = [inventory_platform_cell(row, platform) for platform in platforms]
+        row["platform_cells"] = [
+            row["platform_cells_by_name"][platform] for platform in platforms
+        ]
 
     return render(
         request,
@@ -9389,7 +9651,15 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             "paginator": paginator,
             "page_query": page_query,
             "platform_cards": platform_cards,
+            "hudu_card": {
+                "counts": [
+                    {"name": name, "count": count, "url": hudu_urls[name]}
+                    for name, count in hudu_counts.items()
+                ],
+            },
             "filtered_summary": filtered_summary,
+            "filter_logic": filter_logic,
+            "filters_active": filters_active,
             "platforms": platforms,
             "platform_filter_columns": platform_filter_columns,
             "coverage_filter_sources": coverage_filter_sources,
@@ -9406,6 +9676,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             "any_platform_filters": any_platform_filters,
             "any_platform_selected": any_platform_selected,
             "no_platform_selected": no_platform_selected,
+            "computer_scope_filters": computer_scope_filters,
             "hudu_filters": hudu_filters,
             "hudu_link_filters": hudu_link_filters,
             "hudu_record_filter": hudu_record_filter,
@@ -9415,6 +9686,8 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             "device_type_filters": device_type_filters,
             "state_filters": state_filters,
             "platform_status_filters": platform_status_filters,
+            "record_status_filters": record_status_filters,
+            "rule_status_filters": rule_status_filters,
         },
     )
 
