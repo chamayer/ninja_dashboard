@@ -9472,6 +9472,9 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
     record_status_order = (
         "Online", "Offline", "No status reported", "Withdrawn", "No record",
     )
+    present_record_statuses = tuple(
+        status for status in record_status_order if status != "No record"
+    )
     platform_cards = []
     for platform in platforms:
         record_counts = {status: 0 for status in record_status_order}
@@ -9495,8 +9498,8 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                 for status in record_status_order
             ] + [{
                 "name": "Total",
-                "count": sum(record_counts.values()),
-                "url": agent_filter_url(platform, states=record_status_order),
+                "count": sum(record_counts[status] for status in present_record_statuses),
+                "url": agent_filter_url(platform, states=present_record_statuses),
             }],
             "requirement_total": requirement_total,
             "requirement_total_url": agent_filter_url(platform, requirement="Required"),
@@ -9537,7 +9540,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             hudu="in_hudu", hudu_record_filter="archived_only",
         ),
         "No record": _coverage_filter_url(hudu="not_in_hudu"),
-        "Total": _coverage_filter_url(),
+        "Total": _coverage_filter_url(hudu="in_hudu"),
     }
 
     filtered_summary = {
@@ -9727,7 +9730,11 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                 "counts": [
                     {"name": name, "count": count, "url": hudu_urls[name]}
                     for name, count in hudu_counts.items()
-                ] + [{"name": "Total", "count": len(inventory_rows), "url": hudu_urls["Total"]}],
+                ] + [{
+                    "name": "Total",
+                    "count": sum(row["hudu_present"] for row in inventory_rows),
+                    "url": hudu_urls["Total"],
+                }],
             },
             "filtered_summary": filtered_summary,
             "filter_logic": filter_logic,

@@ -39,8 +39,9 @@ distinct without being framed as an exception.
 Every agent card presents its five source states plus Total in a fixed two
 column by three row grid. This makes “No status reported” visible even at zero,
 keeps cards equal, gives multi-digit values room, and makes Total clickable as
-the union of all source-record states. Hudu uses its four mutually exclusive
-record groups plus Total in the same two-column grid. Count values never wrap.
+the union of source states that have a record (not No record). Hudu uses its
+four mutually exclusive record groups plus an in-Hudu Total in the same
+two-column grid. Count values never wrap.
 The Agents menu does not clip its nested State or Required menus; those menus
 are positioned from their own controls, close on an outside click or Escape,
 and only one may remain open at a time.
@@ -78,7 +79,7 @@ were addressed. The normal results header now shows a short grouped filter
 summary; the full parenthesized expression is available only through “Show
 exact logic.”
 
-**Next action:** release the approved no-migration patch as `0.122.53`: commit
+**Next action:** release the approved no-migration patch as `0.122.54`: commit
 only the scoped files, push `origin` then `a-m-rose`, trigger the configured
 Portainer redeploy, and verify service health.
 

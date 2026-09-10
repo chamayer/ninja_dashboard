@@ -2,6 +2,14 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.122.54] — 2026-09-10 — Correct Computer card totals
+
+### Fixed
+
+- Made each agent Total count only Computers with a record in that source,
+  excluding No record; Hudu Total now likewise counts only Computers in Hudu.
+  The Total drill-throughs use those same source-specific definitions.
+
 ## [0.122.53] — 2026-09-10 — Normalize Computer card metrics
 
 ### Changed

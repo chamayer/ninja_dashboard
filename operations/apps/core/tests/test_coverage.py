@@ -253,7 +253,7 @@ def test_coverage_uses_effective_requirements_and_source_specific_filters(monkey
         "No status reported": 0,
         "Withdrawn": 0,
         "No record": 1,
-        "Total": 4,
+        "Total": 3,
     }
     assert cards["Ninja"]["requirement_total"] == 2
     assert {item["name"]: item["count"] for item in cards["Ninja"]["requirement_exceptions"]} == {
@@ -268,7 +268,7 @@ def test_coverage_uses_effective_requirements_and_source_specific_filters(monkey
         "Current + archived": 0,
         "Archived only": 0,
         "No record": 2,
-        "Total": 4,
+        "Total": 2,
     }
 
 
