@@ -2,6 +2,16 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.122.46] — 2026-09-10 — Repair Computer Details
+
+### Fixed
+
+- Restored Computer Details after the sectioned layout release. Every reported
+  field now retains its layout section during rendering.
+- Moved the Needs review/Retired lifecycle notice to immediately above the
+  device issues list on Overview, while retaining lifecycle review actions in
+  Details → Source records.
+
 ## [0.122.45] — 2026-09-10 — Clearer Computer information and patching
 
 ### Changed

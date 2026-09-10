@@ -31,7 +31,23 @@ existing device-detail/lifecycle tests, Python compilation, and
 `git diff --check`. No migration, custom test script, production data change,
 or deployment in this scope without separate approval.
 
-**Current checkpoint:** Details now organizes every normalized displayed
+**Release:** version 0.122.45, commit `5bf5d07` (Reorganize Computer details
+and patching), pushed to `origin` and `a-m-rose` on 2026-09-10. Portainer
+deployed the matching commit; no migration was included. Operations and ingest
+are healthy, and the Operations health endpoint returned `ok`.
+
+**Validation completed:** Django check, Python compilation, configured
+template loading, focused existing device-detail/lifecycle tests (5 passed),
+`git diff --check`, and deployed service-health checks. The test environment
+emitted only pre-existing Python 3.14/Django async deprecation warnings.
+
+**Hotfix checkpoint:** deployed Details exposed a missing `section` key while
+building the section list for rendered claims. The section was calculated but
+not copied into the final field object. The correction restores that key only;
+no query, data, schema, or layout behavior changes. Validate the failing
+Details route after release.
+
+**Previous release checkpoint:** Details now organizes every normalized displayed
 claim into Identity and inventory, Operating system, Hardware and
 virtualization, Network, Security and management, or Other reported
 information. Each value lists its reporting source and record type, and real
@@ -42,7 +58,7 @@ redirect directly to that section. Overview has an attention-only lifecycle
 banner and no longer makes dead-end links to Details; tabs are Overview,
 Details, Patching, Activity, Software. The new Patching tab shows existing
 policy/override, restart and install information, and current Ninja patch
-evidence. Next action: final focused validation and request release approval.
+evidence.
 
 ## Previous release — Restore Computer Overview software access
 

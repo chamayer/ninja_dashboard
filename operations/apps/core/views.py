@@ -2359,6 +2359,7 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
                 {
                     "name": field["name"],
                     "sensitivity": field["sensitivity"],
+                    "section": field["section"],
                     "value_groups": value_groups,
                     "differs": len(value_groups) > 1,
                 }
