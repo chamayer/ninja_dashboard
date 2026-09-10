@@ -2,6 +2,18 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.122.57] — 2026-09-10 — Clarify Computer role and duplicate review
+
+### Changed
+
+- Added a separate Computer Role column and filter for Server, Workstation,
+  and Unknown; hardware type remains independent and is included in CSV export.
+- Consolidated possible duplicate Computers into the Findings workflow with
+  client-scoped collision evidence, links to each Computer, and a direct
+  comparison action. Removed the separate Merges navigation item.
+- Retired the Hudu-only duplicate-record finding emission; Hudu remains source
+  evidence for the same cross-source duplicate-Computer review.
+
 ## [0.122.56] — 2026-09-10 — Safeguard VMware guest reconciliation
 
 ### Fixed

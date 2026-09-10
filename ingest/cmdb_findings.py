@@ -17,8 +17,9 @@ connector already computes and which was verified against production:
 * different serials  -> the CMDB linked a wrong machine (`cmdb_link_incorrect`).
   Observed cause is the CMDB's integration matching on a name prefix, e.g.
   `ADH-READY17` picking up both `adh-ready17` and `adh-ready1`.
-* same hostname      -> Operations holds two device records for one machine
-  (`duplicate_device_records`). Not a CMDB fault.
+* same hostname      -> Operations may hold two device records for one
+  computer. The identity resolver emits the single cross-source
+  ``identity_conflict`` Finding; Hudu is evidence for it, not a second queue.
 
 Findings must attach to something clickable in Operations, and `subject_id` is
 NOT NULL with a closed `subject_type` list (client / device / client_user /
@@ -233,13 +234,10 @@ def evaluate(*, dry_run: bool = True) -> dict[str, int]:
         # 2/3. divergent — split on evidence
         cur.execute(_DIVERGENT, (TENANT_ID, _PLATFORM))
         wrong_by_client: dict[Any, list] = {}
-        dupes: list[tuple] = []
         for entity_key, client_id, page, layout, url, _devs, hostnames, serials, devlist in cur.fetchall():
             item = {"asset_id": entity_key, "name": page, "layout": layout,
                     "url": url, "devices": devlist}
-            if hostnames == 1:
-                dupes.append((client_id, item, devlist))
-            elif serials > 1:
+            if hostnames != 1 and serials > 1:
                 wrong_by_client.setdefault(client_id, []).append(item)
 
         wrong_keys = []
@@ -256,21 +254,13 @@ def evaluate(*, dry_run: bool = True) -> dict[str, int]:
         counts["cmdb_link_incorrect"] = len(wrong_keys)
         counts["cmdb_link_incorrect_pages"] = sum(len(v) for v in wrong_by_client.values())
 
-        dupe_keys = []
-        for client_id, item, devlist in dupes:
-            # File against the device carrying a serial — the better-evidenced
-            # record of the pair — so the finding has a concrete subject.
-            anchor = next((d for d in devlist if d.get("serial")), devlist[0])
-            subject = uuid.UUID(anchor["device_id"])
-            key = _condition_key(TENANT_ID, client_id, subject, "duplicate_device_records", _PLATFORM)
-            dupe_keys.append(key)
-            if not dry_run:
-                _upsert(
-                    cur, tenant_id=TENANT_ID, finding_type_id=ft_dupe,
-                    client_id=client_id, subject_type="device", subject_id=subject,
-                    condition_key=key, severity="medium", now=now, details=item,
-                )
-        counts["duplicate_device_records"] = len(dupe_keys)
+        # A Hudu page that shares a name with multiple Computers is useful
+        # evidence, but not a distinct operational condition.  The identity
+        # resolver owns the one client-scoped duplicate-Computer Finding.  An
+        # empty key set retires legacy Hudu-only duplicate findings on this
+        # evaluator's next normal run.
+        dupe_keys: list[str] = []
+        counts["duplicate_device_records"] = 0
 
         # 4. unintegrated vendors seen through the aggregator
         cur.execute(_UNINTEGRATED, (TENANT_ID, _PLATFORM))

@@ -1,11 +1,49 @@
 # Active Operations implementation plan
 
-## ACTIVE TASK — Stabilize Ninja VMware guest identity
+## ACTIVE TASK — Show Computer role and consolidate duplicate review
 
-**Status:** reconciliation safeguard in progress.
+**Status:** ready for approved commit and push.
 
-**Goal:** prevent Ninja VMware host movement from minting duplicate Computers
-while preserving every raw Ninja record and existing evidence history.
+**Goal:** make the Computers inventory show and filter Server, Workstation, and
+Unknown as a distinct role, alongside the separate hardware-type field; surface
+possible duplicate Computers as one evidence-led Finding workflow instead of a
+separate Merges queue.
+
+**Scope:** add a Role table column and Role multi-select filter to
+`/inventory/computers/`; include it in CSV export and the displayed filter
+summary. Reconcile current same-client/name collisions into scoped
+`identity_conflict` findings with candidate links and a direct comparison
+action. Retire the duplicate Hudu-only finding emission and remove the Merges
+navigation surface. Do not infer or rewrite physical hardware types and do not
+automatically combine Computers.
+
+**Affected files:** Computers inventory reader/template/tests; identity and
+CMDB finding evaluators; Findings and navigation templates; release metadata;
+and this plan. No migration or source-data rewrite.
+
+**Decision:** hardware type remains Physical, VM, Hypervisor host, Network
+device, or Unknown. Server and Workstation remain roles because either may be
+physical or virtual. The type filter continues to list actual current values;
+the role filter exposes current role values separately. A source collision is
+derived as one `identity_conflict` Finding, scoped by client plus normalized
+name, with the matching Computers and the concrete signal displayed. A signal
+prompts an operator comparison; it never authorizes an automatic merge.
+
+**Validation plan:** focused coverage-page tests plus focused identity-query
+tests, Django check, compilation/import check, and diff check.
+
+**Checkpoint:** live data contains Servers, Workstations, and Unknown roles;
+the existing type filter is data-derived and omits Physical because no current
+Computer has that positive hardware classification.
+
+**Validation completed:** focused Computers inventory regression tests (12
+passed), Django system check, Python compilation of the two changed ingest
+modules, and `git diff --check` passed. The full-file Ruff check remains
+blocked by pre-existing violations throughout `views.py`; this change introduces
+none.
+
+**Next action:** commit and push the approved release, then use the normal
+resolver and CMDB evaluator to refresh the derived findings.
 
 **Scope:** make a VMware guest with an exact VMX path use a stable, source-
 scoped observation identity: Ninja organization plus normalized VMX path.
@@ -85,9 +123,13 @@ The command now follows the existing UI combine boundary: it atomically moves
 source evidence and tombstones duplicates, while the normal ingest projection
 converges source links later.
 
-**Next action:** release version 0.122.56, repeat the fresh dry run, and apply
-only its freshly measured pins. Verify the post-combine device population and
-service health.
+**Release and validation:** version 0.122.55 (`b0ff76e`) and safeguard version
+0.122.56 (`f7aaef3`) were pushed to `origin` and `a-m-rose` on 2026-09-10;
+Portainer deployed `f7aaef3` with no migration. The guarded post-deployment
+dry run measured 53 groups, 476 Computers, digest
+`26010b8b06241781a33bcd2c1806ea5475dde2837cd6d8fed295bb84120cb113`; the
+pinned apply combined 423 duplicate anchors. The final dry run reports zero
+eligible groups. Operations and ingest health endpoints both report healthy.
 
 **Release:** version 0.122.45, commit `5bf5d07` (Reorganize Computer details
 and patching), pushed to `origin` and `a-m-rose` on 2026-09-10. Portainer

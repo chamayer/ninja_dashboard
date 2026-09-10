@@ -16,6 +16,7 @@ entity_observations directly rather than consuming a queue table.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import uuid
 from typing import Any
@@ -43,6 +44,12 @@ log = logging.getLogger(__name__)
 
 TENANT_ID = 1
 _MIN_IDENTITY_CANDIDATES = 2
+
+
+def _identity_conflict_key(client_id: uuid.UUID, hostname: str) -> str:
+    """Stable, client-scoped key for one possible duplicate Computer group."""
+    digest = hashlib.md5(f"{client_id}:{hostname}".encode()).hexdigest()
+    return f"identity_conflict:{digest}"
 
 
 def drain_resolution(batch_size: int = 200, *, refresh_current: bool = True) -> int:
@@ -306,7 +313,7 @@ def _maybe_create_candidate(
     # Standard operator-visible surface — the ADR's mandated path.
     # condition_key deduplicates repeat observations of the same
     # hostname collision within a tenant.
-    if identity_conflict_ft_id is not None:
+    if identity_conflict_ft_id is not None and client_id is not None:
         cur.execute(
             """
             INSERT INTO operations.findings (
@@ -341,7 +348,7 @@ def _maybe_create_candidate(
                         "trigger_observation_id": str(obs_id),
                     }
                 ),
-                f"identity_conflict:{norm}",
+                _identity_conflict_key(client_id, norm),
             ),
         )
 
@@ -364,7 +371,8 @@ WITH collisions AS (
                ) ORDER BY d.created_at
            ) AS members
     FROM operations.devices d
-    WHERE d.tenant_id = %s AND d.deleted_at IS NULL AND d.canonical_hostname <> ''
+    WHERE d.tenant_id = %s AND d.deleted_at IS NULL AND d.client_id IS NOT NULL
+      AND d.canonical_hostname <> ''
     GROUP BY d.client_id, d.canonical_hostname
     HAVING COUNT(*) >= %s
 )
@@ -372,7 +380,7 @@ INSERT INTO operations.merge_candidates
     (id, version, tenant_id, client_id, entity_type, canonical_key,
      member_snapshots, member_observation_ids, match_reason, confidence, status)
 SELECT gen_random_uuid(), 1, %s, c.client_id, 'device',
-       'identity_conflict:' || c.canonical_hostname,
+       'identity_conflict:' || md5(c.client_id::text || ':' || c.canonical_hostname),
        c.members, NULL,
        FORMAT('%%s devices share the normalized hostname %%s within one client',
               c.member_count, c.canonical_hostname),
@@ -398,7 +406,7 @@ WHERE mc.tenant_id = %s
       WHERE d.tenant_id = mc.tenant_id
         AND d.deleted_at IS NULL
         AND d.canonical_hostname <> ''
-        AND 'identity_conflict:' || d.canonical_hostname = mc.canonical_key
+        AND 'identity_conflict:' || md5(d.client_id::text || ':' || d.canonical_hostname) = mc.canonical_key
       GROUP BY d.client_id, d.canonical_hostname
       HAVING COUNT(*) >= %s
   )
@@ -428,12 +436,170 @@ def project_merge_candidates(cur) -> dict[str, int]:
     cur.execute(_MERGE_CANDIDATE_CLOSE, (TENANT_ID, _MIN_IDENTITY_CANDIDATES))
     closed = cur.rowcount or 0
     strong = _project_strong_identity_candidates(cur)
+    findings = _project_identity_conflict_findings(cur)
     return {
         "upserted": upserted,
         "closed": closed,
         "strong_upserted": strong["upserted"],
         "strong_closed": strong["closed"],
+        "findings_upserted": findings["upserted"],
+        "findings_closed": findings["closed"],
     }
+
+
+_IDENTITY_CONFLICT_COLLISIONS = """
+WITH device_evidence AS (
+    SELECT d.id,
+           d.client_id,
+           d.canonical_hostname,
+           d.canonical_serial,
+           d.canonical_vm_uuid,
+           d.device_type,
+           d.device_role,
+           d.os_name,
+           d.created_at,
+           ARRAY_REMOVE(ARRAY_AGG(DISTINCT LOWER(mac.value)), NULL) AS macs
+      FROM operations.devices d
+      LEFT JOIN operations.entity_observation_current o
+        ON o.tenant_id = d.tenant_id
+       AND o.device_id = d.id
+       AND o.active
+      LEFT JOIN LATERAL jsonb_array_elements_text(
+          COALESCE(o.canonical_data -> 'macs', '[]'::jsonb)
+      ) AS mac(value) ON TRUE
+     WHERE d.tenant_id = %s
+       AND d.deleted_at IS NULL
+       AND d.client_id IS NOT NULL
+       AND d.canonical_hostname <> ''
+     GROUP BY d.id, d.client_id, d.canonical_hostname, d.canonical_serial,
+              d.canonical_vm_uuid, d.device_type, d.device_role, d.os_name,
+              d.created_at
+), collision_groups AS (
+    SELECT client_id,
+           canonical_hostname,
+           MIN(id::text)::uuid AS subject_id,
+           COUNT(*) AS candidate_count,
+           JSONB_AGG(id::text ORDER BY created_at, id) AS candidate_device_ids,
+           JSONB_AGG(
+               JSONB_BUILD_OBJECT(
+                   'device_id', id,
+                   'hostname', canonical_hostname,
+                   'serial', COALESCE(canonical_serial, ''),
+                   'vm_uuid', COALESCE(canonical_vm_uuid, ''),
+                   'device_type', device_type,
+                   'device_role', device_role,
+                   'os_name', COALESCE(os_name, '')
+               ) ORDER BY created_at, id
+           ) AS candidate_devices,
+           COUNT(NULLIF(canonical_serial, '')) >= 2
+             AND COUNT(DISTINCT NULLIF(LOWER(canonical_serial), '')) = 1 AS shared_serial,
+           COUNT(NULLIF(canonical_vm_uuid, '')) >= 2
+             AND COUNT(DISTINCT NULLIF(LOWER(canonical_vm_uuid), '')) = 1 AS shared_vm_uuid
+      FROM device_evidence
+     GROUP BY client_id, canonical_hostname
+    HAVING COUNT(*) >= %s
+), shared_mac AS (
+    SELECT a.client_id, a.canonical_hostname
+      FROM device_evidence a
+      JOIN device_evidence b
+        ON b.client_id = a.client_id
+       AND b.canonical_hostname = a.canonical_hostname
+       AND b.id > a.id
+       AND cardinality(a.macs) > 0
+       AND cardinality(b.macs) > 0
+       AND a.macs && b.macs
+     GROUP BY a.client_id, a.canonical_hostname
+), collisions AS (
+    SELECT c.*,
+           CASE
+             WHEN c.shared_serial THEN 'same serial number'
+             WHEN c.shared_vm_uuid THEN 'same VM UUID'
+             WHEN sm.client_id IS NOT NULL THEN 'same MAC address'
+             ELSE 'same normalized computer name'
+           END AS match_signal,
+           CASE
+             WHEN c.shared_serial OR c.shared_vm_uuid OR sm.client_id IS NOT NULL
+               THEN 'probable'
+             ELSE 'possible'
+           END AS confidence
+      FROM collision_groups c
+      LEFT JOIN shared_mac sm
+        ON sm.client_id = c.client_id
+       AND sm.canonical_hostname = c.canonical_hostname
+)
+"""
+
+
+_IDENTITY_CONFLICT_FINDING_UPSERT = _IDENTITY_CONFLICT_COLLISIONS + """
+INSERT INTO operations.findings (
+    id, version, tenant_id, finding_type_id, client_id,
+    subject_type, subject_id, subject_layer, subject_layer_entity_id,
+    finding_details, condition_key, severity, confidence, status,
+    first_seen_at, last_seen_at, last_detected_at
+)
+SELECT gen_random_uuid(), 1, %s, %s, c.client_id,
+       'device', c.subject_id, '', NULL,
+       JSONB_BUILD_OBJECT(
+           'hostname', c.canonical_hostname,
+           'candidate_count', c.candidate_count,
+           'candidate_device_ids', c.candidate_device_ids,
+           'candidate_devices', c.candidate_devices,
+           'match_signal', c.match_signal,
+           'evidence_summary', c.match_signal
+       ),
+       'identity_conflict:' || md5(c.client_id::text || ':' || c.canonical_hostname),
+       'medium', c.confidence, 'open', NOW(), NOW(), NOW()
+  FROM collisions c
+ON CONFLICT (tenant_id, condition_key)
+    WHERE condition_key > '' AND status IN ('open', 'acknowledged')
+DO UPDATE SET
+    client_id = EXCLUDED.client_id,
+    subject_id = EXCLUDED.subject_id,
+    finding_details = EXCLUDED.finding_details,
+    severity = EXCLUDED.severity,
+    confidence = EXCLUDED.confidence,
+    last_seen_at = EXCLUDED.last_seen_at,
+    last_detected_at = EXCLUDED.last_detected_at
+"""
+
+
+_IDENTITY_CONFLICT_FINDING_CLOSE = _IDENTITY_CONFLICT_COLLISIONS + """
+UPDATE operations.findings finding
+   SET status = 'resolved', closed_at = NOW(), last_seen_at = NOW()
+ WHERE finding.tenant_id = %s
+   AND finding.finding_type_id = %s
+   AND finding.status IN ('open', 'acknowledged', 'investigating')
+   AND finding.condition_key LIKE 'identity_conflict:%%'
+   AND NOT EXISTS (
+       SELECT 1
+         FROM collisions c
+        WHERE finding.condition_key =
+              'identity_conflict:' || md5(c.client_id::text || ':' || c.canonical_hostname)
+   )
+"""
+
+
+def _project_identity_conflict_findings(cur) -> dict[str, int]:
+    """Keep one current, client-scoped duplicate-Computer Finding per group.
+
+    Candidate proposals remain internal derived data for compatibility, but
+    operators work from Findings.  Name equality is evidence to review, not
+    proof to combine; serial, VM UUID, or MAC evidence raises confidence only.
+    """
+    finding_type_id = _load_finding_type_id(cur, "identity_conflict")
+    if finding_type_id is None:
+        return {"upserted": 0, "closed": 0}
+    cur.execute(
+        _IDENTITY_CONFLICT_FINDING_UPSERT,
+        (TENANT_ID, _MIN_IDENTITY_CANDIDATES, TENANT_ID, finding_type_id),
+    )
+    upserted = cur.rowcount or 0
+    cur.execute(
+        _IDENTITY_CONFLICT_FINDING_CLOSE,
+        (TENANT_ID, _MIN_IDENTITY_CANDIDATES, TENANT_ID, finding_type_id),
+    )
+    closed = cur.rowcount or 0
+    return {"upserted": upserted, "closed": closed}
 
 
 _STRONG_IDENTITY_CANDIDATE_CTE = """

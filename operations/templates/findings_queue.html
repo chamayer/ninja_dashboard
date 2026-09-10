@@ -205,12 +205,19 @@
                             <code>{{ row.subject_label }}</code>
                         {% endif %}
                         {% if f.finding_type.name == "identity_conflict" %}
-                            {% if f.finding_details.candidate_count == 2 and f.client %}
-                            <br><a href="{% url 'device_merge' org_slug=f.client.slug device_id=f.finding_details.candidate_device_ids.0 target_id=f.finding_details.candidate_device_ids.1 %}"
-                                   style="font-size:0.75rem;">Merge candidates →</a>
+                            {% if row.duplicate_candidates %}
+                            <div class="muted" style="margin-top:0.3rem; font-size:0.75rem;">
+                                Records:
+                                {% for candidate in row.duplicate_candidates %}
+                                    <a href="{{ candidate.url }}">{{ forloop.counter }}</a>{% if not forloop.last %}, {% endif %}
+                                {% endfor %}
+                            </div>
+                            {% for candidate in row.duplicate_candidates %}
+                                {% if candidate.compare_url %}
+                                <a href="{{ candidate.compare_url }}" style="font-size:0.75rem;">Compare record {{ forloop.counter }} →</a>{% if not forloop.last %} · {% endif %}
+                                {% endif %}
+                            {% endfor %}
                             {% endif %}
-                            <br><a href="{% url 'merge_candidates_queue' %}?key={{ f.condition_key|urlencode }}"
-                               style="font-size:0.75rem;">Review {{ f.finding_details.candidate_count }} matching devices →</a>
                         {% endif %}
                     </td>
                     <td>{{ row.detail|default:"—" }}</td>

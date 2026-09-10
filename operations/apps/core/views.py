@@ -3294,6 +3294,13 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             return f"{base} (last: {last_src})" if last_src else base
         if name == "device_role_conflict":
             return f"{d.get('previous_role', '?')} → {d.get('new_role', '?')}"
+        if name == "identity_conflict":
+            count = d.get("candidate_count")
+            signal = d.get("evidence_summary") or d.get("match_signal")
+            pieces = [f"{count} Computer records" if count else "possible duplicate Computer"]
+            if signal:
+                pieces.append(signal)
+            return " · ".join(pieces)
         if name == "cross_client_serial":
             devices = d.get("device_count")
             clients = d.get("client_count")
@@ -3523,6 +3530,62 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
         }
 
     findings_with_detail = [_display_row(f) for f in findings]
+
+    # A duplicate-Computer Finding carries the whole collision group.  Resolve
+    # the IDs once here so operators can inspect or compare the actual
+    # Computers from the finding, without being sent to a separate queue.
+    duplicate_ids: set[uuid.UUID] = set()
+    for row in findings_with_detail:
+        if row["f"].finding_type.name != "identity_conflict":
+            continue
+        for candidate_id in (row["f"].finding_details or {}).get("candidate_device_ids", []):
+            try:
+                duplicate_ids.add(uuid.UUID(str(candidate_id)))
+            except (ValueError, TypeError):
+                continue
+    duplicate_devices = {
+        device.id: device
+        for device in Device.objects.filter(
+            tenant_id=1,
+            id__in=duplicate_ids,
+            deleted_at__isnull=True,
+        ).select_related("client")
+    }
+    for row in findings_with_detail:
+        finding = row["f"]
+        if finding.finding_type.name != "identity_conflict":
+            continue
+        candidates = []
+        for candidate_id in (finding.finding_details or {}).get("candidate_device_ids", []):
+            try:
+                device = duplicate_devices.get(uuid.UUID(str(candidate_id)))
+            except (ValueError, TypeError):
+                device = None
+            if not device or not device.client:
+                continue
+            candidates.append(
+                {
+                    "id": device.id,
+                    "label": device.canonical_hostname or "Unnamed Computer",
+                    "url": reverse(
+                        "device_detail",
+                        kwargs={"org_slug": device.client.slug, "device_id": device.id},
+                    ),
+                    "compare_url": (
+                        reverse(
+                            "device_merge",
+                            kwargs={
+                                "org_slug": device.client.slug,
+                                "device_id": finding.subject_id,
+                                "target_id": device.id,
+                            },
+                        )
+                        if device.id != finding.subject_id
+                        else ""
+                    ),
+                }
+            )
+        row["duplicate_candidates"] = candidates
     policy_rows = [_display_row(f) for f in policy_findings]
 
     if wants_csv(request):
@@ -8548,6 +8611,9 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
     device_type_filters = list(dict.fromkeys(
         value for value in request.GET.getlist("device_type") if value
     ))
+    device_role_filters = list(dict.fromkeys(
+        value for value in request.GET.getlist("device_role") if value
+    ))
     state_filters = [
         value for value in request.GET.getlist("state") if value in _COVERAGE_STATES
     ]
@@ -8761,7 +8827,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                 """
                 SELECT d.id, d.client_id, c.slug, c.display_name,
                        COALESCE(d.canonical_hostname, ''),
-                       COALESCE(d.os_family, ''), d.device_type,
+                       COALESCE(d.os_family, ''), d.device_type, d.device_role,
                        d.lifecycle_status,
                        COALESCE(decision.value, '{}'::jsonb) ? 'agent.edr'
                            AS s1_exempt
@@ -8852,8 +8918,8 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         row[0]: {
             "device_id": row[0], "client_id": row[1], "client_slug": row[2],
             "client_name": row[3], "hostname": row[4], "os_family": row[5],
-            "device_type": row[6], "lifecycle_status": row[7],
-            "s1_exempt": bool(row[8]),
+            "device_type": row[6], "device_role": row[7],
+            "lifecycle_status": row[8], "s1_exempt": bool(row[9]),
         }
         for row in computer_rows
     }
@@ -9079,6 +9145,9 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
     device_types = sorted(
         {row["device_type"] for row in devices_by_id.values() if row["device_type"]}
     )
+    device_roles = sorted(
+        {row["device_role"] for row in devices_by_id.values() if row["device_role"]}
+    )
     filter_clients = sorted(
         clients_by_id.values(),
         key=lambda row: row["name"],
@@ -9188,6 +9257,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             "hostname": hostname or "",
             "os_family": "",
             "device_type": "",
+            "device_role": "",
             "lifecycle_status": "",
             "hudu_records": [],
             "source_states": {platform: "Online" if reported_online else "Offline"},
@@ -9215,6 +9285,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             "hostname": hudu["hostname"],
             "os_family": "",
             "device_type": "",
+            "device_role": "",
             "lifecycle_status": "",
             "hudu_records": [hudu],
             "source_states": {},
@@ -9450,6 +9521,8 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             return False
         if device_type_filters and row["device_type"] not in device_type_filters:
             return False
+        if device_role_filters and row["device_role"] not in device_role_filters:
+            return False
         if hudu_filters:
             hudu_value = "in_hudu" if row["hudu_present"] else "not_in_hudu"
             if hudu_value not in hudu_filters:
@@ -9649,6 +9722,11 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             "(" + " OR ".join(f"Type is {device_type}" for device_type in device_type_filters) + ")"
         )
         filter_summary_parts.append("Type: " + " or ".join(device_type_filters))
+    if device_role_filters:
+        filter_logic_parts.append(
+            "(" + " OR ".join(f"Role is {role}" for role in device_role_filters) + ")"
+        )
+        filter_summary_parts.append("Role: " + " or ".join(device_role_filters))
     if not filter_logic_parts:
         filter_logic_parts.append("No filters selected — showing every known Computer")
     filter_logic = " AND ".join(filter_logic_parts)
@@ -9660,7 +9738,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         or coverage_source_filters or hudu_filters or hudu_link_filters
         or hudu_record_filter != "any" or s1_exemption_filters
         or platform_filters or state_filters or platform_status_filters
-        or os_family_filters or device_type_filters
+        or os_family_filters or device_type_filters or device_role_filters
     )
 
     if wants_csv(request):
@@ -9678,6 +9756,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                 {
                     "client_name": row["client_name"], "hostname": row["hostname"],
                     "os_family": row["os_family"], "device_type": row["device_type"],
+                    "device_role": row["device_role"],
                     "lifecycle_status": row["lifecycle_status"],
                     "hudu": row["hudu_status"],
                     "hudu_links": ", ".join(row["hudu_links"]),
@@ -9690,6 +9769,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                 ("Device", "hostname"),
                 ("OS family", "os_family"),
                 ("Device type", "device_type"),
+                ("Role", "device_role"),
                 ("Lifecycle", "lifecycle_status"),
                 ("Hudu", "hudu"),
                 ("Hudu links", "hudu_links"),
@@ -9750,6 +9830,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             "coverage_filter_sources": coverage_filter_sources,
             "os_families": os_families,
             "device_types": device_types,
+            "device_roles": device_roles,
             "filter_clients": filter_clients,
             "states": _COVERAGE_STATES,
             "client_filters": client_filters,
@@ -9770,6 +9851,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             "s1_exemption_filters": s1_exemption_filters,
             "os_family_filters": os_family_filters,
             "device_type_filters": device_type_filters,
+            "device_role_filters": device_role_filters,
             "state_filters": state_filters,
             "platform_status_filters": platform_status_filters,
             "record_status_filters": record_status_filters,

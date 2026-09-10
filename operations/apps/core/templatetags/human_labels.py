@@ -70,6 +70,8 @@ _LABELS: dict[str, str] = {
     "device_stale_data": "No recent data",
     "device_unenrolled": "No management agent installed",
     "duplicate_platform_record": "Duplicate device record",
+    "identity_conflict": "Possible duplicate Computers",
+    "duplicate_device_records": "Possible duplicate Computers",
     "source_failure": "Data source not responding",
     "device_missing_from_source": "No sources currently report this Computer",
     "device_source_record_withdrawn": "Source record withdrawn",

@@ -111,6 +111,7 @@ class _Cursor:
                     "Acme",
                     "host-1",
                     "Windows 11",
+                    "physical",
                     "workstation",
                     "active",
                     False,
@@ -122,6 +123,7 @@ class _Cursor:
                     "Beta",
                     "host-2",
                     "Ubuntu",
+                    "vm",
                     "server",
                     "active",
                     True,
@@ -191,7 +193,7 @@ def test_coverage_uses_effective_requirements_and_source_specific_filters(monkey
         "&agent_requirement_0=Missing&agent_1=SentinelOne&agent_state_1=Online"
         "&agent_requirement_1=Required&hudu=in_hudu&hudu_links=has_links"
         "&s1_exemption=not_exempt"
-        "&os_family=Windows+11&device_type=workstation"
+        "&os_family=Windows+11&device_type=physical&device_role=workstation"
     )
     request.user = SimpleNamespace(is_authenticated=True)
 
@@ -224,7 +226,8 @@ def test_coverage_uses_effective_requirements_and_source_specific_filters(monkey
     assert context["s1_exemption_filters"] == ["not_exempt"]
     assert context["state_filters"] == []
     assert context["os_family_filters"] == ["Windows 11"]
-    assert context["device_type_filters"] == ["workstation"]
+    assert context["device_type_filters"] == ["physical"]
+    assert context["device_role_filters"] == ["workstation"]
     assert len(context["device_rows"]) == 1
     assert context["paginator"].count == 1
     assert context["filtered_summary"] == {
@@ -307,6 +310,16 @@ def test_required_filter_includes_missing_and_sentinelone_exempt_is_independent(
     assert exempt["device_rows"][0]["device_id"] == "device-2"
 
 
+def test_role_filter_is_distinct_from_hardware_type(monkeypatch):
+    context = _render_coverage_context(monkeypatch, "device_role=server")
+
+    assert context["device_role_filters"] == ["server"]
+    assert context["paginator"].count == 1
+    assert context["device_rows"][0]["device_id"] == "device-2"
+    assert context["device_rows"][0]["device_type"] == "vm"
+    assert context["device_rows"][0]["device_role"] == "server"
+
+
 def test_agents_condition_builder_shows_its_exact_and_or_logic(monkeypatch):
     context = _render_coverage_context(
         monkeypatch,
@@ -372,6 +385,7 @@ def test_computers_csv_has_the_current_table_platform_columns(monkeypatch):
         "Device",
         "OS family",
         "Device type",
+        "Role",
         "Lifecycle",
         "Hudu",
         "Hudu links",
@@ -381,6 +395,7 @@ def test_computers_csv_has_the_current_table_platform_columns(monkeypatch):
         "Acme",
         "host-1",
         "Windows 11",
+        "physical",
         "workstation",
         "active",
         "In Hudu",
@@ -390,6 +405,7 @@ def test_computers_csv_has_the_current_table_platform_columns(monkeypatch):
     assert [
         "Beta",
         "host-2",
+        "",
         "",
         "",
         "",
@@ -407,14 +423,15 @@ def test_coverage_template_has_clear_statuses_hudu_and_multiselect_filters():
         "Agents",
         "OS family",
         "Device type",
+        "Role",
     ):
         assert label in template
     assert "Show Computers where every condition below is true." in template
     assert "Required platform" not in template
     assert "Hudu" in template
     assert template.count('type="checkbox"') >= 12
-    assert template.count('<details class="coverage-filter">') == 5
-    assert template.count('class="coverage-filter-search"') >= 6
+    assert template.count('<details class="coverage-filter">') == 6
+    assert template.count('class="coverage-filter-search"') >= 7
     assert "coverage-filterbar" in template
     assert "const filterMenus" in template
     assert "event.target.closest('details.coverage-filter, details.coverage-column-filter')" in template
