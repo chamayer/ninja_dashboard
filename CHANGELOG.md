@@ -2,6 +2,14 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.122.56] — 2026-09-10 — Safeguard VMware guest reconciliation
+
+### Fixed
+
+- Kept VMware duplicate reconciliation atomic when derived source-link history
+  needs its normal asynchronous projection, matching the established Computer
+  merge workflow.
+
 ## [0.122.55] — 2026-09-10 — Stabilize VMware guest Computer identity
 
 ### Fixed

@@ -145,6 +145,4 @@ class Command(BaseCommand):
                         "ninja.vmware_vmx_path_identity",
                     )
                     merged += 1
-            cur.execute("SELECT operations.sync_entity_source_links_from_observations()")
-
         self.stdout.write(self.style.SUCCESS(f"combined={merged}"))

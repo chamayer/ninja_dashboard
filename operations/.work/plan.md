@@ -2,7 +2,7 @@
 
 ## ACTIVE TASK — Stabilize Ninja VMware guest identity
 
-**Status:** release in progress.
+**Status:** reconciliation safeguard in progress.
 
 **Goal:** prevent Ninja VMware host movement from minting duplicate Computers
 while preserving every raw Ninja record and existing evidence history.
@@ -58,8 +58,9 @@ bad VM UUID assertion.
 The packaged `reconcile_ninja_vmware_guest_duplicates` management command
 measures and combines only same-Ninja-organization, exact-normalized-VMX-path
 groups. It defaults to read-only, requires an expected group count and SHA-256
-digest for apply, locks the target set, uses the existing Computer combine
-operation, and reprojects source links. A live read-only measure found 53
+digest for apply, locks the target set, and uses the existing Computer combine
+operation. Derived source links converge through the normal ingest projection,
+as they do after an operator-initiated combine. A live read-only measure found 53
 eligible groups, 475 affected Computers, and 853 retained Ninja guest records;
 the exact digest must be generated again from the deployed command immediately
 before apply. It does not merge changed paths, name-only matches, or groups
@@ -74,9 +75,19 @@ constants (`_COVERAGE_STATES`, `_MATCHERS`, `_SIGNALS`, and
 `_TAG_OWNED_SOURCES`); this change introduced none. The selected Operations
 integration test module contains no discoverable tests in this checkout.
 
-**Next action:** commit and push version 0.122.55, then invoke the deployed
-command in dry-run mode and apply only its freshly measured count and digest.
-Run the normal resolver/evaluator refresh afterwards and verify services.
+**Checkpoint:** version 0.122.55 was deployed as `b0ff76e`. The fresh
+production dry run found 53 exact-path groups containing 476 Computers with
+digest `26010b8b06241781a33bcd2c1806ea5475dde2837cd6d8fed295bb84120cb113`.
+The pinned apply transaction rolled back completely when its eager derived
+source-link projection encountered a pre-existing history-window constraint
+for unrelated legacy Ninja compatibility evidence. No Computers were combined.
+The command now follows the existing UI combine boundary: it atomically moves
+source evidence and tombstones duplicates, while the normal ingest projection
+converges source links later.
+
+**Next action:** release version 0.122.56, repeat the fresh dry run, and apply
+only its freshly measured pins. Verify the post-combine device population and
+service health.
 
 **Release:** version 0.122.45, commit `5bf5d07` (Reorganize Computer details
 and patching), pushed to `origin` and `a-m-rose` on 2026-09-10. Portainer
