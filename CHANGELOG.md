@@ -2,26 +2,6 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
-## [0.122.47] — 2026-09-10 — Separate Computer inventory from requirements
-
-### Changed
-
-- Reworked Computers into an inventory-first view. Platform cells now show the
-  source state separately from the applicable rule, so a required source with
-  no current record reads `No record` / `Required` rather than conflating it
-  with a coverage-only Missing status.
-- Replaced the platform-status matrix with an Inventory sources filter. Per
-  platform column filters now separately expose source state and rule status;
-  Ninja possible matches, Hudu archive/link controls, and legacy drill-through
-  URLs remain available.
-- Include retired Computers in inventory rather than excluding them before the
-  reader constructs the full inventory.
-
-### Fixed
-
-- Made the Computer Overview Current status card lifecycle-aware and linked it
-  directly to Details → Source records, removing a duplicate lifecycle notice.
-
 ## [0.122.46] — 2026-09-10 — Repair Computer Details
 
 ### Fixed

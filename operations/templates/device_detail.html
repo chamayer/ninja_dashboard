@@ -180,11 +180,11 @@
 
 {% if active_tab == 'overview' %}
 <div class="dd-cards">
-    <a class="dd-card {% if device.lifecycle_status == 'pending_cleanup' or not patching.is_online_any %}alert{% endif %}" href="?tab=details#source-records">
+    <div class="dd-card {% if device.lifecycle_status == 'pending_cleanup' or not patching.is_online_any %}alert{% endif %}">
         <div class="lbl">Current status</div>
-        <div class="val">{% if device.lifecycle_status == 'pending_cleanup' %}Needs review{% elif device.lifecycle_status == 'retired' %}Retired{% elif patching.is_online_any %}Online{% else %}Offline{% endif %}</div>
-        <div class="sub">{% if device.lifecycle_status == 'pending_cleanup' %}no current source record{% elif device.lifecycle_status == 'retired' %}outside normal inventory{% elif patching.online_sources %}{{ patching.online_sources|join:", " }}{% else %}no source checked in{% endif %}</div>
-    </a>
+        <div class="val">{% if device.lifecycle_status == 'pending_cleanup' %}Needs review{% elif patching.is_online_any %}Online{% else %}Offline{% endif %}</div>
+        <div class="sub">{% if device.lifecycle_status == 'pending_cleanup' %}no source currently reports this Computer{% elif patching.online_sources %}{{ patching.online_sources|join:", " }}{% else %}no source checked in{% endif %}</div>
+    </div>
     <a class="dd-card {% if sev_counts.critical %}alert{% elif sev_counts.high %}warn{% endif %}" href="{% url 'findings_queue' %}?status=all&amp;subject_id={{ device.id }}">
         <div class="lbl">Open issues</div>
         <div class="val">{{ active_findings|length }}</div>
@@ -315,6 +315,17 @@
     </div>
 </div>
 
+{% if device.lifecycle_status == 'pending_cleanup' %}
+<div class="dd-lifecycle-banner">
+    <strong>Needs review</strong> — no current source record reports this Computer.
+    <a href="?tab=details#source-records">Review source records →</a>
+</div>
+{% elif device.lifecycle_status == 'retired' %}
+<div class="dd-lifecycle-banner retired">
+    <strong>Retired</strong> — this Computer is outside normal inventory; its source records and history remain available.
+    <a href="?tab=details#source-records">View source records →</a>
+</div>
+{% endif %}
 <div class="card">
     <h2 style="margin-top:0;">Top issues on this device</h2>
     {% if active_findings %}
