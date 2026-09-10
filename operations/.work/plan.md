@@ -1,87 +1,82 @@
 # Active Operations implementation plan
 
-## ACTIVE TASK — Correct the Computers inventory reader and filters
+## ACTIVE TASK — Stabilize Ninja VMware guest identity
 
-**Status:** ready for approved release.
+**Status:** release in progress.
 
-**Goal:** make Computers an inventory-first page that shows every known
-Computer record and keeps current source facts separate from authored agent
-requirements in cells, filters, summary cards, and CSV.
+**Goal:** prevent Ninja VMware host movement from minting duplicate Computers
+while preserving every raw Ninja record and existing evidence history.
 
-**Scope:** replace the separate Ninja, SentinelOne, ScreenConnect, and
-LogMeIn table columns with one readable **Agents** column: one named line per
-agent, showing record state and required state. Replace the long global filter
-with an Agents condition builder. Keep Hudu separate, preserve cards, Hudu,
-possible matches, legacy URLs, CSV, client, OS, and device-type behavior, and
-show the exact AND/OR expression in the filtered-results header. No schema,
-ingest, evaluator, lifecycle write, source-data write, permission, commit,
-push, or deployment. Rework the footer of each platform card so inventory
-record counts remain separate from the concise agent-requirement exceptions.
+**Scope:** make a VMware guest with an exact VMX path use a stable, source-
+scoped observation identity: Ninja organization plus normalized VMX path.
+Retain changing Ninja node IDs and node UUIDs as raw evidence, never as a VM
+UUID. Route current parent-host data through the existing source evidence
+contract and retain a path-only guest as a valid Computer with unavailable
+guest details. Existing duplicate Computers are not silently merged; exact-path
+clusters become reviewable candidates after the evidence identity correction.
 
-**Affected files:** `apps/core/views.py`, `templates/coverage.html`,
-`apps/core/tests/test_coverage.py`, and this plan.
+**Affected files:** Ninja collection/observation identity, historical-evidence
+normalization, the guarded Operations reconciliation command, focused tests,
+and this plan. No schema migration, UI redesign, or broad inventory-model
+replacement.
 
-**Decision:** record fact and authored rule remain independent. An Agents cell
-renders one line as `Agent · state · required state`; Missing and Stale stay
-in the required-state position rather than replacing the record state. A
-condition has one agent and optional record-state and required-state choices;
-choices within either field are OR and conditions are AND. The filtered-results
-header renders that exact parenthesized expression. New reporting agents are
-listed dynamically from the existing reader; Hudu remains a separate
-inventory-data column. Lifecycle is displayed but is not used as a proxy for
-current records. Platform-card footers show the total policy population as
-“N required,” followed by distinct Missing, Stale, and Exempt exception
-counts. The total is the denominator for Missing and Stale, not a peer state.
-Card colors convey the equivalent inventory meaning for every source: current
-or online is green; offline and archived-only are amber; withdrawn is orange;
-and no record is red. Hudu’s current-plus-archived state is blue so it remains
-distinct without being framed as an exception.
-Every agent card presents its five source states plus Total in a fixed two
-column by three row grid. This makes “No status reported” visible even at zero,
-keeps cards equal, gives multi-digit values room, and makes Total clickable as
-the union of source states that have a record (not No record). Hudu uses its
-four mutually exclusive record groups plus an in-Hudu Total in the same
-two-column grid. Count values never wrap.
-The Agents menu does not clip its nested State or Required menus; those menus
-are positioned from their own controls, close on an outside click or Escape,
-and only one may remain open at a time.
-Clear is always visible next to Filter and muted when the page has no active
-filters, so operators do not have to infer where reset became available.
+**Decision:** `ninja_core.devices` remains the raw per-Ninja-node record store.
+`entity_observation_current/history` and `entity_source_links` carry a stable
+source record identity. For a VMware guest that reports a VMX path, that key is
+the Ninja organization and normalized VMX path; for one without a path, the
+existing Ninja node identity remains the safe fallback. `operations.devices`
+remains the single Computer anchor. A shared MAC may connect a VMware guest and
+an OS agent to that Computer; a VMX path never becomes `canonical_vm_uuid`.
+A storage-path change is a review candidate absent an independent strong
+signal. Existing raw records and observation history are retained.
 
-**Verified baseline:** the live reader currently returns 6,819 rows: 5,873
-canonical Computers plus 946 current source-only/Hudu-only rows. The old “No
-platform records” predicate returns 1,365 rows. A source-neutral no-current-
-record predicate returns 1,055; the 310-row difference consists entirely of
-current Hudu evidence (54 canonical rows and 256 Hudu-only rows). Current agent
-records all report Online or Offline; there are zero live no-signal records.
-The page flags 37 SentinelOne exemptions while 84 operator decisions exist.
-Lifecycle is not current-evidence authority: 475 `pending_cleanup` Computers
-currently have qualifying source evidence.
+**Validation plan:** focused identity/observation tests for guest-path
+continuity, path absence, shared-MAC attachment, and raw-ID retention; Python
+compilation; Django check; migration dependency/reversibility review; and
+`git diff --check`. No custom diagnostic scripts. Production reconciliation,
+commit, push, and deployment require their own approval.
 
-**Validation plan:** focused existing coverage tests plus cases for global
-scope, source/rule combinations, exemptions, possible matches, cards and CSV;
-Django check; template loading; Python compilation; `git diff --check`; and a
-read-only live count comparison only after an explicitly approved deployment.
-No custom test script.
+**Checkpoint:** live investigation found 144 current Ninja VMware guests; 27
+have no MAC, IP, or guest OS but all 27 have a VMX path. `82livigent01` is a
+black-box appliance with VMware Tools unavailable and only a VMX path.
+`82fileserv3` has a stable VMX path and shared MAC with its Ninja OS-agent
+record. Current code writes Ninja `uid` into `canonical_data.vm_uuid` and keys
+all Ninja observations by changing numeric node ID; both behaviors conflict
+with this decision. Unrelated `.work/` artifacts remain unstaged.
 
-**Checkpoint:** release `785340b` is deployed after the user manually
-committed/pushed it, but the user rejected its visual design. Replace that UI
-locally before any further release. The prior reader calculation remains the
-authority for states and counts; no source data or schema change is needed.
-The local revision now has one Agents column, a multi-condition Agent/state/
-required-state builder, and an explicit AND/OR filter expression. The normal
-results header presents a compact summary; the full expression is available on
-demand. Focused
-coverage tests pass (11), as do Django check, template loading, compilation,
-and `git diff --check`. Full-file Ruff remains non-clean due pre-existing
-complexity and style findings in `views.py`; the new simple lint suggestions
-were addressed. The normal results header now shows a short grouped filter
-summary; the full parenthesized expression is available only through “Show
-exact logic.”
+**Checkpoint:** implementation is complete. VMware guests with a valid VMX
+path now use external namespace `vmware_guest_vmx_path`, parent identity
+`organization:<Ninja organization ID>`, and a normalized VMX path external ID.
+The numeric Ninja node ID and its `uid` are retained as `ninja_node_id` and
+`ninja_node_uid` source evidence; neither is written as `vm_uuid`. The first
+corrected collection attaches the stable path observation to the existing link
+for its currently reported Ninja node, then the existing snapshot reconciler
+withdraws obsolete per-node observations. Future host moves resolve by the
+stable path identity. Historical-restoration code no longer reintroduces the
+bad VM UUID assertion.
 
-**Next action:** release the approved no-migration patch as `0.122.54`: commit
-only the scoped files, push `origin` then `a-m-rose`, trigger the configured
-Portainer redeploy, and verify service health.
+The packaged `reconcile_ninja_vmware_guest_duplicates` management command
+measures and combines only same-Ninja-organization, exact-normalized-VMX-path
+groups. It defaults to read-only, requires an expected group count and SHA-256
+digest for apply, locks the target set, uses the existing Computer combine
+operation, and reprojects source links. A live read-only measure found 53
+eligible groups, 475 affected Computers, and 853 retained Ninja guest records;
+the exact digest must be generated again from the deployed command immediately
+before apply. It does not merge changed paths, name-only matches, or groups
+crossing clients.
+
+**Validation completed:** Ruff on every changed Python module, Python
+compilation of all changed modules, `python manage.py check` (passed), command
+discovery/help (passed), and `git diff --check` (passed). The focused ingest
+test file was skipped because the workstation lacks the ingest image's optional HTTP dependency. The repository
+hardcoded-domain-mapping ratchet failed on four pre-existing, unrelated
+constants (`_COVERAGE_STATES`, `_MATCHERS`, `_SIGNALS`, and
+`_TAG_OWNED_SOURCES`); this change introduced none. The selected Operations
+integration test module contains no discoverable tests in this checkout.
+
+**Next action:** commit and push version 0.122.55, then invoke the deployed
+command in dry-run mode and apply only its freshly measured count and digest.
+Run the normal resolver/evaluator refresh afterwards and verify services.
 
 **Release:** version 0.122.45, commit `5bf5d07` (Reorganize Computer details
 and patching), pushed to `origin` and `a-m-rose` on 2026-09-10. Portainer

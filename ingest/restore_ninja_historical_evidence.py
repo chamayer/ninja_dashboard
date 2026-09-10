@@ -338,7 +338,11 @@ def _canonical_data(row: dict[str, Any]) -> dict[str, Any]:
         "platform": "Ninja",
         "entity_type": entity_type,
         "node_class": node_class,
-        "vm_uuid": str(row["uid"]) if row["uid"] else None,
+        # Ninja's uid is its node-record UUID, not a VMware BIOS/instance
+        # UUID. Historical restoration must not reintroduce it as hardware
+        # identity evidence.
+        "ninja_node_id": str(row["id"]),
+        "ninja_node_uid": str(row["uid"]) if row["uid"] else None,
         "is_vm": row["is_virtual_machine"],
         "last_seen_at": (
             row["last_contact"].isoformat() if row["last_contact"] else None
@@ -390,6 +394,11 @@ def _canonical_data(row: dict[str, Any]) -> dict[str, Any]:
             if hypervisor_reported_boot is not None
             else None
         )
+    if entity_type == "vm.guest" and isinstance(raw.get("files"), str):
+        vmx_path = " ".join(raw["files"].split())
+        if vmx_path.casefold().endswith(".vmx"):
+            canonical["vmx_path"] = raw["files"]
+            canonical["vmx_path_normalized"] = vmx_path.casefold()
     return canonical
 
 

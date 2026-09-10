@@ -2,6 +2,17 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.122.55] — 2026-09-10 — Stabilize VMware guest Computer identity
+
+### Fixed
+
+- Identified Ninja VMware guest observations by their organization and VMX
+  configuration path, rather than treating Ninja's changing guest node ID as
+  the VMware identity.
+- Added a guarded reconciliation command that combines only duplicate
+  Computers with the same client-scoped VMX path, after a pinned dry-run
+  verification.
+
 ## [0.122.54] — 2026-09-10 — Correct Computer card totals
 
 ### Fixed

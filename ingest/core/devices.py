@@ -48,7 +48,72 @@ _TENANT_ID = 1
 NINJA_SOURCE_BINDING_ID = uuid.UUID("00000000-0000-4000-8000-000000000011")
 NINJA_DEVICE_EXTERNAL_NAMESPACE = "device"
 NINJA_ORG_EXTERNAL_NAMESPACE = "organization"
+NINJA_VMWARE_GUEST_VMX_EXTERNAL_NAMESPACE = "vmware_guest_vmx_path"
 INTERNAL_COLLECTOR_INSTANCE_ID = uuid.UUID("00000000-0000-4000-8000-000000000001")
+
+
+def _normalized_vmx_path(value: object) -> str | None:
+    """Return a comparison-safe VMware configuration path, if supplied.
+
+    Ninja's VMware guest node ID and ``uid`` change when inventory is
+    rediscovered on another host.  Its ``files`` field is a source-reported
+    VMX path instead.  A path is source-scoped rather than a universal VM UUID,
+    but it is stable enough to identify the same guest across normal host
+    movement.  It is intentionally not used for non-VM records or arbitrary
+    file values.
+    """
+    if not isinstance(value, str):
+        return None
+    path = " ".join(value.split())
+    if not path or not path.casefold().endswith(".vmx"):
+        return None
+    return path.casefold()
+
+
+def _ninja_observation_identity(record: dict[str, object]) -> dict[str, str]:
+    """Build Operations' stable source identity for one Ninja record.
+
+    The raw numeric Ninja node ID remains available in the payload.  Only a
+    VMware guest with a valid VMX path receives the path-based source identity;
+    all other records retain the established Ninja device identity.
+    """
+    node_id = str(record["id"])
+    if record.get("entity_type") != "vm.guest":
+        return {
+            "external_namespace": NINJA_DEVICE_EXTERNAL_NAMESPACE,
+            "parent_external_namespace": "",
+            "parent_external_id": "",
+            "external_id": node_id,
+            "entity_key": node_id,
+            "vmx_path": "",
+            "vmx_path_normalized": "",
+        }
+
+    vmx_path = record.get("vmx_path")
+    normalized_path = _normalized_vmx_path(vmx_path)
+    organization_id = str(record.get("organization_id") or "").strip()
+    if not normalized_path or not organization_id:
+        return {
+            "external_namespace": NINJA_DEVICE_EXTERNAL_NAMESPACE,
+            "parent_external_namespace": "",
+            "parent_external_id": "",
+            "external_id": node_id,
+            "entity_key": node_id,
+            "vmx_path": "",
+            "vmx_path_normalized": "",
+        }
+
+    return {
+        "external_namespace": NINJA_VMWARE_GUEST_VMX_EXTERNAL_NAMESPACE,
+        "parent_external_namespace": NINJA_ORG_EXTERNAL_NAMESPACE,
+        "parent_external_id": organization_id,
+        "external_id": normalized_path,
+        # This is intentionally organization-qualified: a shared Ninja source
+        # may contain identical path strings for different clients.
+        "entity_key": f"vmx:{organization_id}:{normalized_path}",
+        "vmx_path": str(vmx_path),
+        "vmx_path_normalized": normalized_path,
+    }
 
 
 def _add_vm_canonical_measurements(
@@ -451,7 +516,16 @@ def _write_ninja_observations(
                     unknown_classes[r["node_class"] or ""] = (
                         unknown_classes.get(r["node_class"] or "", 0) + 1
                     )
-                entity_key = str(r["id"])
+                raw = (raw_by_id or {}).get(r["id"]) or {}
+                identity = _ninja_observation_identity(
+                    {
+                        "id": r["id"],
+                        "organization_id": r["organization_id"],
+                        "entity_type": entity_type,
+                        "vmx_path": raw.get("files"),
+                    }
+                )
+                entity_key = identity["entity_key"]
                 obs_hash = hashlib.sha256(
                     f"{entity_key}:{snapshot_at.isoformat()}".encode()
                 ).digest()
@@ -459,7 +533,6 @@ def _write_ninja_observations(
                 offline = snapshot.get("offline")
                 last_contact = snapshot.get("last_contact")
                 last_boot = snapshot.get("last_boot")
-                raw = (raw_by_id or {}).get(r["id"]) or {}
                 raw_system = raw.get("system") or {}
                 canonical_data = {
                     "hostname": (
@@ -468,7 +541,12 @@ def _write_ninja_observations(
                     "platform": "Ninja",
                     "entity_type": entity_type,
                     "node_class": r["node_class"],
-                    "vm_uuid": str(r["uid"]) if r.get("uid") else None,
+                    "ninja_organization_id": str(r["organization_id"]),
+                    # Ninja's uid identifies this Ninja node.  It is not a
+                    # VMware BIOS/instance UUID and changes for guest records
+                    # when the host inventory rediscovers them.
+                    "ninja_node_id": str(r["id"]),
+                    "ninja_node_uid": str(r["uid"]) if r.get("uid") else None,
                     "is_vm": r.get("is_virtual_machine"),
                     "last_seen_at": last_contact.isoformat() if last_contact else None,
                     "last_contact_at": (
@@ -526,6 +604,16 @@ def _write_ninja_observations(
                         else None
                     ),
                 }
+                if identity["vmx_path"]:
+                    canonical_data["vmx_path"] = identity["vmx_path"]
+                    canonical_data["vmx_path_normalized"] = identity[
+                        "vmx_path_normalized"
+                    ]
+                    canonical_data["guest_tools_status"] = raw.get("toolStatus")
+                    canonical_data["guest_tools_install_type"] = raw.get(
+                        "toolsInstallType"
+                    )
+                    canonical_data["guest_tools_version"] = raw.get("toolsVersion")
                 # vm.guest / vm.host tracking payload — sourced from the
                 # side-band lookup populated during fetch.
                 vm_extras = (vm_tracking or {}).get(r["id"])
@@ -560,10 +648,12 @@ def _write_ninja_observations(
                         "source_binding_id": NINJA_SOURCE_BINDING_ID,
                         "source_instance_id": source_instance_id,
                         "last_seen_binding_id": NINJA_SOURCE_BINDING_ID,
-                        "external_namespace": NINJA_DEVICE_EXTERNAL_NAMESPACE,
-                        "parent_external_namespace": "",
-                        "parent_external_id": "",
-                        "external_id": entity_key,
+                        "external_namespace": identity["external_namespace"],
+                        "parent_external_namespace": identity[
+                            "parent_external_namespace"
+                        ],
+                        "parent_external_id": identity["parent_external_id"],
+                        "external_id": identity["external_id"],
                         "entity_type": entity_type,
                         "entity_key": entity_key,
                         "platform": "Ninja",
@@ -653,7 +743,7 @@ def _write_ninja_observations(
             device_current_rows = [
                 row
                 for row in current_rows
-                if row["external_namespace"] == NINJA_DEVICE_EXTERNAL_NAMESPACE
+                if row["entity_type"] != "org"
             ]
             rollup_written = write_daily_presence_rows(
                 cur,
