@@ -335,6 +335,18 @@ def test_agents_condition_builder_shows_its_exact_and_or_logic(monkeypatch):
     )
 
 
+def test_agents_column_filter_contains_displayed_values(monkeypatch):
+    context = _render_coverage_context(
+        monkeypatch,
+        "agents=Ninja%20Online%20Required%20%C2%B7%20Missing",
+    )
+
+    assert context["agents_query"] == "ninja online required · missing"
+    assert context["paginator"].count == 1
+    assert context["device_rows"][0]["device_id"] == "device-1"
+    assert context["filter_logic"] == "(Agents contains “ninja online required · missing”)"
+
+
 def test_coverage_includes_an_unattached_hudu_computer_as_its_own_row(monkeypatch):
     cursor = _Cursor()
     captured = {}

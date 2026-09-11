@@ -2,6 +2,13 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.122.58] — 2026-09-11 — Filter Computer agent cells
+
+### Added
+
+- Added an Agents column filter to Computers inventory. It performs a literal
+  contains match against the agent values displayed in each row.
+
 ## [0.122.57] — 2026-09-10 — Clarify Computer role and duplicate review
 
 ### Changed

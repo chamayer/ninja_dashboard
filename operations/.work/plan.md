@@ -2,7 +2,7 @@
 
 ## ACTIVE TASK — Show Computer role and consolidate duplicate review
 
-**Status:** ready for approved commit and push.
+**Status:** ready for commit approval.
 
 **Goal:** make the Computers inventory show and filter Server, Workstation, and
 Unknown as a distinct role, alongside the separate hardware-type field; surface
@@ -14,8 +14,9 @@ separate Merges queue.
 summary. Reconcile current same-client/name collisions into scoped
 `identity_conflict` findings with candidate links and a direct comparison
 action. Retire the duplicate Hudu-only finding emission and remove the Merges
-navigation surface. Do not infer or rewrite physical hardware types and do not
-automatically combine Computers.
+navigation surface. Add a column-level Agents text filter using a literal
+contains match against the values displayed in each Agent cell. Do not infer or
+rewrite physical hardware types and do not automatically combine Computers.
 
 **Affected files:** Computers inventory reader/template/tests; identity and
 CMDB finding evaluators; Findings and navigation templates; release metadata;
@@ -28,6 +29,9 @@ the role filter exposes current role values separately. A source collision is
 derived as one `identity_conflict` Finding, scoped by client plus normalized
 name, with the matching Computers and the concrete signal displayed. A signal
 prompts an operator comparison; it never authorizes an automatic merge.
+The Agents column filter is deliberately a simple contains match for the human
+readable cell values; the existing Agents condition builder remains the place
+for exact source/state/requirement logic.
 
 **Validation plan:** focused coverage-page tests plus focused identity-query
 tests, Django check, compilation/import check, and diff check.
@@ -36,14 +40,13 @@ tests, Django check, compilation/import check, and diff check.
 the existing type filter is data-derived and omits Physical because no current
 Computer has that positive hardware classification.
 
-**Validation completed:** focused Computers inventory regression tests (12
-passed), Django system check, Python compilation of the two changed ingest
-modules, and `git diff --check` passed. The full-file Ruff check remains
-blocked by pre-existing violations throughout `views.py`; this change introduces
-none.
+**Validation completed:** focused Computers inventory regression tests (13
+passed), Django system check, and `git diff --check` passed. The full-file Ruff
+check remains blocked by pre-existing violations throughout `views.py`; this
+change introduces none.
 
-**Next action:** commit and push the approved release, then use the normal
-resolver and CMDB evaluator to refresh the derived findings.
+**Next action:** commit the Agents-column contains filter if approved. Push
+needs separate approval.
 
 **Scope:** make a VMware guest with an exact VMX path use a stable, source-
 scoped observation identity: Ninja organization plus normalized VMX path.

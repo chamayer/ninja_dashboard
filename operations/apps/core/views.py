@@ -8554,6 +8554,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         value for value in request.GET.getlist("client") if value
     ))
     device_query = (request.GET.get("device") or "").strip().lower()
+    agents_query = (request.GET.get("agents") or "").strip().lower()
     # ``platform``, ``state``, and ``online_in`` are retained as legacy query
     # parameters for existing drill-through URLs.  New controls express a
     # condition as one source plus that source's selected statuses.
@@ -9423,6 +9424,25 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         row["platform_cells_by_name"] = {
             platform: inventory_platform_cell(row, platform) for platform in platforms
         }
+        row["agents_filter_text"] = " ".join(
+            " ".join(
+                value
+                for value in (
+                    cell["platform"],
+                    cell["record_status"],
+                    cell["record_age"],
+                    cell["rule_label"],
+                    "Possible match" if cell["possible_match"] else "",
+                    (
+                        cell["possible_match"].get("hostname", "")
+                        if cell["possible_match"]
+                        else ""
+                    ),
+                )
+                if value
+            )
+            for cell in row["platform_cells_by_name"].values()
+        ).lower()
 
     def agent_condition_matches(row: dict, condition: dict) -> bool:
         cell = row["platform_cells_by_name"][condition["agent"]]
@@ -9447,6 +9467,8 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         if client_filters and row["client_slug"] not in client_filters:
             return False
         if device_query and device_query not in row["hostname"].lower():
+            return False
+        if agents_query and agents_query not in row["agents_filter_text"]:
             return False
         if no_platform_selected and row["source_states"]:
             return False
@@ -9637,6 +9659,9 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
     if device_query:
         filter_logic_parts.append(f"(Computer name contains “{device_query}”)")
         filter_summary_parts.append(f"Name contains “{device_query}”")
+    if agents_query:
+        filter_logic_parts.append(f"(Agents contains “{agents_query}”)")
+        filter_summary_parts.append(f"Agents contains “{agents_query}”")
     scope_labels = {
         "has_product_record": "Found now in Ninja, SentinelOne, ScreenConnect, or LogMeIn",
         "any_online": "Online in at least one of those four",
@@ -9732,7 +9757,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
     filter_logic = " AND ".join(filter_logic_parts)
     filter_summary = "; ".join(filter_summary_parts) if filter_summary_parts else "None"
     filters_active = bool(
-        client_filters or device_query or computer_scope_filters
+        client_filters or device_query or agents_query or computer_scope_filters
         or agent_filter_conditions or record_status_filters or rule_status_filters
         or any_platform_selected or no_platform_selected or any_platform_filters
         or coverage_source_filters or hudu_filters or hudu_link_filters
@@ -9835,6 +9860,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             "states": _COVERAGE_STATES,
             "client_filters": client_filters,
             "device_query": device_query,
+            "agents_query": agents_query,
             "platform_filters": platform_filters,
             "online_filters": online_filters,
             "coverage_source_filters": coverage_source_filters,
