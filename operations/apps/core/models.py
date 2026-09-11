@@ -55,6 +55,7 @@ class User(AbstractUser):
             ("write_decisions", "Can write decisions"),
             ("approve_merges", "Can approve merges"),
             ("manage_findings", "Can manage findings"),
+            ("manage_lifecycle", "Can manage Computer lifecycle"),
             ("manage_client_policy", "Can manage client policy"),
             ("manage_catalog", "Can manage software catalog"),
             ("manage_collectors", "Can manage collectors"),

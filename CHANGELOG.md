@@ -2,6 +2,21 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.122.59] — 2026-09-11 — Add auditable Findings actions
+
+### Added
+
+- Added permission-controlled Findings actions, beginning with bulk Computer
+  retirement and **Archive in Hudu**.
+- Added an auditable source-action queue. Operations queues exact targets;
+  ingest rechecks eligibility, executes the source API request, and refreshes
+  source evidence before a finding resolves.
+
+### Changed
+
+- Made each Hudu record whose linked source records no longer resolve its own
+  actionable finding. Current records with no external links remain excluded.
+
 ## [0.122.58] — 2026-09-11 — Filter Computer agent cells
 
 ### Added

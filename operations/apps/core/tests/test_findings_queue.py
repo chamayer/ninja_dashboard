@@ -2,7 +2,16 @@ from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import parse_qs
 
+import pytest
+from django.core.exceptions import PermissionDenied
+from django.test import RequestFactory
+
 from apps.core import views
+from apps.core.finding_actions import (
+    ARCHIVE_HUDU_ASSETS,
+    BULK_RETIRE_COMPUTERS,
+    available_finding_actions,
+)
 from apps.core.templatetags.human_labels import finding_drilldown_query
 
 
@@ -129,6 +138,47 @@ def test_findings_queue_template_exposes_device_csv_and_grouped_types():
     assert "result_scope_cards" in template
     assert "card.count }} / {{ card.total" in template
     assert "card.percentage" in template
+    assert "action.label" in template
+    assert "Why take this action?" in template
+    assert "action.confirmation" in template
+
+
+class _FindingActionUser:
+    is_authenticated = True
+
+    def __init__(self, *, may_manage_lifecycle: bool, may_manage_sources: bool = False) -> None:
+        self.is_superuser = False
+        self._may_manage_lifecycle = may_manage_lifecycle
+        self._may_manage_sources = may_manage_sources
+
+    def has_perm(self, permission: str) -> bool:
+        return (
+            permission == "operations.manage_lifecycle" and self._may_manage_lifecycle
+        ) or (permission == "operations.manage_sources" and self._may_manage_sources)
+
+
+def test_registered_retirement_action_requires_lifecycle_permission():
+    assert available_finding_actions(_FindingActionUser(may_manage_lifecycle=False)) == ()
+    assert available_finding_actions(_FindingActionUser(may_manage_lifecycle=True)) == (
+        BULK_RETIRE_COMPUTERS,
+    )
+
+
+def test_hudu_archive_action_requires_source_management_permission():
+    assert available_finding_actions(
+        _FindingActionUser(may_manage_lifecycle=False, may_manage_sources=True)
+    ) == (ARCHIVE_HUDU_ASSETS,)
+
+
+def test_bulk_retirement_fails_closed_without_lifecycle_permission():
+    request = RequestFactory().post(
+        "/findings/bulk/",
+        {"ids": "7e0ae011-9b4e-4a8b-9a74-7c13f7b61123", "action": "retire_computers"},
+    )
+    request.user = _FindingActionUser(may_manage_lifecycle=False)
+
+    with pytest.raises(PermissionDenied):
+        views.findings_bulk_action(request)
 
 
 def test_findings_scope_cards_compare_filtered_counts_with_labeled_baselines():

@@ -24,8 +24,8 @@ connector already computes and which was verified against production:
 Findings must attach to something clickable in Operations, and `subject_id` is
 NOT NULL with a closed `subject_type` list (client / device / client_user /
 source_binding / collector_instance). There is no subject type for a CMDB
-page, so page-level conditions are filed against the client with the affected
-pages enumerated in `finding_details`.
+page, so each page-level condition is filed against its client while the exact
+source target remains in `finding_details`.
 
 Default is dry-run: nothing is written unless `dry_run=False` is passed.
 """
@@ -46,9 +46,9 @@ log = logging.getLogger(__name__)
 TENANT_ID = 1
 _PLATFORM = "Hudu"
 
-# Cap the page list embedded in a finding. A client with 200 stale pages does
-# not need all 200 inlined; the count is authoritative and the drill-through
-# lists the rest.
+# The incorrect-link finding remains client-scoped, so cap only its embedded
+# example list. Archive candidates are one source record per finding and do
+# not use this cap.
 _MAX_DETAIL_ITEMS = 50
 
 
@@ -135,21 +135,21 @@ def _resolve_absent(cur: Any, finding_type_id: int, keys: list[str], now: dateti
 # Each returns rows shaped for _upsert. Kept as plain SQL so the exact
 # predicate is reviewable next to the counts it produced.
 
-_VERDICT_BY_CLIENT = """
+_STALE_ASSETS = """
 SELECT eo.client_id,
-       count(*)                                              AS n,
-       jsonb_agg(jsonb_build_object(
-           'asset_id', eo.entity_key,
-           'name',     eo.canonical_data->>'hostname',
-           'layout',   eo.canonical_data->>'hudu_layout',
-           'url',      eo.canonical_data->>'hudu_url')
-         ORDER BY eo.canonical_data->>'hostname')            AS pages
+       eo.source_instance_id,
+       eo.raw_data->>'company_id' AS company_id,
+       eo.external_id,
+       eo.canonical_data->>'hostname' AS name,
+       eo.canonical_data->>'hudu_layout' AS layout,
+       eo.canonical_data->>'hudu_url' AS url,
+       eo.canonical_data->'relayed' AS relayed
   FROM operations.entity_observation_current eo
  WHERE eo.tenant_id = %s AND eo.platform = %s
    AND eo.entity_type = 'cmdb.asset' AND eo.active
    AND eo.client_id IS NOT NULL
-   AND eo.canonical_data->>'link_verdict' = %s
- GROUP BY eo.client_id
+   AND COALESCE((eo.canonical_data->>'archived')::boolean, FALSE) IS FALSE
+   AND eo.canonical_data->>'link_verdict' = 'stale'
 """
 
 # Divergent pages, with the devices they resolve to, split by evidence.
@@ -214,22 +214,39 @@ def evaluate(*, dry_run: bool = True) -> dict[str, int]:
         ft_dupe = _finding_type_id(cur, "duplicate_device_records")
         ft_unint = _finding_type_id(cur, "unintegrated_source_observed")
 
-        # 1. stale — filed against the client, pages enumerated
-        cur.execute(_VERDICT_BY_CLIENT, (TENANT_ID, _PLATFORM, "stale"))
+        # 1. stale — one actionable Hudu source record per finding.  A
+        # client-scoped aggregate hid targets beyond its detail cap and could
+        # not be safely acted on.  The subject remains the client because a
+        # Hudu source record is evidence, not an Operations subject type.
+        cur.execute(_STALE_ASSETS, (TENANT_ID, _PLATFORM))
         stale_rows = cur.fetchall()
         stale_keys = []
-        for client_id, n, pages in stale_rows:
-            key = _condition_key(TENANT_ID, client_id, "cmdb_asset_stale", _PLATFORM)
+        for (
+            client_id, source_instance_id, parent_external_id, external_id,
+            name, layout, url, relayed,
+        ) in stale_rows:
+            key = _condition_key(
+                TENANT_ID, source_instance_id, parent_external_id, external_id,
+                "cmdb_asset_stale",
+            )
             stale_keys.append(key)
             if not dry_run:
                 _upsert(
                     cur, tenant_id=TENANT_ID, finding_type_id=ft_stale,
                     client_id=client_id, subject_type="client", subject_id=client_id,
                     condition_key=key, severity="low", now=now,
-                    details={"page_count": n, "pages": pages[:_MAX_DETAIL_ITEMS]},
+                    details={
+                        "asset_id": external_id,
+                        "company_id": parent_external_id,
+                        "source_instance_id": str(source_instance_id),
+                        "name": name,
+                        "layout": layout,
+                        "url": url,
+                        "linked_records": relayed or [],
+                    },
                 )
         counts["cmdb_asset_stale"] = len(stale_rows)
-        counts["cmdb_asset_stale_pages"] = sum(r[1] for r in stale_rows)
+        counts["cmdb_asset_stale_pages"] = len(stale_rows)
 
         # 2/3. divergent — split on evidence
         cur.execute(_DIVERGENT, (TENANT_ID, _PLATFORM))

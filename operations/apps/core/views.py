@@ -12,6 +12,7 @@ from urllib.parse import urlencode, urlsplit
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator
 from django.db import IntegrityError, connection, transaction
 from django.db.models import Count, Prefetch, Q
@@ -33,6 +34,13 @@ from .device_status import DEFAULTS as DEVICE_STATUS_DEFAULTS
 from .device_status import POLICY_NAME as DEVICE_STATUS_POLICY_NAME
 from .device_status import get_device_status_policy
 from .forms import ClientPolicyForm
+from .finding_actions import (
+    ARCHIVE_HUDU_ASSETS,
+    BULK_RETIRE_COMPUTERS,
+    FINDING_ACTIONS,
+    available_finding_actions,
+    can_manage_lifecycle,
+)
 from .models import (
     AdminFinding,
     Agent,
@@ -2693,22 +2701,20 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
                     or request.user.has_perm("operations.manage_catalog")
                 )
             ),
-            "can_manage_lifecycle": bool(
-                request.user.is_superuser
-                or request.user.has_perm("operations.manage_catalog")
-            ),
+            "can_manage_lifecycle": can_manage_lifecycle(request.user),
         },
     )
 
 
 @login_required
-@require_admin
 @require_POST
 @transaction.atomic
 def device_lifecycle_set(
     request: HttpRequest, org_slug: str, device_id: str, target: str
 ) -> HttpResponse:
     """Retire or restore a Computer without deleting its evidence."""
+    if not can_manage_lifecycle(request.user):
+        raise PermissionDenied
     if target not in ("retired", "active"):
         messages.error(request, "That lifecycle action is not available.")
         return redirect("device_detail", org_slug=org_slug, device_id=device_id)
@@ -3301,6 +3307,10 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             if signal:
                 pieces.append(signal)
             return " · ".join(pieces)
+        if name == "cmdb_asset_stale":
+            asset = d.get("name") or "Hudu record"
+            layout = d.get("layout")
+            return f"{asset}" + (f" · {layout}" if layout else "") + " · linked source record is gone"
         if name == "cross_client_serial":
             devices = d.get("device_count")
             clients = d.get("client_count")
@@ -3697,6 +3707,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             "policy_rows_truncated": policy_matching > len(policy_rows),
             "affected_device_count": len(affected_devices),
             "page_query": page_query.urlencode(),
+            "finding_actions": available_finding_actions(request.user),
         },
     )
 
@@ -3810,10 +3821,25 @@ def finding_suppress(request: HttpRequest, finding_id: str) -> HttpResponse:
 @require_POST
 def findings_bulk_action(request: HttpRequest) -> HttpResponse:
     """Apply one action across multiple selected findings."""
-    ids = request.POST.getlist("ids")
+    ids = list(dict.fromkeys(request.POST.getlist("ids")))
     action = (request.POST.get("action") or "").strip()
-    if not ids or action not in ("ack", "resolve", "snooze"):
+    if not ids:
         messages.warning(request, "Pick an action and at least one issue.")
+        return redirect(request.POST.get("next") or "findings_queue")
+
+    registered_action = FINDING_ACTIONS.get(action)
+    if registered_action is not None:
+        if not (
+            request.user.is_superuser
+            or request.user.has_perm(registered_action.permission)
+        ):
+            raise PermissionDenied
+        if registered_action.key == BULK_RETIRE_COMPUTERS.key:
+            return _retire_selected_computers(request, ids, registered_action)
+        if registered_action.key == ARCHIVE_HUDU_ASSETS.key:
+            return _queue_selected_hudu_archives(request, ids, registered_action)
+    if action not in ("ack", "resolve", "snooze"):
+        messages.warning(request, "That action is not available.")
         return redirect(request.POST.get("next") or "findings_queue")
 
     now = timezone.now()
@@ -3861,6 +3887,224 @@ def findings_bulk_action(request: HttpRequest) -> HttpResponse:
             f"{'s' if policy_count != 1 else ''}."
         )
     messages.info(request, message)
+    return redirect(request.POST.get("next") or "findings_queue")
+
+
+@transaction.atomic
+def _retire_selected_computers(request: HttpRequest, ids: list[str], action) -> HttpResponse:
+    """Execute the first registered lifecycle action from selected Findings.
+
+    This deliberately validates the complete selection before changing any
+    Computer.  A Finding is evidence for a human decision; it is not a blanket
+    permission to retire a Computer that has regained a current source record.
+    """
+    reason = (request.POST.get("reason") or "").strip()
+    if action.requires_reason and not reason:
+        messages.warning(request, "A retirement reason is required.")
+        return redirect(request.POST.get("next") or "findings_queue")
+    if len(reason) > _LIFECYCLE_REASON_MAX_LENGTH:
+        messages.warning(
+            request,
+            f"Keep the reason to {_LIFECYCLE_REASON_MAX_LENGTH} characters or fewer.",
+        )
+        return redirect(request.POST.get("next") or "findings_queue")
+
+    findings = list(
+        Finding.objects.select_for_update()
+        .select_related("finding_type")
+        .filter(tenant_id=1, id__in=ids)
+    )
+    if len(findings) != len(ids):
+        messages.warning(request, "One or more selected issues are no longer available.")
+        return redirect(request.POST.get("next") or "findings_queue")
+    if any(
+        finding.finding_type.name not in action.finding_types
+        or finding.subject_type != Finding.SubjectType.DEVICE
+        for finding in findings
+    ):
+        messages.warning(
+            request,
+            "Retirement can only be started from “No current source record” issues.",
+        )
+        return redirect(request.POST.get("next") or "findings_queue")
+
+    device_ids = [finding.subject_id for finding in findings]
+    devices = list(
+        Device.objects.select_for_update()
+        .filter(tenant_id=1, id__in=device_ids, deleted_at__isnull=True)
+    )
+    devices_by_id = {device.id: device for device in devices}
+    if len(devices_by_id) != len(device_ids) or any(
+        devices_by_id[device_id].lifecycle_status != Device.LifecycleStatus.PENDING_CLEANUP
+        for device_id in device_ids
+    ):
+        messages.warning(
+            request,
+            "Every selected Computer must still need review before it can be retired.",
+        )
+        return redirect(request.POST.get("next") or "findings_queue")
+
+    entity_ids = [device.entity_id for device in devices]
+    entities_by_id = {
+        entity.id: entity
+        for entity in Entity.objects.select_for_update().filter(
+            tenant_id=1, id__in=entity_ids, deleted_at__isnull=True
+        )
+    }
+    if len(entities_by_id) != len(entity_ids):
+        messages.warning(request, "One or more selected Computers no longer has an active entity.")
+        return redirect(request.POST.get("next") or "findings_queue")
+
+    now = timezone.now()
+    for device in devices:
+        entity = entities_by_id[device.entity_id]
+        before = {
+            "lifecycle_status": device.lifecycle_status,
+            "entity_retired_at": entity.retired_at.isoformat() if entity.retired_at else None,
+            "entity_retired_reason": entity.retired_reason,
+        }
+        device.lifecycle_status = Device.LifecycleStatus.RETIRED
+        device.updated_at = now
+        device.updated_reason = "operator.finding_action.retire"
+        device.save(update_fields=["lifecycle_status", "updated_at", "updated_reason"])
+        entity.retired_at = now
+        entity.retired_reason = reason
+        entity.updated_at = now
+        entity.updated_reason = "operator.finding_action.retire"
+        entity.save(
+            update_fields=["retired_at", "retired_reason", "updated_at", "updated_reason"]
+        )
+        _audit(
+            request,
+            "finding_action.retire_computer",
+            device.id,
+            before,
+            {
+                "lifecycle_status": device.lifecycle_status,
+                "reason": reason,
+                "finding_ids": [str(finding.id) for finding in findings if finding.subject_id == device.id],
+            },
+            entity_type="device",
+        )
+
+    Finding.objects.filter(tenant_id=1, id__in=ids).exclude(
+        status=Finding.Status.RESOLVED
+    ).update(status=Finding.Status.RESOLVED, closed_at=now)
+    messages.success(
+        request,
+        f"Retired {len(devices)} Computer{'s' if len(devices) != 1 else ''}. "
+        "Source records and history were kept.",
+    )
+    return redirect(request.POST.get("next") or "findings_queue")
+
+
+@transaction.atomic
+def _queue_selected_hudu_archives(request: HttpRequest, ids: list[str], action) -> HttpResponse:
+    """Queue explicit Hudu archive requests for still-eligible findings.
+
+    The Findings action does not call Hudu.  It records an operator request;
+    the ingest worker rechecks eligibility and resolves the source credential
+    immediately before its API call.
+    """
+    reason = (request.POST.get("reason") or "").strip()
+    if action.requires_reason and not reason:
+        messages.warning(request, "A reason is required to archive records in Hudu.")
+        return redirect(request.POST.get("next") or "findings_queue")
+    if len(reason) > _LIFECYCLE_REASON_MAX_LENGTH:
+        messages.warning(
+            request,
+            f"Keep the reason to {_LIFECYCLE_REASON_MAX_LENGTH} characters or fewer.",
+        )
+        return redirect(request.POST.get("next") or "findings_queue")
+
+    findings = list(
+        Finding.objects.select_for_update()
+        .select_related("finding_type")
+        .filter(tenant_id=1, id__in=ids)
+    )
+    if len(findings) != len(ids) or any(
+        finding.finding_type.name not in action.finding_types for finding in findings
+    ):
+        messages.warning(request, "Archive in Hudu requires only Hudu archive-candidate issues.")
+        return redirect(request.POST.get("next") or "findings_queue")
+
+    queued = 0
+    already_queued = 0
+    no_longer_eligible = 0
+    with connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        for finding in findings:
+            details = finding.finding_details or {}
+            source_instance_id = details.get("source_instance_id")
+            company_id = details.get("company_id")
+            asset_id = details.get("asset_id")
+            if not (source_instance_id and company_id and asset_id):
+                no_longer_eligible += 1
+                continue
+            # Recheck the exact current source record. A Finding is evidence,
+            # not authority to mutate a Hudu record that has since recovered.
+            cur.execute(
+                """
+                SELECT eo.source_instance_id, eo.parent_external_id, eo.external_id
+                  FROM operations.entity_observation_current eo
+                  JOIN operations.source_instances si ON si.id = eo.source_instance_id
+                  JOIN operations.sources s ON s.id = si.source_id
+                 WHERE eo.tenant_id = 1
+                   AND eo.source_instance_id = %s::uuid
+                   AND COALESCE(eo.raw_data->>'company_id', '') = %s
+                   AND eo.external_id = %s
+                   AND eo.active
+                   AND s.name = 'Hudu'
+                   AND eo.entity_type = 'cmdb.asset'
+                   AND eo.canonical_data->>'link_verdict' = 'stale'
+                   AND COALESCE((eo.canonical_data->>'archived')::boolean, FALSE) IS FALSE
+                """,
+                (source_instance_id, str(company_id), str(asset_id)),
+            )
+            target = cur.fetchone()
+            if target is None:
+                no_longer_eligible += 1
+                continue
+            cur.execute(
+                """
+                INSERT INTO operations.source_action_requests (
+                    tenant_id, finding_id, source_instance_id, action_key,
+                    parent_external_id, external_id, requested_by_id, reason
+                ) VALUES (1, %s, %s, 'archive_hudu_asset', %s, %s, %s, %s)
+                ON CONFLICT (tenant_id, action_key, source_instance_id,
+                             parent_external_id, external_id)
+                    WHERE status IN ('pending', 'processing')
+                DO NOTHING
+                RETURNING id
+                """,
+                (finding.id, target[0], target[1], target[2], request.user.pk, reason),
+            )
+            request_id = cur.fetchone()
+            if request_id is None:
+                already_queued += 1
+                continue
+            queued += 1
+            _audit(
+                request,
+                "finding_action.queue_archive_hudu",
+                None,
+                {"finding_id": str(finding.id), "eligible": True},
+                {
+                    "request_id": request_id[0],
+                    "source_instance_id": str(target[0]),
+                    "company_id": target[1],
+                    "asset_id": target[2],
+                    "reason": reason,
+                },
+                entity_type="source_action_request",
+            )
+
+    message = f"Queued Archive in Hudu for {queued} record{'s' if queued != 1 else ''}."
+    if already_queued:
+        message += f" {already_queued} already queued."
+    if no_longer_eligible:
+        message += f" {no_longer_eligible} no longer met the archive rule."
+    messages.success(request, message)
     return redirect(request.POST.get("next") or "findings_queue")
 
 

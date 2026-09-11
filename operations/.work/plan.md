@@ -1,52 +1,68 @@
 # Active Operations implementation plan
 
-## ACTIVE TASK — Show Computer role and consolidate duplicate review
+## ACTIVE TASK — Findings actions: bulk Computer retirement
 
 **Status:** ready for commit approval.
 
-**Goal:** make the Computers inventory show and filter Server, Workstation, and
-Unknown as a distinct role, alongside the separate hardware-type field; surface
-possible duplicate Computers as one evidence-led Finding workflow instead of a
-separate Merges queue.
+**Goal:** let an authorized operator retire multiple eligible Computers from
+the Findings workflow, and establish the reusable action boundary for future
+Operations and source API actions.
 
-**Scope:** add a Role table column and Role multi-select filter to
-`/inventory/computers/`; include it in CSV export and the displayed filter
-summary. Reconcile current same-client/name collisions into scoped
-`identity_conflict` findings with candidate links and a direct comparison
-action. Retire the duplicate Hudu-only finding emission and remove the Merges
-navigation surface. Add a column-level Agents text filter using a literal
-contains match against the values displayed in each Agent cell. Do not infer or
-rewrite physical hardware types and do not automatically combine Computers.
+**Scope:** add a registered bulk action for the existing “No current source
+record reports this Computer” finding. It must require a shared reason, select
+only active Computers in `pending_cleanup`, retain evidence/history, retire the
+canonical Computer and entity atomically, resolve the selected finding, and
+write one audit event per Computer. Add a dedicated lifecycle permission and a
+Findings UI control. Do not call source APIs in this slice.
 
-**Affected files:** Computers inventory reader/template/tests; identity and
-CMDB finding evaluators; Findings and navigation templates; release metadata;
-and this plan. No migration or source-data rewrite.
+**Affected files:** finding action registry/handler, lifecycle access policy,
+Findings template and focused tests, User permissions migration, release
+metadata, and this plan. No source-data rewrite.
 
-**Decision:** hardware type remains Physical, VM, Hypervisor host, Network
-device, or Unknown. Server and Workstation remain roles because either may be
-physical or virtual. The type filter continues to list actual current values;
-the role filter exposes current role values separately. A source collision is
-derived as one `identity_conflict` Finding, scoped by client plus normalized
-name, with the matching Computers and the concrete signal displayed. A signal
-prompts an operator comparison; it never authorizes an automatic merge.
-The Agents column filter is deliberately a simple contains match for the human
-readable cell values; the existing Agents condition builder remains the place
-for exact source/state/requirement logic.
+**Decision:** a Finding remains a derived fact. An action is an explicit,
+registered operator operation with a permitted finding type, required
+permission, validation, and audited handler. `manage_lifecycle` is independent
+of catalog administration; the migration grants it to existing catalog
+managers for continuity. Future source API actions use this same registration
+boundary but require their own source capability and confirmation design.
 
-**Validation plan:** focused coverage-page tests plus focused identity-query
-tests, Django check, compilation/import check, and diff check.
+**Validation plan:** focused finding-action and lifecycle-permission tests,
+Django check, migration review, and diff check.
 
-**Checkpoint:** live data contains Servers, Workstations, and Unknown roles;
-the existing type filter is data-derived and omits Physical because no current
-Computer has that positive hardware classification.
+**Checkpoint:** individual retirement exists only from an eligible Computer’s
+detail page, guarded by `manage_catalog`; Findings bulk actions currently alter
+only finding state and have no authorization check.
 
-**Validation completed:** focused Computers inventory regression tests (13
-passed), Django system check, and `git diff --check` passed. The full-file Ruff
-check remains blocked by pre-existing violations throughout `views.py`; this
-change introduces none.
+**Expanded scope:** register **Archive in Hudu** as the first external source
+action. The existing source-agnostic ``cmdb_asset_stale`` evaluator condition
+is the candidate rule: a current Hudu record has at least one integrated,
+linked external record and none still resolve. It excludes unlinked records,
+archived Hudu records, and any asset for which a linked record remains current
+(including offline or stale). The web application queues exact current Hudu
+asset targets; ingest alone resolves the Hudu secret reference, calls the API,
+and records a per-target outcome. It is never an automatic archive or side
+effect of Operations retirement.
 
-**Next action:** commit the Agents-column contains filter if approved. Push
-needs separate approval.
+**Checkpoint:** implemented the generic registered Findings-action registry;
+the initial lifecycle action; a generic, auditable `source_action_requests`
+queue; and the initial `Archive in Hudu` action. `cmdb_asset_stale` is now one
+finding per eligible current Hudu record, not a client aggregate. The web
+action rechecks the exact Hudu observation then queues it; the ingest worker
+rechecks again, resolves the Hudu credential, calls the archive endpoint, and
+refreshes Hudu evidence so source data resolves the finding. It uses the raw
+Hudu company ID because legacy normalized child observations intentionally do
+not populate `parent_external_id`.
+
+**Validation completed:** Python compilation, Django migration-state check,
+Django system check, focused Findings/lifecycle tests (16 passed), diff check,
+and a read-only/live Hudu API inspection. An explicitly approved archive of
+the disposable Hudu `Test-Asset` returned HTTP 200 and a direct read-back
+reported `archived: true`, confirming the configured key supports the action.
+Ruff exposed and the implementation corrected one undefined stale-detail cap;
+the remaining `views.py` lint findings pre-exist this change.
+
+**Next action:** review the pending migration plus current unrelated workspace
+changes, then commit and push only after approval.
 
 **Scope:** make a VMware guest with an exact VMX path use a stable, source-
 scoped observation identity: Ninja organization plus normalized VMX path.

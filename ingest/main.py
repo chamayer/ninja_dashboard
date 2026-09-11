@@ -40,7 +40,7 @@ from ingest.activities import ingest as activities_ingest
 from ingest.agent_compliance import ingest as agent_compliance_ingest
 from ingest.agent_compliance import review_digest
 from ingest.source_observations import is_identity_source, run_source_observations
-from ingest import source_run_queue
+from ingest import source_actions, source_run_queue
 from ingest.inventory import software as software_ingest
 from ingest.inventory import queue as software_queue
 from ingest.runlog import run_log
@@ -2517,6 +2517,13 @@ def main() -> None:
         "interval",
         minutes=15,
         id="source_run_queue_stale_recovery",
+    )
+    scheduler.add_job(
+        source_actions.process_pending,
+        "interval",
+        minutes=1,
+        id="source_action_requests",
+        max_instances=1,
     )
     # Catches hangs the startup reaper cannot: process alive, work stuck.
     scheduler.add_job(

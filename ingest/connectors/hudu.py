@@ -165,6 +165,20 @@ def _fetch_assets(client: httpx.Client, base_url: str) -> list[dict]:
     )
 
 
+def archive_asset(source: SourceConfig, *, company_id: str, asset_id: str) -> int:
+    """Archive one exact Hudu asset for an approved source-action request."""
+    if not source.base_url or not source.api_token:
+        raise RuntimeError("Hudu source requires base_url and api_token_secret_ref")
+    url = (
+        f"{source.base_url.rstrip('/')}/api/v1/companies/"
+        f"{company_id}/assets/{asset_id}/archive"
+    )
+    with httpx.Client(timeout=_TIMEOUT) as client:
+        response = client.put(url, headers={"X-Api-Key": source.api_token})
+        response.raise_for_status()
+        return response.status_code
+
+
 def _resolve_cards(
     asset: dict,
     ninja_map: dict[str, tuple[Any, Any]],
