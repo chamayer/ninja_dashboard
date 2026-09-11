@@ -60,6 +60,7 @@
                 <th style="padding: 0.5rem;">Why it matches</th>
                 <th style="padding: 0.5rem;">Confidence</th>
                 <th style="padding: 0.5rem;">Status</th>
+                <th style="padding: 0.5rem;">Action</th>
             </tr>
         </thead>
         <tbody>
@@ -72,13 +73,19 @@
                     {% for member in c.member_snapshots %}
                     {% if c.client %}<a href="{% url 'device_detail' c.client.slug member.device_id %}">{{ member.hostname|default:member.device_id }}</a>{% else %}{{ member.hostname|default:member.device_id }}{% endif %}{% if not forloop.last %}, {% endif %}
                     {% endfor %}
-                    {% if c.client and c.member_snapshots|length == 2 %}
-                    <br><a href="{% url 'device_merge' c.client.slug c.member_snapshots.0.device_id c.member_snapshots.1.device_id %}">Review same computer →</a>
-                    {% endif %}
-                </td>
+                    </td>
                 <td style="padding: 0.5rem;">{{ c.match_reason|default:"—" }}</td>
                 <td style="padding: 0.5rem;">{{ c.confidence|default:"—" }}</td>
-                <td style="padding: 0.5rem;">{{ c.get_status_display }}</td>
+                    <td style="padding: 0.5rem;">{{ c.get_status_display }}</td>
+                    <td style="padding: 0.5rem;">
+                        {% if c.client and c.member_snapshots|length == 2 %}
+                        <a class="btn btn-secondary" href="{% url 'device_merge' c.client.slug c.member_snapshots.0.device_id c.member_snapshots.1.device_id %}">Review and merge →</a>
+                        {% elif c.member_snapshots|length > 1 %}
+                        <span class="muted">Review members individually</span>
+                        {% else %}
+                        <span class="muted">No merge action</span>
+                        {% endif %}
+                    </td>
             </tr>
             {% endfor %}
         </tbody>

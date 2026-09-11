@@ -54,6 +54,7 @@ from .models import (
     ClientSourceLink,
     CoverageRequirement,
     Device,
+    DeviceSourceLink,
     DeviceOperatorDecision,
     DevicePatchingOverride,
     Entity,
@@ -3456,30 +3457,24 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     def _subject_display_name(f: Finding) -> str | None:
         return _device_context(f).get("hostname") or None
 
-    # A stale Hudu record has no resolved source link by definition, so it
-    # cannot truthfully have a canonical Computer as its Finding subject. An
-    # exact name/client match is still useful navigation. Keep it qualified as
-    # a possible related Computer and only show it when there is one match.
-    stale_finding_keys = {
-        (finding.client_id, (finding.finding_details or {}).get("name", "").strip().casefold())
+    # A stale Hudu record has no resolved *external* source link, but its own
+    # Hudu source link should still identify the Operations Computer. Use that
+    # relationship as the subject link; never substitute a name-only guess.
+    stale_asset_ids = {
+        str((finding.finding_details or {}).get("asset_id"))
         for finding in all_display_findings
         if finding.finding_type.name == "cmdb_asset_stale"
-        and finding.client_id
-        and (finding.finding_details or {}).get("name", "").strip()
+        and (finding.finding_details or {}).get("asset_id")
     }
-    stale_name_filter = Q()
-    for client_id, hostname in stale_finding_keys:
-        stale_name_filter |= Q(client_id=client_id, canonical_hostname__iexact=hostname)
-    stale_devices_by_key: dict[tuple[uuid.UUID, str], list[Device]] = {}
-    if stale_finding_keys:
-        for device in Device.objects.filter(
-            stale_name_filter,
+    hudu_devices_by_asset: dict[str, list[Device]] = {}
+    if stale_asset_ids:
+        for link in DeviceSourceLink.objects.filter(
             tenant_id=1,
-            deleted_at__isnull=True,
-        ).select_related("client"):
-            stale_devices_by_key.setdefault(
-                (device.client_id, device.canonical_hostname.casefold()), []
-            ).append(device)
+            source__name="Hudu",
+            external_id__in=stale_asset_ids,
+            device__deleted_at__isnull=True,
+        ).select_related("device", "device__client"):
+            hudu_devices_by_asset.setdefault(link.external_id, []).append(link.device)
     may_archive_hudu = ARCHIVE_HUDU_ASSETS in available_finding_actions(request.user)
 
     def _display_row(f: Finding) -> dict:
@@ -3536,24 +3531,27 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             context_parts.append("platform or source context")
 
         related_device = None
+        hudu_url = ""
         if f.finding_type.name == "cmdb_asset_stale":
-            # Make the exact Hudu record visible, rather than the client used
-            # as the database subject for this source-evidence Finding.
-            subject_label = details.get("name") or "Hudu record"
-            subject_url = details.get("url") or ""
+            # The database subject remains the client because Hudu evidence is
+            # not a canonical Operations subject. The visible subject is the
+            # linked Computer, while the Hudu URL is retained as evidence.
+            hudu_url = details.get("url") or ""
             context_parts = [f.client.display_name] if f.client else []
-            candidates = stale_devices_by_key.get(
-                (f.client_id, subject_label.casefold()), []
-            )
+            candidates = hudu_devices_by_asset.get(str(details.get("asset_id")), [])
             if len(candidates) == 1:
                 device = candidates[0]
+                subject_label = device.canonical_hostname or "Unnamed Computer"
+                subject_url = reverse(
+                    "device_detail",
+                    kwargs={"org_slug": device.client.slug, "device_id": device.id},
+                )
                 related_device = {
                     "label": device.canonical_hostname,
-                    "url": reverse(
-                        "device_detail",
-                        kwargs={"org_slug": device.client.slug, "device_id": device.id},
-                    ),
+                    "url": subject_url,
                 }
+            else:
+                subject_label = details.get("name") or "Hudu record"
 
         evidence_date = None
         if f.finding_type.name == "device_missing_from_source":
@@ -3579,6 +3577,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             "subject_label": subject_label,
             "subject_url": subject_url,
             "related_device": related_device,
+            "hudu_url": hudu_url,
             "archive_action": (
                 f.finding_type.name == "cmdb_asset_stale" and may_archive_hudu
             ),

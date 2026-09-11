@@ -2,6 +2,15 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.122.61] — 2026-09-11 — Link source findings to Computers
+
+### Changed
+
+- Hudu candidate subjects now link to the Operations Computer carrying the
+  Hudu link, with the Hudu URL shown separately as evidence.
+- Merge candidates now expose a clear Review and merge action in their own
+  column.
+
 ## [0.122.60] — 2026-09-11 — Clarify Hudu archive candidates
 
 ### Changed

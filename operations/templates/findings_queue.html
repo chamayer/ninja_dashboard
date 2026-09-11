@@ -213,9 +213,9 @@
                         {% else %}
                             <code>{{ row.subject_label }}</code>
                         {% endif %}
-                        {% if row.related_device %}
+                        {% if row.hudu_url %}
                             <div class="muted" style="margin-top:0.3rem; font-size:0.75rem;">
-                                Possible Computer: <a href="{{ row.related_device.url }}">{{ row.related_device.label }}</a>
+                                Hudu source record: <a href="{{ row.hudu_url }}" target="_blank" rel="noreferrer">Open Hudu →</a>
                             </div>
                         {% endif %}
                         {% if f.finding_type.name == "identity_conflict" %}

@@ -41,6 +41,11 @@ per-row `Manage` disclosure is replaced by visible actions, including Archive
 in Hudu for authorized users; bulk checkboxes and selected-item actions remain.
 No production mutation or deployment has occurred.
 
+**Follow-up:** the subject link now uses the persisted Hudu-to-Computer source
+link when present; the Hudu URL remains a separate evidence link. Merge
+candidates expose their existing two-member merge operation in a dedicated
+Action column. Validated locally; no manual Portainer redeploy requested.
+
 
 ## ACTIVE TASK — Findings actions: bulk Computer retirement
 

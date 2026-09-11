@@ -142,7 +142,7 @@ def test_findings_queue_template_exposes_device_csv_and_grouped_types():
     assert "Why take this action?" in template
     assert "action.confirmation" in template
     assert "Archive in Hudu" in template
-    assert "Possible Computer:" in template
+    assert "Hudu source record:" in template
     assert "archiveHuduRow" in template
 
 
