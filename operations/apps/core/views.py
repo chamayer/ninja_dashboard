@@ -3538,6 +3538,33 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             subject_label = f.get_subject_type_display()
             context_parts.append("platform or source context")
 
+        # Identity conflicts are stored against the client because the
+        # finding represents a hostname collision, but their evidence names
+        # the actual Computers. If a hostname is available, make the visible
+        # Computer subject drill into that Computer rather than the client.
+        if f.finding_type.name == "identity_conflict" and f.client:
+            candidate_ids = (details.get("candidate_device_ids") or [])
+            candidates = list(
+                Device.objects.filter(
+                    tenant_id=1,
+                    client_id=f.client_id,
+                    id__in=candidate_ids,
+                    deleted_at__isnull=True,
+                ).order_by("created_at", "id")
+            )
+            hostname = details.get("hostname") or details.get("canonical_hostname")
+            device = next(
+                (item for item in candidates if hostname and item.canonical_hostname == hostname),
+                candidates[0] if candidates else None,
+            )
+            if device:
+                subject_label = device.canonical_hostname or "Unnamed Computer"
+                subject_url = reverse(
+                    "device_detail",
+                    kwargs={"org_slug": device.client.slug, "device_id": device.id},
+                )
+                context_parts = [f.client.display_name]
+
         related_device = None
         hudu_url = ""
         if f.finding_type.name == "cmdb_asset_stale":
@@ -11645,6 +11672,20 @@ def device_merge(
         with transaction.atomic(), connection.cursor() as cur:
             cur.execute("SET LOCAL operations.tenant_id = 1")
             counts = _merge_devices(cur, survivor.id, loser.id, "operator.merged")
+            merged_ids = {str(device_a.id), str(device_b.id)}
+            for candidate in MergeCandidate.objects.select_for_update().filter(
+                tenant_id=1,
+                client_id=survivor.client_id,
+                status=MergeCandidate.Status.OPEN,
+            ):
+                snapshot_ids = {
+                    str(member.get("device_id"))
+                    for member in (candidate.member_snapshots or [])
+                    if member.get("device_id")
+                }
+                if snapshot_ids == merged_ids:
+                    candidate.status = MergeCandidate.Status.MERGED
+                    candidate.save(update_fields=["status", "version"])
         _audit(
             request,
             "device.combine",

@@ -1,5 +1,41 @@
 # Active Operations implementation plan
 
+## ACTIVE TASK — Close pairwise merge candidates
+
+**Status:** complete locally; awaiting commit approval.
+
+**Goal:** mark an exact two-Computer merge candidate as merged when the
+existing pairwise merge action succeeds.
+
+**Scope:** pairwise device merge status bookkeeping only. Multi-member
+candidates remain open until their complete group merge is confirmed.
+
+**Validation completed:** Django system check, Python compilation, and
+`git diff --check` pass.
+
+**Checkpoint:** pairwise merges now lock and close only the open candidate
+whose snapshot contains exactly the two merged device IDs. No production
+mutation, commit, or deployment has occurred.
+
+## ACTIVE TASK — Link identity findings to Computers
+
+**Status:** complete locally; awaiting commit approval.
+
+**Goal:** make identity-conflict Subject links open the relevant Computer
+detail page when the finding contains candidate Computer IDs.
+
+**Scope:** Findings queue subject-row construction only. Client-wide findings
+retain their organization links; no finding storage or resolver behavior
+changes.
+
+**Validation completed:** Django system check, Python compilation, and
+`git diff --check` pass.
+
+**Checkpoint:** identity-conflict findings now resolve their snapshotted active
+candidate Computers and link the displayed hostname to the oldest matching
+Computer, with the client retained as context. No production mutation,
+commit, or deployment has occurred.
+
 ## ACTIVE TASK — Group merge review for multi-member candidates
 
 **Status:** implementation in progress.
