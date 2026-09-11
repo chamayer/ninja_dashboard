@@ -2013,6 +2013,7 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
             cur.execute(
                 """
             SELECT evidence.observation_id, evidence.source_name, evidence.entity_type, evidence.external_id,
+                   hudu.source_url,
                    evidence.observation_active, evidence.observation_last_seen_at,
                    presence.reported_online, presence.last_contact_at,
                    lifecycle.record_lifecycle
@@ -2025,6 +2026,10 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
                AND presence.device_id = %s
                AND presence.platform = evidence.source_name
                AND presence.entity_type = evidence.entity_type
+              LEFT JOIN operations.v_cmdb_inventory_evidence_current hudu
+                ON hudu.tenant_id = evidence.tenant_id
+               AND hudu.observation_id = evidence.observation_id
+               AND hudu.source_name = 'Hudu'
              WHERE evidence.tenant_id = %s AND evidence.device_id = %s
              ORDER BY evidence.source_name, evidence.entity_type,
                       evidence.observation_last_seen_at DESC
