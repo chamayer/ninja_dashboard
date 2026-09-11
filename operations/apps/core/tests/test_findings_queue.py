@@ -129,7 +129,7 @@ def test_findings_queue_template_exposes_device_csv_and_grouped_types():
     assert "Issues CSV" in template
     assert "Shown issues CSV" not in template
     assert "<optgroup" in template
-    assert "Manage selected" in template
+    assert "Selected actions" in template
     assert "bulk-action" in template
     assert "Software policy candidates" in template
     assert "Review decision" in template
@@ -141,6 +141,9 @@ def test_findings_queue_template_exposes_device_csv_and_grouped_types():
     assert "action.label" in template
     assert "Why take this action?" in template
     assert "action.confirmation" in template
+    assert "Archive in Hudu" in template
+    assert "Possible Computer:" in template
+    assert "archiveHuduRow" in template
 
 
 class _FindingActionUser:

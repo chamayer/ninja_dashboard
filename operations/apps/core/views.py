@@ -3449,10 +3449,38 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             "os_build_number": details.get("os_build_number")
             or details.get("build_number")
             or current.get("os_build_number", ""),
+            "client_slug": device.get("client_slug", ""),
+            "client_name": device.get("client_name", ""),
         }
 
     def _subject_display_name(f: Finding) -> str | None:
         return _device_context(f).get("hostname") or None
+
+    # A stale Hudu record has no resolved source link by definition, so it
+    # cannot truthfully have a canonical Computer as its Finding subject. An
+    # exact name/client match is still useful navigation. Keep it qualified as
+    # a possible related Computer and only show it when there is one match.
+    stale_finding_keys = {
+        (finding.client_id, (finding.finding_details or {}).get("name", "").strip().casefold())
+        for finding in all_display_findings
+        if finding.finding_type.name == "cmdb_asset_stale"
+        and finding.client_id
+        and (finding.finding_details or {}).get("name", "").strip()
+    }
+    stale_name_filter = Q()
+    for client_id, hostname in stale_finding_keys:
+        stale_name_filter |= Q(client_id=client_id, canonical_hostname__iexact=hostname)
+    stale_devices_by_key: dict[tuple[uuid.UUID, str], list[Device]] = {}
+    if stale_finding_keys:
+        for device in Device.objects.filter(
+            stale_name_filter,
+            tenant_id=1,
+            deleted_at__isnull=True,
+        ).select_related("client"):
+            stale_devices_by_key.setdefault(
+                (device.client_id, device.canonical_hostname.casefold()), []
+            ).append(device)
+    may_archive_hudu = ARCHIVE_HUDU_ASSETS in available_finding_actions(request.user)
 
     def _display_row(f: Finding) -> dict:
         details = f.finding_details or {}
@@ -3507,6 +3535,26 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             subject_label = f.get_subject_type_display()
             context_parts.append("platform or source context")
 
+        related_device = None
+        if f.finding_type.name == "cmdb_asset_stale":
+            # Make the exact Hudu record visible, rather than the client used
+            # as the database subject for this source-evidence Finding.
+            subject_label = details.get("name") or "Hudu record"
+            subject_url = details.get("url") or ""
+            context_parts = [f.client.display_name] if f.client else []
+            candidates = stale_devices_by_key.get(
+                (f.client_id, subject_label.casefold()), []
+            )
+            if len(candidates) == 1:
+                device = candidates[0]
+                related_device = {
+                    "label": device.canonical_hostname,
+                    "url": reverse(
+                        "device_detail",
+                        kwargs={"org_slug": device.client.slug, "device_id": device.id},
+                    ),
+                }
+
         evidence_date = None
         if f.finding_type.name == "device_missing_from_source":
             raw_evidence_date = details.get("last_seen_at")
@@ -3530,6 +3578,10 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             "device_context": device_context,
             "subject_label": subject_label,
             "subject_url": subject_url,
+            "related_device": related_device,
+            "archive_action": (
+                f.finding_type.name == "cmdb_asset_stale" and may_archive_hudu
+            ),
             "context": " · ".join(context_parts),
             "canonical_name": details.get("canonical_name", ""),
             "publisher": details.get("publisher", ""),

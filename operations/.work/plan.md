@@ -1,8 +1,50 @@
 # Active Operations implementation plan
 
+## ACTIVE TASK — Clear Hudu archive candidates in Findings
+
+**Status:** complete — awaiting commit approval.
+
+**Goal:** make each Hudu archive candidate understandable and actionable from
+the Findings list: show the Hudu record instead of treating its organization as
+the subject, link safely to an exact same-client Operations Computer when one
+exists, and replace the hidden per-row management menu with direct actions.
+
+**Scope:** Findings list presentation and client-side action affordances only.
+No schema, evaluator, candidate-rule, permission, or source-action queue
+change. A Hudu record remains source evidence, not a canonical Computer; an
+exact name-and-client Computer link is explicitly presented as a possible
+related Computer rather than an identity claim.
+
+**Affected files:** Findings view, Findings template, focused Findings tests,
+and this plan.
+
+**Decision:** `cmdb_asset_stale` has no canonical Computer subject because its
+linked source records are no longer resolvable. Its row therefore names and
+links the exact Hudu record, retains the organization in context, and, only
+when exactly one same-client hostname matches, provides a clearly qualified
+Operations Computer link. Archive in Hudu is a direct per-row action with a
+required reason and confirmation; it uses the existing guarded queue endpoint.
+
+**Validation plan:** focused Findings tests, Django check/template load, and
+diff check. No production mutation.
+
+**Validation completed:** Python compilation; focused Findings tests (13
+passed); Django system check; and `git diff --check`. A full Ruff pass still
+reports pre-existing issues in the large Findings view and label module; this
+change introduced no new F/E diagnostic. Ruff format check also reports
+pre-existing formatting drift, so no broad mechanical rewrite was made.
+
+**Checkpoint:** completed locally. Hudu candidates now display as `Hudu
+archive candidate` in the Type selector, link to the exact Hudu record, and
+show an exact-name/client Operations Computer link only when unique. The
+per-row `Manage` disclosure is replaced by visible actions, including Archive
+in Hudu for authorized users; bulk checkboxes and selected-item actions remain.
+No production mutation or deployment has occurred.
+
+
 ## ACTIVE TASK — Findings actions: bulk Computer retirement
 
-**Status:** ready for commit approval.
+**Status:** complete.
 
 **Goal:** let an authorized operator retire multiple eligible Computers from
 the Findings workflow, and establish the reusable action boundary for future
@@ -61,8 +103,14 @@ reported `archived: true`, confirming the configured key supports the action.
 Ruff exposed and the implementation corrected one undefined stale-detail cap;
 the remaining `views.py` lint findings pre-exist this change.
 
-**Next action:** review the pending migration plus current unrelated workspace
-changes, then commit and push only after approval.
+**Release:** version 0.122.59, commit `17a6887` (Add auditable Hudu archive
+actions), pushed to `origin` and `a-m-rose` on 2026-09-11. Portainer deployed
+the commit; Operations migrations 0159 and 0160 applied successfully, and
+both Operations and ingest health endpoints are healthy. A post-deployment
+Hudu findings evaluation emitted 198 individual archive candidates.
+
+**Next action:** none. Source actions are operator-confirmed; do not archive a
+candidate without a separate operator request.
 
 **Scope:** make a VMware guest with an exact VMX path use a stable, source-
 scoped observation identity: Ninja organization plus normalized VMX path.

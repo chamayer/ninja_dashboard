@@ -77,6 +77,8 @@ _LABELS: dict[str, str] = {
     "device_source_record_withdrawn": "Source record withdrawn",
     "device_role_conflict": "Device role changed",
     "device_long_offline": "Offline for an extended period",
+    "cmdb_asset_stale": "Hudu archive candidate",
+    "cmdb_link_incorrect": "Hudu record linked to different Computers",
     "cross_client_conflict": "Same hostname on two clients",
     "unmapped_node_class": "Unrecognized device type",
     "supported": "Supported",

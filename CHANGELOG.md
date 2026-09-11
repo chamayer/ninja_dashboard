@@ -2,6 +2,15 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.122.60] — 2026-09-11 — Clarify Hudu archive candidates
+
+### Changed
+
+- Made Hudu archive candidates understandable directly in Findings: the row
+  names and links the Hudu record, identifies an unambiguous possible
+  Operations Computer, and presents Archive in Hudu as a direct action while
+  retaining bulk selected-item actions.
+
 ## [0.122.59] — 2026-09-11 — Add auditable Findings actions
 
 ### Added
