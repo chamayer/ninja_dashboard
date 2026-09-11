@@ -1,5 +1,34 @@
 # Active Operations implementation plan
 
+## ACTIVE TASK — Group merge review for multi-member candidates
+
+**Status:** complete locally; awaiting commit approval.
+
+**Goal:** provide a review and one-confirmation merge action for merge
+candidates containing more than two current Computers.
+
+**Scope:** Operations merge-candidate queue, group merge view, and existing
+device merge helper. No schema, resolver, or automatic-merge behavior change.
+
+**Decision:** validate every snapshotted active member belongs to the same
+client, retain the oldest member as the technical anchor, move each other
+member into it transactionally, and mark the candidate merged. Existing
+pairwise merge behavior remains unchanged.
+
+**Validation plan:** Django check, changed-template loading/compilation, and
+`git diff --check`.
+
+**Validation completed:** `python operations/manage.py check`, Python
+compilation, and `git diff --check` pass.
+
+**Checkpoint:** the queue now links multi-member candidates to a group review
+page. The page validates all active members are present and same-client,
+confirms the complete merge, combines them transactionally through the
+existing evidence-preserving helper, and marks the candidate merged. No
+production mutation, commit, or deployment has occurred.
+
+**Next action:** obtain commit approval if this should be released.
+
 ## ACTIVE TASK — Clear Hudu archive candidates in Findings
 
 **Status:** complete — awaiting commit approval.

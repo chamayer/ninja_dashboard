@@ -80,8 +80,8 @@
                     <td style="padding: 0.5rem;">
                         {% if c.client and c.member_snapshots|length == 2 %}
                         <a class="btn btn-secondary" href="{% url 'device_merge' c.client.slug c.member_snapshots.0.device_id c.member_snapshots.1.device_id %}">Review and merge →</a>
-                        {% elif c.member_snapshots|length > 1 %}
-                        <span class="muted">Review members individually</span>
+                        {% elif c.client and c.member_snapshots|length > 1 %}
+                        <a class="btn btn-secondary" href="{% url 'merge_candidate_group_review' c.id %}">Review and merge all →</a>
                         {% else %}
                         <span class="muted">No merge action</span>
                         {% endif %}

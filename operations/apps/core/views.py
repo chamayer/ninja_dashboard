@@ -11516,6 +11516,68 @@ def _merge_devices(cur, survivor_id, loser_id: str, reason: str) -> dict:
     return counts
 
 
+# ── Merge-candidate group review ────────────────────────────────────────────
+
+
+@login_required
+def merge_candidate_group_review(request: HttpRequest, candidate_id) -> HttpResponse:
+    """Review and optionally combine every current member of a candidate."""
+    candidate = get_object_or_404(
+        MergeCandidate.objects.select_related("client"),
+        id=candidate_id,
+        tenant_id=1,
+        status=MergeCandidate.Status.OPEN,
+    )
+    member_ids = []
+    for snapshot in candidate.member_snapshots or []:
+        try:
+            member_ids.append(uuid.UUID(str(snapshot["device_id"])))
+        except (KeyError, TypeError, ValueError):
+            messages.error(request, "This merge candidate has invalid member data.")
+            return redirect("merge_candidates_queue")
+    devices = list(
+        Device.objects.select_related("client")
+        .prefetch_related("source_links__source")
+        .filter(tenant_id=1, id__in=member_ids, deleted_at__isnull=True)
+        .order_by("created_at", "id")
+    )
+    if len(devices) < 2 or len(devices) != len(set(member_ids)):
+        messages.error(request, "This merge candidate no longer has all of its active members.")
+        return redirect("merge_candidates_queue")
+    if len({device.client_id for device in devices}) != 1:
+        messages.error(request, "Cross-client group merges are not permitted.")
+        return redirect("merge_candidates_queue")
+
+    if request.method == "POST":
+        if request.POST.get("confirmation") != "same_computer_group":
+            messages.error(request, "Confirm that all records describe the same computer.")
+            return redirect("merge_candidate_group_review", candidate_id=candidate.id)
+        survivor = devices[0]
+        total_counts = {}
+        with transaction.atomic(), connection.cursor() as cur:
+            cur.execute("SET LOCAL operations.tenant_id = 1")
+            for loser in devices[1:]:
+                counts = _merge_devices(cur, survivor.id, loser.id, "operator.merged")
+                for key, value in counts.items():
+                    if isinstance(value, int):
+                        total_counts[key] = total_counts.get(key, 0) + value
+                    else:
+                        total_counts[key] = value
+            candidate.status = MergeCandidate.Status.MERGED
+            candidate.save(update_fields=["status", "version"])
+        _audit(
+            request,
+            "device.group_combine",
+            survivor.id,
+            {"candidate_id": str(candidate.id), "member_count": len(devices)},
+            {"survivor_id": str(survivor.id), "counts": total_counts},
+        )
+        messages.success(request, f"Combined {len(devices)} records into {survivor.canonical_hostname}.")
+        return redirect("device_detail", org_slug=survivor.client.slug, device_id=survivor.id)
+
+    return render(request, "merge_candidate_group.html", {"candidate": candidate, "devices": devices})
+
+
 # ── Device merge (generic entity operation) ─────────────────────────────────
 
 
