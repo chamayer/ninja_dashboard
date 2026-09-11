@@ -2013,7 +2013,12 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
             cur.execute(
                 """
             SELECT evidence.observation_id, evidence.source_name, evidence.entity_type, evidence.external_id,
-                   hudu.source_url,
+                   CASE
+                       WHEN evidence.source_name = 'Ninja'
+                       THEN 'https://amrose.rmmservice.com/#/deviceDashboard/'
+                            || evidence.external_id || '/overview'
+                       ELSE hudu.source_url
+                   END AS source_url,
                    evidence.observation_active, evidence.observation_last_seen_at,
                    presence.reported_online, presence.last_contact_at,
                    lifecycle.record_lifecycle
