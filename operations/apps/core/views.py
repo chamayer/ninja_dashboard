@@ -2511,7 +2511,7 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
     ]
     current_agent_records = {
         (source, entity_type)
-        for _observation_id, source, entity_type, _external_id, active, _last_seen,
+        for _observation_id, source, entity_type, _external_id, _source_url, active, _last_seen,
         _reported_online, _last_contact, record_lifecycle in observations
         if active and record_lifecycle not in {"archived", "retired", "decommissioned"}
     }
