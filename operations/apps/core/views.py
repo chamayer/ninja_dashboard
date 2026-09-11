@@ -1953,6 +1953,13 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
         active_tab = "overview"
     same_name_devices = []
     same_name_device_count = 0
+    merge_candidate = None
+    for candidate in MergeCandidate.objects.filter(
+        tenant_id=1, client_id=device.client_id, status=MergeCandidate.Status.OPEN
+    ).only("id", "member_snapshots"):
+        if any(str(device.id) == str(member.get("device_id")) for member in (candidate.member_snapshots or [])):
+            merge_candidate = candidate
+            break
     if active_tab == "overview":
         same_name_devices_qs = (
             Device.objects.filter(
@@ -2675,6 +2682,7 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
             "device": device,
             "same_name_devices": same_name_devices,
             "same_name_device_count": same_name_device_count,
+            "merge_candidate": merge_candidate,
             "links": links,
             "hudu_records": hudu_records,
             "active_findings": active_findings,

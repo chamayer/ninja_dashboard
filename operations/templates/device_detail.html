@@ -224,6 +224,11 @@
     <div class="dd-field-groups">
         <section class="dd-field-group">
             <h3>Identity</h3>
+            {% if merge_candidate %}
+            <p style="margin:.5rem 0;">
+                <a class="btn btn-secondary" href="{% url 'merge_candidate_group_review' merge_candidate.id %}">Review possible duplicate{% if merge_candidate.member_snapshots|length > 2 %} group{% endif %} →</a>
+            </p>
+            {% endif %}
             <dl>
                 <div class="field-row"><dt>Name</dt><dd><code>{{ device.canonical_hostname|default:"Not reported" }}</code><span class="dd-field-note">Computer record</span></dd></div>
                 <div class="field-row"><dt>Role</dt><dd>{{ device.device_role|humanize_label|default:"Not reported" }}</dd></div>

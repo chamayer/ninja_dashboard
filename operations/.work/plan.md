@@ -2,7 +2,7 @@
 
 ## ACTIVE TASK — Group merge review for multi-member candidates
 
-**Status:** complete locally; awaiting commit approval.
+**Status:** implementation in progress.
 
 **Goal:** provide a review and one-confirmation merge action for merge
 candidates containing more than two current Computers.
@@ -22,10 +22,8 @@ pairwise merge behavior remains unchanged.
 compilation, and `git diff --check` pass.
 
 **Checkpoint:** the queue now links multi-member candidates to a group review
-page. The page validates all active members are present and same-client,
-confirms the complete merge, combines them transactionally through the
-existing evidence-preserving helper, and marks the candidate merged. No
-production mutation, commit, or deployment has occurred.
+page. The generic Computer identity section is also being wired to the same
+review action when the current Computer belongs to an open candidate.
 
 **Next action:** obtain commit approval if this should be released.
 
