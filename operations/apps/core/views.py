@@ -11620,6 +11620,18 @@ def merge_candidate_group_review(request: HttpRequest, candidate_id) -> HttpResp
         messages.success(request, f"Combined {len(devices)} records into {survivor.canonical_hostname}.")
         return redirect("device_detail", org_slug=survivor.client.slug, device_id=survivor.id)
 
+    for device in devices:
+        device.source_records = []
+        for link in device.source_links.all():
+            url = ""
+            if link.source.name == "Ninja" and link.external_id:
+                url = (
+                    "https://amrose.rmmservice.com/#/deviceDashboard/"
+                    f"{link.external_id}/overview"
+                )
+            device.source_records.append(
+                {"name": link.source.name, "external_id": link.external_id, "url": url}
+            )
     return render(request, "merge_candidate_group.html", {"candidate": candidate, "devices": devices})
 
 

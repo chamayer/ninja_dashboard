@@ -16,7 +16,7 @@
             <td><code>{{ device.canonical_serial|default:"—" }}</code></td>
             <td><code>{{ device.canonical_vm_uuid|default:"—" }}</code></td>
             <td>{{ device.created_at|date:"Y-m-d H:i" }}</td>
-            <td>{% regroup device.source_links.all by source.name as source_groups %}{% for group in source_groups %}{{ group.grouper }}{% if not forloop.last %}, {% endif %}{% endfor %}</td>
+            <td>{% for record in device.source_records %}{% if record.url %}<a href="{{ record.url }}" target="_blank" rel="noopener">{{ record.name }} record</a>{% else %}{{ record.name }}{% endif %} <code>({{ record.external_id }})</code>{% if not forloop.last %}, {% endif %}{% empty %}—{% endfor %}</td>
         </tr>
         {% endfor %}
         </tbody>
