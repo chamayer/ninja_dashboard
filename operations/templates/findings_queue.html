@@ -90,6 +90,7 @@
                 {% endfor %}
             </select>
         </div>
+        <div style="grid-column:1 / -1; display:flex; gap:1rem; flex-wrap:wrap; align-items:end; padding-bottom:.25rem; border-bottom:1px solid var(--border);">
         <div>
             <label>Category</label>
             <select name="category" onchange="this.form.submit()">
@@ -107,6 +108,7 @@
                     <option value="{{ group.value }}"{% if active_type == group.value %} selected{% endif %}>{{ group.label }}</option>
                 {% endfor %}
             </select>
+        </div>
         </div>
         <div>
             <label>Platform</label>

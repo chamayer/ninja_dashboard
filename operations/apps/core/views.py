@@ -34,6 +34,7 @@ from .device_status import DEFAULTS as DEVICE_STATUS_DEFAULTS
 from .device_status import POLICY_NAME as DEVICE_STATUS_POLICY_NAME
 from .device_status import get_device_status_policy
 from .forms import ClientPolicyForm
+from .templatetags.human_labels import humanize_label
 from .finding_actions import (
     ARCHIVE_HUDU_ASSETS,
     BULK_RETIRE_COMPUTERS,
@@ -231,7 +232,7 @@ def _operator_issue_type_groups(finding_types: list[FindingType], category_key: 
             continue
         alias = next((key for key, value in _ISSUE_TYPE_GROUPS.items() if ft.name in value["types"]), None)
         key = alias or ft.name
-        group = groups.setdefault(key, {"value": key, "label": _ISSUE_TYPE_GROUPS.get(key, {}).get("label", ft.name), "types": set()})
+        group = groups.setdefault(key, {"value": key, "label": _ISSUE_TYPE_GROUPS.get(key, {}).get("label", humanize_label(ft.name)), "types": set()})
         group["types"].add(ft.name)
     return [{**group, "types": sorted(group["types"])} for group in sorted(groups.values(), key=lambda item: item["label"])]
 
