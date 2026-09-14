@@ -19,11 +19,10 @@
     </div>
     <div class="tile-grid" style="margin-top:1rem;">
         {% for t in category_tiles %}
-            <a class="tile" href="{{ t.href }}">
-                <div class="tile-label">{{ t.label }}</div>
-                <div class="tile-value">{{ t.total }}</div>
+            <div class="tile">
+                <a href="{{ t.href }}" style="color:inherit; text-decoration:none;"><div class="tile-label">{{ t.label }}</div><div class="tile-value">{{ t.total }}</div></a>
                 <div class="sev-mini">{% for severity in t.severity_links %}<span class="{{ severity.value }}"><a href="{{ severity.href }}" style="color:inherit; text-decoration:none;">{{ severity.label }} {{ severity.count }}</a></span>{% endfor %}</div>
-            </a>
+            </div>
         {% endfor %}
         <a class="tile {% if policy_matching %}tile-low{% endif %}" href="#software-policy">
             <div class="tile-label">Software policy review</div>
