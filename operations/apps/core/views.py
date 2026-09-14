@@ -3291,6 +3291,15 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
                 "active": is_active,
             }
         )
+    category_tiles = []
+    category_counts = severity_qs.values("finding_type__category__name", "severity").annotate(n=Count("id"))
+    for key, label, names in _ISSUE_CATEGORY_GROUPS:
+        counts = {sev: 0 for sev, _ in Finding.Severity.choices}
+        for row in category_counts:
+            if row["finding_type__category__name"] in names:
+                counts[row["severity"]] += row["n"]
+        params = request.GET.copy(); params.pop("page", None); params["category"] = key
+        category_tiles.append({"label": label, "total": sum(counts.values()), "href": "?" + params.urlencode(), **counts})
 
     _SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
     # The screen intentionally stays bounded so it remains responsive, but an
@@ -3851,6 +3860,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             "active_group_key": active_group_key,
             "show_snoozed": show_snoozed,
             "severity_tiles": severity_tiles,
+            "category_tiles": category_tiles,
             "total_matching": total_matching,
             "actionable_matching": actionable_matching,
             "policy_matching": policy_matching,
