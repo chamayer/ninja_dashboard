@@ -3299,7 +3299,12 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             if row["finding_type__category__name"] in names:
                 counts[row["severity"]] += row["n"]
         params = request.GET.copy(); params.pop("page", None); params["category"] = key
-        category_tiles.append({"label": label, "total": sum(counts.values()), "href": "?" + params.urlencode(), **counts})
+        severity_links = []
+        for sev, sev_label in Finding.Severity.choices:
+            sev_params = params.copy()
+            sev_params["severity"] = sev
+            severity_links.append({"label": sev_label, "count": counts[sev], "href": "?" + sev_params.urlencode(), "value": sev})
+        category_tiles.append({"label": label, "total": sum(counts.values()), "href": "?" + params.urlencode(), "severity_links": severity_links})
 
     _SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
     # The screen intentionally stays bounded so it remains responsive, but an

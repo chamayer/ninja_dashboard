@@ -22,7 +22,7 @@
             <a class="tile" href="{{ t.href }}">
                 <div class="tile-label">{{ t.label }}</div>
                 <div class="tile-value">{{ t.total }}</div>
-                <div class="sev-mini">{% if t.critical %}<span class="crit">{{ t.critical }} crit</span>{% endif %}{% if t.high %}<span class="high">{{ t.high }} high</span>{% endif %}{% if t.medium %}<span class="med">{{ t.medium }} med</span>{% endif %}{% if t.low %}<span class="low">{{ t.low }} low</span>{% endif %}{% if t.info %}<span class="info">{{ t.info }} info</span>{% endif %}</div>
+                <div class="sev-mini">{% for severity in t.severity_links %}<span class="{{ severity.value }}"><a href="{{ severity.href }}" style="color:inherit; text-decoration:none;">{{ severity.label }} {{ severity.count }}</a></span>{% endfor %}</div>
             </a>
         {% endfor %}
         <a class="tile {% if policy_matching %}tile-low{% endif %}" href="#software-policy">
