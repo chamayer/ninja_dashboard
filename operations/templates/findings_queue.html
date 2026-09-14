@@ -95,7 +95,7 @@
             <select name="category" onchange="this.form.submit()">
                 <option value="">Any</option>
                 {% for c in categories %}
-                    <option value="{{ c.name }}"{% if active_category == c.name %} selected{% endif %}>{{ c.name|humanize_label }}</option>
+                    <option value="{{ c.name }}"{% if active_category == c.name %} selected{% endif %}>{{ c.label }}</option>
                 {% endfor %}
             </select>
         </div>
@@ -104,11 +104,7 @@
             <select name="type">
                 <option value="">Any</option>
                 {% for group in finding_type_groups %}
-                    <optgroup label="{{ group.label|humanize_label }}">
-                    {% for ft in group.types %}
-                        <option value="{{ ft.name }}"{% if active_type == ft.name %} selected{% endif %}>{{ ft.name|humanize_label }}</option>
-                    {% endfor %}
-                    </optgroup>
+                    <option value="{{ group.value }}"{% if active_type == group.value %} selected{% endif %}>{{ group.label }}</option>
                 {% endfor %}
             </select>
         </div>

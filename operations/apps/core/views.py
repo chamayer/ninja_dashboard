@@ -205,6 +205,37 @@ def _finding_type_groups(
     return groups
 
 
+_ISSUE_CATEGORY_GROUPS = [
+    ("coverage", "Coverage", {"coverage"}),
+    ("identity_quality", "Identity & data quality", {"identity", "data_quality"}),
+    ("security_software", "Security & software", {"software"}),
+    ("patching_lifecycle", "Patching & lifecycle", {"patching", "lifecycle"}),
+    ("platform_health", "Platform health", {"platform_health", "platform"}),
+]
+
+_ISSUE_TYPE_GROUPS = {
+    "possible_duplicate_records": {
+        "label": "Possible duplicate records",
+        "types": {"identity_conflict", "duplicate_device_records", "duplicate_platform_record"},
+    },
+}
+
+
+def _operator_issue_type_groups(finding_types: list[FindingType], category_key: str) -> list[dict]:
+    category_names = next(
+        (names for key, _label, names in _ISSUE_CATEGORY_GROUPS if key == category_key), None
+    )
+    groups: dict[str, dict] = {}
+    for ft in finding_types:
+        if category_names and (ft.category.name if ft.category else "") not in category_names:
+            continue
+        alias = next((key for key, value in _ISSUE_TYPE_GROUPS.items() if ft.name in value["types"]), None)
+        key = alias or ft.name
+        group = groups.setdefault(key, {"value": key, "label": _ISSUE_TYPE_GROUPS.get(key, {}).get("label", ft.name), "types": set()})
+        group["types"].add(ft.name)
+    return [{**group, "types": sorted(group["types"])} for group in sorted(groups.values(), key=lambda item: item["label"])]
+
+
 def _affected_device_rows(findings) -> list[dict]:
     """Return each device exposed to the filtered finding queryset once.
 
@@ -3005,6 +3036,20 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     group_value_filter = (request.GET.get("group_value") or "").strip()
     q_filter = (request.GET.get("q") or "").strip()
 
+    # Normalize legacy technical values into the operator-facing filter groups.
+    if category_filter in {"identity", "data_quality"}:
+        category_filter = "identity_quality"
+    elif category_filter in {"platform", "platform_health"}:
+        category_filter = "platform_health"
+    elif category_filter == "software":
+        category_filter = "security_software"
+    elif category_filter in {"patching", "lifecycle"}:
+        category_filter = "patching_lifecycle"
+    for group_key, group in _ISSUE_TYPE_GROUPS.items():
+        if type_filter in group["types"]:
+            type_filter = group_key
+            break
+
     # Source names come from operations.sources (admin-editable
     # reference data) — never hardcoded in code.
     source_names = list(Source.objects.order_by("name").values_list("name", flat=True))
@@ -3028,9 +3073,14 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     status_scope_qs = qs
 
     if category_filter:
-        qs = qs.filter(finding_type__category__name=category_filter)
+        category_names = next(
+            (names for key, _label, names in _ISSUE_CATEGORY_GROUPS if key == category_filter),
+            {category_filter},
+        )
+        qs = qs.filter(finding_type__category__name__in=category_names)
     if type_filter:
-        qs = qs.filter(finding_type__name=type_filter)
+        type_names = _ISSUE_TYPE_GROUPS.get(type_filter, {}).get("types", {type_filter})
+        qs = qs.filter(finding_type__name__in=type_names)
     if confidence_filter:
         qs = qs.filter(confidence=confidence_filter)
     if client_filter:
@@ -3754,10 +3804,8 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
 
     # Type dropdown cascades: if category selected, only show types in it.
     ft_qs = FindingType.objects.select_related("category").order_by("name")
-    if category_filter:
-        ft_qs = ft_qs.filter(category__name=category_filter)
-    categories = list(FindingCategory.objects.order_by("display_order", "name"))
-    finding_type_groups = _finding_type_groups(categories, list(ft_qs))
+    categories = [{"name": key, "label": label} for key, label, _names in _ISSUE_CATEGORY_GROUPS]
+    finding_type_groups = _operator_issue_type_groups(list(ft_qs), category_filter)
     clients = Client.objects.filter(tenant_id=1, deleted_at__isnull=True).order_by("display_name")
 
     page_query = request.GET.copy()
