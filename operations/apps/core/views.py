@@ -3292,7 +3292,10 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             }
         )
     category_tiles = []
-    category_counts = severity_qs.values("finding_type__category__name", "severity").annotate(n=Count("id"))
+    top_summary_qs = status_scope_qs.exclude(
+        finding_type__name__in=_SOFTWARE_POLICY_CANDIDATE_TYPES
+    )
+    category_counts = top_summary_qs.values("finding_type__category__name", "severity").annotate(n=Count("id"))
     for key, label, names in _ISSUE_CATEGORY_GROUPS:
         counts = {sev: 0 for sev, _ in Finding.Severity.choices}
         for row in category_counts:
