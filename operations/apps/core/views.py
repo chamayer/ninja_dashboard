@@ -3800,8 +3800,15 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             filename_stem="findings",
         )
 
+    findings_with_detail.sort(key=lambda row: humanize_label(row["f"].finding_type.name))
     paginator = Paginator(findings_with_detail, 50)
     page = paginator.get_page(request.GET.get("page"))
+    page_group_counts = {}
+    for row in page.object_list:
+        row["issue_group"] = humanize_label(row["f"].finding_type.name)
+        page_group_counts[row["issue_group"]] = page_group_counts.get(row["issue_group"], 0) + 1
+    for row in page.object_list:
+        row["issue_group_count"] = page_group_counts[row["issue_group"]]
 
     # Type dropdown cascades: if category selected, only show types in it.
     ft_qs = FindingType.objects.select_related("category").order_by("name")

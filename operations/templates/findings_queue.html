@@ -53,7 +53,13 @@
 </div>
 
 <div class="card">
-    <form action="" method="get" class="filterbar">
+    <style>
+        .issues-filterbar { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:.75rem; align-items:end; }
+        .issues-filterbar .filter-primary { grid-column:1/-1; display:grid; grid-template-columns:repeat(2,minmax(220px,1fr)); gap:.75rem; padding-bottom:.8rem; border-bottom:1px solid var(--border); }
+        .issues-filterbar .filter-control { display:flex; flex-direction:column; gap:.15rem; }
+        @media (max-width:600px) { .issues-filterbar .filter-primary { grid-template-columns:1fr; } }
+    </style>
+    <form action="" method="get" class="issues-filterbar">
         {% if active_group_key %}
         <input type="hidden" name="group_key" value="{{ active_group_key }}">
         <input type="hidden" name="group_value" value="{{ request.GET.group_value }}">
@@ -90,8 +96,8 @@
                 {% endfor %}
             </select>
         </div>
-        <div style="grid-column:1 / -1; display:flex; gap:1rem; flex-wrap:wrap; align-items:end; padding-bottom:.25rem; border-bottom:1px solid var(--border);">
-        <div>
+        <div class="filter-primary">
+        <div class="filter-control">
             <label>Category</label>
             <select name="category" onchange="this.form.submit()">
                 <option value="">Any</option>
@@ -100,7 +106,7 @@
                 {% endfor %}
             </select>
         </div>
-        <div>
+        <div class="filter-control">
             <label>Type</label>
             <select name="type">
                 <option value="">Any</option>
@@ -198,8 +204,15 @@
             </thead>
             <tbody>
                 {% for row in findings %}
+                {% ifchanged row.issue_group %}
+                <tr class="issue-group-header">
+                    <td colspan="9" style="padding:.65rem .5rem; background:var(--surface-subtle,#f3f4f6);">
+                        <button type="button" class="issue-group-toggle" data-group="{{ row.issue_group|slugify }}" aria-expanded="true" style="border:0; background:none; font-weight:700; cursor:pointer;">▾ {{ row.issue_group }} <span class="muted">({{ row.issue_group_count }})</span></button>
+                    </td>
+                </tr>
+                {% endifchanged %}
                 {% with f=row.f %}
-                <tr {% if f.snoozed_until %}style="opacity:0.6;"{% endif %}>
+                <tr class="issue-group-row issue-group-{{ row.issue_group|slugify }}"{% if f.snoozed_until %} style="opacity:0.6;"{% endif %}>
                     <td><input type="checkbox" name="ids" value="{{ f.id }}" class="bulk-cb"></td>
                     <td><span class="badge badge-{{ f.severity }}">{{ f.get_severity_display }}</span></td>
                     <td>
