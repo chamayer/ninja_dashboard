@@ -393,6 +393,24 @@ class FindingType(models.Model):
         return self.name
 
 
+class ConditionPolicyVersion(models.Model):
+    """Database-owned condition policy document and active-version selector."""
+
+    version = models.CharField(max_length=120, primary_key=True)
+    digest = models.CharField(max_length=64, unique=True)
+    policy = models.JSONField()
+    active = models.BooleanField(default=False)
+    created_at = models.DateTimeField()
+
+    class Meta:
+        managed = False
+        db_table = "condition_policy_versions"
+        ordering = ("-version",)
+
+    def __str__(self) -> str:
+        return self.version
+
+
 class Client(UUIDTenantScopedModel):
     entity = models.OneToOneField(
         Entity,
@@ -452,7 +470,10 @@ class ClientSourceLink(models.Model):
         Client, on_delete=models.DO_NOTHING, db_column="client_id", related_name="source_links"
     )
     source = models.ForeignKey(
-        Source, on_delete=models.DO_NOTHING, db_column="source_id", related_name="client_source_links"
+        Source,
+        on_delete=models.DO_NOTHING,
+        db_column="source_id",
+        related_name="client_source_links",
     )
     external_id = models.CharField(max_length=240)
     external_namespace = models.CharField(max_length=120)
@@ -1874,9 +1895,7 @@ class IdentityMatchPolicy(UUIDTenantScopedModel):
         db_table = "identity_match_policies"
         ordering = ("tenant", "priority", "matcher")
         constraints = (
-            models.UniqueConstraint(
-                fields=("tenant", "matcher"), name="uq_identity_match_policy"
-            ),
+            models.UniqueConstraint(fields=("tenant", "matcher"), name="uq_identity_match_policy"),
             models.UniqueConstraint(
                 fields=("tenant", "priority"), name="uq_identity_match_policy_priority"
             ),
@@ -2776,20 +2795,14 @@ class EntityRelationshipEvidenceCurrent(UUIDTenantScopedModel):
                     ~Q(source_external_id="")
                     & ~Q(target_external_id="")
                     & (
-                        (
-                            Q(source_parent_external_namespace="")
-                            & Q(source_parent_external_id="")
-                        )
+                        (Q(source_parent_external_namespace="") & Q(source_parent_external_id=""))
                         | (
                             ~Q(source_parent_external_namespace="")
                             & ~Q(source_parent_external_id="")
                         )
                     )
                     & (
-                        (
-                            Q(target_parent_external_namespace="")
-                            & Q(target_parent_external_id="")
-                        )
+                        (Q(target_parent_external_namespace="") & Q(target_parent_external_id=""))
                         | (
                             ~Q(target_parent_external_namespace="")
                             & ~Q(target_parent_external_id="")
@@ -2965,9 +2978,7 @@ class EntityRelationshipDirty(UUIDTenantScopedModel):
                 name="uq_entity_relationship_dirty",
             ),
         )
-        indexes = (
-            models.Index(fields=("queued_at", "id"), name="idx_relationship_dirty_queue"),
-        )
+        indexes = (models.Index(fields=("queued_at", "id"), name="idx_relationship_dirty_queue"),)
 
     def __str__(self) -> str:
         return f"{self.relationship_type_id}:{self.source_entity_id}:{self.target_entity_id}"
@@ -3111,10 +3122,7 @@ class SourceEvent(UUIDTenantScopedModel):
             models.CheckConstraint(
                 condition=(
                     (Q(subject_parent_external_namespace="") & Q(subject_parent_external_id=""))
-                    | (
-                        ~Q(subject_parent_external_namespace="")
-                        & ~Q(subject_parent_external_id="")
-                    )
+                    | (~Q(subject_parent_external_namespace="") & ~Q(subject_parent_external_id=""))
                 ),
                 name="ck_source_event_parent_identity",
             ),
@@ -4169,9 +4177,7 @@ class PlatformProductMap(models.Model):
     component_role = models.CharField(
         max_length=16, choices=ComponentRole.choices, default=ComponentRole.AGENT
     )
-    provenance = models.TextField(
-        help_text="Why this product identity belongs to the platform."
-    )
+    provenance = models.TextField(help_text="Why this product identity belongs to the platform.")
     enabled = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -4227,9 +4233,7 @@ class ProductAuthorization(models.Model):
     # No default. Permit and deny are opposite decisions, so an authorization
     # must state which one it is; a default would let an incomplete write
     # silently become a permit.
-    polarity = models.BooleanField(
-        help_text="Permitted when true, explicitly denied when false."
-    )
+    polarity = models.BooleanField(help_text="Permitted when true, explicitly denied when false.")
     rationale = models.TextField(help_text="Why this product is permitted or denied here.")
     authorized_by = models.ForeignKey(
         "User",

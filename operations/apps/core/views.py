@@ -28,13 +28,12 @@ from django.views.decorators.http import require_GET, require_POST
 from . import capability as capability_evidence
 from . import category as category_evidence
 from .client_workspace import build_client_directory, build_client_workspace
+from .conditions.live import load_active_profile
 from .csv_export import csv_response, wants_csv
 from .decorators import require_admin
 from .device_status import DEFAULTS as DEVICE_STATUS_DEFAULTS
 from .device_status import POLICY_NAME as DEVICE_STATUS_POLICY_NAME
 from .device_status import get_device_status_policy
-from .forms import ClientPolicyForm
-from .templatetags.human_labels import humanize_label
 from .finding_actions import (
     ARCHIVE_HUDU_ASSETS,
     BULK_RETIRE_COMPUTERS,
@@ -42,6 +41,7 @@ from .finding_actions import (
     available_finding_actions,
     can_manage_lifecycle,
 )
+from .forms import ClientPolicyForm
 from .models import (
     AdminFinding,
     Agent,
@@ -55,9 +55,9 @@ from .models import (
     ClientSourceLink,
     CoverageRequirement,
     Device,
-    DeviceSourceLink,
     DeviceOperatorDecision,
     DevicePatchingOverride,
+    DeviceSourceLink,
     Entity,
     EntityType,
     EvaluatorConfig,
@@ -75,6 +75,7 @@ from .models import (
     Source,
     SuppressionRule,
 )
+from .templatetags.human_labels import humanize_label
 
 DEVICE_PAGE_SIZE = 100
 
@@ -206,33 +207,84 @@ def _finding_type_groups(
     return groups
 
 
-_ISSUE_CATEGORY_GROUPS = [
-    ("coverage", "Coverage", {"coverage"}),
-    ("identity_quality", "Identity & data quality", {"identity", "data_quality"}),
-    ("security_software", "Security & software", {"software"}),
-    ("patching_lifecycle", "Patching & lifecycle", {"patching", "lifecycle"}),
-    ("platform_health", "Platform health", {"platform_health", "platform"}),
-]
-
-_ISSUE_TYPE_GROUPS = {
-    "possible_duplicate_records": {
-        "label": "Possible duplicate records",
-        "types": {"identity_conflict", "duplicate_device_records", "duplicate_platform_record"},
-    },
-}
+def _issue_taxonomy() -> tuple[list[dict], dict[str, dict]]:
+    profile = load_active_profile()
+    categories = [
+        {"key": item["key"], "label": item["label"], "categories": set(item["categories"])}
+        for item in profile.issue_categories
+    ]
+    aliases = {
+        item["key"]: {**item, "types": set(item["types"])}
+        for item in profile.issue_type_aliases
+    }
+    return categories, aliases
 
 
-def _operator_issue_type_groups(finding_types: list[FindingType], category_key: str) -> list[dict]:
+def _condition_assessment_display(row_kind: str, finding_ids) -> dict[str, dict]:
+    """Load persisted dependency responses for visible findings."""
+    ids = [str(value) for value in finding_ids if value]
+    if not ids:
+        return {}
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT to_regclass('operations.condition_assessments')")
+        if cursor.fetchone()[0] is None:
+            return {}
+        cursor.execute(
+            """
+            SELECT finding_id, policy_version, assessed_at, response
+              FROM operations.condition_assessments
+             WHERE tenant_id = 1 AND row_kind = %s
+               AND finding_id = ANY(%s::uuid[])
+             ORDER BY assessed_at DESC
+            """,
+            [row_kind, ids],
+        )
+        rows = cursor.fetchall()
+
+    result: dict[str, dict] = {}
+    for finding_id, policy_version, assessed_at, response in rows:
+        key = str(finding_id)
+        if isinstance(response, str):
+            response = json.loads(response)
+        response = response or {}
+        item = result.setdefault(
+            key,
+            {
+                "available": True,
+                "policy_version": policy_version,
+                "assessed_at": assessed_at,
+                "dispositions": set(),
+                "reasons": set(),
+                "blockers": set(),
+                "may_execute": True,
+            },
+        )
+        item["dispositions"].add(response.get("disposition", "unknown"))
+        item["reasons"].update(response.get("reasons") or [])
+        item["blockers"].update(response.get("blockers") or [])
+        item["may_execute"] = item["may_execute"] and bool(response.get("may_execute"))
+    for item in result.values():
+        for field in ("reasons", "blockers"):
+            item[field] = sorted(item[field])
+        item["disposition"] = next(iter(item["dispositions"])) if len(item["dispositions"]) == 1 else "mixed"
+        del item["dispositions"]
+    return result
+
+
+def _operator_issue_type_groups(
+    finding_types: list[FindingType], category_key: str,
+    categories: list[dict], aliases: dict[str, dict],
+) -> list[dict]:
     category_names = next(
-        (names for key, _label, names in _ISSUE_CATEGORY_GROUPS if key == category_key), None
+        (item["categories"] for item in categories if item["key"] == category_key), None
     )
     groups: dict[str, dict] = {}
     for ft in finding_types:
         if category_names and (ft.category.name if ft.category else "") not in category_names:
             continue
-        alias = next((key for key, value in _ISSUE_TYPE_GROUPS.items() if ft.name in value["types"]), None)
+        alias = next((key for key, value in aliases.items() if ft.name in value["types"]), None)
         key = alias or ft.name
-        group = groups.setdefault(key, {"value": key, "label": _ISSUE_TYPE_GROUPS.get(key, {}).get("label", humanize_label(ft.name)), "types": set()})
+        group = groups.setdefault(key, {"value": key, "label": aliases.get(key, {}).get("label", humanize_label(ft.name)), "types": set()})
         group["types"].add(ft.name)
     return [{**group, "types": sorted(group["types"])} for group in sorted(groups.values(), key=lambda item: item["label"])]
 
@@ -3036,17 +3088,17 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     group_key_filter = (request.GET.get("group_key") or "").strip()
     group_value_filter = (request.GET.get("group_value") or "").strip()
     q_filter = (request.GET.get("q") or "").strip()
+    issue_categories, issue_type_aliases = _issue_taxonomy()
 
     # Normalize legacy technical values into the operator-facing filter groups.
-    if category_filter in {"identity", "data_quality"}:
-        category_filter = "identity_quality"
-    elif category_filter in {"platform", "platform_health"}:
-        category_filter = "platform_health"
-    elif category_filter == "software":
-        category_filter = "security_software"
-    elif category_filter in {"patching", "lifecycle"}:
-        category_filter = "patching_lifecycle"
-    for group_key, group in _ISSUE_TYPE_GROUPS.items():
+    category_filter = next(
+        (
+            item["key"] for item in issue_categories
+            if category_filter in item["categories"]
+        ),
+        category_filter,
+    )
+    for group_key, group in issue_type_aliases.items():
         if type_filter in group["types"]:
             type_filter = group_key
             break
@@ -3075,12 +3127,12 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
 
     if category_filter:
         category_names = next(
-            (names for key, _label, names in _ISSUE_CATEGORY_GROUPS if key == category_filter),
+            (item["categories"] for item in issue_categories if item["key"] == category_filter),
             {category_filter},
         )
         qs = qs.filter(finding_type__category__name__in=category_names)
     if type_filter:
-        type_names = _ISSUE_TYPE_GROUPS.get(type_filter, {}).get("types", {type_filter})
+        type_names = issue_type_aliases.get(type_filter, {}).get("types", {type_filter})
         qs = qs.filter(finding_type__name__in=type_names)
     if confidence_filter:
         qs = qs.filter(confidence=confidence_filter)
@@ -3296,7 +3348,8 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
         finding_type__name__in=_SOFTWARE_POLICY_CANDIDATE_TYPES
     )
     category_counts = top_summary_qs.values("finding_type__category__name", "severity").annotate(n=Count("id"))
-    for key, label, names in _ISSUE_CATEGORY_GROUPS:
+    for category in issue_categories:
+        key, label, names = category["key"], category["label"], category["categories"]
         counts = {sev: 0 for sev, _ in Finding.Severity.choices}
         for row in category_counts:
             if row["finding_type__category__name"] in names:
@@ -3704,6 +3757,11 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
         }
 
     findings_with_detail = [_display_row(f) for f in findings]
+    assessments = _condition_assessment_display(
+        "entity", (row["f"].id for row in findings_with_detail)
+    )
+    for row in findings_with_detail:
+        row["assessment"] = assessments.get(str(row["f"].id))
 
     # A duplicate-Computer Finding carries the whole collision group.  Resolve
     # the IDs once here so operators can inspect or compare the actual
@@ -3829,8 +3887,10 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
 
     # Type dropdown cascades: if category selected, only show types in it.
     ft_qs = FindingType.objects.select_related("category").order_by("name")
-    categories = [{"name": key, "label": label} for key, label, _names in _ISSUE_CATEGORY_GROUPS]
-    finding_type_groups = _operator_issue_type_groups(list(ft_qs), category_filter)
+    categories = [{"name": item["key"], "label": item["label"]} for item in issue_categories]
+    finding_type_groups = _operator_issue_type_groups(
+        list(ft_qs), category_filter, issue_categories, issue_type_aliases
+    )
     clients = Client.objects.filter(tenant_id=1, deleted_at__isnull=True).order_by("display_name")
 
     page_query = request.GET.copy()
@@ -7847,6 +7907,10 @@ def findings_admin_health(request: HttpRequest) -> HttpResponse:
         qs = qs.filter(finding_type__name=type_filter)
 
     qs = qs.order_by("-last_detected_at")[:200]
+    findings = list(qs)
+    assessments = _condition_assessment_display("admin", (finding.id for finding in findings))
+    for finding in findings:
+        finding.assessment = assessments.get(str(finding.id))
 
     finding_types = FindingType.objects.filter(finding_class="admin").order_by("name")
 
@@ -7856,7 +7920,7 @@ def findings_admin_health(request: HttpRequest) -> HttpResponse:
         {
             "admin_group": "integrations",
             "admin_tab": "ingest",
-            "findings": qs,
+            "findings": findings,
             "finding_types": finding_types,
             "severity_choices": Finding.Severity.choices,
             "active_status": status_filter,

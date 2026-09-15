@@ -61,7 +61,7 @@ def test_profile_covers_53_definitions_and_all_subscribers():
 
 @pytest.mark.parametrize("mutation", ["duplicate", "cycle", "unknown_rule", "threshold", "effect"])
 def test_invalid_profile_rejected(mutation):
-    path = Path(__file__).parents[1] / "conditions" / "profile.json"
+    path = Path(__file__).parents[4] / "shared" / "conditions" / "profile.json"
     data = json.loads(path.read_text())
     if mutation == "duplicate":
         data["definitions"].append(data["definitions"][0])

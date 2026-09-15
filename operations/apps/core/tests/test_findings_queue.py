@@ -128,7 +128,8 @@ def test_findings_queue_template_exposes_device_csv_and_grouped_types():
     assert "format=devices_csv" in template
     assert "Issues CSV" in template
     assert "Shown issues CSV" not in template
-    assert "<optgroup" in template
+    assert 'value="{{ group.value }}"' in template
+    assert "<optgroup" not in template
     assert "Selected actions" in template
     assert "bulk-action" in template
     assert "Software policy candidates" in template

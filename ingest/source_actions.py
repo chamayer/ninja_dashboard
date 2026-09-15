@@ -135,9 +135,41 @@ def _still_eligible(request_row: dict[str, Any]) -> bool:
                    AND eo.entity_type = 'cmdb.asset'
                    AND eo.canonical_data->>'link_verdict' = 'stale'
                    AND COALESCE((eo.canonical_data->>'archived')::boolean, FALSE) IS FALSE
+                   AND EXISTS (
+                       SELECT 1
+                         FROM operations.condition_assessments assessment
+                        WHERE assessment.tenant_id = eo.tenant_id
+                          AND assessment.row_kind = 'entity'
+                          AND assessment.finding_id = %s
+                          AND (assessment.response ->> 'may_execute')::boolean IS TRUE
+                          AND assessment.policy_version = (
+                              SELECT version
+                                FROM operations.condition_policy_versions
+                               WHERE active
+                          )
+                          AND assessment.assessed_at >= now() - (
+                              SELECT ((policy->>'freshness_hours')::integer * interval '1 hour')
+                                FROM operations.condition_policy_versions
+                               WHERE active
+                          )
+                   )
+                   AND NOT EXISTS (
+                       SELECT 1
+                         FROM operations.condition_assessments assessment
+                        WHERE assessment.tenant_id = eo.tenant_id
+                          AND assessment.row_kind = 'entity'
+                          AND assessment.finding_id = %s
+                          AND (assessment.response ->> 'may_execute')::boolean IS NOT TRUE
+                   )
             )
             """,
-            (request_row["source_instance_id"], request_row["company_id"], request_row["asset_id"]),
+            (
+                request_row["source_instance_id"],
+                request_row["company_id"],
+                request_row["asset_id"],
+                request_row["finding_id"],
+                request_row["finding_id"],
+            ),
         )
         return bool(cur.fetchone()[0])
 

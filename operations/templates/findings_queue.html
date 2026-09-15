@@ -246,7 +246,18 @@
                         {% endif %}
                     </td>
                     <td>{{ row.detail|default:"—" }}</td>
-                    <td class="muted">{{ row.context|default:"—" }}</td>
+                    <td class="muted">
+                        {{ row.context|default:"—" }}
+                        {% if row.assessment %}
+                        <div style="margin-top:0.35rem; font-size:0.75rem;">
+                            <strong>Assessment: {{ row.assessment.disposition }}</strong>
+                            {% if row.assessment.reasons %}<br>Reason: {{ row.assessment.reasons|join:", " }}{% endif %}
+                            {% if row.assessment.blockers %}<br>Blocker: {{ row.assessment.blockers|join:", " }}{% endif %}
+                        </div>
+                        {% else %}
+                        <div style="margin-top:0.35rem; font-size:0.75rem;">Assessment pending</div>
+                        {% endif %}
+                    </td>
                     <td>
                         <span class="badge badge-{{ f.status }}">{{ f.get_status_display }}</span>
                         {% if f.snoozed_until %}<br><span class="muted" style="font-size:0.7rem;">snoozed → {{ f.snoozed_until|date:"Y-m-d" }}</span>{% endif %}

@@ -37,9 +37,17 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from ingest import db
+from ingest.conditions import load_active_profile, record_assessment
 from ingest.identity import identity_entity_types
 from ingest.intel.windows_servicing import sync as sync_windows_servicing
 from ingest.normalize import normalize_hostname
+from shared.conditions.contracts import (
+    Condition,
+    EvaluationCoverage,
+    Participant,
+    Readiness,
+    Signal,
+)
 
 log = logging.getLogger(__name__)
 
@@ -1186,6 +1194,8 @@ def _evaluate_coverage(
     if missing_ft is None:
         log.warning("evaluator: finding_type 'missing_required_platform' not found")
         return 0
+    policy = load_active_profile(cur)
+    identity_blocked = _identity_blocked_devices(cur, tenant_id)
 
     # Pre-compute devices that are fully offline (last contact across
     # ALL agents older than the device_offline threshold). Per
@@ -1196,16 +1206,16 @@ def _evaluate_coverage(
     # offline devices (the agent was never installed, that's a real
     # gap regardless of current online state).
     cur.execute(
-        f"""
+        """
         SELECT apc.device_id
         FROM operations.device_agent_presence_current apc
         WHERE apc.tenant_id = %s
           AND apc.entity_type LIKE 'agent.%%'
         GROUP BY apc.device_id
         HAVING MAX(COALESCE(apc.last_contact_at, apc.last_observed_at))
-             < NOW() - INTERVAL '{_LONG_OFFLINE_DAYS} days'
+             < NOW() - (%s::text || ' days')::interval
         """,
-        (tenant_id,),
+        (tenant_id, policy.offline_days),
     )
     fully_offline_devices = {r[0] for r in cur.fetchall()}
 
@@ -1344,6 +1354,21 @@ def _evaluate_coverage(
                 confidence,
                 now,
                 details,
+                assessment=(
+                    _device_condition_signals(
+                        tenant_id,
+                        dev_id,
+                        identity_blocked,
+                        offline=offline_downgrade,
+                        collection_skipped=False,
+                    ),
+                    EvaluationCoverage(
+                        True,
+                        device_id is None,
+                        True,
+                        platform not in skip_platforms,
+                    ),
+                ),
             )
 
     return count
@@ -1590,7 +1615,9 @@ def _evaluate_device_offline(cur: Any, tenant_id: int, now: datetime) -> int:
     ft_id = _get_finding_type_id(cur, "device_offline")
     if ft_id is None:
         return 0
-    threshold_interval = f"{_LONG_OFFLINE_DAYS} days"
+    policy = load_active_profile(cur)
+    threshold_interval = f"{policy.offline_days} days"
+    identity_blocked = _identity_blocked_devices(cur, tenant_id)
     # Per-platform last-seen is preserved as evidence on the finding
     # so operators triaging a fully-offline device can see the exact
     # timeline ("went dark on Ninja 7/10 → SentinelOne 7/12 →
@@ -1646,9 +1673,86 @@ def _evaluate_device_offline(cur: Any, tenant_id: int, now: datetime) -> int:
                 "source_last_seen": per_source or {},
                 "last_seen_source": last_seen_source,
             },
+            assessment=(
+                (
+                    Signal(
+                        "identity",
+                        Participant("device", str(dev_id), "affected", tenant_id),
+                        Readiness.BLOCKED if dev_id in identity_blocked else Readiness.UNKNOWN,
+                        "identity:unsettled_group"
+                        if dev_id in identity_blocked
+                        else "identity:readiness_not_established",
+                    ),
+                    Signal(
+                        "offline",
+                        Participant("device", str(dev_id), "affected", tenant_id),
+                        Readiness.BLOCKED,
+                        "offline:extended_absence",
+                    ),
+                ),
+                EvaluationCoverage(True, True, True, True),
+            ),
         )
-    _resolve_findings_absent(cur, tenant_id, ft_id, offenders, now)
+    _resolve_findings_absent(
+        cur, tenant_id, ft_id, offenders, now, assessment_required=True
+    )
     return count
+
+
+def _identity_blocked_devices(cur: Any, tenant_id: int) -> set[uuid.UUID]:
+    cur.execute(
+        """
+        SELECT CASE
+                   WHEN member.value ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+                   THEN member.value::uuid
+               END
+        FROM operations.findings f
+        JOIN operations.finding_types ft ON ft.id = f.finding_type_id
+        CROSS JOIN LATERAL jsonb_array_elements_text(
+            f.finding_details -> 'candidate_device_ids'
+        ) AS member(value)
+        WHERE f.tenant_id = %s
+          AND ft.name = 'identity_conflict'
+          AND f.status IN ('open', 'acknowledged', 'investigating')
+        """,
+        (tenant_id,),
+    )
+    return {row[0] for row in cur.fetchall() if row[0] is not None}
+
+
+def _device_condition_signals(
+    tenant_id: int,
+    device_id: uuid.UUID,
+    identity_blocked: set[uuid.UUID],
+    *,
+    offline: bool,
+    collection_skipped: bool,
+) -> tuple[Signal, ...]:
+    participant = Participant("device", str(device_id), "affected", tenant_id)
+    return (
+        Signal(
+            "identity",
+            participant,
+            Readiness.BLOCKED if device_id in identity_blocked else Readiness.UNKNOWN,
+            "identity:unsettled_group"
+            if device_id in identity_blocked
+            else "identity:readiness_not_established",
+        ),
+        Signal(
+            "collection",
+            participant,
+            Readiness.BLOCKED if collection_skipped else Readiness.UNKNOWN,
+            "collection:incomplete_or_stale"
+            if collection_skipped
+            else "collection:required_scope_set_unverified",
+        ),
+        Signal(
+            "offline",
+            participant,
+            Readiness.BLOCKED if offline else Readiness.READY,
+            "offline:extended_absence" if offline else "offline:within_window",
+        ),
+    )
 
 
 def _evaluate_stale_data(cur: Any, tenant_id: int, now: datetime) -> int:
@@ -1954,16 +2058,27 @@ def _resolve_findings_absent(
     finding_type_id: int,
     current_subject_ids: list[uuid.UUID],
     now: datetime,
+    assessment_required: bool = False,
 ) -> None:
     """Resolve open findings of a type whose subject is no longer an offender."""
+    assessment_clause = """
+          AND EXISTS (
+              SELECT 1
+              FROM operations.condition_assessments assessment
+              WHERE assessment.tenant_id = findings.tenant_id
+                AND assessment.row_kind = 'entity'
+                AND assessment.finding_id = findings.id
+                AND (assessment.response ->> 'may_clear')::boolean IS TRUE
+          )""" if assessment_required else ""
     cur.execute(
-        """
+        f"""
         UPDATE operations.findings
         SET status = 'resolved', last_seen_at = %s
         WHERE tenant_id = %s
           AND finding_type_id = %s
           AND status IN ('open', 'acknowledged')
           AND NOT (subject_id = ANY(%s::uuid[]))
+        {assessment_clause}
         """,
         (now, tenant_id, finding_type_id, current_subject_ids),
     )
@@ -1990,6 +2105,17 @@ def _get_finding_type_id(cur: Any, name: str) -> int | None:
     return None
 
 
+def _finding_type_name(cur: Any, finding_type_id: int) -> str:
+    cur.execute(
+        "SELECT name FROM operations.finding_types WHERE id = %s LIMIT 1",
+        (finding_type_id,),
+    )
+    row = cur.fetchone()
+    if not row:
+        raise RuntimeError(f"Finding type {finding_type_id} is not registered")
+    return row[0]
+
+
 def _condition_key(
     tenant_id: int,
     client_id: Any,
@@ -2012,6 +2138,7 @@ def _upsert_finding(
     confidence: str,
     now: datetime,
     details: dict[str, Any],
+    assessment: tuple[tuple[Signal, ...], EvaluationCoverage] | None = None,
 ) -> int:
     """UPSERT a finding. Severity is immutable; confidence and timestamps update."""
     cur.execute(
@@ -2037,6 +2164,7 @@ def _upsert_finding(
                 WHEN findings.status = 'resolved' THEN 'open'
                 ELSE findings.status
             END
+        RETURNING id
         """,
         (
             tenant_id,
@@ -2052,4 +2180,26 @@ def _upsert_finding(
             now,
         ),
     )
+    finding_id = cur.fetchone()[0]
+    if assessment is not None:
+        signals, coverage = assessment
+        participant = Participant("device", str(device_id), "affected", tenant_id)
+        condition = Condition(
+            tenant_id,
+            "entity",
+            str(finding_id),
+            _finding_type_name(cur, finding_type_id),
+            condition_key,
+            "open",
+            (participant,),
+        )
+        record_assessment(
+            cur,
+            condition,
+            signals,
+            coverage,
+            now=now,
+            reevaluation_key=f"evaluator:{condition_key}:{now.isoformat()}",
+            participant=participant,
+        )
     return 1

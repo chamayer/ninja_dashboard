@@ -40,6 +40,14 @@ from datetime import UTC, datetime
 from typing import Any
 
 from ingest import db
+from ingest.conditions import record_assessment
+from shared.conditions.contracts import (
+    Condition,
+    EvaluationCoverage,
+    Participant,
+    Readiness,
+    Signal,
+)
 
 log = logging.getLogger(__name__)
 
@@ -77,7 +85,7 @@ def _upsert(
     severity: str,
     now: datetime,
     details: dict[str, Any],
-) -> None:
+) -> uuid.UUID:
     """Upsert one finding.
 
     Deliberately not reusing `evaluator._upsert_finding`: that helper hardcodes
@@ -108,6 +116,7 @@ def _upsert(
                 WHEN findings.status = 'resolved' THEN 'open'
                 ELSE findings.status
             END
+        RETURNING id
         """,
         (
             tenant_id, finding_type_id, client_id,
@@ -115,19 +124,76 @@ def _upsert(
             condition_key, severity, now, now, now,
         ),
     )
+    return cur.fetchone()[0]
 
 
-def _resolve_absent(cur: Any, finding_type_id: int, keys: list[str], now: datetime) -> None:
+def _resolve_absent(
+    cur: Any,
+    finding_type_id: int,
+    keys: list[str],
+    now: datetime,
+    *,
+    assessment_required: bool = False,
+) -> None:
     """Close findings of this type whose condition no longer holds."""
-    cur.execute(
+    assessment_clause = ""
+    if assessment_required:
+        # The producer is deployed before the Operations migration in some
+        # restart sequences.  Do not let the compatibility lifecycle query
+        # fail while the additive assessment tables are still absent.
+        cur.execute("SELECT to_regclass('operations.condition_assessments') IS NOT NULL")
+        assessment_required = bool(cur.fetchone()[0])
+    if assessment_required:
+        assessment_clause = """
+           AND EXISTS (
+               SELECT 1
+                 FROM operations.condition_assessments assessment
+                WHERE assessment.tenant_id = operations.findings.tenant_id
+                  AND assessment.row_kind = 'entity'
+                  AND assessment.finding_id = operations.findings.id
+                  AND (assessment.response ->> 'may_clear')::boolean IS TRUE
+           )
         """
+    cur.execute(
+        f"""
         UPDATE operations.findings
            SET status = 'resolved', last_seen_at = %s
          WHERE tenant_id = %s AND finding_type_id = %s
            AND status IN ('open', 'acknowledged')
            AND NOT (condition_key = ANY(%s::text[]))
+           {assessment_clause}
         """,
         (now, TENANT_ID, finding_type_id, keys),
+    )
+
+
+def _record_stale_assessment(
+    cur: Any,
+    *,
+    tenant_id: int,
+    finding_id: uuid.UUID,
+    finding_type_id: int,
+    condition_key: str,
+    source_instance_id: uuid.UUID,
+    now: datetime,
+) -> None:
+    cur.execute("SELECT to_regclass('operations.condition_assessments') IS NOT NULL")
+    if not cur.fetchone()[0]:
+        return
+    cur.execute("SELECT name FROM operations.finding_types WHERE id = %s", (finding_type_id,))
+    type_name = cur.fetchone()[0]
+    participant = Participant("source_binding", str(source_instance_id), "affected", tenant_id)
+    condition = Condition(
+        tenant_id, "entity", str(finding_id), type_name, condition_key, "open", (participant,)
+    )
+    record_assessment(
+        cur,
+        condition,
+        (Signal("collection", participant, Readiness.READY, "collection:current_source_evidence"),),
+        EvaluationCoverage(True, True, True, True),
+        now=now,
+        reevaluation_key=f"cmdb:{condition_key}",
+        participant=participant,
     )
 
 
@@ -231,7 +297,7 @@ def evaluate(*, dry_run: bool = True) -> dict[str, int]:
             )
             stale_keys.append(key)
             if not dry_run:
-                _upsert(
+                finding_id = _upsert(
                     cur, tenant_id=TENANT_ID, finding_type_id=ft_stale,
                     client_id=client_id, subject_type="client", subject_id=client_id,
                     condition_key=key, severity="low", now=now,
@@ -244,6 +310,15 @@ def evaluate(*, dry_run: bool = True) -> dict[str, int]:
                         "url": url,
                         "linked_records": relayed or [],
                     },
+                )
+                _record_stale_assessment(
+                    cur,
+                    tenant_id=TENANT_ID,
+                    finding_id=finding_id,
+                    finding_type_id=ft_stale,
+                    condition_key=key,
+                    source_instance_id=source_instance_id,
+                    now=now,
                 )
         counts["cmdb_asset_stale"] = len(stale_rows)
         counts["cmdb_asset_stale_pages"] = len(stale_rows)
@@ -297,7 +372,7 @@ def evaluate(*, dry_run: bool = True) -> dict[str, int]:
         counts["unintegrated_source_observed"] = len(unint_rows)
 
         if not dry_run:
-            _resolve_absent(cur, ft_stale, stale_keys, now)
+            _resolve_absent(cur, ft_stale, stale_keys, now, assessment_required=True)
             _resolve_absent(cur, ft_wrong, wrong_keys, now)
             _resolve_absent(cur, ft_dupe, dupe_keys, now)
             _resolve_absent(cur, ft_unint, unint_keys, now)

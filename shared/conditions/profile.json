@@ -17,6 +17,16 @@
     "merge_and_mapping",
     "legacy_and_external"
   ],
+  "issue_categories": [
+    {"key": "coverage", "label": "Coverage", "categories": ["coverage"]},
+    {"key": "identity_quality", "label": "Identity & data quality", "categories": ["identity", "data_quality"]},
+    {"key": "security_software", "label": "Security & software", "categories": ["software"]},
+    {"key": "patching_lifecycle", "label": "Patching & lifecycle", "categories": ["patching", "lifecycle"]},
+    {"key": "platform_health", "label": "Platform health", "categories": ["platform_health", "platform"]}
+  ],
+  "issue_type_aliases": [
+    {"key": "possible_duplicate_records", "label": "Possible duplicate records", "types": ["identity_conflict", "duplicate_device_records", "duplicate_platform_record"]}
+  ],
   "rules": {
     "identity": {
       "effect": "gate",
@@ -283,10 +293,7 @@
       "category": "Documentation",
       "type": "Hudu archive candidate",
       "lifecycle": "active",
-      "rules": [
-        "identity",
-        "collection"
-      ]
+      "rules": ["collection"]
     },
     {
       "name": "cmdb_link_incorrect",

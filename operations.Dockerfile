@@ -43,6 +43,7 @@ RUN --mount=type=secret,id=workstation_ca \
 COPY operations/config/    ./config/
 COPY operations/apps/      ./apps/
 COPY operations/templates/ ./templates/
+COPY shared/               ./shared/
 COPY operations/manage.py  ./
 COPY operations/entrypoint.sh /entrypoint.sh
 RUN sed -i 's/\r$//' /entrypoint.sh && chmod +x /entrypoint.sh

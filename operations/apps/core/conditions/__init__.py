@@ -1,1 +1,1 @@
-"""Conditions foundation. No consumer changes until shadow results are approved."""
+"""Operations compatibility namespace for the shared conditions package."""

@@ -42,6 +42,49 @@ def send_digest(tenant_id: int = _TENANT_ID) -> int:
             WHERE f.tenant_id = %s
               AND f.status IN ('open', 'acknowledged')
               AND (f.confidence <> 'confirmed' OR f.confidence = '')
+              AND (
+                  NOT EXISTS (
+                      SELECT 1 FROM operations.condition_assessments a
+                      WHERE a.tenant_id = f.tenant_id AND a.row_kind = 'entity'
+                        AND a.finding_id = f.id
+                  )
+                  OR (
+                      NOT EXISTS (
+                          SELECT 1
+                          FROM operations.condition_assessments a
+                          WHERE a.tenant_id = f.tenant_id AND a.row_kind = 'entity'
+                            AND a.finding_id = f.id
+                            AND (
+                                (a.response->>'may_notify')::boolean IS NOT TRUE
+                                OR a.policy_version <> (
+                                    SELECT version FROM operations.condition_policy_versions
+                                    WHERE active ORDER BY version DESC LIMIT 1
+                                )
+                                OR a.assessed_at < now() - (
+                                    SELECT (policy->>'freshness_hours')::integer
+                                    FROM operations.condition_policy_versions
+                                    WHERE active ORDER BY version DESC LIMIT 1
+                                ) * interval '1 hour'
+                            )
+                      )
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM operations.condition_participants p
+                          WHERE p.tenant_id = f.tenant_id AND p.row_kind = 'entity'
+                            AND p.finding_id = f.id
+                            AND NOT EXISTS (
+                                SELECT 1 FROM operations.condition_assessments pa
+                                WHERE pa.tenant_id = p.tenant_id
+                                  AND pa.row_kind = p.row_kind
+                                  AND pa.finding_id = p.finding_id
+                                  AND pa.participant_kind = p.participant_kind
+                                  AND pa.participant_id = p.participant_id
+                                  AND pa.participant_role = p.participant_role
+                                  AND (pa.response->>'may_notify')::boolean IS TRUE
+                            )
+                      )
+                  )
+              )
             ORDER BY f.severity DESC, f.last_seen_at DESC
             LIMIT 500
             """,

@@ -99,4 +99,4 @@ def test_dockerfile_copies_profile_and_command():
 
     root = Path(__file__).resolve().parents[4]
     assert "COPY operations/apps/" in (root / "operations.Dockerfile").read_text()
-    assert (root / "operations/apps/core/conditions/profile.json").is_file()
+    assert (root / "shared/conditions/profile.json").is_file()

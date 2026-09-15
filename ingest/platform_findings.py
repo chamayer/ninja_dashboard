@@ -38,6 +38,8 @@ from ingest.cmdb_findings import (
     _resolve_absent,
     _upsert,
 )
+from ingest.conditions import record_assessment
+from shared.conditions.contracts import Condition, EvaluationCoverage, Participant
 
 log = logging.getLogger(__name__)
 
@@ -68,8 +70,12 @@ def evaluate(*, dry_run: bool = True) -> dict[str, int]:
         queue_keys = _eval_stalled_queues(cur, ft_queue, now, counts, dry_run)
 
         if not dry_run:
-            _resolve_absent(cur, ft_failure, failure_keys, now)
-            _resolve_absent(cur, ft_queue, queue_keys, now)
+            _resolve_absent(
+                cur, ft_failure, failure_keys, now, assessment_required=True
+            )
+            _resolve_absent(
+                cur, ft_queue, queue_keys, now, assessment_required=True
+            )
 
     log.info("platform findings: %s (dry_run=%s)", counts, dry_run)
     return counts
@@ -115,13 +121,14 @@ def _eval_source_failures(
         counts["source_failure"] += 1
         if dry_run:
             continue
-        _upsert(
+        subject_id = _subject("domain", domain)
+        finding_id = _upsert(
             cur,
             tenant_id=TENANT_ID,
             finding_type_id=finding_type_id,
             client_id=None,
             subject_type="source_binding",
-            subject_id=_subject("domain", domain),
+            subject_id=subject_id,
             condition_key=key,
             # A domain with no success in 24h is broken, not flaky.
             severity="high" if last_ok is None else "medium",
@@ -134,6 +141,7 @@ def _eval_source_failures(
                 "error": (error_text or "")[:500],
             },
         )
+        _record_platform_assessment(cur, finding_id, key, "source_failure", subject_id, now)
     return keys
 
 
@@ -188,7 +196,7 @@ def _eval_stalled_queues(
         counts["software_queue_stalled"] += 1
         if dry_run:
             continue
-        _upsert(
+        finding_id = _upsert(
             cur,
             tenant_id=TENANT_ID,
             finding_type_id=finding_type_id,
@@ -210,7 +218,39 @@ def _eval_stalled_queues(
                 ],
             },
         )
+        _record_platform_assessment(
+            cur, finding_id, key, "software_queue_stalled", _subject("queue", queue_key), now
+        )
     return keys
+
+
+def _record_platform_assessment(
+    cur: Any,
+    finding_id: uuid.UUID,
+    condition_key: str,
+    type_name: str,
+    subject_id: uuid.UUID,
+    now: datetime,
+) -> None:
+    participant = Participant("source_binding", str(subject_id), "affected", TENANT_ID)
+    condition = Condition(
+        TENANT_ID,
+        "entity",
+        str(finding_id),
+        type_name,
+        condition_key,
+        "open",
+        (participant,),
+    )
+    record_assessment(
+        cur,
+        condition,
+        (),
+        EvaluationCoverage(True, True, True, True),
+        now=now,
+        reevaluation_key=f"platform:{condition_key}",
+        participant=participant,
+    )
 
 
 def _queue_is_measurable(cur: Any, table_name: str | None) -> bool:

@@ -25,7 +25,15 @@ import uuid
 from datetime import datetime, timezone
 
 from ingest import db
+from ingest.conditions import record_assessment
 from ingest.config import settings
+from shared.conditions.contracts import (
+    Condition,
+    EvaluationCoverage,
+    Participant,
+    Readiness,
+    Signal,
+)
 
 log = logging.getLogger(__name__)
 
@@ -1040,12 +1048,63 @@ def _emit_scoped(cur, tenant_id, ft_id, client_id, device_id, canonical_key,
                 WHEN findings.status = 'resolved' THEN 'open'
                 ELSE findings.status
             END
+        RETURNING id
         """,
         (
             tenant_id, ft_id, row_client, subject_type, subject_id,
             json.dumps(details), ckey, severity, now, now, now,
         ),
     )
+    finding_id = cur.fetchone()[0]
+    participants = []
+    if device_id is not None:
+        participants.append(Participant("device", str(device_id), "affected", tenant_id))
+    for kind, value in (
+        ("software_product", product_uuid),
+        ("software_version", version_uuid),
+        ("software_installation", installation_uuid),
+    ):
+        if value is not None:
+            participants.append(Participant(kind, str(value), "affected", tenant_id))
+    if participants:
+        cur.execute("SELECT name FROM operations.finding_types WHERE id = %s", (ft_id,))
+        type_name = cur.fetchone()[0]
+        participant_rows = tuple(participants)
+        condition = Condition(
+            tenant_id,
+            "entity",
+            str(finding_id),
+            type_name,
+            ckey,
+            "open",
+            participant_rows,
+        )
+        for participant in participant_rows:
+            signals = ()
+            if participant.kind == "device":
+                signals = (
+                    Signal(
+                        "identity",
+                        participant,
+                        Readiness.UNKNOWN,
+                        "identity:readiness_not_established",
+                    ),
+                    Signal(
+                        "offline",
+                        participant,
+                        Readiness.UNKNOWN,
+                        "offline:contact_unavailable",
+                    ),
+                )
+            record_assessment(
+                cur,
+                condition,
+                signals,
+                EvaluationCoverage(True, True, True, True),
+                now=now,
+                reevaluation_key=f"software:{ckey}",
+                participant=participant,
+            )
     return 1
 
 

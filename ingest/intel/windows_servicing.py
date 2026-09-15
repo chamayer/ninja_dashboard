@@ -19,6 +19,14 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from ingest import db
+from ingest.conditions import record_assessment
+from shared.conditions.contracts import (
+    Condition,
+    EvaluationCoverage,
+    Participant,
+    Readiness,
+    Signal,
+)
 
 log = logging.getLogger(__name__)
 
@@ -423,6 +431,7 @@ def _sync_findings(
                 confidence = EXCLUDED.confidence,
                 last_seen_at = EXCLUDED.last_seen_at,
                 last_detected_at = EXCLUDED.last_detected_at
+            RETURNING id
             """,
             (
                 tenant_id,
@@ -437,6 +446,12 @@ def _sync_findings(
                 now,
             ),
         )
+        finding_id = cur.fetchone()[0]
+        _record_assessment(
+            cur, tenant_id, finding_id, finding_type_id,
+            _finding_condition(tenant_id, row["device_id"], name), name,
+            row["device_id"], now,
+        )
         affected += cur.rowcount or 0
 
     for name, (finding_type_id, _severity) in types.items():
@@ -449,11 +464,50 @@ def _sync_findings(
               AND status IN ('open', 'acknowledged')
               AND (%s::uuid IS NULL OR subject_id = %s)
               AND NOT (subject_id = ANY(%s::uuid[]))
+              AND (
+                  to_regclass('operations.condition_assessments') IS NULL
+                  OR NOT EXISTS (
+                      SELECT 1 FROM operations.condition_assessments a
+                      WHERE a.tenant_id = operations.findings.tenant_id
+                        AND a.row_kind = 'entity'
+                        AND a.finding_id = operations.findings.id
+                  )
+                  OR EXISTS (
+                      SELECT 1 FROM operations.condition_assessments a
+                      WHERE a.tenant_id = operations.findings.tenant_id
+                        AND a.row_kind = 'entity'
+                        AND a.finding_id = operations.findings.id
+                        AND (a.response->>'may_clear')::boolean IS TRUE
+                  )
+              )
             """,
             (now, now, tenant_id, finding_type_id, device_id, device_id, offenders[name]),
         )
         affected += cur.rowcount or 0
     return affected
+
+
+def _record_assessment(cur, tenant_id, finding_id, finding_type_id,
+                       condition_key, type_name, device_id, now) -> None:
+    cur.execute("SELECT to_regclass('operations.condition_assessments') IS NOT NULL")
+    if not cur.fetchone()[0]:
+        return
+    cur.execute("SELECT name FROM operations.finding_types WHERE id = %s", (finding_type_id,))
+    type_name = cur.fetchone()[0]
+    participant = Participant("device", str(device_id), "affected", tenant_id)
+    condition = Condition(
+        tenant_id, "entity", str(finding_id), type_name, condition_key, "open",
+        (participant,),
+    )
+    record_assessment(
+        cur,
+        condition,
+        (Signal("identity", participant, Readiness.READY, "identity:resolved"),),
+        EvaluationCoverage(True, True, True, True),
+        now=now,
+        reevaluation_key=f"windows_servicing:{condition_key}",
+        participant=participant,
+    )
 
 
 def _iso(value: date | None) -> str | None:

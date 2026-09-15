@@ -141,6 +141,54 @@ def _load_pending_findings(cur, tenant_id: int) -> list[dict[str, Any]]:
         FROM operations.findings f
         JOIN operations.finding_types ft ON ft.id = f.finding_type_id
         WHERE f.tenant_id = %s AND f.status IN ('open', 'acknowledged')
+          AND (
+              NOT EXISTS (
+                  SELECT 1
+                    FROM operations.condition_assessments assessment
+                   WHERE assessment.tenant_id = f.tenant_id
+                     AND assessment.row_kind = 'entity'
+                     AND assessment.finding_id = f.id
+              )
+              OR (
+                  NOT EXISTS (
+                      SELECT 1
+                        FROM operations.condition_assessments assessment
+                       WHERE assessment.tenant_id = f.tenant_id
+                         AND assessment.row_kind = 'entity'
+                         AND assessment.finding_id = f.id
+                         AND (
+                             (assessment.response ->> 'may_notify')::boolean IS NOT TRUE
+                             OR assessment.policy_version <> (
+                                 SELECT version
+                                   FROM operations.condition_policy_versions
+                                  WHERE active
+                             )
+                             OR assessment.assessed_at < now() - (
+                                 SELECT ((policy->>'freshness_hours')::integer * interval '1 hour')
+                                   FROM operations.condition_policy_versions
+                                  WHERE active
+                             )
+                         )
+                  )
+                  AND NOT EXISTS (
+                      SELECT 1
+                        FROM operations.condition_participants participant
+                       WHERE participant.tenant_id = f.tenant_id
+                         AND participant.row_kind = 'entity'
+                         AND participant.finding_id = f.id
+                         AND NOT EXISTS (
+                             SELECT 1
+                               FROM operations.condition_assessments assessment
+                              WHERE assessment.tenant_id = participant.tenant_id
+                                AND assessment.row_kind = participant.row_kind
+                                AND assessment.finding_id = participant.finding_id
+                                AND assessment.participant_kind = participant.participant_kind
+                                AND assessment.participant_id = participant.participant_id
+                                AND assessment.participant_role = participant.participant_role
+                         )
+                  )
+              )
+          )
 
         UNION ALL
 

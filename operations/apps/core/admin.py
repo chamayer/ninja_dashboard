@@ -1,7 +1,13 @@
 from __future__ import annotations
 
+import hashlib
+import json
+
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
+from django.db import connection
+from django.utils import timezone
+from shared.conditions.policy import parse_profile
 
 from .models import (
     AttributeAuthorityPolicy,
@@ -14,6 +20,7 @@ from .models import (
     ClientUserLink,
     Collector,
     CollectorInstance,
+    ConditionPolicyVersion,
     DeadLetterObservation,
     Device,
     DeviceSourceLink,
@@ -47,8 +54,8 @@ from .models import (
     Source,
     SourceBinding,
     SourceFieldMapping,
-    SourceRecordLifecycleMapping,
     SourceInstance,
+    SourceRecordLifecycleMapping,
     SuppressionRule,
     Tenant,
     User,
@@ -408,6 +415,86 @@ class FindingTypeAdmin(admin.ModelAdmin):
     list_display = ("name", "default_severity", "drilldown_evidence_key", "runbook_path")
     list_filter = ("default_severity",)
     search_fields = ("name", "description", "runbook_path")
+
+
+@admin.register(ConditionPolicyVersion)
+class ConditionPolicyVersionAdmin(admin.ModelAdmin):
+    list_display = ("version", "digest", "active", "created_at")
+    list_filter = ("active",)
+    search_fields = ("version", "digest")
+    readonly_fields = ("digest", "active", "created_at")
+    actions = ("activate_version",)
+
+    def has_add_permission(self, request):
+        return request.user.is_superuser or request.user.has_perm("operations.manage_taxonomy")
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    def save_model(self, request, obj, form, change):
+        if change:
+            raise PermissionError("Condition policy versions are immutable")
+        profile = parse_profile(obj.policy)
+        if profile.version != obj.version:
+            raise ValueError("Policy version must match the document version")
+        digest = hashlib.sha256(json.dumps(obj.policy, sort_keys=True).encode()).hexdigest()
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT operations.create_condition_policy_version(%s,%s,%s::jsonb)",
+                (obj.version, digest, json.dumps(obj.policy, separators=(",", ":"))),
+            )
+        obj.digest = digest
+        obj.active = False
+        obj.created_at = timezone.now()
+        AuditLog.objects.create(
+            tenant=request.user.tenant,
+            actor=request.user,
+            actor_kind="user",
+            source="ui",
+            action="condition_policy.created",
+            entity_type="condition_policy_version",
+            before_state=None,
+            after_state={"version": obj.version, "digest": digest},
+        )
+
+    @admin.action(description="Activate selected condition policy version")
+    def activate_version(self, request, queryset):
+        if not self.has_add_permission(request):
+            self.message_user(
+                request, "Condition policy management permission is required.", level="error"
+            )
+            return
+        selected = list(queryset.values_list("version", flat=True))
+        if len(selected) != 1:
+            self.message_user(request, "Select exactly one policy version.", level="error")
+            return
+        previous = (
+            ConditionPolicyVersion.objects.filter(active=True)
+            .values_list("version", flat=True)
+            .first()
+        )
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT operations.activate_condition_policy_version(%s)",
+                (selected[0],),
+            )
+        AuditLog.objects.create(
+            tenant=request.user.tenant,
+            actor=request.user,
+            actor_kind="user",
+            source="ui",
+            action="condition_policy.activated",
+            entity_type="condition_policy_version",
+            before_state={"version": previous} if previous else None,
+            after_state={
+                "version": selected[0],
+                "reason": "Activated from Operations admin",
+            },
+        )
+        self.message_user(request, f"Activated condition policy {selected[0]}.")
 
 
 # Read-only: v_client_source_link is a view (migration 0123).

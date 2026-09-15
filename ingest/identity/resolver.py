@@ -24,6 +24,7 @@ from typing import Any
 from psycopg.types.json import Json
 
 from ingest import db, device_cache_projector
+from ingest.conditions import record_assessment
 from ingest.identity import identity_entity_types
 from ingest.identity.matching import (
     IdentityMatchPolicy,
@@ -39,6 +40,7 @@ from ingest.normalize import (
     normalize_loose_hostname,
     os_family,
 )
+from shared.conditions.contracts import Condition, EvaluationCoverage, Participant
 
 log = logging.getLogger(__name__)
 
@@ -576,6 +578,7 @@ UPDATE operations.findings finding
         WHERE finding.condition_key =
               'identity_conflict:' || md5(c.client_id::text || ':' || c.canonical_hostname)
    )
+   /* CONDITION_ASSESSMENT_GUARD */
 """
 
 
@@ -594,12 +597,90 @@ def _project_identity_conflict_findings(cur) -> dict[str, int]:
         (TENANT_ID, _MIN_IDENTITY_CANDIDATES, TENANT_ID, finding_type_id),
     )
     upserted = cur.rowcount or 0
+    cur.execute("SELECT to_regclass('operations.condition_assessments')")
+    has_assessments = cur.fetchone()[0] is not None
+    if has_assessments:
+        _record_identity_conflict_assessments(cur, finding_type_id)
+    close_sql = _IDENTITY_CONFLICT_FINDING_CLOSE.replace(
+        "/* CONDITION_ASSESSMENT_GUARD */",
+        """
+   AND EXISTS (
+       SELECT 1
+         FROM operations.condition_assessments assessment
+        WHERE assessment.tenant_id = finding.tenant_id
+          AND assessment.row_kind = 'entity'
+          AND assessment.finding_id = finding.id
+          AND (assessment.response ->> 'may_clear')::boolean IS TRUE
+   )
+        """
+        if has_assessments
+        else "",
+    )
     cur.execute(
-        _IDENTITY_CONFLICT_FINDING_CLOSE,
+        close_sql,
         (TENANT_ID, _MIN_IDENTITY_CANDIDATES, TENANT_ID, finding_type_id),
     )
     closed = cur.rowcount or 0
     return {"upserted": upserted, "closed": closed}
+
+
+def _record_identity_conflict_assessments(cur, finding_type_id: int) -> None:
+    """Record eligible participant assessments for current identity groups."""
+    now = _assessment_now(cur)
+    cur.execute(
+        """
+        SELECT id, client_id, condition_key, status,
+               finding_details -> 'candidate_device_ids'
+        FROM operations.findings
+        WHERE tenant_id = %s AND finding_type_id = %s
+          AND status IN ('open', 'acknowledged', 'investigating')
+        """,
+        (TENANT_ID, finding_type_id),
+    )
+    for finding_id, client_id, condition_key, status, raw_candidates in cur.fetchall():
+        candidates = raw_candidates if isinstance(raw_candidates, list) else []
+        participants = tuple(
+            Participant("device", candidate_id, "conflicting", TENANT_ID)
+            for candidate in candidates
+            if (candidate_id := _candidate_uuid(candidate)) is not None
+        )
+        if not participants:
+            continue
+        if client_id:
+            participants += (Participant("client", str(client_id), "context", TENANT_ID),)
+        condition = Condition(
+            TENANT_ID,
+            "entity",
+            str(finding_id),
+            "identity_conflict",
+            condition_key,
+            status,
+            participants,
+        )
+        for participant in participants:
+            if participant.kind != "device":
+                continue
+            record_assessment(
+                cur,
+                condition,
+                (),
+                EvaluationCoverage(True, True, True, True),
+                now=now,
+                reevaluation_key=f"identity-resolver:{condition_key}",
+                participant=participant,
+            )
+
+
+def _assessment_now(cur):
+    cur.execute("SELECT CURRENT_TIMESTAMP")
+    return cur.fetchone()[0]
+
+
+def _candidate_uuid(value: Any) -> str | None:
+    try:
+        return str(uuid.UUID(str(value)))
+    except (ValueError, TypeError, AttributeError):
+        return None
 
 
 _STRONG_IDENTITY_CANDIDATE_CTE = """

@@ -54,6 +54,7 @@
                 <th style="padding: 0.5rem;">Type</th>
                 <th style="padding: 0.5rem;">Condition key</th>
                 <th style="padding: 0.5rem;">Status</th>
+                <th style="padding: 0.5rem;">Assessment</th>
                 <th style="padding: 0.5rem;">First detected</th>
                 <th style="padding: 0.5rem;">Last detected</th>
                 <th style="padding: 0.5rem;"></th>
@@ -66,6 +67,15 @@
                 <td style="padding: 0.5rem;">{{ f.finding_type.name }}</td>
                 <td style="padding: 0.5rem;"><code class="muted" style="font-size: 0.8rem;">{{ f.condition_key|truncatechars:40 }}</code></td>
                 <td style="padding: 0.5rem;">{{ f.status }}</td>
+                <td style="padding: 0.5rem; font-size: 0.8rem;">
+                    {% if f.assessment %}
+                        <strong>{{ f.assessment.disposition }}</strong>
+                        {% if f.assessment.reasons %}<br>Reason: {{ f.assessment.reasons|join:", " }}{% endif %}
+                        {% if f.assessment.blockers %}<br>Blocker: {{ f.assessment.blockers|join:", " }}{% endif %}
+                    {% else %}
+                        <span class="muted">Assessment pending</span>
+                    {% endif %}
+                </td>
                 <td style="padding: 0.5rem;" class="muted">{{ f.first_detected_at }}</td>
                 <td style="padding: 0.5rem;" class="muted">{{ f.last_detected_at }}</td>
                 <td style="padding: 0.5rem;">

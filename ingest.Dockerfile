@@ -31,6 +31,7 @@ RUN --mount=type=secret,id=workstation_ca \
 # App code + SQL migrations (everything else excluded by .dockerignore)
 COPY ingest/ ./ingest/
 COPY sql/   ./sql/
+COPY shared/ ./shared/
 COPY VERSION ./
 
 RUN chown -R ninja:ninja /app
