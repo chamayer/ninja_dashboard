@@ -2,20 +2,20 @@
 
 ## Status
 
-Hotfix validated and ready to publish. Commit `aa4ef58` was pushed to both
-remotes, but the automatic Operations startup failed in migration `0161`
-during policy seeding. The traceback confirms that migration used the wrong
-Django app label (`core`); its filesystem seed path also pointed outside the
-Operations image. The migration did not finish.
-Scope: migration seed lookup, focused migration test, and this checkpoint.
-Validation: the actual seed passed against disposable PostgreSQL (3 focused
-tests); Django historical migration state resolves `operations.FindingType`;
-the rebuilt Operations image reads all 53 packaged seed definitions and
-matches the locked digest; Django check, migration drift check, compilation,
-targeted import lint, and diff whitespace check passed. The fix changes no
-schema SQL or policy content. Production retry remains unverified.
-Next action: commit and push this reviewed hotfix under the standing approval,
-then verify automatic startup read-only. No manual redeploy.
+Issues page hotfix validated and ready to publish. Feature commit `aa4ef58`
+and migration seed hotfix `502306a` reached both remotes. Migration `0161`
+applied and the Operations container is healthy, but authenticated
+`GET /findings/` returns
+HTTP 500. The production traceback points to the Operations raw-SQL policy
+loader passing a JSONB text value directly into `parse_profile`, which expects
+a mapping. The ingest adapter already decodes this value when it is text.
+Scope: decode JSONB text in `operations/apps/core/conditions/live.py`, add a
+focused regression test, and update this checkpoint. Both JSONB result shapes
+pass; 45 focused Operations tests, Django check, Ruff lint/format, compilation,
+diff whitespace check, and Operations image build pass. No migration is changed
+or pending for this hotfix. The deployed page still needs verification after
+the approved push. Preserve unrelated edits. No manual redeploy.
+Next action: publish the reviewed hotfix and verify the deployed result.
 
 ## Authority and constraints
 
@@ -415,6 +415,6 @@ The approved read-only production check still reports Operations migration
 0160 and no condition policy tables; 0161 has not been run manually. No
 production or external source writes were performed.
 
-The automatic startup failure supersedes the earlier completion checkpoint;
-publication of the validated `0161` seed fix and read-only startup verification
-remain. Do not manually redeploy.
+The automatic startup failure was corrected by `502306a`. Migration `0161`
+applied and Operations health passed on the automatic retry. No manual
+redeploy occurred.

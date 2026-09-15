@@ -33,6 +33,8 @@ def load_active_profile() -> Profile:
     if row is None:
         raise RuntimeError("No active condition policy is configured")
     policy = row["policy"] if isinstance(row, dict) else row[0]
+    if isinstance(policy, str):
+        policy = json.loads(policy)
     return parse_profile(policy)
 
 

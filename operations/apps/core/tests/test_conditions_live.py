@@ -1,0 +1,31 @@
+"""The Operations policy reader accepts both PostgreSQL JSONB result shapes."""
+
+from __future__ import annotations
+
+import json
+from contextlib import contextmanager
+from pathlib import Path
+
+import pytest
+
+from apps.core.conditions import live
+
+
+@pytest.mark.parametrize("as_text", [False, True])
+def test_active_policy_raw_sql_result_is_parsed(monkeypatch, as_text):
+    profile_path = Path(__file__).resolve().parents[4] / "shared" / "conditions" / "profile.json"
+    profile = json.loads(profile_path.read_text(encoding="utf-8"))
+
+    class Cursor:
+        def execute(self, query):
+            assert "condition_policy_versions" in query
+
+        def fetchone(self):
+            return (json.dumps(profile) if as_text else profile,)
+
+    @contextmanager
+    def cursor():
+        yield Cursor()
+
+    monkeypatch.setattr(live.connection, "cursor", cursor)
+    assert live.load_active_profile().version == profile["version"]
