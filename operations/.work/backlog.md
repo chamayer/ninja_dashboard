@@ -1,5 +1,22 @@
 # Operations deferred work backlog
 
+## Conditions enforcement after shadow validation
+
+- Foundation/shadow is implemented under `apps/core/conditions/`; runbook:
+  `docs/runbooks/conditions-shadow.md`, decision: ADR-0020.
+- Next behavior-changing slice needs a supported identity-readiness assessment
+  (including accepted distinct-identity decisions), complete required-source
+  scope declarations, durable participant/episode state, and shared disposition
+  integration across all consumers. Shadow unknowns must not become blanket
+  production suppression.
+- Preserve finding IDs, source-action foreign keys, notification fingerprints,
+  operator decisions, exposure semantics, and versioned client-health metrics.
+- Subscriber work includes Issues/Admin Health, entity pages, software exposure,
+  counts/history, dispatch/digest, source actions, merge/mapping, and legacy
+  Metabase/external readers. Keep advanced columns out of ordinary operator UI.
+- Gate: reviewed shadow impact plus explicit approval of migrations and live
+  behavior changes. No enforcement switch exists in the current shadow slice.
+
 This is the proposed successor to the genuinely open portion of
 `operations/TODO.md`. Completed tracks and chronological history are excluded.
 

@@ -1,5 +1,14 @@
 # Active root implementation plan
 
+## Current release — Conditions shadow foundation 0.123.0
+
+Operations implementation and validation are tracked in
+`operations/.work/plan.md`. Root scope is VERSION/CHANGELOG release metadata
+only. User authorized commit and push after validation; both migration systems
+were checked against production and have no pending migrations. No live
+condition behavior changes are included. Earlier task records below are not
+the active authority for this release.
+
 ## CURRENT TASK — Computer and OS-installation history
 
 **Status:** release preparation.

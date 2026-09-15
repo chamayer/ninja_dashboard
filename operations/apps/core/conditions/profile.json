@@ -1,0 +1,533 @@
+{
+  "schema_version": 1,
+  "version": "conditions-shadow-1",
+  "offline_days": 180,
+  "freshness_hours": 48,
+  "identity_member_field": "candidate_device_ids",
+  "identity_group_type": "identity_conflict",
+  "consumers": [
+    "issues",
+    "admin_health",
+    "entity_pages",
+    "counts_and_health_history",
+    "software_exposure",
+    "notifications",
+    "digest",
+    "source_actions",
+    "merge_and_mapping",
+    "legacy_and_external"
+  ],
+  "rules": {
+    "identity": {
+      "effect": "gate",
+      "participant_kind": "device",
+      "requires": [],
+      "explanation": "Unsettled computer identity blocks downstream computer attribution."
+    },
+    "offline": {
+      "effect": "suppress_attention",
+      "participant_kind": "device",
+      "requires": [],
+      "explanation": "Extended loss of agent contact suppresses routine attention; it does not clear the condition."
+    },
+    "collection": {
+      "effect": "gate",
+      "requires": [],
+      "explanation": "Absence and cleanup conclusions require current, complete evidence for every required source scope."
+    }
+  },
+  "definitions": [
+    {
+      "name": "missing_required_platform",
+      "label": "Required agent missing",
+      "category": "Computers",
+      "type": "Agent coverage gaps",
+      "lifecycle": "active",
+      "rules": [
+        "identity",
+        "collection"
+      ]
+    },
+    {
+      "name": "stale_required_platform",
+      "label": "Required agent not reporting",
+      "category": "Computers",
+      "type": "Agent coverage gaps",
+      "lifecycle": "active",
+      "rules": [
+        "identity",
+        "collection",
+        "offline"
+      ]
+    },
+    {
+      "name": "device_unenrolled",
+      "label": "No management agent detected",
+      "category": "Computers",
+      "type": "Agent coverage gaps",
+      "lifecycle": "active",
+      "rules": [
+        "identity",
+        "collection"
+      ]
+    },
+    {
+      "name": "device_offline",
+      "label": "Computer not reporting",
+      "category": "Computers",
+      "type": "Reporting problems",
+      "lifecycle": "active",
+      "rules": [
+        "identity"
+      ]
+    },
+    {
+      "name": "device_stale_data",
+      "label": "Computer data out of date",
+      "category": "Computers",
+      "type": "Reporting problems",
+      "lifecycle": "active",
+      "rules": [
+        "identity"
+      ]
+    },
+    {
+      "name": "device_long_offline",
+      "label": "Historical computer offline",
+      "category": "Computers",
+      "type": "Reporting problems",
+      "lifecycle": "historical",
+      "rules": []
+    },
+    {
+      "name": "device_source_record_withdrawn",
+      "label": "Computer removed from a source",
+      "category": "Computers",
+      "type": "Computer cleanup",
+      "lifecycle": "active",
+      "rules": [
+        "identity",
+        "collection"
+      ]
+    },
+    {
+      "name": "device_missing_from_source",
+      "label": "No current computer evidence",
+      "category": "Computers",
+      "type": "Computer cleanup",
+      "lifecycle": "active",
+      "rules": [
+        "identity",
+        "collection"
+      ]
+    },
+    {
+      "name": "identity_conflict",
+      "label": "Possible duplicate computers",
+      "category": "Records & Matching",
+      "type": "Possible duplicate computers",
+      "lifecycle": "active",
+      "rules": []
+    },
+    {
+      "name": "duplicate_platform_record",
+      "label": "Duplicate records in a source",
+      "category": "Records & Matching",
+      "type": "Duplicate source records",
+      "lifecycle": "active",
+      "rules": []
+    },
+    {
+      "name": "duplicate_device_records",
+      "label": "Historical duplicate Hudu records",
+      "category": "Records & Matching",
+      "type": "Duplicate source records",
+      "lifecycle": "historical",
+      "rules": []
+    },
+    {
+      "name": "shared_serial",
+      "label": "Serial number shared by computers",
+      "category": "Records & Matching",
+      "type": "Identifier problems",
+      "lifecycle": "active",
+      "rules": []
+    },
+    {
+      "name": "cross_client_serial",
+      "label": "Serial number shared across clients",
+      "category": "Records & Matching",
+      "type": "Identifier problems",
+      "lifecycle": "active",
+      "rules": []
+    },
+    {
+      "name": "placeholder_serial",
+      "label": "Invalid serial number",
+      "category": "Records & Matching",
+      "type": "Identifier problems",
+      "lifecycle": "active",
+      "rules": []
+    },
+    {
+      "name": "placeholder_mac",
+      "label": "Invalid MAC address",
+      "category": "Records & Matching",
+      "type": "Identifier problems",
+      "lifecycle": "active",
+      "rules": []
+    },
+    {
+      "name": "cross_client_conflict",
+      "label": "Historical cross-client hostname collision",
+      "category": "Records & Matching",
+      "type": "Identifier problems",
+      "lifecycle": "historical",
+      "rules": []
+    },
+    {
+      "name": "device_role_conflict",
+      "label": "Sources disagree on computer role",
+      "category": "Records & Matching",
+      "type": "Conflicting details",
+      "lifecycle": "active",
+      "rules": [
+        "identity"
+      ]
+    },
+    {
+      "name": "lifecycle_reported_state_conflict",
+      "label": "Sources disagree on lifecycle status",
+      "category": "Records & Matching",
+      "type": "Conflicting details",
+      "lifecycle": "active",
+      "rules": [
+        "identity"
+      ]
+    },
+    {
+      "name": "lifecycle_unknown_reported_state",
+      "label": "Unrecognized lifecycle status",
+      "category": "Records & Matching",
+      "type": "Unrecognized source values",
+      "lifecycle": "active",
+      "rules": []
+    },
+    {
+      "name": "unmapped_node_class",
+      "label": "Unrecognized Ninja device class",
+      "category": "Records & Matching",
+      "type": "Unrecognized source values",
+      "lifecycle": "active",
+      "rules": []
+    },
+    {
+      "name": "client_name_conflict",
+      "label": "Client name changed in a source",
+      "category": "Records & Matching",
+      "type": "Client matching",
+      "lifecycle": "active",
+      "rules": []
+    },
+    {
+      "name": "client_link_collision",
+      "label": "Source organization matches multiple clients",
+      "category": "Records & Matching",
+      "type": "Client matching",
+      "lifecycle": "active",
+      "rules": []
+    },
+    {
+      "name": "client_unattached_group",
+      "label": "Source organization not assigned to a client",
+      "category": "Records & Matching",
+      "type": "Client matching",
+      "lifecycle": "active",
+      "rules": []
+    },
+    {
+      "name": "unnamed_source_group",
+      "label": "Source organization has no name",
+      "category": "Records & Matching",
+      "type": "Client matching",
+      "lifecycle": "active",
+      "rules": []
+    },
+    {
+      "name": "unmatched_source_group",
+      "label": "Source group awaiting matching",
+      "category": "Records & Matching",
+      "type": "Client matching",
+      "lifecycle": "active",
+      "rules": []
+    },
+    {
+      "name": "identity_resolution_pending",
+      "label": "Device matching pending",
+      "category": "Records & Matching",
+      "type": "Client matching",
+      "lifecycle": "unverified",
+      "rules": []
+    },
+    {
+      "name": "unlinked_external_identity",
+      "label": "Source record not matched to a computer",
+      "category": "Records & Matching",
+      "type": "Client matching",
+      "lifecycle": "unverified",
+      "rules": []
+    },
+    {
+      "name": "cmdb_asset_stale",
+      "label": "Hudu archive candidate",
+      "category": "Documentation",
+      "type": "Hudu archive candidate",
+      "lifecycle": "active",
+      "rules": [
+        "identity",
+        "collection"
+      ]
+    },
+    {
+      "name": "cmdb_link_incorrect",
+      "label": "Hudu links point to different computers",
+      "category": "Documentation",
+      "type": "Hudu link problems",
+      "lifecycle": "active",
+      "rules": []
+    },
+    {
+      "name": "unintegrated_source_observed",
+      "label": "Hudu references an unconnected platform",
+      "category": "Documentation",
+      "type": "Unconnected platform",
+      "lifecycle": "active",
+      "rules": []
+    },
+    {
+      "name": "unauthorized_remote_access",
+      "label": "Unapproved remote-access software",
+      "category": "Software & Security",
+      "type": "Unapproved software",
+      "lifecycle": "active",
+      "rules": [
+        "identity"
+      ]
+    },
+    {
+      "name": "unauthorized_rmm",
+      "label": "Unapproved management software",
+      "category": "Software & Security",
+      "type": "Unapproved software",
+      "lifecycle": "active",
+      "rules": [
+        "identity"
+      ]
+    },
+    {
+      "name": "unauthorized_av",
+      "label": "Unapproved endpoint-security software",
+      "category": "Software & Security",
+      "type": "Unapproved software",
+      "lifecycle": "active",
+      "rules": [
+        "identity"
+      ]
+    },
+    {
+      "name": "capability_review_candidate",
+      "label": "Software capability not confirmed",
+      "category": "Software & Security",
+      "type": "Software classification needed",
+      "lifecycle": "active",
+      "rules": []
+    },
+    {
+      "name": "whitelist_suggestion",
+      "label": "Widespread software without a decision",
+      "category": "Software & Security",
+      "type": "Software approval needed",
+      "lifecycle": "active",
+      "rules": []
+    },
+    {
+      "name": "rare_recent",
+      "label": "Newly installed uncommon software",
+      "category": "Software & Security",
+      "type": "Suspicious software indicators",
+      "lifecycle": "active",
+      "rules": [
+        "identity"
+      ]
+    },
+    {
+      "name": "suspicious_name",
+      "label": "Suspicious software name",
+      "category": "Software & Security",
+      "type": "Suspicious software indicators",
+      "lifecycle": "active",
+      "rules": [
+        "identity"
+      ]
+    },
+    {
+      "name": "install_path_suspicious",
+      "label": "Suspicious software location",
+      "category": "Software & Security",
+      "type": "Suspicious software indicators",
+      "lifecycle": "active",
+      "rules": [
+        "identity"
+      ]
+    },
+    {
+      "name": "known_malicious_hint",
+      "label": "Software matches threat-report indicators",
+      "category": "Software & Security",
+      "type": "Suspicious software indicators",
+      "lifecycle": "active",
+      "rules": [
+        "identity"
+      ]
+    },
+    {
+      "name": "vulnerable_software",
+      "label": "Software vulnerability detected",
+      "category": "Software & Security",
+      "type": "Software vulnerability",
+      "lifecycle": "active",
+      "rules": [
+        "identity"
+      ]
+    },
+    {
+      "name": "eol_runtime",
+      "label": "Potentially unsupported runtime",
+      "category": "Software & Security",
+      "type": "Unsupported runtime",
+      "lifecycle": "active",
+      "rules": [
+        "identity"
+      ]
+    },
+    {
+      "name": "multi_av_conflict",
+      "label": "Possible conflicting security products",
+      "category": "Software & Security",
+      "type": "Protection conflict",
+      "lifecycle": "disabled",
+      "rules": [
+        "identity"
+      ]
+    },
+    {
+      "name": "device_never_patched",
+      "label": "No installed patch history",
+      "category": "Updates & Support",
+      "type": "Patching not progressing",
+      "lifecycle": "active",
+      "rules": [
+        "identity",
+        "offline"
+      ]
+    },
+    {
+      "name": "patching_stalled",
+      "label": "Patch activity overdue",
+      "category": "Updates & Support",
+      "type": "Patching not progressing",
+      "lifecycle": "active",
+      "rules": [
+        "identity",
+        "offline"
+      ]
+    },
+    {
+      "name": "patch_approval_backlog",
+      "label": "Approved patches awaiting installation",
+      "category": "Updates & Support",
+      "type": "Patching not progressing",
+      "lifecycle": "active",
+      "rules": [
+        "identity",
+        "offline"
+      ]
+    },
+    {
+      "name": "patch_failing_repeatedly",
+      "label": "Repeated patch failures",
+      "category": "Updates & Support",
+      "type": "Patch failure",
+      "lifecycle": "active",
+      "rules": [
+        "identity",
+        "offline"
+      ]
+    },
+    {
+      "name": "reboot_pending",
+      "label": "Restart pending",
+      "category": "Updates & Support",
+      "type": "Restart pending",
+      "lifecycle": "active",
+      "rules": [
+        "identity",
+        "offline"
+      ]
+    },
+    {
+      "name": "windows_servicing_approaching_eol",
+      "label": "Windows support ending soon",
+      "category": "Updates & Support",
+      "type": "Windows support",
+      "lifecycle": "active",
+      "rules": [
+        "identity"
+      ]
+    },
+    {
+      "name": "windows_servicing_eol",
+      "label": "Windows past standard support",
+      "category": "Updates & Support",
+      "type": "Windows support",
+      "lifecycle": "active",
+      "rules": [
+        "identity"
+      ]
+    },
+    {
+      "name": "windows_servicing_unknown",
+      "label": "Windows support status unknown",
+      "category": "Updates & Support",
+      "type": "Windows support",
+      "lifecycle": "active",
+      "rules": [
+        "identity"
+      ]
+    },
+    {
+      "name": "source_failure",
+      "label": "Data collection problem",
+      "category": "System Health",
+      "type": "Collection problem",
+      "lifecycle": "active",
+      "rules": []
+    },
+    {
+      "name": "software_queue_stalled",
+      "label": "Processing queue delayed",
+      "category": "System Health",
+      "type": "Processing delayed",
+      "lifecycle": "active",
+      "rules": []
+    },
+    {
+      "name": "stale_collector_binding",
+      "label": "Collector not reporting",
+      "category": "System Health",
+      "type": "Collector not reporting",
+      "lifecycle": "unverified",
+      "rules": []
+    }
+  ]
+}

@@ -2,6 +2,26 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.123.0] — 2026-09-15 — Conditions foundation and shadow comparison
+
+### Added
+
+- Added an opt-in, tenant-scoped `compare_conditions` management command with
+  stable legacy condition references, typed participants, evaluation coverage,
+  and separate dependency decisions for identity, offline attention, and
+  collection completeness.
+- Added a validated, versioned shadow profile covering all 53 finding types
+  and an aggregate comparison including candidate software exposure and known
+  finding subscribers. Missing prerequisites remain explicitly unknown.
+- Added contract, policy, reader, command, scoping, and regression tests plus
+  the conditions shadow runbook and decision record.
+
+### Compatibility
+
+- No schema migration, automatic scheduling, or live finding/subscriber behavior
+  change. Existing IDs, keys, decisions, actions, and notification paths remain
+  unchanged. Shadow mode has no apply option and uses read-only transactions.
+
 ## [0.122.61] — 2026-09-11 — Link source findings to Computers
 
 ### Changed
