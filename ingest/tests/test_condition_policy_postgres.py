@@ -128,7 +128,7 @@ def test_policy_creation_activation_and_runtime_permissions(pg):
         class _Apps:
             @staticmethod
             def get_model(app_label, model_name):
-                assert (app_label, model_name) == ("core", "FindingType")
+                assert (app_label, model_name) == ("operations", "FindingType")
                 return _FindingType
 
         migration.seed_policies(_Apps, SimpleNamespace(connection=conn))

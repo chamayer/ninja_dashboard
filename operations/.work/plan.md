@@ -2,9 +2,20 @@
 
 ## Status
 
-Implementation and focused validation are complete in the worktree. The
-task-owned migration remains unapplied in production; no commit, push,
-production migration, or redeploy has occurred for this work.
+Hotfix validated and ready to publish. Commit `aa4ef58` was pushed to both
+remotes, but the automatic Operations startup failed in migration `0161`
+during policy seeding. The traceback confirms that migration used the wrong
+Django app label (`core`); its filesystem seed path also pointed outside the
+Operations image. The migration did not finish.
+Scope: migration seed lookup, focused migration test, and this checkpoint.
+Validation: the actual seed passed against disposable PostgreSQL (3 focused
+tests); Django historical migration state resolves `operations.FindingType`;
+the rebuilt Operations image reads all 53 packaged seed definitions and
+matches the locked digest; Django check, migration drift check, compilation,
+targeted import lint, and diff whitespace check passed. The fix changes no
+schema SQL or policy content. Production retry remains unverified.
+Next action: commit and push this reviewed hotfix under the standing approval,
+then verify automatic startup read-only. No manual redeploy.
 
 ## Authority and constraints
 
@@ -404,5 +415,6 @@ The approved read-only production check still reports Operations migration
 0160 and no condition policy tables; 0161 has not been run manually. No
 production or external source writes were performed.
 
-Next action: stage and review only task-owned files, then commit and push the
-reviewed change under the standing approval. Do not manually redeploy.
+The automatic startup failure supersedes the earlier completion checkpoint;
+publication of the validated `0161` seed fix and read-only startup verification
+remain. Do not manually redeploy.

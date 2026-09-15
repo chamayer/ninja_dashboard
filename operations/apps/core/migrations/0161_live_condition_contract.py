@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from pathlib import Path
+from importlib import resources
 from typing import ClassVar
 
 from django.db import migrations, models
@@ -207,9 +207,10 @@ DROP TABLE IF EXISTS operations.condition_policy_versions;
 
 
 def seed_policies(apps, schema_editor):
-    FindingType = apps.get_model("core", "FindingType")
-    profile_path = Path(__file__).parents[4] / "shared" / "conditions" / "profile.json"
-    profile = json.loads(profile_path.read_text(encoding="utf-8"))
+    FindingType = apps.get_model("operations", "FindingType")
+    profile = json.loads(
+        resources.files("shared.conditions").joinpath("profile.json").read_text(encoding="utf-8")
+    )
     digest = hashlib.sha256(json.dumps(profile, sort_keys=True).encode()).hexdigest()
     if profile.get("version") != BOOTSTRAP_VERSION or digest != BOOTSTRAP_DIGEST:
         raise RuntimeError("The migration bootstrap profile changed; create a new policy migration")
