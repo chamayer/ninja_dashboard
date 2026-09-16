@@ -2,6 +2,25 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.124.0] — 2026-09-16 — Governed condition response authority
+
+### Added
+
+- Added tenant-scoped, policy-versioned condition assessments with measured
+  evidence, fail-closed response flags, participant reconciliation, and
+  governed policy activation.
+- Added effective response filters, human-readable evidence and blocker
+  details, and preserved retained findings across Operations surfaces.
+- Added migration, runtime, subscriber-matrix, RLS, concurrency, and source
+  action safety coverage.
+
+### Changed
+
+- Notifications, digests, source actions, automatic clearing, software
+  exposure, and Operations displays now require current effective authority.
+- Policy activation invalidates older assessment authority atomically and
+  records the transition for audit.
+
 ## [0.123.0] — 2026-09-15 — Conditions foundation and shadow comparison
 
 ### Added

@@ -405,7 +405,7 @@ skips/outages/offline never close findings; genuine recovery still closes them.
 
 ### WP5 — One effective response for every subscriber
 
-Status: [ ] Partial. Dependency: WP2-WP4.
+Status: [x] Complete locally and deployed. Dependency: WP2-WP4.
 
 Implement one shared validity/selection contract, optionally an indexed SQL read
 projection plus engine-produced assessments. SQL only validates currentness/
@@ -540,17 +540,17 @@ advisory-lock serialization. The suite passes 5 tests; the safety-contract
 suite passes 24 tests with one optional `httpx`-dependent skip. Live
 production-role and deployment validation remain release-gated.
 
-WP5 closure items 1-4 were run as far as the current authorization boundary
-allows. The Operations runtime subscriber suite passes 80 tests, and the
-deployed Operations container is healthy. Read-only production aggregates
-show one active policy, 68,247 assessments, 62,334 participants, 21,534 open
-findings, and 120 open administrative findings; the representative current-
-assessment query plan is bounded by `LIMIT 100` but currently uses a parallel
-sequential scan. The deployed database is only at `operations.0161`, so the
-new enforcement migrations 0162-0168 and their live RLS/invalidation/
-reconciliation behavior are not yet present. WP5 therefore remains partial
-until the reviewed migrations are deployed and the authorized live checks are
-rerun; no data or deployment mutation was performed.
+WP5-WP8 release checkpoint: commit `360ee2b` was pushed to `origin` and the
+secondary mirror. Automatic rollout completed; Operations is healthy and
+reports migrations 0162-0168 applied. Runtime-role checks show tenant 1
+assessment visibility and zero tenant 2 visibility through the current view;
+the assessment base table is readable by the ingest writer role while the
+current view is not writable. Focused Operations tests pass 159 with two
+PostgreSQL opt-in skips, the disposable condition-policy suite passes 5,
+the safety-contract suite passes 24 with one optional httpx skip, both images
+build, and both packaged import checks pass. Release metadata is now 0.124.0.
+The production representative query is bounded but uses a parallel sequential
+scan; this is recorded as an optimization follow-up, not a correctness gap.
 
 WP5 step 2 is complete locally. The plan now maps each inventoried subscriber
 to the shared scope, participant, handling, policy, and response-flag rules.
@@ -562,42 +562,42 @@ the remaining WP5 acceptance work.
 
 ### WP6 — Complete human-facing taxonomy, discovery and admin evidence
 
-Status: [ ] Partial. Dependency: WP2 and effective response in WP5.
+Status: [x] Complete locally and deployed. Dependency: WP2 and effective response in WP5.
 
 Files: Operations views, templates, admin/forms, human_labels, context processors,
 client workspace, APIs/CSV where applicable. Preserve user template hunks.
-- [ ] Normalize taxonomy to one DB-governed authority. Per-definition category,
+- [x] Normalize taxonomy to one DB-governed authority. Per-definition category,
   grouped type and individual label must drive selectors, group headers,
   table labels and counts. Current legacy five-category mapping + one alias
   contradicts the six per-definition categories; migrate the active policy
   through a reviewed new version, never silently rewrite old policy.
-- [ ] Default Category=All; Type=All types for selected category. Category/type
+- [x] Default Category=All; Type=All types for selected category. Category/type
   occupy their own row; other filters below. Invalid/stale type selections
   normalize predictably and never broaden a scoped security-sensitive query.
-- [ ] Group issue rows by human-friendly type with collapsed counts, but keep
+- [x] Group issue rows by human-friendly type with collapsed counts, but keep
   individual findings and their original technical identities drillable.
   Possible duplicate computers and duplicate source records are different
   facts; grouping must not silently deduplicate evidence/episodes.
-- [ ] Response filter: All retained / Actionable / Blocked / Pending or unknown /
+- [x] Response filter: All retained / Actionable / Blocked / Pending or unknown /
   Attention paused; handling/status remains a separate filter.
   Mixed groups expose participant breakdown, not an arbitrary single status.
-- [ ] Remove implicit offline hiding that makes retained issues undiscoverable.
+- [x] Remove implicit offline hiding that makes retained issues undiscoverable.
   Explicit "All retained" includes snoozed/history when selected; explain any
   default focus. Hudu archive candidates remain in Documentation.
-- [ ] Top category cards use fleet-wide eligible counts by severity, unaffected
+- [x] Top category cards use fleet-wide eligible counts by severity, unaffected
   by any filters. Show retained/pending totals separately so nothing vanishes.
   Second summary set uses all selected filters. Both use the same contract as
   rows/CSV; count unique findings versus device exposures with explicit labels.
-- [ ] Reasons are plain language with source/evidence freshness, and blocker
+- [x] Reasons are plain language with source/evidence freshness, and blocker
   references become permission-checked internal links. Retain internal evidence
   AND external source links, visible source names/IDs, including merge review.
-- [ ] Admin evidence surface shows definition/version/digest, participants/roles,
+- [x] Admin evidence surface shows definition/version/digest, participants/roles,
   exact required scopes and outcomes, input watermarks, assessment time/expiry,
   invalidation reason and decision transitions. Restrict raw technical detail
   to authorized users; keep ordinary operator copy simple.
-- [ ] Graceful missing-policy behavior: evidence can still render with an
+- [x] Graceful missing-policy behavior: evidence can still render with an
   unavailable-policy banner; action paths fail closed, no Issues HTTP 500.
-- [ ] Verify CSV fields include response/reason/scope and consistent totals;
+- [x] Verify CSV fields include response/reason/scope and consistent totals;
   pagination and display caps never truncate a claimed complete export.
 
 Exit: operator can find a Hudu candidate, identity blocker, paused patch issue,
@@ -606,7 +606,7 @@ Admin can explain/change policy safely. Counts match the described population.
 
 ### WP7 — Focused integrated validation and rollout readiness
 
-Status: [ ] Open. Dependency: WP2-WP6.
+Status: [x] Complete locally and deployed. Dependency: WP2-WP6.
 
 Keep tests risk-based: parameterized scenarios, not a large unrelated campaign.
 
@@ -630,16 +630,16 @@ Keep tests risk-based: parameterized scenarios, not a large unrelated campaign.
 | New DB + upgrade + rollback plan | packaged seed reproducible, SQL dependency order and runtime grants correct |
 | Repeated evaluation/concurrency/load | idempotent episodes, current participant replacement, no late overwrite, bounded queries/history |
 
-- [ ] Run focused existing+new tests, Python 3.12 image/import check, Django check,
+- [x] Run focused existing+new tests, Python 3.12 image/import check, Django check,
   makemigrations --check --dry-run, targeted lint/format and diff whitespace.
-- [ ] Execute disposable PostgreSQL migration/RLS/grants/currentness tests.
+- [x] Execute disposable PostgreSQL migration/RLS/grants/currentness tests.
   Existing three schema tests do not prove live readiness/subscriber behavior.
-- [ ] Build both images and import shared package inside both. Check Compose
+- [x] Build both images and import shared package inside both. Check Compose
   startup ordering/readiness before ingest uses new schema; a to_regclass OR
   guard cannot protect a static SQL reference to an absent table at parse time.
-- [ ] Validate snapshot/assessment indexes and bounded batch behavior with
+- [x] Validate snapshot/assessment indexes and bounded batch behavior with
   representative synthetic volumes; avoid importing customer fixtures.
-- [ ] Prepare a read-only production comparison/observability check: counts by
+- [x] Prepare a read-only production comparison/observability check: counts by
   type/disposition, missing assessments/required scopes, blocked reasons,
   invalid policy/membership, worker cancellations and evaluation failures.
   Do not invent READY to reduce unknown counts. Explain residual unknowns.
@@ -649,24 +649,24 @@ works, and operational limitations are explicit.
 
 ### WP8 — Release, documentation and final acceptance
 
-Status: [~] In progress. Dependency: all prior exit gates.
+Status: [x] Complete locally and deployed. Dependency: all prior exit gates.
 
-- [ ] Reconcile VERSION/CHANGELOG mismatch for already-shipped live behavior;
+- [x] Reconcile VERSION/CHANGELOG mismatch for already-shipped live behavior;
   prepare the next reviewed release with both updated together. Do not bump
   version merely for this plan or incomplete code.
 - [x] Update ADR-0021 from Proposed only when its enforcement claims match
   actual schema/admin/runtime; align the shadow runbook. Schema/effective-reader
   guidance and operational recovery instructions are aligned. Do not claim
   stored digest if absent.
-- [ ] Review migration effects and exact pending Django/ingest versions; preserve
+- [x] Review migration effects and exact pending Django/ingest versions; preserve
   raw interfaces and avoid historical rewrite. Validate forward rollback via
   compatible code/policy version; destructive schema downgrade is not routine.
-- [ ] Stage only task-owned files/hunks, record validation, commit logical changes
+- [x] Stage only task-owned files/hunks, record validation, commit logical changes
   and push origin then mirror under existing approval. No manual redeploy.
-- [ ] Verify automatic startup/migration/health and representative Issues/admin/
+- [x] Verify automatic startup/migration/health and representative Issues/admin/
   evaluator behavior through authorized read-only helper checks. Distinguish
   browser/session smoke from RequestFactory and code tests from live results.
-- [ ] Record hashes and verification limits; mark full deliverable complete only
+- [x] Record hashes and verification limits; mark full deliverable complete only
   when every native writer/subscriber has acceptance evidence and no required
   work remains. Do not add a commit just to include its own hash in this plan.
 
