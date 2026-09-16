@@ -3,9 +3,10 @@ from __future__ import annotations
 import hashlib
 import json
 
+from django import forms
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
-from django.db import connection
+from django.db import connection, transaction
 from django.utils import timezone
 from shared.conditions.policy import parse_profile
 
@@ -417,16 +418,28 @@ class FindingTypeAdmin(admin.ModelAdmin):
     search_fields = ("name", "description", "runbook_path")
 
 
+class ConditionPolicyActivationForm(forms.Form):
+    reason = forms.CharField(
+        required=True,
+        max_length=500,
+        label="Activation reason",
+        help_text="Explain why this policy version is being activated.",
+    )
+
+
 @admin.register(ConditionPolicyVersion)
 class ConditionPolicyVersionAdmin(admin.ModelAdmin):
     list_display = ("version", "digest", "active", "created_at")
     list_filter = ("active",)
     search_fields = ("version", "digest")
     readonly_fields = ("digest", "active", "created_at")
-    actions = ("activate_version",)
+    actions = ("review_version", "activate_version")
+    action_form = ConditionPolicyActivationForm
 
     def has_add_permission(self, request):
-        return request.user.is_superuser or request.user.has_perm("operations.manage_taxonomy")
+        # The policy is global. A tenant-scoped taxonomy permission must not
+        # silently authorize changing it for every tenant.
+        return request.user.is_superuser
 
     def has_change_permission(self, request, obj=None):
         return False
@@ -441,24 +454,71 @@ class ConditionPolicyVersionAdmin(admin.ModelAdmin):
         if profile.version != obj.version:
             raise ValueError("Policy version must match the document version")
         digest = hashlib.sha256(json.dumps(obj.policy, sort_keys=True).encode()).hexdigest()
-        with connection.cursor() as cursor:
-            cursor.execute(
-                "SELECT operations.create_condition_policy_version(%s,%s,%s::jsonb)",
-                (obj.version, digest, json.dumps(obj.policy, separators=(",", ":"))),
+        with transaction.atomic():
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT operations.create_condition_policy_version(%s,%s,%s::jsonb)",
+                    (obj.version, digest, json.dumps(obj.policy, separators=(",", ":"))),
+                )
+            obj.digest = digest
+            obj.active = False
+            obj.created_at = timezone.now()
+            AuditLog.objects.create(
+                tenant=request.user.tenant,
+                actor=request.user,
+                actor_kind="user",
+                source="ui",
+                action="condition_policy.created",
+                entity_type="condition_policy_version",
+                before_state=None,
+                after_state={"version": obj.version, "digest": digest},
             )
-        obj.digest = digest
-        obj.active = False
-        obj.created_at = timezone.now()
-        AuditLog.objects.create(
-            tenant=request.user.tenant,
-            actor=request.user,
-            actor_kind="user",
-            source="ui",
-            action="condition_policy.created",
-            entity_type="condition_policy_version",
-            before_state=None,
-            after_state={"version": obj.version, "digest": digest},
+
+    @admin.action(description="Review selected condition policy version")
+    def review_version(self, request, queryset):
+        if not self.has_add_permission(request):
+            self.message_user(request, "Condition policy management permission is required.", level="error")
+            return
+        selected = list(queryset.values_list("version", flat=True))
+        reason = (request.POST.get("reason") or "").strip()
+        if len(selected) != 1:
+            self.message_user(request, "Select exactly one policy version.", level="error")
+            return
+        if not reason:
+            self.message_user(request, "A review reason is required.", level="error")
+            return
+        policy = queryset.get(version=selected[0])
+        profile = parse_profile(policy.policy)
+        active_policy = ConditionPolicyVersion.objects.filter(active=True).first()
+        previous_state = (
+            {"version": active_policy.version, "digest": active_policy.digest}
+            if active_policy
+            else None
         )
+        previous_document = active_policy.policy if active_policy else {}
+        diff_keys = sorted(
+            key
+            for key in set(previous_document) | set(policy.policy)
+            if previous_document.get(key) != policy.policy.get(key)
+        )
+        validation_result = {
+            "valid": True,
+            "digest": profile.digest,
+            "diff": {"from": previous_state, "changed_keys": diff_keys},
+        }
+        with transaction.atomic():
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT operations.review_condition_policy_version(%s,%s,%s,%s::jsonb)",
+                    (policy.version, request.user.pk, reason, json.dumps(validation_result)),
+                )
+            AuditLog.objects.create(
+                tenant=request.user.tenant, actor=request.user, actor_kind="user", source="ui",
+                action="condition_policy.reviewed", entity_type="condition_policy_version",
+                after_state={"version": policy.version, "digest": policy.digest, "reason": reason,
+                             "validation": validation_result},
+            )
+        self.message_user(request, f"Reviewed condition policy {policy.version}.")
 
     @admin.action(description="Activate selected condition policy version")
     def activate_version(self, request, queryset):
@@ -471,29 +531,46 @@ class ConditionPolicyVersionAdmin(admin.ModelAdmin):
         if len(selected) != 1:
             self.message_user(request, "Select exactly one policy version.", level="error")
             return
-        previous = (
-            ConditionPolicyVersion.objects.filter(active=True)
-            .values_list("version", flat=True)
-            .first()
-        )
-        with connection.cursor() as cursor:
-            cursor.execute(
-                "SELECT operations.activate_condition_policy_version(%s)",
-                (selected[0],),
+        reason = (request.POST.get("reason") or "").strip()
+        if not reason:
+            self.message_user(request, "An activation reason is required.", level="error")
+            return
+        with transaction.atomic():
+            review = None
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT pg_advisory_xact_lock(hashtext('operations.condition_policy_activation'))"
+                )
+                cursor.execute(
+                    "SELECT reviewer_id, reviewed_at, validation_result FROM operations.condition_policy_reviews WHERE version=%s",
+                    (selected[0],),
+                )
+                review = cursor.fetchone()
+                cursor.execute(
+                    "SELECT version FROM operations.condition_policy_versions WHERE active"
+                )
+                previous_row = cursor.fetchone()
+                previous = previous_row[0] if previous_row else None
+            if review is None:
+                self.message_user(request, "The policy must be reviewed before activation.", level="error")
+                return
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT operations.activate_condition_policy_version(%s)",
+                    (selected[0],),
+                )
+            AuditLog.objects.create(
+                tenant=request.user.tenant,
+                actor=request.user,
+                actor_kind="user",
+                source="ui",
+                action="condition_policy.activated",
+                entity_type="condition_policy_version",
+                before_state={"version": previous} if previous else None,
+                after_state={"version": selected[0], "digest": queryset.get(version=selected[0]).digest,
+                             "reason": reason, "review": {"reviewer_id": str(review[0]),
+                             "reviewed_at": review[1].isoformat(), "validation": review[2]}},
             )
-        AuditLog.objects.create(
-            tenant=request.user.tenant,
-            actor=request.user,
-            actor_kind="user",
-            source="ui",
-            action="condition_policy.activated",
-            entity_type="condition_policy_version",
-            before_state={"version": previous} if previous else None,
-            after_state={
-                "version": selected[0],
-                "reason": "Activated from Operations admin",
-            },
-        )
         self.message_user(request, f"Activated condition policy {selected[0]}.")
 
 

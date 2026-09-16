@@ -15,9 +15,9 @@ is required for them to appear.
 
 Subject convention follows the existing admin-finding precedent in
 `ingest/identity/resolver.py`: `subject_type='source_binding'` with a
-deterministic UUID and the real context in `finding_details`. Neither an
-ingest domain nor a queue is literally a source binding, but there is no
-subject type for either and inventing one is a schema change.
+deterministic UUID and the real context in `finding_details`. Assessment
+participants use the non-owned `platform_signal` kind because these UUIDs are
+synthetic and are not rows in `source_bindings`.
 
 Default is dry-run: nothing is written unless `dry_run=False` is passed.
 """
@@ -35,7 +35,6 @@ from ingest import db
 from ingest.cmdb_findings import (
     TENANT_ID,
     _finding_type_id,
-    _resolve_absent,
     _upsert,
 )
 from ingest.conditions import record_assessment
@@ -70,15 +69,55 @@ def evaluate(*, dry_run: bool = True) -> dict[str, int]:
         queue_keys = _eval_stalled_queues(cur, ft_queue, now, counts, dry_run)
 
         if not dry_run:
-            _resolve_absent(
+            _resolve_admin_absent(
                 cur, ft_failure, failure_keys, now, assessment_required=True
             )
-            _resolve_absent(
+            _resolve_admin_absent(
                 cur, ft_queue, queue_keys, now, assessment_required=True
             )
 
     log.info("platform findings: %s (dry_run=%s)", counts, dry_run)
     return counts
+
+
+def _resolve_admin_absent(
+    cur: Any,
+    finding_type_id: int | None,
+    keys: list[str],
+    now: datetime,
+    *,
+    assessment_required: bool = True,
+) -> None:
+    """Resolve absent platform findings only with a current admin assessment."""
+    if finding_type_id is None or not assessment_required:
+        return
+    cur.execute("SELECT to_regclass('operations.condition_assessments') IS NOT NULL")
+    if not cur.fetchone()[0]:
+        return
+    cur.execute(
+        """
+        UPDATE operations.admin_findings finding
+           SET status = 'resolved', resolved_at = %s
+         WHERE finding.tenant_id = %s
+           AND finding.finding_type_id = %s
+           AND finding.status IN ('open', 'acknowledged')
+           AND NOT (finding.condition_key = ANY(%s::text[]))
+           AND EXISTS (
+               SELECT 1
+                 FROM operations.condition_assessments assessment
+                 JOIN operations.condition_policy_versions policy
+                   ON policy.version = assessment.policy_version
+                  AND policy.active
+                WHERE assessment.tenant_id = finding.tenant_id
+                  AND assessment.row_kind = 'admin'
+                  AND assessment.finding_id = finding.id
+                  AND (assessment.response ->> 'may_clear')::boolean IS TRUE
+                  AND assessment.assessed_at >= now() -
+                      (policy.policy ->> 'freshness_hours')::integer * interval '1 hour'
+           )
+        """,
+        (now, TENANT_ID, finding_type_id, keys),
+    )
 
 
 def _eval_source_failures(
@@ -219,7 +258,8 @@ def _eval_stalled_queues(
             },
         )
         _record_platform_assessment(
-            cur, finding_id, key, "software_queue_stalled", _subject("queue", queue_key), now
+            cur, finding_id, key, "software_queue_stalled", _subject("queue", queue_key), now,
+            measured=True,
         )
     return keys
 
@@ -231,11 +271,13 @@ def _record_platform_assessment(
     type_name: str,
     subject_id: uuid.UUID,
     now: datetime,
+    *,
+    measured: bool = False,
 ) -> None:
-    participant = Participant("source_binding", str(subject_id), "affected", TENANT_ID)
+    participant = Participant("platform_signal", str(subject_id), "affected", TENANT_ID)
     condition = Condition(
         TENANT_ID,
-        "entity",
+        "admin",
         str(finding_id),
         type_name,
         condition_key,
@@ -246,7 +288,7 @@ def _record_platform_assessment(
         cur,
         condition,
         (),
-        EvaluationCoverage(True, True, True, True),
+        EvaluationCoverage(measured, measured, measured, measured),
         now=now,
         reevaluation_key=f"platform:{condition_key}",
         participant=participant,

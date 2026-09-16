@@ -85,11 +85,6 @@ _FINDING_ACTIVE_STATUSES = (
     Finding.Status.INVESTIGATING,
 )
 
-_COALESCED_OFFLINE_FINDING_TYPES = (
-    "missing_required_platform",
-    "stale_required_platform",
-)
-
 # These are title-level policy recommendations, not incidents. Their
 # authoritative state changes live in SoftwareDecision, whose scope resolves
 # device before client before global.
@@ -209,10 +204,26 @@ def _finding_type_groups(
 
 def _issue_taxonomy() -> tuple[list[dict], dict[str, dict]]:
     profile = load_active_profile()
-    categories = [
-        {"key": item["key"], "label": item["label"], "categories": set(item["categories"])}
-        for item in profile.issue_categories
-    ]
+    finding_type_rows = FindingType.objects.filter(
+        name__in=profile.definitions,
+    ).values_list("name", "category__name")
+    db_categories = {name: category for name, category in finding_type_rows}
+    grouped: dict[str, dict] = {}
+    for type_name, definition in profile.definitions.items():
+        category_label = definition["category"]
+        item = grouped.setdefault(
+            category_label,
+            {
+                "key": slugify(category_label).replace("-", "_"),
+                "label": category_label,
+                "categories": set(),
+                "types": set(),
+            },
+        )
+        item["types"].add(type_name)
+        if db_category := db_categories.get(type_name):
+            item["categories"].add(db_category)
+    categories = sorted(grouped.values(), key=lambda item: item["label"])
     aliases = {
         item["key"]: {**item, "types": set(item["types"])}
         for item in profile.issue_type_aliases
@@ -231,10 +242,21 @@ def _condition_assessment_display(row_kind: str, finding_ids) -> dict[str, dict]
             return {}
         cursor.execute(
             """
-            SELECT finding_id, policy_version, assessed_at, response
-              FROM operations.condition_assessments
-             WHERE tenant_id = 1 AND row_kind = %s
-               AND finding_id = ANY(%s::uuid[])
+            SELECT a.finding_id, a.policy_version, a.policy_digest, a.assessed_at, a.response,
+                   a.participant_kind, a.participant_id, a.participant_role
+              FROM operations.condition_assessments a
+             WHERE a.tenant_id = 1 AND a.row_kind = %s
+               AND a.finding_id = ANY(%s::uuid[])
+               AND a.participant_role <> 'context'
+               AND a.policy_version = (
+                   SELECT version FROM operations.condition_policy_versions
+                    WHERE active ORDER BY version DESC LIMIT 1
+               )
+               AND a.assessed_at >= now() - (
+                   SELECT (policy->>'freshness_hours')::integer * interval '1 hour'
+                     FROM operations.condition_policy_versions
+                    WHERE active ORDER BY version DESC LIMIT 1
+               )
              ORDER BY assessed_at DESC
             """,
             [row_kind, ids],
@@ -242,7 +264,7 @@ def _condition_assessment_display(row_kind: str, finding_ids) -> dict[str, dict]
         rows = cursor.fetchall()
 
     result: dict[str, dict] = {}
-    for finding_id, policy_version, assessed_at, response in rows:
+    for finding_id, policy_version, policy_digest, assessed_at, response, participant_kind, participant_id, participant_role in rows:
         key = str(finding_id)
         if isinstance(response, str):
             response = json.loads(response)
@@ -252,22 +274,98 @@ def _condition_assessment_display(row_kind: str, finding_ids) -> dict[str, dict]
             {
                 "available": True,
                 "policy_version": policy_version,
+                "policy_digest": policy_digest,
                 "assessed_at": assessed_at,
                 "dispositions": set(),
                 "reasons": set(),
                 "blockers": set(),
+                "scopes": set(),
                 "may_execute": True,
             },
         )
         item["dispositions"].add(response.get("disposition", "unknown"))
         item["reasons"].update(response.get("reasons") or [])
         item["blockers"].update(response.get("blockers") or [])
+        item["scopes"].add(
+            f"{participant_kind}:{participant_id}:{participant_role}"
+        )
         item["may_execute"] = item["may_execute"] and bool(response.get("may_execute"))
     for item in result.values():
         for field in ("reasons", "blockers"):
             item[field] = sorted(item[field])
+        item["scopes"] = sorted(item["scopes"])
         item["disposition"] = next(iter(item["dispositions"])) if len(item["dispositions"]) == 1 else "mixed"
         del item["dispositions"]
+    return result
+
+
+def _condition_response_ids(finding_ids) -> dict[str, set[str]]:
+    """Classify entity findings using current assessments and required scopes."""
+    ids = [str(value) for value in finding_ids if value]
+    result = {key: set() for key in ("actionable", "blocked", "pending")}
+    if not ids:
+        return result
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT to_regclass('operations.condition_assessments')")
+        if cursor.fetchone()[0] is None:
+            result["pending"].update(ids)
+            return result
+        for offset in range(0, len(ids), 1000):
+            batch = ids[offset:offset + 1000]
+            cursor.execute(
+                """
+            WITH expected AS (
+                SELECT f.id,
+                       count(cp.finding_id) FILTER (WHERE cp.participant_role <> 'context') AS expected
+                  FROM operations.findings f
+                 LEFT JOIN operations.condition_participants cp
+                    ON cp.tenant_id = f.tenant_id AND cp.row_kind = 'entity'
+                   AND cp.finding_id = f.id
+                 WHERE f.tenant_id = 1 AND f.id = ANY(%s::uuid[])
+                   AND f.status IN ('open', 'acknowledged')
+                   AND (f.snoozed_until IS NULL OR f.snoozed_until <= now())
+                 GROUP BY f.id
+            ), assessed AS (
+                SELECT a.finding_id,
+                       bool_or(a.participant_kind = 'condition'
+                               AND (a.response->>'may_execute')::boolean IS TRUE) AS condition_execute,
+                       count(DISTINCT (a.participant_kind, a.participant_id, a.participant_role))
+                           FILTER (WHERE a.participant_kind <> 'condition') AS assessed,
+                       count(DISTINCT (a.participant_kind, a.participant_id, a.participant_role))
+                           FILTER (WHERE a.participant_kind <> 'condition'
+                                   AND (a.response->>'may_execute')::boolean IS TRUE) AS participant_execute,
+                       bool_or(a.response->>'disposition' = 'blocked') AS blocked,
+                       bool_or(a.response->>'disposition' = 'unknown') AS unknown
+                  FROM operations.condition_assessments a
+                 WHERE a.tenant_id = 1 AND a.row_kind = 'entity'
+                   AND a.finding_id = ANY(%s::uuid[])
+                   AND a.participant_role <> 'context'
+                   AND a.policy_version = (SELECT version FROM operations.condition_policy_versions WHERE active ORDER BY version DESC LIMIT 1)
+                   AND a.assessed_at >= now() - (SELECT (policy->>'freshness_hours')::integer * interval '1 hour' FROM operations.condition_policy_versions WHERE active ORDER BY version DESC LIMIT 1)
+                 GROUP BY a.finding_id
+            )
+            SELECT e.id, e.expected, a.condition_execute, a.assessed,
+                   a.participant_execute, a.blocked, a.unknown
+              FROM expected e LEFT JOIN assessed a ON a.finding_id = e.id
+                """,
+                [batch, batch],
+            )
+            rows = cursor.fetchall()
+            for finding_id, expected, condition_execute, assessed, participant_execute, blocked, _unknown in rows:
+                key = str(finding_id)
+                complete = (
+                    bool(condition_execute) if expected == 0
+                    else assessed == expected and participant_execute == expected
+                )
+                if complete:
+                    result["actionable"].add(key)
+                elif blocked:
+                    result["blocked"].add(key)
+                else:
+                    result["pending"].add(key)
+    for key in ids:
+        if not any(key in values for values in result.values()):
+            result["pending"].add(key)
     return result
 
 
@@ -2084,6 +2182,24 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
         .select_related("finding_type")
         .order_by("severity", "-last_seen_at")[:50]
     )
+    response_ids = _condition_response_ids(finding.id for finding in active_findings)
+    for finding in active_findings:
+        finding.condition_response = next(
+            (
+                state
+                for state, ids in response_ids.items()
+                if str(finding.id) in ids
+            ),
+            "pending",
+        )
+        if finding.snoozed_until and finding.snoozed_until > timezone.now():
+            finding.condition_response = "paused"
+        finding.condition_assessment = None
+    assessments = _condition_assessment_display(
+        "entity", (finding.id for finding in active_findings)
+    )
+    for finding in active_findings:
+        finding.condition_assessment = assessments.get(str(finding.id))
 
     observations = []
     software_rows = []
@@ -2769,11 +2885,18 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
     activity.sort(key=lambda e: (e["at"] or timezone.now()), reverse=True)
     activity = activity[:100]
 
+    try:
+        load_active_profile()
+        condition_policy_available = True
+    except (RuntimeError, ValueError):
+        condition_policy_available = False
+
     return render(
         request,
         "device_detail.html",
         {
             "device": device,
+            "condition_policy_available": condition_policy_available,
             "same_name_devices": same_name_devices,
             "same_name_device_count": same_name_device_count,
             "merge_candidate": merge_candidate,
@@ -3078,17 +3201,28 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     severity_filter = request.GET.get("severity", "")
     type_filter = request.GET.get("type", "")
     category_filter = request.GET.get("category", "")
+    requested_category_filter = category_filter
     confidence_filter = request.GET.get("confidence", "")
     client_filter = request.GET.get("client", "")
     platform_filter = request.GET.get("platform", "")
     online_filter = request.GET.get("online", "")
+    response_filter = request.GET.get("response", "actionable")
+    if response_filter not in {"all", "actionable", "blocked", "pending", "paused"}:
+        response_filter = "actionable"
     subject_id_filter = (request.GET.get("subject_id") or "").strip()
     requested_device_id_filter = (request.GET.get("device_id") or "").strip()
     device_id_filter = ""
     group_key_filter = (request.GET.get("group_key") or "").strip()
     group_value_filter = (request.GET.get("group_value") or "").strip()
     q_filter = (request.GET.get("q") or "").strip()
-    issue_categories, issue_type_aliases = _issue_taxonomy()
+    try:
+        issue_categories, issue_type_aliases = _issue_taxonomy()
+        condition_policy_available = True
+    except RuntimeError:
+        # Evidence and retained findings remain reviewable when policy
+        # authority is unavailable; governed response filters fail closed.
+        issue_categories, issue_type_aliases = [], {}
+        condition_policy_available = False
 
     # Normalize legacy technical values into the operator-facing filter groups.
     category_filter = next(
@@ -3098,6 +3232,14 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
         ),
         category_filter,
     )
+    if (
+        condition_policy_available
+        and requested_category_filter
+        and category_filter != requested_category_filter
+    ):
+        params = request.GET.copy()
+        params["category"] = category_filter
+        return redirect(f"{reverse('findings_queue')}?{params.urlencode()}")
     for group_key, group in issue_type_aliases.items():
         if type_filter in group["types"]:
             type_filter = group_key
@@ -3115,7 +3257,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
         "owner",
     )
 
-    show_snoozed = request.GET.get("snoozed") == "1"
+    show_snoozed = request.GET.get("snoozed") == "1" or response_filter == "paused"
     if status_filter == "active":
         qs = qs.filter(status__in=_FINDING_ACTIVE_STATUSES)
     elif status_filter and status_filter != "all":
@@ -3130,7 +3272,14 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             (item["categories"] for item in issue_categories if item["key"] == category_filter),
             {category_filter},
         )
-        qs = qs.filter(finding_type__category__name__in=category_names)
+        category_types = next(
+            (item.get("types", set()) for item in issue_categories if item["key"] == category_filter),
+            set(),
+        )
+        if category_types:
+            qs = qs.filter(finding_type__name__in=category_types)
+        else:
+            qs = qs.filter(finding_type__category__name__in=category_names)
     if type_filter:
         type_names = issue_type_aliases.get(type_filter, {}).get("types", {type_filter})
         qs = qs.filter(finding_type__name__in=type_names)
@@ -3201,17 +3350,10 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             | Q(finding_details__hostname__icontains=q_filter)
         )
 
-    # Findings with a coalesced platform gap only belong in this queue when
-    # the device is online. Applying the same predicate before aggregates and
-    # row selection keeps every count and export aligned with the visible set.
+    # Retained findings stay discoverable even when their device is offline.
+    # The governed response filter controls whether an offline finding is
+    # actionable, while status/response=all exposes the retained evidence.
     device_subject = Q(subject_type=Finding.SubjectType.DEVICE)
-    coalesced_offline_q = (
-        Q(finding_type__name__in=_COALESCED_OFFLINE_FINDING_TYPES)
-        & device_subject
-        & ~Q(subject_id__in=_online_device_ids())
-    )
-    status_scope_qs = status_scope_qs.exclude(coalesced_offline_q)
-    qs = qs.exclude(coalesced_offline_q)
 
     # Online is a device-state filter. Software findings are unscoped facts,
     # not offline devices, and are therefore excluded when this filter is set.
@@ -3225,6 +3367,24 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             subject_id__in=_online_device_ids(online_filter),
         )
 
+    # Response state is separate from operator handling. Policy candidates
+    # retain their independent review workflow; governed findings are filtered
+    # only after all subject and evidence filters have been applied.
+    governed_qs = qs.exclude(finding_type__name__in=_SOFTWARE_POLICY_CANDIDATE_TYPES)
+    response_ids = _condition_response_ids(governed_qs.values_list("id", flat=True))
+    if response_filter != "all":
+        if response_filter == "paused":
+            response_ids["paused"] = set(
+                str(value) for value in governed_qs.filter(snoozed_until__gt=timezone.now()).values_list("id", flat=True)
+            )
+            selected_ids = response_ids["paused"]
+        else:
+            selected_ids = response_ids[response_filter]
+        qs = qs.filter(
+            Q(finding_type__name__in=_SOFTWARE_POLICY_CANDIDATE_TYPES)
+            | Q(id__in=selected_ids)
+        )
+
     # Software-policy candidates have their own review workflow. Severity
     # tiles stay focused on actionable findings, rather than treating a large
     # low-severity decision backlog as an incident count.
@@ -3234,6 +3394,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
 
     policy_qs = qs.filter(finding_type__name__in=_SOFTWARE_POLICY_CANDIDATE_TYPES)
     actionable_qs = qs.exclude(finding_type__name__in=_SOFTWARE_POLICY_CANDIDATE_TYPES)
+    response_matching = actionable_qs.count()
 
     # Tile counts and the headline are computed before the display slice from
     # the fully filtered queryset, so they remain exact beyond 500 rows.
@@ -3344,16 +3505,24 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             }
         )
     category_tiles = []
-    top_summary_qs = status_scope_qs.exclude(
-        finding_type__name__in=_SOFTWARE_POLICY_CANDIDATE_TYPES
-    )
-    category_counts = top_summary_qs.values("finding_type__category__name", "severity").annotate(n=Count("id"))
+    # Top category cards are fleet-wide eligible counts. They deliberately do
+    # not inherit the selected category, type, client, severity, or search
+    # filters; the governed response contract still determines eligibility.
+    fleet_governed_qs = Finding.objects.filter(
+        tenant_id=1,
+        status__in=_FINDING_ACTIVE_STATUSES,
+    ).filter(
+        Q(snoozed_until__isnull=True) | Q(snoozed_until__lt=timezone.now())
+    ).exclude(finding_type__name__in=_SOFTWARE_POLICY_CANDIDATE_TYPES)
+    fleet_actionable_ids = _condition_response_ids(
+        fleet_governed_qs.values_list("id", flat=True)
+    )["actionable"]
+    top_summary_qs = fleet_governed_qs.filter(id__in=fleet_actionable_ids)
     for category in issue_categories:
-        key, label, names = category["key"], category["label"], category["categories"]
+        key, label, names = category["key"], category["label"], category.get("types", set())
         counts = {sev: 0 for sev, _ in Finding.Severity.choices}
-        for row in category_counts:
-            if row["finding_type__category__name"] in names:
-                counts[row["severity"]] += row["n"]
+        for finding in top_summary_qs.filter(finding_type__name__in=names).values("severity").annotate(n=Count("id")):
+            counts[finding["severity"]] += finding["n"]
         params = request.GET.copy(); params.pop("page", None); params["category"] = key
         severity_links = []
         for sev, sev_label in Finding.Severity.choices:
@@ -3368,7 +3537,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     # uncapped makes its row count agree with the headline rather than silently
     # truncating at the screen limit.
     findings = sorted(
-        qs if wants_csv(request) else actionable_qs[:500],
+        actionable_qs if wants_csv(request) else actionable_qs[:500],
         key=lambda f: (
             _SEVERITY_ORDER.get(f.severity, 9),
             -(f.last_detected_at or f.last_seen_at).timestamp(),
@@ -3865,6 +4034,22 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
                 ("Detail", "detail"),
                 ("Online sources", "online_sources"),
                 ("Status", lambda r: r["f"].status),
+                (
+                    "Response",
+                    lambda r: (r.get("assessment") or {}).get("disposition", "pending"),
+                ),
+                (
+                    "Response reasons",
+                    lambda r: "; ".join((r.get("assessment") or {}).get("reasons", [])),
+                ),
+                (
+                    "Response blockers",
+                    lambda r: "; ".join((r.get("assessment") or {}).get("blockers", [])),
+                ),
+                (
+                    "Assessment scope",
+                    lambda r: "; ".join((r.get("assessment") or {}).get("scopes", [])),
+                ),
                 ("Confidence", lambda r: r["f"].confidence),
                 ("First seen", lambda r: r["f"].first_seen_at),
                 ("Last seen", lambda r: r["f"].last_seen_at),
@@ -3915,11 +4100,20 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
                 + [(name, f"via {name}") for name in source_names]
             ),
             "active_status": status_filter,
+            "condition_policy_available": condition_policy_available,
             "active_severity": severity_filter,
             "active_type": type_filter,
             "active_category": category_filter,
             "active_platform": platform_filter,
             "active_online": online_filter,
+            "active_response": response_filter,
+            "response_choices": (
+                ("actionable", "Actionable"),
+                ("blocked", "Blocked"),
+                ("pending", "Pending or unknown"),
+                ("paused", "Attention paused"),
+                ("all", "All retained"),
+            ),
             "active_q": q_filter,
             "active_confidence": confidence_filter,
             "active_client": client_filter,
@@ -3931,6 +4125,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             "category_tiles": category_tiles,
             "total_matching": total_matching,
             "actionable_matching": actionable_matching,
+            "response_matching": response_matching,
             "policy_matching": policy_matching,
             "result_scope_cards": result_scope_cards,
             "policy_rows": policy_rows,
@@ -3982,9 +4177,15 @@ def finding_resolve(request: HttpRequest, finding_id: str) -> HttpResponse:
     if _policy_candidate_state_action_blocked(request, finding):
         return redirect(request.POST.get("next") or "findings_queue")
     if finding.status != Finding.Status.RESOLVED:
+        details = dict(finding.finding_details or {})
+        details["resolution"] = {
+            "reason": "operator_resolved",
+            "detail": "Resolved by an operator; this is not an automated recovery claim.",
+        }
         finding.status = Finding.Status.RESOLVED
         finding.closed_at = finding.closed_at or timezone.now()
-        finding.save(update_fields=["status", "closed_at"])
+        finding.finding_details = details
+        finding.save(update_fields=["status", "closed_at", "finding_details"])
     return redirect(request.POST.get("next") or "findings_queue")
 
 
@@ -4097,10 +4298,19 @@ def findings_bulk_action(request: HttpRequest) -> HttpResponse:
         )
         message = f"Acknowledged {touched} issue{'s' if touched != 1 else ''}."
     elif action == "resolve":
-        touched = qs.exclude(status=Finding.Status.RESOLVED).update(
-            status=Finding.Status.RESOLVED,
-            closed_at=now,
+        resolved = list(qs.exclude(status=Finding.Status.RESOLVED).only("id", "finding_details"))
+        touched = qs.filter(id__in=[finding.id for finding in resolved]).update(
+            status=Finding.Status.RESOLVED, closed_at=now
         )
+        for finding in resolved:
+            details = dict(finding.finding_details or {})
+            details["resolution"] = {
+                "reason": "operator_resolved",
+                "detail": "Resolved by an operator; this is not an automated recovery claim.",
+            }
+            Finding.objects.filter(id=finding.id, tenant_id=1).update(
+                finding_details=details
+            )
         message = f"Resolved {touched} issue{'s' if touched != 1 else ''}."
     elif action == "snooze":
         try:
@@ -4217,9 +4427,20 @@ def _retire_selected_computers(request: HttpRequest, ids: list[str], action) -> 
             entity_type="device",
         )
 
-    Finding.objects.filter(tenant_id=1, id__in=ids).exclude(
-        status=Finding.Status.RESOLVED
+    retiring_findings = list(
+        Finding.objects.filter(tenant_id=1, id__in=ids)
+        .exclude(status=Finding.Status.RESOLVED)
+        .only("id", "finding_details")
+    )
+    Finding.objects.filter(
+        tenant_id=1, id__in=[finding.id for finding in retiring_findings]
     ).update(status=Finding.Status.RESOLVED, closed_at=now)
+    for finding in retiring_findings:
+        details = dict(finding.finding_details or {})
+        details["resolution"] = {"reason": "retired", "detail": reason}
+        Finding.objects.filter(id=finding.id, tenant_id=1).update(
+            finding_details=details
+        )
     messages.success(
         request,
         f"Retired {len(devices)} Computer{'s' if len(devices) != 1 else ''}. "
@@ -4269,6 +4490,13 @@ def _queue_selected_hudu_archives(request: HttpRequest, ids: list[str], action) 
             company_id = details.get("company_id")
             asset_id = details.get("asset_id")
             if not (source_instance_id and company_id and asset_id):
+                no_longer_eligible += 1
+                continue
+            # Queueing is itself a governed response: do not create a pending
+            # source mutation for a finding that is already blocked, pending,
+            # stale, or missing a required participant assessment. The worker
+            # repeats this check immediately before the external API call.
+            if str(finding.id) not in _condition_response_ids([finding.id])["actionable"]:
                 no_longer_eligible += 1
                 continue
             # Recheck the exact current source record. A Finding is evidence,
@@ -7913,6 +8141,11 @@ def findings_admin_health(request: HttpRequest) -> HttpResponse:
         finding.assessment = assessments.get(str(finding.id))
 
     finding_types = FindingType.objects.filter(finding_class="admin").order_by("name")
+    try:
+        load_active_profile()
+        condition_policy_available = True
+    except (RuntimeError, ValueError):
+        condition_policy_available = False
 
     return render(
         request,
@@ -7920,6 +8153,7 @@ def findings_admin_health(request: HttpRequest) -> HttpResponse:
         {
             "admin_group": "integrations",
             "admin_tab": "ingest",
+            "condition_policy_available": condition_policy_available,
             "findings": findings,
             "finding_types": finding_types,
             "severity_choices": Finding.Severity.choices,
@@ -10839,11 +11073,21 @@ def _attach_group_to_client(
             UPDATE operations.admin_findings af
             SET status = 'resolved', resolved_at = NOW()
             FROM operations.finding_types ft
+            JOIN operations.condition_assessments assessment
+              ON assessment.tenant_id = af.tenant_id
+             AND assessment.row_kind = 'admin'
+             AND assessment.finding_id = af.id
+             AND (assessment.response->>'may_clear')::boolean IS TRUE
+            JOIN operations.condition_policy_versions policy
+              ON policy.version = assessment.policy_version
+             AND policy.active
             WHERE af.finding_type_id = ft.id
               AND ft.name = 'client_unattached_group'
               AND af.tenant_id = 1
               AND af.condition_key = %s
               AND af.status IN ('open', 'acknowledged')
+              AND assessment.assessed_at >= NOW() -
+                  (policy.policy->>'freshness_hours')::integer * INTERVAL '1 hour'
             """,
             (ckey,),
         )
@@ -10860,11 +11104,21 @@ def _resolve_finding_for_group(cur, source_binding_id, external_id: str) -> None
         UPDATE operations.admin_findings af
         SET status = 'resolved', resolved_at = NOW()
         FROM operations.finding_types ft
+        JOIN operations.condition_assessments assessment
+          ON assessment.tenant_id = af.tenant_id
+         AND assessment.row_kind = 'admin'
+         AND assessment.finding_id = af.id
+         AND (assessment.response->>'may_clear')::boolean IS TRUE
+        JOIN operations.condition_policy_versions policy
+          ON policy.version = assessment.policy_version
+         AND policy.active
         WHERE af.finding_type_id = ft.id
           AND ft.name = 'client_unattached_group'
           AND af.tenant_id = 1
           AND af.condition_key = %s
           AND af.status IN ('open', 'acknowledged')
+          AND assessment.assessed_at >= NOW() -
+              (policy.policy->>'freshness_hours')::integer * INTERVAL '1 hour'
         """,
         (condition_key,),
     )
@@ -11619,14 +11873,68 @@ def _merge_devices(cur, survivor_id, loser_id: str, reason: str) -> dict:
     # 3. findings — subject_id (only device-subject findings)
     cur.execute(
         """
-        UPDATE operations.findings SET subject_id=%s
+        UPDATE operations.findings
+           SET subject_id=%s,
+               finding_details = finding_details || jsonb_build_object(
+                   'merge', jsonb_build_object(
+                       'reason', 'merged_device',
+                       'from_device_id', %s::text,
+                       'into_device_id', %s::text
+                   )
+               )
         WHERE tenant_id=1 AND subject_id=%s AND subject_type='device'
         """,
-        (survivor_id, loser_id),
+        (survivor_id, loser_id, survivor_id, loser_id),
     )
     counts["findings_moved"] = cur.rowcount
 
-    # 4. Current software inventory has one row per device/product.  Fold a
+    # 4. Re-key condition scope and assessment rows atomically with the
+    # finding move. If the survivor already has the same scope, retain its
+    # current assessment and remove only the duplicate loser scope. This
+    # prevents stale loser participants from authorizing downstream actions.
+    cur.execute(
+        """
+        INSERT INTO operations.condition_participants
+            (tenant_id, row_kind, finding_id, participant_kind, participant_id, participant_role)
+        SELECT tenant_id, row_kind, finding_id, participant_kind, %s, participant_role
+          FROM operations.condition_participants
+         WHERE tenant_id = 1 AND participant_kind = 'device' AND participant_id = %s
+        ON CONFLICT DO NOTHING
+        """,
+        (survivor_id, loser_id),
+    )
+    cur.execute(
+        """
+        DELETE FROM operations.condition_participants
+         WHERE tenant_id = 1 AND participant_kind = 'device' AND participant_id = %s
+        """,
+        (loser_id,),
+    )
+    cur.execute(
+        """
+        INSERT INTO operations.condition_assessments
+            (tenant_id, row_kind, finding_id, participant_kind, participant_id,
+             participant_role, condition_identity, policy_version, policy_digest,
+             coverage, response, reevaluation_key, currentness, assessed_at)
+        SELECT tenant_id, row_kind, finding_id, participant_kind, %s,
+               participant_role, condition_identity, policy_version, policy_digest,
+               coverage, response, reevaluation_key, currentness, assessed_at
+          FROM operations.condition_assessments
+         WHERE tenant_id = 1 AND participant_kind = 'device' AND participant_id = %s
+        ON CONFLICT DO NOTHING
+        """,
+        (survivor_id, loser_id),
+    )
+    cur.execute(
+        """
+        DELETE FROM operations.condition_assessments
+         WHERE tenant_id = 1 AND participant_kind = 'device' AND participant_id = %s
+        """,
+        (loser_id,),
+    )
+    counts["condition_participants_reconciled"] = cur.rowcount
+
+    # 5. Current software inventory has one row per device/product.  Fold a
     # collision into the survivor's row first, then move the remaining rows.
     # The old merge action deleted the loser rows outright, which could make a
     # confirmed identity decision erase inventory.
@@ -11687,7 +11995,7 @@ def _merge_devices(cur, survivor_id, loser_id: str, reason: str) -> dict:
     )
     counts["software_rows_moved"] = cur.rowcount
 
-    # 5. Tombstone loser
+    # 6. Tombstone loser
     cur.execute(
         """
         UPDATE operations.devices

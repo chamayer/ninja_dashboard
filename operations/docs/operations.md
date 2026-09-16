@@ -105,6 +105,18 @@ After a rebuild:
 ## Recovery
 
 - Preserve evidence and logs before retrying a failed migration or refresh.
+- For condition-policy failures, retain the last valid active version, inspect
+  the policy version/digest and assessment freshness, and do not manually mark
+  findings or subscribers eligible. Invalid or absent policy authority is a
+  fail-closed state for notifications and source actions while evidence pages
+  may still render retained findings.
+- Migration 0162 serializes policy activation; migration 0163 binds assessment
+  rows to the policy digest. Review both migrations together before any
+  approved rollback, and keep compatible application code available for the
+  selected schema version.
+- Migration 0164 promotes the six policy-defined issue categories and keeps
+  the prior policy version available for rollback. Review its canonical keys
+  and legacy URL redirects with the queue change before an approved release.
 - Cancel a blocked database operation only with explicit approval and a clear
   rollback plan.
 - Do not apply destructive legacy cutover steps until consumer audits and

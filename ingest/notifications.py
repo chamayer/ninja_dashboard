@@ -60,6 +60,9 @@ def dispatch(tenant_id: int = _TENANT_ID) -> int:
     )
 
     for f in findings:
+        if not _still_notifyable(f, tenant_id):
+            _record_event(f, None, "", "skipped_stale_assessment", "", "", {}, now)
+            continue
         if _is_suppressed(f, suppressions):
             _record_event(f, None, "", "suppressed", "", "", {}, now)
             continue
@@ -87,6 +90,100 @@ def dispatch(tenant_id: int = _TENANT_ID) -> int:
 
     log.info("notifications: sent %d", sent)
     return sent
+
+
+def _still_notifyable(finding: dict[str, Any], tenant_id: int) -> bool:
+    """Recheck mutable handling and current response immediately before send."""
+    row_kind = finding.get("finding_row_kind")
+    if row_kind == "entity":
+        query = """
+            SELECT EXISTS (
+                SELECT 1
+                  FROM operations.findings f
+                  JOIN operations.condition_assessments a
+                    ON a.tenant_id = f.tenant_id
+                   AND a.row_kind = 'entity'
+                   AND a.finding_id = f.id
+                   AND a.participant_kind = 'condition'
+                  JOIN operations.condition_policy_versions p
+                    ON p.version = a.policy_version AND p.active
+                 WHERE f.tenant_id = %s AND f.id = %s
+                   AND f.status IN ('open', 'acknowledged')
+                   AND (f.snoozed_until IS NULL OR f.snoozed_until <= now())
+                   AND (a.response->>'may_notify')::boolean IS TRUE
+                   AND a.assessed_at >= now() -
+                       (p.policy->>'freshness_hours')::integer * interval '1 hour'
+                   AND NOT EXISTS (
+                       SELECT 1
+                         FROM operations.condition_participants participant
+                        WHERE participant.tenant_id = f.tenant_id
+                          AND participant.row_kind = 'entity'
+                          AND participant.finding_id = f.id
+                          AND participant.participant_role <> 'context'
+                          AND NOT EXISTS (
+                              SELECT 1
+                                FROM operations.condition_assessments pa
+                                JOIN operations.condition_policy_versions pp
+                                  ON pp.version = pa.policy_version AND pp.active
+                               WHERE pa.tenant_id = participant.tenant_id
+                                 AND pa.row_kind = participant.row_kind
+                                 AND pa.finding_id = participant.finding_id
+                                 AND pa.participant_kind = participant.participant_kind
+                                 AND pa.participant_id = participant.participant_id
+                                 AND pa.participant_role = participant.participant_role
+                                 AND (pa.response->>'may_notify')::boolean IS TRUE
+                                 AND pa.assessed_at >= now() -
+                                     (pp.policy->>'freshness_hours')::integer * interval '1 hour'
+                          )
+                   )
+            )
+        """
+    elif row_kind == "admin":
+        query = """
+            SELECT EXISTS (
+                SELECT 1
+                  FROM operations.admin_findings f
+                  JOIN operations.condition_assessments a
+                    ON a.tenant_id = f.tenant_id
+                   AND a.row_kind = 'admin'
+                   AND a.finding_id = f.id
+                   AND a.participant_kind = 'condition'
+                  JOIN operations.condition_policy_versions p
+                    ON p.version = a.policy_version AND p.active
+                 WHERE f.tenant_id = %s AND f.id = %s
+                   AND f.status IN ('open', 'acknowledged')
+                  AND (a.response->>'may_notify')::boolean IS TRUE
+                   AND a.assessed_at >= now() -
+                       (p.policy->>'freshness_hours')::integer * interval '1 hour'
+                   AND NOT EXISTS (
+                       SELECT 1
+                         FROM operations.condition_participants participant
+                        WHERE participant.tenant_id = f.tenant_id
+                          AND participant.row_kind = 'admin'
+                          AND participant.finding_id = f.id
+                          AND participant.participant_role <> 'context'
+                          AND NOT EXISTS (
+                              SELECT 1
+                                FROM operations.condition_assessments pa
+                               WHERE pa.tenant_id = participant.tenant_id
+                                 AND pa.row_kind = participant.row_kind
+                                 AND pa.finding_id = participant.finding_id
+                                 AND pa.participant_kind = participant.participant_kind
+                                 AND pa.participant_id = participant.participant_id
+                                 AND pa.participant_role = participant.participant_role
+                                 AND (pa.response->>'may_notify')::boolean IS TRUE
+                                 AND pa.assessed_at >= now() -
+                                     (p.policy->>'freshness_hours')::integer * interval '1 hour'
+                          )
+                   )
+            )
+        """
+    else:
+        return False
+    with db.pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(f"SET LOCAL operations.tenant_id = {tenant_id}")
+        cur.execute(query, (tenant_id, finding["id"]))
+        return bool(cur.fetchone()[0])
 
 
 # ── loaders ─────────────────────────────────────────────────────────────
@@ -141,53 +238,51 @@ def _load_pending_findings(cur, tenant_id: int) -> list[dict[str, Any]]:
         FROM operations.findings f
         JOIN operations.finding_types ft ON ft.id = f.finding_type_id
         WHERE f.tenant_id = %s AND f.status IN ('open', 'acknowledged')
-          AND (
-              NOT EXISTS (
-                  SELECT 1
-                    FROM operations.condition_assessments assessment
-                   WHERE assessment.tenant_id = f.tenant_id
-                     AND assessment.row_kind = 'entity'
-                     AND assessment.finding_id = f.id
-              )
-              OR (
-                  NOT EXISTS (
-                      SELECT 1
-                        FROM operations.condition_assessments assessment
-                       WHERE assessment.tenant_id = f.tenant_id
-                         AND assessment.row_kind = 'entity'
-                         AND assessment.finding_id = f.id
-                         AND (
-                             (assessment.response ->> 'may_notify')::boolean IS NOT TRUE
-                             OR assessment.policy_version <> (
-                                 SELECT version
-                                   FROM operations.condition_policy_versions
-                                  WHERE active
-                             )
-                             OR assessment.assessed_at < now() - (
-                                 SELECT ((policy->>'freshness_hours')::integer * interval '1 hour')
-                                   FROM operations.condition_policy_versions
-                                  WHERE active
-                             )
-                         )
-                  )
-                  AND NOT EXISTS (
-                      SELECT 1
-                        FROM operations.condition_participants participant
-                       WHERE participant.tenant_id = f.tenant_id
-                         AND participant.row_kind = 'entity'
-                         AND participant.finding_id = f.id
-                         AND NOT EXISTS (
-                             SELECT 1
-                               FROM operations.condition_assessments assessment
-                              WHERE assessment.tenant_id = participant.tenant_id
-                                AND assessment.row_kind = participant.row_kind
-                                AND assessment.finding_id = participant.finding_id
-                                AND assessment.participant_kind = participant.participant_kind
-                                AND assessment.participant_id = participant.participant_id
-                                AND assessment.participant_role = participant.participant_role
-                         )
-                  )
-              )
+          AND (f.snoozed_until IS NULL OR f.snoozed_until <= now())
+          AND EXISTS (
+              SELECT 1
+                FROM operations.condition_assessments assessment
+               WHERE assessment.tenant_id = f.tenant_id
+                 AND assessment.row_kind = 'entity'
+                 AND assessment.finding_id = f.id
+                 AND (assessment.response ->> 'may_notify')::boolean IS TRUE
+                 AND assessment.policy_version = (
+                     SELECT version FROM operations.condition_policy_versions
+                      WHERE active ORDER BY version DESC LIMIT 1
+                 )
+                 AND assessment.assessed_at >= now() - (
+                     SELECT (policy->>'freshness_hours')::integer * interval '1 hour'
+                       FROM operations.condition_policy_versions
+                      WHERE active ORDER BY version DESC LIMIT 1
+                 )
+          )
+          AND NOT EXISTS (
+              SELECT 1
+                FROM operations.condition_participants participant
+               WHERE participant.tenant_id = f.tenant_id
+                 AND participant.row_kind = 'entity'
+                 AND participant.finding_id = f.id
+                 AND participant.participant_role <> 'context'
+                 AND NOT EXISTS (
+                     SELECT 1
+                       FROM operations.condition_assessments assessment
+                      WHERE assessment.tenant_id = participant.tenant_id
+                        AND assessment.row_kind = participant.row_kind
+                        AND assessment.finding_id = participant.finding_id
+                        AND assessment.participant_kind = participant.participant_kind
+                        AND assessment.participant_id = participant.participant_id
+                        AND assessment.participant_role = participant.participant_role
+                        AND (assessment.response ->> 'may_notify')::boolean IS TRUE
+                        AND assessment.policy_version = (
+                            SELECT version FROM operations.condition_policy_versions
+                             WHERE active ORDER BY version DESC LIMIT 1
+                        )
+                        AND assessment.assessed_at >= now() - (
+                            SELECT (policy->>'freshness_hours')::integer * interval '1 hour'
+                              FROM operations.condition_policy_versions
+                             WHERE active ORDER BY version DESC LIMIT 1
+                        )
+                 )
           )
 
         UNION ALL
@@ -205,6 +300,48 @@ def _load_pending_findings(cur, tenant_id: int) -> list[dict[str, Any]]:
         FROM operations.admin_findings af
         JOIN operations.finding_types ft ON ft.id = af.finding_type_id
         WHERE af.tenant_id = %s AND af.status IN ('open', 'acknowledged')
+          AND EXISTS (
+              SELECT 1
+                FROM operations.condition_assessments assessment
+               WHERE assessment.tenant_id = af.tenant_id
+                 AND assessment.row_kind = 'admin'
+                 AND assessment.finding_id = af.id
+                 AND assessment.participant_kind = 'condition'
+                 AND (assessment.response ->> 'may_notify')::boolean IS TRUE
+                 AND assessment.policy_version = (
+                     SELECT version FROM operations.condition_policy_versions
+                      WHERE active ORDER BY version DESC LIMIT 1
+                 )
+                 AND assessment.assessed_at >= now() - (
+                     SELECT (policy->>'freshness_hours')::integer * interval '1 hour'
+                       FROM operations.condition_policy_versions
+                      WHERE active ORDER BY version DESC LIMIT 1
+                 )
+          )
+          AND NOT EXISTS (
+              SELECT 1
+                FROM operations.condition_participants participant
+               WHERE participant.tenant_id = af.tenant_id
+                 AND participant.row_kind = 'admin'
+                 AND participant.finding_id = af.id
+                 AND participant.participant_role <> 'context'
+                 AND NOT EXISTS (
+                     SELECT 1
+                       FROM operations.condition_assessments pa
+                      WHERE pa.tenant_id = participant.tenant_id
+                        AND pa.row_kind = participant.row_kind
+                        AND pa.finding_id = participant.finding_id
+                        AND pa.participant_kind = participant.participant_kind
+                        AND pa.participant_id = participant.participant_id
+                        AND pa.participant_role = participant.participant_role
+                        AND (pa.response ->> 'may_notify')::boolean IS TRUE
+                        AND pa.assessed_at >= now() - (
+                            SELECT (policy->>'freshness_hours')::integer * interval '1 hour'
+                            FROM operations.condition_policy_versions
+                            WHERE active ORDER BY version DESC LIMIT 1
+                        )
+                 )
+          )
         """,
         (tenant_id, tenant_id),
     )

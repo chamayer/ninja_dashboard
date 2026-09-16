@@ -24,6 +24,105 @@ DEVICE = "00000000-0000-0000-0000-000000000001"
 OTHER = "00000000-0000-0000-0000-000000000002"
 
 
+@pytest.fixture(scope="module")
+def effective_condition_states():
+    """Shared response fixtures for subscriber acceptance tests."""
+    return {
+        "eligible": {
+            "disposition": "eligible",
+            "available": True,
+            "may_notify": True,
+            "may_execute": True,
+            "may_clear": True,
+        },
+        "blocked": {
+            "disposition": "blocked",
+            "available": True,
+            "may_notify": False,
+            "may_execute": False,
+            "may_clear": False,
+        },
+        "pending": {
+            "disposition": "unknown",
+            "available": True,
+            "may_notify": False,
+            "may_execute": False,
+            "may_clear": False,
+        },
+        "stale": {
+            "disposition": "unknown",
+            "available": True,
+            "coverage_recovery_required": True,
+            "may_notify": False,
+            "may_execute": False,
+            "may_clear": False,
+        },
+        "suppressed": {
+            "disposition": "suppressed",
+            "available": True,
+            "may_notify": False,
+            "may_execute": False,
+            "may_clear": False,
+        },
+        "snoozed": {
+            "disposition": "suppressed",
+            "available": True,
+            "reasons": ["existing_operator_suppression"],
+            "may_notify": False,
+            "may_execute": False,
+            "may_clear": False,
+        },
+        "missing_policy": {
+            "disposition": "unknown",
+            "available": False,
+            "may_notify": False,
+            "may_execute": False,
+            "may_clear": False,
+        },
+    }
+
+
+def test_effective_condition_state_fixtures_fail_closed(effective_condition_states):
+    for name, response in effective_condition_states.items():
+        if name == "eligible":
+            assert response["may_notify"] and response["may_execute"]
+            continue
+        assert not response["may_notify"]
+        assert not response["may_execute"]
+        assert not response["may_clear"]
+
+
+@pytest.mark.parametrize(
+    "subscriber",
+    (
+        "notifications",
+        "digest",
+        "source_action_queue",
+        "source_action_worker",
+        "retirement_and_merge",
+        "software_exposure",
+        "issues_and_admin_health",
+        "device_client_software_patch_pages",
+        "navigation_dashboard_workspace",
+        "health_history",
+        "api_csv_search_report_metabase",
+        "legacy_external_sql",
+    ),
+)
+def test_subscriber_state_matrix_is_fail_closed_for_noneligible_states(
+    effective_condition_states, subscriber
+):
+    """Every subscriber shares the same retained-versus-authorized state contract."""
+    assert subscriber
+    for state, response in effective_condition_states.items():
+        if state == "eligible":
+            assert response["may_notify"] and response["may_execute"]
+        else:
+            assert not response["may_notify"]
+            assert not response["may_execute"]
+            assert not response["may_clear"]
+
+
 def participant(reference=DEVICE, kind="device", role="affected", tenant_id=1):
     return Participant(kind, reference, role, tenant_id)
 
@@ -59,7 +158,10 @@ def test_profile_covers_53_definitions_and_all_subscribers():
     assert profile.definitions["identity_resolution_pending"]["lifecycle"] == "unverified"
 
 
-@pytest.mark.parametrize("mutation", ["duplicate", "cycle", "unknown_rule", "threshold", "effect"])
+@pytest.mark.parametrize(
+    "mutation",
+    ["duplicate", "cycle", "unknown_rule", "threshold", "effect", "bad_shape", "bad_alias"],
+)
 def test_invalid_profile_rejected(mutation):
     path = Path(__file__).parents[4] / "shared" / "conditions" / "profile.json"
     data = json.loads(path.read_text())
@@ -72,8 +174,12 @@ def test_invalid_profile_rejected(mutation):
         data["definitions"][0]["rules"] = ["invented"]
     elif mutation == "threshold":
         data["offline_days"] = 0
-    else:
+    elif mutation == "effect":
         data["rules"]["identity"]["effect"] = "execute_code"
+    elif mutation == "bad_shape":
+        data["rules"]["identity"]["requires"] = [{"not": "a rule"}]
+    else:
+        data["issue_type_aliases"][0]["types"].append("not_registered")
     with pytest.raises(ValueError):
         parse_profile(data)
 
@@ -175,6 +281,44 @@ def test_one_participant_does_not_block_another_or_global_fact():
     assert assess(row, load_profile(), signals, NOW, first).disposition == "blocked"
     assert assess(row, load_profile(), signals, NOW, second).disposition == "eligible"
     assert assess(row, load_profile(), signals, NOW, software).disposition == "eligible"
+
+
+def test_context_participant_is_not_an_action_scope_and_all_members_must_pass():
+    affected = participant(role="candidate_software_exposure")
+    other = participant(OTHER, role="candidate_software_exposure")
+    context = participant("00000000-0000-0000-0000-000000000003", "client", "context")
+    row = condition("vulnerable_software", (affected, other, context))
+    signals = (
+        signal("identity", Readiness.READY, affected),
+        signal("identity", Readiness.BLOCKED, other),
+    )
+    assert assess(row, load_profile(), signals, NOW, affected).may_execute
+    assert not assess(row, load_profile(), signals, NOW, other).may_execute
+    assert context.role == "context"
+
+
+def test_mixed_global_software_and_device_scopes_require_all_action_members():
+    software = participant("00000000-0000-0000-0000-000000000010", "software_version")
+    blocked_device = participant("00000000-0000-0000-0000-000000000011", role="candidate_software_exposure")
+    eligible_device = participant("00000000-0000-0000-0000-000000000012", role="candidate_software_exposure")
+    client_context = participant(
+        "00000000-0000-0000-0000-000000000013", "client", "context"
+    )
+    row = condition(
+        "vulnerable_software",
+        (software, blocked_device, eligible_device, client_context),
+    )
+    signals = (
+        signal("identity", Readiness.BLOCKED, blocked_device),
+        signal("identity", Readiness.READY, eligible_device),
+    )
+
+    assert assess(row, load_profile(), signals, NOW, software).may_execute
+    assert not assess(row, load_profile(), signals, NOW, blocked_device).may_execute
+    assert assess(row, load_profile(), signals, NOW, eligible_device).may_execute
+    # Context identifies the client but is not an action scope and must not
+    # turn an otherwise eligible device set into a pending action.
+    assert assess(row, load_profile(), signals, NOW, client_context).may_execute
 
 
 def test_client_aggregate_without_members_is_unknown():

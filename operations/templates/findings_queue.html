@@ -6,6 +6,13 @@
 {% block content %}
 
 <div class="card">
+    {% if not condition_policy_available %}
+    <div class="notice notice-warning" role="status">
+        Condition policy is unavailable. Retained evidence is shown, but
+        governed response and notification eligibility are blocked until a
+        valid active policy is restored.
+    </div>
+    {% endif %}
     <div style="display:flex; align-items:center; justify-content:space-between; gap:1rem;">
         <h1 style="margin:0;">{% if active_category %}{{ active_category|humanize_label }} issues{% else %}Issues{% endif %}
           <span class="muted" style="font-weight:400; font-size:0.9rem;">({{ actionable_matching }} actionable · {{ affected_device_count }} devices)</span>
@@ -115,6 +122,14 @@
                 {% endfor %}
             </select>
         </div>
+        <div>
+            <label>Response</label>
+            <select name="response">
+                {% for value, label in response_choices %}
+                    <option value="{{ value }}"{% if active_response == value %} selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </div>
         </div>
         <div>
             <label>Platform</label>
@@ -164,7 +179,7 @@
 
 <div class="card">
     {% if findings %}
-    <h2 class="section-label">Actionable issues <span>({{ actionable_matching }} matching)</span></h2>
+    <h2 class="section-label">{{ active_response|title }} issues <span>({{ response_matching }} matching)</span></h2>
     <form method="post" action="{% url 'findings_bulk_action' %}" id="bulk-form">
         {% csrf_token %}
         <input type="hidden" name="next" value="{{ request.get_full_path }}">
@@ -251,8 +266,10 @@
                         {% if row.assessment %}
                         <div style="margin-top:0.35rem; font-size:0.75rem;">
                             <strong>Assessment: {{ row.assessment.disposition }}</strong>
-                            {% if row.assessment.reasons %}<br>Reason: {{ row.assessment.reasons|join:", " }}{% endif %}
-                            {% if row.assessment.blockers %}<br>Blocker: {{ row.assessment.blockers|join:", " }}{% endif %}
+                            <br>Policy: {{ row.assessment.policy_version }} · {{ row.assessment.policy_digest|slice:":12" }}
+                            <br>Scope: {{ row.assessment.scopes|join:", " }}
+                            {% if row.assessment.reasons %}<br>Reason: {% for reason in row.assessment.reasons %}{{ reason|humanize_label }}{% if not forloop.last %}, {% endif %}{% endfor %}{% endif %}
+                            {% if row.assessment.blockers %}<br>Blocker: {% for blocker in row.assessment.blockers %}{{ blocker|humanize_label }}{% if not forloop.last %}, {% endif %}{% endfor %}{% endif %}
                         </div>
                         {% else %}
                         <div style="margin-top:0.35rem; font-size:0.75rem;">Assessment pending</div>
@@ -295,7 +312,7 @@
     </form>
     {% include "_pagination.html" with page_obj=page_obj paginator=page_obj.paginator page_query=page_query %}
     {% else %}
-    <p class="muted">No actionable issues match the current filters.</p>
+    <p class="muted">No retained issues match the current filters.</p>
     {% endif %}
 </div>
 

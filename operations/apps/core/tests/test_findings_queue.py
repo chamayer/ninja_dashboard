@@ -141,6 +141,7 @@ def test_findings_queue_template_exposes_device_csv_and_grouped_types():
     assert "card.percentage" in template
     assert "action.label" in template
     assert "Why take this action?" in template
+    assert "Condition policy is unavailable" in template
     assert "action.confirmation" in template
     assert "Archive in Hudu" in template
     assert "Hudu source record:" in template
@@ -269,3 +270,133 @@ def test_device_and_issues_templates_explain_the_drilldown_scope():
     assert "{% finding_drilldown_query f device.id %}" in device_template
     assert "Showing every device with this finding type" in findings_template
     assert "Filtered to the selected device." in findings_template
+
+
+def test_findings_queue_exposes_governed_response_filter():
+    source = Path("apps/core/views.py").read_text(encoding="utf-8")
+    template = Path("templates/findings_queue.html").read_text(encoding="utf-8")
+    for value in ("actionable", "blocked", "pending", "paused", "all"):
+        assert value in source
+    assert 'name="response"' in template
+    assert "_condition_response_ids" in source
+    assert "condition_participants" in source
+    assert '"Response reasons"' in source
+    assert '"Assessment scope"' in source
+    assert "Policy:" in template
+
+
+def test_findings_queue_canonicalizes_legacy_category_urls():
+    source = Path("apps/core/views.py").read_text(encoding="utf-8")
+    assert "requested_category_filter = category_filter" in source
+    assert 'params["category"] = category_filter' in source
+    assert "reverse('findings_queue')}?{params.urlencode()" in source
+
+
+def test_findings_queue_retains_offline_evidence_for_explicit_review():
+    source = Path("apps/core/views.py").read_text(encoding="utf-8")
+    assert "Retained findings stay discoverable even when their device is offline" in source
+    assert "status_scope_qs = status_scope_qs.exclude(coalesced_offline_q)" not in source
+    assert "qs = qs.exclude(coalesced_offline_q)" not in source
+
+
+def test_findings_queue_category_cards_use_fleet_wide_eligible_counts():
+    source = Path("apps/core/views.py").read_text(encoding="utf-8")
+    assert "fleet_governed_qs = Finding.objects.filter" in source
+    assert "fleet_actionable_ids = _condition_response_ids" in source
+    assert "top_summary_qs = fleet_governed_qs.filter(id__in=fleet_actionable_ids)" in source
+
+
+def test_condition_reasons_are_humanized_in_evidence_surfaces():
+    queue = Path("templates/findings_queue.html").read_text(encoding="utf-8")
+    admin = Path("templates/findings_admin_health.html").read_text(encoding="utf-8")
+    device = Path("templates/device_detail.html").read_text(encoding="utf-8")
+    assert queue.count("|humanize_label") >= 2
+    assert admin.count("|humanize_label") >= 2
+    assert "blocker|humanize_label" in device
+
+
+def test_human_label_filter_formats_scoped_condition_reasons():
+    source = Path("apps/core/templatetags/human_labels.py").read_text(encoding="utf-8")
+    assert 'key.split(":", 1)' in source
+    assert "suffix.replace('_', ' ')" in source
+
+
+def test_condition_response_reads_are_batched():
+    source = Path("apps/core/views.py").read_text(encoding="utf-8")
+    assert "for offset in range(0, len(ids), 1000)" in source
+    assert "batch = ids[offset:offset + 1000]" in source
+    assert "[batch, batch]" in source
+
+
+def test_device_surface_exposes_governed_response_state():
+    source = Path("apps/core/views.py").read_text(encoding="utf-8")
+    template = Path("templates/device_detail.html").read_text(encoding="utf-8")
+    assert "_condition_response_ids(finding.id for finding in active_findings)" in source
+    assert "condition_response" in template
+    assert "condition_assessment" in source
+    assert "policy_digest" in source
+    assert "condition_policy_available" in source
+    assert "Condition policy unavailable" in template
+
+
+def test_admin_health_exposes_unavailable_policy_state():
+    source = Path("apps/core/views.py").read_text(encoding="utf-8")
+    template = Path("templates/findings_admin_health.html").read_text(encoding="utf-8")
+    assert '"condition_policy_available": condition_policy_available' in source
+    assert "Condition policy is unavailable" in template
+
+
+def test_device_issue_card_links_to_all_retained_responses():
+    template = Path("templates/device_detail.html").read_text(encoding="utf-8")
+    assert "status=all&amp;response=all&amp;subject_id={{ device.id }}" in template
+
+
+def test_client_workspace_drilldowns_match_retained_issue_counts():
+    source = Path("apps/core/client_workspace.py").read_text(encoding="utf-8")
+    assert 'f"&response=all&type={row[\'finding_type__name\']}"' in source
+
+
+def test_source_action_enqueue_requires_current_actionable_response():
+    source = Path("apps/core/views.py").read_text(encoding="utf-8")
+    assert '_condition_response_ids([finding.id])["actionable"]' in source
+
+
+def test_source_action_actionability_excludes_operator_managed_findings():
+    source = Path("apps/core/views.py").read_text(encoding="utf-8")
+    section = source[source.index("def _condition_response_ids"):source.index("def _operator_issue_type_groups")]
+    assert "f.status IN ('open', 'acknowledged')" in section
+    assert "f.snoozed_until IS NULL OR f.snoozed_until <= now()" in section
+    assert "may_execute" in section
+    assert "may_clear" not in section
+
+
+def test_operator_resolution_and_retirement_preserve_explicit_reasons():
+    source = Path("apps/core/views.py").read_text(encoding="utf-8")
+    assert '"reason": "operator_resolved"' in source
+    assert '"reason": "retired"' in source
+    assert "finding_details" in source[source.index("def finding_resolve"):source.index("def finding_snooze")]
+
+
+def test_device_merge_preserves_finding_merge_provenance():
+    source = Path("apps/core/views.py").read_text(encoding="utf-8")
+    section = source[source.index("def _merge_devices"):source.index("def merge_candidate_group_review")]
+    assert "'merge'" in section
+    assert "from_device_id" in section
+    assert "into_device_id" in section
+
+
+def test_device_merge_reconciles_condition_scopes_before_downstream_use():
+    source = Path("apps/core/views.py").read_text(encoding="utf-8")
+    section = source[source.index("def _merge_devices"):source.index("def merge_candidate_group_review")]
+    assert "condition_participants_reconciled" in section
+    assert "condition_participants" in section
+    assert "condition_assessments" in section
+    assert "ON CONFLICT DO NOTHING" in section
+    assert "source_action_requests" not in section
+    assert "UPDATE operations.findings SET id" not in section
+def test_client_attachment_resolution_requires_current_clear_assessment():
+    source = (Path(__file__).parents[1] / "views.py").read_text(encoding="utf-8")
+    section = source[source.index("def _attach_group_to_client"):source.index("@login_required", source.index("def _resolve_finding_for_group"))]
+    assert section.count("condition_assessments") >= 2
+    assert section.count("may_clear") >= 2
+    assert "policy.active" in section

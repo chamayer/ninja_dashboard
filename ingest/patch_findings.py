@@ -30,6 +30,7 @@ emission (BOOL_OR / MAX / SUM) — same E.3 gotcha handled in O1/O3/O4.
 
 from __future__ import annotations
 
+import uuid
 import hashlib
 import json
 import logging
@@ -37,6 +38,7 @@ from datetime import datetime, timezone
 
 from ingest import db
 from ingest.conditions import record_assessment
+from ingest.condition_evidence import preserve_operator_episode
 from shared.conditions.contracts import (
     Condition,
     EvaluationCoverage,
@@ -456,6 +458,11 @@ def _upsert(
     if ckey in emitted_keys:
         return 0
     emitted_keys.add(ckey)
+    preserved = preserve_operator_episode(cur, "findings", tenant_id, ckey, now, details)
+    if preserved is not None:
+        _record_assessment(cur, tenant_id, uuid.UUID(preserved), ft_id, ckey, ft_name,
+                           subject_type, subject_id, now)
+        return 1
     cur.execute(
         """
         INSERT INTO operations.findings (
@@ -470,7 +477,7 @@ def _upsert(
             %s, %s, %s
         )
         ON CONFLICT (tenant_id, condition_key)
-            WHERE condition_key > '' AND status IN ('open', 'acknowledged')
+            WHERE condition_key > '' AND status IN ('open', 'acknowledged', 'investigating', 'suppressed')
         DO UPDATE SET
             last_seen_at     = EXCLUDED.last_seen_at,
             last_detected_at = EXCLUDED.last_detected_at,
@@ -512,15 +519,19 @@ def _record_assessment(cur, tenant_id, finding_id, ft_id, condition_key,
         tenant_id, "entity", str(finding_id), type_name, condition_key, "open",
         (participant,),
     )
+    # Patch rows do not themselves prove identity or current agent contact.
+    # Until those scopes are measured by the shared evidence reader, keep the
+    # assessment fail-closed instead of turning producer assumptions into
+    # response eligibility.
     signals = (
-        Signal("identity", participant, Readiness.READY, "identity:resolved"),
-        Signal("offline", participant, Readiness.READY, "offline:agent_online"),
+        Signal("identity", participant, Readiness.UNKNOWN, "identity:readiness_not_measured"),
+        Signal("offline", participant, Readiness.UNKNOWN, "offline:readiness_not_measured"),
     ) if subject_type == "device" else ()
     record_assessment(
         cur,
         condition,
         signals,
-        EvaluationCoverage(True, True, True, True),
+        EvaluationCoverage(False, False, False, False),
         now=now,
         reevaluation_key=f"patch:{condition_key}",
         participant=participant,
@@ -535,6 +546,10 @@ def _auto_resolve(cur, tenant_id, emitted_keys, now) -> None:
     removing an offline, stale, or withdrawn source record from the active
     queue until current evidence supports it again.
     """
+    # An empty emission can represent a failed, partial, or skipped upstream
+    # read. It is not proof that every prior patch finding has cleared.
+    if not emitted_keys:
+        return
     cur.execute(
         """
         UPDATE operations.findings f
@@ -553,53 +568,44 @@ def _auto_resolve(cur, tenant_id, emitted_keys, now) -> None:
           AND f.tenant_id = %s
           AND f.status IN ('open', 'acknowledged')
           AND NOT (f.condition_key = ANY(%s::text[]))
-          AND (
-              to_regclass('operations.condition_assessments') IS NULL
-              OR NOT EXISTS (
-                  SELECT 1 FROM operations.condition_assessments a
-                  WHERE a.tenant_id = f.tenant_id AND a.row_kind = 'entity'
-                    AND a.finding_id = f.id
-              )
-              OR (
-                  NOT EXISTS (
-                      SELECT 1
-                      FROM operations.condition_assessments a
-                      WHERE a.tenant_id = f.tenant_id
-                        AND a.row_kind = 'entity'
-                        AND a.finding_id = f.id
-                        AND (
-                            (a.response->>'may_clear')::boolean IS NOT TRUE
-                            OR a.policy_version <> (
-                                SELECT v.version
-                                FROM operations.condition_policy_versions v
-                                WHERE v.active ORDER BY v.version DESC LIMIT 1
-                            )
-                            OR a.assessed_at < now() - (
-                                SELECT v.policy->>'freshness_hours'
-                                FROM operations.condition_policy_versions v
-                                WHERE v.active ORDER BY v.version DESC LIMIT 1
-                            )::integer * interval '1 hour'
-                        )
-                  )
-                  AND NOT EXISTS (
-                      SELECT 1
-                      FROM operations.condition_participants p
-                      WHERE p.tenant_id = f.tenant_id
-                        AND p.row_kind = 'entity'
-                        AND p.finding_id = f.id
-                        AND NOT EXISTS (
-                            SELECT 1
-                            FROM operations.condition_assessments pa
-                            WHERE pa.tenant_id = p.tenant_id
-                              AND pa.row_kind = p.row_kind
-                              AND pa.finding_id = p.finding_id
-                              AND pa.participant_kind = p.participant_kind
-                              AND pa.participant_id = p.participant_id
-                              AND pa.participant_role = p.participant_role
-                              AND (pa.response->>'may_clear')::boolean IS TRUE
-                        )
-                  )
-              )
+          AND to_regclass('operations.condition_assessments') IS NOT NULL
+          AND EXISTS (
+              SELECT 1 FROM operations.condition_assessments a
+              WHERE a.tenant_id = f.tenant_id AND a.row_kind = 'entity'
+                AND a.finding_id = f.id
+                AND (a.response->>'may_clear')::boolean IS TRUE
+                AND a.policy_version = (
+                    SELECT v.version FROM operations.condition_policy_versions v
+                    WHERE v.active ORDER BY v.version DESC LIMIT 1
+                )
+                AND a.assessed_at >= now() - (
+                    SELECT (v.policy->>'freshness_hours')::integer
+                    FROM operations.condition_policy_versions v
+                    WHERE v.active ORDER BY v.version DESC LIMIT 1
+                ) * interval '1 hour'
+          )
+          AND NOT EXISTS (
+              SELECT 1 FROM operations.condition_participants p
+              WHERE p.tenant_id = f.tenant_id AND p.row_kind = 'entity'
+                AND p.finding_id = f.id AND p.participant_role <> 'context'
+                AND NOT EXISTS (
+                    SELECT 1 FROM operations.condition_assessments pa
+                    WHERE pa.tenant_id = p.tenant_id AND pa.row_kind = p.row_kind
+                      AND pa.finding_id = p.finding_id
+                      AND pa.participant_kind = p.participant_kind
+                      AND pa.participant_id = p.participant_id
+                      AND pa.participant_role = p.participant_role
+                      AND (pa.response->>'may_clear')::boolean IS TRUE
+                      AND pa.policy_version = (
+                          SELECT v.version FROM operations.condition_policy_versions v
+                          WHERE v.active ORDER BY v.version DESC LIMIT 1
+                      )
+                      AND pa.assessed_at >= now() - (
+                          SELECT (v.policy->>'freshness_hours')::integer
+                          FROM operations.condition_policy_versions v
+                          WHERE v.active ORDER BY v.version DESC LIMIT 1
+                      ) * interval '1 hour'
+                )
           )
         """,
         (now, now, tenant_id, list(emitted_keys) if emitted_keys else [""]),

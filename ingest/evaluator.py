@@ -38,6 +38,7 @@ from typing import Any
 
 from ingest import db
 from ingest.conditions import load_active_profile, record_assessment
+from ingest.condition_evidence import preserve_operator_episode
 from ingest.identity import identity_entity_types
 from ingest.intel.windows_servicing import sync as sync_windows_servicing
 from ingest.normalize import normalize_hostname
@@ -227,6 +228,15 @@ def _source_failure_guard(cur: Any, tenant_id: int, now: datetime) -> set[str]:
                 SET status = 'resolved', resolved_at = %s
                 WHERE tenant_id = %s AND condition_key = %s
                   AND status IN ('open', 'acknowledged')
+                  AND EXISTS (
+                      SELECT 1 FROM operations.condition_assessments a
+                       WHERE a.tenant_id = operations.admin_findings.tenant_id
+                         AND a.row_kind = 'admin'
+                         AND a.finding_id = operations.admin_findings.id
+                         AND (a.response->>'may_clear')::boolean IS TRUE
+                         AND a.policy_version = (SELECT version FROM operations.condition_policy_versions WHERE active ORDER BY version DESC LIMIT 1)
+                         AND a.assessed_at >= now() - (SELECT (policy->>'freshness_hours')::integer * interval '1 hour' FROM operations.condition_policy_versions WHERE active ORDER BY version DESC LIMIT 1)
+                  )
                 """,
                 (now, tenant_id, condition_key),
             )
@@ -244,7 +254,11 @@ def _upsert_admin_finding(
     subject_ref: dict[str, Any],
     details: dict[str, Any],
 ) -> None:
-    cur.execute(
+    preserved = preserve_operator_episode(cur, "admin_findings", tenant_id, condition_key, now, details)
+    if preserved is not None:
+        finding_id = uuid.UUID(preserved)
+    else:
+        cur.execute(
         """
         INSERT INTO operations.admin_findings (
             id, version, tenant_id, finding_type_id, condition_key, severity,
@@ -253,10 +267,11 @@ def _upsert_admin_finding(
             gen_random_uuid(), 1, %s, %s, %s, %s, 'open', %s::jsonb, %s::jsonb, %s, %s
         )
         ON CONFLICT (tenant_id, condition_key)
-            WHERE status IN ('open', 'acknowledged')
+            WHERE status IN ('open', 'acknowledged', 'investigating', 'suppressed')
         DO UPDATE SET
             last_detected_at = EXCLUDED.last_detected_at,
             details          = EXCLUDED.details
+        RETURNING id
         """,
         (
             tenant_id,
@@ -268,6 +283,26 @@ def _upsert_admin_finding(
             now,
             now,
         ),
+    )
+        row = cur.fetchone()
+        if row is None:
+            return
+        finding_id = row[0]
+    condition = Condition(
+        tenant_id,
+        "admin",
+        str(finding_id),
+        _finding_type_name(cur, finding_type_id),
+        condition_key,
+        "open",
+    )
+    record_assessment(
+        cur,
+        condition,
+        (),
+        EvaluationCoverage(False, False, False, False),
+        now=now,
+        reevaluation_key=f"evaluator-admin:{condition_key}:{now.isoformat()}",
     )
 
 
@@ -349,7 +384,9 @@ def _sync_device_roles(cur: Any, tenant_id: int, now: datetime) -> int:
                 )
 
     if ft_id:
-        _resolve_findings_absent(cur, tenant_id, ft_id, conflict_ids, now)
+        _resolve_findings_absent(
+            cur, tenant_id, ft_id, conflict_ids, now, assessment_required=True
+        )
     return count
 
 
@@ -479,9 +516,21 @@ def _resolve_lifecycle_findings_absent(
                SET status = 'resolved', last_seen_at = %s
              WHERE tenant_id = %s
                AND finding_type_id = %s
-               AND status IN ('open', 'acknowledged', 'investigating', 'suppressed')
+               AND status IN ('open', 'acknowledged')
                AND (%s::uuid IS NULL OR subject_id = %s)
                AND NOT (condition_key = ANY(%s))
+               AND EXISTS (
+                   SELECT 1
+                     FROM operations.condition_assessments a
+                     JOIN operations.condition_policy_versions p
+                       ON p.version = a.policy_version
+                      AND p.active
+                    WHERE a.tenant_id = operations.findings.tenant_id
+                      AND a.row_kind = 'entity'
+                      AND a.finding_id = operations.findings.id
+                      AND (a.response->>'may_clear')::boolean IS TRUE
+                      AND a.assessed_at >= now() - (p.policy->>'freshness_hours')::integer * interval '1 hour'
+               )
             """,
             (now, tenant_id, finding_type_id, device_id, device_id, list(condition_keys)),
         )
@@ -492,8 +541,20 @@ def _resolve_lifecycle_findings_absent(
                SET status = 'resolved', last_seen_at = %s
              WHERE tenant_id = %s
                AND finding_type_id = %s
-               AND status IN ('open', 'acknowledged', 'investigating', 'suppressed')
+               AND status IN ('open', 'acknowledged')
                AND (%s::uuid IS NULL OR subject_id = %s)
+               AND EXISTS (
+                   SELECT 1
+                     FROM operations.condition_assessments a
+                     JOIN operations.condition_policy_versions p
+                       ON p.version = a.policy_version
+                      AND p.active
+                    WHERE a.tenant_id = operations.findings.tenant_id
+                      AND a.row_kind = 'entity'
+                      AND a.finding_id = operations.findings.id
+                      AND (a.response->>'may_clear')::boolean IS TRUE
+                      AND a.assessed_at >= now() - (p.policy->>'freshness_hours')::integer * interval '1 hour'
+               )
             """,
             (now, tenant_id, finding_type_id, device_id, device_id),
         )
@@ -940,6 +1001,15 @@ def _evaluate_unknown_entities(cur: Any, tenant_id: int, now: datetime) -> int:
         WHERE tenant_id = %s AND finding_type_id = %s
           AND status IN ('open', 'acknowledged')
           AND NOT (condition_key = ANY(%s))
+          AND EXISTS (
+              SELECT 1 FROM operations.condition_assessments a
+               WHERE a.tenant_id = operations.admin_findings.tenant_id
+                 AND a.row_kind = 'admin'
+                 AND a.finding_id = operations.admin_findings.id
+                 AND (a.response->>'may_clear')::boolean IS TRUE
+                 AND a.policy_version = (SELECT version FROM operations.condition_policy_versions WHERE active ORDER BY version DESC LIMIT 1)
+                 AND a.assessed_at >= now() - (SELECT (policy->>'freshness_hours')::integer * interval '1 hour' FROM operations.condition_policy_versions WHERE active ORDER BY version DESC LIMIT 1)
+          )
         """,
         (now, tenant_id, ft_id, present_keys),
     )
@@ -1044,6 +1114,15 @@ def _evaluate_duplicate_records(cur: Any, tenant_id: int, now: datetime) -> int:
         WHERE tenant_id = %s AND finding_type_id = %s
           AND status IN ('open', 'acknowledged')
           AND NOT (condition_key = ANY(%s))
+          AND EXISTS (
+              SELECT 1 FROM operations.condition_assessments a
+               WHERE a.tenant_id = operations.admin_findings.tenant_id
+                 AND a.row_kind = 'admin'
+                 AND a.finding_id = operations.admin_findings.id
+                 AND (a.response->>'may_clear')::boolean IS TRUE
+                 AND a.policy_version = (SELECT version FROM operations.condition_policy_versions WHERE active ORDER BY version DESC LIMIT 1)
+                 AND a.assessed_at >= now() - (SELECT (policy->>'freshness_hours')::integer * interval '1 hour' FROM operations.condition_policy_versions WHERE active ORDER BY version DESC LIMIT 1)
+          )
         """,
         (now, tenant_id, ft_id, present_keys),
     )
@@ -1362,12 +1441,10 @@ def _evaluate_coverage(
                         offline=offline_downgrade,
                         collection_skipped=False,
                     ),
-                    EvaluationCoverage(
-                        True,
-                        device_id is None,
-                        True,
-                        platform not in skip_platforms,
-                    ),
+                    # Presence and source-run completeness are not proven by
+                    # reaching this loop; the shared evidence reader must
+                    # supply that contract before a response can clear.
+                    EvaluationCoverage(False, False, False, False),
                 ),
             )
 
@@ -1690,7 +1767,7 @@ def _evaluate_device_offline(cur: Any, tenant_id: int, now: datetime) -> int:
                         "offline:extended_absence",
                     ),
                 ),
-                EvaluationCoverage(True, True, True, True),
+                EvaluationCoverage(False, False, False, False),
             ),
         )
     _resolve_findings_absent(
@@ -1749,8 +1826,8 @@ def _device_condition_signals(
         Signal(
             "offline",
             participant,
-            Readiness.BLOCKED if offline else Readiness.READY,
-            "offline:extended_absence" if offline else "offline:within_window",
+            Readiness.BLOCKED if offline else Readiness.UNKNOWN,
+            "offline:extended_absence" if offline else "offline:contact_readiness_not_measured",
         ),
     )
 
@@ -1793,7 +1870,9 @@ def _evaluate_stale_data(cur: Any, tenant_id: int, now: datetime) -> int:
                 "last_observed_at": last_observed.isoformat() if last_observed else None,
             },
         )
-    _resolve_findings_absent(cur, tenant_id, ft_id, offenders, now)
+    _resolve_findings_absent(
+        cur, tenant_id, ft_id, offenders, now, assessment_required=True
+    )
     return count
 
 
@@ -1821,6 +1900,20 @@ def _auto_resolve(
 ) -> int:
     """Resolve findings where the condition has cleared."""
     count = 0
+    clear_assessment = """
+              AND EXISTS (
+                  SELECT 1
+                    FROM operations.condition_assessments assessment
+                    JOIN operations.condition_policy_versions policy
+                      ON policy.version = assessment.policy_version
+                     AND policy.active
+                   WHERE assessment.tenant_id = f.tenant_id
+                     AND assessment.row_kind = 'entity'
+                     AND assessment.finding_id = f.id
+                     AND (assessment.response->>'may_clear')::boolean IS TRUE
+                     AND assessment.assessed_at >= now() -
+                         (policy.policy->>'freshness_hours')::integer * interval '1 hour'
+              )"""
 
     # Resolve coverage findings whose (entity_type, platform) is no longer
     # required. Client-scoped rows are sparse overrides: disabled suppresses
@@ -1831,7 +1924,7 @@ def _auto_resolve(
         if not ft_id:
             continue
         cur.execute(
-            """
+            f"""
             WITH required_for_device AS (
                 -- Profile-bound clients inherit profile items unless a
                 -- client-specific disabled override removes the same agent.
@@ -1911,6 +2004,7 @@ def _auto_resolve(
                     AND r.entity_type = (f.finding_details->>'entity_type')
                     AND r.platform    = (f.finding_details->>'platform')
               )
+            {clear_assessment}
             """,
             (tenant_id, tenant_id, tenant_id, now, tenant_id, ft_id, device_id, device_id),
         )
@@ -1923,7 +2017,7 @@ def _auto_resolve(
         if not ft_id:
             continue
         cur.execute(
-            """
+            f"""
             UPDATE operations.findings f
             SET status = 'resolved',
                 last_seen_at = %s
@@ -1939,6 +2033,7 @@ def _auto_resolve(
                     AND apc.platform = (f.finding_details->>'platform')
                     AND COALESCE(apc.last_contact_at, apc.last_observed_at) > now() - INTERVAL '48 hours'
               )
+            {clear_assessment}
             """,
             (now, tenant_id, ft_id, device_id, device_id),
         )
@@ -1970,6 +2065,7 @@ def _auto_resolve(
                   HAVING MAX(COALESCE(apc.last_contact_at, apc.last_observed_at))
                        < NOW() - INTERVAL '{_LONG_OFFLINE_DAYS} days'
               )
+              {clear_assessment}
             """,
             (now, tenant_id, stale_ft_id, device_id, device_id, tenant_id),
         )
@@ -1984,7 +2080,7 @@ def _auto_resolve(
         if not ft_id:
             continue
         cur.execute(
-            """
+            f"""
             UPDATE operations.findings f
             SET status = 'resolved', last_seen_at = %s
             WHERE f.tenant_id = %s AND f.finding_type_id = %s
@@ -1996,6 +2092,7 @@ def _auto_resolve(
                     AND apc.device_id = f.subject_id
                     AND apc.entity_type LIKE 'agent.%%'
               )
+            {clear_assessment}
             """,
             (now, tenant_id, ft_id, device_id, device_id),
         )
@@ -2006,7 +2103,7 @@ def _auto_resolve(
     unenrolled_ft_id = _get_finding_type_id(cur, "device_unenrolled")
     if unenrolled_ft_id:
         cur.execute(
-            """
+            f"""
             UPDATE operations.findings f
             SET status = 'resolved', last_seen_at = %s
             WHERE f.tenant_id = %s AND f.finding_type_id = %s
@@ -2018,6 +2115,7 @@ def _auto_resolve(
                     AND apc.device_id = f.subject_id
                     AND apc.entity_type LIKE 'agent.%%'
               )
+            {clear_assessment}
             """,
             (now, tenant_id, unenrolled_ft_id, device_id, device_id),
         )
@@ -2029,7 +2127,7 @@ def _auto_resolve(
     missing_ft_id = _get_finding_type_id(cur, "device_missing_from_source")
     if missing_ft_id:
         cur.execute(
-            """
+            f"""
             UPDATE operations.findings f
             SET status = 'resolved',
                 last_seen_at = %s
@@ -2044,6 +2142,7 @@ def _auto_resolve(
                      AND record.tenant_id = f.tenant_id
                      AND record.counts_as_current_computer_evidence
               )
+            {clear_assessment}
             """,
             (now, tenant_id, missing_ft_id, device_id, device_id),
         )
@@ -2058,9 +2157,12 @@ def _resolve_findings_absent(
     finding_type_id: int,
     current_subject_ids: list[uuid.UUID],
     now: datetime,
-    assessment_required: bool = False,
+    assessment_required: bool = True,
+    empty_result_verified: bool = False,
 ) -> None:
-    """Resolve open findings of a type whose subject is no longer an offender."""
+    """Resolve absent findings only after a complete result is established."""
+    if not current_subject_ids and not empty_result_verified:
+        return
     assessment_clause = """
           AND EXISTS (
               SELECT 1
@@ -2069,6 +2171,15 @@ def _resolve_findings_absent(
                 AND assessment.row_kind = 'entity'
                 AND assessment.finding_id = findings.id
                 AND (assessment.response ->> 'may_clear')::boolean IS TRUE
+                AND assessment.policy_version = (
+                    SELECT version FROM operations.condition_policy_versions
+                    WHERE active ORDER BY version DESC LIMIT 1
+                )
+                AND assessment.assessed_at >= now() - (
+                    SELECT (policy->>'freshness_hours')::integer * interval '1 hour'
+                    FROM operations.condition_policy_versions
+                    WHERE active ORDER BY version DESC LIMIT 1
+                )
           )""" if assessment_required else ""
     cur.execute(
         f"""
@@ -2155,7 +2266,7 @@ def _upsert_finding(
             %s, %s, %s
         )
         ON CONFLICT (tenant_id, condition_key)
-            WHERE condition_key > '' AND status IN ('open', 'acknowledged')
+            WHERE condition_key > '' AND status IN ('open', 'acknowledged', 'investigating', 'suppressed')
         DO UPDATE SET
             confidence      = EXCLUDED.confidence,
             last_seen_at    = EXCLUDED.last_seen_at,

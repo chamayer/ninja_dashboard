@@ -43,6 +43,9 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
+from ingest.conditions import record_assessment
+from shared.conditions.contracts import Condition, EvaluationCoverage, Participant, Signal, Readiness
+
 log = logging.getLogger(__name__)
 
 _TENANT_ID = 1
@@ -398,7 +401,7 @@ def _emit_unnamed_source_group_finding(
             %s, %s, %s
         )
         ON CONFLICT (tenant_id, condition_key)
-        WHERE condition_key > '' AND status IN ('open', 'acknowledged')
+        WHERE condition_key > '' AND status IN ('open', 'acknowledged', 'investigating', 'suppressed')
         DO UPDATE SET
             last_seen_at = NOW(),
             last_detected_at = NOW(),
@@ -444,7 +447,7 @@ def _emit_finding(
                 %s::jsonb, %s::jsonb, %s, %s
             )
             ON CONFLICT (tenant_id, condition_key)
-                WHERE status IN ('open', 'acknowledged')
+                WHERE status IN ('open', 'acknowledged', 'investigating', 'suppressed')
             DO UPDATE SET
                 last_detected_at = EXCLUDED.last_detected_at,
                 details          = EXCLUDED.details
@@ -454,6 +457,7 @@ def _emit_finding(
                 json.dumps(subject_ref), json.dumps(details), now, now,
             ),
         )
+        _record_resolver_assessment(cur, type_name, condition_key, subject_ref, now)
     else:
         # Entity finding — subject_type='client', subject_id=client_id.
         if client_id is None:
@@ -472,7 +476,7 @@ def _emit_finding(
                 %s, %s, %s
             )
             ON CONFLICT (tenant_id, condition_key)
-                WHERE condition_key > '' AND status IN ('open', 'acknowledged')
+                WHERE condition_key > '' AND status IN ('open', 'acknowledged', 'investigating', 'suppressed')
             DO UPDATE SET
                 last_seen_at     = EXCLUDED.last_seen_at,
                 last_detected_at = EXCLUDED.last_detected_at,
@@ -496,6 +500,21 @@ def _resolve_finding(cur, type_name: str, condition_key: str) -> None:
     if ft_id is None:
         return
     cur.execute(
+        """SELECT id, subject_ref FROM operations.admin_findings
+           WHERE tenant_id = %s AND finding_type_id = %s AND condition_key = %s
+           ORDER BY last_detected_at DESC LIMIT 1""",
+        (_TENANT_ID, ft_id, condition_key),
+    )
+    row = cur.fetchone()
+    assessment = None
+    if row is not None:
+        subject_ref = row[1] or {}
+        assessment = _record_resolver_assessment(
+            cur, type_name, condition_key, subject_ref, datetime.now(timezone.utc)
+        )
+    if not assessment or not assessment.get("may_clear"):
+        return
+    cur.execute(
         """
         UPDATE operations.admin_findings
         SET status = 'resolved', resolved_at = NOW()
@@ -504,6 +523,50 @@ def _resolve_finding(cur, type_name: str, condition_key: str) -> None:
           AND status IN ('open', 'acknowledged')
         """,
         (_TENANT_ID, ft_id, condition_key),
+    )
+
+
+def _record_resolver_assessment(
+    cur: Any,
+    type_name: str,
+    condition_key: str,
+    subject_ref: dict[str, Any],
+    now: datetime,
+) -> dict[str, Any] | None:
+    """Persist the resolver's complete current-observation evaluation."""
+    binding_id = subject_ref.get("source_binding_id")
+    participant = (
+        Participant("source_binding", str(binding_id), "affected", _TENANT_ID)
+        if binding_id
+        else None
+    )
+    cur.execute(
+        """SELECT id, status FROM operations.admin_findings
+           WHERE tenant_id = %s AND condition_key = %s
+           ORDER BY last_detected_at DESC LIMIT 1""",
+        (_TENANT_ID, condition_key),
+    )
+    row = cur.fetchone()
+    if row is None:
+        return None
+    finding_id, status = row
+    participants = (participant,) if participant else ()
+    condition = Condition(
+        _TENANT_ID, "admin", str(finding_id), type_name, condition_key, status, participants
+    )
+    signals = (
+        (Signal("identity", participant, Readiness.READY, "resolver:current_observation"),)
+        if participant
+        else ()
+    )
+    return record_assessment(
+        cur,
+        condition,
+        signals,
+        EvaluationCoverage(True, True, True, True),
+        now=now,
+        reevaluation_key=f"client-resolver:{condition_key}",
+        participant=participant,
     )
 
 
@@ -544,6 +607,7 @@ def _check_name_drift(cur, source_ids_by_name: dict[str, int]) -> None:
             ORDER BY source_binding_id, entity_key, observed_at DESC
         )
         SELECT cl.id, cl.client_id, cl.source_id, cl.external_id,
+               sb.id,
                l.observed_name, l.observed_norm,
                c.display_name
         FROM operations.v_client_source_link cl
@@ -559,7 +623,7 @@ def _check_name_drift(cur, source_ids_by_name: dict[str, int]) -> None:
         (_TENANT_ID, _TENANT_ID),
     )
     drift_rows = cur.fetchall()
-    for link_id, client_id, source_id, external_id, \
+    for link_id, client_id, source_id, external_id, source_binding_id, \
             observed_name, observed_norm, client_display in drift_rows:
         if not observed_name:
             continue
@@ -573,6 +637,7 @@ def _check_name_drift(cur, source_ids_by_name: dict[str, int]) -> None:
             condition_key=_cond_link(link_id),
             subject_ref={
                 "client_link_id": str(link_id),
+                "source_binding_id": str(source_binding_id),
                 "client_id": str(client_id),
                 "source_id": source_id,
                 "external_id": external_id,

@@ -96,25 +96,45 @@ not need redesigning.
 - Migration 090 adds `intel_ingest_status.last_duration_seconds` so the next
   such drift shows up as a number rather than as someone waiting.
 
-### Open decision: incremental vs full rebuild — now measurable
+### Decided 2026-08-14: not incremental — a second missing index (migration 101)
 
-**Measured 2026-08-13: 2,477 seconds per run, i.e. 41 minutes.** At
-`INTEL_MATCHER_SCHEDULE_HOURS = 6` that is four runs a day, about **2.75
-database-hours daily**. For scale, the next most expensive connector is
-chocolatey at 301 s; everything else is under a minute.
+The prediction directly above was right, and worth noting because it was made
+before the profiling: the 41 minutes were the `affected_cpes ?|` lookups.
 
-This closes the "measure first" caveat and opens an explicit decision. Note
-that the index fix above removed the per-title sequential scan of `intel.cpes`,
-so these 41 minutes are a *different* cost — most likely the per-unit
-`affected_cpes ?|` lookups across ~40k product+versions. Profile that before
-choosing a strategy rather than assuming the earlier fix was the whole story.
+`intel.cves.affected_cpes` is a jsonb array and carried **no GIN index**, so
+every `_cves_for()` call sequentially scanned all 97,520 CVE rows. Measured:
+**684.4 ms and 18,271 buffers per call, versus 0.063 ms and 7 buffers** with a
+`gin (affected_cpes jsonb_ops)` index. `jsonb_path_ops` cannot be used — it
+does not support `?|`. Index costs 34 MB against a 137 MB table, 3.4 s to
+build, 11.4 CPEs per CVE.
 
-The full rebuild is what guarantees no stale match survives a CVE withdrawal or
-a CPE correction, so going incremental needs an explicit answer for removals.
-This is a security-relevant path: a silently retained match is worse than a
-slow one. Options worth costing: set-based issuing of the per-unit lookups;
-restricting the rebuild to products whose version set changed, with a periodic
-full reconciliation; or leaving it alone and accepting 2.75 hours/day.
+**Result, measured on production 2026-08-14: 2,527 s → 542 s**, a 4.7x
+reduction; about 2.75 → 0.60 database-hours daily. NVD delta ingest showed no
+write penalty (475 rows in 1.92 s, against 78 rows in 3.65 s before).
+
+Full rebuild semantics are **unchanged and stay that way**. Fixing the lookup
+answered the incremental question without trading away the guarantee that no
+stale match survives a CVE withdrawal, so there is no incremental path to keep
+safe and no reconciliation pass to schedule.
+
+That is twice now that this entry's framing — "structurally too expensive,
+redesign it" — has been wrong, and twice the cause was a missing or unusable
+index. Profile before redesigning a security-relevant path.
+
+### Remaining, deliberately deferred: per-title CPE candidate fetches
+
+The 542 s that remain are dominated by the CPE candidate lookups against
+`intel.cpes` (1.8M rows), issued once or twice per title across 22,013 titles.
+Measured incidentally during the 101 work: `lower(product) = 'firefox' LIMIT 50`
+took **589 ms reading 2,082 buffers** — on an index scan, so this is round-trip
+volume rather than a missing index.
+
+- Reason deferred (owner decision 2026-08-14): 36 minutes a day is no longer
+  material. Leave it until it is.
+- Likely shape if revisited: issue the per-title lookups set-based instead of
+  one query per title. Do **not** reach for incrementality; see above, twice.
+- Trigger: `intel_ingest_status.last_duration_seconds` for `matcher` climbing
+  materially above ~542 s, or `intel.cpes` growing substantially again.
 
 **Still open, and genuinely separate:** `matcher.py` ends with a
 **non-concurrent** `REFRESH MATERIALIZED VIEW operations.v_software_safety`,

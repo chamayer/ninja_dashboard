@@ -6,6 +6,13 @@
 <div class="card">
     <h1>Admin / Platform Health</h1>
     <p class="muted">Platform-level items: queue health, identity resolution backlogs, and other operational issues.</p>
+    {% if not condition_policy_available %}
+    <div class="notice notice-warning" role="status">
+        Condition policy is unavailable. Retained evidence is shown, but
+        governed response and notification eligibility are blocked until a
+        valid active policy is restored.
+    </div>
+    {% endif %}
 </div>
 
 <div class="card">
@@ -70,8 +77,10 @@
                 <td style="padding: 0.5rem; font-size: 0.8rem;">
                     {% if f.assessment %}
                         <strong>{{ f.assessment.disposition }}</strong>
-                        {% if f.assessment.reasons %}<br>Reason: {{ f.assessment.reasons|join:", " }}{% endif %}
-                        {% if f.assessment.blockers %}<br>Blocker: {{ f.assessment.blockers|join:", " }}{% endif %}
+                        <br>Policy: {{ f.assessment.policy_version }} · {{ f.assessment.policy_digest|slice:":12" }}
+                        <br>Scope: {{ f.assessment.scopes|join:", " }}
+                        {% if f.assessment.reasons %}<br>Reason: {% for reason in f.assessment.reasons %}{{ reason|humanize_label }}{% if not forloop.last %}, {% endif %}{% endfor %}{% endif %}
+                        {% if f.assessment.blockers %}<br>Blocker: {% for blocker in f.assessment.blockers %}{{ blocker|humanize_label }}{% if not forloop.last %}, {% endif %}{% endfor %}{% endif %}
                     {% else %}
                         <span class="muted">Assessment pending</span>
                     {% endif %}

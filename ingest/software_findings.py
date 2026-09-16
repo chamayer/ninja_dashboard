@@ -25,6 +25,7 @@ import uuid
 from datetime import datetime, timezone
 
 from ingest import db
+from ingest.condition_evidence import device_identity_signal, successful_run_available
 from ingest.conditions import record_assessment
 from ingest.config import settings
 from shared.conditions.contracts import (
@@ -982,6 +983,9 @@ def _emit(cur, tenant_id, ft_id, client_id, device_id, canonical_name,
 def _emit_scoped(cur, tenant_id, ft_id, client_id, device_id, canonical_key,
                  publisher, severity, now, extra_details, emitted_keys,
                  subj=None) -> int:
+    classifier_run_ready = successful_run_available(
+        cur, tenant_id, "software_classifier", now=now
+    )
     # subj = (scope_by_finding_type_id, product_uuid, version_uuid,
     #         installation_uuid). Absent, everything stays device-scoped, which
     # is the pre-0130 behavior and the safe default for any caller not yet
@@ -1039,7 +1043,7 @@ def _emit_scoped(cur, tenant_id, ft_id, client_id, device_id, canonical_key,
             %s, %s, %s
         )
         ON CONFLICT (tenant_id, condition_key)
-            WHERE condition_key > '' AND status IN ('open', 'acknowledged')
+            WHERE condition_key > '' AND status IN ('open', 'acknowledged', 'investigating', 'suppressed')
         DO UPDATE SET
             last_seen_at     = EXCLUDED.last_seen_at,
             last_detected_at = EXCLUDED.last_detected_at,
@@ -1083,12 +1087,7 @@ def _emit_scoped(cur, tenant_id, ft_id, client_id, device_id, canonical_key,
             signals = ()
             if participant.kind == "device":
                 signals = (
-                    Signal(
-                        "identity",
-                        participant,
-                        Readiness.UNKNOWN,
-                        "identity:readiness_not_established",
-                    ),
+                    device_identity_signal(cur, tenant_id, str(device_id)),
                     Signal(
                         "offline",
                         participant,
@@ -1100,7 +1099,12 @@ def _emit_scoped(cur, tenant_id, ft_id, client_id, device_id, canonical_key,
                 cur,
                 condition,
                 signals,
-                EvaluationCoverage(True, True, True, True),
+                # Inventory emission alone does not prove complete, fresh
+                # intelligence and exposure coverage for clearing.
+                EvaluationCoverage(
+                    classifier_run_ready, classifier_run_ready,
+                    classifier_run_ready, classifier_run_ready
+                ),
                 now=now,
                 reevaluation_key=f"software:{ckey}",
                 participant=participant,
@@ -1145,6 +1149,44 @@ def _auto_resolve(
           AND f.status IN ('open', 'acknowledged')
            AND NOT (f.condition_key = ANY(%s::text[]))
            AND NOT (ft.name = ANY(%s::text[]))
+           AND to_regclass('operations.condition_assessments') IS NOT NULL
+           AND EXISTS (
+               SELECT 1
+                 FROM operations.condition_assessments a
+                 JOIN operations.condition_policy_versions p
+                   ON p.version = a.policy_version
+                  AND p.active
+                WHERE a.tenant_id = f.tenant_id
+                  AND a.row_kind = 'entity'
+                  AND a.finding_id = f.id
+                  AND (a.response->>'may_clear')::boolean IS TRUE
+                  AND a.assessed_at >= now() -
+                      (p.policy->>'freshness_hours')::integer * interval '1 hour'
+           )
+           AND NOT EXISTS (
+               SELECT 1
+                 FROM operations.condition_participants participant
+                WHERE participant.tenant_id = f.tenant_id
+                  AND participant.row_kind = 'entity'
+                  AND participant.finding_id = f.id
+                  AND participant.participant_role <> 'context'
+                  AND NOT EXISTS (
+                      SELECT 1
+                        FROM operations.condition_assessments pa
+                        JOIN operations.condition_policy_versions pp
+                          ON pp.version = pa.policy_version
+                         AND pp.active
+                       WHERE pa.tenant_id = participant.tenant_id
+                         AND pa.row_kind = participant.row_kind
+                         AND pa.finding_id = participant.finding_id
+                         AND pa.participant_kind = participant.participant_kind
+                         AND pa.participant_id = participant.participant_id
+                         AND pa.participant_role = participant.participant_role
+                         AND (pa.response->>'may_clear')::boolean IS TRUE
+                         AND pa.assessed_at >= now() -
+                             (pp.policy->>'freshness_hours')::integer * interval '1 hour'
+                  )
+           )
         """,
         (now, now, tenant_id, list(emitted_keys), list(preserve_types)),
     )

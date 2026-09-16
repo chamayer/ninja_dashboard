@@ -125,6 +125,23 @@ severity, confidence, subject, condition key, evidence, and lifecycle.
 Findings do not directly send notifications. The notification layer applies
 suppression, rule matching, cooldown, routing, and event audit.
 
+### Condition policy and response
+
+The active condition policy is selected from
+`operations.condition_policy_versions`; the repository profile is bootstrap
+and comparison input, not the live authority. Policy versions are immutable,
+and assessments retain both the selected version and SHA-256 digest used for
+evaluation. `operations.condition_participants` identifies required scopes;
+`operations.condition_assessments` stores the evaluated response and coverage
+for the condition and each participant.
+
+Consumers must treat a response as actionable, not merely present, only when
+the assessment uses the current active policy, is within its freshness window,
+and every required non-context participant has a current permitted response.
+Missing, stale, invalid, or unmeasured state fails closed. Operator handling
+(`status` and `snoozed_until`) remains on the finding and is read alongside the
+assessment; it is not replaced by the condition response.
+
 ## Patching layer
 
 Patching scope is domain-specific:

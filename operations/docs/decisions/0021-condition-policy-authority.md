@@ -1,6 +1,6 @@
 # 0021 — Condition policy authority and shared runtime
 
-Status: Proposed for the live conditions integration
+Status: Accepted for the live conditions integration; deployment validation pending
 
 ## Decision
 
@@ -40,5 +40,9 @@ notifications, and source-action references remain unchanged. Shadow reports
 may compare an explicitly supplied Git profile, but they do not activate or
 write policy.
 
-The initial live migration and admin workflow require PostgreSQL validation
-before policy gates or subscriber enforcement are enabled.
+The live migration and admin workflow are implemented in the current code. The
+pending validation gate is execution against PostgreSQL with the deployed
+roles and migrations, including RLS, privileges, concurrent activation, and
+backfill behavior. Until that validation and an approved release are complete,
+the repository profile remains usable only as bootstrap/shadow input and no
+deployment or production cutover is implied by this record.

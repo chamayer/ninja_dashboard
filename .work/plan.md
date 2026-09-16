@@ -1,6 +1,21 @@
 # Active root implementation plan
 
+## Active plan — complete conditions framework
+
+The audited cross-service implementation and acceptance plan is
+`operations/.work/plan.md`. Baseline `ac1f78d` is verified on both remotes.
+Shared runtime, initial schema/admin and partial integrations exist; the full
+deliverable is incomplete. The plan marks verified components complete and
+defines the remaining work, all 53 types, consumer coverage and release gates.
+Reviewed migrations and commit/push remain approved when ready; **no manual
+redeploy**. This pointer supersedes older task/release statuses below, which
+are historical context only. This planning turn did not change runtime code.
+
 ## Current release — Conditions shadow foundation 0.123.0
+
+Release 0.123.0 was pushed to both remotes as `5922c87`. The user's latest
+instruction superseded manual redeployment; none was triggered. Deployment
+verification remains unperformed. This completion checkpoint is local only.
 
 Operations implementation and validation are tracked in
 `operations/.work/plan.md`. Root scope is VERSION/CHANGELOG release metadata

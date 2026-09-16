@@ -19,13 +19,12 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from ingest import db
+from ingest.condition_evidence import device_identity_signal
 from ingest.conditions import record_assessment
 from shared.conditions.contracts import (
     Condition,
     EvaluationCoverage,
     Participant,
-    Readiness,
-    Signal,
 )
 
 log = logging.getLogger(__name__)
@@ -424,7 +423,7 @@ def _sync_findings(
                 %s, %s, 'confirmed', 'open', %s, %s, %s
             )
             ON CONFLICT (tenant_id, condition_key)
-                WHERE condition_key > '' AND status IN ('open', 'acknowledged')
+                WHERE condition_key > '' AND status IN ('open', 'acknowledged', 'investigating', 'suppressed')
             DO UPDATE SET
                 finding_details = EXCLUDED.finding_details,
                 severity = EXCLUDED.severity,
@@ -464,21 +463,22 @@ def _sync_findings(
               AND status IN ('open', 'acknowledged')
               AND (%s::uuid IS NULL OR subject_id = %s)
               AND NOT (subject_id = ANY(%s::uuid[]))
-              AND (
-                  to_regclass('operations.condition_assessments') IS NULL
-                  OR NOT EXISTS (
-                      SELECT 1 FROM operations.condition_assessments a
-                      WHERE a.tenant_id = operations.findings.tenant_id
-                        AND a.row_kind = 'entity'
-                        AND a.finding_id = operations.findings.id
-                  )
-                  OR EXISTS (
-                      SELECT 1 FROM operations.condition_assessments a
-                      WHERE a.tenant_id = operations.findings.tenant_id
-                        AND a.row_kind = 'entity'
-                        AND a.finding_id = operations.findings.id
-                        AND (a.response->>'may_clear')::boolean IS TRUE
-                  )
+              AND to_regclass('operations.condition_assessments') IS NOT NULL
+              AND EXISTS (
+                  SELECT 1 FROM operations.condition_assessments a
+                  WHERE a.tenant_id = operations.findings.tenant_id
+                    AND a.row_kind = 'entity'
+                    AND a.finding_id = operations.findings.id
+                    AND (a.response->>'may_clear')::boolean IS TRUE
+                    AND a.policy_version = (
+                        SELECT version FROM operations.condition_policy_versions
+                        WHERE active ORDER BY version DESC LIMIT 1
+                    )
+                    AND a.assessed_at >= now() - (
+                        SELECT (policy->>'freshness_hours')::integer * interval '1 hour'
+                        FROM operations.condition_policy_versions
+                        WHERE active ORDER BY version DESC LIMIT 1
+                    )
               )
             """,
             (now, now, tenant_id, finding_type_id, device_id, device_id, offenders[name]),
@@ -499,11 +499,12 @@ def _record_assessment(cur, tenant_id, finding_id, finding_type_id,
         tenant_id, "entity", str(finding_id), type_name, condition_key, "open",
         (participant,),
     )
+    identity_signal = device_identity_signal(cur, tenant_id, str(device_id))
     record_assessment(
         cur,
         condition,
-        (Signal("identity", participant, Readiness.READY, "identity:resolved"),),
-        EvaluationCoverage(True, True, True, True),
+        (identity_signal,),
+        EvaluationCoverage(False, False, False, False),
         now=now,
         reevaluation_key=f"windows_servicing:{condition_key}",
         participant=participant,

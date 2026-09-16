@@ -331,7 +331,7 @@ def _maybe_create_candidate(
                 'high', 'confirmed', 'open', NOW(), NOW(), NOW()
             )
             ON CONFLICT (tenant_id, condition_key)
-            WHERE condition_key > '' AND status IN ('open', 'acknowledged')
+            WHERE condition_key > '' AND status IN ('open', 'acknowledged', 'investigating', 'suppressed')
             DO UPDATE SET
                 last_seen_at = NOW(),
                 last_detected_at = NOW(),
@@ -553,7 +553,7 @@ SELECT gen_random_uuid(), 1, %s, %s, c.client_id,
        'medium', c.confidence, 'open', NOW(), NOW(), NOW()
   FROM collisions c
 ON CONFLICT (tenant_id, condition_key)
-    WHERE condition_key > '' AND status IN ('open', 'acknowledged')
+WHERE condition_key > '' AND status IN ('open', 'acknowledged', 'investigating', 'suppressed')
 DO UPDATE SET
     client_id = EXCLUDED.client_id,
     subject_id = EXCLUDED.subject_id,
@@ -570,7 +570,7 @@ UPDATE operations.findings finding
    SET status = 'resolved', closed_at = NOW(), last_seen_at = NOW()
  WHERE finding.tenant_id = %s
    AND finding.finding_type_id = %s
-   AND finding.status IN ('open', 'acknowledged', 'investigating')
+   AND finding.status IN ('open', 'acknowledged')
    AND finding.condition_key LIKE 'identity_conflict:%%'
    AND NOT EXISTS (
        SELECT 1
@@ -611,10 +611,19 @@ def _project_identity_conflict_findings(cur) -> dict[str, int]:
           AND assessment.row_kind = 'entity'
           AND assessment.finding_id = finding.id
           AND (assessment.response ->> 'may_clear')::boolean IS TRUE
+          AND assessment.policy_version = (
+              SELECT version FROM operations.condition_policy_versions
+              WHERE active ORDER BY version DESC LIMIT 1
+          )
+          AND assessment.assessed_at >= now() - (
+              SELECT (policy->>'freshness_hours')::integer * interval '1 hour'
+              FROM operations.condition_policy_versions
+              WHERE active ORDER BY version DESC LIMIT 1
+          )
    )
         """
         if has_assessments
-        else "",
+        else "   AND FALSE\n",
     )
     cur.execute(
         close_sql,
@@ -664,7 +673,11 @@ def _record_identity_conflict_assessments(cur, finding_type_id: int) -> None:
                 cur,
                 condition,
                 (),
-                EvaluationCoverage(True, True, True, True),
+                # The resolver knows the current candidate membership, but
+                # this path does not prove a complete negative evaluation for
+                # clearing. Keep the conflict visible until a measured clear
+                # assessment is available.
+                EvaluationCoverage(False, False, False, False),
                 now=now,
                 reevaluation_key=f"identity-resolver:{condition_key}",
                 participant=participant,
@@ -1393,7 +1406,7 @@ def _upsert_shared_serial_findings(cur, finding_type_id: int) -> int:
             HAVING COUNT(*) > 1
         ) sub
         ON CONFLICT (tenant_id, condition_key)
-        WHERE condition_key > '' AND status IN ('open', 'acknowledged')
+        WHERE condition_key > '' AND status IN ('open', 'acknowledged', 'investigating', 'suppressed')
         DO UPDATE SET
             last_seen_at = NOW(),
             last_detected_at = NOW(),
@@ -1489,7 +1502,7 @@ def _upsert_cross_client_serial_findings(cur, finding_type_id: int) -> int:
           ON c.tenant_id = e.tenant_id
          AND c.serial_key = e.serial_key
         ON CONFLICT (tenant_id, condition_key)
-        WHERE condition_key > '' AND status IN ('open', 'acknowledged')
+        WHERE condition_key > '' AND status IN ('open', 'acknowledged', 'investigating', 'suppressed')
         DO UPDATE SET
             last_seen_at = NOW(),
             last_detected_at = NOW(),
@@ -1722,7 +1735,7 @@ def _sync_device_attributes(cur) -> None:
                   )) = 0
               )
             ON CONFLICT (tenant_id, condition_key)
-            WHERE condition_key > '' AND status IN ('open', 'acknowledged')
+            WHERE condition_key > '' AND status IN ('open', 'acknowledged', 'investigating', 'suppressed')
             DO UPDATE SET
                 last_seen_at = NOW(),
                 last_detected_at = NOW(),
@@ -1788,7 +1801,7 @@ def _sync_device_attributes(cur) -> None:
             FROM operations.unmatched_source_groups u
             WHERE u.tenant_id = %s AND u.status = 'pending'
             ON CONFLICT (tenant_id, condition_key)
-            WHERE condition_key > '' AND status IN ('open', 'acknowledged')
+            WHERE condition_key > '' AND status IN ('open', 'acknowledged', 'investigating', 'suppressed')
             DO UPDATE SET
                 last_seen_at = NOW(),
                 last_detected_at = NOW(),
@@ -1852,7 +1865,7 @@ def _sync_device_attributes(cur) -> None:
               ON d.id = sub.device_id AND d.tenant_id = sub.tenant_id
             WHERE d.deleted_at IS NULL
             ON CONFLICT (tenant_id, condition_key)
-            WHERE condition_key > '' AND status IN ('open', 'acknowledged')
+            WHERE condition_key > '' AND status IN ('open', 'acknowledged', 'investigating', 'suppressed')
             DO UPDATE SET
                 last_seen_at = NOW(),
                 last_detected_at = NOW(),

@@ -236,6 +236,9 @@ def humanize_label(value):
             # `default:workstation` → "Default for Workstation devices"
             arg_labeled = _LABELS.get(arg, arg)
             return tmpl.format(arg_labeled.lower() if tmpl.endswith(" devices") else arg_labeled)
+    if ":" in key:
+        prefix, suffix = key.split(":", 1)
+        return f"{prefix.replace('_', ' ').capitalize()}: {suffix.replace('_', ' ')}"
     return key
 
 

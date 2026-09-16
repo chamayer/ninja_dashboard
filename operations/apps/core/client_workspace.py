@@ -349,7 +349,7 @@ def build_client_workspace(client, existing: dict, *, device_policy: dict | None
                 "new": row["new"],
                 "href": (
                     f"{reverse(view_name)}?client={client.slug}"
-                    f"&type={row['finding_type__name']}"
+                    f"&response=all&type={row['finding_type__name']}"
                 ),
             }
         )

@@ -121,7 +121,66 @@ def _still_eligible(request_row: dict[str, Any]) -> bool:
         cur.execute("SET LOCAL operations.tenant_id = 1")
         cur.execute(
             """
-            SELECT EXISTS (
+                SELECT EXISTS (
+                SELECT 1
+                  FROM operations.findings finding
+                  JOIN operations.finding_types finding_type
+                    ON finding_type.id = finding.finding_type_id
+                 WHERE finding.tenant_id = 1
+                   AND finding.id = %s
+                   AND finding_type.name = 'cmdb_asset_stale'
+                   AND finding.finding_details->>'source_instance_id' = %s
+                   AND COALESCE(finding.finding_details->>'company_id', '') = %s
+                   AND finding.finding_details->>'asset_id' = %s
+                   AND finding.status IN ('open', 'acknowledged')
+                   AND (finding.snoozed_until IS NULL OR finding.snoozed_until <= now())
+                   AND EXISTS (
+                       SELECT 1
+                         FROM operations.condition_assessments assessment
+                        WHERE assessment.tenant_id = 1
+                          AND assessment.row_kind = 'entity'
+                          AND assessment.finding_id = finding.id
+                          AND (assessment.response ->> 'may_execute')::boolean IS TRUE
+                          AND assessment.policy_version = (
+                              SELECT version FROM operations.condition_policy_versions
+                               WHERE active ORDER BY version DESC LIMIT 1
+                          )
+                          AND assessment.assessed_at >= now() - (
+                              SELECT (policy->>'freshness_hours')::integer * interval '1 hour'
+                                FROM operations.condition_policy_versions
+                               WHERE active ORDER BY version DESC LIMIT 1
+                          )
+                   )
+                   AND NOT EXISTS (
+                       SELECT 1
+                         FROM operations.condition_participants participant
+                        WHERE participant.tenant_id = finding.tenant_id
+                          AND participant.row_kind = 'entity'
+                          AND participant.finding_id = finding.id
+                          AND participant.participant_role <> 'context'
+                          AND NOT EXISTS (
+                              SELECT 1
+                                FROM operations.condition_assessments participant_assessment
+                               WHERE participant_assessment.tenant_id = participant.tenant_id
+                                 AND participant_assessment.row_kind = participant.row_kind
+                                 AND participant_assessment.finding_id = participant.finding_id
+                                 AND participant_assessment.participant_kind = participant.participant_kind
+                                 AND participant_assessment.participant_id = participant.participant_id
+                                 AND participant_assessment.participant_role = participant.participant_role
+                                 AND (participant_assessment.response ->> 'may_execute')::boolean IS TRUE
+                                 AND participant_assessment.policy_version = (
+                                     SELECT version FROM operations.condition_policy_versions
+                                      WHERE active ORDER BY version DESC LIMIT 1
+                                 )
+                                 AND participant_assessment.assessed_at >= now() - (
+                                     SELECT (policy->>'freshness_hours')::integer * interval '1 hour'
+                                       FROM operations.condition_policy_versions
+                                      WHERE active ORDER BY version DESC LIMIT 1
+                                 )
+                          )
+                   )
+            )
+            AND EXISTS (
                 SELECT 1
                   FROM operations.entity_observation_current eo
                   JOIN operations.source_instances si ON si.id = eo.source_instance_id
@@ -143,31 +202,25 @@ def _still_eligible(request_row: dict[str, Any]) -> bool:
                           AND assessment.finding_id = %s
                           AND (assessment.response ->> 'may_execute')::boolean IS TRUE
                           AND assessment.policy_version = (
-                              SELECT version
-                                FROM operations.condition_policy_versions
-                               WHERE active
+                              SELECT version FROM operations.condition_policy_versions
+                               WHERE active ORDER BY version DESC LIMIT 1
                           )
                           AND assessment.assessed_at >= now() - (
                               SELECT ((policy->>'freshness_hours')::integer * interval '1 hour')
                                 FROM operations.condition_policy_versions
-                               WHERE active
+                               WHERE active ORDER BY version DESC LIMIT 1
                           )
-                   )
-                   AND NOT EXISTS (
-                       SELECT 1
-                         FROM operations.condition_assessments assessment
-                        WHERE assessment.tenant_id = eo.tenant_id
-                          AND assessment.row_kind = 'entity'
-                          AND assessment.finding_id = %s
-                          AND (assessment.response ->> 'may_execute')::boolean IS NOT TRUE
                    )
             )
             """,
             (
+                request_row["finding_id"],
+                str(request_row["source_instance_id"]),
+                str(request_row["company_id"]),
+                str(request_row["asset_id"]),
                 request_row["source_instance_id"],
                 request_row["company_id"],
                 request_row["asset_id"],
-                request_row["finding_id"],
                 request_row["finding_id"],
             ),
         )

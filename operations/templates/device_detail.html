@@ -4,6 +4,13 @@
 {% block title %}{{ device.canonical_hostname }}{% endblock %}
 
 {% block content %}
+{% if not condition_policy_available %}
+<div class="card" role="status">
+    <strong>Condition policy unavailable.</strong>
+    Retained evidence is shown, but governed response and notification
+    eligibility are blocked until a valid active policy is restored.
+</div>
+{% endif %}
 <style>
     .dd-header {
         padding: 1rem 1.2rem; background: var(--surface);
@@ -185,7 +192,7 @@
         <div class="val">{% if device.lifecycle_status == 'pending_cleanup' %}Needs review{% elif patching.is_online_any %}Online{% else %}Offline{% endif %}</div>
         <div class="sub">{% if device.lifecycle_status == 'pending_cleanup' %}no source currently reports this Computer{% elif patching.online_sources %}{{ patching.online_sources|join:", " }}{% else %}no source checked in{% endif %}</div>
     </div>
-    <a class="dd-card {% if sev_counts.critical %}alert{% elif sev_counts.high %}warn{% endif %}" href="{% url 'findings_queue' %}?status=all&amp;subject_id={{ device.id }}">
+    <a class="dd-card {% if sev_counts.critical %}alert{% elif sev_counts.high %}warn{% endif %}" href="{% url 'findings_queue' %}?status=all&amp;response=all&amp;subject_id={{ device.id }}">
         <div class="lbl">Open issues</div>
         <div class="val">{{ active_findings|length }}</div>
         <div class="sev-mini">
@@ -340,6 +347,7 @@
                 <th>Severity</th>
                 <th>Issue</th>
                 <th>Detail</th>
+                <th>Response</th>
                 <th>Status</th>
                 <th class="num">First seen</th>
                 <th class="num">Last seen</th>
@@ -368,6 +376,10 @@
                     {% endif %}
                 </td>
                 <td class="muted">{% finding_detail_text f %}</td>
+                <td>
+                    <span class="badge badge-{{ f.condition_response }}">{{ f.condition_response|title }}</span>
+                    {% if f.condition_assessment.blockers %}<span class="muted" title="{% for blocker in f.condition_assessment.blockers %}{{ blocker|humanize_label }}{% if not forloop.last %}, {% endif %}{% endfor %}">blocked</span>{% endif %}
+                </td>
                 <td><span class="badge badge-{{ f.status }}">{{ f.get_status_display }}</span></td>
                 <td class="muted num">{{ f.first_seen_at|date:"Y-m-d" }}</td>
                 <td class="muted num">{{ f.last_seen_at|date:"Y-m-d H:i" }}</td>
@@ -384,6 +396,16 @@
     <p class="muted">No open issues on this device.</p>
     {% endif %}
 </div>
+{% if merge_candidate %}
+<div class="card" style="border-left:4px solid #d97706;">
+    <h2 style="margin-top:0;">Identity review</h2>
+    <p style="margin-bottom:.6rem;">
+        <strong>Possible duplicate Computer records</strong>
+        <span class="muted">({{ merge_candidate.member_snapshots|length }} records; separate from Findings)</span>
+    </p>
+    <a class="btn btn-secondary" href="{% url 'merge_candidate_group_review' merge_candidate.id %}">Review merge candidate →</a>
+</div>
+{% endif %}
 
 {% elif active_tab == 'patching' %}
 <div class="card">

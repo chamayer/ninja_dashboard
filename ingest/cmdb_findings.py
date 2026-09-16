@@ -40,6 +40,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from ingest import db
+from ingest.condition_evidence import complete_snapshot_available, preserve_operator_episode
 from ingest.conditions import record_assessment
 from shared.conditions.contracts import (
     Condition,
@@ -93,6 +94,9 @@ def _upsert(
     device-scoped. Conflict target, status handling and reopen semantics match
     it exactly so the two behave identically where they overlap.
     """
+    preserved = preserve_operator_episode(cur, "findings", tenant_id, condition_key, now, details)
+    if preserved is not None:
+        return uuid.UUID(preserved)
     cur.execute(
         """
         INSERT INTO operations.findings (
@@ -107,7 +111,7 @@ def _upsert(
             %s, %s, %s
         )
         ON CONFLICT (tenant_id, condition_key)
-            WHERE condition_key > '' AND status IN ('open', 'acknowledged')
+            WHERE condition_key > '' AND status IN ('open', 'acknowledged', 'investigating', 'suppressed')
         DO UPDATE SET
             finding_details  = EXCLUDED.finding_details,
             last_seen_at     = EXCLUDED.last_seen_at,
@@ -134,8 +138,11 @@ def _resolve_absent(
     now: datetime,
     *,
     assessment_required: bool = False,
+    empty_result_verified: bool = False,
 ) -> None:
-    """Close findings of this type whose condition no longer holds."""
+    """Close absent findings only after a complete result is established."""
+    if not keys and not empty_result_verified:
+        return
     assessment_clause = ""
     if assessment_required:
         # The producer is deployed before the Operations migration in some
@@ -143,15 +150,26 @@ def _resolve_absent(
         # fail while the additive assessment tables are still absent.
         cur.execute("SELECT to_regclass('operations.condition_assessments') IS NOT NULL")
         assessment_required = bool(cur.fetchone()[0])
+        if not assessment_required:
+            return
     if assessment_required:
         assessment_clause = """
            AND EXISTS (
                SELECT 1
                  FROM operations.condition_assessments assessment
                 WHERE assessment.tenant_id = operations.findings.tenant_id
-                  AND assessment.row_kind = 'entity'
-                  AND assessment.finding_id = operations.findings.id
-                  AND (assessment.response ->> 'may_clear')::boolean IS TRUE
+                 AND assessment.row_kind = 'entity'
+                 AND assessment.finding_id = operations.findings.id
+                 AND (assessment.response ->> 'may_clear')::boolean IS TRUE
+                 AND assessment.policy_version = (
+                     SELECT version FROM operations.condition_policy_versions
+                     WHERE active ORDER BY version DESC LIMIT 1
+                 )
+                 AND assessment.assessed_at >= now() - (
+                     SELECT (policy->>'freshness_hours')::integer * interval '1 hour'
+                     FROM operations.condition_policy_versions
+                     WHERE active ORDER BY version DESC LIMIT 1
+                 )
            )
         """
     cur.execute(
@@ -175,6 +193,7 @@ def _record_stale_assessment(
     finding_type_id: int,
     condition_key: str,
     source_instance_id: uuid.UUID,
+    source_binding_id: uuid.UUID,
     now: datetime,
 ) -> None:
     cur.execute("SELECT to_regclass('operations.condition_assessments') IS NOT NULL")
@@ -182,18 +201,35 @@ def _record_stale_assessment(
         return
     cur.execute("SELECT name FROM operations.finding_types WHERE id = %s", (finding_type_id,))
     type_name = cur.fetchone()[0]
-    participant = Participant("source_binding", str(source_instance_id), "affected", tenant_id)
+    participants = (
+        Participant("source_instance", str(source_instance_id), "context", tenant_id),
+        Participant("source_binding", str(source_binding_id), "affected", tenant_id),
+    )
+    measured = complete_snapshot_available(
+        cur,
+        tenant_id,
+        str(source_instance_id),
+        source_binding_id=str(source_binding_id),
+        now=now,
+    )
     condition = Condition(
-        tenant_id, "entity", str(finding_id), type_name, condition_key, "open", (participant,)
+        tenant_id, "entity", str(finding_id), type_name, condition_key, "open", participants
     )
     record_assessment(
         cur,
         condition,
-        (Signal("collection", participant, Readiness.READY, "collection:current_source_evidence"),),
-        EvaluationCoverage(True, True, True, True),
+        (
+            Signal(
+                "collection",
+                participants[1],
+                Readiness.READY if measured else Readiness.UNKNOWN,
+                "collection:complete_snapshot" if measured else "collection:readiness_not_measured",
+            ),
+        ),
+        EvaluationCoverage(measured, measured, measured, measured),
         now=now,
         reevaluation_key=f"cmdb:{condition_key}",
-        participant=participant,
+            participant=participants[1],
     )
 
 
@@ -204,6 +240,7 @@ def _record_stale_assessment(
 _STALE_ASSETS = """
 SELECT eo.client_id,
        eo.source_instance_id,
+       eo.source_binding_id,
        eo.raw_data->>'company_id' AS company_id,
        eo.external_id,
        eo.canonical_data->>'hostname' AS name,
@@ -288,7 +325,7 @@ def evaluate(*, dry_run: bool = True) -> dict[str, int]:
         stale_rows = cur.fetchall()
         stale_keys = []
         for (
-            client_id, source_instance_id, parent_external_id, external_id,
+            client_id, source_instance_id, source_binding_id, parent_external_id, external_id,
             name, layout, url, relayed,
         ) in stale_rows:
             key = _condition_key(
@@ -318,6 +355,7 @@ def evaluate(*, dry_run: bool = True) -> dict[str, int]:
                     finding_type_id=ft_stale,
                     condition_key=key,
                     source_instance_id=source_instance_id,
+                    source_binding_id=source_binding_id,
                     now=now,
                 )
         counts["cmdb_asset_stale"] = len(stale_rows)
@@ -373,9 +411,9 @@ def evaluate(*, dry_run: bool = True) -> dict[str, int]:
 
         if not dry_run:
             _resolve_absent(cur, ft_stale, stale_keys, now, assessment_required=True)
-            _resolve_absent(cur, ft_wrong, wrong_keys, now)
-            _resolve_absent(cur, ft_dupe, dupe_keys, now)
-            _resolve_absent(cur, ft_unint, unint_keys, now)
+            _resolve_absent(cur, ft_wrong, wrong_keys, now, assessment_required=True)
+            _resolve_absent(cur, ft_dupe, dupe_keys, now, assessment_required=True)
+            _resolve_absent(cur, ft_unint, unint_keys, now, assessment_required=True)
         else:
             # Nothing was written, but be explicit rather than relying on it.
             cur.connection.rollback()

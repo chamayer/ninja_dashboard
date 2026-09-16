@@ -18,20 +18,17 @@ from uuid import uuid4
 import psycopg
 import pytest
 
-_MIGRATION = (
-    Path(__file__).resolve().parents[2]
-    / "operations"
-    / "apps"
-    / "core"
-    / "migrations"
-    / "0161_live_condition_contract.py"
-)
+_MIGRATIONS = Path(__file__).resolve().parents[2] / "operations" / "apps" / "core" / "migrations"
 _PROFILE = Path(__file__).resolve().parents[2] / "shared" / "conditions" / "profile.json"
 _ROLE_PASSWORD = "probe"
 
 
 def _forward_sql() -> str:
-    spec = importlib.util.spec_from_file_location("condition_policy_migration", _MIGRATION)
+    return _migration_sql("0161_live_condition_contract.py")
+
+
+def _migration_sql(filename: str) -> str:
+    spec = importlib.util.spec_from_file_location("condition_policy_migration", _MIGRATIONS / filename)
     if spec is None or spec.loader is None:
         raise RuntimeError("cannot load condition policy migration")
     module = importlib.util.module_from_spec(spec)
@@ -40,7 +37,18 @@ def _forward_sql() -> str:
 
 
 def _migration_module():
-    spec = importlib.util.spec_from_file_location("condition_policy_migration", _MIGRATION)
+    spec = importlib.util.spec_from_file_location(
+        "condition_policy_migration", _MIGRATIONS / "0161_live_condition_contract.py"
+    )
+    if spec is None or spec.loader is None:
+        raise RuntimeError("cannot load condition policy migration")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_migration(filename: str):
+    spec = importlib.util.spec_from_file_location("condition_policy_migration", _MIGRATIONS / filename)
     if spec is None or spec.loader is None:
         raise RuntimeError("cannot load condition policy migration")
     module = importlib.util.module_from_spec(spec)
@@ -101,6 +109,8 @@ def pg():
             cur.execute(
                 "GRANT SELECT ON operations.finding_types, operations.tenants TO operations_migrate"
             )
+            cur.execute(_migration_sql("0162_harden_condition_policy_authority.py"))
+            cur.execute(_migration_sql("0163_condition_assessment_policy_digest.py"))
 
         yield {
             "admin": admin_dsn,
@@ -132,11 +142,29 @@ def test_policy_creation_activation_and_runtime_permissions(pg):
                 return _FindingType
 
         migration.seed_policies(_Apps, SimpleNamespace(connection=conn))
+        _load_migration("0164_policy_defined_issue_categories.py").promote_categories(
+            None, SimpleNamespace(connection=conn)
+        )
+        cur.execute(_migration_sql("0165_govern_condition_policy_activation.py"))
+        cur.execute(_migration_sql("0166_condition_assessment_integrity.py"))
+        cur.execute(_migration_sql("0167_reviewed_distinct_conditions.py"))
     with psycopg.connect(pg["app"], autocommit=True) as conn, conn.cursor() as cur:
+        cur.execute("SET operations.tenant_id = '1'")
+        with pytest.raises(psycopg.errors.RaiseException):
+            cur.execute(
+                "SELECT operations.activate_condition_policy_version(%s)", (profile["version"],)
+            )
+        cur.execute(
+            "SELECT operations.review_condition_policy_version(%s,%s,%s,%s::jsonb)",
+            (profile["version"], uuid4(), "Initial policy review", json.dumps({"valid": True})),
+        )
         cur.execute(
             "SELECT operations.activate_condition_policy_version(%s)", (profile["version"],)
         )
-        cur.execute("SELECT count(*) FROM operations.condition_policies")
+        cur.execute(
+            "SELECT count(*) FROM operations.condition_policies WHERE policy_version = %s",
+            (profile["version"],),
+        )
         assert cur.fetchone()[0] == len(profile["definitions"])
         cur.execute("SELECT count(*) FROM operations.condition_policy_versions WHERE active")
         assert cur.fetchone()[0] == 1
@@ -145,6 +173,24 @@ def test_policy_creation_activation_and_runtime_permissions(pg):
                 "UPDATE operations.condition_policy_versions SET digest = %s",
                 ("b" * 64,),
             )
+        assessment_id = uuid4()
+        cur.execute(
+            """INSERT INTO operations.condition_assessments
+                (tenant_id, row_kind, finding_id, participant_kind, participant_id,
+                 participant_role, condition_identity, policy_version, policy_digest,
+                 coverage, response, reevaluation_key)
+                VALUES (1, 'entity', %s, 'device', %s, 'affected', 'identity', %s, %s,
+                        '{}'::jsonb,
+                        '{"may_evaluate": true, "may_notify": true,
+                          "may_execute": true, "may_clear": true}'::jsonb,
+                        'activation-before-replacement')""",
+            (
+                assessment_id,
+                uuid4(),
+                profile["version"],
+                "5e9b47350aabfc45b6cd21fea2bfd6e591ec9826886187ddfcfe0d6a7a031c40",
+            ),
+        )
         replacement = deepcopy(profile)
         replacement["version"] = "conditions-shadow-2"
         cur.execute(
@@ -152,11 +198,22 @@ def test_policy_creation_activation_and_runtime_permissions(pg):
             (replacement["version"], "c" * 64, json.dumps(replacement)),
         )
         cur.execute(
+            "SELECT operations.review_condition_policy_version(%s,%s,%s,%s::jsonb)",
+            (replacement["version"], uuid4(), "Replacement policy review", json.dumps({"valid": True})),
+        )
+        cur.execute(
             "SELECT operations.activate_condition_policy_version(%s)",
             (replacement["version"],),
         )
         cur.execute("SELECT version FROM operations.condition_policy_versions WHERE active")
         assert cur.fetchone()[0] == replacement["version"]
+        cur.execute(
+            "SELECT response->>'may_notify', response->>'may_execute', "
+            "response->>'may_clear', currentness->>'invalidated_reason' "
+            "FROM operations.condition_assessments WHERE finding_id = %s",
+            (assessment_id,),
+        )
+        assert cur.fetchone() == ("false", "false", "false", "policy_activated")
         cur.execute(
             "SELECT operations.activate_condition_policy_version(%s)",
             (profile["version"],),
@@ -171,19 +228,32 @@ def test_runtime_assessments_are_tenant_scoped_and_participants_are_normalized(p
     finding_id = uuid4()
     with psycopg.connect(pg["ingest"], autocommit=True) as conn, conn.cursor() as cur:
         cur.execute("SET operations.tenant_id = '1'")
+        cur.execute("DELETE FROM operations.condition_assessments WHERE tenant_id = 1")
+        cur.execute("DELETE FROM operations.condition_participants WHERE tenant_id = 1")
         cur.execute(
             """INSERT INTO operations.condition_assessments
                 (tenant_id, row_kind, finding_id, participant_kind, participant_id,
-                 participant_role, condition_identity, policy_version,
-                 coverage, response, reevaluation_key)
+                     participant_role, condition_identity, policy_version,
+                     policy_digest, coverage, response, reevaluation_key)
                 VALUES (1, 'entity', %s, 'device', %s, 'affected',
-                        'identity', 'conditions-shadow-1', '{}'::jsonb, '{}'::jsonb, 'run-1'),
+                        'identity', 'conditions-shadow-1', %s, '{}'::jsonb, '{}'::jsonb, 'run-1'),
                        (1, 'entity', %s, 'software_version', %s, 'affected',
-                        'identity', 'conditions-shadow-1', '{}'::jsonb, '{}'::jsonb, 'run-1')""",
-            (finding_id, uuid4(), finding_id, uuid4()),
+                        'identity', 'conditions-shadow-1', %s, '{}'::jsonb, '{}'::jsonb, 'run-1')""",
+            (
+                finding_id, uuid4(),
+                "5e9b47350aabfc45b6cd21fea2bfd6e591ec9826886187ddfcfe0d6a7a031c40",
+                finding_id, uuid4(),
+                "5e9b47350aabfc45b6cd21fea2bfd6e591ec9826886187ddfcfe0d6a7a031c40",
+            ),
         )
-        cur.execute("SELECT count(*) FROM operations.v_condition_assessment_current")
-        assert cur.fetchone()[0] == 2
+        cur.execute(
+            "SELECT count(*), count(policy_digest), min(policy_digest) "
+            "FROM operations.v_condition_assessment_current"
+        )
+        count, digest_count, minimum_digest = cur.fetchone()
+        assert count == 2
+        assert digest_count == 2
+        assert minimum_digest == "5e9b47350aabfc45b6cd21fea2bfd6e591ec9826886187ddfcfe0d6a7a031c40"
         cur.execute("SET operations.tenant_id = '2'")
         cur.execute("SELECT count(*) FROM operations.v_condition_assessment_current")
         assert cur.fetchone()[0] == 0
@@ -219,3 +289,74 @@ def test_policy_storage_grants_separate_runtime_reads_and_assessment_writes(pg):
             ("operations_app",),
         )
         assert cur.fetchone()[0] is True
+
+
+def test_participant_reconciliation_removes_stale_scope_and_assessment_rows(pg):
+    finding_id = uuid4()
+    old_device = uuid4()
+    new_device = uuid4()
+    with psycopg.connect(pg["ingest"], autocommit=True) as conn, conn.cursor() as cur:
+        cur.execute("SET operations.tenant_id = '1'")
+        cur.execute(
+            "SELECT version, digest FROM operations.condition_policy_versions WHERE active"
+        )
+        policy_version, policy_digest = cur.fetchone()
+        cur.execute(
+            """INSERT INTO operations.condition_assessments
+                (tenant_id, row_kind, finding_id, participant_kind, participant_id,
+                 participant_role, condition_identity, policy_version, policy_digest,
+                 coverage, response, reevaluation_key)
+                VALUES (1, 'entity', %s, 'device', %s, 'affected', 'identity', %s, %s,
+                        '{}'::jsonb, '{}'::jsonb, 'merge-before')""",
+            (finding_id, old_device, policy_version, policy_digest),
+        )
+        cur.execute(
+            """INSERT INTO operations.condition_participants
+                (tenant_id, row_kind, finding_id, participant_kind, participant_id, participant_role)
+                VALUES (1, 'entity', %s, 'device', %s, 'affected')""",
+            (finding_id, old_device),
+        )
+        cur.execute(
+            """SELECT operations.reconcile_condition_participants(
+                1, 'entity', %s, %s::jsonb)""",
+            (
+                finding_id,
+                json.dumps([{
+                    "kind": "device",
+                    "reference": str(new_device),
+                    "role": "affected",
+                    "tenant_id": 1,
+                }]),
+            ),
+        )
+        cur.execute(
+            """SELECT participant_id FROM operations.condition_participants
+                WHERE finding_id = %s AND participant_kind = 'device'""",
+            (finding_id,),
+        )
+        assert cur.fetchall() == [(new_device,)]
+        cur.execute(
+            """SELECT participant_id FROM operations.condition_assessments
+                WHERE finding_id = %s AND participant_kind = 'device'""",
+            (finding_id,),
+        )
+        assert cur.fetchall() == []
+
+
+def test_condition_scope_advisory_lock_serializes_concurrent_reconciliation(pg):
+    finding_id = uuid4()
+    lock_sql = "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))"
+    first = psycopg.connect(pg["admin"], autocommit=False)
+    second = psycopg.connect(pg["admin"], autocommit=False)
+    try:
+        with first.cursor() as cur:
+            cur.execute(lock_sql, (f"1:entity:{finding_id}",))
+        with second.cursor() as cur:
+            cur.execute("SET statement_timeout = '100ms'")
+            with pytest.raises(psycopg.errors.QueryCanceled):
+                cur.execute(lock_sql, (f"1:entity:{finding_id}",))
+    finally:
+        first.rollback()
+        second.rollback()
+        first.close()
+        second.close()

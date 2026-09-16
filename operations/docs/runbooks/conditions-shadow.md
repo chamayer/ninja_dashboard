@@ -89,14 +89,21 @@ from the active offline-contact adapter; retirement applicability is not inferre
 | Merge / mapping | Membership and readiness invalidation followed by fresh evaluation |
 | Legacy / external | Preserve keys/interfaces until consumers are explicitly audited |
 
-## Release boundary
+## Shadow command boundary
 
-This foundation can be deployed without migrations and without changing live
-evaluators. Deployment does not itself run a comparison. Run the command after
-deployment to validate the packaged code against actual data.
+This command remains read-only and does not activate policy, rewrite findings,
+or authorize subscribers. It can be run after deployment to compare an
+explicit profile with actual data, but its successful exit is not evidence
+that the live database migrations, roles, or response gates are healthy.
 
-Before enabling policies, establish a supported identity-readiness contract,
-required collection scopes, persisted/audited participant and episode state,
-and consumer integration tests. Review the shadow impact and approve the
-behavior-changing release. Do not interpret this command's successful exit as
-approval to enable gates or rewrite historical resolved findings.
+The live runtime now reads the active database policy, uses its six
+policy-defined issue categories, and fail-closes stale or unmeasured
+responses. That runtime path is separate from this shadow command;
+validate it through the normal migration, health, and consumer checks before
+an approved release.
+
+Before approving a behavior-changing release, establish a supported
+identity-readiness contract, required collection scopes, persisted/audited
+participant and episode state, and consumer integration tests. Review the
+shadow impact as release evidence. Do not interpret this command's successful
+exit as approval to rewrite historical resolved findings.
