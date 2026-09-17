@@ -1368,3 +1368,19 @@ path for databases where the SQL migration runner is active.
 
 Next action: commit and push the three-blocker remediation, then verify its
 automatic rollout.
+
+## Current checkpoint — patch clearing evidence hardening
+
+Status: [ ] Complete locally; commit and rollout verification remain.
+
+The patch recovery path now selects the newest patch collection run before
+accepting its status, requires a fresh successful run and per-device facts
+observed during that run, links client backlog recovery through the affected
+tenant's Ninja device links, uses the emitter's latest-per-device/patch count,
+and retains the effective assessment and participant-authority gate. Zero
+emissions are no longer treated as failure or recovery by themselves.
+
+Validation: focused ingest safety/evidence tests pass (38 passed, 1 optional
+skip), plus compileall and diff checks. Next action: run the full focused
+validation set, commit task-owned changes, push both remotes, and verify
+automatic rollout.

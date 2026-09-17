@@ -562,6 +562,13 @@ def _patch_evaluation_coverage(cur, tenant_id, subject_type, subject_id, now, po
     if subject_type == "device":
         cur.execute(
             f"""
+            WITH latest_patch_run AS (
+                SELECT status, started_at, finished_at
+                  FROM ninja_core.run_log
+                 WHERE domain = 'patches'
+                 ORDER BY COALESCE(finished_at, started_at) DESC
+                 LIMIT 1
+            )
             SELECT EXISTS (
                        SELECT 1 FROM operations.v_device v
                        JOIN operations.v_device_source_link link
@@ -575,46 +582,68 @@ def _patch_evaluation_coverage(cur, tenant_id, subject_type, subject_id, now, po
                         AND presence.reported_online IS TRUE
                        JOIN ninja_patches.device_patch_signal signal
                          ON signal.device_id = link.external_id::int
+                       CROSS JOIN latest_patch_run run
                       WHERE v.tenant_id = %s AND v.device_id = %s
                         AND v.effective_patching_scope = 'Included'
                         AND v.lifecycle_status <> 'retired'
                         AND COALESCE(presence.last_contact_at, presence.last_observed_at)
                             BETWEEN %s - interval '{policy['patch_activity_days']} days' AND %s
+                        AND run.status = 'ok'
+                        AND run.finished_at BETWEEN %s - interval '{policy['patch_activity_days']} days' AND %s
+                        AND EXISTS (
+                            SELECT 1 FROM ninja_patches.patch_facts fact
+                             WHERE fact.device_id = link.external_id::int
+                               AND fact.last_observed_at >= run.started_at
+                        )
                    )
             """,
-            (tenant_id, subject_id, now, now),
+            (tenant_id, subject_id, now, now, now, now),
         )
     elif subject_type == "client":
         cur.execute(
-            """
+            f"""
+            WITH latest_patch_run AS (
+                SELECT status, started_at, finished_at
+                  FROM ninja_core.run_log
+                 WHERE domain = 'patches'
+                 ORDER BY COALESCE(finished_at, started_at) DESC
+                 LIMIT 1
+            ), included AS (
+                SELECT v.device_id
+                  FROM operations.v_device v
+                  JOIN operations.device_agent_presence_current presence
+                    ON presence.tenant_id = v.tenant_id
+                   AND presence.device_id = v.device_id
+                   AND presence.platform = 'Ninja'
+                   AND presence.reported_online IS TRUE
+                 WHERE v.tenant_id = %s AND v.client_id = %s
+                   AND v.effective_patching_scope = 'Included'
+                   AND v.lifecycle_status <> 'retired'
+            )
             SELECT EXISTS (
                        SELECT 1 FROM operations.clients
                         WHERE tenant_id = %s AND id = %s AND deleted_at IS NULL
                    )
-               AND EXISTS (
-                   SELECT 1 FROM operations.v_device v
-                   JOIN operations.device_agent_presence_current presence
-                     ON presence.tenant_id = v.tenant_id
-                    AND presence.device_id = v.device_id
-                    AND presence.platform = 'Ninja'
-                    AND presence.reported_online IS TRUE
-                  WHERE v.tenant_id = %s AND v.client_id = %s
-                    AND v.effective_patching_scope = 'Included'
-                    AND v.lifecycle_status <> 'retired'
-               )
-               AND EXISTS (
-                   SELECT 1 FROM ninja_patches.patch_facts facts
-                   JOIN operations.v_device_source_link link
-                     ON link.external_id::int = facts.device_id
-                   JOIN operations.v_device v
-                     ON v.tenant_id = link.tenant_id AND v.device_id = link.device_id
-                   JOIN operations.sources source
-                     ON source.id = link.source_id AND source.name = 'Ninja'
-                  WHERE v.tenant_id = %s AND v.client_id = %s
-                    AND facts.device_id IS NOT NULL
+               AND (SELECT status FROM latest_patch_run) = 'ok'
+               AND (SELECT finished_at FROM latest_patch_run)
+                   BETWEEN %s - interval '{policy['patch_activity_days']} days' AND %s
+               AND EXISTS (SELECT 1 FROM included)
+               AND NOT EXISTS (
+                   SELECT 1 FROM included i
+                    WHERE NOT EXISTS (
+                        SELECT 1
+                          FROM operations.v_device_source_link link
+                          JOIN operations.sources source
+                            ON source.id = link.source_id AND source.name = 'Ninja'
+                          JOIN ninja_patches.patch_facts facts
+                            ON facts.device_id = link.external_id::int
+                         CROSS JOIN latest_patch_run run
+                         WHERE link.tenant_id = %s AND link.device_id = i.device_id
+                           AND facts.last_observed_at >= run.started_at
+                    )
                )
             """,
-            (tenant_id, subject_id, tenant_id, subject_id, tenant_id, subject_id),
+            (tenant_id, subject_id, tenant_id, subject_id, now, now, tenant_id),
         )
     else:
         cur.execute("SELECT FALSE")
@@ -634,6 +663,13 @@ def _auto_resolve(cur, tenant_id, emitted_keys, now, policy) -> None:
     # read. It is not proof that every prior patch finding has cleared.
     cur.execute(
         f"""
+        WITH latest_patch_run AS (
+            SELECT status, started_at, finished_at
+              FROM ninja_core.run_log
+             WHERE domain = 'patches'
+             ORDER BY COALESCE(finished_at, started_at) DESC
+             LIMIT 1
+        )
         UPDATE operations.findings f
         SET status = 'resolved',
             last_seen_at = %s,
@@ -651,8 +687,7 @@ def _auto_resolve(cur, tenant_id, emitted_keys, now, policy) -> None:
           AND f.status IN ('open', 'acknowledged')
           AND NOT (f.condition_key = ANY(%s::text[]))
           AND to_regclass('operations.condition_assessments') IS NOT NULL
-          AND (
-            EXISTS (
+          AND EXISTS (
                SELECT 1 FROM operations.condition_assessments a
               WHERE a.tenant_id = f.tenant_id AND a.row_kind = 'entity'
                 AND a.finding_id = f.id
@@ -667,7 +702,8 @@ def _auto_resolve(cur, tenant_id, emitted_keys, now, policy) -> None:
                     WHERE v.active ORDER BY v.version DESC LIMIT 1
                 ) * interval '1 hour'
           )
-          AND EXISTS (
+          AND (
+            EXISTS (
               SELECT 1
                 FROM operations.v_device v
                 JOIN operations.v_device_source_link link
@@ -677,13 +713,21 @@ def _auto_resolve(cur, tenant_id, emitted_keys, now, policy) -> None:
                 JOIN operations.device_agent_presence_current presence
                   ON presence.tenant_id = v.tenant_id
                  AND presence.device_id = v.device_id
-                 AND presence.platform = 'Ninja'
-                 AND presence.reported_online IS TRUE
+                AND presence.platform = 'Ninja'
+                AND presence.reported_online IS TRUE
+                CROSS JOIN latest_patch_run run
                WHERE f.subject_type = 'device'
                  AND f.subject_id = v.device_id
                  AND v.tenant_id = f.tenant_id
                  AND v.effective_patching_scope = 'Included'
                  AND v.lifecycle_status <> 'retired'
+                 AND run.status = 'ok'
+                 AND run.finished_at BETWEEN now() - interval '{policy['patch_activity_days']} days' AND now()
+                 AND EXISTS (
+                     SELECT 1 FROM ninja_patches.patch_facts current_fact
+                      WHERE current_fact.device_id = link.external_id::int
+                        AND current_fact.last_observed_at >= run.started_at
+                 )
                  AND (
                      (ft.name = 'device_never_patched' AND EXISTS (
                          SELECT 1 FROM ninja_patches.device_patch_signal signal
@@ -704,6 +748,7 @@ def _auto_resolve(cur, tenant_id, emitted_keys, now, policy) -> None:
                           WHERE facts.device_id = link.external_id::int
                             AND facts.status = 'FAILED'
                             AND facts.kb_number IS NOT NULL
+                            AND facts.last_observed_at >= run.started_at
                           GROUP BY facts.kb_number
                          HAVING COUNT(*) >= {policy['repeated_failure_count']}
                      ))
@@ -724,27 +769,48 @@ def _auto_resolve(cur, tenant_id, emitted_keys, now, policy) -> None:
                      AND client_device.client_id = f.subject_id
                      AND client_device.effective_patching_scope = 'Included'
                      AND client_device.lifecycle_status <> 'retired'
+                     AND (SELECT status FROM latest_patch_run) = 'ok'
+                     AND (SELECT finished_at FROM latest_patch_run)
+                         BETWEEN now() - interval '{policy['patch_activity_days']} days' AND now()
               )
               AND EXISTS (
                   SELECT 1
                     FROM ninja_patches.patch_facts facts
+                    JOIN operations.v_device_source_link link
+                      ON link.external_id::int = facts.device_id
+                    JOIN operations.sources source
+                      ON source.id = link.source_id AND source.name = 'Ninja'
                     JOIN operations.v_device client_device
-                      ON client_device.tenant_id = f.tenant_id
+                      ON client_device.tenant_id = link.tenant_id
+                     AND client_device.device_id = link.device_id
+                   CROSS JOIN latest_patch_run run
+                   WHERE client_device.tenant_id = f.tenant_id
                      AND client_device.client_id = f.subject_id
-                   WHERE facts.device_id IS NOT NULL
+                     AND facts.last_observed_at >= run.started_at
               )
-              AND NOT EXISTS (
-                  SELECT 1
-                    FROM ninja_patches.patch_facts facts
-                    JOIN operations.v_device client_device
-                      ON client_device.tenant_id = f.tenant_id
-                     AND client_device.client_id = f.subject_id
-                   WHERE facts.device_id IS NOT NULL
-                     AND facts.status = 'APPROVED'
-                   GROUP BY facts.patch_uid
-                  HAVING COUNT(*) >= {policy['approval_backlog_count']}
+              AND (
+                  SELECT COUNT(*)
+                    FROM (
+                        SELECT DISTINCT ON (facts.device_id, facts.patch_uid)
+                               facts.device_id, facts.patch_uid, facts.status
+                          FROM ninja_patches.patch_facts facts
+                          JOIN operations.v_device_source_link link
+                            ON link.external_id::int = facts.device_id
+                          JOIN operations.sources source
+                            ON source.id = link.source_id AND source.name = 'Ninja'
+                          JOIN operations.v_device client_device
+                            ON client_device.tenant_id = link.tenant_id
+                           AND client_device.device_id = link.device_id
+                         CROSS JOIN latest_patch_run run
+                         WHERE client_device.tenant_id = f.tenant_id
+                           AND client_device.client_id = f.subject_id
+                           AND facts.last_observed_at >= run.started_at
+                         ORDER BY facts.device_id, facts.patch_uid,
+                                  facts.last_observed_at DESC, facts.id DESC
+                    ) current_patch
+                   WHERE current_patch.status = 'APPROVED'
+              ) < {policy['approval_backlog_count']}
               )
-            )
           )
           AND NOT EXISTS (
               SELECT 1 FROM operations.condition_participants p

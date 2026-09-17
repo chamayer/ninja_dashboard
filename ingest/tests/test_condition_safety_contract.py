@@ -383,6 +383,9 @@ def test_patch_recovery_requires_current_source_evidence_and_allows_empty_runs()
     assert "if not emitted_keys" not in recovery
     assert "f.subject_type = 'client'" in recovery
     assert "patch_approval_backlog" in recovery
+    assert "latest_patch_run" in recovery
+    assert "last_observed_at >= run.started_at" in recovery
+    assert "condition_assessments a" in recovery
 
 
 def test_review_workflow_uses_integer_django_user_ids_and_has_endpoint():
