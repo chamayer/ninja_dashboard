@@ -5,7 +5,6 @@ import logging
 import os
 import re
 import uuid
-from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from urllib import request as _urllib_request
 from urllib.error import HTTPError, URLError
@@ -25,7 +24,6 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from django.utils.text import slugify
 from django.views.decorators.http import require_GET, require_POST
-from shared.conditions.policy import load_profile
 
 from . import capability as capability_evidence
 from . import category as category_evidence
@@ -208,12 +206,7 @@ def _issue_taxonomy() -> tuple[list[dict], dict[str, dict]]:
     """Return the active policy's sole operator-facing taxonomy authority."""
     profile = load_active_profile()
     if not profile.issue_taxonomy:
-        # Old immutable policy rows remain readable until the reviewed policy
-        # version is activated. Use the packaged registry only for this
-        # compatibility window; all condition labels still come from the
-        # active policy row.
-        packaged = load_profile()
-        profile = replace(profile, issue_taxonomy=packaged.issue_taxonomy)
+        raise RuntimeError("Active policy has no approved Issues taxonomy")
     categories = []
     type_groups = {}
     for category in profile.issue_taxonomy:

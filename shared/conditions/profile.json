@@ -18,23 +18,18 @@
     "legacy_and_external"
   ],
   "issue_taxonomy": [
-    {"key": "computers", "label": "Computers", "types": [
-      {"key": "agent_coverage", "label": "Agent coverage", "conditions": ["missing_required_platform", "stale_required_platform", "device_unenrolled"]},
-      {"key": "computer_reporting", "label": "Computer reporting", "conditions": ["device_offline", "device_stale_data", "device_long_offline"]},
-      {"key": "computer_cleanup", "label": "Computer cleanup", "conditions": ["device_source_record_withdrawn", "device_missing_from_source"]}
+    {"key": "inventory", "label": "Inventory", "types": [
+      {"key": "inventory_gaps", "label": "Inventory gaps", "conditions": ["device_source_record_withdrawn", "device_missing_from_source"]},
+      {"key": "duplicate_computers", "label": "Duplicate Computers", "conditions": ["identity_conflict", "shared_serial", "cross_client_serial", "cross_client_conflict"]},
+      {"key": "duplicate_platform_entries", "label": "Duplicate platform entries", "conditions": ["duplicate_platform_record", "duplicate_device_records"]},
+      {"key": "inventory_data_problems", "label": "Inventory data problems", "conditions": ["placeholder_serial", "placeholder_mac", "device_role_conflict", "lifecycle_reported_state_conflict", "lifecycle_unknown_reported_state", "unmapped_node_class"]},
+      {"key": "client_matching", "label": "Client matching", "conditions": ["client_name_conflict", "client_link_collision", "client_unattached_group", "unnamed_source_group", "unmatched_source_group", "identity_resolution_pending", "unlinked_external_identity"]},
+      {"key": "hudu_maintenance", "label": "Hudu maintenance", "conditions": ["cmdb_asset_stale", "cmdb_link_incorrect", "unintegrated_source_observed"]}
     ]},
-    {"key": "matching_duplicates", "label": "Matching & duplicates", "types": [
-      {"key": "duplicate_computers", "label": "Duplicate computers", "conditions": ["identity_conflict"]},
-      {"key": "duplicate_source_records", "label": "Duplicate source records", "conditions": ["duplicate_platform_record", "duplicate_device_records"]},
-      {"key": "identifier_issues", "label": "Identifier issues", "conditions": ["shared_serial", "cross_client_serial", "placeholder_serial", "placeholder_mac", "cross_client_conflict"]},
-      {"key": "conflicting_computer_details", "label": "Conflicting computer details", "conditions": ["device_role_conflict", "lifecycle_reported_state_conflict"]},
-      {"key": "unrecognized_source_data", "label": "Unrecognized source data", "conditions": ["lifecycle_unknown_reported_state", "unmapped_node_class"]},
-      {"key": "client_matching", "label": "Client matching", "conditions": ["client_name_conflict", "client_link_collision", "client_unattached_group", "unnamed_source_group", "unmatched_source_group", "identity_resolution_pending", "unlinked_external_identity"]}
-    ]},
-    {"key": "hudu", "label": "Hudu", "types": [
-      {"key": "archive_candidates", "label": "Archive candidates", "conditions": ["cmdb_asset_stale"]},
-      {"key": "incorrect_links", "label": "Incorrect links", "conditions": ["cmdb_link_incorrect"]},
-      {"key": "unconnected_references", "label": "Unconnected references", "conditions": ["unintegrated_source_observed"]}
+    {"key": "agents_reporting", "label": "Agents & reporting", "types": [
+      {"key": "required_agents", "label": "Required agents", "conditions": ["missing_required_platform", "device_unenrolled"]},
+      {"key": "agents_not_reporting", "label": "Agents not reporting", "conditions": ["stale_required_platform"]},
+      {"key": "computers_not_reporting", "label": "Computers not reporting", "conditions": ["device_offline", "device_stale_data", "device_long_offline"]}
     ]},
     {"key": "software_security", "label": "Software & security", "types": [
       {"key": "unapproved_software", "label": "Unapproved software", "conditions": ["unauthorized_remote_access", "unauthorized_rmm", "unauthorized_av"]},
@@ -45,8 +40,8 @@
       {"key": "unsupported_software", "label": "Unsupported software", "conditions": ["eol_runtime"]},
       {"key": "protection_conflicts", "label": "Protection conflicts", "conditions": ["multi_av_conflict"]}
     ]},
-    {"key": "patching_windows", "label": "Patching & Windows", "types": [
-      {"key": "patch_progress", "label": "Patch progress", "conditions": ["device_never_patched", "patching_stalled", "patch_approval_backlog"]},
+    {"key": "patching_support", "label": "Patching & support", "types": [
+      {"key": "patching_not_progressing", "label": "Patching not progressing", "conditions": ["device_never_patched", "patching_stalled", "patch_approval_backlog"]},
       {"key": "patch_failures", "label": "Patch failures", "conditions": ["patch_failing_repeatedly"]},
       {"key": "restarts_required", "label": "Restarts required", "conditions": ["reboot_pending"]},
       {"key": "windows_support", "label": "Windows support", "conditions": ["windows_servicing_approaching_eol", "windows_servicing_eol", "windows_servicing_unknown"]}
@@ -144,7 +139,7 @@
     },
     {
       "name": "device_source_record_withdrawn",
-      "label": "Computer removed from a source",
+      "label": "Computer no longer reported by platform",
       "category": "Computers",
       "type": "Computer cleanup",
       "lifecycle": "active",
@@ -174,7 +169,7 @@
     },
     {
       "name": "duplicate_platform_record",
-      "label": "Duplicate records in a source",
+      "label": "Duplicate platform entries",
       "category": "Records & Matching",
       "type": "Duplicate source records",
       "lifecycle": "active",
@@ -182,7 +177,7 @@
     },
     {
       "name": "duplicate_device_records",
-      "label": "Historical duplicate Hudu records",
+      "label": "Historical duplicate Hudu entries",
       "category": "Records & Matching",
       "type": "Duplicate source records",
       "lifecycle": "historical",
@@ -230,7 +225,7 @@
     },
     {
       "name": "device_role_conflict",
-      "label": "Sources disagree on computer role",
+      "label": "Platforms disagree on computer role",
       "category": "Records & Matching",
       "type": "Conflicting details",
       "lifecycle": "active",
@@ -240,7 +235,7 @@
     },
     {
       "name": "lifecycle_reported_state_conflict",
-      "label": "Sources disagree on lifecycle status",
+      "label": "Platforms disagree on lifecycle status",
       "category": "Records & Matching",
       "type": "Conflicting details",
       "lifecycle": "active",
@@ -250,7 +245,7 @@
     },
     {
       "name": "lifecycle_unknown_reported_state",
-      "label": "Unrecognized lifecycle status",
+      "label": "Unknown lifecycle status",
       "category": "Records & Matching",
       "type": "Unrecognized source values",
       "lifecycle": "active",
@@ -258,7 +253,7 @@
     },
     {
       "name": "unmapped_node_class",
-      "label": "Unrecognized Ninja device class",
+      "label": "Unknown Ninja device class",
       "category": "Records & Matching",
       "type": "Unrecognized source values",
       "lifecycle": "active",
@@ -266,7 +261,7 @@
     },
     {
       "name": "client_name_conflict",
-      "label": "Client name changed in a source",
+      "label": "Client name changed",
       "category": "Records & Matching",
       "type": "Client matching",
       "lifecycle": "active",
@@ -274,7 +269,7 @@
     },
     {
       "name": "client_link_collision",
-      "label": "Source organization matches multiple clients",
+      "label": "Platform organization matches multiple clients",
       "category": "Records & Matching",
       "type": "Client matching",
       "lifecycle": "active",
@@ -282,7 +277,7 @@
     },
     {
       "name": "client_unattached_group",
-      "label": "Source organization not assigned to a client",
+      "label": "Platform organization not assigned to a client",
       "category": "Records & Matching",
       "type": "Client matching",
       "lifecycle": "active",
@@ -290,7 +285,7 @@
     },
     {
       "name": "unnamed_source_group",
-      "label": "Source organization has no name",
+      "label": "Unnamed platform organization",
       "category": "Records & Matching",
       "type": "Client matching",
       "lifecycle": "active",
@@ -298,7 +293,7 @@
     },
     {
       "name": "unmatched_source_group",
-      "label": "Source group awaiting matching",
+      "label": "Platform group awaiting matching",
       "category": "Records & Matching",
       "type": "Client matching",
       "lifecycle": "active",
@@ -314,7 +309,7 @@
     },
     {
       "name": "unlinked_external_identity",
-      "label": "Source record not matched to a computer",
+      "label": "Computer not matched to platform entry",
       "category": "Records & Matching",
       "type": "Client matching",
       "lifecycle": "unverified",

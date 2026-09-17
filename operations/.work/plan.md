@@ -2,8 +2,8 @@
 
 ## Status
 
-**Implementation in progress.** The approved taxonomy is six categories and 26
-operator types covering all 53 condition keys. Product implementation is
+**Corrective implementation in progress.** The approved taxonomy is five
+categories and 23 operator types covering all 53 condition keys. Product implementation is
 authorized; deployment remains subject to the repository's explicit push and
 automatic-migration rules.
 
@@ -55,9 +55,9 @@ and discovery scope (formerly WP6), not a cosmetic rename.
 
 ## Proposed operator vocabulary
 
-The approved taxonomy supersedes the draft vocabulary below. The authoritative
-six-category/26-type registry is now in `shared/conditions/profile.json` and
-has been approved by the user; internal finding names remain unchanged.
+The authoritative five-category/23-type registry is now in
+`shared/conditions/profile.json` and has been approved by the user; internal
+finding names remain unchanged.
 
 | Category | Purpose |
 | --- | --- |
@@ -163,7 +163,7 @@ eligibility/data change, not accepted as a naming side effect.
 
 ### WP1 — Approve vocabulary and freeze a baseline
 
-- Review the approved six category names and 26 type names with the user.
+- Review the approved five category names and 23 type names with the user.
 - Export the active policy's complete 53-condition taxonomy and compare it with
   the matrix above; fail if anything is missing, duplicated, or unmapped.
 - Capture the count reconciliation matrix and representative screenshots/URLs
@@ -194,7 +194,7 @@ validation because production access is not required for local taxonomy work.
   the exact migration/seed approach before implementation; do not mutate the
   active policy in place or silently auto-activate an unreviewed policy.
 
-Exit: one validated policy registry maps all 53 keys to six categories, 26
+Exit: one validated policy registry maps all 53 keys to five categories, 23
 types, and 53 individual labels.
 
 ### WP3 — Build a single Issues-page projection
@@ -301,9 +301,10 @@ and available action without interpreting an internal key or conflicting total.
 
 ## Current checkpoint and next action
 
-WP1 vocabulary approval is complete. WP2/WP3 are implemented locally: the
-registry validates all 53 condition memberships, the immutable policy seed is
-prepared, and the Issues resolver drives filters, headings, rows, and CSVs.
+WP1 vocabulary approval is complete. The prior six-category implementation was
+rejected and is being corrected without activating its policy version. The
+corrective registry validates all 53 condition memberships, and the Issues
+resolver is being aligned to the five-category/23-type policy.
 WP4/WP5 first-pass count and layout corrections are implemented. Focused
 condition and queue tests pass (79 tests), and `manage.py check` passes. The
 remaining work is migration-plan review, broader Operations validation, and

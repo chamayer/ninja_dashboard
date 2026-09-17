@@ -2,6 +2,17 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.125.0] — 2026-09-17 — Corrected Issues taxonomy
+
+### Changed
+
+- Corrected the Issues page to use the approved five-category, 23-type
+  taxonomy across filters, counts, headings, rows, and CSV exports.
+- Replaced operator-facing source terminology in individual issue labels with
+  plain platform and integration language.
+- Seeded the corrected taxonomy as a new immutable policy version; it remains
+  inactive until reviewed through the Operations policy workflow.
+
 ## [0.124.0] — 2026-09-16 — Governed condition response authority
 
 ### Added

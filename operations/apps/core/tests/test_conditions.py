@@ -502,11 +502,10 @@ def test_issue_taxonomy_covers_every_condition_once():
     assert len(set(memberships)) == 53
     assert set(memberships) == set(profile.definitions)
     assert [category["label"] for category in profile.issue_taxonomy] == [
-        "Computers",
-        "Matching & duplicates",
-        "Hudu",
+        "Inventory",
+        "Agents & reporting",
         "Software & security",
-        "Patching & Windows",
+        "Patching & support",
         "Data collection",
     ]
 
@@ -516,3 +515,10 @@ def test_issue_taxonomy_rejects_cross_type_membership():
     data["issue_taxonomy"][0]["types"][1]["conditions"].append("missing_required_platform")
     with pytest.raises(ValueError, match="multiple taxonomy types"):
         parse_profile(data)
+
+
+def test_operator_issue_labels_do_not_expose_source_terminology():
+    profile = load_profile()
+    labels = [definition["label"].lower() for definition in profile.definitions.values()]
+    assert not any("source record" in label for label in labels)
+    assert not any("source organization" in label for label in labels)

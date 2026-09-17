@@ -307,6 +307,13 @@ def test_findings_queue_category_cards_use_fleet_wide_eligible_counts():
     assert "top_summary_qs = fleet_governed_qs.filter(id__in=fleet_actionable_ids)" in source
 
 
+def test_findings_queue_does_not_substitute_packaged_taxonomy():
+    source = Path("apps/core/views.py").read_text(encoding="utf-8")
+    taxonomy_section = source[source.index("def _issue_taxonomy"):source.index("def _condition_assessment_display")]
+    assert "load_profile" not in taxonomy_section
+    assert "issue_taxonomy" in taxonomy_section
+
+
 def test_condition_reasons_are_humanized_in_evidence_surfaces():
     queue = Path("templates/findings_queue.html").read_text(encoding="utf-8")
     admin = Path("templates/findings_admin_health.html").read_text(encoding="utf-8")
