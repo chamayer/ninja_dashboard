@@ -1371,7 +1371,7 @@ automatic rollout.
 
 ## Current checkpoint — patch clearing evidence hardening
 
-Status: [ ] Complete locally; commit and rollout verification remain.
+Status: [ ] Complete locally; final startup migration rollout verification remains.
 
 The patch recovery path now selects the newest patch collection run before
 accepting its status, requires a fresh successful run and per-device facts
@@ -1383,7 +1383,8 @@ emissions are no longer treated as failure or recovery by themselves.
 Validation: focused ingest safety/evidence tests pass (38 passed, 1 optional
 skip), plus compileall and diff checks. Next action: run the full focused
 validation set, commit task-owned changes, push both remotes, and verify
-automatic rollout.
+automatic rollout. The Operations fallback migration 0171 also carries the
+additive run-log column for deployments without an active ingest container.
 
 ## Current checkpoint — explicit patch snapshot and complete client recovery
 
