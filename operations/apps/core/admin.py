@@ -9,6 +9,7 @@ from django.contrib.admin import helpers
 from django.contrib.auth.admin import UserAdmin
 from django.db import connection, transaction
 from django.shortcuts import render
+from django.urls import reverse
 from django.utils import timezone
 from shared.conditions.policy import parse_profile
 
@@ -485,6 +486,9 @@ class ConditionPolicyVersionAdmin(admin.ModelAdmin):
             "opts": self.model._meta,
             "original": policy,
             "title": f"Review condition policy {policy.version}",
+            "changelist_url": reverse(
+                f"admin:{self.model._meta.app_label}_{self.model._meta.model_name}_changelist"
+            ),
             "policy_version": policy,
             "policy_profile": profile,
             "digest_valid": profile.digest == policy.digest,

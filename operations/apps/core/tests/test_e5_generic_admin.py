@@ -121,3 +121,5 @@ def test_condition_policy_review_template_uses_structured_taxonomy():
     assert "issue_count" in template
     assert "Changed policy sections" in template
     assert "policy_version.policy" not in template
+    assert "changelist_url" in template
+    assert "admin:core_conditionpolicyversion_changelist" not in template
