@@ -2,16 +2,16 @@
 
 ## Status
 
-**Taxonomy correction implementation in progress; do not activate the seeded
-taxonomy versions.** The five top-level categories and revised 34-type mapping
-are approved. The prior 23-type matrix is superseded.
+**Taxonomy correction implementation complete.** The five top-level categories
+and revised 34-type mapping are approved. The prior 23-type matrix is
+superseded. Do not activate versions 1–3; only `conditions-taxonomy-4` may be
+reviewed for a future activation.
 Deployment remains subject to the repository's explicit push and
 automatic-migration rules.
 
-Baseline reviewed: local `master` at `a02bb61`. The only tracked worktree
-change is this plan update;
-the pre-existing untracked `.work/probe_*` and bootstrap files are unrelated and
-must remain untouched.
+Implementation baseline: local `master` at `1121dbb`.
+The pre-existing untracked `.work/probe_*` and bootstrap files are unrelated
+and remain untouched.
 
 ## Goal
 
@@ -408,5 +408,16 @@ deterministic historical migration payloads are included. The prior production
 policy state was not reverified in this checkpoint; do not infer live
 activation from repository state.
 
-The next action is final diff review and release handoff. No production
-activation or manual migration is authorized by this plan.
+Implementation completed in `1121dbb`.
+
+Validation recorded: 83 focused Operations tests passed; `manage.py check` and
+`makemigrations --check --dry-run` passed; all five embedded historical/final
+policy payloads decoded successfully; the 0174 payload is byte-identical to
+the version shipped in `143d242`; targeted Ruff checks, Python compilation,
+and `git diff --check` passed.
+
+Production activation was not independently verified in this checkpoint. The
+next operational step, when separately authorized, is to review and activate
+only `conditions-taxonomy-4`, then allow evaluators to produce fresh
+assessments under that policy. No manual migration or activation is part of
+this completed implementation plan.
