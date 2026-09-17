@@ -761,9 +761,18 @@ def _auto_resolve(cur, tenant_id, emitted_keys, now, policy) -> None:
             OR (
               f.subject_type = 'client'
               AND ft.name = 'patch_approval_backlog'
+              AND (SELECT status FROM latest_patch_run) = 'ok'
+              AND (SELECT finished_at FROM latest_patch_run)
+                  BETWEEN now() - interval '{policy['patch_activity_days']} days' AND now()
               AND EXISTS (
                   SELECT 1
                     FROM operations.v_device client_device
+                    JOIN operations.v_device_source_link device_link
+                      ON device_link.tenant_id = client_device.tenant_id
+                     AND device_link.device_id = client_device.device_id
+                    JOIN operations.sources device_source
+                      ON device_source.id = device_link.source_id
+                     AND device_source.name = 'Ninja'
                     JOIN operations.device_agent_presence_current client_presence
                       ON client_presence.tenant_id = client_device.tenant_id
                      AND client_presence.device_id = client_device.device_id
@@ -773,24 +782,33 @@ def _auto_resolve(cur, tenant_id, emitted_keys, now, policy) -> None:
                      AND client_device.client_id = f.subject_id
                      AND client_device.effective_patching_scope = 'Included'
                      AND client_device.lifecycle_status <> 'retired'
-                     AND (SELECT status FROM latest_patch_run) = 'ok'
-                     AND (SELECT finished_at FROM latest_patch_run)
-                         BETWEEN now() - interval '{policy['patch_activity_days']} days' AND now()
               )
-              AND EXISTS (
+              AND NOT EXISTS (
                   SELECT 1
-                    FROM ninja_patches.patch_facts facts
-                    JOIN operations.v_device_source_link link
-                      ON link.external_id::int = facts.device_id
-                    JOIN operations.sources source
-                      ON source.id = link.source_id AND source.name = 'Ninja'
-                    JOIN operations.v_device client_device
-                      ON client_device.tenant_id = link.tenant_id
-                     AND client_device.device_id = link.device_id
-                   CROSS JOIN latest_patch_run run
+                    FROM operations.v_device client_device
+                    JOIN operations.v_device_source_link device_link
+                      ON device_link.tenant_id = client_device.tenant_id
+                     AND device_link.device_id = client_device.device_id
+                    JOIN operations.sources device_source
+                      ON device_source.id = device_link.source_id
+                     AND device_source.name = 'Ninja'
+                    JOIN operations.device_agent_presence_current client_presence
+                      ON client_presence.tenant_id = client_device.tenant_id
+                     AND client_presence.device_id = client_device.device_id
+                     AND client_presence.platform = 'Ninja'
+                     AND client_presence.reported_online IS TRUE
                    WHERE client_device.tenant_id = f.tenant_id
                      AND client_device.client_id = f.subject_id
-                     AND facts.last_observed_at = run.snapshot_at
+                     AND client_device.effective_patching_scope = 'Included'
+                     AND client_device.lifecycle_status <> 'retired'
+                     AND NOT EXISTS (
+                         SELECT 1
+                           FROM ninja_patches.patch_facts facts
+                           CROSS JOIN latest_patch_run run
+                          WHERE facts.device_id = device_link.external_id::int
+                            AND run.snapshot_at IS NOT NULL
+                            AND facts.last_observed_at = run.snapshot_at
+                     )
               )
               AND (
                   SELECT COUNT(*)
@@ -805,9 +823,16 @@ def _auto_resolve(cur, tenant_id, emitted_keys, now, policy) -> None:
                           JOIN operations.v_device client_device
                             ON client_device.tenant_id = link.tenant_id
                            AND client_device.device_id = link.device_id
+                          JOIN operations.device_agent_presence_current presence
+                            ON presence.tenant_id = client_device.tenant_id
+                           AND presence.device_id = client_device.device_id
+                           AND presence.platform = 'Ninja'
+                           AND presence.reported_online IS TRUE
                          CROSS JOIN latest_patch_run run
                          WHERE client_device.tenant_id = f.tenant_id
                            AND client_device.client_id = f.subject_id
+                           AND client_device.effective_patching_scope = 'Included'
+                           AND client_device.lifecycle_status <> 'retired'
                            AND run.snapshot_at IS NOT NULL
                            AND facts.last_observed_at = run.snapshot_at
                          ORDER BY facts.device_id, facts.patch_uid,

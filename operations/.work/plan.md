@@ -1367,6 +1367,20 @@ permissions. SQL migration 110 remains the ingest-schema permission path.
 Next action: commit and push the three-blocker remediation, then verify its
 automatic rollout.
 
+## Current checkpoint — complete client patch recovery scope
+
+Status: [ ] Complete locally; rollout verification remains.
+
+Client backlog recovery now requires exact-snapshot patch facts for every
+included, non-retired, currently online Ninja-linked device, and counts only
+latest approved states from that same population. It remains behind current
+condition assessment and participant authority checks.
+
+Validation: 38 ingest safety/evidence tests pass with one optional skip, 80
+Operations tests pass, 5 PostgreSQL policy tests pass, and Django checks,
+migration drift, compileall, and diff checks pass. Next action: commit,
+push both remotes, and verify automatic rollout.
+
 ## Current checkpoint — patch clearing evidence hardening
 
 Status: [ ] Complete locally; final startup migration rollout verification remains.

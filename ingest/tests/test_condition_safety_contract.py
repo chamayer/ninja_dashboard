@@ -383,6 +383,9 @@ def test_patch_recovery_requires_current_source_evidence_and_allows_empty_runs()
     assert "if not emitted_keys" not in recovery
     assert "f.subject_type = 'client'" in recovery
     assert "patch_approval_backlog" in recovery
+    assert "NOT EXISTS (\n                  SELECT 1\n                    FROM operations.v_device client_device" in recovery
+    assert "effective_patching_scope = 'Included'" in recovery
+    assert "lifecycle_status <> 'retired'" in recovery
     assert "latest_patch_run" in recovery
     assert "last_observed_at = run.snapshot_at" in recovery
     assert "condition_assessments a" in recovery
