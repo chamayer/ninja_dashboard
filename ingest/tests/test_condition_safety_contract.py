@@ -384,8 +384,10 @@ def test_patch_recovery_requires_current_source_evidence_and_allows_empty_runs()
     assert "f.subject_type = 'client'" in recovery
     assert "patch_approval_backlog" in recovery
     assert "latest_patch_run" in recovery
-    assert "last_observed_at >= run.started_at" in recovery
+    assert "last_observed_at = run.snapshot_at" in recovery
     assert "condition_assessments a" in recovery
+    migration = (Path(__file__).parents[2] / "sql" / "migrations" / "111_patch_run_snapshot_association.sql").read_text()
+    assert "ADD COLUMN IF NOT EXISTS snapshot_at" in migration
 
 
 def test_review_workflow_uses_integer_django_user_ids_and_has_endpoint():

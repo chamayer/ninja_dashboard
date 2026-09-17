@@ -1384,3 +1384,20 @@ Validation: focused ingest safety/evidence tests pass (38 passed, 1 optional
 skip), plus compileall and diff checks. Next action: run the full focused
 validation set, commit task-owned changes, push both remotes, and verify
 automatic rollout.
+
+## Current checkpoint — explicit patch snapshot and complete client recovery
+
+Status: [ ] Complete locally; commit and rollout verification remain.
+
+Patch collection runs now persist their cycle snapshot timestamp, matching the
+timestamp written to patch facts. Coverage and recovery require the newest
+successful fresh run and exact snapshot-associated facts for every affected
+device. Client backlog recovery uses the same complete device scope and
+latest-per-device/patch counting semantics as emission, while retaining
+assessment authority checks.
+
+Validation: focused ingest safety/evidence tests pass (38 passed, 1 optional
+skip), Operations tests pass (80), PostgreSQL policy tests pass (5), Django
+checks and migration drift checks pass, compileall passes, and diff checks are
+clean. Next action: commit task-owned changes, push both remotes, and verify
+automatic rollout.

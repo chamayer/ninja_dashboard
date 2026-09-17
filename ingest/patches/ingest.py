@@ -44,7 +44,7 @@ _BATCH_SIZE = 5000
 
 def run(client: NinjaClient, snapshot_at: datetime) -> tuple[int, int]:
     """Returns (rows_changed, rows_observed)."""
-    with run_log("patches") as stats:
+    with run_log("patches", observed_at=snapshot_at) as stats:
         total_observed = 0
         total_changed = 0
 

@@ -44,13 +44,13 @@ REASON_STALE = f"exceeded {STALE_RUN_MINUTES}m without completing — presumed h
 
 
 @contextmanager
-def run_log(domain: str) -> Iterator[dict[str, int]]:
+def run_log(domain: str, *, observed_at: datetime | None = None) -> Iterator[dict[str, Any]]:
     started = datetime.now(timezone.utc)
     with db.transaction() as cur:
         cur.execute(
-            "INSERT INTO ninja_core.run_log (domain, started_at, status) "
-            "VALUES (%s, %s, 'running') RETURNING run_id",
-            (domain, started),
+            "INSERT INTO ninja_core.run_log (domain, started_at, snapshot_at, status) "
+            "VALUES (%s, %s, %s, 'running') RETURNING run_id",
+            (domain, started, observed_at),
         )
         run_id = cur.fetchone()[0]
 

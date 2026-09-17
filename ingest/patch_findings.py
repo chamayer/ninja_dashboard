@@ -563,7 +563,7 @@ def _patch_evaluation_coverage(cur, tenant_id, subject_type, subject_id, now, po
         cur.execute(
             f"""
             WITH latest_patch_run AS (
-                SELECT status, started_at, finished_at
+                SELECT status, started_at, finished_at, snapshot_at
                   FROM ninja_core.run_log
                  WHERE domain = 'patches'
                  ORDER BY COALESCE(finished_at, started_at) DESC
@@ -593,7 +593,8 @@ def _patch_evaluation_coverage(cur, tenant_id, subject_type, subject_id, now, po
                         AND EXISTS (
                             SELECT 1 FROM ninja_patches.patch_facts fact
                              WHERE fact.device_id = link.external_id::int
-                               AND fact.last_observed_at >= run.started_at
+                        AND run.snapshot_at IS NOT NULL
+                        AND fact.last_observed_at = run.snapshot_at
                         )
                    )
             """,
@@ -603,7 +604,7 @@ def _patch_evaluation_coverage(cur, tenant_id, subject_type, subject_id, now, po
         cur.execute(
             f"""
             WITH latest_patch_run AS (
-                SELECT status, started_at, finished_at
+                SELECT status, started_at, finished_at, snapshot_at
                   FROM ninja_core.run_log
                  WHERE domain = 'patches'
                  ORDER BY COALESCE(finished_at, started_at) DESC
@@ -639,7 +640,8 @@ def _patch_evaluation_coverage(cur, tenant_id, subject_type, subject_id, now, po
                             ON facts.device_id = link.external_id::int
                          CROSS JOIN latest_patch_run run
                          WHERE link.tenant_id = %s AND link.device_id = i.device_id
-                           AND facts.last_observed_at >= run.started_at
+                           AND run.snapshot_at IS NOT NULL
+                           AND facts.last_observed_at = run.snapshot_at
                     )
                )
             """,
@@ -664,7 +666,7 @@ def _auto_resolve(cur, tenant_id, emitted_keys, now, policy) -> None:
     cur.execute(
         f"""
         WITH latest_patch_run AS (
-            SELECT status, started_at, finished_at
+            SELECT status, started_at, finished_at, snapshot_at
               FROM ninja_core.run_log
              WHERE domain = 'patches'
              ORDER BY COALESCE(finished_at, started_at) DESC
@@ -726,7 +728,8 @@ def _auto_resolve(cur, tenant_id, emitted_keys, now, policy) -> None:
                  AND EXISTS (
                      SELECT 1 FROM ninja_patches.patch_facts current_fact
                       WHERE current_fact.device_id = link.external_id::int
-                        AND current_fact.last_observed_at >= run.started_at
+                        AND run.snapshot_at IS NOT NULL
+                        AND current_fact.last_observed_at = run.snapshot_at
                  )
                  AND (
                      (ft.name = 'device_never_patched' AND EXISTS (
@@ -748,7 +751,8 @@ def _auto_resolve(cur, tenant_id, emitted_keys, now, policy) -> None:
                           WHERE facts.device_id = link.external_id::int
                             AND facts.status = 'FAILED'
                             AND facts.kb_number IS NOT NULL
-                            AND facts.last_observed_at >= run.started_at
+                            AND run.snapshot_at IS NOT NULL
+                            AND facts.last_observed_at = run.snapshot_at
                           GROUP BY facts.kb_number
                          HAVING COUNT(*) >= {policy['repeated_failure_count']}
                      ))
@@ -786,7 +790,7 @@ def _auto_resolve(cur, tenant_id, emitted_keys, now, policy) -> None:
                    CROSS JOIN latest_patch_run run
                    WHERE client_device.tenant_id = f.tenant_id
                      AND client_device.client_id = f.subject_id
-                     AND facts.last_observed_at >= run.started_at
+                     AND facts.last_observed_at = run.snapshot_at
               )
               AND (
                   SELECT COUNT(*)
@@ -804,7 +808,8 @@ def _auto_resolve(cur, tenant_id, emitted_keys, now, policy) -> None:
                          CROSS JOIN latest_patch_run run
                          WHERE client_device.tenant_id = f.tenant_id
                            AND client_device.client_id = f.subject_id
-                           AND facts.last_observed_at >= run.started_at
+                           AND run.snapshot_at IS NOT NULL
+                           AND facts.last_observed_at = run.snapshot_at
                          ORDER BY facts.device_id, facts.patch_uid,
                                   facts.last_observed_at DESC, facts.id DESC
                     ) current_patch
