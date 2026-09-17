@@ -330,6 +330,8 @@ def test_identity_readiness_covers_group_members_and_reviewed_distinct_decisions
     assert "condition_reviewed_distinct" in source
     assert "membership_fingerprint" in source
     assert "evidence_fingerprint" in source
+    assert "pg_catalog.sha256(convert_to" in source
+    assert "digest(" not in source
 
 
 def test_snapshot_and_software_exposure_require_fresh_authority():

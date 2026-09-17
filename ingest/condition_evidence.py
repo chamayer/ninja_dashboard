@@ -75,10 +75,12 @@ def device_identity_signals(cur: Any, tenant_id: int, device_ids: list[str]) -> 
                        WHERE reviewed.tenant_id = f.tenant_id
                          AND reviewed.condition_identity = f.condition_key
                          AND reviewed.membership_fingerprint = encode(
-                             digest((f.finding_details->'candidate_device_ids')::text, 'sha256'),
-                             'hex')
+                             pg_catalog.sha256(convert_to(
+                                 (f.finding_details->'candidate_device_ids')::text,
+                                 'UTF8')), 'hex')
                          AND reviewed.evidence_fingerprint = encode(
-                             digest(f.finding_details::text, 'sha256'), 'hex')
+                             pg_catalog.sha256(convert_to(
+                                 f.finding_details::text, 'UTF8')), 'hex')
                   ))
           FROM operations.devices d
          WHERE d.tenant_id = %s AND d.id = ANY(%s::uuid[]) AND d.deleted_at IS NULL
@@ -187,10 +189,12 @@ def device_identity_signal(
                            WHERE reviewed.tenant_id = conflict.tenant_id
                              AND reviewed.condition_identity = conflict.condition_key
                              AND reviewed.membership_fingerprint = encode(
-                                 digest((conflict.finding_details->'candidate_device_ids')::text, 'sha256'),
-                                 'hex')
+                                 pg_catalog.sha256(convert_to(
+                                     (conflict.finding_details->'candidate_device_ids')::text,
+                                     'UTF8')), 'hex')
                              AND reviewed.evidence_fingerprint = encode(
-                                 digest(conflict.finding_details::text, 'sha256'), 'hex')
+                                 pg_catalog.sha256(convert_to(
+                                     conflict.finding_details::text, 'UTF8')), 'hex')
                       )
                )
           FROM operations.devices d

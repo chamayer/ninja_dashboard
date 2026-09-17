@@ -417,8 +417,9 @@ policy payloads decoded successfully; the 0174 payload is byte-identical to
 the version shipped in `143d242`; targeted Ruff checks, Python compilation,
 and `git diff --check` passed.
 
-Production activation was not independently verified in this checkpoint. The
-next operational step, when separately authorized, is to review and activate
-only `conditions-taxonomy-4`, then allow evaluators to produce fresh
-assessments under that policy. No manual migration or activation is part of
-this completed implementation plan.
+Production activation was not independently verified in the original
+implementation checkpoint. It was subsequently verified active externally as
+`conditions-taxonomy-4` on 2026-09-17. A manually triggered platform evaluator
+then exposed two identity fingerprint queries that still called unavailable
+pgcrypto `digest`; those paths now use PostgreSQL 16's qualified
+`pg_catalog.sha256` and require regression validation before redeployment.

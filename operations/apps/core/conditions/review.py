@@ -19,8 +19,10 @@ def record_identity_reviewed_distinct(*, actor, tenant_id: int, finding_id, reas
         cursor.execute(
             """
             SELECT condition_key,
-                   encode(digest((finding_details->'candidate_device_ids')::text, 'sha256'), 'hex'),
-                   encode(digest(finding_details::text, 'sha256'), 'hex')
+                   encode(pg_catalog.sha256(convert_to(
+                       (finding_details->'candidate_device_ids')::text, 'UTF8')), 'hex'),
+                   encode(pg_catalog.sha256(convert_to(
+                       finding_details::text, 'UTF8')), 'hex')
               FROM operations.findings f
               JOIN operations.finding_types ft ON ft.id = f.finding_type_id
              WHERE f.tenant_id = %s AND f.id = %s AND ft.name = 'identity_conflict'
