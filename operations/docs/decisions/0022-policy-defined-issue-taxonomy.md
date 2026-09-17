@@ -17,7 +17,7 @@ human-label formatter are not taxonomy authorities. They remain available only
 for storage compatibility and unrelated surfaces.
 
 The revised registry is seeded as a new immutable, inactive policy version
-(`conditions-taxonomy-3`). It separates platform withdrawal from missing
+(`conditions-taxonomy-4`). It separates platform withdrawal from missing
 computer evidence, identity conflicts from possible duplicate Computers,
 platform-entry duplication, identifier/detail/classification problems, client
 organization matching from Computer identity matching, and current reporting

@@ -2,6 +2,17 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.126.1] — 2026-09-17 — Issues taxonomy corrections
+
+### Fixed
+
+- Added immutable policy version `conditions-taxonomy-4` so the corrected
+  taxonomy is available without rewriting the already-deployed 0174 migration.
+- Fixed complete-result group counts and severity summaries, safe group-chevron
+  toggling, and dependent filter state transitions.
+- Made historical policy migrations deterministic by embedding their original
+  policy payloads.
+
 ## [0.126.0] — 2026-09-17 — Revised Issues taxonomy
 
 ### Changed

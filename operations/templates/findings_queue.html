@@ -222,7 +222,7 @@
                 {% ifchanged row.issue_group %}
                 <tr class="issue-group-header">
                     <td colspan="9" style="padding:.65rem .5rem; background:var(--surface-subtle,#f3f4f6);">
-                        <button type="button" class="issue-group-toggle" data-group="{{ row.issue_group|slugify }}" aria-expanded="{{ row.issue_group_expanded|yesno:'true,false' }}" style="border:0; background:none; font-weight:700; cursor:pointer;">{% if row.issue_group_expanded %}▾{% else %}▸{% endif %} {{ row.issue_group }} <span class="muted">({{ row.issue_group_count }}){% if row.issue_group_severity_summary %} · {{ row.issue_group_severity_summary|join:", " }}{% endif %}</span></button>
+                        <button type="button" class="issue-group-toggle" data-group="{{ row.issue_group|slugify }}" aria-expanded="{{ row.issue_group_expanded|yesno:'true,false' }}" style="border:0; background:none; font-weight:700; cursor:pointer;"><span class="issue-group-chevron" aria-hidden="true">{% if row.issue_group_expanded %}▾{% else %}▸{% endif %}</span> {{ row.issue_group }} <span class="muted">({{ row.issue_group_count }}){% if row.issue_group_severity_summary %} · {{ row.issue_group_severity_summary|join:", " }}{% endif %}</span></button>
                     </td>
                 </tr>
                 {% endifchanged %}
@@ -409,7 +409,7 @@
             var expanded = button.getAttribute('aria-expanded') === 'true';
             var group = button.getAttribute('data-group');
             button.setAttribute('aria-expanded', expanded ? 'false' : 'true');
-            button.firstChild.textContent = expanded ? '▸' : '▾';
+            button.querySelector('.issue-group-chevron').textContent = expanded ? '▸' : '▾';
             document.querySelectorAll('.issue-group-' + CSS.escape(group)).forEach(function(row) { row.hidden = expanded; });
         });
     });

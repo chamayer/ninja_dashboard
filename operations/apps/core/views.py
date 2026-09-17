@@ -3517,6 +3517,26 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     # explicit CSV is a report of the complete filtered set. Keeping its input
     # uncapped makes its row count agree with the headline rather than silently
     # truncating at the screen limit.
+    group_summary = {
+        group["label"]: {
+            value: 0 for value, _label in Finding.Severity.choices
+        }
+        for group in issue_type_groups.values()
+    }
+    condition_groups = {
+        condition: group["label"]
+        for group in issue_type_groups.values()
+        for condition in group["types"]
+    }
+    for summary in actionable_qs.values(
+        "finding_type__name", "severity"
+    ).annotate(n=Count("id")):
+        group_label = condition_groups.get(
+            summary["finding_type__name"], "Unclassified issue"
+        )
+        group_summary.setdefault(
+            group_label, {value: 0 for value, _label in Finding.Severity.choices}
+        )[summary["severity"]] += summary["n"]
     findings = sorted(
         actionable_qs if wants_csv(request) else actionable_qs[:500],
         key=lambda f: (
@@ -4064,21 +4084,17 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     findings_with_detail.sort(key=lambda row: (row["issue_type_label"], row["issue_label"]))
     paginator = Paginator(findings_with_detail, 50)
     page = paginator.get_page(request.GET.get("page"))
-    page_group_counts = {}
-    page_group_severity = {}
     for row in findings_with_detail:
         row["issue_group"] = row["issue_type_label"]
-        page_group_counts[row["issue_group"]] = page_group_counts.get(row["issue_group"], 0) + 1
-        severity_counts = page_group_severity.setdefault(
-            row["issue_group"], {value: 0 for value, _label in Finding.Severity.choices}
-        )
-        severity_counts[row["f"].severity] += 1
     severity_labels = dict(Finding.Severity.choices)
     for row in page.object_list:
-        row["issue_group_count"] = page_group_counts[row["issue_group"]]
+        severity_counts = group_summary.get(
+            row["issue_group"], {value: 0 for value, _label in Finding.Severity.choices}
+        )
+        row["issue_group_count"] = sum(severity_counts.values())
         row["issue_group_severity_summary"] = [
             f"{severity_labels[value]} {count}"
-            for value, count in page_group_severity[row["issue_group"]].items()
+            for value, count in severity_counts.items()
             if count
         ]
         row["issue_group_expanded"] = bool(

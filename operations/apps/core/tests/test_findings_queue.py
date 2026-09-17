@@ -144,6 +144,8 @@ def test_findings_queue_template_exposes_device_csv_and_grouped_types():
     assert "row.hidden = expanded" in template
     assert "issue_group_severity_summary" in template
     assert "json_script:\"issue-taxonomy-data\"" in template
+    assert '<span class="issue-group-chevron"' in template
+    assert "querySelector('.issue-group-chevron')" in template
     assert "card.count }} / {{ card.total" not in template
     assert "card.percentage" not in template
     assert "action.label" in template
@@ -153,6 +155,12 @@ def test_findings_queue_template_exposes_device_csv_and_grouped_types():
     assert "Archive in Hudu" in template
     assert "Hudu source record:" in template
     assert "archiveHuduRow" in template
+
+
+def test_findings_group_summaries_are_computed_before_screen_cap():
+    source = Path("apps/core/views.py").read_text(encoding="utf-8")
+    assert source.index("group_summary =") < source.index("actionable_qs[:500]")
+    assert 'actionable_qs.values(\n        "finding_type__name", "severity"' in source
 
 
 class _FindingActionUser:

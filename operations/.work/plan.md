@@ -402,7 +402,7 @@ policy version should be activated yet.
 
 The revised taxonomy is implemented locally in the packaged profile, Issues
 projection, validator, tests, documentation, and frozen additive migration
-`conditions-taxonomy-3`. Group collapse, severity summaries, legacy-policy
+`conditions-taxonomy-4`. Group collapse, severity summaries, legacy-policy
 fallbacks, dependent filter behavior, historical identity separation, and
 deterministic historical migration payloads are included. The prior production
 policy state was not reverified in this checkpoint; do not infer live
