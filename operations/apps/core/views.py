@@ -29,6 +29,7 @@ from . import capability as capability_evidence
 from . import category as category_evidence
 from .client_workspace import build_client_directory, build_client_workspace
 from .conditions.live import load_active_profile
+from .conditions.review import record_identity_reviewed_distinct
 from .csv_export import csv_response, wants_csv
 from .decorators import require_admin
 from .device_status import DEFAULTS as DEVICE_STATUS_DEFAULTS
@@ -4147,6 +4148,26 @@ def _policy_candidate_state_action_blocked(request: HttpRequest, finding: Findin
         "a global, client, or device decision is the authoritative action.",
     )
     return True
+
+
+@login_required
+@require_POST
+def finding_reviewed_distinct(request: HttpRequest, finding_id: str) -> HttpResponse:
+    """Approve an identity conflict as distinct for its current evidence."""
+    finding = get_object_or_404(
+        Finding.objects.select_related("finding_type"),
+        id=finding_id,
+        tenant_id=1,
+        finding_type__name="identity_conflict",
+    )
+    record_identity_reviewed_distinct(
+        actor=request.user,
+        tenant_id=1,
+        finding_id=finding.id,
+        reason=request.POST.get("reason", ""),
+    )
+    messages.success(request, "Identity conflict reviewed as distinct for the current evidence.")
+    return redirect(request.POST.get("next") or "findings_queue")
 
 
 @login_required

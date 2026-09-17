@@ -143,6 +143,21 @@ SELECT e.finding_id, e.tenant_id, e.finding_type_id, e.finding_type,
           AND evidence.canonical_name = installation.canonical_name
           AND evidence.evidence_state IN ('current', 'offline')
    )
+   AND EXISTS (
+       SELECT 1
+         FROM operations.condition_assessments assessment
+        JOIN operations.condition_policy_versions policy
+          ON policy.version = assessment.policy_version AND policy.active
+        WHERE assessment.tenant_id = installation.tenant_id
+          AND assessment.row_kind = 'entity'
+          AND assessment.finding_id = e.finding_id
+          AND assessment.participant_kind = 'device'
+          AND assessment.participant_id = installation.device_id
+          AND assessment.participant_role <> 'context'
+          AND (assessment.response->>'may_execute')::boolean IS TRUE
+          AND assessment.assessed_at >= now() -
+              (policy.policy->>'freshness_hours')::integer * interval '1 hour'
+   )
    AND NOT EXISTS (
         SELECT 1 FROM operations.software_decisions decision
          WHERE decision.tenant_id = installation.tenant_id

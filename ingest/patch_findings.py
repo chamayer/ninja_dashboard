@@ -38,7 +38,11 @@ from datetime import datetime, timezone
 
 from ingest import db
 from ingest.conditions import record_assessment
-from ingest.condition_evidence import preserve_operator_episode
+from ingest.condition_evidence import (
+    device_identity_signal,
+    offline_readiness,
+    preserve_operator_episode,
+)
 from shared.conditions.contracts import (
     Condition,
     EvaluationCoverage,
@@ -519,19 +523,34 @@ def _record_assessment(cur, tenant_id, finding_id, ft_id, condition_key,
         tenant_id, "entity", str(finding_id), type_name, condition_key, "open",
         (participant,),
     )
-    # Patch rows do not themselves prove identity or current agent contact.
-    # Until those scopes are measured by the shared evidence reader, keep the
-    # assessment fail-closed instead of turning producer assumptions into
-    # response eligibility.
-    signals = (
-        Signal("identity", participant, Readiness.UNKNOWN, "identity:readiness_not_measured"),
-        Signal("offline", participant, Readiness.UNKNOWN, "offline:readiness_not_measured"),
-    ) if subject_type == "device" else ()
+    signals = ()
+    if subject_type == "device":
+        identity = device_identity_signal(cur, tenant_id, str(subject_id))
+        cur.execute(
+            """
+            SELECT COALESCE(last_contact_at, last_observed_at)
+              FROM operations.device_agent_presence_current
+             WHERE tenant_id = %s AND device_id = %s AND platform = 'Ninja'
+             ORDER BY COALESCE(last_contact_at, last_observed_at) DESC NULLS LAST
+             LIMIT 1
+            """,
+            (tenant_id, subject_id),
+        )
+        contact_row = cur.fetchone()
+        offline_state, offline_reason = offline_readiness(
+            [contact_row[0] if contact_row else None],
+            now=now,
+            offline_days=_policy(cur, tenant_id)["patch_activity_days"],
+        )
+        signals = (
+            identity,
+            Signal("offline", participant, offline_state, offline_reason),
+        )
     record_assessment(
         cur,
         condition,
         signals,
-        EvaluationCoverage(False, False, False, False),
+        EvaluationCoverage(True, True, True, True),
         now=now,
         reevaluation_key=f"patch:{condition_key}",
         participant=participant,

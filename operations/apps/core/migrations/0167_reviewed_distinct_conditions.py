@@ -12,7 +12,7 @@ CREATE TABLE operations.condition_reviewed_distinct (
     condition_identity TEXT NOT NULL,
     membership_fingerprint TEXT NOT NULL,
     evidence_fingerprint TEXT NOT NULL,
-    reviewer_id UUID NOT NULL,
+    reviewer_id BIGINT NOT NULL,
     reason TEXT NOT NULL CHECK (length(btrim(reason)) > 0),
     reviewed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (tenant_id, condition_identity)
@@ -30,7 +30,7 @@ GRANT SELECT ON operations.condition_reviewed_distinct TO ninja_ingest;
 
 CREATE OR REPLACE FUNCTION operations.record_reviewed_distinct(
     p_tenant_id BIGINT, p_condition_identity TEXT, p_membership_fingerprint TEXT,
-    p_evidence_fingerprint TEXT, p_reviewer_id UUID, p_reason TEXT
+    p_evidence_fingerprint TEXT, p_reviewer_id BIGINT, p_reason TEXT
 ) RETURNS VOID LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = pg_catalog, operations AS $$
 BEGIN
@@ -52,16 +52,16 @@ BEGIN
         reviewed_at = now();
 END
 $$;
-ALTER FUNCTION operations.record_reviewed_distinct(BIGINT, TEXT, TEXT, TEXT, UUID, TEXT)
+ALTER FUNCTION operations.record_reviewed_distinct(BIGINT, TEXT, TEXT, TEXT, BIGINT, TEXT)
     OWNER TO operations_migrate;
-REVOKE ALL ON FUNCTION operations.record_reviewed_distinct(BIGINT, TEXT, TEXT, TEXT, UUID, TEXT)
+REVOKE ALL ON FUNCTION operations.record_reviewed_distinct(BIGINT, TEXT, TEXT, TEXT, BIGINT, TEXT)
     FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION operations.record_reviewed_distinct(BIGINT, TEXT, TEXT, TEXT, UUID, TEXT)
+GRANT EXECUTE ON FUNCTION operations.record_reviewed_distinct(BIGINT, TEXT, TEXT, TEXT, BIGINT, TEXT)
     TO operations_app;
 """
 
 REVERSE_SQL = """
-DROP FUNCTION IF EXISTS operations.record_reviewed_distinct(BIGINT, TEXT, TEXT, TEXT, UUID, TEXT);
+DROP FUNCTION IF EXISTS operations.record_reviewed_distinct(BIGINT, TEXT, TEXT, TEXT, BIGINT, TEXT);
 DROP TABLE IF EXISTS operations.condition_reviewed_distinct;
 """
 

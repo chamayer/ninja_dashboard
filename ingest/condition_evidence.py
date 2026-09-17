@@ -17,8 +17,9 @@ def complete_snapshot_available(
     source_binding_id: str | None = None,
     snapshot_scope: str | None = None,
     now: datetime,
+    max_age_hours: int = 24,
 ) -> bool:
-    """Return true only for a complete, internally consistent current run."""
+    """Return true only for a recent, complete, internally consistent run."""
     scope_clause = "AND snapshot_scope = %s" if snapshot_scope else ""
     binding_clause = "AND source_binding_id = %s" if source_binding_id else ""
     params = [tenant_id, source_instance_id]
@@ -34,23 +35,28 @@ def complete_snapshot_available(
          WHERE tenant_id = %s AND source_instance_id = %s
            {binding_clause}
            {scope_clause}
-         ORDER BY completed_at DESC NULLS LAST, run_started_at DESC
+           AND status = 'complete'
+           AND is_complete_snapshot IS TRUE
+           AND failed_rows = 0
+           AND expected_rows = written_rows
+           AND run_started_at IS NOT NULL
+           AND completed_at IS NOT NULL
+           AND completed_at <= %s
+           AND completed_at >= %s - (%s * interval '1 hour')
+         ORDER BY completed_at DESC
          LIMIT 1
         """,
-        params,
+        [*params, now, now, max_age_hours],
     )
     row = cur.fetchone()
     if row is None:
         return False
     status, complete, expected, written, failed, started, completed = row
     return bool(
-        status == "complete"
-        and complete is True
-        and failed == 0
-        and expected == written
-        and started is not None
-        and completed is not None
+        status == "complete" and complete is True and failed == 0
+        and expected == written and started is not None and completed is not None
         and started <= completed <= now
+        and completed >= now - timedelta(hours=max_age_hours)
     )
 
 
@@ -63,9 +69,22 @@ def device_identity_signals(cur: Any, tenant_id: int, device_ids: list[str]) -> 
         SELECT d.id, d.entity_id IS NOT NULL AND d.client_id IS NOT NULL,
                EXISTS (SELECT 1 FROM operations.findings f
                  JOIN operations.finding_types ft ON ft.id = f.finding_type_id
-                WHERE f.tenant_id = d.tenant_id AND f.subject_id = d.id
+                WHERE f.tenant_id = d.tenant_id
+                  AND (f.subject_id = d.id OR f.finding_details->'candidate_device_ids'
+                       @> jsonb_build_array(d.id::text))
                   AND ft.name = 'identity_conflict'
-                  AND f.status IN ('open','acknowledged','investigating','suppressed'))
+                  AND f.status IN ('open','acknowledged','investigating','suppressed')
+                  AND NOT EXISTS (
+                      SELECT 1
+                        FROM operations.condition_reviewed_distinct reviewed
+                       WHERE reviewed.tenant_id = f.tenant_id
+                         AND reviewed.condition_identity = f.condition_key
+                         AND reviewed.membership_fingerprint = encode(
+                             digest((f.finding_details->'candidate_device_ids')::text, 'sha256'),
+                             'hex')
+                         AND reviewed.evidence_fingerprint = encode(
+                             digest(f.finding_details::text, 'sha256'), 'hex')
+                  ))
           FROM operations.devices d
          WHERE d.tenant_id = %s AND d.id = ANY(%s::uuid[]) AND d.deleted_at IS NULL
         """,
@@ -163,9 +182,21 @@ def device_identity_signal(
                      JOIN operations.finding_types conflict_type
                        ON conflict_type.id = conflict.finding_type_id
                     WHERE conflict.tenant_id = d.tenant_id
-                      AND conflict.subject_id = d.id
+                      AND (conflict.subject_id = d.id OR conflict.finding_details->'candidate_device_ids'
+                           @> jsonb_build_array(d.id::text))
                       AND conflict_type.name = 'identity_conflict'
                       AND conflict.status IN ('open', 'acknowledged', 'investigating', 'suppressed')
+                      AND NOT EXISTS (
+                          SELECT 1
+                            FROM operations.condition_reviewed_distinct reviewed
+                           WHERE reviewed.tenant_id = conflict.tenant_id
+                             AND reviewed.condition_identity = conflict.condition_key
+                             AND reviewed.membership_fingerprint = encode(
+                                 digest((conflict.finding_details->'candidate_device_ids')::text, 'sha256'),
+                                 'hex')
+                             AND reviewed.evidence_fingerprint = encode(
+                                 digest(conflict.finding_details::text, 'sha256'), 'hex')
+                      )
                )
           FROM operations.devices d
          WHERE d.tenant_id = %s AND d.id = %s AND d.deleted_at IS NULL

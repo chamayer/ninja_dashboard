@@ -313,3 +313,55 @@ def test_admin_notifications_require_non_context_participants():
     admin = source[source.index("FROM operations.admin_findings"):source.index("def _load_route")]
     assert "participant.row_kind = 'admin'" in admin
     assert "pa.response ->> 'may_notify'" in admin
+
+
+def test_notification_recheck_accepts_participant_assessments_without_aggregate_row():
+    source = (Path(__file__).parents[1] / "notifications.py").read_text()
+    helper = source[source.index("def _still_notifyable"):source.index("def _load_rules")]
+    assert "authority.participant_kind" not in helper
+    assert "authority.response->>'may_notify'" in helper
+    assert "NOT EXISTS" in helper
+
+
+def test_identity_readiness_covers_group_members_and_reviewed_distinct_decisions():
+    source = (Path(__file__).parents[1] / "condition_evidence.py").read_text()
+    assert "candidate_device_ids" in source
+    assert "condition_reviewed_distinct" in source
+    assert "membership_fingerprint" in source
+    assert "evidence_fingerprint" in source
+
+
+def test_snapshot_and_software_exposure_require_fresh_authority():
+    evidence = (Path(__file__).parents[1] / "condition_evidence.py").read_text()
+    assert "max_age_hours: int = 24" in evidence
+    migration = (
+        Path(__file__).parents[2] / "sql" / "migrations" / "109_condition_gated_software_exposure.sql"
+    ).read_text()
+    assert "assessment.participant_kind = 'device'" in migration
+    assert "assessment.response->>'may_execute'" in migration
+    assert "freshness_hours" in migration
+
+
+def test_patch_assessments_measure_identity_offline_and_coverage():
+    source = (Path(__file__).parents[1] / "patch_findings.py").read_text()
+    section = source[source.index("def _record_assessment"):source.index("def _auto_resolve")]
+    assert "device_identity_signal" in section
+    assert "offline_readiness" in section
+    assert "EvaluationCoverage(True, True, True, True)" in section
+
+
+def test_review_workflow_uses_integer_django_user_ids_and_has_endpoint():
+    migration = (
+        Path(__file__).parents[2]
+        / "operations"
+        / "apps"
+        / "core"
+        / "migrations"
+        / "0169_align_condition_reviewer_ids.py"
+    ).read_text()
+    assert "ALTER COLUMN reviewer_id TYPE BIGINT" in migration
+    assert "p_reviewer BIGINT" in migration
+    views = (Path(__file__).parents[2] / "operations" / "apps" / "core" / "views.py").read_text(encoding="utf-8")
+    urls = (Path(__file__).parents[2] / "operations" / "config" / "urls.py").read_text(encoding="utf-8")
+    assert "record_identity_reviewed_distinct" in views
+    assert "finding_reviewed_distinct" in urls

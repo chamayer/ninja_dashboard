@@ -100,19 +100,21 @@ def _still_notifyable(finding: dict[str, Any], tenant_id: int) -> bool:
             SELECT EXISTS (
                 SELECT 1
                   FROM operations.findings f
-                  JOIN operations.condition_assessments a
-                    ON a.tenant_id = f.tenant_id
-                   AND a.row_kind = 'entity'
-                   AND a.finding_id = f.id
-                   AND a.participant_kind = 'condition'
-                  JOIN operations.condition_policy_versions p
-                    ON p.version = a.policy_version AND p.active
                  WHERE f.tenant_id = %s AND f.id = %s
                    AND f.status IN ('open', 'acknowledged')
                    AND (f.snoozed_until IS NULL OR f.snoozed_until <= now())
-                   AND (a.response->>'may_notify')::boolean IS TRUE
-                   AND a.assessed_at >= now() -
-                       (p.policy->>'freshness_hours')::integer * interval '1 hour'
+                   AND EXISTS (
+                       SELECT 1
+                         FROM operations.condition_assessments authority
+                         JOIN operations.condition_policy_versions policy
+                           ON policy.version = authority.policy_version AND policy.active
+                        WHERE authority.tenant_id = f.tenant_id
+                          AND authority.row_kind = 'entity'
+                          AND authority.finding_id = f.id
+                          AND (authority.response->>'may_notify')::boolean IS TRUE
+                          AND authority.assessed_at >= now() -
+                              (policy.policy->>'freshness_hours')::integer * interval '1 hour'
+                   )
                    AND NOT EXISTS (
                        SELECT 1
                          FROM operations.condition_participants participant
@@ -143,18 +145,20 @@ def _still_notifyable(finding: dict[str, Any], tenant_id: int) -> bool:
             SELECT EXISTS (
                 SELECT 1
                   FROM operations.admin_findings f
-                  JOIN operations.condition_assessments a
-                    ON a.tenant_id = f.tenant_id
-                   AND a.row_kind = 'admin'
-                   AND a.finding_id = f.id
-                   AND a.participant_kind = 'condition'
-                  JOIN operations.condition_policy_versions p
-                    ON p.version = a.policy_version AND p.active
                  WHERE f.tenant_id = %s AND f.id = %s
                    AND f.status IN ('open', 'acknowledged')
-                  AND (a.response->>'may_notify')::boolean IS TRUE
-                   AND a.assessed_at >= now() -
-                       (p.policy->>'freshness_hours')::integer * interval '1 hour'
+                   AND EXISTS (
+                       SELECT 1
+                         FROM operations.condition_assessments authority
+                         JOIN operations.condition_policy_versions policy
+                           ON policy.version = authority.policy_version AND policy.active
+                        WHERE authority.tenant_id = f.tenant_id
+                          AND authority.row_kind = 'admin'
+                          AND authority.finding_id = f.id
+                          AND (authority.response->>'may_notify')::boolean IS TRUE
+                          AND authority.assessed_at >= now() -
+                              (policy.policy->>'freshness_hours')::integer * interval '1 hour'
+                   )
                    AND NOT EXISTS (
                        SELECT 1
                          FROM operations.condition_participants participant
@@ -165,6 +169,8 @@ def _still_notifyable(finding: dict[str, Any], tenant_id: int) -> bool:
                           AND NOT EXISTS (
                               SELECT 1
                                 FROM operations.condition_assessments pa
+                                JOIN operations.condition_policy_versions pp
+                                  ON pp.version = pa.policy_version AND pp.active
                                WHERE pa.tenant_id = participant.tenant_id
                                  AND pa.row_kind = participant.row_kind
                                  AND pa.finding_id = participant.finding_id
@@ -173,7 +179,7 @@ def _still_notifyable(finding: dict[str, Any], tenant_id: int) -> bool:
                                  AND pa.participant_role = participant.participant_role
                                  AND (pa.response->>'may_notify')::boolean IS TRUE
                                  AND pa.assessed_at >= now() -
-                                     (p.policy->>'freshness_hours')::integer * interval '1 hour'
+                                     (pp.policy->>'freshness_hours')::integer * interval '1 hour'
                           )
                    )
             )

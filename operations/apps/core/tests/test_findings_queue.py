@@ -283,6 +283,8 @@ def test_findings_queue_exposes_governed_response_filter():
     assert '"Response reasons"' in source
     assert '"Assessment scope"' in source
     assert "Policy:" in template
+    assert "finding_reviewed_distinct" in template
+    assert "Reviewed distinct" in template
 
 
 def test_findings_queue_canonicalizes_legacy_category_urls():

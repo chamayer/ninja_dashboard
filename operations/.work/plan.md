@@ -405,7 +405,7 @@ skips/outages/offline never close findings; genuine recovery still closes them.
 
 ### WP5 — One effective response for every subscriber
 
-Status: [x] Complete locally and deployed. Dependency: WP2-WP4.
+Status: [ ] Blocker remediation complete locally; deployment validation pending. Dependency: WP2-WP4.
 
 Implement one shared validity/selection contract, optionally an indexed SQL read
 projection plus engine-produced assessments. SQL only validates currentness/
@@ -562,7 +562,7 @@ the remaining WP5 acceptance work.
 
 ### WP6 — Complete human-facing taxonomy, discovery and admin evidence
 
-Status: [x] Complete locally and deployed. Dependency: WP2 and effective response in WP5.
+Status: [ ] Blocker remediation complete locally; deployment validation pending. Dependency: WP2 and effective response in WP5.
 
 Files: Operations views, templates, admin/forms, human_labels, context processors,
 client workspace, APIs/CSV where applicable. Preserve user template hunks.
@@ -606,7 +606,7 @@ Admin can explain/change policy safely. Counts match the described population.
 
 ### WP7 — Focused integrated validation and rollout readiness
 
-Status: [x] Complete locally and deployed. Dependency: WP2-WP6.
+Status: [ ] Pending post-push integrated validation. Dependency: WP2-WP6.
 
 Keep tests risk-based: parameterized scenarios, not a large unrelated campaign.
 
@@ -649,7 +649,7 @@ works, and operational limitations are explicit.
 
 ### WP8 — Release, documentation and final acceptance
 
-Status: [x] Complete locally and deployed. Dependency: all prior exit gates.
+Status: [ ] Pending authorized commit, push, and automatic rollout verification. Dependency: all prior exit gates.
 
 - [x] Reconcile VERSION/CHANGELOG mismatch for already-shipped live behavior;
   prepare the next reviewed release with both updated together. Do not bump
@@ -1321,3 +1321,25 @@ scopes from authorizing downstream responses. Source-action request IDs,
 action keys, and exact legacy target fields remain unchanged. Focused
 merge/source-action tests and the full ingest safety-contract set pass; live
 migration and concurrency behavior remain release-gated.
+## Current checkpoint — seven condition-integration blockers
+
+Status: [ ] Implementation complete locally; commit, push, and automatic
+rollout verification remain.
+
+Scope completed in this checkpoint: notification eligibility now accepts the
+producer's participant-level assessments while still requiring every required
+scope; identity conflicts cover all candidate group members and honor current
+reviewed-distinct decisions; complete snapshots require a bounded freshness
+window; patch assessments record measured identity/contact coverage; reviewer
+IDs align with Django integer user IDs through migration 0169; software
+exposure requires a fresh effective device assessment; and the reviewed-
+distinct helper is reachable from an authenticated POST endpoint and queue UI.
+
+Validation completed: focused ingest safety/evidence tests pass (35 passed, 1
+optional skip), Operations condition/findings tests pass (80 passed), the
+disposable PostgreSQL policy suite passes (5 passed), Django checks and
+migration drift checks pass, and compileall passes.
+
+Next action: run the final focused checks, commit only task-owned changes,
+push `origin` then `a-m-rose`, and verify automatic migration, health, grants,
+RLS, and view behavior through the authorized read-only production helper.

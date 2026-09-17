@@ -40,6 +40,11 @@ def test_failed_or_future_snapshot_is_not_evidence():
     assert not complete_snapshot_available(Cursor(future), 1, "source", now=NOW)
 
 
+def test_old_snapshot_is_not_current_even_when_complete():
+    old = ("complete", True, 10, 10, 0, NOW - timedelta(days=2), NOW - timedelta(days=2))
+    assert not complete_snapshot_available(Cursor(old), 1, "source", now=NOW)
+
+
 def test_device_identity_signal_requires_attachment_and_no_conflict():
     ready = device_identity_signal(Cursor((True, False)), 1, "device")
     blocked = device_identity_signal(Cursor((True, True)), 1, "device")

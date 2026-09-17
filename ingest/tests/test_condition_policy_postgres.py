@@ -148,6 +148,7 @@ def test_policy_creation_activation_and_runtime_permissions(pg):
         cur.execute(_migration_sql("0165_govern_condition_policy_activation.py"))
         cur.execute(_migration_sql("0166_condition_assessment_integrity.py"))
         cur.execute(_migration_sql("0167_reviewed_distinct_conditions.py"))
+        cur.execute(_migration_sql("0169_align_condition_reviewer_ids.py"))
     with psycopg.connect(pg["app"], autocommit=True) as conn, conn.cursor() as cur:
         cur.execute("SET operations.tenant_id = '1'")
         with pytest.raises(psycopg.errors.RaiseException):
@@ -156,7 +157,7 @@ def test_policy_creation_activation_and_runtime_permissions(pg):
             )
         cur.execute(
             "SELECT operations.review_condition_policy_version(%s,%s,%s,%s::jsonb)",
-            (profile["version"], uuid4(), "Initial policy review", json.dumps({"valid": True})),
+            (profile["version"], 1, "Initial policy review", json.dumps({"valid": True})),
         )
         cur.execute(
             "SELECT operations.activate_condition_policy_version(%s)", (profile["version"],)
@@ -199,7 +200,7 @@ def test_policy_creation_activation_and_runtime_permissions(pg):
         )
         cur.execute(
             "SELECT operations.review_condition_policy_version(%s,%s,%s,%s::jsonb)",
-            (replacement["version"], uuid4(), "Replacement policy review", json.dumps({"valid": True})),
+            (replacement["version"], 1, "Replacement policy review", json.dumps({"valid": True})),
         )
         cur.execute(
             "SELECT operations.activate_condition_policy_version(%s)",

@@ -9,7 +9,7 @@ from django.db import migrations
 FORWARD_SQL = """
 CREATE TABLE operations.condition_policy_reviews (
     version TEXT PRIMARY KEY REFERENCES operations.condition_policy_versions(version),
-    reviewer_id UUID NOT NULL,
+    reviewer_id BIGINT NOT NULL,
     reason TEXT NOT NULL CHECK (length(btrim(reason)) > 0),
     validation_result JSONB NOT NULL CHECK (jsonb_typeof(validation_result) = 'object'),
     reviewed_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -21,7 +21,7 @@ GRANT SELECT ON operations.condition_policy_reviews TO operations_app, ninja_ing
     operations_readonly, metabase_ro;
 
 CREATE OR REPLACE FUNCTION operations.review_condition_policy_version(
-    p_version TEXT, p_reviewer UUID, p_reason TEXT, p_validation_result JSONB
+    p_version TEXT, p_reviewer BIGINT, p_reason TEXT, p_validation_result JSONB
 ) RETURNS VOID LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = pg_catalog, operations AS $$
 BEGIN
@@ -75,11 +75,11 @@ BEGIN
 END
 $$;
 
-ALTER FUNCTION operations.review_condition_policy_version(TEXT, UUID, TEXT, JSONB)
+ALTER FUNCTION operations.review_condition_policy_version(TEXT, BIGINT, TEXT, JSONB)
     OWNER TO operations_migrate;
-REVOKE ALL ON FUNCTION operations.review_condition_policy_version(TEXT, UUID, TEXT, JSONB)
+REVOKE ALL ON FUNCTION operations.review_condition_policy_version(TEXT, BIGINT, TEXT, JSONB)
     FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION operations.review_condition_policy_version(TEXT, UUID, TEXT, JSONB)
+GRANT EXECUTE ON FUNCTION operations.review_condition_policy_version(TEXT, BIGINT, TEXT, JSONB)
     TO operations_app;
 """
 

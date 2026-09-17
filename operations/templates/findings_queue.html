@@ -288,6 +288,9 @@
                             {% if f.finding_type.name == "device_missing_from_source" and row.subject_url %}
                                 <a class="btn btn-secondary" href="{{ row.subject_url }}?tab=observations" style="padding:0.15rem 0.5rem; font-size:0.75rem;">Review</a>
                             {% endif %}
+                            {% if f.finding_type.name == "identity_conflict" and f.status != "resolved" %}
+                                <button type="submit" formaction="{% url 'finding_reviewed_distinct' f.id %}" name="reason" value="Reviewed as distinct after comparing source records" style="padding:0.15rem 0.5rem; font-size:0.75rem;">Reviewed distinct</button>
+                            {% endif %}
                             {% if f.status == "open" %}
                                 <button type="submit" formaction="{% url 'finding_acknowledge' f.id %}" style="padding:0.15rem 0.5rem; font-size:0.75rem;">Ack</button>
                             {% endif %}
