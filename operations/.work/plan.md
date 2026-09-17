@@ -1358,5 +1358,5 @@ aggregate assessment requirement from the initial admin notification selector.
 Validation: focused tests are in progress. Pre-existing probe artifacts under
 `.work/` remain untracked and are excluded from this change.
 
-Next action: finish focused validation, commit task-owned changes, push both
-authorized remotes, and verify automatic migration and service health.
+Next action: push the follow-up SQL permission migration 110 and verify its
+automatic application and service health.
