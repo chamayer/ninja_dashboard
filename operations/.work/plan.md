@@ -1346,7 +1346,7 @@ migration was run. The broader WP5-WP8 plan retains any unrelated acceptance
 items separately.
 ## Current checkpoint — five remaining condition-integration blockers
 
-Status: [ ] Complete locally; rollout verification remains.
+Status: [x] Complete and deployed.
 
 Scope: grant the software-exposure view owner access to condition tables;
 measure software device coverage and contact readiness for every affected
@@ -1378,8 +1378,9 @@ condition assessment and participant authority checks.
 
 Validation: 38 ingest safety/evidence tests pass with one optional skip, 80
 Operations tests pass, 5 PostgreSQL policy tests pass, and Django checks,
-migration drift, compileall, and diff checks pass. Next action: commit,
-push both remotes, and verify automatic rollout.
+migration drift, compileall, and diff checks pass. Commit `5991c43` is pushed
+to both remotes. Automatic rollout restarted `operations-ingest` healthy, and
+the production SQL ledger shows migrations 109, 110, and 111 applied.
 
 ## Current checkpoint — patch clearing evidence hardening
 
