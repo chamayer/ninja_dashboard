@@ -79,6 +79,9 @@ SELECT e.finding_id, e.tenant_id, e.finding_type_id, e.finding_type,
    );
 
 ALTER VIEW operations.v_device_software_exposure OWNER TO operations_view_owner;
+GRANT SELECT ON operations.condition_assessments,
+    operations.condition_policy_versions
+TO operations_view_owner;
 REVOKE ALL ON operations.v_device_software_exposure
 FROM PUBLIC, operations_app, ninja_ingest, operations_readonly, metabase_ro;
 GRANT SELECT ON operations.v_device_software_exposure

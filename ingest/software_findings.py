@@ -25,7 +25,11 @@ import uuid
 from datetime import datetime, timezone
 
 from ingest import db
-from ingest.condition_evidence import device_identity_signal, successful_run_available
+from ingest.condition_evidence import (
+    device_identity_signal,
+    offline_readiness,
+    successful_run_available,
+)
 from ingest.conditions import record_assessment
 from ingest.config import settings
 from shared.conditions.contracts import (
@@ -1021,8 +1025,7 @@ def _emit_scoped(cur, tenant_id, ft_id, client_id, device_id, canonical_key,
         if subject_type in ("software_version", "software_installation"):
             key_material = f"{canonical_key}@{subject_id}"
     ckey = _condition_key(tenant_id, key_client, key_device, str(ft_id), key_material)
-    if ckey in emitted_keys:
-        return 0
+    already_emitted = ckey in emitted_keys
     emitted_keys.add(ckey)
     details = {
         "canonical_name": canonical_key,
@@ -1086,14 +1089,38 @@ def _emit_scoped(cur, tenant_id, ft_id, client_id, device_id, canonical_key,
         for participant in participant_rows:
             signals = ()
             if participant.kind == "device":
+                cur.execute(
+                    """
+                    SELECT COALESCE(last_contact_at, last_observed_at)
+                      FROM operations.device_agent_presence_current
+                     WHERE tenant_id = %s AND device_id = %s AND platform = 'Ninja'
+                     ORDER BY COALESCE(last_contact_at, last_observed_at) DESC NULLS LAST
+                     LIMIT 1
+                    """,
+                    (tenant_id, device_id),
+                )
+                contact_row = cur.fetchone()
+                cur.execute(
+                    """
+                    SELECT config FROM operations.evaluator_config
+                     WHERE tenant_id = %s AND evaluator_name = 'device_status'
+                    """,
+                    (tenant_id,),
+                )
+                policy_row = cur.fetchone()
+                policy = policy_row[0] if policy_row and isinstance(policy_row[0], dict) else {}
+                try:
+                    offline_days = max(1, int(policy.get("patch_activity_days", 35)))
+                except (TypeError, ValueError):
+                    offline_days = 35
+                offline_state, offline_reason = offline_readiness(
+                    [contact_row[0] if contact_row else None],
+                    now=now,
+                    offline_days=offline_days,
+                )
                 signals = (
                     device_identity_signal(cur, tenant_id, str(device_id)),
-                    Signal(
-                        "offline",
-                        participant,
-                        Readiness.UNKNOWN,
-                        "offline:contact_unavailable",
-                    ),
+                    Signal("offline", participant, offline_state, offline_reason),
                 )
             record_assessment(
                 cur,
@@ -1109,7 +1136,7 @@ def _emit_scoped(cur, tenant_id, ft_id, client_id, device_id, canonical_key,
                 reevaluation_key=f"software:{ckey}",
                 participant=participant,
             )
-    return 1
+    return 0 if already_emitted else 1
 
 
 def _auto_resolve(

@@ -100,7 +100,7 @@ def classify(tenant_id: int = _TENANT_ID) -> int:
             affected += _emit_failing_repeatedly(cur, tenant_id, ft_ids, now, emitted_keys, policy)
             affected += _emit_approval_backlog(cur, tenant_id, ft_ids, now, emitted_keys, policy)
 
-            _auto_resolve(cur, tenant_id, emitted_keys, now)
+            _auto_resolve(cur, tenant_id, emitted_keys, now, policy)
     except Exception as exc:
         error = str(exc)[:2000]
         raise
@@ -550,14 +550,47 @@ def _record_assessment(cur, tenant_id, finding_id, ft_id, condition_key,
         cur,
         condition,
         signals,
-        EvaluationCoverage(True, True, True, True),
+        _patch_evaluation_coverage(cur, tenant_id, subject_type, subject_id),
         now=now,
         reevaluation_key=f"patch:{condition_key}",
         participant=participant,
     )
 
 
-def _auto_resolve(cur, tenant_id, emitted_keys, now) -> None:
+def _patch_evaluation_coverage(cur, tenant_id, subject_type, subject_id):
+    """Measure the source scope used by this patch assessment."""
+    if subject_type == "device":
+        cur.execute(
+            """
+            SELECT to_regclass('operations.v_device') IS NOT NULL
+               AND to_regclass('operations.device_agent_presence_current') IS NOT NULL
+               AND to_regclass('ninja_patches.device_patch_signal') IS NOT NULL
+               AND EXISTS (
+                   SELECT 1 FROM operations.v_device
+                    WHERE tenant_id = %s AND device_id = %s
+               )
+            """,
+            (tenant_id, subject_id),
+        )
+    elif subject_type == "client":
+        cur.execute(
+            """
+            SELECT to_regclass('operations.clients') IS NOT NULL
+               AND to_regclass('ninja_patches.patch_facts') IS NOT NULL
+               AND EXISTS (
+                   SELECT 1 FROM operations.clients
+                    WHERE tenant_id = %s AND id = %s AND deleted_at IS NULL
+               )
+            """,
+            (tenant_id, subject_id),
+        )
+    else:
+        cur.execute("SELECT FALSE")
+    measured = bool(cur.fetchone()[0])
+    return EvaluationCoverage(measured, measured, measured, measured)
+
+
+def _auto_resolve(cur, tenant_id, emitted_keys, now, policy) -> None:
     """Close findings that no longer meet the active patching criteria.
 
     A patch condition is actionable only while Ninja currently reports the
@@ -570,7 +603,7 @@ def _auto_resolve(cur, tenant_id, emitted_keys, now) -> None:
     if not emitted_keys:
         return
     cur.execute(
-        """
+        f"""
         UPDATE operations.findings f
         SET status = 'resolved',
             last_seen_at = %s,
@@ -589,7 +622,7 @@ def _auto_resolve(cur, tenant_id, emitted_keys, now) -> None:
           AND NOT (f.condition_key = ANY(%s::text[]))
           AND to_regclass('operations.condition_assessments') IS NOT NULL
           AND EXISTS (
-              SELECT 1 FROM operations.condition_assessments a
+               SELECT 1 FROM operations.condition_assessments a
               WHERE a.tenant_id = f.tenant_id AND a.row_kind = 'entity'
                 AND a.finding_id = f.id
                 AND (a.response->>'may_clear')::boolean IS TRUE
@@ -602,6 +635,48 @@ def _auto_resolve(cur, tenant_id, emitted_keys, now) -> None:
                     FROM operations.condition_policy_versions v
                     WHERE v.active ORDER BY v.version DESC LIMIT 1
                 ) * interval '1 hour'
+          )
+          AND EXISTS (
+              SELECT 1
+                FROM operations.v_device v
+                JOIN operations.v_device_source_link link
+                  ON link.tenant_id = v.tenant_id AND link.device_id = v.device_id
+                JOIN operations.sources source
+                  ON source.id = link.source_id AND source.name = 'Ninja'
+                JOIN operations.device_agent_presence_current presence
+                  ON presence.tenant_id = v.tenant_id
+                 AND presence.device_id = v.device_id
+                 AND presence.platform = 'Ninja'
+                 AND presence.reported_online IS TRUE
+               WHERE f.subject_type = 'device'
+                 AND f.subject_id = v.device_id
+                 AND v.tenant_id = f.tenant_id
+                 AND v.effective_patching_scope = 'Included'
+                 AND v.lifecycle_status <> 'retired'
+                 AND (
+                     (ft.name = 'device_never_patched' AND EXISTS (
+                         SELECT 1 FROM ninja_patches.device_patch_signal signal
+                          WHERE signal.device_id = link.external_id::int
+                            AND signal.ever_installed IS TRUE
+                     ))
+                     OR (ft.name = 'patching_stalled' AND EXISTS (
+                         SELECT 1 FROM ninja_patches.device_patch_signal signal
+                          WHERE signal.device_id = link.external_id::int
+                            AND signal.last_seen_at >= now() - interval '{policy['patch_activity_days']} days'
+                     ))
+                     OR (ft.name = 'reboot_pending' AND (
+                         v.needs_reboot IS FALSE
+                         OR v.last_boot_at >= now() - interval '{policy['reboot_pending_days']} days'
+                     ))
+                     OR (ft.name = 'patch_failing_repeatedly' AND NOT EXISTS (
+                         SELECT 1 FROM ninja_patches.patch_facts facts
+                          WHERE facts.device_id = link.external_id::int
+                            AND facts.status = 'FAILED'
+                            AND facts.kb_number IS NOT NULL
+                          GROUP BY facts.kb_number
+                         HAVING COUNT(*) >= {policy['repeated_failure_count']}
+                     ))
+                 )
           )
           AND NOT EXISTS (
               SELECT 1 FROM operations.condition_participants p

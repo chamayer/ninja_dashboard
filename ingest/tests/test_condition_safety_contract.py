@@ -313,6 +313,7 @@ def test_admin_notifications_require_non_context_participants():
     admin = source[source.index("FROM operations.admin_findings"):source.index("def _load_route")]
     assert "participant.row_kind = 'admin'" in admin
     assert "pa.response ->> 'may_notify'" in admin
+    assert "assessment.participant_kind = 'condition'" not in admin
 
 
 def test_notification_recheck_accepts_participant_assessments_without_aggregate_row():
@@ -340,6 +341,8 @@ def test_snapshot_and_software_exposure_require_fresh_authority():
     assert "assessment.participant_kind = 'device'" in migration
     assert "assessment.response->>'may_execute'" in migration
     assert "freshness_hours" in migration
+    assert "GRANT SELECT ON operations.condition_assessments" in migration
+    assert "TO operations_view_owner" in migration
 
 
 def test_patch_assessments_measure_identity_offline_and_coverage():
@@ -347,7 +350,26 @@ def test_patch_assessments_measure_identity_offline_and_coverage():
     section = source[source.index("def _record_assessment"):source.index("def _auto_resolve")]
     assert "device_identity_signal" in section
     assert "offline_readiness" in section
-    assert "EvaluationCoverage(True, True, True, True)" in section
+    assert "_patch_evaluation_coverage" in section
+    assert "EvaluationCoverage(measured, measured, measured, measured)" in source
+    assert "reported_online IS TRUE" in source
+    assert "no_longer_actionable" in source
+
+
+def test_software_assessments_cover_each_device_and_measure_contact():
+    source = (Path(__file__).parents[1] / "software_findings.py").read_text()
+    section = source[source.index("def _emit_scoped"):source.index("def _auto_resolve")]
+    assert "already_emitted" in section
+    assert "device_agent_presence_current" in section
+    assert "offline_readiness" in section
+    assert "offline:contact_unavailable" not in section
+
+
+def test_snapshot_chooses_latest_run_before_validating_status():
+    source = (Path(__file__).parents[1] / "condition_evidence.py").read_text()
+    section = source[source.index("def complete_snapshot_available"):source.index("def device_identity_signals")]
+    assert "ORDER BY GREATEST" in section
+    assert "AND status = 'complete'" not in section
 
 
 def test_review_workflow_uses_integer_django_user_ids_and_has_endpoint():

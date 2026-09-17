@@ -1344,3 +1344,19 @@ Verified after push: commit `8d27e19` is present on both `origin` and
 SQL migration ledger contains 109 after 107 and 108. No manual redeploy or
 migration was run. The broader WP5-WP8 plan retains any unrelated acceptance
 items separately.
+## Current checkpoint — five remaining condition-integration blockers
+
+Status: [ ] Complete locally; commit, push, and automatic rollout verification
+remain.
+
+Scope: grant the software-exposure view owner access to condition tables;
+measure software device coverage and contact readiness for every affected
+computer; select the newest snapshot before validating status; require
+current type-specific patch recovery evidence before clearing; and remove the
+aggregate assessment requirement from the initial admin notification selector.
+
+Validation: focused tests are in progress. Pre-existing probe artifacts under
+`.work/` remain untracked and are excluded from this change.
+
+Next action: finish focused validation, commit task-owned changes, push both
+authorized remotes, and verify automatic migration and service health.

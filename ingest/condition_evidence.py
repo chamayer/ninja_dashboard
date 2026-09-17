@@ -35,18 +35,13 @@ def complete_snapshot_available(
          WHERE tenant_id = %s AND source_instance_id = %s
            {binding_clause}
            {scope_clause}
-           AND status = 'complete'
-           AND is_complete_snapshot IS TRUE
-           AND failed_rows = 0
-           AND expected_rows = written_rows
-           AND run_started_at IS NOT NULL
-           AND completed_at IS NOT NULL
-           AND completed_at <= %s
-           AND completed_at >= %s - (%s * interval '1 hour')
-         ORDER BY completed_at DESC
+         ORDER BY GREATEST(
+             COALESCE(completed_at, '-infinity'::timestamptz),
+             COALESCE(run_started_at, '-infinity'::timestamptz)
+         ) DESC
          LIMIT 1
         """,
-        [*params, now, now, max_age_hours],
+        params,
     )
     row = cur.fetchone()
     if row is None:

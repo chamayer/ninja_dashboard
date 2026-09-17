@@ -312,7 +312,6 @@ def _load_pending_findings(cur, tenant_id: int) -> list[dict[str, Any]]:
                WHERE assessment.tenant_id = af.tenant_id
                  AND assessment.row_kind = 'admin'
                  AND assessment.finding_id = af.id
-                 AND assessment.participant_kind = 'condition'
                  AND (assessment.response ->> 'may_notify')::boolean IS TRUE
                  AND assessment.policy_version = (
                      SELECT version FROM operations.condition_policy_versions
