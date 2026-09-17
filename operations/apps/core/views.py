@@ -4046,6 +4046,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
                 for group in issue_type_groups.values()
                 if row["f"].finding_type.name in group["types"]
             ),
+            "Unclassified issue",
         ) or "Unclassified issue"
         row["issue_category_label"] = next(
             (category["label"] for category in issue_categories
@@ -4064,11 +4065,29 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     paginator = Paginator(findings_with_detail, 50)
     page = paginator.get_page(request.GET.get("page"))
     page_group_counts = {}
+    page_group_severity = {}
     for row in findings_with_detail:
         row["issue_group"] = row["issue_type_label"]
         page_group_counts[row["issue_group"]] = page_group_counts.get(row["issue_group"], 0) + 1
+        severity_counts = page_group_severity.setdefault(
+            row["issue_group"], {value: 0 for value, _label in Finding.Severity.choices}
+        )
+        severity_counts[row["f"].severity] += 1
+    severity_labels = dict(Finding.Severity.choices)
     for row in page.object_list:
         row["issue_group_count"] = page_group_counts[row["issue_group"]]
+        row["issue_group_severity_summary"] = [
+            f"{severity_labels[value]} {count}"
+            for value, count in page_group_severity[row["issue_group"]].items()
+            if count
+        ]
+        row["issue_group_expanded"] = bool(
+            type_filter
+            or issue_filter
+            or active_group_key
+            or device_id_filter
+            or subject_id_filter
+        )
 
     # Type dropdown cascades: if category selected, only show types in it.
     ft_qs = FindingType.objects.select_related("category").order_by("name")
@@ -4079,6 +4098,15 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     issue_choices = []
     if selected_type:
         issue_choices = list(selected_type["issues"])
+    taxonomy_filter_data = [
+        {
+            "value": group["value"],
+            "label": group["label"],
+            "category": group["category"],
+            "issues": list(group["issues"]),
+        }
+        for group in issue_type_groups.values()
+    ]
     clients = Client.objects.filter(tenant_id=1, deleted_at__isnull=True).order_by("display_name")
 
     page_query = request.GET.copy()
@@ -4108,6 +4136,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             "active_type": type_filter,
             "active_issue": issue_filter,
             "issue_choices": issue_choices,
+            "taxonomy_filter_data": taxonomy_filter_data,
             "active_category": category_filter,
             "active_category_label": next(
                 (item["label"] for item in issue_categories if item["key"] == category_filter),

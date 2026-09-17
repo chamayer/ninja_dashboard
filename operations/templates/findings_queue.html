@@ -97,7 +97,7 @@
         <div class="filter-primary">
         <div class="filter-control">
             <label>Category</label>
-            <select name="category" onchange="this.form.submit()">
+            <select name="category" id="issues-category-filter">
                 <option value="">Any</option>
                 {% for c in categories %}
                     <option value="{{ c.name }}"{% if active_category == c.name %} selected{% endif %}>{{ c.label }}</option>
@@ -106,7 +106,7 @@
         </div>
         <div class="filter-control">
             <label>Type</label>
-            <select name="type">
+            <select name="type" id="issues-type-filter">
                 <option value="">Any</option>
                 {% for group in finding_type_groups %}
                     <option value="{{ group.value }}"{% if active_type == group.value %} selected{% endif %}>{{ group.label }}</option>
@@ -115,7 +115,7 @@
         </div>
         <div class="filter-control">
             <label>Issue</label>
-            <select name="issue">
+            <select name="issue" id="issues-issue-filter">
                 <option value="">Any</option>
                 {% for issue in issue_choices %}
                     <option value="{{ issue.value }}"{% if active_issue == issue.value %} selected{% endif %}>{{ issue.label }}</option>
@@ -222,12 +222,12 @@
                 {% ifchanged row.issue_group %}
                 <tr class="issue-group-header">
                     <td colspan="9" style="padding:.65rem .5rem; background:var(--surface-subtle,#f3f4f6);">
-                        <button type="button" class="issue-group-toggle" data-group="{{ row.issue_group|slugify }}" aria-expanded="true" style="border:0; background:none; font-weight:700; cursor:pointer;">▾ {{ row.issue_group }} <span class="muted">({{ row.issue_group_count }})</span></button>
+                        <button type="button" class="issue-group-toggle" data-group="{{ row.issue_group|slugify }}" aria-expanded="{{ row.issue_group_expanded|yesno:'true,false' }}" style="border:0; background:none; font-weight:700; cursor:pointer;">{% if row.issue_group_expanded %}▾{% else %}▸{% endif %} {{ row.issue_group }} <span class="muted">({{ row.issue_group_count }}){% if row.issue_group_severity_summary %} · {{ row.issue_group_severity_summary|join:", " }}{% endif %}</span></button>
                     </td>
                 </tr>
                 {% endifchanged %}
                 {% with f=row.f %}
-                <tr class="issue-group-row issue-group-{{ row.issue_group|slugify }}"{% if f.snoozed_until %} style="opacity:0.6;"{% endif %}>
+                <tr class="issue-group-row issue-group-{{ row.issue_group|slugify }}"{% if not row.issue_group_expanded %} hidden{% endif %}{% if f.snoozed_until %} style="opacity:0.6;"{% endif %}>
                     <td><input type="checkbox" name="ids" value="{{ f.id }}" class="bulk-cb"></td>
                     <td><span class="badge badge-{{ f.severity }}">{{ f.get_severity_display }}</span></td>
                     <td>
@@ -360,8 +360,59 @@
 </div>
 {% endif %}
 
+{{ taxonomy_filter_data|json_script:"issue-taxonomy-data" }}
 <script>
 (function() {
+    var categoryFilter = document.getElementById('issues-category-filter');
+    var typeFilter = document.getElementById('issues-type-filter');
+    var issueFilter = document.getElementById('issues-issue-filter');
+    var taxonomyData = JSON.parse(document.getElementById('issue-taxonomy-data').textContent);
+    function selectedCategory() { return categoryFilter ? categoryFilter.value : ''; }
+    function updateIssues() {
+        if (!issueFilter) return;
+        var selectedType = taxonomyData.find(function(item) { return item.value === typeFilter.value; });
+        var previous = issueFilter.value;
+        issueFilter.innerHTML = '<option value="">Any</option>';
+        (selectedType ? selectedType.issues : []).forEach(function(issue) {
+            var option = document.createElement('option');
+            option.value = issue.value;
+            option.textContent = issue.label;
+            issueFilter.appendChild(option);
+        });
+        if ((selectedType ? selectedType.issues : []).some(function(issue) { return issue.value === previous; })) issueFilter.value = previous;
+    }
+    function updateTypes() {
+        if (!typeFilter) return;
+        var category = selectedCategory();
+        var previous = typeFilter.value;
+        typeFilter.innerHTML = '<option value="">Any</option>';
+        taxonomyData.filter(function(item) { return !category || item.category === category; }).forEach(function(item) {
+            var option = document.createElement('option');
+            option.value = item.value;
+            option.textContent = item.label;
+            typeFilter.appendChild(option);
+        });
+        if (Array.from(typeFilter.options).some(function(option) { return option.value === previous; })) typeFilter.value = previous;
+        else typeFilter.value = '';
+        updateIssues();
+    }
+    if (categoryFilter) categoryFilter.addEventListener('change', function() {
+        updateTypes();
+        if (issueFilter) issueFilter.value = '';
+        categoryFilter.form.submit();
+    });
+    if (typeFilter) typeFilter.addEventListener('change', updateIssues);
+    updateTypes();
+
+    document.querySelectorAll('.issue-group-toggle').forEach(function(button) {
+        button.addEventListener('click', function() {
+            var expanded = button.getAttribute('aria-expanded') === 'true';
+            var group = button.getAttribute('data-group');
+            button.setAttribute('aria-expanded', expanded ? 'false' : 'true');
+            button.firstChild.textContent = expanded ? '▸' : '▾';
+            document.querySelectorAll('.issue-group-' + CSS.escape(group)).forEach(function(row) { row.hidden = expanded; });
+        });
+    });
     var toggle = document.getElementById('bulk-toggle-all');
     var cbs = document.querySelectorAll('.bulk-cb');
     var actions = document.querySelectorAll('.bulk-action');

@@ -3,7 +3,7 @@
 ## Status
 
 **Taxonomy correction implementation in progress; do not activate the seeded
-taxonomy versions.** The five top-level categories and revised 33-type mapping
+taxonomy versions.** The five top-level categories and revised 34-type mapping
 are approved. The prior 23-type matrix is superseded.
 Deployment remains subject to the repository's explicit push and
 automatic-migration rules.
@@ -162,14 +162,15 @@ history” and “Patch activity overdue” remain separate row names.
 
 ### Approved replacement matrix
 
-The approved replacement contains 33 Types and all 53 conditions exactly once:
+The approved replacement contains 34 Types and all 53 conditions exactly once.
 
 | Category | Type | Conditions |
 | --- | --- | --- |
 | Inventory | Platform withdrawal | `device_source_record_withdrawn` |
 | Inventory | Missing computer evidence | `device_missing_from_source` |
 | Inventory | Possible duplicate Computers | `identity_conflict` |
-| Inventory | Computer identity conflicts | `shared_serial`, `cross_client_serial`, `cross_client_conflict` |
+| Inventory | Computer identity conflicts | `shared_serial`, `cross_client_serial` |
+| Inventory | Historical identity collisions | `cross_client_conflict` |
 | Inventory | Duplicate Ninja entries | `duplicate_platform_record` |
 | Inventory | Historical duplicate Hudu entries | `duplicate_device_records` |
 | Inventory | Invalid computer identifiers | `placeholder_serial`, `placeholder_mac` |
@@ -394,16 +395,18 @@ and available action without interpreting an internal key or conflicting total.
 
 ## Current checkpoint and next action
 
-The five category names remain accepted, but WP1 Type approval has reopened.
-The 23-type baseline combines several different workflows and is superseded
-for review. Hudu must render as three separate Types rather than a combined
-“Hudu maintenance” header. No taxonomy policy version should be activated yet.
+The five category names and revised mapping are approved. The 23-type baseline
+is superseded. Hudu renders as three separate Types, and historical identity
+collisions are separate from active computer identity conflicts. No taxonomy
+policy version should be activated yet.
 
 The revised taxonomy is implemented locally in the packaged profile, Issues
 projection, validator, tests, documentation, and frozen additive migration
-`conditions-taxonomy-3`. Local focused validation passes; production remains
-on active `conditions-taxonomy-2` until the new policy is reviewed and
-explicitly activated.
+`conditions-taxonomy-3`. Group collapse, severity summaries, legacy-policy
+fallbacks, dependent filter behavior, historical identity separation, and
+deterministic historical migration payloads are included. The prior production
+policy state was not reverified in this checkpoint; do not infer live
+activation from repository state.
 
 The next action is final diff review and release handoff. No production
 activation or manual migration is authorized by this plan.

@@ -8,7 +8,7 @@ Accepted
 
 The active condition policy is the authority for the operator-facing Issues
 taxonomy. It defines ordered categories, grouped types, and individual issue
-labels. The approved registry contains five categories, 33 types, and all 53
+labels. The approved registry contains five categories, 34 types, and all 53
 condition keys exactly once.
 
 The condition keys remain stable technical identifiers for policy, audit,
@@ -21,7 +21,8 @@ The revised registry is seeded as a new immutable, inactive policy version
 computer evidence, identity conflicts from possible duplicate Computers,
 platform-entry duplication, identifier/detail/classification problems, client
 organization matching from Computer identity matching, and current reporting
-from historical offline status. Hudu archive candidates, incorrect Hudu links,
+from historical offline status, including a separate historical identity
+collision workflow. Hudu archive candidates, incorrect Hudu links,
 and unconnected Hudu references are separate Types.
 Review and activation use the existing database-governed Operations admin
 workflow. The Issues projection never substitutes packaged taxonomy data for

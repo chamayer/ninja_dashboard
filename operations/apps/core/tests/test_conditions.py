@@ -508,7 +508,7 @@ def test_issue_taxonomy_covers_every_condition_once():
         "Patching & support",
         "Data collection",
     ]
-    assert sum(len(category["types"]) for category in profile.issue_taxonomy) == 33
+    assert sum(len(category["types"]) for category in profile.issue_taxonomy) == 34
     assert [item["label"] for item in profile.issue_taxonomy[0]["types"][-3:]] == [
         "Hudu archive candidates",
         "Incorrect Hudu links",
@@ -540,9 +540,8 @@ def test_issue_taxonomy_separates_distinct_inventory_workflows():
     assert types["platform_withdrawal"] == {"device_source_record_withdrawn"}
     assert types["missing_computer_evidence"] == {"device_missing_from_source"}
     assert types["possible_duplicate_computers"] == {"identity_conflict"}
-    assert types["computer_identity_conflicts"] == {
-        "shared_serial", "cross_client_serial", "cross_client_conflict"
-    }
+    assert types["computer_identity_conflicts"] == {"shared_serial", "cross_client_serial"}
+    assert types["historical_identity_collisions"] == {"cross_client_conflict"}
     assert types["client_organization_matching"] == {
         "client_name_conflict", "client_link_collision", "client_unattached_group",
         "unnamed_source_group", "unmatched_source_group",

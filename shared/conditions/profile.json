@@ -22,7 +22,8 @@
       {"key": "platform_withdrawal", "label": "Platform withdrawal", "conditions": ["device_source_record_withdrawn"]},
       {"key": "missing_computer_evidence", "label": "Missing computer evidence", "conditions": ["device_missing_from_source"]},
       {"key": "possible_duplicate_computers", "label": "Possible duplicate Computers", "conditions": ["identity_conflict"]},
-      {"key": "computer_identity_conflicts", "label": "Computer identity conflicts", "conditions": ["shared_serial", "cross_client_serial", "cross_client_conflict"]},
+      {"key": "computer_identity_conflicts", "label": "Computer identity conflicts", "conditions": ["shared_serial", "cross_client_serial"]},
+      {"key": "historical_identity_collisions", "label": "Historical identity collisions", "conditions": ["cross_client_conflict"]},
       {"key": "duplicate_ninja_entries", "label": "Duplicate Ninja entries", "conditions": ["duplicate_platform_record"]},
       {"key": "historical_duplicate_hudu_entries", "label": "Historical duplicate Hudu entries", "conditions": ["duplicate_device_records"]},
       {"key": "invalid_computer_identifiers", "label": "Invalid computer identifiers", "conditions": ["placeholder_serial", "placeholder_mac"]},
@@ -53,7 +54,7 @@
     {"key": "patching_support", "label": "Patching & support", "types": [
       {"key": "patching_not_progressing", "label": "Patching not progressing", "conditions": ["device_never_patched", "patching_stalled", "patch_approval_backlog"]},
       {"key": "patch_failures", "label": "Patch failures", "conditions": ["patch_failing_repeatedly"]},
-      {"key": "restarts_required", "label": "Restarts required", "conditions": ["reboot_pending"]},
+      {"key": "restart_required", "label": "Restart required", "conditions": ["reboot_pending"]},
       {"key": "windows_support", "label": "Windows support", "conditions": ["windows_servicing_approaching_eol", "windows_servicing_eol", "windows_servicing_unknown"]}
     ]},
     {"key": "data_collection", "label": "Data collection", "types": [

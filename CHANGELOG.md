@@ -6,7 +6,7 @@ All notable changes in this project follow [Semantic Versioning](https://semver.
 
 ### Changed
 
-- Replaced the superseded 23-type Issues taxonomy with a 33-type registry
+- Replaced the superseded 23-type Issues taxonomy with a 34-type registry
   covering all 53 conditions across the five approved categories.
 - Split Hudu archive, incorrect-link, and unconnected-reference workflows, and
   separated inventory, matching, identity, and reporting workflows with
