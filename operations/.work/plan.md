@@ -1359,12 +1359,10 @@ optional skip, 80 Operations tests, 5 PostgreSQL tests, Django checks,
 migration drift checks, compileall, and diff checks). Pre-existing probe
 artifacts under `.work/` remain untracked and are excluded from this change.
 
-Verified after push: commit `132ff45` is present on both remotes; automatic
-rollout applied Operations migration 0170 and restarted the service healthy.
-The runtime ACL shows `operations_view_owner` has SELECT on both condition
-tables, and the exposure view reaches its expected tenant-context guard rather
-than failing on permissions. SQL migration 110 remains the ingest-schema
-path for databases where the SQL migration runner is active.
+Verified after push: commit `132ff45` is present on both remotes; the runtime
+ACL shows `operations_view_owner` has SELECT on both condition tables, and the
+exposure view reaches its expected tenant-context guard rather than failing on
+permissions. SQL migration 110 remains the ingest-schema permission path.
 
 Next action: commit and push the three-blocker remediation, then verify its
 automatic rollout.
@@ -1383,8 +1381,8 @@ emissions are no longer treated as failure or recovery by themselves.
 Validation: focused ingest safety/evidence tests pass (38 passed, 1 optional
 skip), plus compileall and diff checks. Next action: run the full focused
 validation set, commit task-owned changes, push both remotes, and verify
-automatic rollout. The Operations fallback migration 0171 also carries the
-additive run-log column for deployments without an active ingest container.
+automatic rollout. The additive run-log column is carried by SQL migration 111
+and applied by the ingest service.
 
 ## Current checkpoint — explicit patch snapshot and complete client recovery
 
