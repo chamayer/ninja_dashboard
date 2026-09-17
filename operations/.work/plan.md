@@ -1323,8 +1323,7 @@ merge/source-action tests and the full ingest safety-contract set pass; live
 migration and concurrency behavior remain release-gated.
 ## Current checkpoint — seven condition-integration blockers
 
-Status: [ ] Implementation complete locally; commit, push, and automatic
-rollout verification remain.
+Status: [x] Complete for the seven reported blockers; deployed and verified.
 
 Scope completed in this checkpoint: notification eligibility now accepts the
 producer's participant-level assessments while still requiring every required
@@ -1340,6 +1339,8 @@ optional skip), Operations condition/findings tests pass (80 passed), the
 disposable PostgreSQL policy suite passes (5 passed), Django checks and
 migration drift checks pass, and compileall passes.
 
-Next action: run the final focused checks, commit only task-owned changes,
-push `origin` then `a-m-rose`, and verify automatic migration, health, grants,
-RLS, and view behavior through the authorized read-only production helper.
+Verified after push: commit `8d27e19` is present on both `origin` and
+`a-m-rose`; Operations is healthy; Django migration 0169 is applied; and the
+SQL migration ledger contains 109 after 107 and 108. No manual redeploy or
+migration was run. The broader WP5-WP8 plan retains any unrelated acceptance
+items separately.
