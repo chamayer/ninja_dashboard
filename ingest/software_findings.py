@@ -1073,6 +1073,43 @@ def _emit_scoped(cur, tenant_id, ft_id, client_id, device_id, canonical_key,
     ):
         if value is not None:
             participants.append(Participant(kind, str(value), "affected", tenant_id))
+    if subject_type in ("software_product", "software_version"):
+        if subject_type == "software_product":
+            device_sql = """
+                SELECT DISTINCT installation.device_id
+                  FROM operations.software_installations_current installation
+                  JOIN catalog.software_versions version
+                    ON version.id = installation.software_version_id
+                  JOIN catalog.products product
+                    ON product.id = version.product_id
+                 WHERE installation.tenant_id = %s
+                   AND product.product_uuid = %s
+                   AND installation.stale_since IS NULL
+                   AND installation.deleted_at IS NULL
+            """
+            device_params = (tenant_id, subject_id)
+        else:
+            device_sql = """
+                SELECT DISTINCT installation.device_id
+                  FROM operations.software_installations_current installation
+                  JOIN catalog.software_versions version
+                    ON version.id = installation.software_version_id
+                 WHERE installation.tenant_id = %s
+                   AND version.version_uuid = %s
+                   AND installation.stale_since IS NULL
+                   AND installation.deleted_at IS NULL
+            """
+            device_params = (tenant_id, subject_id)
+        cur.execute(device_sql, device_params)
+        all_devices = {str(row[0]) for row in cur.fetchall()}
+        participants = [
+            item for item in participants
+            if item.kind not in {"device", "software_installation"}
+        ]
+        participants.extend(
+            Participant("device", device, "affected", tenant_id)
+            for device in sorted(all_devices)
+        )
     if participants:
         cur.execute("SELECT name FROM operations.finding_types WHERE id = %s", (ft_id,))
         type_name = cur.fetchone()[0]
@@ -1097,7 +1134,7 @@ def _emit_scoped(cur, tenant_id, ft_id, client_id, device_id, canonical_key,
                      ORDER BY COALESCE(last_contact_at, last_observed_at) DESC NULLS LAST
                      LIMIT 1
                     """,
-                    (tenant_id, device_id),
+                    (tenant_id, participant.reference),
                 )
                 contact_row = cur.fetchone()
                 cur.execute(
@@ -1119,7 +1156,7 @@ def _emit_scoped(cur, tenant_id, ft_id, client_id, device_id, canonical_key,
                     offline_days=offline_days,
                 )
                 signals = (
-                    device_identity_signal(cur, tenant_id, str(device_id)),
+                    device_identity_signal(cur, tenant_id, participant.reference),
                     Signal("offline", participant, offline_state, offline_reason),
                 )
             record_assessment(

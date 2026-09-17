@@ -550,39 +550,71 @@ def _record_assessment(cur, tenant_id, finding_id, ft_id, condition_key,
         cur,
         condition,
         signals,
-        _patch_evaluation_coverage(cur, tenant_id, subject_type, subject_id),
+        _patch_evaluation_coverage(cur, tenant_id, subject_type, subject_id, now, _policy(cur, tenant_id)),
         now=now,
         reevaluation_key=f"patch:{condition_key}",
         participant=participant,
     )
 
 
-def _patch_evaluation_coverage(cur, tenant_id, subject_type, subject_id):
+def _patch_evaluation_coverage(cur, tenant_id, subject_type, subject_id, now, policy):
     """Measure the source scope used by this patch assessment."""
     if subject_type == "device":
         cur.execute(
-            """
-            SELECT to_regclass('operations.v_device') IS NOT NULL
-               AND to_regclass('operations.device_agent_presence_current') IS NOT NULL
-               AND to_regclass('ninja_patches.device_patch_signal') IS NOT NULL
-               AND EXISTS (
-                   SELECT 1 FROM operations.v_device
-                    WHERE tenant_id = %s AND device_id = %s
-               )
+            f"""
+            SELECT EXISTS (
+                       SELECT 1 FROM operations.v_device v
+                       JOIN operations.v_device_source_link link
+                         ON link.tenant_id = v.tenant_id AND link.device_id = v.device_id
+                       JOIN operations.sources source
+                         ON source.id = link.source_id AND source.name = 'Ninja'
+                       JOIN operations.device_agent_presence_current presence
+                         ON presence.tenant_id = v.tenant_id
+                        AND presence.device_id = v.device_id
+                        AND presence.platform = 'Ninja'
+                        AND presence.reported_online IS TRUE
+                       JOIN ninja_patches.device_patch_signal signal
+                         ON signal.device_id = link.external_id::int
+                      WHERE v.tenant_id = %s AND v.device_id = %s
+                        AND v.effective_patching_scope = 'Included'
+                        AND v.lifecycle_status <> 'retired'
+                        AND COALESCE(presence.last_contact_at, presence.last_observed_at)
+                            BETWEEN %s - interval '{policy['patch_activity_days']} days' AND %s
+                   )
             """,
-            (tenant_id, subject_id),
+            (tenant_id, subject_id, now, now),
         )
     elif subject_type == "client":
         cur.execute(
             """
-            SELECT to_regclass('operations.clients') IS NOT NULL
-               AND to_regclass('ninja_patches.patch_facts') IS NOT NULL
+            SELECT EXISTS (
+                       SELECT 1 FROM operations.clients
+                        WHERE tenant_id = %s AND id = %s AND deleted_at IS NULL
+                   )
                AND EXISTS (
-                   SELECT 1 FROM operations.clients
-                    WHERE tenant_id = %s AND id = %s AND deleted_at IS NULL
+                   SELECT 1 FROM operations.v_device v
+                   JOIN operations.device_agent_presence_current presence
+                     ON presence.tenant_id = v.tenant_id
+                    AND presence.device_id = v.device_id
+                    AND presence.platform = 'Ninja'
+                    AND presence.reported_online IS TRUE
+                  WHERE v.tenant_id = %s AND v.client_id = %s
+                    AND v.effective_patching_scope = 'Included'
+                    AND v.lifecycle_status <> 'retired'
+               )
+               AND EXISTS (
+                   SELECT 1 FROM ninja_patches.patch_facts facts
+                   JOIN operations.v_device_source_link link
+                     ON link.external_id::int = facts.device_id
+                   JOIN operations.v_device v
+                     ON v.tenant_id = link.tenant_id AND v.device_id = link.device_id
+                   JOIN operations.sources source
+                     ON source.id = link.source_id AND source.name = 'Ninja'
+                  WHERE v.tenant_id = %s AND v.client_id = %s
+                    AND facts.device_id IS NOT NULL
                )
             """,
-            (tenant_id, subject_id),
+            (tenant_id, subject_id, tenant_id, subject_id, tenant_id, subject_id),
         )
     else:
         cur.execute("SELECT FALSE")
@@ -600,8 +632,6 @@ def _auto_resolve(cur, tenant_id, emitted_keys, now, policy) -> None:
     """
     # An empty emission can represent a failed, partial, or skipped upstream
     # read. It is not proof that every prior patch finding has cleared.
-    if not emitted_keys:
-        return
     cur.execute(
         f"""
         UPDATE operations.findings f
@@ -621,7 +651,8 @@ def _auto_resolve(cur, tenant_id, emitted_keys, now, policy) -> None:
           AND f.status IN ('open', 'acknowledged')
           AND NOT (f.condition_key = ANY(%s::text[]))
           AND to_regclass('operations.condition_assessments') IS NOT NULL
-          AND EXISTS (
+          AND (
+            EXISTS (
                SELECT 1 FROM operations.condition_assessments a
               WHERE a.tenant_id = f.tenant_id AND a.row_kind = 'entity'
                 AND a.finding_id = f.id
@@ -677,6 +708,43 @@ def _auto_resolve(cur, tenant_id, emitted_keys, now, policy) -> None:
                          HAVING COUNT(*) >= {policy['repeated_failure_count']}
                      ))
                  )
+            )
+            OR (
+              f.subject_type = 'client'
+              AND ft.name = 'patch_approval_backlog'
+              AND EXISTS (
+                  SELECT 1
+                    FROM operations.v_device client_device
+                    JOIN operations.device_agent_presence_current client_presence
+                      ON client_presence.tenant_id = client_device.tenant_id
+                     AND client_presence.device_id = client_device.device_id
+                     AND client_presence.platform = 'Ninja'
+                     AND client_presence.reported_online IS TRUE
+                   WHERE client_device.tenant_id = f.tenant_id
+                     AND client_device.client_id = f.subject_id
+                     AND client_device.effective_patching_scope = 'Included'
+                     AND client_device.lifecycle_status <> 'retired'
+              )
+              AND EXISTS (
+                  SELECT 1
+                    FROM ninja_patches.patch_facts facts
+                    JOIN operations.v_device client_device
+                      ON client_device.tenant_id = f.tenant_id
+                     AND client_device.client_id = f.subject_id
+                   WHERE facts.device_id IS NOT NULL
+              )
+              AND NOT EXISTS (
+                  SELECT 1
+                    FROM ninja_patches.patch_facts facts
+                    JOIN operations.v_device client_device
+                      ON client_device.tenant_id = f.tenant_id
+                     AND client_device.client_id = f.subject_id
+                   WHERE facts.device_id IS NOT NULL
+                     AND facts.status = 'APPROVED'
+                   GROUP BY facts.patch_uid
+                  HAVING COUNT(*) >= {policy['approval_backlog_count']}
+              )
+            )
           )
           AND NOT EXISTS (
               SELECT 1 FROM operations.condition_participants p

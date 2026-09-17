@@ -37,7 +37,7 @@ def test_empty_results_require_explicit_complete_coverage_before_clearing():
     assert "empty_result_verified: bool = False" in evaluator
     assert "if not keys and not empty_result_verified:" in cmdb
     assert "empty_result_verified: bool = False" in cmdb
-    assert "if not emitted_keys:" in patch
+    assert "list(emitted_keys) if emitted_keys else [\"\"]" in patch
 
 
 def test_source_action_worker_preserves_legacy_target_identity():
@@ -191,7 +191,7 @@ def test_windows_servicing_uses_measured_identity_evidence():
 
 def test_software_device_findings_use_shared_measured_identity_evidence():
     source = (Path(__file__).parents[1] / "software_findings.py").read_text()
-    assert "device_identity_signal(cur, tenant_id, str(device_id))" in source
+    assert "device_identity_signal(cur, tenant_id, participant.reference)" in source
 
 
 def test_platform_health_assessments_use_admin_row_kind():
@@ -363,6 +363,8 @@ def test_software_assessments_cover_each_device_and_measure_contact():
     assert "device_agent_presence_current" in section
     assert "offline_readiness" in section
     assert "offline:contact_unavailable" not in section
+    assert "all_devices" in section
+    assert "participants.extend" in section
 
 
 def test_snapshot_chooses_latest_run_before_validating_status():
@@ -370,6 +372,17 @@ def test_snapshot_chooses_latest_run_before_validating_status():
     section = source[source.index("def complete_snapshot_available"):source.index("def device_identity_signals")]
     assert "ORDER BY GREATEST" in section
     assert "AND status = 'complete'" not in section
+
+
+def test_patch_recovery_requires_current_source_evidence_and_allows_empty_runs():
+    source = (Path(__file__).parents[1] / "patch_findings.py").read_text()
+    coverage = source[source.index("def _patch_evaluation_coverage"):source.index("def _auto_resolve")]
+    recovery = source[source.index("def _auto_resolve"):]
+    assert "device_patch_signal signal" in coverage
+    assert "reported_online IS TRUE" in coverage
+    assert "if not emitted_keys" not in recovery
+    assert "f.subject_type = 'client'" in recovery
+    assert "patch_approval_backlog" in recovery
 
 
 def test_review_workflow_uses_integer_django_user_ids_and_has_endpoint():
