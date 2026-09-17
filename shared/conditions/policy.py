@@ -175,7 +175,7 @@ _KEY_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 def _issue_taxonomy(value, definitions) -> tuple[dict[str, Any], ...]:
     if not isinstance(value, list) or not value:
         raise ValueError("Issue taxonomy must be a nonempty list")
-    categories, category_keys, type_keys, members = [], set(), set(), set()
+    categories, category_keys, category_labels, type_keys, type_labels, members = [], set(), set(), set(), set(), set()
     for category in value:
         if not isinstance(category, dict):
             raise ValueError("Invalid issue taxonomy category")
@@ -184,7 +184,10 @@ def _issue_taxonomy(value, definitions) -> tuple[dict[str, Any], ...]:
             raise ValueError("Duplicate or invalid issue taxonomy category key")
         if not isinstance(label, str) or not label.strip() or not isinstance(types, list) or not types:
             raise ValueError("Invalid issue taxonomy category")
+        if label in category_labels:
+            raise ValueError("Duplicate issue taxonomy category label")
         category_keys.add(key)
+        category_labels.add(label)
         parsed_types = []
         for type_item in types:
             if not isinstance(type_item, dict):
@@ -200,7 +203,10 @@ def _issue_taxonomy(value, definitions) -> tuple[dict[str, Any], ...]:
                 raise ValueError("Issue taxonomy references an unknown condition")
             if members.intersection(conditions):
                 raise ValueError("Issue condition belongs to multiple taxonomy types")
+            if type_label in type_labels:
+                raise ValueError("Duplicate issue taxonomy type label")
             type_keys.add(type_key)
+            type_labels.add(type_label)
             members.update(conditions)
             parsed_types.append({"key": type_key, "label": type_label, "conditions": tuple(conditions)})
         categories.append({"key": key, "label": label, "types": tuple(parsed_types)})

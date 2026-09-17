@@ -137,6 +137,8 @@ def test_findings_queue_template_exposes_device_csv_and_grouped_types():
     assert "Installed devices" in template
     assert "Current result scope" in template
     assert "current_result_summary" in template
+    assert '<select name="issue">' in template
+    assert "issue_choices" in template
     assert "card.count }} / {{ card.total" not in template
     assert "card.percentage" not in template
     assert "action.label" in template

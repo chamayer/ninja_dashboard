@@ -2,13 +2,14 @@
 
 ## Status
 
-**Corrective implementation in progress.** The approved taxonomy is five
-categories and 23 operator types covering all 53 condition keys. Product implementation is
-authorized; deployment remains subject to the repository's explicit push and
+**Taxonomy correction implementation in progress; do not activate the seeded
+taxonomy versions.** The five top-level categories and revised 33-type mapping
+are approved. The prior 23-type matrix is superseded.
+Deployment remains subject to the repository's explicit push and
 automatic-migration rules.
 
-Baseline reviewed: local `master` at `816e574`. The tracked worktree contains
-the approved implementation changes;
+Baseline reviewed: local `master` at `a02bb61`. The only tracked worktree
+change is this plan update;
 the pre-existing untracked `.work/probe_*` and bootstrap files are unrelated and
 must remain untouched.
 
@@ -53,11 +54,13 @@ and discovery scope (formerly WP6), not a cosmetic rename.
    prove complete taxonomy coverage, human-readable output, disjoint category
    membership, count conservation, or filter invariants.
 
-## Proposed operator vocabulary
+## Operator vocabulary under revision
 
-The authoritative five-category/23-type registry is now in
-`shared/conditions/profile.json` and has been approved by the user; internal
-finding names remain unchanged.
+The five-category registry in `shared/conditions/profile.json` is the current
+baseline, not the final approved type mapping. Internal finding names remain
+unchanged. The revision must preserve complete, exactly-once coverage of all
+53 conditions while separating findings that have different subjects,
+meanings, owners, actions, or lifecycle posture.
 
 | Category | Purpose |
 | --- | --- |
@@ -67,11 +70,13 @@ finding names remain unchanged.
 | Patching & support | Patch progress, restart requirements, and Windows support |
 | Data collection | Source collection, processing, and collector health |
 
-### Complete type mapping
+### Prior 23-type baseline (superseded for review)
 
-Every one of the 53 condition keys must appear exactly once in this matrix.
-Lifecycle state controls whether a condition can currently be emitted; it must
-not remove historical retained findings from `status=all` discovery.
+This matrix records the deployed baseline for comparison only. It is not the
+implementation target. The replacement matrix must list every one of the 53
+condition keys exactly once. Lifecycle state controls whether a condition can
+currently be emitted; it must not remove historical retained findings from
+`status=all` discovery.
 
 | Category | Operator type | Internal condition keys |
 | --- | --- | --- |
@@ -99,6 +104,43 @@ not remove historical retained findings from `status=all` discovery.
 | Data collection | Processing delays | `software_queue_stalled` |
 | Data collection | Collector reporting | `stale_collector_binding` |
 
+### Display hierarchy and combination rule
+
+The operator hierarchy is **Category → Type → Issue**:
+
+- Category controls the broad fleet area and the available Type choices. It
+  does not create an additional combined result header.
+- Each Type is an independently filterable work group and renders as its own
+  collapsible result header with its complete filtered count and severity
+  summary.
+- Each Issue remains an individual condition with its own plain-English name,
+  subject, evidence, status, and actions beneath that Type header.
+- The display must never recombine separately approved Types into a shared
+  header. In particular, the Hudu revision renders separate headers for
+  **Hudu archive candidates**, **Incorrect Hudu links**, and
+  **Unconnected Hudu references**.
+- Add an optional Issue filter after Type so an operator can select one exact
+  condition without exposing its technical key or forcing every condition to
+  become a Type.
+
+Conditions may share a Type only when they have the same subject level,
+operational meaning, likely owner, next action, and lifecycle posture. Similar
+technical origins are not sufficient. The revised matrix must resolve at
+least these counterintuitive baseline combinations:
+
+| Baseline Type | Required review direction |
+| --- | --- |
+| Inventory gaps | Separate a platform withdrawal from a Computer with no current evidence; only the latter supports retirement. |
+| Duplicate Computers | Do not imply that serial conflicts or historical cross-client collisions are confirmed duplicate Computers. |
+| Inventory data problems | Separate invalid identifiers, platform disagreements, and unknown classifications unless the workflow audit proves one operator response. |
+| Client matching | Separate client/organization matching from Computer identity matching. |
+| Hudu maintenance | Replace with the three separately displayed Hudu Types listed above. |
+
+Duplicate platform entries, Computers not reporting, Patching not progressing,
+and Windows support require an explicit workflow/lifecycle review before the
+replacement matrix is approved. Historical and disabled Issues must be
+visibly marked when included through retained-history filters.
+
 Individual row names come from each condition definition's `label`, not from the
 grouped type and not from a technical-key formatter. Before implementation,
 review all 53 labels together for capitalization, terminology, tense, and
@@ -117,6 +159,46 @@ history” and “Patch activity overdue” remain separate row names.
   “Duplicate platform entries.”
 - Keep `source`, `source_instance`, `source_binding`, external IDs, and condition
   keys available in policy administration, audit, evidence, and diagnostics.
+
+### Approved replacement matrix
+
+The approved replacement contains 33 Types and all 53 conditions exactly once:
+
+| Category | Type | Conditions |
+| --- | --- | --- |
+| Inventory | Platform withdrawal | `device_source_record_withdrawn` |
+| Inventory | Missing computer evidence | `device_missing_from_source` |
+| Inventory | Possible duplicate Computers | `identity_conflict` |
+| Inventory | Computer identity conflicts | `shared_serial`, `cross_client_serial`, `cross_client_conflict` |
+| Inventory | Duplicate Ninja entries | `duplicate_platform_record` |
+| Inventory | Historical duplicate Hudu entries | `duplicate_device_records` |
+| Inventory | Invalid computer identifiers | `placeholder_serial`, `placeholder_mac` |
+| Inventory | Conflicting computer details | `device_role_conflict`, `lifecycle_reported_state_conflict` |
+| Inventory | Unknown computer classification | `lifecycle_unknown_reported_state`, `unmapped_node_class` |
+| Inventory | Client organization matching | `client_name_conflict`, `client_link_collision`, `client_unattached_group`, `unnamed_source_group`, `unmatched_source_group` |
+| Inventory | Computer identity matching | `identity_resolution_pending`, `unlinked_external_identity` |
+| Inventory | Hudu archive candidates | `cmdb_asset_stale` |
+| Inventory | Incorrect Hudu links | `cmdb_link_incorrect` |
+| Inventory | Unconnected Hudu references | `unintegrated_source_observed` |
+| Agents & reporting | Required agents | `missing_required_platform`, `device_unenrolled` |
+| Agents & reporting | Agents not reporting | `stale_required_platform` |
+| Agents & reporting | Computers not reporting | `device_offline` |
+| Agents & reporting | Stale computer data | `device_stale_data` |
+| Agents & reporting | Historical offline Computers | `device_long_offline` |
+| Software & security | Unapproved software | `unauthorized_remote_access`, `unauthorized_rmm`, `unauthorized_av` |
+| Software & security | Software classification | `capability_review_candidate` |
+| Software & security | Software approval | `whitelist_suggestion` |
+| Software & security | Suspicious software | `rare_recent`, `suspicious_name`, `install_path_suspicious`, `known_malicious_hint` |
+| Software & security | Vulnerable software | `vulnerable_software` |
+| Software & security | Unsupported software | `eol_runtime` |
+| Software & security | Protection conflicts | `multi_av_conflict` |
+| Patching & support | Patching not progressing | `device_never_patched`, `patching_stalled`, `patch_approval_backlog` |
+| Patching & support | Patch failures | `patch_failing_repeatedly` |
+| Patching & support | Restart required | `reboot_pending` |
+| Patching & support | Windows support | `windows_servicing_approaching_eol`, `windows_servicing_eol`, `windows_servicing_unknown` |
+| Data collection | Collection failures | `source_failure` |
+| Data collection | Processing delays | `software_queue_stalled` |
+| Data collection | Collector reporting | `stale_collector_binding` |
 
 ## Count and filtering contract
 
@@ -163,7 +245,10 @@ eligibility/data change, not accepted as a naming side effect.
 
 ### WP1 — Approve vocabulary and freeze a baseline
 
-- Review the approved five category names and 23 type names with the user.
+- Produce and review the revised complete Type mapping with the user; do not
+  treat the prior 23-type matrix as approved.
+- Apply the combination rule to every multi-condition Type and record why each
+  retained combination represents one operator workflow.
 - Export the active policy's complete 53-condition taxonomy and compare it with
   the matrix above; fail if anything is missing, duplicated, or unmapped.
 - Capture the count reconciliation matrix and representative screenshots/URLs
@@ -172,8 +257,10 @@ eligibility/data change, not accepted as a naming side effect.
 - Record whether each count changed during the prior conditions rollout because
   of eligibility, status, snoozing, policy-candidate separation, or a UI bug.
 
-Exit: vocabulary approved. Baseline evidence capture remains part of WP6
-validation because production access is not required for local taxonomy work.
+Exit: five categories, the final Type count and names, all 53 Issue names, and
+the exact display hierarchy are approved. Baseline evidence capture remains
+part of WP6 validation because production access is not required for local
+taxonomy work.
 
 ### WP2 — Establish one taxonomy authority
 
@@ -194,8 +281,8 @@ validation because production access is not required for local taxonomy work.
   the exact migration/seed approach before implementation; do not mutate the
   active policy in place or silently auto-activate an unreviewed policy.
 
-Exit: one validated policy registry maps all 53 keys to five categories, 23
-types, and 53 individual labels.
+Exit: one validated policy registry maps all 53 keys to five categories, the
+approved revised Type set, and 53 individual labels.
 
 ### WP3 — Build a single Issues-page projection
 
@@ -206,6 +293,8 @@ types, and 53 individual labels.
   that resolver; delete their dependence on reconstructed legacy categories.
 - Replace `humanize_label(finding_type.name)` in Issues grouping and row labels
   with policy `type.label` and definition `label` respectively.
+- Project Category, Type, and Issue as separate fields. Never merge distinct
+  Types for display merely because they share a Category or platform.
 - Preserve dynamic context additions such as the missing agent product and
   offline explanation without replacing the canonical issue label.
 - Unknown keys fail visibly as “Unclassified issue” with the technical key in
@@ -240,9 +329,13 @@ the before/after reconciliation has zero unexplained population changes.
 - First section: “Actionable work across the fleet,” category cards by severity,
   plus a separate Software decisions card.
 - Second section: category and type on their own primary row, with “All
-  categories” and “All types” as defaults; remaining filters below.
+  categories” and “All types” as defaults; add an “All issues” dependent
+  filter after Type; remaining filters stay below.
 - Third section: compact current-result summary followed by collapsible type
-  groups. Group header shows human type label and full filtered count.
+  groups. Every approved Type has its own header. Headers are collapsed by
+  default on the general queue, expand when their Type/Issue is selected or
+  when reached through a subject/evidence drilldown, and show the human Type
+  label, full filtered count, and severity summary.
 - Row “Issue” cell shows the specific policy label. Preserve subject links,
   evidence, context, status, dates, actions, bulk actions, condition detail,
   Hudu actions, reviewed-distinct, and CSV exports.
@@ -301,11 +394,16 @@ and available action without interpreting an internal key or conflicting total.
 
 ## Current checkpoint and next action
 
-WP1 vocabulary approval is complete. The prior six-category implementation was
-rejected and is being corrected without activating its policy version. The
-corrective registry validates all 53 condition memberships, and the Issues
-resolver is being aligned to the five-category/23-type policy.
-WP4/WP5 first-pass count and layout corrections are implemented. Focused
-condition and queue tests pass (79 tests), and `manage.py check` passes. The
-remaining work is migration-plan review, broader Operations validation, and
-deployment authorization if the implementation is accepted.
+The five category names remain accepted, but WP1 Type approval has reopened.
+The 23-type baseline combines several different workflows and is superseded
+for review. Hudu must render as three separate Types rather than a combined
+“Hudu maintenance” header. No taxonomy policy version should be activated yet.
+
+The revised taxonomy is implemented locally in the packaged profile, Issues
+projection, validator, tests, documentation, and frozen additive migration
+`conditions-taxonomy-3`. Local focused validation passes; production remains
+on active `conditions-taxonomy-2` until the new policy is reviewed and
+explicitly activated.
+
+The next action is final diff review and release handoff. No production
+activation or manual migration is authorized by this plan.

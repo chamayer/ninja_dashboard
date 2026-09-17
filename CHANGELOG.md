@@ -2,6 +2,19 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.126.0] — 2026-09-17 — Revised Issues taxonomy
+
+### Changed
+
+- Replaced the superseded 23-type Issues taxonomy with a 33-type registry
+  covering all 53 conditions across the five approved categories.
+- Split Hudu archive, incorrect-link, and unconnected-reference workflows, and
+  separated inventory, matching, identity, and reporting workflows with
+  different operator actions or lifecycle states.
+- Added a dependent Issue filter beneath the Type filter.
+- Seeded the revised taxonomy as immutable policy version
+  `conditions-taxonomy-3`, inactive pending policy review and activation.
+
 ## [0.125.0] — 2026-09-17 — Corrected Issues taxonomy
 
 ### Changed

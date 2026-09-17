@@ -113,6 +113,15 @@
                 {% endfor %}
             </select>
         </div>
+        <div class="filter-control">
+            <label>Issue</label>
+            <select name="issue">
+                <option value="">Any</option>
+                {% for issue in issue_choices %}
+                    <option value="{{ issue.value }}"{% if active_issue == issue.value %} selected{% endif %}>{{ issue.label }}</option>
+                {% endfor %}
+            </select>
+        </div>
         <div>
             <label>Response</label>
             <select name="response">

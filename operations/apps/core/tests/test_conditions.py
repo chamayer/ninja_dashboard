@@ -508,6 +508,12 @@ def test_issue_taxonomy_covers_every_condition_once():
         "Patching & support",
         "Data collection",
     ]
+    assert sum(len(category["types"]) for category in profile.issue_taxonomy) == 33
+    assert [item["label"] for item in profile.issue_taxonomy[0]["types"][-3:]] == [
+        "Hudu archive candidates",
+        "Incorrect Hudu links",
+        "Unconnected Hudu references",
+    ]
 
 
 def test_issue_taxonomy_rejects_cross_type_membership():
@@ -522,3 +528,25 @@ def test_operator_issue_labels_do_not_expose_source_terminology():
     labels = [definition["label"].lower() for definition in profile.definitions.values()]
     assert not any("source record" in label for label in labels)
     assert not any("source organization" in label for label in labels)
+
+
+def test_issue_taxonomy_separates_distinct_inventory_workflows():
+    profile = load_profile()
+    types = {
+        item["key"]: set(item["conditions"])
+        for category in profile.issue_taxonomy
+        for item in category["types"]
+    }
+    assert types["platform_withdrawal"] == {"device_source_record_withdrawn"}
+    assert types["missing_computer_evidence"] == {"device_missing_from_source"}
+    assert types["possible_duplicate_computers"] == {"identity_conflict"}
+    assert types["computer_identity_conflicts"] == {
+        "shared_serial", "cross_client_serial", "cross_client_conflict"
+    }
+    assert types["client_organization_matching"] == {
+        "client_name_conflict", "client_link_collision", "client_unattached_group",
+        "unnamed_source_group", "unmatched_source_group",
+    }
+    assert types["computer_identity_matching"] == {
+        "identity_resolution_pending", "unlinked_external_identity"
+    }

@@ -19,17 +19,27 @@
   ],
   "issue_taxonomy": [
     {"key": "inventory", "label": "Inventory", "types": [
-      {"key": "inventory_gaps", "label": "Inventory gaps", "conditions": ["device_source_record_withdrawn", "device_missing_from_source"]},
-      {"key": "duplicate_computers", "label": "Duplicate Computers", "conditions": ["identity_conflict", "shared_serial", "cross_client_serial", "cross_client_conflict"]},
-      {"key": "duplicate_platform_entries", "label": "Duplicate platform entries", "conditions": ["duplicate_platform_record", "duplicate_device_records"]},
-      {"key": "inventory_data_problems", "label": "Inventory data problems", "conditions": ["placeholder_serial", "placeholder_mac", "device_role_conflict", "lifecycle_reported_state_conflict", "lifecycle_unknown_reported_state", "unmapped_node_class"]},
-      {"key": "client_matching", "label": "Client matching", "conditions": ["client_name_conflict", "client_link_collision", "client_unattached_group", "unnamed_source_group", "unmatched_source_group", "identity_resolution_pending", "unlinked_external_identity"]},
-      {"key": "hudu_maintenance", "label": "Hudu maintenance", "conditions": ["cmdb_asset_stale", "cmdb_link_incorrect", "unintegrated_source_observed"]}
+      {"key": "platform_withdrawal", "label": "Platform withdrawal", "conditions": ["device_source_record_withdrawn"]},
+      {"key": "missing_computer_evidence", "label": "Missing computer evidence", "conditions": ["device_missing_from_source"]},
+      {"key": "possible_duplicate_computers", "label": "Possible duplicate Computers", "conditions": ["identity_conflict"]},
+      {"key": "computer_identity_conflicts", "label": "Computer identity conflicts", "conditions": ["shared_serial", "cross_client_serial", "cross_client_conflict"]},
+      {"key": "duplicate_ninja_entries", "label": "Duplicate Ninja entries", "conditions": ["duplicate_platform_record"]},
+      {"key": "historical_duplicate_hudu_entries", "label": "Historical duplicate Hudu entries", "conditions": ["duplicate_device_records"]},
+      {"key": "invalid_computer_identifiers", "label": "Invalid computer identifiers", "conditions": ["placeholder_serial", "placeholder_mac"]},
+      {"key": "conflicting_computer_details", "label": "Conflicting computer details", "conditions": ["device_role_conflict", "lifecycle_reported_state_conflict"]},
+      {"key": "unknown_computer_classification", "label": "Unknown computer classification", "conditions": ["lifecycle_unknown_reported_state", "unmapped_node_class"]},
+      {"key": "client_organization_matching", "label": "Client organization matching", "conditions": ["client_name_conflict", "client_link_collision", "client_unattached_group", "unnamed_source_group", "unmatched_source_group"]},
+      {"key": "computer_identity_matching", "label": "Computer identity matching", "conditions": ["identity_resolution_pending", "unlinked_external_identity"]},
+      {"key": "hudu_archive_candidates", "label": "Hudu archive candidates", "conditions": ["cmdb_asset_stale"]},
+      {"key": "incorrect_hudu_links", "label": "Incorrect Hudu links", "conditions": ["cmdb_link_incorrect"]},
+      {"key": "unconnected_hudu_references", "label": "Unconnected Hudu references", "conditions": ["unintegrated_source_observed"]}
     ]},
     {"key": "agents_reporting", "label": "Agents & reporting", "types": [
       {"key": "required_agents", "label": "Required agents", "conditions": ["missing_required_platform", "device_unenrolled"]},
       {"key": "agents_not_reporting", "label": "Agents not reporting", "conditions": ["stale_required_platform"]},
-      {"key": "computers_not_reporting", "label": "Computers not reporting", "conditions": ["device_offline", "device_stale_data", "device_long_offline"]}
+      {"key": "computers_not_reporting", "label": "Computers not reporting", "conditions": ["device_offline"]},
+      {"key": "stale_computer_data", "label": "Stale computer data", "conditions": ["device_stale_data"]},
+      {"key": "historical_offline_computers", "label": "Historical offline Computers", "conditions": ["device_long_offline"]}
     ]},
     {"key": "software_security", "label": "Software & security", "types": [
       {"key": "unapproved_software", "label": "Unapproved software", "conditions": ["unauthorized_remote_access", "unauthorized_rmm", "unauthorized_av"]},

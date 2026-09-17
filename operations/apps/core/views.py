@@ -223,6 +223,13 @@ def _issue_taxonomy() -> tuple[list[dict], dict[str, dict]]:
                 "value": type_item["key"],
                 "label": type_item["label"],
                 "types": condition_names,
+                "issues": tuple(
+                    {
+                        "value": name,
+                        "label": profile.definitions[name]["label"],
+                    }
+                    for name in type_item["conditions"]
+                ),
                 "legacy_types": {
                     profile.definitions[name]["type"] for name in condition_names
                 },
@@ -392,7 +399,7 @@ def _operator_issue_type_groups(
             continue
         if group["types"].intersection(available):
             result.append({**group, "types": sorted(group["types"].intersection(available))})
-    return sorted(result, key=lambda item: item["label"])
+    return result
 
 
 def _affected_device_rows(findings) -> list[dict]:
@@ -3208,6 +3215,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     status_filter = request.GET.get("status", "active")
     severity_filter = request.GET.get("severity", "")
     type_filter = request.GET.get("type", "")
+    issue_filter = request.GET.get("issue", "")
     category_filter = request.GET.get("category", "")
     requested_category_filter = category_filter
     confidence_filter = request.GET.get("confidence", "")
@@ -3255,6 +3263,13 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             type_filter = group_key
             break
 
+    selected_type = issue_type_groups.get(type_filter)
+    valid_issue_names = {
+        issue["value"] for issue in selected_type["issues"]
+    } if selected_type else set()
+    if issue_filter and issue_filter not in valid_issue_names:
+        issue_filter = ""
+
     # Source names come from operations.sources (admin-editable
     # reference data) — never hardcoded in code.
     source_names = list(Source.objects.order_by("name").values_list("name", flat=True))
@@ -3292,6 +3307,8 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     if type_filter:
         type_names = issue_type_groups.get(type_filter, {}).get("types", {type_filter})
         qs = qs.filter(finding_type__name__in=type_names)
+    if issue_filter:
+        qs = qs.filter(finding_type__name=issue_filter)
     if confidence_filter:
         qs = qs.filter(confidence=confidence_filter)
     if client_filter:
@@ -4059,6 +4076,9 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     finding_type_groups = _operator_issue_type_groups(
         list(ft_qs), category_filter, issue_categories, issue_type_groups
     )
+    issue_choices = []
+    if selected_type:
+        issue_choices = list(selected_type["issues"])
     clients = Client.objects.filter(tenant_id=1, deleted_at__isnull=True).order_by("display_name")
 
     page_query = request.GET.copy()
@@ -4086,6 +4106,8 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             "condition_policy_available": condition_policy_available,
             "active_severity": severity_filter,
             "active_type": type_filter,
+            "active_issue": issue_filter,
+            "issue_choices": issue_choices,
             "active_category": category_filter,
             "active_category_label": next(
                 (item["label"] for item in issue_categories if item["key"] == category_filter),
