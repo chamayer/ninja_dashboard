@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% load human_labels %}
 
-{% block title %}{% if active_category %}{{ active_category|humanize_label }} issues{% else %}Issues{% endif %}{% endblock %}
+{% block title %}{% if active_category_label %}{{ active_category_label }} issues{% else %}Issues{% endif %}{% endblock %}
 
 {% block content %}
 
@@ -14,7 +14,7 @@
     </div>
     {% endif %}
     <div style="display:flex; align-items:center; justify-content:space-between; gap:1rem;">
-        <h1 style="margin:0;">{% if active_category %}{{ active_category|humanize_label }} issues{% else %}Issues{% endif %}
+        <h1 style="margin:0;">{% if active_category_label %}{{ active_category_label }} issues{% else %}Issues{% endif %}
           <span class="muted" style="font-weight:400; font-size:0.9rem;">({{ actionable_matching }} actionable · {{ affected_device_count }} devices)</span>
         </h1>
         <div style="display:flex; gap:0.75rem; font-size:0.85rem; white-space:nowrap;">
@@ -31,9 +31,9 @@
                 <div class="sev-mini">{% for severity in t.severity_links %}<span class="{{ severity.value }}"><a href="{{ severity.href }}" style="color:inherit; text-decoration:none;">{{ severity.label }} {{ severity.count }}</a></span>{% endfor %}</div>
             </div>
         {% endfor %}
-        <a class="tile {% if policy_matching %}tile-low{% endif %}" href="#software-policy">
-            <div class="tile-label">Software policy review</div>
-            <div class="tile-value">{{ policy_matching }}</div>
+        <a class="tile {% if fleet_policy_count %}tile-low{% endif %}" href="#software-policy">
+            <div class="tile-label">Software decisions</div>
+            <div class="tile-value">{{ fleet_policy_count }}</div>
         </a>
     </div>
 </div>
@@ -47,16 +47,7 @@
     {% elif active_subject_id %}
     <p class="muted" style="margin-top:0;">Filtered to the selected device.</p>
     {% endif %}
-    <div class="tile-grid">
-        {% for card in result_scope_cards %}
-            <div class="tile">
-                <div class="tile-label">{{ card.label }}</div>
-                <div class="tile-value">{{ card.count }}</div>
-                <div class="tile-note">{{ card.note }}</div>
-                <div class="tile-note">{{ card.count }} / {{ card.total }} {{ card.total_label }} · {{ card.percentage }}</div>
-            </div>
-        {% endfor %}
-    </div>
+    <p class="muted" style="margin:0;">{{ current_result_summary }}</p>
 </div>
 
 <div class="card">
@@ -231,7 +222,7 @@
                     <td><input type="checkbox" name="ids" value="{{ f.id }}" class="bulk-cb"></td>
                     <td><span class="badge badge-{{ f.severity }}">{{ f.get_severity_display }}</span></td>
                     <td>
-                        {% finding_display_label f %}
+                        {{ row.issue_display_label }}
                     </td>
                     <td>
                         {% if row.subject_url %}

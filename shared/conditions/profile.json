@@ -17,12 +17,45 @@
     "merge_and_mapping",
     "legacy_and_external"
   ],
-  "issue_categories": [
-    {"key": "coverage", "label": "Coverage", "categories": ["coverage"]},
-    {"key": "identity_quality", "label": "Identity & data quality", "categories": ["identity", "data_quality"]},
-    {"key": "security_software", "label": "Security & software", "categories": ["software"]},
-    {"key": "patching_lifecycle", "label": "Patching & lifecycle", "categories": ["patching", "lifecycle"]},
-    {"key": "platform_health", "label": "Platform health", "categories": ["platform_health", "platform"]}
+  "issue_taxonomy": [
+    {"key": "computers", "label": "Computers", "types": [
+      {"key": "agent_coverage", "label": "Agent coverage", "conditions": ["missing_required_platform", "stale_required_platform", "device_unenrolled"]},
+      {"key": "computer_reporting", "label": "Computer reporting", "conditions": ["device_offline", "device_stale_data", "device_long_offline"]},
+      {"key": "computer_cleanup", "label": "Computer cleanup", "conditions": ["device_source_record_withdrawn", "device_missing_from_source"]}
+    ]},
+    {"key": "matching_duplicates", "label": "Matching & duplicates", "types": [
+      {"key": "duplicate_computers", "label": "Duplicate computers", "conditions": ["identity_conflict"]},
+      {"key": "duplicate_source_records", "label": "Duplicate source records", "conditions": ["duplicate_platform_record", "duplicate_device_records"]},
+      {"key": "identifier_issues", "label": "Identifier issues", "conditions": ["shared_serial", "cross_client_serial", "placeholder_serial", "placeholder_mac", "cross_client_conflict"]},
+      {"key": "conflicting_computer_details", "label": "Conflicting computer details", "conditions": ["device_role_conflict", "lifecycle_reported_state_conflict"]},
+      {"key": "unrecognized_source_data", "label": "Unrecognized source data", "conditions": ["lifecycle_unknown_reported_state", "unmapped_node_class"]},
+      {"key": "client_matching", "label": "Client matching", "conditions": ["client_name_conflict", "client_link_collision", "client_unattached_group", "unnamed_source_group", "unmatched_source_group", "identity_resolution_pending", "unlinked_external_identity"]}
+    ]},
+    {"key": "hudu", "label": "Hudu", "types": [
+      {"key": "archive_candidates", "label": "Archive candidates", "conditions": ["cmdb_asset_stale"]},
+      {"key": "incorrect_links", "label": "Incorrect links", "conditions": ["cmdb_link_incorrect"]},
+      {"key": "unconnected_references", "label": "Unconnected references", "conditions": ["unintegrated_source_observed"]}
+    ]},
+    {"key": "software_security", "label": "Software & security", "types": [
+      {"key": "unapproved_software", "label": "Unapproved software", "conditions": ["unauthorized_remote_access", "unauthorized_rmm", "unauthorized_av"]},
+      {"key": "software_classification", "label": "Software classification", "conditions": ["capability_review_candidate"]},
+      {"key": "software_approval", "label": "Software approval", "conditions": ["whitelist_suggestion"]},
+      {"key": "suspicious_software", "label": "Suspicious software", "conditions": ["rare_recent", "suspicious_name", "install_path_suspicious", "known_malicious_hint"]},
+      {"key": "vulnerable_software", "label": "Vulnerable software", "conditions": ["vulnerable_software"]},
+      {"key": "unsupported_software", "label": "Unsupported software", "conditions": ["eol_runtime"]},
+      {"key": "protection_conflicts", "label": "Protection conflicts", "conditions": ["multi_av_conflict"]}
+    ]},
+    {"key": "patching_windows", "label": "Patching & Windows", "types": [
+      {"key": "patch_progress", "label": "Patch progress", "conditions": ["device_never_patched", "patching_stalled", "patch_approval_backlog"]},
+      {"key": "patch_failures", "label": "Patch failures", "conditions": ["patch_failing_repeatedly"]},
+      {"key": "restarts_required", "label": "Restarts required", "conditions": ["reboot_pending"]},
+      {"key": "windows_support", "label": "Windows support", "conditions": ["windows_servicing_approaching_eol", "windows_servicing_eol", "windows_servicing_unknown"]}
+    ]},
+    {"key": "data_collection", "label": "Data collection", "types": [
+      {"key": "collection_failures", "label": "Collection failures", "conditions": ["source_failure"]},
+      {"key": "processing_delays", "label": "Processing delays", "conditions": ["software_queue_stalled"]},
+      {"key": "collector_reporting", "label": "Collector reporting", "conditions": ["stale_collector_binding"]}
+    ]}
   ],
   "issue_type_aliases": [
     {"key": "possible_duplicate_records", "label": "Possible duplicate records", "types": ["identity_conflict", "duplicate_device_records", "duplicate_platform_record"]}

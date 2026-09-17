@@ -488,3 +488,31 @@ def test_retained_suppressed_rows_are_not_counted_as_new_active_impact():
     result = build_report(sample, load_profile())
     assert result["comparison"]["active_rows_with_identity_blocked_participants"] == 0
     assert result["by_type"]["patching_stalled"]["reasons"]["existing_operator_suppression"] == 1
+
+
+def test_issue_taxonomy_covers_every_condition_once():
+    profile = load_profile()
+    memberships = [
+        condition
+        for category in profile.issue_taxonomy
+        for type_item in category["types"]
+        for condition in type_item["conditions"]
+    ]
+    assert len(memberships) == 53
+    assert len(set(memberships)) == 53
+    assert set(memberships) == set(profile.definitions)
+    assert [category["label"] for category in profile.issue_taxonomy] == [
+        "Computers",
+        "Matching & duplicates",
+        "Hudu",
+        "Software & security",
+        "Patching & Windows",
+        "Data collection",
+    ]
+
+
+def test_issue_taxonomy_rejects_cross_type_membership():
+    data = json.loads(Path(__file__).parents[4].joinpath("shared/conditions/profile.json").read_text())
+    data["issue_taxonomy"][0]["types"][1]["conditions"].append("missing_required_platform")
+    with pytest.raises(ValueError, match="multiple taxonomy types"):
+        parse_profile(data)

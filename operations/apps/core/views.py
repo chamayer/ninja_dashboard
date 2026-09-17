@@ -5,6 +5,7 @@ import logging
 import os
 import re
 import uuid
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from urllib import request as _urllib_request
 from urllib.error import HTTPError, URLError
@@ -24,6 +25,7 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from django.utils.text import slugify
 from django.views.decorators.http import require_GET, require_POST
+from shared.conditions.policy import load_profile
 
 from . import capability as capability_evidence
 from . import category as category_evidence
@@ -76,7 +78,6 @@ from .models import (
     Source,
     SuppressionRule,
 )
-from .templatetags.human_labels import humanize_label
 
 DEVICE_PAGE_SIZE = 100
 
@@ -204,32 +205,46 @@ def _finding_type_groups(
 
 
 def _issue_taxonomy() -> tuple[list[dict], dict[str, dict]]:
+    """Return the active policy's sole operator-facing taxonomy authority."""
     profile = load_active_profile()
-    finding_type_rows = FindingType.objects.filter(
-        name__in=profile.definitions,
-    ).values_list("name", "category__name")
-    db_categories = {name: category for name, category in finding_type_rows}
-    grouped: dict[str, dict] = {}
-    for type_name, definition in profile.definitions.items():
-        category_label = definition["category"]
-        item = grouped.setdefault(
-            category_label,
+    if not profile.issue_taxonomy:
+        # Old immutable policy rows remain readable until the reviewed policy
+        # version is activated. Use the packaged registry only for this
+        # compatibility window; all condition labels still come from the
+        # active policy row.
+        packaged = load_profile()
+        profile = replace(profile, issue_taxonomy=packaged.issue_taxonomy)
+    categories = []
+    type_groups = {}
+    for category in profile.issue_taxonomy:
+        category_types = set()
+        legacy_names = set()
+        for type_item in category["types"]:
+            condition_names = set(type_item["conditions"])
+            category_types.update(condition_names)
+            legacy_names.update(
+                profile.definitions[name]["category"]
+                for name in condition_names
+            )
+            group = {
+                "value": type_item["key"],
+                "label": type_item["label"],
+                "types": condition_names,
+                "legacy_types": {
+                    profile.definitions[name]["type"] for name in condition_names
+                },
+                "category": category["key"],
+            }
+            type_groups[type_item["key"]] = group
+        categories.append(
             {
-                "key": slugify(category_label).replace("-", "_"),
-                "label": category_label,
-                "categories": set(),
-                "types": set(),
-            },
+                "key": category["key"],
+                "label": category["label"],
+                "categories": legacy_names,
+                "types": category_types,
+            }
         )
-        item["types"].add(type_name)
-        if db_category := db_categories.get(type_name):
-            item["categories"].add(db_category)
-    categories = sorted(grouped.values(), key=lambda item: item["label"])
-    aliases = {
-        item["key"]: {**item, "types": set(item["types"])}
-        for item in profile.issue_type_aliases
-    }
-    return categories, aliases
+    return categories, type_groups
 
 
 def _condition_assessment_display(row_kind: str, finding_ids) -> dict[str, dict]:
@@ -372,20 +387,19 @@ def _condition_response_ids(finding_ids) -> dict[str, set[str]]:
 
 def _operator_issue_type_groups(
     finding_types: list[FindingType], category_key: str,
-    categories: list[dict], aliases: dict[str, dict],
+    categories: list[dict], type_groups: dict[str, dict],
 ) -> list[dict]:
-    category_names = next(
-        (item["categories"] for item in categories if item["key"] == category_key), None
+    allowed = next(
+        (item["types"] for item in categories if item["key"] == category_key), None
     )
-    groups: dict[str, dict] = {}
-    for ft in finding_types:
-        if category_names and (ft.category.name if ft.category else "") not in category_names:
+    available = {ft.name for ft in finding_types}
+    result = []
+    for group in type_groups.values():
+        if allowed is not None and not group["types"].intersection(allowed):
             continue
-        alias = next((key for key, value in aliases.items() if ft.name in value["types"]), None)
-        key = alias or ft.name
-        group = groups.setdefault(key, {"value": key, "label": aliases.get(key, {}).get("label", humanize_label(ft.name)), "types": set()})
-        group["types"].add(ft.name)
-    return [{**group, "types": sorted(group["types"])} for group in sorted(groups.values(), key=lambda item: item["label"])]
+        if group["types"].intersection(available):
+            result.append({**group, "types": sorted(group["types"].intersection(available))})
+    return sorted(result, key=lambda item: item["label"])
 
 
 def _affected_device_rows(findings) -> list[dict]:
@@ -3216,13 +3230,15 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     group_key_filter = (request.GET.get("group_key") or "").strip()
     group_value_filter = (request.GET.get("group_value") or "").strip()
     q_filter = (request.GET.get("q") or "").strip()
+    profile = None
     try:
-        issue_categories, issue_type_aliases = _issue_taxonomy()
+        issue_categories, issue_type_groups = _issue_taxonomy()
+        profile = load_active_profile()
         condition_policy_available = True
     except RuntimeError:
         # Evidence and retained findings remain reviewable when policy
         # authority is unavailable; governed response filters fail closed.
-        issue_categories, issue_type_aliases = [], {}
+        issue_categories, issue_type_groups = [], {}
         condition_policy_available = False
 
     # Normalize legacy technical values into the operator-facing filter groups.
@@ -3241,8 +3257,8 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
         params = request.GET.copy()
         params["category"] = category_filter
         return redirect(f"{reverse('findings_queue')}?{params.urlencode()}")
-    for group_key, group in issue_type_aliases.items():
-        if type_filter in group["types"]:
+    for group_key, group in issue_type_groups.items():
+        if type_filter in group["types"] or type_filter in group["legacy_types"]:
             type_filter = group_key
             break
 
@@ -3266,7 +3282,6 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     # Hide snoozed issues by default; user can toggle to see them.
     if not show_snoozed and status_filter not in ("all",):
         qs = qs.filter(Q(snoozed_until__isnull=True) | Q(snoozed_until__lt=timezone.now()))
-    status_scope_qs = qs
 
     if category_filter:
         category_names = next(
@@ -3282,7 +3297,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
         else:
             qs = qs.filter(finding_type__category__name__in=category_names)
     if type_filter:
-        type_names = issue_type_aliases.get(type_filter, {}).get("types", {type_filter})
+        type_names = issue_type_groups.get(type_filter, {}).get("types", {type_filter})
         qs = qs.filter(finding_type__name__in=type_names)
     if confidence_filter:
         qs = qs.filter(confidence=confidence_filter)
@@ -3408,66 +3423,14 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     policy_matching = policy_qs.count()
     affected_devices = _affected_device_rows(actionable_qs)
     affected_client_count = len({row["client"] for row in affected_devices if row["client"]})
-    status_scope_total = status_scope_qs.count()
-    status_scope_actionable_total = status_scope_qs.exclude(
-        finding_type__name__in=_SOFTWARE_POLICY_CANDIDATE_TYPES
-    ).count()
-    status_scope_policy_total = status_scope_qs.filter(
-        finding_type__name__in=_SOFTWARE_POLICY_CANDIDATE_TYPES
-    ).count()
-    fleet_device_total = Device.objects.filter(tenant_id=1, deleted_at__isnull=True).count()
-    fleet_client_total = Client.objects.filter(tenant_id=1, deleted_at__isnull=True).count()
-    status_scope_label = "all" if status_filter == "all" else status_filter.replace("_", " ")
-
-    def scope_card(label: str, count: int, total: int, total_label: str, note: str) -> dict:
-        """Build a labeled filtered-count fraction for the Issues summary."""
-        percentage = f"{(100 * count / total):.1f}%" if total else "0%"
-        return {
-            "label": label,
-            "count": count,
-            "total": total,
-            "total_label": total_label,
-            "percentage": percentage,
-            "note": note,
-        }
-
-    result_scope_cards = [
-        scope_card(
-            "Findings",
-            total_matching,
-            status_scope_total,
-            f"{status_scope_label} findings",
-            "matching the active filters",
-        ),
-        scope_card(
-            "Actionable",
-            actionable_matching,
-            status_scope_actionable_total,
-            f"{status_scope_label} actionable findings",
-            "incident or remediation work",
-        ),
-        scope_card(
-            "Devices",
-            len(affected_devices),
-            fleet_device_total,
-            "fleet devices",
-            "affected by actionable findings",
-        ),
-        scope_card(
-            "Clients",
-            affected_client_count,
-            fleet_client_total,
-            "fleet clients",
-            "with affected devices",
-        ),
-        scope_card(
-            "Policy review",
-            policy_matching,
-            status_scope_policy_total,
-            f"{status_scope_label} policy candidates",
-            "software decision candidates",
-        ),
+    result_summary_parts = [
+        f"{total_matching} issue rows",
+        f"{len(affected_devices)} affected Computers",
+        f"{affected_client_count} affected clients",
     ]
+    if policy_matching:
+        result_summary_parts.append(f"{policy_matching} software decisions")
+    current_result_summary = " · ".join(result_summary_parts)
 
     if request.GET.get("format") == "devices_csv":
         return csv_response(
@@ -3519,6 +3482,12 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
         fleet_governed_qs.values_list("id", flat=True)
     )["actionable"]
     top_summary_qs = fleet_governed_qs.filter(id__in=fleet_actionable_ids)
+    fleet_policy_qs = Finding.objects.filter(
+        tenant_id=1,
+        status__in=_FINDING_ACTIVE_STATUSES,
+        snoozed_until__isnull=True,
+        finding_type__name__in=_SOFTWARE_POLICY_CANDIDATE_TYPES,
+    )
     for category in issue_categories:
         key, label, names = category["key"], category["label"], category.get("types", set())
         counts = {sev: 0 for sev, _ in Finding.Severity.choices}
@@ -3531,6 +3500,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             sev_params["severity"] = sev
             severity_links.append({"label": sev_label, "count": counts[sev], "href": "?" + sev_params.urlencode(), "value": sev})
         category_tiles.append({"label": label, "total": sum(counts.values()), "href": "?" + params.urlencode(), "severity_links": severity_links})
+    fleet_policy_count = fleet_policy_qs.count()
 
     _SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
     # The screen intentionally stays bounded so it remains responsive, but an
@@ -3995,13 +3965,9 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             findings_with_detail,
             columns=[
                 ("Severity", lambda r: r["f"].severity),
-                ("Type", lambda r: r["f"].finding_type.name),
-                (
-                    "Category",
-                    lambda r: (
-                        r["f"].finding_type.category.name if r["f"].finding_type.category else ""
-                    ),
-                ),
+                ("Type", lambda r: r["issue_type_label"]),
+                ("Issue", lambda r: r["issue_label"]),
+                ("Category", lambda r: r["issue_category_label"]),
                 ("Client", lambda r: (r["f"].client.display_name if r["f"].client else "")),
                 ("Subject type", lambda r: r["f"].subject_type),
                 ("Subject id", lambda r: str(r["f"].subject_id) if r["f"].subject_id else ""),
@@ -4061,12 +4027,35 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             filename_stem="findings",
         )
 
-    findings_with_detail.sort(key=lambda row: humanize_label(row["f"].finding_type.name))
+    for row in findings_with_detail:
+        condition = profile.definitions.get(row["f"].finding_type.name) if profile else None
+        row["issue_label"] = condition["label"] if condition else "Unclassified issue"
+        row["issue_type_label"] = next(
+            (
+                group["label"]
+                for group in issue_type_groups.values()
+                if row["f"].finding_type.name in group["types"]
+            ),
+        ) or "Unclassified issue"
+        row["issue_category_label"] = next(
+            (category["label"] for category in issue_categories
+             if row["f"].finding_type.name in category["types"]),
+            "Unclassified issue",
+        )
+        row["issue_display_label"] = row["issue_label"]
+        details = row["f"].finding_details or {}
+        if details.get("platform") and row["f"].finding_type.name in {
+            "missing_required_platform", "stale_required_platform",
+        }:
+            row["issue_display_label"] += f": {details['platform']}"
+        if details.get("reason_suppressed") == "device_offline":
+            row["issue_display_label"] += " (device offline)"
+    findings_with_detail.sort(key=lambda row: (row["issue_type_label"], row["issue_label"]))
     paginator = Paginator(findings_with_detail, 50)
     page = paginator.get_page(request.GET.get("page"))
     page_group_counts = {}
-    for row in page.object_list:
-        row["issue_group"] = humanize_label(row["f"].finding_type.name)
+    for row in findings_with_detail:
+        row["issue_group"] = row["issue_type_label"]
         page_group_counts[row["issue_group"]] = page_group_counts.get(row["issue_group"], 0) + 1
     for row in page.object_list:
         row["issue_group_count"] = page_group_counts[row["issue_group"]]
@@ -4075,7 +4064,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     ft_qs = FindingType.objects.select_related("category").order_by("name")
     categories = [{"name": item["key"], "label": item["label"]} for item in issue_categories]
     finding_type_groups = _operator_issue_type_groups(
-        list(ft_qs), category_filter, issue_categories, issue_type_aliases
+        list(ft_qs), category_filter, issue_categories, issue_type_groups
     )
     clients = Client.objects.filter(tenant_id=1, deleted_at__isnull=True).order_by("display_name")
 
@@ -4105,6 +4094,10 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             "active_severity": severity_filter,
             "active_type": type_filter,
             "active_category": category_filter,
+            "active_category_label": next(
+                (item["label"] for item in issue_categories if item["key"] == category_filter),
+                "",
+            ),
             "active_platform": platform_filter,
             "active_online": online_filter,
             "active_response": response_filter,
@@ -4124,11 +4117,12 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             "show_snoozed": show_snoozed,
             "severity_tiles": severity_tiles,
             "category_tiles": category_tiles,
+            "fleet_policy_count": fleet_policy_count,
             "total_matching": total_matching,
             "actionable_matching": actionable_matching,
             "response_matching": response_matching,
             "policy_matching": policy_matching,
-            "result_scope_cards": result_scope_cards,
+            "current_result_summary": current_result_summary,
             "policy_rows": policy_rows,
             "policy_rows_truncated": policy_matching > len(policy_rows),
             "affected_device_count": len(affected_devices),

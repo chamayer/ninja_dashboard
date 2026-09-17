@@ -1,26 +1,35 @@
-# 0022 — Policy-defined issue taxonomy
+# ADR-0022: Policy-defined Issues taxonomy
 
-Status: Accepted; deployment validation pending
+## Status
+
+Accepted
 
 ## Decision
 
-The active condition policy’s per-definition category, type, and label are the
-authority for the Issues taxonomy. Migration 0164 promotes six stable category
-keys: `computers`, `documentation`, `records_matching`, `security_software`,
-`system_health`, and `updates_support`.
+The active condition policy is the authority for the operator-facing Issues
+taxonomy. It defines ordered categories, grouped types, and individual issue
+labels. The approved registry contains six categories, 26 types, and all 53
+condition keys exactly once.
 
-The queue derives category membership from policy definition names rather than
-maintaining a separate hardcoded category map. Legacy category values remain
-accepted and redirect to the canonical policy key while preserving other query
-parameters.
+The condition keys remain stable technical identifiers for policy, audit,
+URLs, evidence, and diagnostics. Legacy database category names and the
+human-label formatter are not taxonomy authorities. They remain available only
+for storage compatibility and unrelated surfaces.
+
+The new registry is seeded as an immutable, inactive policy version. Review
+and activation use the existing database-governed Operations admin workflow.
+Until activation, the Issues projection can read the packaged registry while
+retaining labels from the active policy, so deployment does not make the queue
+unavailable during the review window.
 
 ## Consequences
 
-Older links remain usable during rollout, while new links converge on the
-policy-defined taxonomy. The migration creates an immutable policy version and
-activates it atomically; rollback reactivates `conditions-shadow-1` without
-rewriting historical assessments or finding identities.
-
-Production validation must confirm the migration against the deployed finding
-registry and verify category counts with representative retained and eligible
-findings.
+- Category and type filters, cards, group headings, rows, CSV exports, and
+  selected-category headings share one resolver.
+- A condition missing from the registry fails validation rather than silently
+  appearing under a technical-key fallback.
+- Existing bookmarks using legacy category or grouped-type values continue to
+  work and are normalized to canonical values.
+- Activating the policy invalidates prior condition response authority through
+  the existing policy activation function; producers must write fresh
+  assessments under the new version.
