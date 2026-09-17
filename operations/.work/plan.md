@@ -1346,8 +1346,7 @@ migration was run. The broader WP5-WP8 plan retains any unrelated acceptance
 items separately.
 ## Current checkpoint — five remaining condition-integration blockers
 
-Status: [ ] Complete locally; final permission migration 0170 rollout
-verification remains.
+Status: [x] Complete and deployed.
 
 Scope: grant the software-exposure view owner access to condition tables;
 measure software device coverage and contact readiness for every affected
@@ -1358,5 +1357,9 @@ aggregate assessment requirement from the initial admin notification selector.
 Validation: focused tests are in progress. Pre-existing probe artifacts under
 `.work/` remain untracked and are excluded from this change.
 
-Next action: push the SQL migration 110 and Operations migration 0170, then
-verify automatic application and service health.
+Verified after push: commit `132ff45` is present on both remotes; automatic
+rollout applied Operations migration 0170 and restarted the service healthy.
+The runtime ACL shows `operations_view_owner` has SELECT on both condition
+tables, and the exposure view reaches its expected tenant-context guard rather
+than failing on permissions. SQL migration 110 remains the ingest-schema
+path for databases where the SQL migration runner is active.
