@@ -5,6 +5,7 @@ import json
 
 from django import forms
 from django.contrib import admin
+from django.contrib.admin import helpers
 from django.contrib.auth.admin import UserAdmin
 from django.db import connection, transaction
 from django.utils import timezone
@@ -418,7 +419,7 @@ class FindingTypeAdmin(admin.ModelAdmin):
     search_fields = ("name", "description", "runbook_path")
 
 
-class ConditionPolicyActivationForm(forms.Form):
+class ConditionPolicyActivationForm(helpers.ActionForm):
     reason = forms.CharField(
         required=True,
         max_length=500,

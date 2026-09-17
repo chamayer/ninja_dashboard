@@ -102,3 +102,9 @@ def test_observation_metadata_view_excludes_payload_columns() -> None:
     assert "raw_data" not in view_sql
     assert "canonical_data->>'hostname'" in view_sql
     assert "canonical_data->>'platform_group_id'" in view_sql
+def test_condition_policy_action_form_preserves_django_action_fields():
+    from apps.core.admin import ConditionPolicyActivationForm
+
+    form = ConditionPolicyActivationForm()
+    assert "action" in form.fields
+    assert "reason" in form.fields
