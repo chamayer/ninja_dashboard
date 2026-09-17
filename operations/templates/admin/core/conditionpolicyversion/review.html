@@ -1,0 +1,56 @@
+{% extends "admin/base_site.html" %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block content %}
+<div id="content-main">
+  <h1>{{ title }}</h1>
+  <p>
+    <a href="{% url 'admin:core_conditionpolicyversion_changelist' %}">Back to policy versions</a>
+  </p>
+
+  <div class="module" style="padding:1rem; margin-bottom:1rem;">
+    <h2>Policy status</h2>
+    <table>
+      <tr><th>Version</th><td><code>{{ policy_version.version }}</code></td></tr>
+      <tr><th>State</th><td>{% if policy_version.active %}Active{% else %}Inactive{% endif %}</td></tr>
+      <tr><th>Created</th><td>{{ policy_version.created_at }}</td></tr>
+      <tr><th>Digest</th><td><code>{{ policy_version.digest }}</code></td></tr>
+      <tr><th>Digest check</th><td>{% if digest_valid %}Valid{% else %}<strong>Invalid</strong>{% endif %}</td></tr>
+      {% if active_policy %}<tr><th>Compared with active</th><td><code>{{ active_policy.version }}</code></td></tr>{% endif %}
+    </table>
+  </div>
+
+  {% if not has_taxonomy %}
+  <div class="messagelist"><p class="warning">This policy has no structured Issues taxonomy and cannot be reviewed for activation.</p></div>
+  {% else %}
+  <div class="module" style="padding:1rem; margin-bottom:1rem;">
+    <h2>Issues taxonomy</h2>
+    <p>{{ category_count }} Categories · {{ type_count }} Types · {{ issue_count }} Issues</p>
+    {% for category in taxonomy_rows %}
+      <details open style="margin:1rem 0;">
+        <summary><strong>{{ category.label }}</strong> <span class="quiet">({{ category.types|length }} Types)</span></summary>
+        {% for type in category.types %}
+          <div style="margin:0.8rem 0 0.8rem 1.2rem;">
+            <h3 style="margin-bottom:0.25rem;">{{ type.label }}</h3>
+            <ul>
+              {% for issue in type.issues %}
+                <li>{{ issue.label }} <span class="quiet">({{ issue.lifecycle }})</span></li>
+              {% endfor %}
+            </ul>
+          </div>
+        {% endfor %}
+      </details>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <div class="module" style="padding:1rem;">
+    <h2>Changed policy sections</h2>
+    {% if changed_keys %}
+      <ul>{% for key in changed_keys %}<li><code>{{ key }}</code></li>{% endfor %}</ul>
+    {% else %}<p>No differences from the active policy.</p>{% endif %}
+    <p class="quiet">Use the changelist action “Review selected condition policy version” to record the review reason. Activation remains a separate action.</p>
+  </div>
+</div>
+{% endblock %}

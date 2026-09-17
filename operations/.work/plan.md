@@ -401,7 +401,8 @@ collisions are separate from active computer identity conflicts. No taxonomy
 policy version should be activated yet.
 
 The revised taxonomy is implemented locally in the packaged profile, Issues
-projection, validator, tests, documentation, and frozen additive migration
+projection, validator, tests, documentation, frozen additive migration, and
+readable policy review UI
 `conditions-taxonomy-4`. Group collapse, severity summaries, legacy-policy
 fallbacks, dependent filter behavior, historical identity separation, and
 deterministic historical migration payloads are included. The prior production
@@ -410,7 +411,7 @@ activation from repository state.
 
 Implementation completed in `1121dbb`.
 
-Validation recorded: 83 focused Operations tests passed; `manage.py check` and
+Validation recorded: 90 focused Operations tests passed; `manage.py check` and
 `makemigrations --check --dry-run` passed; all five embedded historical/final
 policy payloads decoded successfully; the 0174 payload is byte-identical to
 the version shipped in `143d242`; targeted Ruff checks, Python compilation,

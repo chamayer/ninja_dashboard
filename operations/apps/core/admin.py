@@ -8,6 +8,7 @@ from django.contrib import admin
 from django.contrib.admin import helpers
 from django.contrib.auth.admin import UserAdmin
 from django.db import connection, transaction
+from django.shortcuts import render
 from django.utils import timezone
 from shared.conditions.policy import parse_profile
 
@@ -444,6 +445,66 @@ class ConditionPolicyVersionAdmin(admin.ModelAdmin):
 
     def has_change_permission(self, request, obj=None):
         return False
+
+    def has_view_permission(self, request, obj=None):
+        return request.user.is_superuser
+
+    def change_view(self, request, object_id, form_url="", extra_context=None):
+        """Render policy contents as a reviewable taxonomy, not raw JSON."""
+        policy = self.get_object(request, object_id)
+        if policy is None:
+            return super().change_view(request, object_id, form_url, extra_context)
+        profile = parse_profile(policy.policy)
+        active_policy = ConditionPolicyVersion.objects.filter(active=True).first()
+        previous_document = active_policy.policy if active_policy else {}
+        changed_keys = sorted(
+            key
+            for key in set(previous_document) | set(policy.policy)
+            if previous_document.get(key) != policy.policy.get(key)
+        )
+        taxonomy_rows = []
+        for category in profile.issue_taxonomy:
+            types = []
+            for type_item in category["types"]:
+                types.append(
+                    {
+                        "label": type_item["label"],
+                        "issues": [
+                            {
+                                "key": name,
+                                "label": profile.definitions[name]["label"],
+                                "lifecycle": profile.definitions[name]["lifecycle"],
+                            }
+                            for name in type_item["conditions"]
+                        ],
+                    }
+                )
+            taxonomy_rows.append({"label": category["label"], "types": types})
+        review_context = {
+            **self.admin_site.each_context(request),
+            "opts": self.model._meta,
+            "original": policy,
+            "title": f"Review condition policy {policy.version}",
+            "policy_version": policy,
+            "policy_profile": profile,
+            "digest_valid": profile.digest == policy.digest,
+            "active_policy": active_policy,
+            "changed_keys": changed_keys,
+            "has_taxonomy": bool(profile.issue_taxonomy),
+            "taxonomy_rows": taxonomy_rows,
+            "category_count": len(taxonomy_rows),
+            "type_count": sum(len(row["types"]) for row in taxonomy_rows),
+            "issue_count": sum(
+                len(type_row["issues"])
+                for row in taxonomy_rows
+                for type_row in row["types"]
+            ),
+        }
+        return render(
+            request,
+            "admin/core/conditionpolicyversion/review.html",
+            review_context,
+        )
 
     def has_delete_permission(self, request, obj=None):
         return False

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+from pathlib import Path
 
 from django.template.loader import get_template
 from django.urls import reverse
@@ -108,3 +109,15 @@ def test_condition_policy_action_form_preserves_django_action_fields():
     form = ConditionPolicyActivationForm()
     assert "action" in form.fields
     assert "reason" in form.fields
+
+
+def test_condition_policy_review_template_uses_structured_taxonomy():
+    template = Path("templates/admin/core/conditionpolicyversion/review.html").read_text(
+        encoding="utf-8"
+    )
+    assert "taxonomy_rows" in template
+    assert "category_count" in template
+    assert "type_count" in template
+    assert "issue_count" in template
+    assert "Changed policy sections" in template
+    assert "policy_version.policy" not in template
