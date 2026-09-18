@@ -1,6 +1,36 @@
-# Issues page taxonomy and count-contract correction
+# Issues page taxonomy and operator queue usability correction
 
 ## Status
+
+**Follow-up implementation complete locally.** The taxonomy rollout is
+deployed and active. This
+follow-up separates software decision candidates from the Issues queue, hides
+internal condition-policy diagnostics from operators, and makes the complete
+filtered Issues dataset navigable with group summaries, server-side sorting,
+and cell-content filters.
+
+### Follow-up scope
+
+- `operations/apps/core/views.py`
+- `operations/templates/findings_queue.html`
+- focused Operations queue tests
+
+### Follow-up validation
+
+- focused findings-queue tests;
+- Django checks and template loading;
+- `git diff --check`;
+- deployed smoke check of `/findings/` after the approved push.
+
+### Follow-up checkpoint
+
+The queue now exposes all group counts before pagination, routes software
+decisions to their dedicated queue, omits internal policy diagnostics from
+operator rows, and applies sorting/filtering to the complete filtered set
+before pagination. Local validation passed; next action is commit, push, and
+deployed smoke validation.
+
+## Prior rollout status
 
 **Taxonomy correction implementation complete.** The five top-level categories
 and revised 34-type mapping are approved. The prior 23-type matrix is

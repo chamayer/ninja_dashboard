@@ -31,7 +31,7 @@
                 <div class="sev-mini">{% for severity in t.severity_links %}<span class="{{ severity.value }}"><a href="{{ severity.href }}" style="color:inherit; text-decoration:none;">{{ severity.label }} {{ severity.count }}</a></span>{% endfor %}</div>
             </div>
         {% endfor %}
-        <a class="tile {% if fleet_policy_count %}tile-low{% endif %}" href="#software-policy">
+        <a class="tile {% if fleet_policy_count %}tile-low{% endif %}" href="{% url 'software_decisions_queue' %}?decision=pending">
             <div class="tile-label">Software decisions</div>
             <div class="tile-value">{{ fleet_policy_count }}</div>
         </a>
@@ -178,8 +178,31 @@
 
 
 <div class="card">
+    <h2 class="section-label">Issue groups</h2>
+    <p class="muted" style="margin-top:0;">The queue contains {{ total_matching }} retained issues across these groups. Select a group to review its complete filtered set.</p>
+    <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:.45rem .8rem;">
+        {% for group in group_navigation %}
+        <a href="{{ group.href }}" style="display:flex; justify-content:space-between; gap:.5rem; padding:.35rem .45rem; border-radius:4px;{% if group.active %} background:var(--surface-subtle,#f3f4f6); font-weight:700;{% endif %}">
+            <span>{{ group.label }}</span><span class="muted">{{ group.count }}</span>
+        </a>
+        {% endfor %}
+    </div>
+</div>
+
+<div class="card">
     {% if findings %}
     <h2 class="section-label">{{ active_response|title }} issues <span>({{ response_matching }} matching)</span></h2>
+    <form method="get" class="issues-table-filters" style="display:grid; grid-template-columns:repeat(auto-fit,minmax(135px,1fr)); gap:.5rem; margin:.6rem 0 .8rem; padding:.6rem; background:var(--surface-subtle,#f8fafc); border:1px solid var(--border);">
+        {% for key, value in table_base_params %}<input type="hidden" name="{{ key }}" value="{{ value }}">{% endfor %}
+        <label>Severity<input type="search" name="table_severity" value="{{ table_filters.severity }}" placeholder="Contains…"></label>
+        <label>Finding<input type="search" name="table_finding" value="{{ table_filters.finding }}" placeholder="Contains…"></label>
+        <label>Subject<input type="search" name="table_subject" value="{{ table_filters.subject }}" placeholder="Contains…"></label>
+        <label>Evidence<input type="search" name="table_evidence" value="{{ table_filters.evidence }}" placeholder="Contains…"></label>
+        <label>Context<input type="search" name="table_context" value="{{ table_filters.context }}" placeholder="Contains…"></label>
+        <label>Status<input type="search" name="table_status" value="{{ table_filters.status }}" placeholder="Contains…"></label>
+        <label>Evidence date<input type="search" name="table_date" value="{{ table_filters.date }}" placeholder="YYYY-MM-DD"></label>
+        <div style="align-self:end;"><button type="submit">Filter table</button> <a class="reset" href="?{{ page_query }}">Clear</a></div>
+    </form>
     <form method="post" action="{% url 'findings_bulk_action' %}" id="bulk-form">
         {% csrf_token %}
         <input type="hidden" name="next" value="{{ request.get_full_path }}">
@@ -203,29 +226,29 @@
                 {% endif %}
             </details>
         </div>
-        <table data-sortable class="ops-table">
+        <table class="ops-table">
             <thead>
                 <tr>
                     <th style="width:28px;"><input type="checkbox" id="bulk-toggle-all"></th>
-                    <th>Severity</th>
-                    <th>Finding</th>
-                    <th>Subject</th>
-                    <th>Evidence</th>
-                    <th>Context</th>
-                    <th>Status</th>
-                    <th class="num">Evidence date</th>
+                    <th><a href="{{ sort_links.severity }}">Severity</a></th>
+                    <th><a href="{{ sort_links.finding }}">Finding</a></th>
+                    <th><a href="{{ sort_links.subject }}">Subject</a></th>
+                    <th><a href="{{ sort_links.evidence }}">Evidence</a></th>
+                    <th><a href="{{ sort_links.context }}">Context</a></th>
+                    <th><a href="{{ sort_links.status }}">Status</a></th>
+                    <th class="num"><a href="{{ sort_links.date }}">Evidence date</a></th>
                     <th>Actions</th>
                 </tr>
             </thead>
             <tbody>
                 {% for row in findings %}
-                {% ifchanged row.issue_group %}
+                {% if show_group_headers %}{% ifchanged row.issue_group %}
                 <tr class="issue-group-header">
                     <td colspan="9" style="padding:.65rem .5rem; background:var(--surface-subtle,#f3f4f6);">
                         <button type="button" class="issue-group-toggle" data-group="{{ row.issue_group|slugify }}" aria-expanded="{{ row.issue_group_expanded|yesno:'true,false' }}" style="border:0; background:none; font-weight:700; cursor:pointer;"><span class="issue-group-chevron" aria-hidden="true">{% if row.issue_group_expanded %}▾{% else %}▸{% endif %}</span> {{ row.issue_group }} <span class="muted">({{ row.issue_group_count }}){% if row.issue_group_severity_summary %} · {{ row.issue_group_severity_summary|join:", " }}{% endif %}</span></button>
                     </td>
                 </tr>
-                {% endifchanged %}
+                {% endifchanged %}{% endif %}
                 {% with f=row.f %}
                 <tr class="issue-group-row issue-group-{{ row.issue_group|slugify }}"{% if not row.issue_group_expanded %} hidden{% endif %}{% if f.snoozed_until %} style="opacity:0.6;"{% endif %}>
                     <td><input type="checkbox" name="ids" value="{{ f.id }}" class="bulk-cb"></td>
@@ -263,17 +286,6 @@
                     <td>{{ row.detail|default:"—" }}</td>
                     <td class="muted">
                         {{ row.context|default:"—" }}
-                        {% if row.assessment %}
-                        <div style="margin-top:0.35rem; font-size:0.75rem;">
-                            <strong>Assessment: {{ row.assessment.disposition }}</strong>
-                            <br>Policy: {{ row.assessment.policy_version }} · {{ row.assessment.policy_digest|slice:":12" }}
-                            <br>Scope: {{ row.assessment.scopes|join:", " }}
-                            {% if row.assessment.reasons %}<br>Reason: {% for reason in row.assessment.reasons %}{{ reason|humanize_label }}{% if not forloop.last %}, {% endif %}{% endfor %}{% endif %}
-                            {% if row.assessment.blockers %}<br>Blocker: {% for blocker in row.assessment.blockers %}{{ blocker|humanize_label }}{% if not forloop.last %}, {% endif %}{% endfor %}{% endif %}
-                        </div>
-                        {% else %}
-                        <div style="margin-top:0.35rem; font-size:0.75rem;">Assessment pending</div>
-                        {% endif %}
                     </td>
                     <td>
                         <span class="badge badge-{{ f.status }}">{{ f.get_status_display }}</span>
@@ -318,47 +330,6 @@
     <p class="muted">No retained issues match the current filters.</p>
     {% endif %}
 </div>
-
-{% if policy_matching %}
-<div class="card" id="software-policy">
-    <div style="display:flex; align-items:center; justify-content:space-between; gap:1rem;">
-        <div>
-            <h2 class="section-label" style="margin-bottom:0.25rem;">Software policy candidates <span>({{ policy_matching }} matching)</span></h2>
-            <p class="muted" style="margin:0;">These are widespread, undecided software titles—not incidents. Review the existing policy workflow to record a global, client, or device decision.</p>
-        </div>
-        <a href="{% url 'software_decisions_queue' %}?decision=pending" style="white-space:nowrap;">Open Software Decisions →</a>
-    </div>
-    {% if policy_rows %}
-    <table class="ops-table" style="margin-top:1rem;">
-        <thead>
-            <tr>
-                <th>Product</th>
-                <th>Publisher</th>
-                <th class="num">Installed devices</th>
-                <th>Why review</th>
-                <th>Last detected</th>
-                <th>Next step</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for row in policy_rows %}
-            <tr>
-                <td>
-                    {% if row.subject_url %}<a href="{{ row.subject_url }}"><code>{{ row.subject_label }}</code></a>{% else %}<code>{{ row.subject_label }}</code>{% endif %}
-                </td>
-                <td>{{ row.publisher|default:"—" }}</td>
-                <td class="num">{{ row.fleet_device_count|default:"—" }}</td>
-                <td>{{ row.detail }}</td>
-                <td class="muted num">{{ row.f.last_detected_at|default:row.f.last_seen_at|date:"Y-m-d H:i" }}</td>
-                <td><a href="{% url 'software_decisions_queue' %}?q={{ row.canonical_name|urlencode }}">Review decision →</a></td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-    {% if policy_rows_truncated %}<p class="muted" style="margin-bottom:0;">Showing the 100 most recently detected candidates. Open Software Decisions for the complete review queue.</p>{% endif %}
-    {% endif %}
-</div>
-{% endif %}
 
 {{ taxonomy_filter_data|json_script:"issue-taxonomy-data" }}
 <script>

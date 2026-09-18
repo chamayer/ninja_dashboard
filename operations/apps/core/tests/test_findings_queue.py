@@ -132,9 +132,11 @@ def test_findings_queue_template_exposes_device_csv_and_grouped_types():
     assert "<optgroup" not in template
     assert "Selected actions" in template
     assert "bulk-action" in template
-    assert "Software policy candidates" in template
-    assert "Review decision" in template
-    assert "Installed devices" in template
+    assert "Software decisions" in template
+    assert "software_decisions_queue" in template
+    assert "table_finding" in template
+    assert "sort_links.finding" in template
+    assert "Issue groups" in template
     assert "Current result scope" in template
     assert "current_result_summary" in template
     assert '<select name="issue" id="issues-issue-filter">' in template
@@ -159,7 +161,8 @@ def test_findings_queue_template_exposes_device_csv_and_grouped_types():
 
 def test_findings_group_summaries_are_computed_before_screen_cap():
     source = Path("apps/core/views.py").read_text(encoding="utf-8")
-    assert source.index("group_summary =") < source.index("actionable_qs[:500]")
+    assert source.index("group_summary =") < source.index("findings_with_detail =")
+    assert "actionable_qs[:500]" not in source
     assert 'actionable_qs.values(\n        "finding_type__name", "severity"' in source
 
 
@@ -214,7 +217,7 @@ def test_software_policy_candidates_are_not_managed_as_incidents():
     source = Path("apps/core/views.py").read_text(encoding="utf-8")
 
     assert views._SOFTWARE_POLICY_CANDIDATE_TYPES == ("whitelist_suggestion",)
-    assert "policy_qs" in source
+    assert 'qs = qs.exclude(finding_type__name__in=_SOFTWARE_POLICY_CANDIDATE_TYPES)' in source
     assert "actionable_qs" in source
     assert "_policy_candidate_state_action_blocked" in source
     assert "Skipped {policy_count} software policy candidate" in source
@@ -296,7 +299,8 @@ def test_findings_queue_exposes_governed_response_filter():
     assert "condition_participants" in source
     assert '"Response reasons"' in source
     assert '"Assessment scope"' in source
-    assert "Policy:" in template
+    assert "Policy:" not in template
+    assert "row.assessment" not in template
     assert "finding_reviewed_distinct" in template
     assert "Reviewed distinct" in template
 
@@ -333,7 +337,7 @@ def test_condition_reasons_are_humanized_in_evidence_surfaces():
     queue = Path("templates/findings_queue.html").read_text(encoding="utf-8")
     admin = Path("templates/findings_admin_health.html").read_text(encoding="utf-8")
     device = Path("templates/device_detail.html").read_text(encoding="utf-8")
-    assert queue.count("|humanize_label") >= 2
+    assert queue.count("|humanize_label") >= 1
     assert admin.count("|humanize_label") >= 2
     assert "blocker|humanize_label" in device
 

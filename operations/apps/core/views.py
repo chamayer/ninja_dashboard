@@ -3393,10 +3393,13 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             subject_id__in=_online_device_ids(online_filter),
         )
 
-    # Response state is separate from operator handling. Policy candidates
-    # retain their independent review workflow; governed findings are filtered
-    # only after all subject and evidence filters have been applied.
-    governed_qs = qs.exclude(finding_type__name__in=_SOFTWARE_POLICY_CANDIDATE_TYPES)
+    # Software policy candidates have a separate decision queue. They are not
+    # Issues and must not inflate the Issues response counts or appear here.
+    qs = qs.exclude(finding_type__name__in=_SOFTWARE_POLICY_CANDIDATE_TYPES)
+
+    # Response state is separate from operator handling. Governed findings are
+    # filtered only after all subject and evidence filters have been applied.
+    governed_qs = qs
     response_ids = _condition_response_ids(governed_qs.values_list("id", flat=True))
     if response_filter != "all":
         if response_filter == "paused":
@@ -3406,20 +3409,13 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             selected_ids = response_ids["paused"]
         else:
             selected_ids = response_ids[response_filter]
-        qs = qs.filter(
-            Q(finding_type__name__in=_SOFTWARE_POLICY_CANDIDATE_TYPES)
-            | Q(id__in=selected_ids)
-        )
+        qs = qs.filter(id__in=selected_ids)
 
-    # Software-policy candidates have their own review workflow. Severity
-    # tiles stay focused on actionable findings, rather than treating a large
-    # low-severity decision backlog as an incident count.
-    severity_qs = qs.exclude(finding_type__name__in=_SOFTWARE_POLICY_CANDIDATE_TYPES)
+    severity_qs = qs
     if severity_filter:
         qs = qs.filter(severity=severity_filter)
 
-    policy_qs = qs.filter(finding_type__name__in=_SOFTWARE_POLICY_CANDIDATE_TYPES)
-    actionable_qs = qs.exclude(finding_type__name__in=_SOFTWARE_POLICY_CANDIDATE_TYPES)
+    actionable_qs = qs
     response_matching = actionable_qs.count()
 
     # Tile counts and the headline are computed before the display slice from
@@ -3430,7 +3426,6 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     }
     total_matching = qs.count()
     actionable_matching = actionable_qs.count()
-    policy_matching = policy_qs.count()
     affected_devices = _affected_device_rows(actionable_qs)
     affected_client_count = len({row["client"] for row in affected_devices if row["client"]})
     result_summary_parts = [
@@ -3438,8 +3433,6 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
         f"{len(affected_devices)} affected Computers",
         f"{affected_client_count} affected clients",
     ]
-    if policy_matching:
-        result_summary_parts.append(f"{policy_matching} software decisions")
     current_result_summary = " · ".join(result_summary_parts)
 
     if request.GET.get("format") == "devices_csv":
@@ -3538,21 +3531,17 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             group_label, {value: 0 for value, _label in Finding.Severity.choices}
         )[summary["severity"]] += summary["n"]
     findings = sorted(
-        actionable_qs if wants_csv(request) else actionable_qs[:500],
+        actionable_qs,
         key=lambda f: (
             _SEVERITY_ORDER.get(f.severity, 9),
             -(f.last_detected_at or f.last_seen_at).timestamp(),
         ),
     )
-    policy_findings = sorted(
-        policy_qs[:100],
-        key=lambda f: (-(f.last_detected_at or f.last_seen_at).timestamp(), f.id),
-    )
 
     # Per-device map of platforms whose latest source-reported state is online.
     # Freshness is deliberately separate from this state and remains available
     # on the device detail surface.
-    all_display_findings = [*findings, *policy_findings]
+    all_display_findings = findings
     subject_ids = [f.subject_id for f in all_display_findings if f.subject_id]
     online_map: dict[str, list[str]] = {}
     if subject_ids:
@@ -3988,8 +3977,6 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
                 }
             )
         row["duplicate_candidates"] = candidates
-    policy_rows = [_display_row(f) for f in policy_findings]
-
     if wants_csv(request):
         return csv_response(
             findings_with_detail,
@@ -4081,7 +4068,62 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             row["issue_display_label"] += f": {details['platform']}"
         if details.get("reason_suppressed") == "device_offline":
             row["issue_display_label"] += " (device offline)"
-    findings_with_detail.sort(key=lambda row: (row["issue_type_label"], row["issue_label"]))
+
+    # These filters intentionally operate on the rendered cell values, not a
+    # partial database approximation. The complete filtered queryset is small
+    # enough to materialize here, and this keeps filtering faithful to what an
+    # operator actually sees in the table.
+    table_filter_specs = (
+        ("severity", lambda row: row["f"].get_severity_display()),
+        ("finding", lambda row: row["issue_display_label"]),
+        ("subject", lambda row: row["subject_label"]),
+        ("evidence", lambda row: row["detail"]),
+        ("context", lambda row: row["context"]),
+        ("status", lambda row: row["f"].get_status_display()),
+        ("date", lambda row: row.get("evidence_date")),
+    )
+    table_filters = {
+        key: (request.GET.get(f"table_{key}") or "").strip()
+        for key, _getter in table_filter_specs
+    }
+
+    def _table_value(value):
+        if value is None:
+            return ""
+        if isinstance(value, datetime):
+            return value.isoformat(sep=" ")
+        return str(value)
+
+    findings_with_detail = [
+        row
+        for row in findings_with_detail
+        if all(
+            not table_filters[key]
+            or table_filters[key].casefold() in _table_value(getter(row)).casefold()
+            for key, getter in table_filter_specs
+        )
+    ]
+
+    sort_key = request.GET.get("sort", "group")
+    if sort_key not in {"group", "severity", "finding", "subject", "evidence", "context", "status", "date"}:
+        sort_key = "group"
+    sort_dir = request.GET.get("dir", "asc")
+    if sort_dir not in {"asc", "desc"}:
+        sort_dir = "asc"
+    sort_getters = {
+        "group": lambda row: (row["issue_type_label"], row["issue_label"]),
+        "severity": lambda row: row["f"].get_severity_display(),
+        "finding": lambda row: row["issue_display_label"],
+        "subject": lambda row: row["subject_label"],
+        "evidence": lambda row: row["detail"],
+        "context": lambda row: row["context"],
+        "status": lambda row: row["f"].get_status_display(),
+        "date": lambda row: row.get("evidence_date") or datetime.min,
+    }
+    findings_with_detail.sort(
+        key=lambda row: _table_value(sort_getters[sort_key](row)).casefold(),
+        reverse=sort_dir == "desc",
+    )
     paginator = Paginator(findings_with_detail, 50)
     page = paginator.get_page(request.GET.get("page"))
     for row in findings_with_detail:
@@ -4104,6 +4146,42 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             or device_id_filter
             or subject_id_filter
         )
+
+    group_navigation = []
+    for group_key, group in issue_type_groups.items():
+        counts = group_summary.get(
+            group["label"], {value: 0 for value, _label in Finding.Severity.choices}
+        )
+        params = request.GET.copy()
+        params.pop("page", None)
+        params["type"] = group_key
+        group_navigation.append(
+            {
+                "label": group["label"],
+                "count": sum(counts.values()),
+                "severity_summary": [
+                    f"{severity_labels[value]} {count}"
+                    for value, count in counts.items()
+                    if count
+                ],
+                "href": "?" + params.urlencode(),
+                "active": type_filter == group_key,
+            }
+        )
+
+    table_base_params = []
+    excluded_table_params = {"page", "sort", "dir"}
+    excluded_table_params.update(f"table_{key}" for key, _getter in table_filter_specs)
+    for key, values in request.GET.lists():
+        if key not in excluded_table_params:
+            table_base_params.extend((key, value) for value in values)
+    sort_links = {}
+    for candidate in ("group", "severity", "finding", "subject", "evidence", "context", "status", "date"):
+        params = request.GET.copy()
+        params.pop("page", None)
+        params["sort"] = candidate
+        params["dir"] = "desc" if sort_key == candidate and sort_dir == "asc" else "asc"
+        sort_links[candidate] = "?" + params.urlencode()
 
     # Type dropdown cascades: if category selected, only show types in it.
     ft_qs = FindingType.objects.select_related("category").order_by("name")
@@ -4181,10 +4259,15 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             "total_matching": total_matching,
             "actionable_matching": actionable_matching,
             "response_matching": response_matching,
-            "policy_matching": policy_matching,
             "current_result_summary": current_result_summary,
-            "policy_rows": policy_rows,
-            "policy_rows_truncated": policy_matching > len(policy_rows),
+            "group_navigation": group_navigation,
+            "table_filters": table_filters,
+            "table_filter_specs": [key for key, _getter in table_filter_specs],
+            "table_base_params": table_base_params,
+            "sort_links": sort_links,
+            "active_table_sort": sort_key,
+            "active_table_dir": sort_dir,
+            "show_group_headers": sort_key == "group",
             "affected_device_count": len(affected_devices),
             "page_query": page_query.urlencode(),
             "finding_actions": available_finding_actions(request.user),
