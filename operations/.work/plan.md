@@ -429,3 +429,8 @@ that Ninja materialized-view refreshes lacked tenant context, and the derived
 entity-link sync could close a history interval at its exact start timestamp.
 The corrective code and migration are now prepared locally; next action is
 deployment followed by a fresh Ninja collection and policy-4 assessment check.
+
+The fresh cycle validated those fixes and produced 5,468 policy-4 assessments.
+Remaining producer review exposed unsafe integer casts in patch classification
+for non-device VMX source links; those casts are now guarded and require a
+follow-up deployment and classifier run.

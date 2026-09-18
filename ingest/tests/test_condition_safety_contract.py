@@ -356,6 +356,7 @@ def test_patch_assessments_measure_identity_offline_and_coverage():
     assert "EvaluationCoverage(measured, measured, measured, measured)" in source
     assert "reported_online IS TRUE" in source
     assert "no_longer_actionable" in source
+    assert source.count("external_id::int") == source.count("external_id ~ '^[0-9]+$'")
 
 
 def test_software_assessments_cover_each_device_and_measure_contact():

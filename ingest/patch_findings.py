@@ -47,7 +47,6 @@ from shared.conditions.contracts import (
     Condition,
     EvaluationCoverage,
     Participant,
-    Readiness,
     Signal,
 )
 
@@ -155,7 +154,8 @@ _INSCOPE_SIGNAL_CTE = """
         JOIN operations.sources s
           ON s.id = dl.source_id AND s.name = 'Ninja'
         LEFT JOIN ninja_patches.device_patch_signal dps
-          ON dps.device_id = dl.external_id::int
+          ON dps.device_id = CASE WHEN dl.external_id ~ '^[0-9]+$'
+                                  THEN dl.external_id::int END
         WHERE dl.tenant_id = %s
           AND EXISTS (
               SELECT 1
@@ -315,7 +315,8 @@ def _emit_failing_repeatedly(cur, tenant_id, ft_ids, now, keys, policy) -> int:
         f"""
         WITH included AS (
             SELECT dl.tenant_id, dl.device_id AS ops_device_id,
-                   dl.external_id::int AS ninja_id,
+                   CASE WHEN dl.external_id ~ '^[0-9]+$'
+                        THEN dl.external_id::int END AS ninja_id,
                    v.client_id, v.canonical_hostname
             FROM operations.v_device v
             JOIN operations.v_device_source_link dl
@@ -383,7 +384,8 @@ def _emit_approval_backlog(cur, tenant_id, ft_ids, now, keys, policy) -> int:
         f"""
         WITH included AS (
             SELECT dl.tenant_id, dl.device_id AS ops_device_id,
-                   dl.external_id::int AS ninja_id,
+                   CASE WHEN dl.external_id ~ '^[0-9]+$'
+                        THEN dl.external_id::int END AS ninja_id,
                    v.client_id
             FROM operations.v_device v
             JOIN operations.v_device_source_link dl
@@ -581,7 +583,8 @@ def _patch_evaluation_coverage(cur, tenant_id, subject_type, subject_id, now, po
                         AND presence.platform = 'Ninja'
                         AND presence.reported_online IS TRUE
                        JOIN ninja_patches.device_patch_signal signal
-                         ON signal.device_id = link.external_id::int
+                         ON signal.device_id = CASE WHEN link.external_id ~ '^[0-9]+$'
+                                                    THEN link.external_id::int END
                        CROSS JOIN latest_patch_run run
                       WHERE v.tenant_id = %s AND v.device_id = %s
                         AND v.effective_patching_scope = 'Included'
@@ -592,7 +595,8 @@ def _patch_evaluation_coverage(cur, tenant_id, subject_type, subject_id, now, po
                         AND run.finished_at BETWEEN %s - interval '{policy['patch_activity_days']} days' AND %s
                         AND EXISTS (
                             SELECT 1 FROM ninja_patches.patch_facts fact
-                             WHERE fact.device_id = link.external_id::int
+                             WHERE fact.device_id = CASE WHEN link.external_id ~ '^[0-9]+$'
+                                                        THEN link.external_id::int END
                         AND run.snapshot_at IS NOT NULL
                         AND fact.last_observed_at = run.snapshot_at
                         )
@@ -637,7 +641,8 @@ def _patch_evaluation_coverage(cur, tenant_id, subject_type, subject_id, now, po
                           JOIN operations.sources source
                             ON source.id = link.source_id AND source.name = 'Ninja'
                           JOIN ninja_patches.patch_facts facts
-                            ON facts.device_id = link.external_id::int
+                            ON facts.device_id = CASE WHEN link.external_id ~ '^[0-9]+$'
+                                                      THEN link.external_id::int END
                          CROSS JOIN latest_patch_run run
                          WHERE link.tenant_id = %s AND link.device_id = i.device_id
                            AND run.snapshot_at IS NOT NULL
@@ -727,19 +732,22 @@ def _auto_resolve(cur, tenant_id, emitted_keys, now, policy) -> None:
                  AND run.finished_at BETWEEN now() - interval '{policy['patch_activity_days']} days' AND now()
                  AND EXISTS (
                      SELECT 1 FROM ninja_patches.patch_facts current_fact
-                      WHERE current_fact.device_id = link.external_id::int
+                      WHERE current_fact.device_id = CASE WHEN link.external_id ~ '^[0-9]+$'
+                                                         THEN link.external_id::int END
                         AND run.snapshot_at IS NOT NULL
                         AND current_fact.last_observed_at = run.snapshot_at
                  )
                  AND (
                      (ft.name = 'device_never_patched' AND EXISTS (
                          SELECT 1 FROM ninja_patches.device_patch_signal signal
-                          WHERE signal.device_id = link.external_id::int
+                          WHERE signal.device_id = CASE WHEN link.external_id ~ '^[0-9]+$'
+                                                        THEN link.external_id::int END
                             AND signal.ever_installed IS TRUE
                      ))
                      OR (ft.name = 'patching_stalled' AND EXISTS (
                          SELECT 1 FROM ninja_patches.device_patch_signal signal
-                          WHERE signal.device_id = link.external_id::int
+                          WHERE signal.device_id = CASE WHEN link.external_id ~ '^[0-9]+$'
+                                                        THEN link.external_id::int END
                             AND signal.last_seen_at >= now() - interval '{policy['patch_activity_days']} days'
                      ))
                      OR (ft.name = 'reboot_pending' AND (
@@ -748,7 +756,8 @@ def _auto_resolve(cur, tenant_id, emitted_keys, now, policy) -> None:
                      ))
                      OR (ft.name = 'patch_failing_repeatedly' AND NOT EXISTS (
                          SELECT 1 FROM ninja_patches.patch_facts facts
-                          WHERE facts.device_id = link.external_id::int
+                          WHERE facts.device_id = CASE WHEN link.external_id ~ '^[0-9]+$'
+                                                       THEN link.external_id::int END
                             AND facts.status = 'FAILED'
                             AND facts.kb_number IS NOT NULL
                             AND run.snapshot_at IS NOT NULL
@@ -805,7 +814,8 @@ def _auto_resolve(cur, tenant_id, emitted_keys, now, policy) -> None:
                          SELECT 1
                            FROM ninja_patches.patch_facts facts
                            CROSS JOIN latest_patch_run run
-                          WHERE facts.device_id = device_link.external_id::int
+                      WHERE facts.device_id = CASE WHEN device_link.external_id ~ '^[0-9]+$'
+                                                   THEN device_link.external_id::int END
                             AND run.snapshot_at IS NOT NULL
                             AND facts.last_observed_at = run.snapshot_at
                      )
@@ -817,7 +827,8 @@ def _auto_resolve(cur, tenant_id, emitted_keys, now, policy) -> None:
                                facts.device_id, facts.patch_uid, facts.status
                           FROM ninja_patches.patch_facts facts
                           JOIN operations.v_device_source_link link
-                            ON link.external_id::int = facts.device_id
+                            ON CASE WHEN link.external_id ~ '^[0-9]+$'
+                                    THEN link.external_id::int END = facts.device_id
                           JOIN operations.sources source
                             ON source.id = link.source_id AND source.name = 'Ninja'
                           JOIN operations.v_device client_device
