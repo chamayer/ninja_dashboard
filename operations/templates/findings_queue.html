@@ -161,9 +161,9 @@
                title="Download every matching issue row for the current filters">⤓ Issues CSV</a>
         </div>
     </div>
-    <h2 class="section-label" style="margin-top:1.25rem;">Actionable work across the fleet</h2>
-    <p class="muted" style="margin:.25rem 0 .7rem;">Unfiltered fleet totals. Select a card to open that category in the queue.</p>
-    <section class="issues-summary" aria-label="Actionable work across the fleet">
+    <h2 class="section-label" style="margin-top:1.25rem;">Issues summary</h2>
+    <p class="muted" style="margin:.25rem 0 .7rem;">Unfiltered totals. Select a card to open that category in the queue.</p>
+    <section class="issues-summary" aria-label="Issues summary">
         {% for tile in category_tiles %}
         <a class="issues-summary-card" href="{{ tile.href }}">
             <span class="issues-summary-label">{{ tile.label }}</span>

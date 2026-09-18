@@ -135,7 +135,7 @@ def test_findings_queue_template_exposes_device_csv_and_grouped_types():
     assert "table_finding" in template
     assert "sort_links.finding" in template
     assert "issue-group-header" in template
-    assert "Actionable work across the fleet" in template
+    assert "Issues summary" in template
     assert "Filtered results" in template
     assert "issues-column-filter" in template
     assert "issues-results-intro" in template
