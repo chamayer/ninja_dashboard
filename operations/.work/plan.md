@@ -24,11 +24,12 @@ and cell-content filters.
 
 ### Follow-up checkpoint
 
-The queue now exposes all group counts before pagination, routes software
-decisions to their dedicated queue, omits internal policy diagnostics from
-operator rows, and applies sorting/filtering to the complete filtered set
-before pagination. Local validation passed; next action is commit, push, and
-deployed smoke validation.
+The queue now exposes all group counts as collapsed table headers, routes
+software decisions to their dedicated queue, omits internal policy
+diagnostics from operator rows, and applies column sorting/filtering to the
+complete filtered set before pagination. The unfiltered fleet summary is
+separate from the prominently labeled filtered results. Local validation
+passed; next action is commit, push, and deployed smoke validation.
 
 ## Prior rollout status
 

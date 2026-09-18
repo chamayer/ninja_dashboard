@@ -3481,9 +3481,10 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     ).filter(
         Q(snoozed_until__isnull=True) | Q(snoozed_until__lt=timezone.now())
     ).exclude(finding_type__name__in=_SOFTWARE_POLICY_CANDIDATE_TYPES)
-    fleet_actionable_ids = _condition_response_ids(
+    fleet_response_ids = _condition_response_ids(
         fleet_governed_qs.values_list("id", flat=True)
-    )["actionable"]
+    )
+    fleet_actionable_ids = fleet_response_ids["actionable"]
     top_summary_qs = fleet_governed_qs.filter(id__in=fleet_actionable_ids)
     fleet_policy_qs = Finding.objects.filter(
         tenant_id=1,
@@ -3504,32 +3505,50 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             severity_links.append({"label": sev_label, "count": counts[sev], "href": "?" + sev_params.urlencode(), "value": sev})
         category_tiles.append({"label": label, "total": sum(counts.values()), "href": "?" + params.urlencode(), "severity_links": severity_links})
     fleet_policy_count = fleet_policy_qs.count()
+    fleet_summary_cards = [
+        {
+            "label": "Open issues",
+            "value": fleet_governed_qs.count(),
+            "note": "active retained findings",
+            "href": "?status=active&response=all",
+        },
+        {
+            "label": "Actionable",
+            "value": len(fleet_response_ids["actionable"]),
+            "note": "ready for operator action",
+            "href": "?status=active&response=actionable",
+        },
+        {
+            "label": "Blocked",
+            "value": len(fleet_response_ids["blocked"]),
+            "note": "blocked by current evidence",
+            "href": "?status=active&response=blocked",
+        },
+        {
+            "label": "Pending review",
+            "value": len(fleet_response_ids["pending"]),
+            "note": "unknown or incomplete assessment",
+            "href": "?status=active&response=pending",
+        },
+        {
+            "label": "Affected Computers",
+            "value": len(_affected_device_rows(top_summary_qs)),
+            "note": "Computers with actionable issues",
+            "href": "?status=active&response=actionable",
+        },
+        {
+            "label": "Software decisions",
+            "value": fleet_policy_count,
+            "note": "separate decision queue",
+            "href": reverse("software_decisions_queue") + "?decision=pending",
+        },
+    ]
 
     _SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
     # The screen intentionally stays bounded so it remains responsive, but an
     # explicit CSV is a report of the complete filtered set. Keeping its input
     # uncapped makes its row count agree with the headline rather than silently
     # truncating at the screen limit.
-    group_summary = {
-        group["label"]: {
-            value: 0 for value, _label in Finding.Severity.choices
-        }
-        for group in issue_type_groups.values()
-    }
-    condition_groups = {
-        condition: group["label"]
-        for group in issue_type_groups.values()
-        for condition in group["types"]
-    }
-    for summary in actionable_qs.values(
-        "finding_type__name", "severity"
-    ).annotate(n=Count("id")):
-        group_label = condition_groups.get(
-            summary["finding_type__name"], "Unclassified issue"
-        )
-        group_summary.setdefault(
-            group_label, {value: 0 for value, _label in Finding.Severity.choices}
-        )[summary["severity"]] += summary["n"]
     findings = sorted(
         actionable_qs,
         key=lambda f: (
@@ -4103,6 +4122,13 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             for key, getter in table_filter_specs
         )
     ]
+    display_group_summary = {}
+    for row in findings_with_detail:
+        counts = display_group_summary.setdefault(
+            row["issue_type_label"],
+            {value: 0 for value, _label in Finding.Severity.choices},
+        )
+        counts[row["f"].severity] += 1
 
     sort_key = request.GET.get("sort", "group")
     if sort_key not in {"group", "severity", "finding", "subject", "evidence", "context", "status", "date"}:
@@ -4124,13 +4150,18 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
         key=lambda row: _table_value(sort_getters[sort_key](row)).casefold(),
         reverse=sort_dir == "desc",
     )
-    paginator = Paginator(findings_with_detail, 50)
+    # The default grouped view renders every collapsed group header so the
+    # operator can see the complete queue structure at once. Column-sorted
+    # views remain paginated, but sorting still happens above this boundary on
+    # the complete filtered dataset.
+    page_size = (len(findings_with_detail) or 1) if sort_key == "group" else 50
+    paginator = Paginator(findings_with_detail, page_size)
     page = paginator.get_page(request.GET.get("page"))
     for row in findings_with_detail:
         row["issue_group"] = row["issue_type_label"]
     severity_labels = dict(Finding.Severity.choices)
     for row in page.object_list:
-        severity_counts = group_summary.get(
+        severity_counts = display_group_summary.get(
             row["issue_group"], {value: 0 for value, _label in Finding.Severity.choices}
         )
         row["issue_group_count"] = sum(severity_counts.values())
@@ -4145,28 +4176,6 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             or active_group_key
             or device_id_filter
             or subject_id_filter
-        )
-
-    group_navigation = []
-    for group_key, group in issue_type_groups.items():
-        counts = group_summary.get(
-            group["label"], {value: 0 for value, _label in Finding.Severity.choices}
-        )
-        params = request.GET.copy()
-        params.pop("page", None)
-        params["type"] = group_key
-        group_navigation.append(
-            {
-                "label": group["label"],
-                "count": sum(counts.values()),
-                "severity_summary": [
-                    f"{severity_labels[value]} {count}"
-                    for value, count in counts.items()
-                    if count
-                ],
-                "href": "?" + params.urlencode(),
-                "active": type_filter == group_key,
-            }
         )
 
     table_base_params = []
@@ -4255,12 +4264,12 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             "show_snoozed": show_snoozed,
             "severity_tiles": severity_tiles,
             "category_tiles": category_tiles,
+            "fleet_summary_cards": fleet_summary_cards,
             "fleet_policy_count": fleet_policy_count,
             "total_matching": total_matching,
             "actionable_matching": actionable_matching,
             "response_matching": response_matching,
             "current_result_summary": current_result_summary,
-            "group_navigation": group_navigation,
             "table_filters": table_filters,
             "table_filter_specs": [key for key, _getter in table_filter_specs],
             "table_base_params": table_base_params,

@@ -14,9 +14,7 @@
     </div>
     {% endif %}
     <div style="display:flex; align-items:center; justify-content:space-between; gap:1rem;">
-        <h1 style="margin:0;">{% if active_category_label %}{{ active_category_label }} issues{% else %}Issues{% endif %}
-          <span class="muted" style="font-weight:400; font-size:0.9rem;">({{ actionable_matching }} actionable · {{ affected_device_count }} devices)</span>
-        </h1>
+        <h1 style="margin:0;">Issues</h1>
         <div style="display:flex; gap:0.75rem; font-size:0.85rem; white-space:nowrap;">
             <a class="csv-download" href="?{{ page_query }}{% if page_query %}&amp;{% endif %}format=devices_csv"
                title="Download one row per affected device for the current filters">⤓ Devices CSV</a>
@@ -24,22 +22,25 @@
                title="Download every matching issue row for the current filters">⤓ Issues CSV</a>
         </div>
     </div>
-    <div class="tile-grid" style="margin-top:1rem;">
-        {% for t in category_tiles %}
-            <div class="tile">
-                <a href="{{ t.href }}" style="color:inherit; text-decoration:none;"><div class="tile-label">{{ t.label }}</div><div class="tile-value">{{ t.total }}</div></a>
-                <div class="sev-mini">{% for severity in t.severity_links %}<span class="{{ severity.value }}"><a href="{{ severity.href }}" style="color:inherit; text-decoration:none;">{{ severity.label }} {{ severity.count }}</a></span>{% endfor %}</div>
-            </div>
-        {% endfor %}
-        <a class="tile {% if fleet_policy_count %}tile-low{% endif %}" href="{% url 'software_decisions_queue' %}?decision=pending">
-            <div class="tile-label">Software decisions</div>
-            <div class="tile-value">{{ fleet_policy_count }}</div>
+    <h2 class="section-label" style="margin-top:1.25rem;">Fleet summary · not filtered</h2>
+    <section class="dashboard-fleet" aria-label="Unfiltered Issues summary">
+        {% for card in fleet_summary_cards %}
+        <a class="fleet-stat" href="{{ card.href }}">
+            <span class="fleet-stat-label">{{ card.label }}</span>
+            <span class="fleet-stat-value">{{ card.value }}</span>
+            <span class="fleet-stat-note">{{ card.note }}</span>
         </a>
-    </div>
+        {% endfor %}
+    </section>
+</div>
+
+<div class="card" style="border:2px solid var(--accent);">
+    <h2 style="margin-bottom:.35rem;">Filtered results</h2>
+    <p class="muted" style="margin:0;">Everything below reflects the filters you select. The fleet summary above is intentionally unchanged by these filters.</p>
 </div>
 
 <div class="card">
-    <h2 class="section-label">Current result scope</h2>
+    <h2 class="section-label">Filtered result scope</h2>
     {% if active_group_key %}
     <p class="muted" style="margin-top:0;">Showing every device with this finding type and the same {{ active_group_key|humanize_label }} evidence value.</p>
     {% elif active_device_id %}
@@ -51,6 +52,7 @@
 </div>
 
 <div class="card">
+    <h2 class="section-label">Filters for filtered results</h2>
     <style>
         .issues-filterbar { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:.75rem; align-items:end; }
         .issues-filterbar .filter-primary { grid-column:1/-1; grid-row:1; display:grid; grid-template-columns:repeat(2,minmax(220px,1fr)); gap:.75rem; padding-bottom:.8rem; border-bottom:1px solid var(--border); }
@@ -178,30 +180,11 @@
 
 
 <div class="card">
-    <h2 class="section-label">Issue groups</h2>
-    <p class="muted" style="margin-top:0;">The queue contains {{ total_matching }} retained issues across these groups. Select a group to review its complete filtered set.</p>
-    <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:.45rem .8rem;">
-        {% for group in group_navigation %}
-        <a href="{{ group.href }}" style="display:flex; justify-content:space-between; gap:.5rem; padding:.35rem .45rem; border-radius:4px;{% if group.active %} background:var(--surface-subtle,#f3f4f6); font-weight:700;{% endif %}">
-            <span>{{ group.label }}</span><span class="muted">{{ group.count }}</span>
-        </a>
-        {% endfor %}
-    </div>
-</div>
-
-<div class="card">
     {% if findings %}
     <h2 class="section-label">{{ active_response|title }} issues <span>({{ response_matching }} matching)</span></h2>
-    <form method="get" class="issues-table-filters" style="display:grid; grid-template-columns:repeat(auto-fit,minmax(135px,1fr)); gap:.5rem; margin:.6rem 0 .8rem; padding:.6rem; background:var(--surface-subtle,#f8fafc); border:1px solid var(--border);">
+    <p class="muted" style="margin:.35rem 0 .6rem;">Column filters and sorting apply across all {{ total_matching }} matching rows before the current page is shown.</p>
+    <form id="issues-table-filter-form" method="get">
         {% for key, value in table_base_params %}<input type="hidden" name="{{ key }}" value="{{ value }}">{% endfor %}
-        <label>Severity<input type="search" name="table_severity" value="{{ table_filters.severity }}" placeholder="Contains…"></label>
-        <label>Finding<input type="search" name="table_finding" value="{{ table_filters.finding }}" placeholder="Contains…"></label>
-        <label>Subject<input type="search" name="table_subject" value="{{ table_filters.subject }}" placeholder="Contains…"></label>
-        <label>Evidence<input type="search" name="table_evidence" value="{{ table_filters.evidence }}" placeholder="Contains…"></label>
-        <label>Context<input type="search" name="table_context" value="{{ table_filters.context }}" placeholder="Contains…"></label>
-        <label>Status<input type="search" name="table_status" value="{{ table_filters.status }}" placeholder="Contains…"></label>
-        <label>Evidence date<input type="search" name="table_date" value="{{ table_filters.date }}" placeholder="YYYY-MM-DD"></label>
-        <div style="align-self:end;"><button type="submit">Filter table</button> <a class="reset" href="?{{ page_query }}">Clear</a></div>
     </form>
     <form method="post" action="{% url 'findings_bulk_action' %}" id="bulk-form">
         {% csrf_token %}
@@ -230,14 +213,14 @@
             <thead>
                 <tr>
                     <th style="width:28px;"><input type="checkbox" id="bulk-toggle-all"></th>
-                    <th><a href="{{ sort_links.severity }}">Severity</a></th>
-                    <th><a href="{{ sort_links.finding }}">Finding</a></th>
-                    <th><a href="{{ sort_links.subject }}">Subject</a></th>
-                    <th><a href="{{ sort_links.evidence }}">Evidence</a></th>
-                    <th><a href="{{ sort_links.context }}">Context</a></th>
-                    <th><a href="{{ sort_links.status }}">Status</a></th>
-                    <th class="num"><a href="{{ sort_links.date }}">Evidence date</a></th>
-                    <th>Actions</th>
+                    <th><a href="{{ sort_links.severity }}">Severity</a><br><input form="issues-table-filter-form" type="search" name="table_severity" value="{{ table_filters.severity }}" placeholder="Filter" aria-label="Filter Severity"></th>
+                    <th><a href="{{ sort_links.finding }}">Finding</a><br><input form="issues-table-filter-form" type="search" name="table_finding" value="{{ table_filters.finding }}" placeholder="Filter" aria-label="Filter Finding"></th>
+                    <th><a href="{{ sort_links.subject }}">Subject</a><br><input form="issues-table-filter-form" type="search" name="table_subject" value="{{ table_filters.subject }}" placeholder="Filter" aria-label="Filter Subject"></th>
+                    <th><a href="{{ sort_links.evidence }}">Evidence</a><br><input form="issues-table-filter-form" type="search" name="table_evidence" value="{{ table_filters.evidence }}" placeholder="Filter" aria-label="Filter Evidence"></th>
+                    <th><a href="{{ sort_links.context }}">Context</a><br><input form="issues-table-filter-form" type="search" name="table_context" value="{{ table_filters.context }}" placeholder="Filter" aria-label="Filter Context"></th>
+                    <th><a href="{{ sort_links.status }}">Status</a><br><input form="issues-table-filter-form" type="search" name="table_status" value="{{ table_filters.status }}" placeholder="Filter" aria-label="Filter Status"></th>
+                    <th class="num"><a href="{{ sort_links.date }}">Evidence date</a><br><input form="issues-table-filter-form" type="search" name="table_date" value="{{ table_filters.date }}" placeholder="Filter" aria-label="Filter Evidence date"></th>
+                    <th><a href="?{{ page_query }}">Actions</a></th>
                 </tr>
             </thead>
             <tbody>

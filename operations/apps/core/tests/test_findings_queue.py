@@ -124,7 +124,7 @@ def test_affected_device_rows_uses_one_filtered_finding_set(monkeypatch):
 def test_findings_queue_template_exposes_device_csv_and_grouped_types():
     template = Path("templates/findings_queue.html").read_text(encoding="utf-8")
 
-    assert "{{ affected_device_count }} devices" in template
+    assert "fleet_summary_cards" in template
     assert "format=devices_csv" in template
     assert "Issues CSV" in template
     assert "Shown issues CSV" not in template
@@ -132,12 +132,13 @@ def test_findings_queue_template_exposes_device_csv_and_grouped_types():
     assert "<optgroup" not in template
     assert "Selected actions" in template
     assert "bulk-action" in template
-    assert "Software decisions" in template
-    assert "software_decisions_queue" in template
     assert "table_finding" in template
     assert "sort_links.finding" in template
-    assert "Issue groups" in template
-    assert "Current result scope" in template
+    assert "issue-group-header" in template
+    assert "Fleet summary · not filtered" in template
+    assert "Filtered results" in template
+    assert "fleet_summary_cards" in template
+    assert "Filtered result scope" in template
     assert "current_result_summary" in template
     assert '<select name="issue" id="issues-issue-filter">' in template
     assert "issue_choices" in template
@@ -161,9 +162,8 @@ def test_findings_queue_template_exposes_device_csv_and_grouped_types():
 
 def test_findings_group_summaries_are_computed_before_screen_cap():
     source = Path("apps/core/views.py").read_text(encoding="utf-8")
-    assert source.index("group_summary =") < source.index("findings_with_detail =")
+    assert source.index("display_group_summary =") < source.index("paginator = Paginator(findings_with_detail")
     assert "actionable_qs[:500]" not in source
-    assert 'actionable_qs.values(\n        "finding_type__name", "severity"' in source
 
 
 class _FindingActionUser:
@@ -322,7 +322,7 @@ def test_findings_queue_retains_offline_evidence_for_explicit_review():
 def test_findings_queue_category_cards_use_fleet_wide_eligible_counts():
     source = Path("apps/core/views.py").read_text(encoding="utf-8")
     assert "fleet_governed_qs = Finding.objects.filter" in source
-    assert "fleet_actionable_ids = _condition_response_ids" in source
+    assert "fleet_response_ids = _condition_response_ids" in source
     assert "top_summary_qs = fleet_governed_qs.filter(id__in=fleet_actionable_ids)" in source
 
 
