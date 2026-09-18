@@ -265,6 +265,7 @@ def _write_health_observations(
 def _refresh_latest_health_view() -> None:
     try:
         with db.transaction() as cur:
+            cur.execute(f"SET LOCAL operations.tenant_id = {_TENANT_ID}")
             cur.execute("REFRESH MATERIALIZED VIEW ninja_core.latest_device_health")
         log.info("Refreshed materialized view ninja_core.latest_device_health")
     except (psycopg.errors.UndefinedTable, psycopg.errors.WrongObjectType):

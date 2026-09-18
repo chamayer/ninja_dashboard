@@ -813,6 +813,7 @@ def _refresh_active_devices_view() -> None:
     """Refresh materialized active-device inventory after current flags change."""
     try:
         with db.transaction() as cur:
+            cur.execute(f"SET LOCAL operations.tenant_id = {_TENANT_ID}")
             cur.execute("REFRESH MATERIALIZED VIEW ninja_core.v_active_devices")
         log.info("Refreshed materialized view ninja_core.v_active_devices")
     except (psycopg.errors.UndefinedTable, psycopg.errors.WrongObjectType):

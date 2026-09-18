@@ -423,3 +423,9 @@ implementation checkpoint. It was subsequently verified active externally as
 then exposed two identity fingerprint queries that still called unavailable
 pgcrypto `digest`; those paths now use PostgreSQL 16's qualified
 `pg_catalog.sha256` and require regression validation before redeployment.
+
+Post-activation follow-up: the 2026-09-18 evaluator/source-health review found
+that Ninja materialized-view refreshes lacked tenant context, and the derived
+entity-link sync could close a history interval at its exact start timestamp.
+The corrective code and migration are now prepared locally; next action is
+deployment followed by a fresh Ninja collection and policy-4 assessment check.

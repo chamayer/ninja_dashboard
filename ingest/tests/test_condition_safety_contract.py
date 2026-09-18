@@ -395,6 +395,12 @@ def test_patch_recovery_requires_current_source_evidence_and_allows_empty_runs()
     assert "ADD COLUMN IF NOT EXISTS snapshot_at" in migration
 
 
+def test_ninja_materialized_view_refreshes_set_tenant_context():
+    for name in ("devices.py", "device_health.py", "custom_fields.py"):
+        source = (Path(__file__).parents[1] / "core" / name).read_text()
+        assert "SET LOCAL operations.tenant_id" in source
+
+
 def test_review_workflow_uses_integer_django_user_ids_and_has_endpoint():
     migration = (
         Path(__file__).parents[2]

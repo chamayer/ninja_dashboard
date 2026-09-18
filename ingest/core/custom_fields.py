@@ -34,6 +34,8 @@ from ingest.util import content_hash
 
 log = logging.getLogger(__name__)
 
+_TENANT_ID = 1
+
 _ENTITY_TYPE_BY_SCOPE = {
     "DEVICE":       "DEVICE",
     "NODE":         "DEVICE",
@@ -218,6 +220,7 @@ def _refresh_active_devices_view() -> None:
     """Refresh materialized active-device scope/enrichment after custom fields."""
     try:
         with db.transaction() as cur:
+            cur.execute(f"SET LOCAL operations.tenant_id = {_TENANT_ID}")
             cur.execute("REFRESH MATERIALIZED VIEW ninja_core.v_active_devices")
         log.info("Refreshed materialized view ninja_core.v_active_devices")
     except (psycopg.errors.UndefinedTable, psycopg.errors.WrongObjectType):
