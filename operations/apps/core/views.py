@@ -3497,52 +3497,16 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
         counts = {sev: 0 for sev, _ in Finding.Severity.choices}
         for finding in top_summary_qs.filter(finding_type__name__in=names).values("severity").annotate(n=Count("id")):
             counts[finding["severity"]] += finding["n"]
-        params = request.GET.copy(); params.pop("page", None); params["category"] = key
+        # Category cards are intentionally links from a clean fleet-wide view,
+        # not from whichever filters happen to be active below them.
+        params = {"status": "active", "response": "actionable", "category": key}
         severity_links = []
         for sev, sev_label in Finding.Severity.choices:
             sev_params = params.copy()
             sev_params["severity"] = sev
-            severity_links.append({"label": sev_label, "count": counts[sev], "href": "?" + sev_params.urlencode(), "value": sev})
-        category_tiles.append({"label": label, "total": sum(counts.values()), "href": "?" + params.urlencode(), "severity_links": severity_links})
+            severity_links.append({"label": sev_label, "count": counts[sev], "href": "?" + urlencode(sev_params), "value": sev})
+        category_tiles.append({"label": label, "total": sum(counts.values()), "href": "?" + urlencode(params), "severity_links": severity_links})
     fleet_policy_count = fleet_policy_qs.count()
-    fleet_summary_cards = [
-        {
-            "label": "Open issues",
-            "value": fleet_governed_qs.count(),
-            "note": "active retained findings",
-            "href": "?status=active&response=all",
-        },
-        {
-            "label": "Actionable",
-            "value": len(fleet_response_ids["actionable"]),
-            "note": "ready for operator action",
-            "href": "?status=active&response=actionable",
-        },
-        {
-            "label": "Blocked",
-            "value": len(fleet_response_ids["blocked"]),
-            "note": "blocked by current evidence",
-            "href": "?status=active&response=blocked",
-        },
-        {
-            "label": "Pending review",
-            "value": len(fleet_response_ids["pending"]),
-            "note": "unknown or incomplete assessment",
-            "href": "?status=active&response=pending",
-        },
-        {
-            "label": "Affected Computers",
-            "value": len(_affected_device_rows(top_summary_qs)),
-            "note": "Computers with actionable issues",
-            "href": "?status=active&response=actionable",
-        },
-        {
-            "label": "Software decisions",
-            "value": fleet_policy_count,
-            "note": "separate decision queue",
-            "href": reverse("software_decisions_queue") + "?decision=pending",
-        },
-    ]
 
     _SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
     # The screen intentionally stays bounded so it remains responsive, but an
@@ -4264,7 +4228,6 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             "show_snoozed": show_snoozed,
             "severity_tiles": severity_tiles,
             "category_tiles": category_tiles,
-            "fleet_summary_cards": fleet_summary_cards,
             "fleet_policy_count": fleet_policy_count,
             "total_matching": total_matching,
             "actionable_matching": actionable_matching,

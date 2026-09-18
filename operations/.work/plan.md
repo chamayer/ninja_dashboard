@@ -468,3 +468,12 @@ The fresh cycle validated those fixes and produced 5,468 policy-4 assessments.
 Remaining producer review exposed unsafe integer casts in patch classification
 for non-device VMX source links; those casts are now guarded and require a
 follow-up deployment and classifier run.
+
+Current UI refinement: the Issues page now presents policy-defined category
+cards under “Actionable work across the fleet,” with unfiltered totals and
+severity breakdowns, plus a separate Software decisions card. Table filters
+are compact per-column menus modeled on Inventory rather than a persistent
+row of text boxes; existing server-side full-dataset sorting and filtering is
+unchanged. Focused queue tests pass after this change. Next action: complete
+the Django check, then commit and push the UI refinement if validation stays
+clean.

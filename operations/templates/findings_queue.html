@@ -8,22 +8,19 @@
 <style>
     .issues-summary {
         display: grid;
-        grid-template-columns: repeat(6, minmax(0, 1fr));
-        border: 1px solid var(--border);
-        border-radius: 6px;
-        overflow: hidden;
-        background: var(--surface);
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: .65rem;
     }
     .issues-summary-card {
         display: block;
-        min-height: 6.2rem;
+        min-height: 8.4rem;
         padding: .85rem 1rem;
-        border-right: 1px solid var(--border);
+        border: 1px solid var(--border);
+        border-radius: 6px;
         color: inherit;
         text-decoration: none;
         background: var(--surface);
     }
-    .issues-summary-card:last-child { border-right: 0; }
     .issues-summary-card:hover { background: #f8fafc; }
     .issues-summary-label {
         display: block;
@@ -48,6 +45,16 @@
         font-size: .72rem;
         line-height: 1.25;
     }
+    .issues-severity-breakdown {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: .18rem .55rem;
+        margin-top: .6rem;
+        color: var(--muted);
+        font-size: .7rem;
+    }
+    .issues-severity-item strong { color: var(--text); }
+    .issues-summary-card--decisions { border-left: 4px solid #7c3aed; }
     .issues-results-intro {
         border-left: 4px solid var(--accent);
     }
@@ -82,30 +89,58 @@
         display: inline-block;
         margin-bottom: .3rem;
     }
-    .issues-table thead th input {
+    .issues-column-filter { position: relative; display: inline-block; }
+    .issues-column-filter > summary {
+        display: inline-flex;
+        align-items: center;
+        gap: .25rem;
+        cursor: pointer;
+        list-style: none;
+        color: var(--muted);
+        font-size: .7rem;
+        font-weight: 400;
+        white-space: nowrap;
+    }
+    .issues-column-filter > summary::-webkit-details-marker { display: none; }
+    .issues-column-filter > summary::before { content: "⌕"; font-size: .85rem; }
+    .issues-column-filter > summary::after { content: "▾"; }
+    .issues-column-filter[open] > summary { color: var(--accent); }
+    .issues-column-filter-options {
+        position: absolute;
+        z-index: 20;
+        top: calc(100% + .3rem);
+        left: 0;
+        min-width: 14rem;
+        padding: .5rem;
+        border: 1px solid var(--border);
+        border-radius: 5px;
+        background: var(--surface);
+        box-shadow: 0 3px 12px rgba(0,0,0,.16);
+        font-weight: 400;
+    }
+    .issues-column-filter-options input {
         box-sizing: border-box;
         width: 100%;
-        min-width: 0;
-        padding: .28rem .35rem;
+        min-width: 12rem;
+        padding: .35rem .45rem;
         font-size: .75rem;
         font-weight: 400;
         text-transform: none;
         letter-spacing: normal;
     }
+    .issues-column-filter-options button { margin-top: .4rem; }
     @media (max-width: 1050px) {
         .issues-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-        .issues-summary-card:nth-child(3) { border-right: 0; }
-        .issues-summary-card:nth-child(-n+3) { border-bottom: 1px solid var(--border); }
         .issues-filterbar,
         .issues-filterbar .filter-primary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     }
     @media (max-width: 650px) {
         .issues-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-        .issues-summary-card:nth-child(3) { border-right: 1px solid var(--border); }
-        .issues-summary-card:nth-child(2n) { border-right: 0; }
-        .issues-summary-card:nth-child(-n+4) { border-bottom: 1px solid var(--border); }
         .issues-filterbar,
         .issues-filterbar .filter-primary { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 480px) {
+        .issues-summary { grid-template-columns: 1fr; }
     }
 </style>
 
@@ -126,15 +161,26 @@
                title="Download every matching issue row for the current filters">⤓ Issues CSV</a>
         </div>
     </div>
-    <h2 class="section-label" style="margin-top:1.25rem;">Fleet summary · not filtered</h2>
-    <section class="issues-summary" aria-label="Unfiltered Issues summary">
-        {% for card in fleet_summary_cards %}
-        <a class="issues-summary-card" href="{{ card.href }}">
-            <span class="issues-summary-label">{{ card.label }}</span>
-            <span class="issues-summary-value">{{ card.value }}</span>
-            <span class="issues-summary-note">{{ card.note }}</span>
+    <h2 class="section-label" style="margin-top:1.25rem;">Actionable work across the fleet</h2>
+    <p class="muted" style="margin:.25rem 0 .7rem;">Unfiltered fleet totals. Select a card to open that category in the queue.</p>
+    <section class="issues-summary" aria-label="Actionable work across the fleet">
+        {% for tile in category_tiles %}
+        <a class="issues-summary-card" href="{{ tile.href }}">
+            <span class="issues-summary-label">{{ tile.label }}</span>
+            <span class="issues-summary-value">{{ tile.total }}</span>
+            <span class="issues-summary-note">actionable issues</span>
+            <span class="issues-severity-breakdown" aria-label="Severity breakdown">
+                {% for severity in tile.severity_links %}
+                <span class="issues-severity-item"><strong>{{ severity.count }}</strong> {{ severity.label }}</span>
+                {% endfor %}
+            </span>
         </a>
         {% endfor %}
+        <a class="issues-summary-card issues-summary-card--decisions" href="{% url 'software_decisions_queue' %}?decision=pending">
+            <span class="issues-summary-label">Software decisions</span>
+            <span class="issues-summary-value">{{ fleet_policy_count }}</span>
+            <span class="issues-summary-note">pending decisions</span>
+        </a>
     </section>
 </div>
 
@@ -307,14 +353,14 @@
             <thead>
                 <tr>
                     <th style="width:28px;"><input type="checkbox" id="bulk-toggle-all"></th>
-                    <th><a href="{{ sort_links.severity }}">Severity</a><br><input form="issues-table-filter-form" type="search" name="table_severity" value="{{ table_filters.severity }}" placeholder="Filter" aria-label="Filter Severity"></th>
-                    <th><a href="{{ sort_links.finding }}">Finding</a><br><input form="issues-table-filter-form" type="search" name="table_finding" value="{{ table_filters.finding }}" placeholder="Filter" aria-label="Filter Finding"></th>
-                    <th><a href="{{ sort_links.subject }}">Subject</a><br><input form="issues-table-filter-form" type="search" name="table_subject" value="{{ table_filters.subject }}" placeholder="Filter" aria-label="Filter Subject"></th>
-                    <th><a href="{{ sort_links.evidence }}">Evidence</a><br><input form="issues-table-filter-form" type="search" name="table_evidence" value="{{ table_filters.evidence }}" placeholder="Filter" aria-label="Filter Evidence"></th>
-                    <th><a href="{{ sort_links.context }}">Context</a><br><input form="issues-table-filter-form" type="search" name="table_context" value="{{ table_filters.context }}" placeholder="Filter" aria-label="Filter Context"></th>
-                    <th><a href="{{ sort_links.status }}">Status</a><br><input form="issues-table-filter-form" type="search" name="table_status" value="{{ table_filters.status }}" placeholder="Filter" aria-label="Filter Status"></th>
-                    <th class="num"><a href="{{ sort_links.date }}">Evidence date</a><br><input form="issues-table-filter-form" type="search" name="table_date" value="{{ table_filters.date }}" placeholder="Filter" aria-label="Filter Evidence date"></th>
-                    <th><a href="?{{ page_query }}">Actions</a></th>
+                    <th><a href="{{ sort_links.severity }}">Severity</a><details class="issues-column-filter"><summary>Filter</summary><div class="issues-column-filter-options"><input form="issues-table-filter-form" type="search" name="table_severity" value="{{ table_filters.severity }}" placeholder="Contains text" aria-label="Filter Severity"><button form="issues-table-filter-form" type="submit">Apply</button></div></details></th>
+                    <th><a href="{{ sort_links.finding }}">Finding</a><details class="issues-column-filter"><summary>Filter</summary><div class="issues-column-filter-options"><input form="issues-table-filter-form" type="search" name="table_finding" value="{{ table_filters.finding }}" placeholder="Contains text" aria-label="Filter Finding"><button form="issues-table-filter-form" type="submit">Apply</button></div></details></th>
+                    <th><a href="{{ sort_links.subject }}">Subject</a><details class="issues-column-filter"><summary>Filter</summary><div class="issues-column-filter-options"><input form="issues-table-filter-form" type="search" name="table_subject" value="{{ table_filters.subject }}" placeholder="Contains text" aria-label="Filter Subject"><button form="issues-table-filter-form" type="submit">Apply</button></div></details></th>
+                    <th><a href="{{ sort_links.evidence }}">Evidence</a><details class="issues-column-filter"><summary>Filter</summary><div class="issues-column-filter-options"><input form="issues-table-filter-form" type="search" name="table_evidence" value="{{ table_filters.evidence }}" placeholder="Contains text" aria-label="Filter Evidence"><button form="issues-table-filter-form" type="submit">Apply</button></div></details></th>
+                    <th><a href="{{ sort_links.context }}">Context</a><details class="issues-column-filter"><summary>Filter</summary><div class="issues-column-filter-options"><input form="issues-table-filter-form" type="search" name="table_context" value="{{ table_filters.context }}" placeholder="Contains text" aria-label="Filter Context"><button form="issues-table-filter-form" type="submit">Apply</button></div></details></th>
+                    <th><a href="{{ sort_links.status }}">Status</a><details class="issues-column-filter"><summary>Filter</summary><div class="issues-column-filter-options"><input form="issues-table-filter-form" type="search" name="table_status" value="{{ table_filters.status }}" placeholder="Contains text" aria-label="Filter Status"><button form="issues-table-filter-form" type="submit">Apply</button></div></details></th>
+                    <th class="num"><a href="{{ sort_links.date }}">Evidence date</a><details class="issues-column-filter"><summary>Filter</summary><div class="issues-column-filter-options"><input form="issues-table-filter-form" type="search" name="table_date" value="{{ table_filters.date }}" placeholder="Contains text" aria-label="Filter Evidence date"><button form="issues-table-filter-form" type="submit">Apply</button></div></details></th>
+                    <th>Actions</th>
                 </tr>
             </thead>
             <tbody>
