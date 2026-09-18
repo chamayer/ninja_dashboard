@@ -5,6 +5,110 @@
 
 {% block content %}
 
+<style>
+    .issues-summary {
+        display: grid;
+        grid-template-columns: repeat(6, minmax(0, 1fr));
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        overflow: hidden;
+        background: var(--surface);
+    }
+    .issues-summary-card {
+        display: block;
+        min-height: 6.2rem;
+        padding: .85rem 1rem;
+        border-right: 1px solid var(--border);
+        color: inherit;
+        text-decoration: none;
+        background: var(--surface);
+    }
+    .issues-summary-card:last-child { border-right: 0; }
+    .issues-summary-card:hover { background: #f8fafc; }
+    .issues-summary-label {
+        display: block;
+        color: var(--muted);
+        font-size: .76rem;
+        font-weight: 700;
+        letter-spacing: .03em;
+        text-transform: uppercase;
+    }
+    .issues-summary-value {
+        display: block;
+        margin-top: .2rem;
+        color: #1e40af;
+        font-size: 1.7rem;
+        font-weight: 700;
+        line-height: 1.1;
+    }
+    .issues-summary-note {
+        display: block;
+        margin-top: .35rem;
+        color: var(--muted);
+        font-size: .72rem;
+        line-height: 1.25;
+    }
+    .issues-results-intro {
+        border-left: 4px solid var(--accent);
+    }
+    .issues-results-intro h2 { margin-bottom: .25rem; }
+    .issues-filterbar {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: .75rem;
+        align-items: end;
+    }
+    .issues-filterbar .filter-primary {
+        grid-column: 1 / -1;
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: .75rem;
+        padding-bottom: .85rem;
+        border-bottom: 1px solid var(--border);
+    }
+    .issues-filterbar .filter-control {
+        display: flex;
+        flex-direction: column;
+        gap: .2rem;
+    }
+    .issues-table {
+        table-layout: fixed;
+    }
+    .issues-table thead th {
+        vertical-align: top;
+        padding: .55rem .45rem;
+    }
+    .issues-table thead th > a {
+        display: inline-block;
+        margin-bottom: .3rem;
+    }
+    .issues-table thead th input {
+        box-sizing: border-box;
+        width: 100%;
+        min-width: 0;
+        padding: .28rem .35rem;
+        font-size: .75rem;
+        font-weight: 400;
+        text-transform: none;
+        letter-spacing: normal;
+    }
+    @media (max-width: 1050px) {
+        .issues-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+        .issues-summary-card:nth-child(3) { border-right: 0; }
+        .issues-summary-card:nth-child(-n+3) { border-bottom: 1px solid var(--border); }
+        .issues-filterbar,
+        .issues-filterbar .filter-primary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (max-width: 650px) {
+        .issues-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .issues-summary-card:nth-child(3) { border-right: 1px solid var(--border); }
+        .issues-summary-card:nth-child(2n) { border-right: 0; }
+        .issues-summary-card:nth-child(-n+4) { border-bottom: 1px solid var(--border); }
+        .issues-filterbar,
+        .issues-filterbar .filter-primary { grid-template-columns: 1fr; }
+    }
+</style>
+
 <div class="card">
     {% if not condition_policy_available %}
     <div class="notice notice-warning" role="status">
@@ -23,24 +127,20 @@
         </div>
     </div>
     <h2 class="section-label" style="margin-top:1.25rem;">Fleet summary · not filtered</h2>
-    <section class="dashboard-fleet" aria-label="Unfiltered Issues summary">
+    <section class="issues-summary" aria-label="Unfiltered Issues summary">
         {% for card in fleet_summary_cards %}
-        <a class="fleet-stat" href="{{ card.href }}">
-            <span class="fleet-stat-label">{{ card.label }}</span>
-            <span class="fleet-stat-value">{{ card.value }}</span>
-            <span class="fleet-stat-note">{{ card.note }}</span>
+        <a class="issues-summary-card" href="{{ card.href }}">
+            <span class="issues-summary-label">{{ card.label }}</span>
+            <span class="issues-summary-value">{{ card.value }}</span>
+            <span class="issues-summary-note">{{ card.note }}</span>
         </a>
         {% endfor %}
     </section>
 </div>
 
-<div class="card" style="border:2px solid var(--accent);">
-    <h2 style="margin-bottom:.35rem;">Filtered results</h2>
-    <p class="muted" style="margin:0;">Everything below reflects the filters you select. The fleet summary above is intentionally unchanged by these filters.</p>
-</div>
-
-<div class="card">
-    <h2 class="section-label">Filtered result scope</h2>
+<div class="card issues-results-intro">
+    <h2>Filtered results</h2>
+    <p class="muted" style="margin:0 0 .55rem;">The fleet summary above is not affected by filters. The results below are.</p>
     {% if active_group_key %}
     <p class="muted" style="margin-top:0;">Showing every device with this finding type and the same {{ active_group_key|humanize_label }} evidence value.</p>
     {% elif active_device_id %}
@@ -48,17 +148,11 @@
     {% elif active_subject_id %}
     <p class="muted" style="margin-top:0;">Filtered to the selected device.</p>
     {% endif %}
-    <p class="muted" style="margin:0;">{{ current_result_summary }}</p>
+    <p class="muted" style="margin:0;"><strong>{{ current_result_summary }}</strong></p>
 </div>
 
 <div class="card">
     <h2 class="section-label">Filters for filtered results</h2>
-    <style>
-        .issues-filterbar { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:.75rem; align-items:end; }
-        .issues-filterbar .filter-primary { grid-column:1/-1; grid-row:1; display:grid; grid-template-columns:repeat(2,minmax(220px,1fr)); gap:.75rem; padding-bottom:.8rem; border-bottom:1px solid var(--border); }
-        .issues-filterbar .filter-control { display:flex; flex-direction:column; gap:.15rem; }
-        @media (max-width:600px) { .issues-filterbar .filter-primary { grid-template-columns:1fr; } }
-    </style>
     <form action="" method="get" class="issues-filterbar">
         {% if active_group_key %}
         <input type="hidden" name="group_key" value="{{ active_group_key }}">
@@ -209,7 +303,7 @@
                 {% endif %}
             </details>
         </div>
-        <table class="ops-table">
+        <table class="ops-table issues-table">
             <thead>
                 <tr>
                     <th style="width:28px;"><input type="checkbox" id="bulk-toggle-all"></th>

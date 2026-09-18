@@ -29,7 +29,10 @@ software decisions to their dedicated queue, omits internal policy
 diagnostics from operator rows, and applies column sorting/filtering to the
 complete filtered set before pagination. The unfiltered fleet summary is
 separate from the prominently labeled filtered results. Local validation
-passed; next action is commit, push, and deployed smoke validation.
+passed. The latest layout refinement adds a responsive Inventory/Computers-
+style summary row and consolidates the filtered-results hierarchy into a
+cleaner three-zone page. Next action is commit, push, and deployed smoke
+validation.
 
 ## Prior rollout status
 

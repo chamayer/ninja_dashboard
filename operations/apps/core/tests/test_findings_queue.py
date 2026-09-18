@@ -138,7 +138,7 @@ def test_findings_queue_template_exposes_device_csv_and_grouped_types():
     assert "Fleet summary · not filtered" in template
     assert "Filtered results" in template
     assert "fleet_summary_cards" in template
-    assert "Filtered result scope" in template
+    assert "issues-results-intro" in template
     assert "current_result_summary" in template
     assert '<select name="issue" id="issues-issue-filter">' in template
     assert "issue_choices" in template
