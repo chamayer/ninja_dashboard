@@ -83,8 +83,8 @@ def operator_guidance(
             guidance = {"owner": "Operator", "next_step": "Review identity", "route": "subject"}
         elif reason == "Computer offline":
             guidance = {
-                "owner": "Platform administrator",
-                "next_step": "Review reporting",
+                "owner": "Platform team",
+                "next_step": "Check reporting",
                 "route": "reporting",
             }
         elif severity == "critical":
@@ -93,14 +93,14 @@ def operator_guidance(
             guidance = {"owner": "Operator", "next_step": "Review issue", "route": "subject"}
     elif attention == ATTENTION_PENDING:
         if reason == "Source unavailable":
-            guidance = {"owner": "Integration", "next_step": "View source health", "route": "sources"}
+            guidance = {"owner": "Integration team", "next_step": "Check source health", "route": "sources"}
         elif reason == "Patch data incomplete":
-            guidance = {"owner": "Integration", "next_step": "Review patch collection", "route": "patch"}
+            guidance = {"owner": "Integration team", "next_step": "Check patch collection", "route": "patch"}
         else:
             guidance = {
-                "owner": "Automatic reevaluation",
-                "next_step": "View coverage status",
-                "route": "coverage",
+                "owner": "",
+                "next_step": "Checked automatically when information updates",
+                "route": "",
             }
     return guidance
 

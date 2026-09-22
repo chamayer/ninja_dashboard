@@ -436,9 +436,9 @@ def build_client_workspace(client, existing: dict, *, device_policy: dict | None
             value=f"{device['in_patch_scope']:,}",
             value_label="devices receiving patch management",
             facts=[
-                {"label": f"{_count(patching, 'patching_stalled'):,} stalled"},
-                {"label": f"{_count(patching, 'device_never_patched'):,} never patched"},
-                {"label": f"{_count(patching, 'reboot_pending'):,} awaiting restart"},
+                {"label": f"{_count(patching, 'patching_stalled'):,} no recent patch activity"},
+                {"label": f"{_count(patching, 'device_never_patched'):,} no patch installed yet"},
+                {"label": f"{_count(patching, 'reboot_pending'):,} restart required"},
             ],
             href=f"{reverse('patching_queue')}?client={client.slug}",
             updated_at=health.get("Ninja", {}).get("updated_at"),

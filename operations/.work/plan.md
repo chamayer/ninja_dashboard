@@ -460,5 +460,79 @@ sort now uses the stable ID tie-breaker directly because every displayed Group
 and Issue label is equal; it avoids evaluating the expensive rendered-issue
 SQL merely to compare identical labels. Next action: validate that Type
 drilldown and the evidence column filter in production.
+Production verification complete on 2026-09-22: the default queue returned
+HTTP 200 in 13.879 seconds; the identity-review Type returned HTTP 200 in
+16.358 seconds; and the same Type with the Evidence column filter returned
+HTTP 200 in 11.378 seconds. The latter two requests previously exceeded the
+30-second probe window, and the filtered-page `NoReverseMatch` 500 no longer
+occurs. The running Operations container is healthy and includes commit
+`1ac4033`. Local validation for the final corrections: 48 focused Issues tests,
+Django checks, migration-drift checks, targeted Ruff, compilation, and diff
+checks all pass. The plan checkpoint is complete; this record remains local to
+avoid a documentation-only deploy commit.
 Pause only for a material product decision, conflicting user work, migration
 approval, production mutation, or separate commit/push authorization.
+
+Status-message clarity correction in progress. Scope: the Issues work-status
+cell and Patching policy-state labels. Decision: Pending means no operator can
+act until current information arrives; it must not name “Automatic
+reevaluation” as an owner. Status cells will show a short plain-language note
+and, only where useful, one clear next action. Patching will define In scope,
+Excluded, and Not managed where operators see their counts. Validation: focused
+queue/patching tests, Django checks, and template rendering checks. Next action:
+update the centralized guidance and patching copy.
+
+Implemented locally: Pending now states “Waiting for current information” and
+“Checked automatically when information updates,” with no fictitious automatic
+owner. Source, patch, and reporting routes name the responsible team and use
+short “Check …” actions. Patching scope tiles and their help text now define
+In scope (patching expected), Excluded (do not patch), and Not managed (no
+patch service). Next action: run focused validation and inspect every rendered
+status-message branch.
+
+Patching workflow clarity correction implemented locally. The five work items
+are now labeled by operator outcome: No patch installed yet, No recent patch
+activity, Restart required, Update repeatedly failing, and Approved updates
+not installed. Each Patching card includes a short next action; the last is
+explicitly marked client-level. Detail text and dashboard/client summaries use
+the same vocabulary. Next action: add focused label/rendering coverage and
+validate.
+
+Manual Computer retirement in progress. Scope: make the existing audited
+retirement operation visibly available from every non-retired Computer's
+Source records section to users with `operations.manage_lifecycle`; do not
+require a lifecycle finding or `pending_cleanup` status. Keep the required
+reason, confirmation, permission boundary, tenant scoping, evidence retention,
+and existing restore path. No migration, source mutation, or automatic
+lifecycle-policy change is in scope. Implemented locally: the Source records
+section now shows a Manual retirement control for every non-retired Computer
+to authorized operators; the existing post action remains the enforcement and
+audit boundary. `git diff --check` passes. Container-based validation is not
+available because the local Compose stack is stopped. Workstation Django checks
+cannot run under its Python 3.14 environment because `shared` is absent from
+its import path; the template-only Ruff invocation is inapplicable. Next
+action: validate with the supported Operations environment, then obtain
+separate commit and push approval.
+
+Issue workflow correction in progress. Scope: every operator-visible Issue
+gets a direct, one-click investigation destination from its queue row. Use
+the existing Computer, client, software, patch evidence, source health, merge,
+and Hudu surfaces where they are authoritative; provide a consistent
+operator-facing finding review fallback where a specialized surface does not
+exist. Keep the current row controls and bulk acknowledge, resolve, snooze,
+retire, and Hudu archive actions. Do not expose engine internals, weaken
+permissions, or add a schema migration. Implemented locally: every row now
+has a direct Review action. The review page uses the safe existing evidence
+summary and gives direct destinations for Computer/source records, client,
+software, client-scoped patch evidence, Hudu records, duplicate Computers, or
+source health; a source-health fallback keeps platform-level Issues reviewable.
+The existing per-row and bulk actions remain available. Validation: focused
+Issues tests pass (52), Django checks pass, all three changed templates load,
+Python compilation passes, and `git diff --check` passes. Next action: obtain
+separate commit and push approval; no migration or deployment action is in
+scope.
+
+Release preparation complete: VERSION and CHANGELOG are `0.126.2`; no migration
+is included. The validated workflow, status-copy, patching, and manual
+retirement changes are one operator-workflow release. Next action: commit and
+push the approved release without a manual redeploy.

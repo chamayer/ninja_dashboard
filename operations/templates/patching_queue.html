@@ -123,20 +123,22 @@
     </h2>
     {% include "_tiles.html" with tiles=population_tiles %}
     <p class="muted" style="margin-top: 0.6rem; font-size: 0.85rem;">
+        <strong>In scope</strong> means patching is expected and the device is
+        included in patch activity and issue checks. <strong>Excluded</strong>
+        means it is intentionally not patched. <strong>Not managed</strong>
+        means no patching service is assigned, so patching is not expected.
         <strong>{{ population.in_scope }}</strong> of {{ population.total }}
-        devices included by policy
-        {% if population.total %}(<strong>{{ population.in_scope_pct }}%</strong>){% endif %}.
-        Excluded = operator-set exclusion; Not managed = outside the configured
-        patching service; Not determined = no scope decision yet.
+        devices are in scope{% if population.total %} (<strong>{{ population.in_scope_pct }}%</strong>){% endif %}.
     </p>
 </div>
 
 {# Per-type finding tiles — reflect all filters. Click → filter table by that type. #}
 <div class="card">
     <h2 class="section-label">
-        Open items by type
+        Patching work
         <span>({{ total_active }} total matching filters)</span>
     </h2>
+    <p class="muted" style="font-size:.84rem; margin-top:0;">Each card is a different workflow. “Approved updates not installed” is a client-level backlog; the other cards identify a Computer needing attention.</p>
     {% include "_tiles.html" with tiles=tiles %}
 </div>
 

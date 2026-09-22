@@ -46,11 +46,11 @@ def finding_drilldown_query(finding, subject_id):
 
 _LABELS: dict[str, str] = {
     # ── Finding types — patching ─────────────────────────────
-    "device_never_patched": "Never patched",
-    "patching_stalled": "Patching not progressing",
-    "reboot_pending": "Awaiting reboot",
-    "patch_failing_repeatedly": "Repeated install failures",
-    "patch_approval_backlog": "Approval backlog",
+    "device_never_patched": "No patch installed yet",
+    "patching_stalled": "No recent patch activity",
+    "reboot_pending": "Restart required",
+    "patch_failing_repeatedly": "Update repeatedly failing",
+    "patch_approval_backlog": "Approved updates not installed",
     # ── Finding types — software ─────────────────────────────
     "suspicious_name": "Suspicious name",
     "install_path_suspicious": "Installed from suspicious location",
@@ -301,18 +301,18 @@ def finding_detail_text(finding):
         withdrawn_at = d.get("withdrawn_at")
         return f"removed from {source}{f' on {withdrawn_at[:10]}' if withdrawn_at else ''}"
     if name == "device_never_patched":
-        return "no INSTALLED patches on record"
+        return "no installed patch is recorded"
     if name == "patching_stalled":
         ls = d.get("last_patch_seen_at")
-        return f"last install {ls[:10]}" if ls else "no fresh scan (>35d)"
+        return f"last patch activity {ls[:10]}" if ls else "no recent patch activity"
     if name == "reboot_pending":
         lb = d.get("last_boot_at")
-        return f"last boot {lb[:10]}" if lb else "no boot recorded"
+        return f"last restart {lb[:10]}" if lb else "no restart is recorded"
     if name == "patch_failing_repeatedly":
         kbs = d.get("failing_patches") or []
-        return f"{len(kbs)} KB(s) failing"
+        return f"{len(kbs)} update(s) repeatedly failing"
     if name == "patch_approval_backlog":
-        return f"{d.get('backlog_count', '?')} approved uninstalled"
+        return f"{d.get('backlog_count', '?')} approved updates not installed"
     if name == "placeholder_serial":
         serial = d.get("serial", "")
         return f"serial: {serial}" if serial else "placeholder serial"

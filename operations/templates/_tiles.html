@@ -10,11 +10,13 @@ Args:
             <a class="tile" href="{{ t.href }}">
                 <div class="tile-label">{{ t.label }}</div>
                 <div class="tile-value">{{ t.value }}</div>
+                {% if t.note %}<div class="tile-note">{{ t.note }}</div>{% endif %}
             </a>
         {% else %}
             <div class="tile">
                 <div class="tile-label">{{ t.label }}</div>
                 <div class="tile-value">{{ t.value }}</div>
+                {% if t.note %}<div class="tile-note">{{ t.note }}</div>{% endif %}
             </div>
         {% endif %}
     {% endfor %}

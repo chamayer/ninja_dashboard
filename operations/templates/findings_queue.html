@@ -360,6 +360,7 @@
                     <td class="muted num">{% if row.evidence_date %}<span style="font-size:0.7rem;">{{ row.evidence_label }}</span><br>{{ row.evidence_date|date:"Y-m-d H:i" }}{% endif %}</td>
                     <td>
                         <div style="display:flex; flex-wrap:wrap; gap:0.25rem;">
+                            <a class="btn btn-secondary" href="{{ row.review_url }}" style="padding:0.15rem 0.5rem; font-size:0.75rem;">Review</a>
                             {% if row.archive_action %}
                                 <button type="submit" name="action" value="archive_hudu_assets" class="row-archive-hudu" style="padding:0.15rem 0.5rem; font-size:0.75rem;" onclick="return archiveHuduRow(this)">Archive in Hudu</button>
                             {% endif %}

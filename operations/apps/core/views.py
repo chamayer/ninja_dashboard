@@ -1056,15 +1056,15 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
             "href": reverse("patching_queue"),
             "facts": [
                 {
-                    "label": f"{_count(global_domain_stats['patching'], 'patching_stalled')} stalled",
+                    "label": f"{_count(global_domain_stats['patching'], 'patching_stalled')} no recent patch activity",
                     "href": f"{reverse('patching_queue')}?type=patching_stalled",
                 },
                 {
-                    "label": f"{_count(global_domain_stats['patching'], 'device_never_patched')} never patched",
+                    "label": f"{_count(global_domain_stats['patching'], 'device_never_patched')} no patch installed yet",
                     "href": f"{reverse('patching_queue')}?type=device_never_patched",
                 },
                 {
-                    "label": f"{_count(global_domain_stats['patching'], 'reboot_pending')} awaiting restart",
+                    "label": f"{_count(global_domain_stats['patching'], 'reboot_pending')} restart required",
                     "href": f"{reverse('patching_queue')}?type=reboot_pending",
                 },
             ],
@@ -1217,7 +1217,7 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
                 "delayed": ninja_health["stale"] and "Ninja" in linked_sources,
                 "detail": (
                     f"{_percent(patching['included'], patching['total'])}% included"
-                    f" · {_count(patch_stats, 'patching_stalled')} stalled"
+                    f" · {_count(patch_stats, 'patching_stalled')} no recent patch activity"
                 ),
                 "href": f"{reverse('patching_queue')}?client={client.slug}",
             },
@@ -4559,6 +4559,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             "device_context": device_context,
             "subject_label": subject_label,
             "subject_url": subject_url,
+            "review_url": reverse("finding_review", kwargs={"finding_id": f.id}),
             "related_device": related_device,
             "hudu_url": hudu_url,
             "archive_action": (
@@ -4607,16 +4608,18 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
         # The normal state explanation merely repeats the work status (for
         # example, "Needs action — Ready for action"). Keep a note only when
         # it carries additional, operator-useful information.
-        row["operator_status_note"] = (
+        row["operator_status_note"] = {
+            "Pending current assessment": "Waiting for current information",
+        }.get(
+            row["operator_reason"],
             ""
             if row["operator_reason"]
             in {
                 "Ready for action",
                 "Blocked by current evidence",
-                "Pending current assessment",
                 "Paused by operator",
             }
-            else row["operator_reason"]
+            else row["operator_reason"],
         )
         guidance = operator_guidance(
             attention=row["operator_attention"],
@@ -5127,6 +5130,107 @@ def finding_reviewed_distinct(request: HttpRequest, finding_id: str) -> HttpResp
     )
     messages.success(request, "Identity conflict reviewed as distinct for the current evidence.")
     return redirect(request.POST.get("next") or "findings_queue")
+
+
+@login_required
+@require_GET
+def finding_review(request: HttpRequest, finding_id: str) -> HttpResponse:
+    """Show an operator-safe, one-click review path for any Issue."""
+    finding = get_object_or_404(
+        Finding.objects.select_related("finding_type", "client"),
+        id=finding_id,
+        tenant_id=1,
+    )
+    details = finding.finding_details or {}
+    subject_label = finding.get_subject_type_display()
+    subject_url = ""
+    review_links: list[dict[str, str]] = []
+
+    if finding.subject_type == Finding.SubjectType.DEVICE:
+        device = Device.objects.filter(
+            tenant_id=1,
+            id=finding.subject_id,
+            deleted_at__isnull=True,
+        ).select_related("client").first()
+        if device and device.client:
+            subject_label = device.canonical_hostname or "Unnamed Computer"
+            subject_url = reverse(
+                "device_detail",
+                kwargs={"org_slug": device.client.slug, "device_id": device.id},
+            )
+            review_links.append(
+                {
+                    "label": "Open Computer and source records",
+                    "url": f"{subject_url}?tab=details#source-records",
+                }
+            )
+    elif finding.subject_type == Finding.SubjectType.CLIENT and finding.client:
+        subject_label = finding.client.display_name
+        subject_url = reverse("org_index", kwargs={"org_slug": finding.client.slug})
+        review_links.append({"label": "Open client", "url": subject_url})
+    elif finding.subject_type in {
+        Finding.SubjectType.SOFTWARE_PRODUCT,
+        Finding.SubjectType.SOFTWARE_VERSION,
+        Finding.SubjectType.SOFTWARE_INSTALLATION,
+    }:
+        canonical_name = details.get("canonical_name") or ""
+        if canonical_name:
+            subject_label = canonical_name
+            subject_url = reverse("software_detail", kwargs={"name": canonical_name})
+            review_links.append({"label": "Open software details", "url": subject_url})
+
+    if finding.finding_type.name.startswith("patch_") and finding.client:
+        review_links.append(
+            {
+                "label": "Review patch evidence",
+                "url": f"{reverse('patch_evidence_page')}?{urlencode({'client': finding.client.slug})}",
+            }
+        )
+    if finding.finding_type.name == "cmdb_asset_stale" and details.get("url"):
+        review_links.append({"label": "Open Hudu record", "url": str(details["url"])})
+    if finding.subject_type in {
+        Finding.SubjectType.SOURCE_BINDING,
+        Finding.SubjectType.COLLECTOR_INSTANCE,
+    }:
+        review_links.append({"label": "Check source health", "url": reverse("sources_status")})
+
+    if finding.client and not subject_url:
+        subject_label = finding.client.display_name
+        subject_url = reverse("org_index", kwargs={"org_slug": finding.client.slug})
+        review_links.append({"label": "Open client", "url": subject_url})
+
+    if finding.finding_type.name == "identity_conflict" and finding.client:
+        candidate_ids = details.get("candidate_device_ids") or []
+        candidates = Device.objects.filter(
+            tenant_id=1,
+            client_id=finding.client_id,
+            id__in=candidate_ids,
+            deleted_at__isnull=True,
+        ).select_related("client").order_by("canonical_hostname", "id")
+        for index, device in enumerate(candidates, start=1):
+            review_links.append(
+                {
+                    "label": f"Open possible duplicate {index}: {device.canonical_hostname or 'Unnamed Computer'}",
+                    "url": reverse(
+                        "device_detail",
+                        kwargs={"org_slug": device.client.slug, "device_id": device.id},
+                    ),
+                }
+            )
+
+    if not review_links:
+        review_links.append({"label": "Check source health", "url": reverse("sources_status")})
+
+    return render(
+        request,
+        "finding_review.html",
+        {
+            "finding": finding,
+            "subject_label": subject_label,
+            "subject_url": subject_url,
+            "review_links": review_links,
+        },
+    )
 
 
 @login_required
@@ -8568,6 +8672,29 @@ _PATCHING_TYPES = (
     "patch_approval_backlog",
 )
 
+_PATCHING_WORKFLOW = {
+    "device_never_patched": {
+        "label": "No patch installed yet",
+        "note": "Confirm patching is enabled",
+    },
+    "patching_stalled": {
+        "label": "No recent patch activity",
+        "note": "Check schedule or reporting",
+    },
+    "reboot_pending": {
+        "label": "Restart required",
+        "note": "Schedule a restart",
+    },
+    "patch_failing_repeatedly": {
+        "label": "Update repeatedly failing",
+        "note": "Repair the failed update",
+    },
+    "patch_approval_backlog": {
+        "label": "Approved updates not installed",
+        "note": "Review the client deployment",
+    },
+}
+
 
 @login_required
 def patching_queue(request: HttpRequest) -> HttpResponse:
@@ -8665,8 +8792,9 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
 
     tiles = [
         {
-            "label": ftname.replace("_", " "),
+            "label": _PATCHING_WORKFLOW[ftname]["label"],
             "value": tile_counts.get(ftname, 0),
+            "note": _PATCHING_WORKFLOW[ftname]["note"],
             "href": _type_tile_href(ftname),
         }
         for ftname in _PATCHING_TYPES
@@ -8984,18 +9112,18 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
         d = finding.finding_details or {}
         name = finding.finding_type.name
         if name == "device_never_patched":
-            return "no INSTALLED patches on record"
+            return "No installed patch is recorded"
         if name == "patching_stalled":
             ls = d.get("last_patch_seen_at")
-            return f"last install {ls[:10]}" if ls else "no fresh scan (>35d)"
+            return f"Last patch activity {ls[:10]}" if ls else "No recent patch activity"
         if name == "reboot_pending":
             lb = d.get("last_boot_at")
-            return f"last boot {lb[:10]}" if lb else "no boot recorded"
+            return f"Last restart {lb[:10]}" if lb else "No restart is recorded"
         if name == "patch_failing_repeatedly":
             kbs = d.get("failing_patches") or []
-            return f"{len(kbs)} KB(s) failing"
+            return f"{len(kbs)} update(s) repeatedly failing"
         if name == "patch_approval_backlog":
-            return f"{d.get('backlog_count', '?')} APPROVED uninstalled"
+            return f"{d.get('backlog_count', '?')} approved updates not installed"
         return ""
 
     rows = [
@@ -9057,12 +9185,12 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
     population_tiles = [
         {"label": "Total devices", "value": population["total"]},
         {
-            "label": "In scope (Included)",
+            "label": "In scope — patching expected",
             "value": population["in_scope"],
             "href": _scope_href("Included"),
         },
-        {"label": "Excluded", "value": population["excluded"], "href": _scope_href("Excluded")},
-        {"label": "Unmanaged", "value": population["unmanaged"], "href": _scope_href("Unmanaged")},
+        {"label": "Excluded — do not patch", "value": population["excluded"], "href": _scope_href("Excluded")},
+        {"label": "Not managed — no patch service", "value": population["unmanaged"], "href": _scope_href("Unmanaged")},
     ]
 
     return render(

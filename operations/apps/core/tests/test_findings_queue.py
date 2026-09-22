@@ -15,7 +15,7 @@ from apps.core.finding_actions import (
     BULK_RETIRE_COMPUTERS,
     available_finding_actions,
 )
-from apps.core.templatetags.human_labels import finding_drilldown_query
+from apps.core.templatetags.human_labels import finding_drilldown_query, humanize_label
 
 
 def test_finding_type_groups_preserve_category_order_and_other_bucket():
@@ -160,6 +160,21 @@ def test_findings_queue_template_exposes_device_csv_and_grouped_types():
     assert "Archive in Hudu" in template
     assert "Hudu record:" in template
     assert "archiveHuduRow" in template
+    assert "row.review_url" in template
+
+
+def test_every_issue_row_has_a_direct_review_path_and_keeps_bulk_actions():
+    source = Path("apps/core/views.py").read_text(encoding="utf-8")
+    template = Path("templates/finding_review.html").read_text(encoding="utf-8")
+
+    assert '"review_url": reverse("finding_review", kwargs={"finding_id": f.id})' in source
+    assert "def finding_review(" in source
+    assert "Open Computer and source records" in source
+    assert "Review patch evidence" in source
+    assert "Check source health" in source
+    assert "finding_acknowledge" in template
+    assert "finding_resolve" in template
+    assert "finding_snooze" in template
 
 
 def test_operator_projection_uses_operator_vocabulary_and_short_reasons():
@@ -187,7 +202,14 @@ def test_operator_projection_uses_operator_vocabulary_and_short_reasons():
     ) == {"owner": "Operator", "next_step": "Review identity", "route": "subject"}
     assert operator_guidance(
         attention="pending", reason="Patch data incomplete"
-    ) == {"owner": "Integration", "next_step": "Review patch collection", "route": "patch"}
+    ) == {"owner": "Integration team", "next_step": "Check patch collection", "route": "patch"}
+    assert operator_guidance(
+        attention="pending", reason="Pending current assessment"
+    ) == {
+        "owner": "",
+        "next_step": "Checked automatically when information updates",
+        "route": "",
+    }
 
 
 def test_findings_group_summaries_are_computed_before_screen_cap():
@@ -234,6 +256,7 @@ def test_issue_work_status_uses_one_operator_label_without_a_repeated_reason():
     assert '>Work status</a>' in template
     assert '{{ row.work_status_label }}' in template
     assert '{{ row.operator_attention|humanize_label }}' not in template
+    assert '"Waiting for current information"' in source
 
 
 def test_expanded_type_state_links_are_stacked_for_scanning():
@@ -243,6 +266,27 @@ def test_expanded_type_state_links_are_stacked_for_scanning():
     assert ".issues-type-link > span { min-width:0; overflow:hidden; text-overflow:ellipsis; }" in template
     assert ".issues-state-links { display:grid;" in template
     assert ".issues-state-links a { display:block; }" in template
+
+
+def test_patching_scope_labels_explain_the_three_operator_choices():
+    source = Path("apps/core/views.py").read_text(encoding="utf-8")
+    template = Path("templates/patching_queue.html").read_text(encoding="utf-8")
+
+    assert '"label": "In scope — patching expected"' in source
+    assert '"label": "Excluded — do not patch"' in source
+    assert '"label": "Not managed — no patch service"' in source
+    assert "means patching is expected" in template
+    assert "means it is intentionally not patched" in template
+    assert "means no patching service is assigned" in template
+
+
+def test_patching_workflows_use_human_labels_and_actions():
+    assert humanize_label("device_never_patched") == "No patch installed yet"
+    assert humanize_label("patching_stalled") == "No recent patch activity"
+    assert humanize_label("reboot_pending") == "Restart required"
+    assert humanize_label("patch_failing_repeatedly") == "Update repeatedly failing"
+    assert humanize_label("patch_approval_backlog") == "Approved updates not installed"
+    assert views._PATCHING_WORKFLOW["patch_approval_backlog"]["note"] == "Review the client deployment"
 
 
 class _FindingActionUser:
@@ -264,6 +308,14 @@ def test_registered_retirement_action_requires_lifecycle_permission():
     assert available_finding_actions(_FindingActionUser(may_manage_lifecycle=True)) == (
         BULK_RETIRE_COMPUTERS,
     )
+
+
+def test_manual_retirement_is_visible_without_a_lifecycle_finding_gate():
+    template = Path("templates/device_detail.html").read_text(encoding="utf-8")
+
+    assert "Manually retire this Computer" in template
+    assert "can_manage_lifecycle and device.lifecycle_status != 'retired'" in template
+    assert "Why retire this Computer?" in template
 
 
 def test_hudu_archive_action_requires_source_management_permission():

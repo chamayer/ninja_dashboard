@@ -2,6 +2,19 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.126.2] — 2026-09-22 — Operator issue workflows
+
+### Changed
+
+- Added a direct Review path for every Issue, with links to the relevant
+  Computer, source records, client, software, patch evidence, Hudu record,
+  duplicate Computers, or source health surface.
+- Kept per-row and bulk handling actions available while reviewing Issues.
+- Made manual Computer retirement available to authorized lifecycle managers
+  without requiring an automatic lifecycle gate; reasons and audit history
+  remain required.
+- Reworded Pending guidance and Patching workflows in plain operator language.
+
 ## [0.126.1] — 2026-09-17 — Issues taxonomy corrections
 
 ### Fixed

@@ -580,11 +580,6 @@ function swFilter(q) {
     <div class="dd-lifecycle-banner">
         <strong>Needs review</strong> — no current source record reports this Computer. Review the records before removing it from normal inventory.
         <p style="margin:0.35rem 0;"><a href="{% url 'findings_queue' %}?type=device_missing_from_source&amp;status=all&amp;subject_id={{ device.id }}">Open related finding →</a></p>
-        {% if can_manage_lifecycle %}
-        <form method="post" action="{% url 'device_lifecycle_set' org_slug=device.client.slug device_id=device.id target='retired' %}" style="display:flex; gap:0.4rem; flex-wrap:wrap; align-items:center; margin-top:0.65rem;" onsubmit="return confirm('Retire this Computer? Its source records will be kept.');">
-            {% csrf_token %}<input type="text" name="reason" required maxlength="120" placeholder="Why retire this Computer?" style="padding:0.35rem 0.6rem; min-width:260px;"><button type="submit" style="color:#991b1b;">Retire Computer</button>
-        </form>
-        {% endif %}
     </div>
     {% elif device.lifecycle_status == 'retired' %}
     <div class="dd-lifecycle-banner retired">
@@ -595,6 +590,15 @@ function swFilter(q) {
         </form>
         {% endif %}
     </div>
+    {% endif %}
+    {% if can_manage_lifecycle and device.lifecycle_status != 'retired' %}
+    <details style="margin:0.8rem 0;">
+        <summary style="cursor:pointer; color:#991b1b; font-weight:600;">Manually retire this Computer</summary>
+        <p class="muted" style="margin:0.35rem 0;">Use when you have confirmed this Computer should leave inventory. Its source records and history will be kept.</p>
+        <form method="post" action="{% url 'device_lifecycle_set' org_slug=device.client.slug device_id=device.id target='retired' %}" style="display:flex; gap:0.4rem; flex-wrap:wrap; align-items:center;" onsubmit="return confirm('Retire this Computer? Its source records and history will be kept.');">
+            {% csrf_token %}<input type="text" name="reason" required maxlength="120" placeholder="Why retire this Computer?" style="padding:0.35rem 0.6rem; min-width:260px;"><button type="submit" style="color:#991b1b;">Retire Computer</button>
+        </form>
+    </details>
     {% endif %}
     {% if observations %}
     <table data-sortable style="width:100%;"><thead><tr><th>Source</th><th>What it reports</th><th>Record state</th><th>Status</th><th>Record ID</th><th class="num">Last updated</th><th class="num">Last contact</th></tr></thead><tbody>

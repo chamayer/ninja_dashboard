@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% load human_labels %}
+
+{% block title %}Review issue{% endblock %}
+
+{% block content %}
+<div class="card">
+    <p style="margin:0 0 .6rem;"><a href="{% url 'findings_queue' %}">← Back to Issues</a></p>
+    <h1 style="margin:0;">Review: {{ finding.finding_type.name|humanize_label }}</h1>
+    <p class="muted" style="margin:.4rem 0 0;">{{ finding.get_severity_display }} · {{ finding.get_status_display }}</p>
+</div>
+
+<div class="card">
+    <h2>What to review</h2>
+    <p><strong>Subject:</strong> {% if subject_url %}<a href="{{ subject_url }}">{{ subject_label }}</a>{% else %}{{ subject_label }}{% endif %}</p>
+    {% finding_detail_text finding as evidence %}
+    {% if evidence %}<p>{{ evidence }}</p>{% else %}<p>Review the linked records and current information before deciding how to handle this issue.</p>{% endif %}
+    <div style="display:flex; flex-wrap:wrap; gap:.45rem; margin-top:.8rem;">
+        {% for link in review_links %}
+        <a class="btn btn-secondary" href="{{ link.url }}"{% if link.label == "Open Hudu record" %} target="_blank" rel="noopener"{% endif %}>{{ link.label }}</a>
+        {% endfor %}
+    </div>
+</div>
+
+{% if finding.status != 'resolved' %}
+<div class="card">
+    <h2>Handle this issue</h2>
+    <div style="display:flex; flex-wrap:wrap; gap:.45rem; align-items:center;">
+        {% if finding.status == 'open' %}
+        <form method="post" action="{% url 'finding_acknowledge' finding.id %}">{% csrf_token %}<input type="hidden" name="next" value="{{ request.path }}"><button type="submit">Acknowledge</button></form>
+        {% endif %}
+        <form method="post" action="{% url 'finding_resolve' finding.id %}">{% csrf_token %}<input type="hidden" name="next" value="{{ request.path }}"><button type="submit">Resolve</button></form>
+        <form method="post" action="{% url 'finding_snooze' finding.id %}" style="display:flex; gap:.35rem; align-items:center;">{% csrf_token %}<input type="hidden" name="next" value="{{ request.path }}"><label>Pause for <input type="number" name="days" value="7" min="1" max="90" style="width:4rem;"> days</label><button type="submit">Pause</button></form>
+    </div>
+</div>
+{% endif %}
+{% endblock %}
