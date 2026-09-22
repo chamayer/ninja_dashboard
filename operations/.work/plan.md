@@ -450,11 +450,11 @@ unfiltered summary cards; previously they recalculated the complete state model
 for both the selected Type and the fleet. Resolved-history scopes still receive
 their own projection because they are not a subset of the active fleet. Next
 action: validate the consolidated queue correction locally and in production.
-The affected-Computer rollup is now also conditional on findings that can
-actually expose Computers (device or software subjects). Client-only identity
-review, source, and collector findings no longer invoke the fleet-wide
-software-exposure view that cannot contribute to their result. Next action:
-validate filtered identity review latency and the former column-filter 500.
+The affected-Computer rollup now runs only for the explicit device CSV. It is
+not needed to render the normal Issues table and previously added 6.4 seconds
+to selected-Type browsing through the fleet-wide software-exposure view. Next
+action: validate filtered identity review latency and the former column-filter
+500.
 For a selected single-condition Type or individual Issue, the default Group
 sort now uses the stable ID tie-breaker directly because every displayed Group
 and Issue label is equal; it avoids evaluating the expensive rendered-issue

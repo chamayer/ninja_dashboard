@@ -204,9 +204,7 @@ def test_database_page_replaces_raw_findings_with_display_rows():
 def test_collapsed_queue_skips_affected_device_rollup_until_a_type_is_opened():
     source = Path("apps/core/views.py").read_text(encoding="utf-8")
 
-    assert "device_exposure_subjects = (" in source
-    assert "Finding.SubjectType.SOFTWARE_INSTALLATION" in source
-    assert "matching_qs.filter(subject_type__in=device_exposure_subjects).exists()" in source
+    assert 'needs_affected_devices = request.GET.get("format") == "devices_csv"' in source
     assert "_affected_device_rows(matching_qs) if needs_affected_devices else []" in source
 
 
