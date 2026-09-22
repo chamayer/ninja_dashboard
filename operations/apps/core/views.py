@@ -4822,7 +4822,19 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     # merely to calculate an affected-Computer rollup that is not actionable
     # until a Type is opened. A selected Type and the explicit device CSV
     # retain the complete rollup.
-    needs_affected_devices = show_finding_rows or request.GET.get("format") == "devices_csv"
+    # Client, source, and collector findings cannot reach a Computer through
+    # this rollup. Avoid expanding those queues through the fleet-wide
+    # software-exposure view; identity review is the common case.
+    device_exposure_subjects = (
+        Finding.SubjectType.DEVICE,
+        Finding.SubjectType.SOFTWARE_PRODUCT,
+        Finding.SubjectType.SOFTWARE_VERSION,
+        Finding.SubjectType.SOFTWARE_INSTALLATION,
+    )
+    needs_affected_devices = (
+        (show_finding_rows or request.GET.get("format") == "devices_csv")
+        and matching_qs.filter(subject_type__in=device_exposure_subjects).exists()
+    )
     affected_devices = _affected_device_rows(matching_qs) if needs_affected_devices else []
     affected_client_count = len({row["client"] for row in affected_devices if row["client"]})
     result_summary_parts = [f"{total_matching} issue rows"]

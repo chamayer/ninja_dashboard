@@ -450,5 +450,10 @@ unfiltered summary cards; previously they recalculated the complete state model
 for both the selected Type and the fleet. Resolved-history scopes still receive
 their own projection because they are not a subset of the active fleet. Next
 action: validate the consolidated queue correction locally and in production.
+The affected-Computer rollup is now also conditional on findings that can
+actually expose Computers (device or software subjects). Client-only identity
+review, source, and collector findings no longer invoke the fleet-wide
+software-exposure view that cannot contribute to their result. Next action:
+validate filtered identity review latency and the former column-filter 500.
 Pause only for a material product decision, conflicting user work, migration
 approval, production mutation, or separate commit/push authorization.
