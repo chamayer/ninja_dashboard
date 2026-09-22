@@ -4150,8 +4150,21 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     findings = []
     if show_finding_rows:
         if database_page_mode:
+            # A single-condition Type (or a selected individual Issue) has
+            # the same displayed group and issue label on every row. Ordering
+            # those rows by the expensive rendered issue SQL is pure work; a
+            # stable ID is the valid tie-breaker and keeps Type drilldowns
+            # responsive.
+            single_condition_scope = bool(issue_filter) or (
+                bool(selected_type) and len(selected_type["types"]) == 1
+            )
+            fields = (
+                ("id",)
+                if sort_key == "group" and single_condition_scope
+                else database_sort_fields[sort_key]
+            )
             order = []
-            for field in database_sort_fields[sort_key]:
+            for field in fields:
                 expression = F(field) if isinstance(field, str) else field
                 order.append(
                     expression.desc(nulls_last=True)

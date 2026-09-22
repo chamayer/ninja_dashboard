@@ -455,5 +455,10 @@ actually expose Computers (device or software subjects). Client-only identity
 review, source, and collector findings no longer invoke the fleet-wide
 software-exposure view that cannot contribute to their result. Next action:
 validate filtered identity review latency and the former column-filter 500.
+For a selected single-condition Type or individual Issue, the default Group
+sort now uses the stable ID tie-breaker directly because every displayed Group
+and Issue label is equal; it avoids evaluating the expensive rendered-issue
+SQL merely to compare identical labels. Next action: validate that Type
+drilldown and the evidence column filter in production.
 Pause only for a material product decision, conflicting user work, migration
 approval, production mutation, or separate commit/push authorization.

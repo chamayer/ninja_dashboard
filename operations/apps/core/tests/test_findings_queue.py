@@ -218,6 +218,14 @@ def test_filtered_issue_queue_reuses_the_fleet_operator_state_projection():
     assert "{finding_id: fleet_states[finding_id] for finding_id in governed_id_keys}" in source
 
 
+def test_single_condition_type_uses_a_cheap_default_group_tie_breaker():
+    source = Path("apps/core/views.py").read_text(encoding="utf-8")
+
+    assert "single_condition_scope = bool(issue_filter)" in source
+    assert 'if sort_key == "group" and single_condition_scope' in source
+    assert '("id",)' in source
+
+
 def test_issue_work_status_uses_one_operator_label_without_a_repeated_reason():
     source = Path("apps/core/views.py").read_text(encoding="utf-8")
     template = Path("templates/findings_queue.html").read_text(encoding="utf-8")
