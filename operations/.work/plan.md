@@ -436,5 +436,11 @@ migration-drift checks, targeted Ruff, Python compilation, and `git diff
 --check`. The Type navigation header is explicitly kept on one line. No
 migration or production data mutation is in scope. Next action: commit/push
 the corrected default queue, then run the authenticated production smoke tests.
+The Work status column now uses one human-facing state (Needs action, Blocked,
+Pending, Paused, or the lifecycle fallback) rather than a generic status plus
+a redundant explanation. A note remains only when it adds information, and the
+CSV uses the same Work status/Note contract. Expanded Type state links are
+stacked on separate lines for scanning. Next action: validate this display
+correction together with the queue performance changes before commit.
 Pause only for a material product decision, conflicting user work, migration
 approval, production mutation, or separate commit/push authorization.

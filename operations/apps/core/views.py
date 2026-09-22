@@ -3773,7 +3773,13 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     )
     status_label_expression = Case(
         *[
-            When(id=key, then=Value(OPERATOR_STATUS_LABELS.get(state["status"], "")))
+            When(
+                id=key,
+                then=Value(
+                    OPERATOR_ATTENTION_LABELS.get(state["attention"])
+                    or OPERATOR_STATUS_LABELS.get(state["status"], "")
+                ),
+            )
             for key, state in operator_states.items()
         ],
         default=Value(""),
@@ -4581,6 +4587,24 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             row["operator_reason"] = "Pending current assessment"
         elif row["operator_attention"] == ATTENTION_BLOCKED and row["operator_reason"] == "Ready for action":
             row["operator_reason"] = "Blocked by current evidence"
+        row["work_status_label"] = (
+            OPERATOR_ATTENTION_LABELS.get(row["operator_attention"])
+            or row["operator_status_label"]
+        )
+        # The normal state explanation merely repeats the work status (for
+        # example, "Needs action — Ready for action"). Keep a note only when
+        # it carries additional, operator-useful information.
+        row["operator_status_note"] = (
+            ""
+            if row["operator_reason"]
+            in {
+                "Ready for action",
+                "Blocked by current evidence",
+                "Pending current assessment",
+                "Paused by operator",
+            }
+            else row["operator_reason"]
+        )
         guidance = operator_guidance(
             attention=row["operator_attention"],
             reason=row["operator_reason"],
@@ -4727,14 +4751,8 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
                 ),
                 ("Detail", "detail"),
                 ("Online sources", "online_sources"),
-                ("Status", "operator_status_label"),
-                (
-                    "Attention",
-                    lambda r: OPERATOR_ATTENTION_LABELS.get(r["operator_attention"], "")
-                    if r["operator_attention"]
-                    else "",
-                ),
-                ("Reason", "operator_reason"),
+                ("Work status", "work_status_label"),
+                ("Note", "operator_status_note"),
                 ("Owner", "operator_owner"),
                 ("Next step", "operator_next_step"),
                 ("Confidence", lambda r: r["f"].confidence),
@@ -4755,7 +4773,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
         ("subject", lambda row: row["subject_label"]),
         ("evidence", lambda row: row["detail"]),
         ("context", lambda row: row["context"]),
-        ("status", lambda row: row["operator_status_label"]),
+        ("status", lambda row: row["work_status_label"]),
         ("date", lambda row: row.get("evidence_date")),
     )
     table_filters = {

@@ -208,6 +208,25 @@ def test_collapsed_queue_skips_affected_device_rollup_until_a_type_is_opened():
     assert "_affected_device_rows(matching_qs) if needs_affected_devices else []" in source
 
 
+def test_issue_work_status_uses_one_operator_label_without_a_repeated_reason():
+    source = Path("apps/core/views.py").read_text(encoding="utf-8")
+    template = Path("templates/findings_queue.html").read_text(encoding="utf-8")
+
+    assert 'row["work_status_label"]' in source
+    assert 'row["operator_status_note"]' in source
+    assert '("Work status", "work_status_label")' in source
+    assert '>Work status</a>' in template
+    assert '{{ row.work_status_label }}' in template
+    assert '{{ row.operator_attention|humanize_label }}' not in template
+
+
+def test_expanded_type_state_links_are_stacked_for_scanning():
+    template = Path("templates/findings_queue.html").read_text(encoding="utf-8")
+
+    assert ".issues-state-links { display:grid;" in template
+    assert ".issues-state-links a { display:block; }" in template
+
+
 class _FindingActionUser:
     is_authenticated = True
 
@@ -339,7 +358,7 @@ def test_findings_queue_exposes_governed_response_filter():
     assert 'name="attention"' in template
     assert "_condition_operator_states" in source
     assert "condition_participants" in source
-    assert '"Attention"' in source
+    assert '"Work status"' in source
     assert '"Reason"' in source
     assert "Policy:" not in template
     assert "row.assessment" not in template
