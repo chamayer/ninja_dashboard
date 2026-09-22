@@ -223,6 +223,8 @@ def test_issue_work_status_uses_one_operator_label_without_a_repeated_reason():
 def test_expanded_type_state_links_are_stacked_for_scanning():
     template = Path("templates/findings_queue.html").read_text(encoding="utf-8")
 
+    assert ".issues-type-group { min-width:0; }" in template
+    assert ".issues-type-link > span { min-width:0; overflow:hidden; text-overflow:ellipsis; }" in template
     assert ".issues-state-links { display:grid;" in template
     assert ".issues-state-links a { display:block; }" in template
 

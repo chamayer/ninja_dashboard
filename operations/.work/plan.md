@@ -440,7 +440,10 @@ The Work status column now uses one human-facing state (Needs action, Blocked,
 Pending, Paused, or the lifecycle fallback) rather than a generic status plus
 a redundant explanation. A note remains only when it adds information, and the
 CSV uses the same Work status/Note contract. Expanded Type state links are
-stacked on separate lines for scanning. Next action: validate this display
+stacked on separate lines for scanning. Each Type header and its expanded state
+links are one grid item, preventing an expanded list from taking a neighboring
+Type's grid cell; the header keeps only shown/unresolved totals because the
+expanded list carries state totals. Next action: validate this display
 correction together with the queue performance changes before commit.
 Pause only for a material product decision, conflicting user work, migration
 approval, production mutation, or separate commit/push authorization.
