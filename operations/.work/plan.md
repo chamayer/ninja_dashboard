@@ -571,3 +571,29 @@ compilation, scoped import lint, and diff check. The full Ruff run remains
 blocked by 65 pre-existing violations in `apps/core/views.py`. Next action:
 release the approved `0.126.3` operator-workflow change; no migration is
 included.
+
+Targeted refresh and action-density correction in progress. Scope: give every
+Pending Issue the narrowest truthful Refresh action available (Computer data,
+specific source data, or reevaluation only when it can act on current
+evidence), keep its result explicit, reduce row controls to the table's visual
+scale, and keep Subject links pointed at the authoritative Computer, client,
+software, or source review surface. Do not present a fleet-wide collection as
+a Computer refresh or change source-derived state from Operations. No schema
+change or production action is in scope. Validation: focused queue tests,
+Django checks, template rendering, compilation, and diff check. Next action:
+map Pending subjects and existing collector/evaluator endpoints to safe
+targets.
+
+Implemented locally: Pending rows now expose Refresh through one shared
+dispatch path. It selects the narrowest available operation: current
+Ninja-linked Computer software data, the registered source named by the
+finding's evidence, or platform reevaluation when only already-collected
+evidence can be checked. Source-bound Subjects now link directly to Source
+health. The Actions column uses a compact fixed-width, single-line control
+set sized to the table row. Jobs now links to Targeted refresh, where an
+operator can search and select a Computer, choose a source, or request an
+explicit reevaluation; it calls the same functions as the Issue action. No
+schema change or production action was performed. Validation: focused queue
+tests, Django checks, template loading, compilation, and diff check pass.
+Next action: review the local behavior and obtain separate commit/push
+authorization.

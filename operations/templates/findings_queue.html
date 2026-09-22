@@ -148,20 +148,20 @@
         letter-spacing: normal;
     }
     .issues-column-filter-options button { margin-top: .4rem; }
-    .issue-row-actions { display:flex; flex-wrap:wrap; gap:.35rem; }
+    .issue-row-actions { display:flex; flex-wrap:nowrap; gap:.22rem; align-items:center; }
     .issue-row-action {
         appearance:none;
         display:inline-flex;
         align-items:center;
         justify-content:center;
-        min-height:1.95rem;
+        min-height:1.35rem;
         box-sizing:border-box;
-        padding:.3rem .6rem;
+        padding:.14rem .38rem;
         border:1px solid #94a3b8;
         border-radius:4px;
         background:var(--surface);
         color:var(--text);
-        font:600 .75rem/1 system-ui, sans-serif;
+        font:600 .68rem/1 system-ui, sans-serif;
         text-decoration:none;
         white-space:nowrap;
         cursor:pointer;
@@ -171,6 +171,7 @@
     .issue-row-action--primary:hover { background:#1d4ed8; color:#fff; }
     .issue-row-action--override { border-color:#b45309; color:#92400e; }
     .issue-row-action--override:hover { border-color:#92400e; background:#fffbeb; color:#78350f; }
+    .issues-table th:last-child, .issues-table td:last-child { width:13.5rem; }
     @media (max-width: 1050px) {
         .issues-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
         .issues-filterbar,
@@ -330,7 +331,7 @@
                     <th><a href="{{ sort_links.context }}">Context</a><details class="issues-column-filter"><summary>Filter</summary><div class="issues-column-filter-options"><input form="issues-table-filter-form" type="search" name="table_context" value="{{ table_filters.context }}" placeholder="Contains text" aria-label="Filter Context"><button form="issues-table-filter-form" type="submit">Apply</button></div></details></th>
                     <th><a href="{{ sort_links.status }}">Status</a><details class="issues-column-filter"><summary>Filter</summary><div class="issues-column-filter-options"><input form="issues-table-filter-form" type="search" name="table_status" value="{{ table_filters.status }}" placeholder="Contains text" aria-label="Filter Status"><button form="issues-table-filter-form" type="submit">Apply</button></div></details></th>
                     <th class="num"><a href="{{ sort_links.date }}">Evidence date</a><details class="issues-column-filter"><summary>Filter</summary><div class="issues-column-filter-options"><input form="issues-table-filter-form" type="search" name="table_date" value="{{ table_filters.date }}" placeholder="Contains text" aria-label="Filter Evidence date"><button form="issues-table-filter-form" type="submit">Apply</button></div></details></th>
-                    <th>Actions</th>
+                    <th style="width:13.5rem;">Actions</th>
                 </tr>
             </thead>
             <tbody>
@@ -383,7 +384,7 @@
                         <div class="issue-row-actions">
                             <a class="issue-row-action issue-row-action--primary" href="{{ row.review_url }}">Review</a>
                             {% if f.status != "resolved" and row.refresh_available %}
-                                <button type="submit" formaction="{% url 'finding_refresh' f.id %}" class="issue-row-action">Refresh</button>
+                                <button type="submit" formaction="{% url 'finding_refresh' f.id %}" class="issue-row-action" title="{{ row.refresh_title }}">Refresh</button>
                             {% endif %}
                             {% if row.archive_action %}
                                 <button type="submit" name="action" value="archive_hudu_assets" class="row-archive-hudu issue-row-action issue-row-action--override" onclick="return archiveHuduRow(this)">Archive in Hudu</button>

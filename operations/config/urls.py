@@ -99,6 +99,7 @@ from apps.core.views import (
     software_title_lookup,
     software_user_risk,
     sources_status,
+    targeted_refresh,
 )
 
 urlpatterns = [
@@ -187,6 +188,7 @@ urlpatterns = [
     path("admin/jobs/", admin_jobs, name="admin_jobs"),
     path("admin/jobs/run/<str:job_id>/", admin_jobs_run, name="admin_jobs_run"),
     path("admin/jobs/run-all/", admin_jobs_run_all, name="admin_jobs_run_all"),
+    path("admin/refresh/", targeted_refresh, name="targeted_refresh"),
     path("admin/config/fields/", attribute_visibility_config, name="attribute_visibility_config"),
     path("devices/", devices_page, name="devices_page"),
     path("software/clients/", software_clients, name="software_clients"),

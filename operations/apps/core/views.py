@@ -4481,6 +4481,13 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
                 if f.subject_type == Finding.SubjectType.SOFTWARE_VERSION
                 else "software title"
             )
+        elif f.subject_type in {
+            Finding.SubjectType.SOURCE_BINDING,
+            Finding.SubjectType.COLLECTOR_INSTANCE,
+        }:
+            subject_label = "Source health"
+            subject_url = reverse("sources_status")
+            context_parts.append("platform health")
         else:
             subject_label = f.get_subject_type_display()
             context_parts.append("platform or source context")
@@ -4574,25 +4581,6 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
         }
 
     findings_with_detail = [_display_row(f) for f in findings]
-    refreshable_device_ids = {
-        row["f"].subject_id
-        for row in findings_with_detail
-        if row["f"].subject_type == Finding.SubjectType.DEVICE
-    }
-    ninja_refreshable_device_ids = set(
-        DeviceSourceLink.objects.filter(
-            tenant_id=1,
-            device_id__in=refreshable_device_ids,
-            source__name="Ninja",
-            device__deleted_at__isnull=True,
-            missing_since__isnull=True,
-        ).values_list("device_id", flat=True)
-    )
-    for row in findings_with_detail:
-        row["refresh_available"] = (
-            row["f"].subject_type == Finding.SubjectType.DEVICE
-            and row["f"].subject_id in ninja_refreshable_device_ids
-        )
     assessments = _condition_assessment_display(
         "entity", (row["f"].id for row in findings_with_detail)
     )
@@ -4640,6 +4628,10 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             else row["operator_reason"],
         )
         row["critical_finding_id"] = governed_state.get("critical_finding_id") if governed_state else ""
+        row["refresh_available"] = row["operator_attention"] == ATTENTION_PENDING
+        row["refresh_title"] = "Refresh the relevant current information for this Issue"
+        row["refresh_available"] = row["operator_attention"] == ATTENTION_PENDING
+        row["refresh_title"] = "Refresh the most relevant current information for this Issue"
 
     # A duplicate-Computer Finding carries the whole collision group.  Resolve
     # the IDs once here so operators can inspect or compare the actual
@@ -5140,25 +5132,133 @@ def _queue_ninja_software_refresh(device_id: uuid.UUID) -> tuple[bool, str]:
     return True, ""
 
 
+def _source_name_for_refresh(finding: Finding) -> str:
+    """Resolve a registered source from the finding's authoritative evidence."""
+    details = finding.finding_details or {}
+    source_id = str(details.get("source_id") or "")
+    if source_id:
+        return Source.objects.filter(id=source_id).values_list("name", flat=True).first() or ""
+    domain = str(details.get("domain") or "")
+    if domain.startswith("source."):
+        candidate = domain.removeprefix("source.").split(".", 1)[0]
+        return Source.objects.filter(name__iexact=candidate).values_list("name", flat=True).first() or ""
+    return ""
+
+
+def _queue_source_refresh(source_name: str) -> tuple[bool, str]:
+    """Queue the existing on-demand collector for one named source."""
+    endpoint = "run/sources/enqueue?" + urlencode(
+        {"source": source_name, "confirm": "1"}
+    )
+    return _dispatch_job({"endpoint": endpoint})
+
+
+def _queue_platform_reevaluation() -> tuple[bool, str]:
+    """Reevaluate conditions using the evidence already collected."""
+    return _dispatch_job({"endpoint": "run/platform-evaluate"})
+
+
+def _queue_refresh_for_finding(finding: Finding) -> tuple[bool, str, str]:
+    """Use the narrowest registered ingest/evaluator path for an Issue."""
+    if finding.subject_type == Finding.SubjectType.DEVICE:
+        queued, detail = _queue_ninja_software_refresh(finding.subject_id)
+        if queued:
+            return True, "computer", ""
+    else:
+        detail = ""
+
+    if source_name := _source_name_for_refresh(finding):
+        queued, source_detail = _queue_source_refresh(source_name)
+        if queued:
+            return True, "source", source_name
+        detail = source_detail
+
+    queued, evaluation_detail = _queue_platform_reevaluation()
+    if queued:
+        return True, "reevaluate", ""
+    return False, "", evaluation_detail or detail
+
+
 @login_required
 @require_POST
 def finding_refresh(request: HttpRequest, finding_id: str) -> HttpResponse:
-    """Queue a scoped Ninja software refresh for the Issue's Computer."""
+    """Queue the registered ingest/evaluator refresh for a Pending Issue."""
     finding = get_object_or_404(
         Finding.objects.select_related("finding_type"), id=finding_id, tenant_id=1
     )
-    if finding.subject_type != Finding.SubjectType.DEVICE:
-        messages.warning(request, "Refresh is available only for a linked Computer.")
+    queued, target, detail = _queue_refresh_for_finding(finding)
+    if queued and target == "computer":
+        messages.success(request, "Computer data refresh queued.")
+    elif queued and target == "source":
+        messages.success(request, f"{detail} source refresh queued.")
+    elif queued:
+        messages.success(request, "Issue reevaluation queued using current information.")
     else:
-        queued, detail = _queue_ninja_software_refresh(finding.subject_id)
-        if queued:
-            messages.success(
-                request,
-                "Refresh queued for this Computer. This Issue updates when the new information arrives.",
-            )
-        else:
-            messages.warning(request, detail)
+        messages.warning(request, detail or "Refresh could not be queued.")
     return redirect(request.POST.get("next") or "findings_queue")
+
+
+@login_required
+def targeted_refresh(request: HttpRequest) -> HttpResponse:
+    """Offer the registered targeted ingest/evaluator refresh operations."""
+    search = (request.GET.get("q") or "").strip()
+    if request.method == "POST":
+        target = (request.POST.get("target") or "").strip()
+        if target == "computer":
+            device_id = request.POST.get("device_id") or ""
+            try:
+                device = Device.objects.filter(
+                    tenant_id=1, id=device_id, deleted_at__isnull=True
+                ).first()
+            except (ValueError, TypeError):
+                device = None
+            if not device:
+                messages.warning(request, "Choose a current Computer to refresh.")
+            else:
+                queued, detail = _queue_ninja_software_refresh(device.id)
+                if queued:
+                    messages.success(request, "Computer data refresh queued.")
+                else:
+                    messages.warning(request, detail)
+        elif target == "source":
+            source_name = (request.POST.get("source") or "").strip()
+            if not Source.objects.filter(name=source_name).exists():
+                messages.warning(request, "Choose a registered source to refresh.")
+            else:
+                queued, detail = _queue_source_refresh(source_name)
+                if queued:
+                    messages.success(request, f"{source_name} source refresh queued.")
+                else:
+                    messages.warning(request, detail or "Source refresh could not be queued.")
+        elif target == "reevaluate":
+            queued, detail = _queue_platform_reevaluation()
+            if queued:
+                messages.success(request, "Platform reevaluation queued using current information.")
+            else:
+                messages.warning(request, detail or "Reevaluation could not be queued.")
+        else:
+            messages.warning(request, "Choose what to refresh.")
+        return redirect("targeted_refresh")
+
+    computers = Device.objects.none()
+    if search:
+        computers = (
+            Device.objects.filter(tenant_id=1, deleted_at__isnull=True)
+            .filter(Q(canonical_hostname__icontains=search) | Q(client__display_name__icontains=search))
+            .select_related("client")
+            .order_by("canonical_hostname", "id")[:50]
+        )
+    return render(
+        request,
+        "targeted_refresh.html",
+        {
+            "admin_group": "integrations",
+            "admin_tab": "jobs",
+            "search": search,
+            "computers": computers,
+            "sources": Source.objects.order_by("name"),
+        },
+    )
 
 
 @login_required
@@ -5430,27 +5530,27 @@ def findings_bulk_action(request: HttpRequest) -> HttpResponse:
         return redirect(request.POST.get("next") or "findings_queue")
     if action == "refresh":
         refreshed_device_ids: set[uuid.UUID] = set()
+        refreshed = 0
         failures = 0
-        for finding in qs.only("subject_type", "subject_id"):
-            if (
-                finding.subject_type != Finding.SubjectType.DEVICE
-                or finding.subject_id in refreshed_device_ids
-            ):
+        for finding in qs.only("subject_type", "subject_id", "finding_details"):
+            if finding.subject_type == Finding.SubjectType.DEVICE and finding.subject_id in refreshed_device_ids:
                 continue
-            queued, _detail = _queue_ninja_software_refresh(finding.subject_id)
+            queued, target, _detail = _queue_refresh_for_finding(finding)
             if queued:
-                refreshed_device_ids.add(finding.subject_id)
+                refreshed += 1
+                if target == "computer":
+                    refreshed_device_ids.add(finding.subject_id)
             else:
                 failures += 1
-        if refreshed_device_ids:
+        if refreshed:
             message = (
-                f"Refresh queued for {len(refreshed_device_ids)} Computer"
-                f"{'s' if len(refreshed_device_ids) != 1 else ''}."
+                f"Refresh queued for {refreshed} Issue"
+                f"{'s' if refreshed != 1 else ''}."
             )
             if failures:
                 message += f" {failures} issue{'s' if failures != 1 else ''} could not be refreshed."
         else:
-            messages.warning(request, "No selected Issues have a refreshable Ninja Computer record.")
+            messages.warning(request, "The selected Issues could not be refreshed.")
             return redirect(request.POST.get("next") or "findings_queue")
     elif action == "snooze":
         try:

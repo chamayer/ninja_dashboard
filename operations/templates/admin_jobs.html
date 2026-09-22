@@ -102,6 +102,7 @@
             {% endif %}
         </div>
     </div>
+    <a href="{% url 'targeted_refresh' %}" class="run-all-primary" style="background:#0f766e; text-decoration:none;">Targeted refresh</a>
     <form method="post" action="{% url 'admin_jobs_run_all' %}"
           onsubmit="return confirm('Fire every job right now? This will call the ingest container once per job.');">
         {% csrf_token %}

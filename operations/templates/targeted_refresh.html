@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+
+{% block title %}Targeted refresh{% endblock %}
+
+{% block content %}
+<style>
+  .refresh-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(18rem,1fr)); gap:1rem; }
+  .refresh-card { padding:1rem; border:1px solid var(--border); border-radius:6px; background:var(--surface); }
+  .refresh-card h2 { margin:0 0 .35rem; font-size:1rem; }
+  .refresh-card p { margin:.25rem 0 .8rem; color:var(--muted); font-size:.85rem; line-height:1.35; }
+  .refresh-card form { display:grid; gap:.55rem; }
+  .refresh-card input, .refresh-card select { min-width:0; padding:.4rem .5rem; }
+  .refresh-card button { justify-self:start; padding:.35rem .65rem; }
+  .computer-match { display:flex; justify-content:space-between; gap:.75rem; align-items:center; padding:.45rem 0; border-top:1px solid var(--border); }
+</style>
+
+<div class="card">
+  <p style="margin:0 0 .6rem;"><a href="{% url 'admin_jobs' %}">← Back to Jobs</a></p>
+  <h1 style="margin:0;">Targeted refresh</h1>
+  <p class="muted" style="margin:.4rem 0 0;">Refresh only the selected Computer or source. Reevaluation uses information already collected.</p>
+</div>
+
+<div class="refresh-grid">
+  <section class="refresh-card">
+    <h2>Computer data</h2>
+    <p>Queues Ninja software collection for one Computer.</p>
+    <form method="get">
+      <label>Find a Computer<br><input type="search" name="q" value="{{ search }}" placeholder="Computer or client name"></label>
+      <button type="submit">Find</button>
+    </form>
+    {% for computer in computers %}
+    <form method="post" class="computer-match">
+      {% csrf_token %}<input type="hidden" name="target" value="computer"><input type="hidden" name="device_id" value="{{ computer.id }}">
+      <span><strong>{{ computer.canonical_hostname|default:"Unnamed Computer" }}</strong><br><span class="muted">{{ computer.client.display_name }}</span></span>
+      <button type="submit">Refresh</button>
+    </form>
+    {% empty %}{% if search %}<p>No current Computers match that search.</p>{% endif %}{% endfor %}
+  </section>
+
+  <section class="refresh-card">
+    <h2>Source data</h2>
+    <p>Queues collection for one source across its configured scope.</p>
+    <form method="post">
+      {% csrf_token %}<input type="hidden" name="target" value="source">
+      <label>Source<br><select name="source" required><option value="">Choose a source</option>{% for source in sources %}<option value="{{ source.name }}">{{ source.name }}</option>{% endfor %}</select></label>
+      <button type="submit">Refresh</button>
+    </form>
+  </section>
+
+  <section class="refresh-card">
+    <h2>Reevaluate</h2>
+    <p>Rechecks coverage, identity, and lifecycle conditions using current information. It does not collect source data.</p>
+    <form method="post">{% csrf_token %}<input type="hidden" name="target" value="reevaluate"><button type="submit">Refresh</button></form>
+  </section>
+</div>
+{% endblock %}

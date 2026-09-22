@@ -2,6 +2,17 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.126.4] — 2026-09-22 — Targeted issue refresh
+
+### Changed
+
+- Added Pending-Issue Refresh actions that queue the narrowest available
+  Computer, source, or reevaluation operation and report what was queued.
+- Added a Targeted refresh form from Jobs for operator-selected Computers,
+  sources, and current-evidence reevaluation.
+- Made source-health Subjects link to the source-health surface and compacted
+  the Issue action controls to fit a normal table row.
+
 ## [0.126.3] — 2026-09-22 — Issue review actions
 
 ### Changed

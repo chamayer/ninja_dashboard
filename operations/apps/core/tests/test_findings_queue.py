@@ -479,6 +479,27 @@ def test_issue_actions_use_consistent_controls_and_scoped_refresh():
     assert "finding_refresh" in urls
 
 
+def test_targeted_refresh_uses_the_same_ingest_and_evaluator_paths_as_issues():
+    source = Path("apps/core/views.py").read_text(encoding="utf-8")
+    queue_template = Path("templates/findings_queue.html").read_text(encoding="utf-8")
+    jobs_template = Path("templates/admin_jobs.html").read_text(encoding="utf-8")
+    refresh_template = Path("templates/targeted_refresh.html").read_text(encoding="utf-8")
+    urls = Path("config/urls.py").read_text(encoding="utf-8")
+
+    assert "def _queue_refresh_for_finding" in source
+    assert "def _queue_source_refresh" in source
+    assert "def _queue_platform_reevaluation" in source
+    assert '"run/platform-evaluate"' in source
+    assert "def targeted_refresh" in source
+    assert "row[\"refresh_available\"] = row[\"operator_attention\"] == ATTENTION_PENDING" in source
+    assert "Source health" in source
+    assert 'url \'targeted_refresh\'' in jobs_template
+    assert "Computer data" in refresh_template
+    assert "Source data" in refresh_template
+    assert "Reevaluate" in refresh_template
+    assert "targeted_refresh" in urls
+
+
 def test_issue_categories_are_collapsed_until_a_drilldown_is_selected():
     source = Path("apps/core/views.py").read_text(encoding="utf-8")
     template = Path("templates/findings_queue.html").read_text(encoding="utf-8")
