@@ -148,6 +148,29 @@
         letter-spacing: normal;
     }
     .issues-column-filter-options button { margin-top: .4rem; }
+    .issue-row-actions { display:flex; flex-wrap:wrap; gap:.35rem; }
+    .issue-row-action {
+        appearance:none;
+        display:inline-flex;
+        align-items:center;
+        justify-content:center;
+        min-height:1.95rem;
+        box-sizing:border-box;
+        padding:.3rem .6rem;
+        border:1px solid #94a3b8;
+        border-radius:4px;
+        background:var(--surface);
+        color:var(--text);
+        font:600 .75rem/1 system-ui, sans-serif;
+        text-decoration:none;
+        white-space:nowrap;
+        cursor:pointer;
+    }
+    .issue-row-action:hover { border-color:var(--accent); background:#eff6ff; color:var(--accent); }
+    .issue-row-action--primary { border-color:var(--accent); background:var(--accent); color:#fff; }
+    .issue-row-action--primary:hover { background:#1d4ed8; color:#fff; }
+    .issue-row-action--override { border-color:#b45309; color:#92400e; }
+    .issue-row-action--override:hover { border-color:#92400e; background:#fffbeb; color:#78350f; }
     @media (max-width: 1050px) {
         .issues-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
         .issues-filterbar,
@@ -222,7 +245,7 @@
         <details class="issues-more-filters">
             <summary>More filters</summary>
             <div class="issues-more-filter-grid">
-                <div><label>Status</label><select name="status"><option value=""{% if not active_status %} selected{% endif %}>Open and unresolved</option><option value="open"{% if active_status == "open" %} selected{% endif %}>Open</option><option value="acknowledged"{% if active_status == "acknowledged" %} selected{% endif %}>Acknowledged</option><option value="paused"{% if active_status == "paused" %} selected{% endif %}>Paused</option><option value="resolved"{% if active_status == "resolved" %} selected{% endif %}>Resolved</option></select></div>
+                <div><label>Status</label><select name="status"><option value=""{% if not active_status %} selected{% endif %}>Open and unresolved</option><option value="open"{% if active_status == "open" %} selected{% endif %}>Open</option><option value="paused"{% if active_status == "paused" %} selected{% endif %}>Paused</option><option value="resolved"{% if active_status == "resolved" %} selected{% endif %}>Resolved</option></select></div>
                 <div><label>Severity</label><select name="severity"><option value="">All</option>{% for value, label in severity_choices %}<option value="{{ value }}"{% if active_severity == value %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
                 <div><label>Client</label><select name="client"><option value="">All</option>{% for c in clients %}<option value="{{ c.slug }}"{% if active_client == c.slug %} selected{% endif %}>{{ c.display_name }}</option>{% endfor %}</select></div>
                 <div><label>Platform</label><select name="platform"><option value="">All</option>{% for value, label in platform_choices %}<option value="{{ value }}"{% if active_platform == value %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
@@ -280,20 +303,20 @@
             <details id="bulk-manage" hidden>
                 <summary style="cursor:pointer;"><strong>Selected actions</strong> <span id="bulk-selected" style="color:var(--muted);">0 selected</span></summary>
                 <div style="display:flex; align-items:center; gap:0.5rem; margin-top:0.5rem;">
-                    <button type="submit" name="action" value="ack" class="bulk-action" disabled style="padding:0.3rem 0.7rem;">Acknowledge</button>
-                    <button type="submit" name="action" value="resolve" class="bulk-action" disabled style="padding:0.3rem 0.7rem;">Resolve</button>
                     <input type="number" name="days" value="7" min="1" max="90" style="width:60px; padding:0.3rem 0.5rem;">
-                    <button type="submit" name="action" value="snooze" class="bulk-action" disabled style="padding:0.3rem 0.7rem;">Snooze</button>
+                    <button type="submit" name="action" value="snooze" class="bulk-action issue-row-action" disabled>Pause</button>
+                    <button type="submit" name="action" value="refresh" class="bulk-action issue-row-action" disabled>Refresh</button>
                 </div>
-                {% if finding_actions %}
                 <div style="display:flex; align-items:end; flex-wrap:wrap; gap:0.5rem; margin-top:0.5rem;">
-                    <label style="font-size:0.78rem;">Reason<br><input id="finding-action-reason" type="text" name="reason" maxlength="120" placeholder="Why take this action?" style="min-width:240px; padding:0.3rem 0.5rem;"></label>
+                    <label style="font-size:0.78rem;">Reason<br><input id="finding-action-reason" type="text" name="reason" maxlength="120" placeholder="Required to exclude or retire" style="min-width:240px; padding:0.3rem 0.5rem;"></label>
+                    <button type="submit" name="action" value="suppress" class="bulk-action issue-row-action issue-row-action--override" disabled onclick="return confirm('Exclude the selected Issues? This is an operator override and needs the reason shown above.')">Exclude</button>
+                    {% if finding_actions %}
                     {% for action in finding_actions %}
-                    <button type="submit" name="action" value="{{ action.key }}" class="bulk-action" disabled style="padding:0.3rem 0.7rem; color:#991b1b;" onclick="return confirm('{{ action.confirmation|escapejs }}')">{{ action.label }}</button>
+                    <button type="submit" name="action" value="{{ action.key }}" class="bulk-action issue-row-action issue-row-action--override" disabled onclick="return confirm('{{ action.confirmation|escapejs }}')">{{ action.label }}</button>
                     {% if action.eligibility_hint %}<span class="muted" style="font-size:0.75rem; flex-basis:100%;">{{ action.eligibility_hint }}</span>{% endif %}
                     {% endfor %}
+                    {% endif %}
                 </div>
-                {% endif %}
             </details>
         </div>
         <table class="ops-table issues-table">
@@ -305,7 +328,7 @@
                     <th><a href="{{ sort_links.subject }}">Subject</a><details class="issues-column-filter"><summary>Filter</summary><div class="issues-column-filter-options"><input form="issues-table-filter-form" type="search" name="table_subject" value="{{ table_filters.subject }}" placeholder="Contains text" aria-label="Filter Subject"><button form="issues-table-filter-form" type="submit">Apply</button></div></details></th>
                     <th><a href="{{ sort_links.evidence }}">Evidence</a><details class="issues-column-filter"><summary>Filter</summary><div class="issues-column-filter-options"><input form="issues-table-filter-form" type="search" name="table_evidence" value="{{ table_filters.evidence }}" placeholder="Contains text" aria-label="Filter Evidence"><button form="issues-table-filter-form" type="submit">Apply</button></div></details></th>
                     <th><a href="{{ sort_links.context }}">Context</a><details class="issues-column-filter"><summary>Filter</summary><div class="issues-column-filter-options"><input form="issues-table-filter-form" type="search" name="table_context" value="{{ table_filters.context }}" placeholder="Contains text" aria-label="Filter Context"><button form="issues-table-filter-form" type="submit">Apply</button></div></details></th>
-                    <th><a href="{{ sort_links.status }}">Work status</a><details class="issues-column-filter"><summary>Filter</summary><div class="issues-column-filter-options"><input form="issues-table-filter-form" type="search" name="table_status" value="{{ table_filters.status }}" placeholder="Contains text" aria-label="Filter Work status"><button form="issues-table-filter-form" type="submit">Apply</button></div></details></th>
+                    <th><a href="{{ sort_links.status }}">Status</a><details class="issues-column-filter"><summary>Filter</summary><div class="issues-column-filter-options"><input form="issues-table-filter-form" type="search" name="table_status" value="{{ table_filters.status }}" placeholder="Contains text" aria-label="Filter Status"><button form="issues-table-filter-form" type="submit">Apply</button></div></details></th>
                     <th class="num"><a href="{{ sort_links.date }}">Evidence date</a><details class="issues-column-filter"><summary>Filter</summary><div class="issues-column-filter-options"><input form="issues-table-filter-form" type="search" name="table_date" value="{{ table_filters.date }}" placeholder="Contains text" aria-label="Filter Evidence date"><button form="issues-table-filter-form" type="submit">Apply</button></div></details></th>
                     <th>Actions</th>
                 </tr>
@@ -353,37 +376,25 @@
                     <td>
                         <span class="badge">{{ row.work_status_label }}</span>
                         {% if row.operator_status_note %}<br><span class="muted" style="font-size:0.7rem;">{{ row.operator_status_note }}</span>{% endif %}
-                        {% if row.operator_owner %}<br><span class="muted" style="font-size:0.7rem;">Owner: {{ row.operator_owner }}</span>{% endif %}
-                        {% if row.operator_next_step %}<br>{% if row.operator_next_url %}<a href="{{ row.operator_next_url }}" style="font-size:0.75rem;">{{ row.operator_next_step }} →</a>{% else %}<span class="muted" style="font-size:0.75rem;">{{ row.operator_next_step }}</span>{% endif %}{% endif %}
-                        {% if f.snoozed_until %}<br><span class="muted" style="font-size:0.7rem;">snoozed → {{ f.snoozed_until|date:"Y-m-d" }}</span>{% endif %}
+                        {% if f.snoozed_until %}<br><span class="muted" style="font-size:0.7rem;">Paused until {{ f.snoozed_until|date:"Y-m-d" }}</span>{% endif %}
                     </td>
                     <td class="muted num">{% if row.evidence_date %}<span style="font-size:0.7rem;">{{ row.evidence_label }}</span><br>{{ row.evidence_date|date:"Y-m-d H:i" }}{% endif %}</td>
                     <td>
-                        <div style="display:flex; flex-wrap:wrap; gap:0.25rem;">
-                            <a class="btn btn-secondary" href="{{ row.review_url }}" style="padding:0.15rem 0.5rem; font-size:0.75rem;">Review</a>
-                            {% if row.archive_action %}
-                                <button type="submit" name="action" value="archive_hudu_assets" class="row-archive-hudu" style="padding:0.15rem 0.5rem; font-size:0.75rem;" onclick="return archiveHuduRow(this)">Archive in Hudu</button>
+                        <div class="issue-row-actions">
+                            <a class="issue-row-action issue-row-action--primary" href="{{ row.review_url }}">Review</a>
+                            {% if f.status != "resolved" and row.refresh_available %}
+                                <button type="submit" formaction="{% url 'finding_refresh' f.id %}" class="issue-row-action">Refresh</button>
                             {% endif %}
-                            {% if f.finding_type.name == "device_missing_from_source" and row.subject_url %}
-                                <a class="btn btn-secondary" href="{{ row.subject_url }}?tab=observations" style="padding:0.15rem 0.5rem; font-size:0.75rem;">Review</a>
+                            {% if row.archive_action %}
+                                <button type="submit" name="action" value="archive_hudu_assets" class="row-archive-hudu issue-row-action issue-row-action--override" onclick="return archiveHuduRow(this)">Archive in Hudu</button>
                             {% endif %}
                             {% if f.finding_type.name == "identity_conflict" and f.status != "resolved" %}
-                                <button type="submit" formaction="{% url 'finding_reviewed_distinct' f.id %}" name="reason" value="Reviewed as distinct after comparing source records" style="padding:0.15rem 0.5rem; font-size:0.75rem;">Reviewed distinct</button>
-                            {% endif %}
-                            {% if f.status == "open" %}
-                                <button type="submit" formaction="{% url 'finding_acknowledge' f.id %}" style="padding:0.15rem 0.5rem; font-size:0.75rem;">Ack</button>
+                                <button type="submit" formaction="{% url 'finding_reviewed_distinct' f.id %}" name="reason" value="Reviewed as distinct after comparing source records" class="issue-row-action">Keep separate</button>
                             {% endif %}
                             {% if f.status != "resolved" %}
-                                <button type="submit" formaction="{% url 'finding_resolve' f.id %}" style="padding:0.15rem 0.5rem; font-size:0.75rem;">Resolve</button>
+                                <button type="submit" formaction="{% url 'finding_snooze' f.id %}" class="issue-row-action">Pause</button>
+                                <button type="button" class="issue-row-action issue-row-action--override" onclick="openExcludeDialog('{% url 'finding_suppress' f.id %}', '{{ row.subject_label|escapejs }}')">Exclude</button>
                             {% endif %}
-                            <details>
-                                <summary style="cursor:pointer; white-space:nowrap;">More</summary>
-                                <div style="display:flex; gap:0.25rem; margin-top:0.3rem;">
-                                    <button type="submit" formaction="{% url 'finding_snooze' f.id %}" style="padding:0.15rem 0.5rem; font-size:0.75rem;">Snooze</button>
-                                    <button type="submit" formaction="{% url 'finding_suppress' f.id %}" style="padding:0.15rem 0.5rem; font-size:0.75rem;"
-                                            onclick="return confirm('Suppress this issue permanently (until manually cleared)? A suppression rule will be created.')">Suppress</button>
-                                </div>
-                            </details>
                         </div>
                     </td>
                 </tr>
@@ -398,6 +409,20 @@
     {% endif %}
     {% endif %}
 </div>
+
+<dialog id="issue-exclude-dialog">
+    <form method="post" id="issue-exclude-form">
+        {% csrf_token %}
+        <input type="hidden" name="next" value="{{ request.get_full_path }}">
+        <h2 style="margin-top:0;">Exclude Issue</h2>
+        <p id="issue-exclude-subject" class="muted"></p>
+        <label>Reason<br><input id="issue-exclude-reason" type="text" name="reason" maxlength="120" required style="min-width:22rem; max-width:100%;"></label>
+        <div style="display:flex; justify-content:flex-end; gap:.5rem; margin-top:1rem;">
+            <button type="button" class="issue-row-action" onclick="document.getElementById('issue-exclude-dialog').close()">Cancel</button>
+            <button type="submit" class="issue-row-action issue-row-action--override">Exclude</button>
+        </div>
+    </form>
+</dialog>
 
 {{ taxonomy_filter_data|json_script:"issue-taxonomy-data" }}
 <script>
@@ -470,6 +495,17 @@
         reasonInput.value = reason.trim();
         refresh();
         return true;
+    };
+    window.openExcludeDialog = function(action, subject) {
+        var dialog = document.getElementById('issue-exclude-dialog');
+        var form = document.getElementById('issue-exclude-form');
+        var reason = document.getElementById('issue-exclude-reason');
+        if (!dialog || !form || !reason) return;
+        form.action = action;
+        document.getElementById('issue-exclude-subject').textContent = subject;
+        reason.value = '';
+        dialog.showModal();
+        reason.focus();
     };
 })();
 </script>

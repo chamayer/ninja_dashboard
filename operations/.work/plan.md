@@ -536,3 +536,38 @@ Release preparation complete: VERSION and CHANGELOG are `0.126.2`; no migration
 is included. The validated workflow, status-copy, patching, and manual
 retirement changes are one operator-workflow release. Next action: commit and
 push the approved release without a manual redeploy.
+
+Issue action simplification in progress. Goal: make the Issues queue a review
+surface rather than an alert console. Scope: rename the column to Status; keep
+only its short state and one useful explanatory line; remove acknowledgement
+and manual resolution from row and bulk controls; replace the More expander
+with consistent direct Review, Pause, Exclude, and applicable specialized
+actions; and render historic acknowledged findings as Open in the operator
+queue without changing their audit history. Refresh is deliberately out of
+scope until an authenticated, safe, issue-scoped collection operation exists:
+the current ingest endpoints either start a whole source or require an
+ingest-specific scope selector. Exclude remains an explicit operator override
+and must retain a reason. No migration, source mutation, or deployment is in
+scope. The operator requires Refresh, so add an authenticated Operations
+endpoint that queues the existing Ninja software demand run for exactly the
+finding's linked Computer; do not make a broad source run look scoped. Show it
+only where a current Ninja device link exists. Validation: focused queue tests,
+Django checks, template rendering, compilation, and diff check. Next action:
+implement the queue, action, and scoped refresh contract locally.
+
+Implemented locally: Status replaces Work status and contains only the state,
+one useful detail, and a pause date. Acknowledged persisted findings render as
+Open in Issues while their audit history remains unchanged. Row and bulk
+controls now use one compact control style with no More expander; review,
+Pause, Exclude (reason required), Keep separate, Hudu archive, and Refresh are
+direct actions. Refresh is an authenticated Operations endpoint that resolves
+only a current Ninja-linked Computer and queues the existing `id=<ninja-id>`
+software demand run; it is unavailable for every other Issue, rather than
+claiming to refresh information it cannot collect. The dedicated Review page
+is investigation-only and no longer reintroduces acknowledgement or manual
+resolution. Validation passed: 53
+focused Issues tests, Django checks, both changed templates loaded, Python
+compilation, scoped import lint, and diff check. The full Ruff run remains
+blocked by 65 pre-existing violations in `apps/core/views.py`. Next action:
+release the approved `0.126.3` operator-workflow change; no migration is
+included.

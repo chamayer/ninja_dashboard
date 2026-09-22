@@ -40,7 +40,6 @@ from .conditions.operator import (
     OPERATOR_ATTENTION_LABELS,
     OPERATOR_STATUS_CHOICES,
     OPERATOR_STATUS_LABELS,
-    operator_guidance,
     operator_state,
 )
 from .conditions.review import record_identity_reviewed_distinct
@@ -4575,6 +4574,25 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
         }
 
     findings_with_detail = [_display_row(f) for f in findings]
+    refreshable_device_ids = {
+        row["f"].subject_id
+        for row in findings_with_detail
+        if row["f"].subject_type == Finding.SubjectType.DEVICE
+    }
+    ninja_refreshable_device_ids = set(
+        DeviceSourceLink.objects.filter(
+            tenant_id=1,
+            device_id__in=refreshable_device_ids,
+            source__name="Ninja",
+            device__deleted_at__isnull=True,
+            missing_since__isnull=True,
+        ).values_list("device_id", flat=True)
+    )
+    for row in findings_with_detail:
+        row["refresh_available"] = (
+            row["f"].subject_type == Finding.SubjectType.DEVICE
+            and row["f"].subject_id in ninja_refreshable_device_ids
+        )
     assessments = _condition_assessment_display(
         "entity", (row["f"].id for row in findings_with_detail)
     )
@@ -4609,7 +4627,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
         # example, "Needs action — Ready for action"). Keep a note only when
         # it carries additional, operator-useful information.
         row["operator_status_note"] = {
-            "Pending current assessment": "Waiting for current information",
+            "Pending current assessment": "Waiting for new information.",
         }.get(
             row["operator_reason"],
             ""
@@ -4621,28 +4639,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             }
             else row["operator_reason"],
         )
-        guidance = operator_guidance(
-            attention=row["operator_attention"],
-            reason=row["operator_reason"],
-            severity=row["f"].severity,
-        )
-        row["operator_owner"] = guidance["owner"]
-        row["operator_next_step"] = guidance["next_step"]
         row["critical_finding_id"] = governed_state.get("critical_finding_id") if governed_state else ""
-        row["operator_next_url"] = {
-            "subject": row["subject_url"],
-            "reporting": (
-                f'{row["subject_url"]}?tab=observations' if row["subject_url"] else ""
-            ),
-            "sources": reverse("sources_status"),
-            "patch": reverse("patch_evidence_page"),
-            "coverage": reverse("fleet_coverage"),
-            "critical": (
-                f'{reverse("findings_queue")}?{urlencode({"type": governed_state.get("critical_type", ""), "subject_id": governed_state.get("critical_subject_id", "")})}'
-                if governed_state and governed_state.get("critical_type")
-                else ""
-            ),
-        }.get(guidance["route"], "")
 
     # A duplicate-Computer Finding carries the whole collision group.  Resolve
     # the IDs once here so operators can inspect or compare the actual
@@ -4767,10 +4764,8 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
                 ),
                 ("Detail", "detail"),
                 ("Online sources", "online_sources"),
-                ("Work status", "work_status_label"),
-                ("Note", "operator_status_note"),
-                ("Owner", "operator_owner"),
-                ("Next step", "operator_next_step"),
+                ("Status", "work_status_label"),
+                ("Details", "operator_status_note"),
                 ("Confidence", lambda r: r["f"].confidence),
                 ("First seen", lambda r: r["f"].first_seen_at),
                 ("Last seen", lambda r: r["f"].last_seen_at),
@@ -5112,6 +5107,60 @@ def _policy_candidate_state_action_blocked(request: HttpRequest, finding: Findin
     return True
 
 
+def _queue_ninja_software_refresh(device_id: uuid.UUID) -> tuple[bool, str]:
+    """Queue the existing Ninja software collector for one linked Computer."""
+    link = (
+        DeviceSourceLink.objects.filter(
+            tenant_id=1,
+            device_id=device_id,
+            device__deleted_at__isnull=True,
+            source__name="Ninja",
+            missing_since__isnull=True,
+        )
+        .exclude(external_id="")
+        .order_by("-last_seen_at", "external_id")
+        .first()
+    )
+    if not link:
+        return False, "This Issue has no current Ninja Computer record to refresh."
+    external_id = link.external_id.strip()
+    if not external_id.isascii() or not external_id.isdecimal():
+        return False, "The linked Ninja Computer record cannot be refreshed safely."
+
+    query = urlencode({"df": f"id={external_id}", "confirm": "1"})
+    url = f"{_INGEST_BASE_URL.rstrip('/')}/run/software/enqueue?{query}"
+    try:
+        request_obj = _urllib_request.Request(url, data=b"", method="POST")
+        with _urllib_request.urlopen(request_obj, timeout=10) as response:
+            response.read(200)
+    except HTTPError as exc:
+        return False, f"Refresh could not be queued (HTTP {exc.code})."
+    except URLError as exc:
+        return False, f"Refresh could not reach collection service ({exc.reason})."
+    return True, ""
+
+
+@login_required
+@require_POST
+def finding_refresh(request: HttpRequest, finding_id: str) -> HttpResponse:
+    """Queue a scoped Ninja software refresh for the Issue's Computer."""
+    finding = get_object_or_404(
+        Finding.objects.select_related("finding_type"), id=finding_id, tenant_id=1
+    )
+    if finding.subject_type != Finding.SubjectType.DEVICE:
+        messages.warning(request, "Refresh is available only for a linked Computer.")
+    else:
+        queued, detail = _queue_ninja_software_refresh(finding.subject_id)
+        if queued:
+            messages.success(
+                request,
+                "Refresh queued for this Computer. This Issue updates when the new information arrives.",
+            )
+        else:
+            messages.warning(request, detail)
+    return redirect(request.POST.get("next") or "findings_queue")
+
+
 @login_required
 @require_POST
 def finding_reviewed_distinct(request: HttpRequest, finding_id: str) -> HttpResponse:
@@ -5304,7 +5353,16 @@ def finding_suppress(request: HttpRequest, finding_id: str) -> HttpResponse:
     )
     if _policy_candidate_state_action_blocked(request, finding):
         return redirect(request.POST.get("next") or "findings_queue")
-    reason = (request.POST.get("reason") or "").strip() or "Suppressed from Issues"
+    reason = (request.POST.get("reason") or "").strip()
+    if not reason:
+        messages.warning(request, "An exclusion reason is required.")
+        return redirect(request.POST.get("next") or "findings_queue")
+    if len(reason) > _LIFECYCLE_REASON_MAX_LENGTH:
+        messages.warning(
+            request,
+            f"Keep the reason to {_LIFECYCLE_REASON_MAX_LENGTH} characters or fewer.",
+        )
+        return redirect(request.POST.get("next") or "findings_queue")
     expires_days = request.POST.get("expires_days")
     expires_at = None
     if expires_days:
@@ -5328,7 +5386,7 @@ def finding_suppress(request: HttpRequest, finding_id: str) -> HttpResponse:
     finding.status = Finding.Status.SUPPRESSED
     finding.closed_at = finding.closed_at or now
     finding.save(update_fields=["status", "closed_at"])
-    messages.info(request, "Issue suppressed.")
+    messages.info(request, "Issue excluded.")
     return redirect(request.POST.get("next") or "findings_queue")
 
 
@@ -5353,7 +5411,7 @@ def findings_bulk_action(request: HttpRequest) -> HttpResponse:
             return _retire_selected_computers(request, ids, registered_action)
         if registered_action.key == ARCHIVE_HUDU_ASSETS.key:
             return _queue_selected_hudu_archives(request, ids, registered_action)
-    if action not in ("ack", "resolve", "snooze"):
+    if action not in ("refresh", "snooze", "suppress"):
         messages.warning(request, "That action is not available.")
         return redirect(request.POST.get("next") or "findings_queue")
 
@@ -5370,32 +5428,30 @@ def findings_bulk_action(request: HttpRequest) -> HttpResponse:
             "no issue-state action was applied.",
         )
         return redirect(request.POST.get("next") or "findings_queue")
-    if action == "ack":
-        # First-time ack sets acknowledged_at; reack (rare) leaves the
-        # original stamp so MTTA stays honest.
-        touched = qs.filter(status=Finding.Status.OPEN, acknowledged_at__isnull=True).update(
-            status=Finding.Status.ACKNOWLEDGED,
-            acknowledged_at=now,
-        )
-        touched += qs.filter(status=Finding.Status.OPEN, acknowledged_at__isnull=False).update(
-            status=Finding.Status.ACKNOWLEDGED,
-        )
-        message = f"Acknowledged {touched} issue{'s' if touched != 1 else ''}."
-    elif action == "resolve":
-        resolved = list(qs.exclude(status=Finding.Status.RESOLVED).only("id", "finding_details"))
-        touched = qs.filter(id__in=[finding.id for finding in resolved]).update(
-            status=Finding.Status.RESOLVED, closed_at=now
-        )
-        for finding in resolved:
-            details = dict(finding.finding_details or {})
-            details["resolution"] = {
-                "reason": "operator_resolved",
-                "detail": "Resolved by an operator; this is not an automated recovery claim.",
-            }
-            Finding.objects.filter(id=finding.id, tenant_id=1).update(
-                finding_details=details
+    if action == "refresh":
+        refreshed_device_ids: set[uuid.UUID] = set()
+        failures = 0
+        for finding in qs.only("subject_type", "subject_id"):
+            if (
+                finding.subject_type != Finding.SubjectType.DEVICE
+                or finding.subject_id in refreshed_device_ids
+            ):
+                continue
+            queued, _detail = _queue_ninja_software_refresh(finding.subject_id)
+            if queued:
+                refreshed_device_ids.add(finding.subject_id)
+            else:
+                failures += 1
+        if refreshed_device_ids:
+            message = (
+                f"Refresh queued for {len(refreshed_device_ids)} Computer"
+                f"{'s' if len(refreshed_device_ids) != 1 else ''}."
             )
-        message = f"Resolved {touched} issue{'s' if touched != 1 else ''}."
+            if failures:
+                message += f" {failures} issue{'s' if failures != 1 else ''} could not be refreshed."
+        else:
+            messages.warning(request, "No selected Issues have a refreshable Ninja Computer record.")
+            return redirect(request.POST.get("next") or "findings_queue")
     elif action == "snooze":
         try:
             days = int(request.POST.get("days") or 7)
@@ -5405,6 +5461,31 @@ def findings_bulk_action(request: HttpRequest) -> HttpResponse:
         until = timezone.now() + timedelta(days=days)
         touched = qs.update(snoozed_until=until)
         message = f"Snoozed {touched} for {days} day{'s' if days != 1 else ''}."
+    else:
+        reason = (request.POST.get("reason") or "").strip()
+        if not reason:
+            messages.warning(request, "An exclusion reason is required.")
+            return redirect(request.POST.get("next") or "findings_queue")
+        if len(reason) > _LIFECYCLE_REASON_MAX_LENGTH:
+            messages.warning(
+                request,
+                f"Keep the reason to {_LIFECYCLE_REASON_MAX_LENGTH} characters or fewer.",
+            )
+            return redirect(request.POST.get("next") or "findings_queue")
+        findings = list(qs.select_related("finding_type"))
+        for finding in findings:
+            SuppressionRule.objects.create(
+                tenant_id=1,
+                finding_type=finding.finding_type,
+                subject_match={
+                    "subject_type": finding.subject_type,
+                    "subject_id": str(finding.subject_id),
+                },
+                reason=reason,
+                created_by=request.user,
+            )
+        touched = qs.update(status=Finding.Status.SUPPRESSED, closed_at=now)
+        message = f"Excluded {touched} issue{'s' if touched != 1 else ''}."
     if policy_count:
         message += (
             f" Skipped {policy_count} software policy candidate"

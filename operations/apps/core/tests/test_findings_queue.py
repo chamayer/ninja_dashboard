@@ -5,11 +5,11 @@ from urllib.parse import parse_qs
 
 import pytest
 from django.core.exceptions import PermissionDenied
-from django.test import RequestFactory
 from django.template.loader import get_template
+from django.test import RequestFactory
 
 from apps.core import views
-from apps.core.conditions.operator import operator_guidance, operator_state
+from apps.core.conditions.operator import operator_state
 from apps.core.finding_actions import (
     ARCHIVE_HUDU_ASSETS,
     BULK_RETIRE_COMPUTERS,
@@ -155,7 +155,7 @@ def test_findings_queue_template_exposes_device_csv_and_grouped_types():
     assert "card.count }} / {{ card.total" not in template
     assert "card.percentage" not in template
     assert "action.label" in template
-    assert "Why take this action?" in template
+    assert "Required to exclude or retire" in template
     assert "action.confirmation" in template
     assert "Archive in Hudu" in template
     assert "Hudu record:" in template
@@ -163,7 +163,7 @@ def test_findings_queue_template_exposes_device_csv_and_grouped_types():
     assert "row.review_url" in template
 
 
-def test_every_issue_row_has_a_direct_review_path_and_keeps_bulk_actions():
+def test_every_issue_row_has_a_direct_review_path_and_review_actions_are_not_alert_actions():
     source = Path("apps/core/views.py").read_text(encoding="utf-8")
     template = Path("templates/finding_review.html").read_text(encoding="utf-8")
 
@@ -172,9 +172,12 @@ def test_every_issue_row_has_a_direct_review_path_and_keeps_bulk_actions():
     assert "Open Computer and source records" in source
     assert "Review patch evidence" in source
     assert "Check source health" in source
-    assert "finding_acknowledge" in template
-    assert "finding_resolve" in template
-    assert "finding_snooze" in template
+    queue_template = Path("templates/findings_queue.html").read_text(encoding="utf-8")
+    for action in ("finding_acknowledge", "finding_resolve"):
+        assert action not in queue_template
+        assert action not in template
+    assert "finding_snooze" in queue_template
+    assert "finding_snooze" not in template
 
 
 def test_operator_projection_uses_operator_vocabulary_and_short_reasons():
@@ -197,19 +200,12 @@ def test_operator_projection_uses_operator_vocabulary_and_short_reasons():
         assessment=None,
         now=now,
     ) == {"status": "paused", "attention": "paused", "reason": "Paused by operator"}
-    assert operator_guidance(
-        attention="blocked", reason="Identity unresolved"
-    ) == {"owner": "Operator", "next_step": "Review identity", "route": "subject"}
-    assert operator_guidance(
-        attention="pending", reason="Patch data incomplete"
-    ) == {"owner": "Integration team", "next_step": "Check patch collection", "route": "patch"}
-    assert operator_guidance(
-        attention="pending", reason="Pending current assessment"
-    ) == {
-        "owner": "",
-        "next_step": "Checked automatically when information updates",
-        "route": "",
-    }
+    assert operator_state(
+        status="acknowledged",
+        snoozed_until=None,
+        assessment=None,
+        now=now,
+    )["status"] == "active"
 
 
 def test_findings_group_summaries_are_computed_before_screen_cap():
@@ -252,11 +248,13 @@ def test_issue_work_status_uses_one_operator_label_without_a_repeated_reason():
 
     assert 'row["work_status_label"]' in source
     assert 'row["operator_status_note"]' in source
-    assert '("Work status", "work_status_label")' in source
-    assert '>Work status</a>' in template
+    assert '("Status", "work_status_label")' in source
+    assert '>Status</a>' in template
     assert '{{ row.work_status_label }}' in template
     assert '{{ row.operator_attention|humanize_label }}' not in template
-    assert '"Waiting for current information"' in source
+    assert '"Waiting for new information."' in source
+    assert "operator_owner" not in template
+    assert "operator_next_step" not in template
 
 
 def test_expanded_type_state_links_are_stacked_for_scanning():
@@ -428,12 +426,12 @@ def test_findings_queue_exposes_governed_response_filter():
     assert 'name="attention"' in template
     assert "_condition_operator_states" in source
     assert "condition_participants" in source
-    assert '"Work status"' in source
-    assert '"Reason"' in source
+    assert '"Status"' in source
+    assert '"Details"' in source
     assert "Policy:" not in template
     assert "row.assessment" not in template
     assert "finding_reviewed_distinct" in template
-    assert "Reviewed distinct" in template
+    assert "Keep separate" in template
     assert "category_tiles" not in template
 
 
@@ -460,8 +458,25 @@ def test_findings_queue_summary_cards_use_fleet_wide_operator_counts():
     assert "if governed_id_keys.issubset(fleet_id_keys)" in source
     assert '"label": "Pending"' in source
     assert "Review by state" in template
-    assert "operator_owner" in source
-    assert "operator_next_step" in source
+    assert "operator_owner" not in source
+    assert "operator_next_step" not in source
+
+
+def test_issue_actions_use_consistent_controls_and_scoped_refresh():
+    source = Path("apps/core/views.py").read_text(encoding="utf-8")
+    template = Path("templates/findings_queue.html").read_text(encoding="utf-8")
+    urls = Path("config/urls.py").read_text(encoding="utf-8")
+
+    assert ".issue-row-action" in template
+    assert "<details>" not in template[template.index('class="issue-row-actions"'):]
+    assert "openExcludeDialog" in template
+    assert "finding_refresh" in template
+    assert "Refresh" in template
+    assert "action\" value=\"ack" not in template
+    assert "action\" value=\"resolve" not in template
+    assert "def _queue_ninja_software_refresh" in source
+    assert '"df": f"id={external_id}"' in source
+    assert "finding_refresh" in urls
 
 
 def test_issue_categories_are_collapsed_until_a_drilldown_is_selected():
@@ -473,12 +488,14 @@ def test_issue_categories_are_collapsed_until_a_drilldown_is_selected():
     assert '<details class="issues-category-group"{% if category.expanded %} open{% endif %}>' in template
 
 
-def test_findings_queue_csv_projects_labels_before_export_and_has_one_owner_column():
+def test_findings_queue_csv_projects_operator_labels_without_internal_owner_columns():
     source = Path("apps/core/views.py").read_text(encoding="utf-8")
     queue = source[source.index("def findings_queue"):source.index("def _policy_candidate_state_action_blocked")]
     assert queue.index('row["issue_label"]') < queue.index('if request.GET.get("format") == "csv"')
     csv_section = queue[queue.index("def _findings_csv_response"):queue.index("# Keep these getters", queue.index("def _findings_csv_response"))]
-    assert csv_section.count('(\"Owner\"') == 1
+    assert '("Status", "work_status_label")' in csv_section
+    assert '("Owner"' not in csv_section
+    assert '("Next step"' not in csv_section
     assert queue.index("return _findings_csv_response()") > queue.index("findings_with_detail = [")
     assert queue.index('if request.GET.get("format") == "csv"') < queue.index(
         "affected_devices = _affected_device_rows"

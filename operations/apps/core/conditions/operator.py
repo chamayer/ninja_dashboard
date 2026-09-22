@@ -25,7 +25,6 @@ OPERATOR_ATTENTION_LABELS = dict(OPERATOR_ATTENTION_CHOICES)
 
 OPERATOR_STATUS_CHOICES = (
     ("active", "Open"),
-    ("acknowledged", "Acknowledged"),
     ("paused", "Paused"),
     ("resolved", "Resolved"),
 )
@@ -52,8 +51,10 @@ def operator_status(status: str, snoozed_until: datetime | None, now: datetime) 
         return "resolved"
     if is_paused(status, snoozed_until, now):
         return "paused"
+    # Acknowledgement is notification history, not an operator work state.
+    # Preserve the persisted audit value but show it as Open in Issues.
     if status in _ACKNOWLEDGED_STATUSES:
-        return "acknowledged"
+        return "active"
     return "active"
 
 
@@ -69,40 +70,6 @@ def short_reason(assessment: dict[str, Any] | None) -> str:
         if suffix:
             return suffix[:1].upper() + suffix[1:]
     return "Pending current assessment"
-
-
-def operator_guidance(
-    *, attention: str, reason: str, severity: str = ""
-) -> dict[str, str]:
-    """Give an operator a safe owner and next step without engine details."""
-    guidance = {"owner": "", "next_step": "", "route": ""}
-    if attention == ATTENTION_BLOCKED:
-        if reason == "Critical issue takes priority":
-            guidance = {"owner": "Operator", "next_step": "Open critical issue", "route": "critical"}
-        elif reason == "Identity unresolved":
-            guidance = {"owner": "Operator", "next_step": "Review identity", "route": "subject"}
-        elif reason == "Computer offline":
-            guidance = {
-                "owner": "Platform team",
-                "next_step": "Check reporting",
-                "route": "reporting",
-            }
-        elif severity == "critical":
-            guidance = {"owner": "Operator", "next_step": "Open critical issue", "route": "subject"}
-        else:
-            guidance = {"owner": "Operator", "next_step": "Review issue", "route": "subject"}
-    elif attention == ATTENTION_PENDING:
-        if reason == "Source unavailable":
-            guidance = {"owner": "Integration team", "next_step": "Check source health", "route": "sources"}
-        elif reason == "Patch data incomplete":
-            guidance = {"owner": "Integration team", "next_step": "Check patch collection", "route": "patch"}
-        else:
-            guidance = {
-                "owner": "",
-                "next_step": "Checked automatically when information updates",
-                "route": "",
-            }
-    return guidance
 
 
 def operator_attention(

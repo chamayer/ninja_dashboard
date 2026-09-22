@@ -2,6 +2,20 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.126.3] — 2026-09-22 — Issue review actions
+
+### Changed
+
+- Simplified the Issues queue to a short Status column and consistent direct
+  action controls; removed alert-style acknowledgement and manual resolution
+  from the operator review workflow.
+- Added required-reason Exclude overrides, direct Pause and specialized
+  actions, and an investigation-only Review page.
+- Added scoped Refresh for a current Ninja-linked Computer, which queues only
+  that Computer's software collection instead of running a broad source pull.
+- Rendered historic acknowledged findings as Open in the Issues workflow while
+  retaining their audit history.
+
 ## [0.126.2] — 2026-09-22 — Operator issue workflows
 
 ### Changed
