@@ -2,8 +2,7 @@
 
 ## Status
 
-**Implementation complete and pushed; production correctness reconciliation
-passed, with query-performance review pending.** This supersedes the
+**Default Issues-page performance correction in progress.** This supersedes the
 completed taxonomy rollout plan. The active taxonomy remains five Categories,
 34 Types, and 53 Issues. This work changes the operator projection, count
 semantics, assessment coverage, and Issues-page layout; it does not rename
@@ -397,10 +396,39 @@ column-filter, and CSV label contracts remain unchanged. Focused validation is
 41 tests passing with Django checks, migration-drift checks, compilation,
 targeted Ruff, and `git diff --check` passing.
 
-Next action: obtain separate approval to commit and push the full-fleet CSV
-optimization, then run the authenticated production full-export timing and
-verify its column/filter/sort contract. A browser-session smoke test remains
-advisable, but the authenticated server-side request covers the same
-authorization and rendering path.
+Commit `7c3dd75` pushed the full-fleet CSV optimization to both remotes. The
+authenticated read-only production export completed successfully in 40.188
+seconds for 22,749 rows, with the expected operator-facing headers and no
+engine-internal columns. This replaces the prior export that did not complete
+within four minutes. The default authenticated HTML request remains successful
+at 21.83 seconds. No migration or production data mutation was required.
+
+The full CSV export is now within an acceptable interactive-export window, but
+the default Issues page still spends 21.83 seconds evaluating every retained
+finding state solely to populate fleet cards and collapsed Type headers. The
+next scope is to replace that full per-finding projection on the unopened
+default page with aggregate state counts, while retaining exact per-finding
+Critical-priority evaluation for opened groups, filtering, and exports. No
+migration is in scope.
+
+The current local performance correction preserves the exact state model more
+directly: a Finding with no current non-context assessment is necessarily
+Pending, so the participant-completeness query now runs only for current
+assessment candidates. Production has 4,807 such candidates among 24,549
+active Findings; 19,742 are direct Pending rows. Focused validation passes
+(41 tests, Django checks, migration-drift checks, compilation, targeted Ruff,
+and `git diff --check`). Next action: commit/push this correction and measure
+the default authenticated Issues-page latency on production.
+
+Follow-up local fixes: Categories are collapsed by default and reopen for the
+selected drilldown; filtered database pages now replace their raw Finding
+objects with the enriched display rows before template rendering. The latter
+fixes the reproduced `NoReverseMatch` 500 from Type and column-filter requests
+whose action controls received an empty Finding ID. Focused validation is now
+43 tests passing, with Django checks, migration-drift checks, compilation,
+targeted Ruff, and `git diff --check` passing. Next action: commit/push the
+combined default-page performance, collapsed-Category, and filtered-page 500
+correction; then run authenticated production timing plus Type and column
+filter smoke tests.
 Pause only for a material product decision, conflicting user work, migration
 approval, production mutation, or separate commit/push authorization.

@@ -339,8 +339,36 @@ def _condition_response_ids(finding_ids) -> dict[str, set[str]]:
         if cursor.fetchone()[0] is None:
             result["pending"].update(ids)
             return result
-        for offset in range(0, len(ids), 1000):
-            batch = ids[offset:offset + 1000]
+        # A finding without a current, non-context assessment cannot be Ready
+        # or Blocked: it is necessarily Pending. Avoid joining participants
+        # for that large population before the default Issues page has even
+        # opened a Type.
+        cursor.execute(
+            """
+            SELECT DISTINCT a.finding_id::text
+              FROM operations.condition_assessments a
+             WHERE a.tenant_id = 1 AND a.row_kind = 'entity'
+               AND a.finding_id = ANY(%s::uuid[])
+               AND a.participant_role <> 'context'
+               AND a.policy_version = (
+                   SELECT version FROM operations.condition_policy_versions
+                    WHERE active ORDER BY version DESC LIMIT 1
+               )
+               AND a.assessed_at >= now() - (
+                   SELECT (policy->>'freshness_hours')::integer * interval '1 hour'
+                     FROM operations.condition_policy_versions
+                    WHERE active ORDER BY version DESC LIMIT 1
+               )
+            """,
+            [ids],
+        )
+        assessed_ids = {row[0] for row in cursor.fetchall()}
+        candidate_ids = [finding_id for finding_id in ids if finding_id in assessed_ids]
+        result["pending"].update(
+            finding_id for finding_id in ids if finding_id not in assessed_ids
+        )
+        for offset in range(0, len(candidate_ids), 1000):
+            batch = candidate_ids[offset:offset + 1000]
             cursor.execute(
                 """
             WITH expected AS (
@@ -4883,6 +4911,13 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
                         state: sum(item["state_counts"][state] for item in category_types)
                         for state in ("needs_action", "blocked", "pending")
                     },
+                    # Keep the default queue compact. A selected Type, Issue,
+                    # or Category remains open so a drilldown never appears to
+                    # have disappeared.
+                    "expanded": bool(
+                        category["key"] == category_filter
+                        or any(item["expanded"] for item in category_types)
+                    ),
                     "types": category_types,
                 }
             )
@@ -4905,6 +4940,12 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     # Group headers are rendered from the complete filtered set. Findings are
     # paginated only after a Type/Issue/drilldown has opened a group.
     if database_page_mode:
+        # ``database_page`` intentionally paginates raw Finding rows in the
+        # database. The template, however, must receive the corresponding
+        # display dictionaries (labels, state, actions, and links), not those
+        # raw model rows. Retain the database paginator's total and page
+        # metadata while replacing only its current object list.
+        database_page.object_list = findings_with_detail
         page = database_page
     else:
         paginator = Paginator(findings_with_detail if show_finding_rows else [], 50)

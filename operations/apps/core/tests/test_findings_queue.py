@@ -196,6 +196,11 @@ def test_findings_group_summaries_are_computed_before_screen_cap():
     assert "actionable_qs[:500]" not in source
 
 
+def test_database_page_replaces_raw_findings_with_display_rows():
+    source = Path("apps/core/views.py").read_text(encoding="utf-8")
+    assert "database_page.object_list = findings_with_detail" in source
+
+
 class _FindingActionUser:
     is_authenticated = True
 
@@ -362,6 +367,13 @@ def test_findings_queue_summary_cards_use_fleet_wide_operator_counts():
     assert "operator_next_step" in source
 
 
+def test_issue_categories_are_collapsed_until_a_drilldown_is_selected():
+    source = Path("apps/core/views.py").read_text(encoding="utf-8")
+    template = Path("templates/findings_queue.html").read_text(encoding="utf-8")
+    assert '"expanded": bool(' in source
+    assert '<details class="issues-category-group"{% if category.expanded %} open{% endif %}>' in template
+
+
 def test_findings_queue_csv_projects_labels_before_export_and_has_one_owner_column():
     source = Path("apps/core/views.py").read_text(encoding="utf-8")
     queue = source[source.index("def findings_queue"):source.index("def _policy_candidate_state_action_blocked")]
@@ -445,8 +457,10 @@ def test_human_label_filter_formats_scoped_condition_reasons():
 
 def test_condition_response_reads_are_batched():
     source = Path("apps/core/views.py").read_text(encoding="utf-8")
-    assert "for offset in range(0, len(ids), 1000)" in source
-    assert "batch = ids[offset:offset + 1000]" in source
+    assert "for offset in range(0, len(candidate_ids), 1000)" in source
+    assert "candidate_ids = [finding_id for finding_id in ids if finding_id in assessed_ids]" in source
+    assert "batch = candidate_ids[offset:offset + 1000]" in source
+    assert "finding_id for finding_id in ids if finding_id not in assessed_ids" in source
     assert "[batch, batch]" in source
 
 

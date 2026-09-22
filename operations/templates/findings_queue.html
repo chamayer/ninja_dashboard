@@ -57,7 +57,12 @@
     .issues-summary-card--decisions { border-left: 4px solid #7c3aed; }
     .issues-group-navigation { display:grid; gap:.55rem; margin:.7rem 0 1rem; }
     .issues-category-group { border:1px solid var(--border); border-radius:5px; background:var(--surface-subtle,#f8fafc); }
-    .issues-category-heading { display:flex; justify-content:space-between; gap:.75rem; padding:.55rem .7rem; border-bottom:1px solid var(--border); }
+    .issues-category-heading { display:flex; justify-content:space-between; gap:.75rem; padding:.55rem .7rem; cursor:pointer; list-style:none; }
+    .issues-category-heading::-webkit-details-marker { display:none; }
+    .issues-category-group[open] .issues-category-heading { border-bottom:1px solid var(--border); }
+    .issues-category-heading::before { content:"▸"; color:var(--muted); }
+    .issues-category-group[open] .issues-category-heading::before { content:"▾"; }
+    .issues-category-heading strong { margin-right:auto; }
     .issues-type-links { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:.35rem; padding:.45rem; }
     .issues-type-link { display:flex; justify-content:space-between; gap:.5rem; padding:.45rem .55rem; border:1px solid transparent; border-radius:4px; color:inherit; text-decoration:none; background:var(--surface); }
     .issues-type-link:hover, .issues-type-link.is-selected { border-color:var(--accent); background:#eff6ff; }
@@ -233,11 +238,11 @@
     <p class="muted" style="margin:.35rem 0 .6rem;">{{ total_matching }} matching rows. Open a Type below to review its rows; column filtering and sorting apply across the complete selected dataset. <a href="?{{ table_clear_query }}">Clear column filters</a></p>
     <div class="issues-group-navigation" aria-label="Issue groups">
         {% for category in issue_group_headers %}
-        <section class="issues-category-group">
-            <div class="issues-category-heading">
+        <details class="issues-category-group"{% if category.expanded %} open{% endif %}>
+            <summary class="issues-category-heading">
                 <strong>{{ category.label }}</strong>
                 <span class="muted">{{ category.current_count }} shown · {{ category.unresolved_count }} unresolved · {{ category.state_counts.needs_action }} needs action · {{ category.state_counts.blocked }} blocked · {{ category.state_counts.pending }} pending</span>
-            </div>
+            </summary>
             <div class="issues-type-links">
                 {% for group in category.types %}
                 <a class="issues-type-link{% if group.expanded %} is-selected{% endif %}" href="{{ group.href }}">
@@ -254,7 +259,7 @@
                 {% endif %}
                 {% endfor %}
             </div>
-        </section>
+        </details>
         {% endfor %}
     </div>
     {% if not findings %}<p class="muted">Select a Type above to open its rows.</p>{% endif %}
