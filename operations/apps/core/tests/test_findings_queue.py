@@ -201,6 +201,13 @@ def test_database_page_replaces_raw_findings_with_display_rows():
     assert "database_page.object_list = findings_with_detail" in source
 
 
+def test_collapsed_queue_skips_affected_device_rollup_until_a_type_is_opened():
+    source = Path("apps/core/views.py").read_text(encoding="utf-8")
+
+    assert 'needs_affected_devices = show_finding_rows or request.GET.get("format") == "devices_csv"' in source
+    assert "_affected_device_rows(matching_qs) if needs_affected_devices else []" in source
+
+
 class _FindingActionUser:
     is_authenticated = True
 
@@ -371,6 +378,8 @@ def test_issue_categories_are_collapsed_until_a_drilldown_is_selected():
     source = Path("apps/core/views.py").read_text(encoding="utf-8")
     template = Path("templates/findings_queue.html").read_text(encoding="utf-8")
     assert '"expanded": bool(' in source
+    assert ".issues-type-link" in template
+    assert "white-space:nowrap" in template
     assert '<details class="issues-category-group"{% if category.expanded %} open{% endif %}>' in template
 
 

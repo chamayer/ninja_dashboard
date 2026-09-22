@@ -4799,13 +4799,24 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     matching_qs = database_qs if database_query_mode else (
         qs if not show_finding_rows else matching_qs
     )
-    affected_devices = _affected_device_rows(matching_qs)
+    # The collapsed default queue has no rows selected for review. Do not
+    # expand its entire Finding population through the software-exposure view
+    # merely to calculate an affected-Computer rollup that is not actionable
+    # until a Type is opened. A selected Type and the explicit device CSV
+    # retain the complete rollup.
+    needs_affected_devices = show_finding_rows or request.GET.get("format") == "devices_csv"
+    affected_devices = _affected_device_rows(matching_qs) if needs_affected_devices else []
     affected_client_count = len({row["client"] for row in affected_devices if row["client"]})
-    result_summary_parts = [
-        f"{total_matching} issue rows",
-        f"{len(affected_devices)} affected Computers",
-        f"{affected_client_count} affected clients",
-    ]
+    result_summary_parts = [f"{total_matching} issue rows"]
+    if needs_affected_devices:
+        result_summary_parts.extend(
+            [
+                f"{len(affected_devices)} affected Computers",
+                f"{affected_client_count} affected clients",
+            ]
+        )
+    else:
+        result_summary_parts.append("choose a Type to review affected Computers")
     current_result_summary = " · ".join(result_summary_parts)
 
     if request.GET.get("format") == "devices_csv":

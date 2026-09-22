@@ -424,11 +424,17 @@ Follow-up local fixes: Categories are collapsed by default and reopen for the
 selected drilldown; filtered database pages now replace their raw Finding
 objects with the enriched display rows before template rendering. The latter
 fixes the reproduced `NoReverseMatch` 500 from Type and column-filter requests
-whose action controls received an empty Finding ID. Focused validation is now
-43 tests passing, with Django checks, migration-drift checks, compilation,
-targeted Ruff, and `git diff --check` passing. Next action: commit/push the
-combined default-page performance, collapsed-Category, and filtered-page 500
-correction; then run authenticated production timing plus Type and column
-filter smoke tests.
+whose action controls received an empty Finding ID. The default collapsed queue
+also no longer expands the complete Finding population through the expensive
+software-exposure view merely to calculate a rollup it does not display; opened
+Types and the explicit device CSV retain the full affected-Computer rollup.
+Next action: validate the complete correction, commit/push it, and rerun the
+authenticated production timing plus Type and column-filter smoke tests.
+
+Focused validation now passes: 44 Issues queue tests, Django checks,
+migration-drift checks, targeted Ruff, Python compilation, and `git diff
+--check`. The Type navigation header is explicitly kept on one line. No
+migration or production data mutation is in scope. Next action: commit/push
+the corrected default queue, then run the authenticated production smoke tests.
 Pause only for a material product decision, conflicting user work, migration
 approval, production mutation, or separate commit/push authorization.
