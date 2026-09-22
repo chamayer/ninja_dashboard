@@ -26,6 +26,7 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Json
 
 from ingest import db
+from ingest.condition_priority import critical_priority_clause
 from ingest.config import settings
 
 log = logging.getLogger(__name__)
@@ -96,7 +97,7 @@ def _still_notifyable(finding: dict[str, Any], tenant_id: int) -> bool:
     """Recheck mutable handling and current response immediately before send."""
     row_kind = finding.get("finding_row_kind")
     if row_kind == "entity":
-        query = """
+        query = f"""
             SELECT EXISTS (
                 SELECT 1
                   FROM operations.findings f
@@ -138,6 +139,7 @@ def _still_notifyable(finding: dict[str, Any], tenant_id: int) -> bool:
                                      (pp.policy->>'freshness_hours')::integer * interval '1 hour'
                           )
                    )
+                   {critical_priority_clause('f')}
             )
         """
     elif row_kind == "admin":
@@ -233,7 +235,7 @@ def _load_suppressions(cur, tenant_id: int) -> list[dict[str, Any]]:
 def _load_pending_findings(cur, tenant_id: int) -> list[dict[str, Any]]:
     """Union of entity + admin findings, both open/acknowledged."""
     cur.execute(
-        """
+        f"""
         SELECT f.id, f.finding_type_id, f.client_id,
                f.subject_type, f.subject_id, f.finding_details,
                f.condition_key, f.severity, f.confidence, f.status,
@@ -290,6 +292,7 @@ def _load_pending_findings(cur, tenant_id: int) -> list[dict[str, Any]]:
                         )
                  )
           )
+          {critical_priority_clause('f')}
 
         UNION ALL
 

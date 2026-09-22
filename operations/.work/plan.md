@@ -1,479 +1,364 @@
-# Issues page taxonomy and operator queue usability correction
+# Issues queue operator model and coverage correction
 
 ## Status
 
-**Follow-up implementation complete locally.** The taxonomy rollout is
-deployed and active. This
-follow-up separates software decision candidates from the Issues queue, hides
-internal condition-policy diagnostics from operators, and makes the complete
-filtered Issues dataset navigable with group summaries, server-side sorting,
-and cell-content filters.
+**Implementation complete locally; deployment verification pending.** This supersedes the
+completed taxonomy rollout plan. The active taxonomy remains five Categories,
+34 Types, and 53 Issues. This work changes the operator projection, count
+semantics, assessment coverage, and Issues-page layout; it does not rename
+internal condition keys or alter the approved taxonomy.
 
-### Follow-up scope
-
-- `operations/apps/core/views.py`
-- `operations/templates/findings_queue.html`
-- focused Operations queue tests
-
-### Follow-up validation
-
-- focused findings-queue tests;
-- Django checks and template loading;
-- `git diff --check`;
-- deployed smoke check of `/findings/` after the approved push.
-
-### Follow-up checkpoint
-
-The queue now exposes all group counts as collapsed table headers, routes
-software decisions to their dedicated queue, omits internal policy
-diagnostics from operator rows, and applies column sorting/filtering to the
-complete filtered set before pagination. The unfiltered fleet summary is
-separate from the prominently labeled filtered results. Local validation
-passed. The latest layout refinement adds a responsive Inventory/Computers-
-style summary row and consolidates the filtered-results hierarchy into a
-cleaner three-zone page. Next action is commit, push, and deployed smoke
-validation.
-
-## Prior rollout status
-
-**Taxonomy correction implementation complete.** The five top-level categories
-and revised 34-type mapping are approved. The prior 23-type matrix is
-superseded. Do not activate versions 1–3; only `conditions-taxonomy-4` may be
-reviewed for a future activation.
-Deployment remains subject to the repository's explicit push and
-automatic-migration rules.
-
-Implementation baseline: local `master` at `1121dbb`.
-The pre-existing untracked `.work/probe_*` and bootstrap files are unrelated
-and remain untouched.
+Repository baseline: `120d641` is current local and remote `master`.
+Pre-existing untracked `.work/probe_*` and bootstrap files are unrelated and
+must remain untouched. Production deployment of this exact baseline has not
+been independently reverified in this checkpoint.
 
 ## Goal
 
-Make the Issues page understandable without knowledge of database keys:
+Create one understandable operator work queue that:
 
-- one small, stable set of human-facing categories;
-- a category-dependent list of human-facing issue types;
-- a specific plain-English issue name on every row;
-- technical condition keys retained for URLs, policy, audit, and admin use but
-  never used as an operator-facing fallback;
-- count labels whose populations and filter behavior are explicit; and
-- no hidden findings, changed eligibility, changed severity, or lost workflow.
+- never makes retained findings appear to have disappeared;
+- distinguishes work needing action from work blocked by another condition or
+  pending current information;
+- keeps software policy decisions out of Issues;
+- exposes every nonempty Issue group before result pagination;
+- filters and sorts the complete matching dataset;
+- hides engine internals from operators while retaining administrator
+  diagnostics; and
+- remains visually compact enough for routine use.
 
-This is corrective completion of the conditions work's human-facing taxonomy
-and discovery scope (formerly WP6), not a cosmetic rename.
+## Confirmed baseline
 
-## Confirmed current behavior and causes
+The latest read-only production review found:
 
-1. The active condition policy already defines three useful levels for all 53
-   conditions: `category`, grouped `type`, and individual `label`.
-2. `views._issue_taxonomy()` ignores the policy's ordered `issue_categories`
-   registry and reconstructs categories from definition display strings plus
-   legacy `FindingCategory` rows. The packaged registry still contains an older
-   five-category vocabulary that does not match the six definition categories.
-3. `views._operator_issue_type_groups()` does not use each definition's grouped
-   `type`. It normally creates one filter option per technical finding key,
-   except for the single special alias group. This expands 26 intended groups
-   into nearly the full condition list.
-4. Row headings and row labels use `human_labels._LABELS`, a second hardcoded
-   vocabulary. Missing entries fall back to raw keys such as
-   `lifecycle_reported_state_conflict`, `unintegrated_source_observed`,
-   `capability_review_candidate`, and `vulnerable_software`.
-5. The page therefore has four competing authorities: policy metadata, legacy
-   database categories, `issue_type_aliases`, and `_LABELS`.
-6. The upper category cards are fleet-wide actionable counts and ignore page
-   filters; severity counts and result cards inherit different subsets of those
-   filters. Policy candidates are mixed into some totals but excluded from
-   others. The current labels do not communicate these population differences.
-7. Existing tests mainly assert that strings or controls exist. They do not
-   prove complete taxonomy coverage, human-readable output, disjoint category
-   membership, count conservation, or filter invariants.
+| Category | Retained | Needs action | Blocked | Pending |
+| --- | ---: | ---: | ---: | ---: |
+| Inventory | 2,713 | 39 | 0 | 2,674 |
+| Agents & reporting | 4,239 | 0 | 127 | 4,112 |
+| Software & security | 12,002 | 0 | 0 | 12,002 |
+| Patching & support | 3,710 | 2,912 | 61 | 737 |
+| Data collection | 7 | 0 | 0 | 7 |
 
-## Operator vocabulary under revision
+There were 22,671 retained unresolved Issues: 2,951 needing action, 188
+blocked, and 19,532 pending. Another 1,799 active software policy
+candidates belonged in Software Decisions. There were 445,919 resolved
+historical findings.
 
-The five-category registry in `shared/conditions/profile.json` is the current
-baseline, not the final approved type mapping. Internal finding names remain
-unchanged. The revision must preserve complete, exactly-once coverage of all
-53 conditions while separating findings that have different subjects,
-meanings, owners, actions, or lifecycle posture.
+Fresh assessment coverage was incomplete: 2,480 Inventory, 1,303 Agents &
+reporting, all 12,002 Software & security, 695 Patching & support, and all
+seven Data collection findings lacked a fresh active-policy assessment. These
+findings were retained, not deleted. Their absence from actionable-only cards
+is both an assessment-coverage and presentation defect.
 
-| Category | Purpose |
+At verification time, `conditions-taxonomy-4` was active and valid, all 53
+conditions were mapped exactly once, 6,410 current assessments existed, and
+all 6,359 required non-context participants represented by those assessments
+had coverage.
+
+## Approved operator vocabulary
+
+Do not expose **Response**, **Actionable**, **Unknown**, **Assessment
+disposition**, or **All retained** as operator terminology.
+
+Summary labels:
+
+- **Unresolved**
+- **Needs action**
+- **Blocked**
+- **Pending**
+- **Paused**
+- **Software decisions**
+
+Filters:
+
+- **Status:** Open, Acknowledged, Paused, Resolved
+- **Attention:** All, Needs action, Blocked, Pending
+
+`Paused` is an operator status, not an engine attention result. Internal
+policy values remain available for execution, audit, and diagnostics but map
+to the operator model as follows:
+
+| Internal outcome | Operator presentation |
 | --- | --- |
-| Inventory | Computer inventory, matching, duplicates, platform entries, and Hudu maintenance |
-| Agents & reporting | Required agents and Computers or agents that are not reporting correctly |
-| Software & security | Software approval, classification, risk, and vulnerability work |
-| Patching & support | Patch progress, restart requirements, and Windows support |
-| Data collection | Source collection, processing, and collector health |
+| Complete, current, and permitted | Needs action |
+| A prerequisite or overriding condition prevents useful action | Blocked |
+| Missing, stale, incomplete, or unknown evidence/assessment | Pending |
+| Future snooze set by an operator | Paused status |
 
-### Prior 23-type baseline (superseded for review)
+Rows outside Needs action show one short reason, such as “Identity
+unresolved,” “Computer offline,” “Source unavailable,” or “Patch data
+incomplete.” Explanations must not become long state labels.
 
-This matrix records the deployed baseline for comparison only. It is not the
-implementation target. The replacement matrix must list every one of the 53
-condition keys exactly once. Lifecycle state controls whether a condition can
-currently be emitted; it must not remove historical retained findings from
-`status=all` discovery.
+## Count contract
 
-| Category | Operator type | Internal condition keys |
-| --- | --- | --- |
-| Inventory | Inventory gaps | `device_source_record_withdrawn`, `device_missing_from_source` |
-| Inventory | Duplicate Computers | `identity_conflict`, `shared_serial`, `cross_client_serial`, `cross_client_conflict` |
-| Inventory | Duplicate platform entries | `duplicate_platform_record`, `duplicate_device_records` |
-| Inventory | Inventory data problems | `placeholder_serial`, `placeholder_mac`, `device_role_conflict`, `lifecycle_reported_state_conflict`, `lifecycle_unknown_reported_state`, `unmapped_node_class` |
-| Inventory | Client matching | `client_name_conflict`, `client_link_collision`, `client_unattached_group`, `unnamed_source_group`, `unmatched_source_group`, `identity_resolution_pending`, `unlinked_external_identity` |
-| Inventory | Hudu maintenance | `cmdb_asset_stale`, `cmdb_link_incorrect`, `unintegrated_source_observed` |
-| Agents & reporting | Required agents | `missing_required_platform`, `device_unenrolled` |
-| Agents & reporting | Agents not reporting | `stale_required_platform` |
-| Agents & reporting | Computers not reporting | `device_offline`, `device_stale_data`, `device_long_offline` |
-| Software & security | Unapproved software | `unauthorized_remote_access`, `unauthorized_rmm`, `unauthorized_av` |
-| Software & security | Software classification | `capability_review_candidate` |
-| Software & security | Software approval | `whitelist_suggestion` |
-| Software & security | Suspicious software | `rare_recent`, `suspicious_name`, `install_path_suspicious`, `known_malicious_hint` |
-| Software & security | Vulnerable software | `vulnerable_software` |
-| Software & security | Unsupported software | `eol_runtime` |
-| Software & security | Protection conflicts | `multi_av_conflict` |
-| Patching & support | Patching not progressing | `device_never_patched`, `patching_stalled`, `patch_approval_backlog` |
-| Patching & support | Patch failures | `patch_failing_repeatedly` |
-| Patching & support | Restart required | `reboot_pending` |
-| Patching & support | Windows support | `windows_servicing_approaching_eol`, `windows_servicing_eol`, `windows_servicing_unknown` |
-| Data collection | Collection failures | `source_failure` |
-| Data collection | Processing delays | `software_queue_stalled` |
-| Data collection | Collector reporting | `stale_collector_binding` |
+### Unfiltered fleet summary
 
-### Display hierarchy and combination rule
+The top row contains exactly six compact clickable cards using the approved
+summary labels. It is fleet-wide and never changes with filters below it.
 
-The operator hierarchy is **Category → Type → Issue**:
+For unresolved Issues, excluding Software Decisions:
 
-- Category controls the broad fleet area and the available Type choices. It
-  does not create an additional combined result header.
-- Each Type is an independently filterable work group and renders as its own
-  collapsible result header with its complete filtered count and severity
-  summary.
-- Each Issue remains an individual condition with its own plain-English name,
-  subject, evidence, status, and actions beneath that Type header.
-- The display must never recombine separately approved Types into a shared
-  header. In particular, the Hudu revision renders separate headers for
-  **Hudu archive candidates**, **Incorrect Hudu links**, and
-  **Unconnected Hudu references**.
-- Add an optional Issue filter after Type so an operator can select one exact
-  condition without exposing its technical key or forcing every condition to
-  become a Type.
+`Unresolved = Needs action + Blocked + Pending + Paused`
 
-Conditions may share a Type only when they have the same subject level,
-operational meaning, likely owner, next action, and lifecycle posture. Similar
-technical origins are not sufficient. The revised matrix must resolve at
-least these counterintuitive baseline combinations:
+- **Unresolved:** open or acknowledged Issues, including paused Issues.
+- **Needs action:** unresolved, not paused, with a current complete assessment
+  permitting action.
+- **Blocked:** unresolved, not paused, with a current assessment identifying a
+  prerequisite or overriding condition.
+- **Pending:** unresolved, not paused, with no current complete decision.
+- **Paused:** unresolved with an active operator snooze.
+- **Software decisions:** active policy candidates in their separate workflow
+  and never included in the other five cards.
 
-| Baseline Type | Required review direction |
-| --- | --- |
-| Inventory gaps | Separate a platform withdrawal from a Computer with no current evidence; only the latter supports retirement. |
-| Duplicate Computers | Do not imply that serial conflicts or historical cross-client collisions are confirmed duplicate Computers. |
-| Inventory data problems | Separate invalid identifiers, platform disagreements, and unknown classifications unless the workflow audit proves one operator response. |
-| Client matching | Separate client/organization matching from Computer identity matching. |
-| Hudu maintenance | Replace with the three separately displayed Hudu Types listed above. |
+Every card links to its complete population. Counts use one captured
+scope/time and must satisfy the conservation rule.
 
-Duplicate platform entries, Computers not reporting, Patching not progressing,
-and Windows support require an explicit workflow/lifecycle review before the
-replacement matrix is approved. Historical and disabled Issues must be
-visibly marked when included through retained-history filters.
+### Filtered workspace
 
-Individual row names come from each condition definition's `label`, not from the
-grouped type and not from a technical-key formatter. Before implementation,
-review all 53 labels together for capitalization, terminology, tense, and
-specificity. The review must preserve meaningful distinctions inside a type;
-for example, “Patching not progressing” is a filter group, while “No installed patch
-history” and “Patch activity overdue” remain separate row names.
+Everything below a clear **Filtered results** boundary follows selected
+filters. Its compact summary contains only matching issue rows, affected
+Computers, affected clients, and the selected Status/Attention scope.
 
-### Operator vocabulary rule
+Category and Type headers show both current matches and unresolved totals when
+the Attention filter would otherwise make a nonempty group look empty.
+Actionable-only Category cards must not serve as inventory totals.
 
-- Do not display “source record” or raw `source_*` terminology to operators.
-- Use **platform** for the service where an entry exists, such as Ninja, Hudu,
-  LMI, or SentinelOne.
-- Use **integration** for the connection or collection mechanism.
-- Use **entry** only when distinguishing duplicates inside a platform.
-- Name the platform when known: “Duplicate Ninja entries” is better than
-  “Duplicate platform entries.”
-- Keep `source`, `source_instance`, `source_binding`, external IDs, and condition
-  keys available in policy administration, audit, evidence, and diagnostics.
+## Work packages
 
-### Approved replacement matrix
+### WP1 - Reconcile the baseline and freeze behavior
 
-The approved replacement contains 34 Types and all 53 conditions exactly once.
+- Preserve unrelated user work and compare `27d59cc` with this contract.
+- Capture counts by condition, Category, Type, Status, Attention, severity,
+  snooze state, and Software Decisions membership.
+- Add failing behavior tests for terminology, count conservation, complete
+  group visibility, dataset-wide sorting, and filter clearing.
 
-| Category | Type | Conditions |
-| --- | --- | --- |
-| Inventory | Platform withdrawal | `device_source_record_withdrawn` |
-| Inventory | Missing computer evidence | `device_missing_from_source` |
-| Inventory | Possible duplicate Computers | `identity_conflict` |
-| Inventory | Computer identity conflicts | `shared_serial`, `cross_client_serial` |
-| Inventory | Historical identity collisions | `cross_client_conflict` |
-| Inventory | Duplicate Ninja entries | `duplicate_platform_record` |
-| Inventory | Historical duplicate Hudu entries | `duplicate_device_records` |
-| Inventory | Invalid computer identifiers | `placeholder_serial`, `placeholder_mac` |
-| Inventory | Conflicting computer details | `device_role_conflict`, `lifecycle_reported_state_conflict` |
-| Inventory | Unknown computer classification | `lifecycle_unknown_reported_state`, `unmapped_node_class` |
-| Inventory | Client organization matching | `client_name_conflict`, `client_link_collision`, `client_unattached_group`, `unnamed_source_group`, `unmatched_source_group` |
-| Inventory | Computer identity matching | `identity_resolution_pending`, `unlinked_external_identity` |
-| Inventory | Hudu archive candidates | `cmdb_asset_stale` |
-| Inventory | Incorrect Hudu links | `cmdb_link_incorrect` |
-| Inventory | Unconnected Hudu references | `unintegrated_source_observed` |
-| Agents & reporting | Required agents | `missing_required_platform`, `device_unenrolled` |
-| Agents & reporting | Agents not reporting | `stale_required_platform` |
-| Agents & reporting | Computers not reporting | `device_offline` |
-| Agents & reporting | Stale computer data | `device_stale_data` |
-| Agents & reporting | Historical offline Computers | `device_long_offline` |
-| Software & security | Unapproved software | `unauthorized_remote_access`, `unauthorized_rmm`, `unauthorized_av` |
-| Software & security | Software classification | `capability_review_candidate` |
-| Software & security | Software approval | `whitelist_suggestion` |
-| Software & security | Suspicious software | `rare_recent`, `suspicious_name`, `install_path_suspicious`, `known_malicious_hint` |
-| Software & security | Vulnerable software | `vulnerable_software` |
-| Software & security | Unsupported software | `eol_runtime` |
-| Software & security | Protection conflicts | `multi_av_conflict` |
-| Patching & support | Patching not progressing | `device_never_patched`, `patching_stalled`, `patch_approval_backlog` |
-| Patching & support | Patch failures | `patch_failing_repeatedly` |
-| Patching & support | Restart required | `reboot_pending` |
-| Patching & support | Windows support | `windows_servicing_approaching_eol`, `windows_servicing_eol`, `windows_servicing_unknown` |
-| Data collection | Collection failures | `source_failure` |
-| Data collection | Processing delays | `software_queue_stalled` |
-| Data collection | Collector reporting | `stale_collector_binding` |
+Exit: reproducible baseline and tests demonstrating each current defect.
 
-## Count and filtering contract
+### WP2 - Create one operator-state projection
 
-### Fleet overview (upper section)
+- Add one shared projection mapping internal assessments and operator handling
+  into Status, Attention, and a short human reason.
+- Keep Status, Attention, and Severity independent.
+- Map unresolved findings lacking a fresh complete assessment to Pending;
+  never hide them or treat them as actionable.
+- Use the projection in cards, filters, groups, rows, CSVs, Computer links, and
+  count queries.
+- Retain technical values only for policy execution, audit, and admin views.
 
-- Purpose: answer “Where is actionable work across the fleet?”
-- Population: active-status, unsnoozed, currently actionable governed findings.
-- Exclude software-policy candidates from incident totals; show them once in a
-  clearly separate “Software decisions” card.
-- Category cards are intentionally unaffected by category, type, severity,
-  client, platform, online, search, subject, or page filters.
-- Each category card shows a total and the same five severity buckets.
-- Invariant: category totals are disjoint and their sum equals the fleet-wide
-  actionable total. Severity buckets within a category sum to its total.
-- Use one captured query scope/time so cards cannot disagree during rendering.
+Exit: every unresolved Issue has exactly one Attention state and counts
+conserve.
 
-### Current results (below filters)
+### WP3 - Restore complete assessment coverage
 
-- Purpose: answer “What does my current filter return?”
-- Apply category, type, response, status, severity, confidence, client,
-  platform, online, subject/evidence drilldown, search, and snooze controls.
-- Replace ambiguous fractions/cards with one compact sentence and only useful
-  distinct counts: issue rows, affected Computers, affected clients, and
-  software decisions when present.
-- Severity controls show counts after every current filter except severity, so
-  selecting one severity does not make the other choices appear to be zero.
-- Type options cascade from the selected category and always include “All
-  types”; selecting a type must never reset unrelated filters.
-- The page title displays the selected category label, never its key.
-- Group headers use the grouped operator type and show the count for the full
-  filtered result, not merely the current page. Rows retain their individual
-  issue label.
+- Build a 53-condition ownership matrix: finding producer, assessment
+  producer, participants, evidence, freshness authority, reevaluation trigger,
+  and recovery authority.
+- Reassess retained findings when source collection succeeds, evidence or
+  participants change, policy changes, or freshness expires.
+- Add safe backlog reconciliation that does not recreate findings, alter
+  operator handling, or clear findings without current type-specific recovery
+  evidence.
+- Fail closed when required source coverage is unhealthy.
+- Expose missing/stale assessment counts in admin diagnostics.
 
-### Reconciliation requirement
+Exit: every eligible retained finding has a fresh assessment or a specific
+observable coverage reason.
 
-Before and after implementation, capture a read-only matrix by response state,
-status, category, type, severity, and policy-candidate status. Taxonomy-only
-work may redistribute rows between labels but must not change the overall
-counts for retained, actionable, blocked, pending, paused, or policy-review
-populations. Any difference must be explained by an independently deployed
-eligibility/data change, not accepted as a naming side effect.
+### WP4 - Separate Software Decisions
 
-## Implementation plan
+- Exclude policy candidates from Issues tables, groups, totals, CSVs, bulk
+  actions, and the Unresolved count.
+- Make `/software/decisions/` their sole queue and card destination.
+- Link relevant Computer and software-detail surfaces to that workflow.
+- Keep vulnerabilities, malicious software, unsupported software, protection
+  conflicts, and other genuine incidents in Issues.
 
-### WP1 — Approve vocabulary and freeze a baseline
+Exit: each software finding belongs to exactly one workflow.
 
-- Produce and review the revised complete Type mapping with the user; do not
-  treat the prior 23-type matrix as approved.
-- Apply the combination rule to every multi-condition Type and record why each
-  retained combination represents one operator workflow.
-- Export the active policy's complete 53-condition taxonomy and compare it with
-  the matrix above; fail if anything is missing, duplicated, or unmapped.
-- Capture the count reconciliation matrix and representative screenshots/URLs
-  for unfiltered, category, type, blocked, pending, policy-review, and device
-  drilldown views.
-- Record whether each count changed during the prior conditions rollout because
-  of eligibility, status, snoozing, policy-candidate separation, or a UI bug.
+### WP5 - Simplify the page
 
-Exit: five categories, the final Type count and names, all 53 Issue names, and
-the exact display hierarchy are approved. Baseline evidence capture remains
-part of WP6 validation because production access is not required for local
-taxonomy work.
+Use four visual zones only:
 
-### WP2 — Establish one taxonomy authority
+1. Page title and exports.
+2. Six-card unfiltered fleet summary.
+3. Filtered results controls and compact result summary.
+4. Hierarchical grouped results.
 
-- Replace the stale category/alias split in `shared/conditions/profile.json`
-  with an ordered registry containing stable category keys, category labels,
-  stable type keys, type labels, and complete condition membership.
-- Keep the 53 condition keys unchanged. Keep each condition's individual label
-  explicit and validated.
-- Extend `shared/conditions/policy.py` validation so every definition belongs
-  to exactly one declared type, every type belongs to exactly one category,
-  keys and labels are unique, and no registry member is unknown.
-- Remove `issue_type_aliases` as a partial special-case mechanism after a
-  compatibility reader has canonicalized old URLs.
-- Do not use legacy `FindingCategory.name` or `_LABELS` as operator taxonomy
-  authority. They may remain for storage compatibility or unrelated surfaces.
-- Because the active policy is immutable and database-governed, create a new
-  policy version through the existing create/review/activate workflow. Review
-  the exact migration/seed approach before implementation; do not mutate the
-  active policy in place or silently auto-activate an unreviewed policy.
+Remove duplicate Category tiles, repeated summaries, separate table-filter
+cards, policy explanations, severity mini-dashboards, and competing counts.
 
-Exit: one validated policy registry maps all 53 keys to five categories, the
-approved revised Type set, and 53 individual labels.
+Primary filters: Category, Type, Issue, Attention.
 
-### WP3 — Build a single Issues-page projection
+Secondary **More filters**: Status, Severity, Client, Platform, Online state,
+Search. Category -> Type -> Issue remains dependent and defaults to All.
 
-- Add one resolver that returns category/type/issue metadata for every finding
-  from the active policy and is shared by filters, cards, headings, rows, CSV,
-  and drilldowns.
-- Update `_issue_taxonomy()` and `_operator_issue_type_groups()` to consume
-  that resolver; delete their dependence on reconstructed legacy categories.
-- Replace `humanize_label(finding_type.name)` in Issues grouping and row labels
-  with policy `type.label` and definition `label` respectively.
-- Project Category, Type, and Issue as separate fields. Never merge distinct
-  Types for display merely because they share a Category or platform.
-- Preserve dynamic context additions such as the missing agent product and
-  offline explanation without replacing the canonical issue label.
-- Unknown keys fail visibly as “Unclassified issue” with the technical key in
-  an admin-only diagnostic, rather than leaking snake_case to operators.
-- Keep legacy category/type query values working through canonical redirects;
-  preserve bookmarks and device/detail drilldowns.
+Exit: the page reads top-to-bottom without knowledge of the condition engine.
 
-Exit: no operator-visible category, type, title, group, row, or CSV field uses
-a technical key or a second label dictionary.
+### WP6 - Make every Issue group visible
 
-### WP4 — Make counts follow the documented contract
+- Render five stable Category headings and every nonempty Type as a collapsed
+  header before finding pagination.
+- Show current matching and unresolved counts on Type headers.
+- Keep empty Types in the Type filter without cluttering the group list.
+- Expand the selected Type and paginate only its findings; never paginate the
+  group-header list.
+- Open the relevant group for Type/Issue filters and Computer/evidence
+  drilldowns; keep the general queue collapsed.
+- Remove duplicate group-navigation cards and duplicate table group headers.
+- Ensure sorting cannot hide rows or remove expansion controls.
 
-- Centralize base querysets for fleet overview, filtered governed findings,
-  and software decisions. Name the scopes in code after the contract.
-- Compute the upper category/severity matrix in one grouped query where
-  practical, using the policy membership map and current response authority.
-- Compute current-result and severity-facet counts from one filtered base with
-  the deliberate “exclude severity for severity facets” rule.
-- Remove or redesign the current five fraction cards; do not compare filtered
-  issue counts with unrelated denominators such as total fleet devices unless
-  the operator explicitly asks for a fleet percentage.
-- Ensure affected-Computer counts include governed software exposure exactly
-  once and category totals count issue rows, not affected-device fanout.
-- Keep top cards independent of filters and visually separate from the current
-  result summary.
+Exit: all nonempty groups remain discoverable regardless of finding volume.
 
-Exit: all conservation/filter invariants pass against PostgreSQL fixtures and
-the before/after reconciliation has zero unexplained population changes.
+### WP7 - Make table filtering and sorting dataset-wide
 
-### WP5 — Simplify the page layout
+- Keep scope filters above the table; put value filters under the corresponding
+  headers for Severity, Finding, Subject, Evidence, Context, Status, and date.
+- Provide Apply and **Clear**; Clear removes all `table_*` parameters while
+  preserving scope filters.
+- Filter and sort the complete selected group before pagination.
+- Use database-backed expressions and deterministic ID ordering; do not sort
+  only one page or materialize the whole queue with per-row queries.
+- Bulk-load identity candidates, source links, device context, and assessments.
+- Make filtered counts, pagination, HTML, and CSV share one query contract.
 
-- First section: “Actionable work across the fleet,” category cards by severity,
-  plus a separate Software decisions card.
-- Second section: category and type on their own primary row, with “All
-  categories” and “All types” as defaults; add an “All issues” dependent
-  filter after Type; remaining filters stay below.
-- Third section: compact current-result summary followed by collapsible type
-  groups. Every approved Type has its own header. Headers are collapsed by
-  default on the general queue, expand when their Type/Issue is selected or
-  when reached through a subject/evidence drilldown, and show the human Type
-  label, full filtered count, and severity summary.
-- Row “Issue” cell shows the specific policy label. Preserve subject links,
-  evidence, context, status, dates, actions, bulk actions, condition detail,
-  Hudu actions, reviewed-distinct, and CSV exports.
-- Keep advanced/internal condition keys off the normal page. Existing policy
-  admin remains the technical surface; any richer advanced operator view stays
-  in `operations/.work/backlog.md` unless separately approved.
+Exit: behavior remains correct beyond 500 rows, totals match rows, and Clear
+works.
 
-Exit: an operator can answer category, type, exact issue, subject, severity,
-and available action without interpreting an internal key or conflicting total.
+### WP8 - Hide internals and complete admin diagnostics
 
-### WP6 — Validation and release
+Remove from operator HTML and CSV:
 
-- Unit-test the registry validator with missing, duplicate, cross-category, and
-  unknown members.
-- Add behavior tests proving all 53 conditions render human category/type/issue
-  labels and no raw key appears in HTML or CSV.
-- Add PostgreSQL-backed count tests for category and severity conservation,
-  software-policy separation, actionable/blocked/pending/paused states,
-  snoozing, inherited software exposure, and type/category cascades.
-- Add request tests for legacy URL redirects, filter preservation, pagination,
-  full-result group counts, device/evidence drilldowns, and `status=all`
-  discoverability of historical conditions.
-- Run focused Operations tests, `manage.py check`, migration-plan/drift review,
-  template loading, `ruff` checks where available, and `git diff --check`.
-- Update root `VERSION` and `CHANGELOG.md` only as part of an approved release.
-- Commit, push, policy activation, automatic deployment, and live validation
-  each follow repository authorization requirements. Verify live category sums,
-  representative filters, CSVs, and application health after rollout.
+- assessment disposition;
+- policy/taxonomy version and digest;
+- participant or device scope internals;
+- rule names, internal blockers, and policy reasoning;
+- reevaluation keys and coverage implementation details.
+
+The administrator-only Conditions/Platform Health surface retains:
+
+- condition key and finding ID;
+- policy version and digest validity;
+- participants and scopes;
+- raw disposition, rules, blockers, and reasoning;
+- producer, assessment age, and coverage;
+- retained/fresh/missing counts for all 53 conditions; and
+- links to the operator finding and relevant evidence.
+
+Exit: operators see concise state and evidence; administrators retain complete
+auditability.
+
+## Required regressions
+
+- Sorting must not suppress headers while leaving rows hidden.
+- Clear must remove every `table_*` parameter.
+- Table filters must update matching totals.
+- Nonempty Categories must not appear empty because cards count only actionable
+  work.
+- Software Decisions must not inflate Issues.
+- Static string-presence tests are insufficient; request/behavior tests are
+  required.
 
 ## Expected files
 
-- `shared/conditions/profile.json`
-- `shared/conditions/policy.py`
 - `operations/apps/core/views.py`
-- `operations/apps/core/conditions/live.py` if the projection belongs there
-- `operations/apps/core/templatetags/human_labels.py` (remove Issues-specific
-  duplicate authority; retain unrelated formatting)
 - `operations/templates/findings_queue.html`
-- `operations/apps/core/tests/test_conditions.py`
-- `operations/apps/core/tests/test_conditions_live.py`
+- `operations/apps/core/conditions/live.py` or a focused projection module
 - `operations/apps/core/tests/test_findings_queue.py`
-- a reviewed additive Operations migration only if needed to seed the new
-  immutable policy version
-- `operations/docs/decisions/0022-policy-defined-issue-taxonomy.md`
-- root `VERSION` and `CHANGELOG.md` at approved release time
+- condition/evaluator producers and tests identified by WP3
+- `ingest/evaluator.py` and source-specific producers where required
+- admin condition-health views/templates/tests
+- an Operations decision record for the durable state/count contract
+- root `VERSION` and `CHANGELOG.md` only for an approved release
+
+Do not add a migration unless a durable schema or measured index need is
+demonstrated. Any migration requires explicit review before push/deployment.
+
+## Validation
+
+- Behavioral tests for Status/Attention mapping and short reasons.
+- Conservation tests for all five unresolved states.
+- Complete 5-Category/34-Type/53-Issue coverage.
+- A greater-than-500-row fixture proving every group header remains visible.
+- Dataset-wide sorting, filtering, pagination, and Clear behavior.
+- Software Decisions exclusion and no double counting.
+- HTML/CSV proof that operator surfaces contain no engine internals.
+- Admin permission and diagnostic coverage tests.
+- Producer reconciliation tests, including unhealthy-source and zero-emission
+  recovery cases.
+- Query-count checks and representative PostgreSQL performance review.
+- `manage.py check`, migration drift/plan review, targeted Ruff/compilation,
+  focused Operations and ingest tests, and `git diff --check`.
+- Read-only production reconciliation after deployment: card conservation,
+  Category/Type totals, assessment coverage, links/CSVs, and service health.
 
 ## Out of scope
 
-- Changing condition predicates, response eligibility, severity, suppression,
-  notification, clearing, source actions, or internal finding keys.
-- Deleting or rewriting retained findings.
-- Reclassifying global software as a client-owned entity.
-- A general rule editor, arbitrary policy scripting, or the deferred advanced
-  issue-columns surface.
-- Manual deployment, manual production migration, or data rebuild.
+- Renaming internal condition keys or changing the approved taxonomy.
+- Deleting or rewriting retained or resolved findings.
+- Changing severity predicates merely to improve displayed counts.
+- A general operator policy/rule editor.
+- Production jobs, activation, migrations, deployment, commit, or push without
+  their separately required authorization.
 
-## Current checkpoint and next action
+## Checkpoint and next action
 
-The five category names and revised mapping are approved. The 23-type baseline
-is superseded. Hudu renders as three separate Types, and historical identity
-collisions are separate from active computer identity conflicts. No taxonomy
-policy version should be activated yet.
+The operator vocabulary, count contract, and target information architecture
+are approved in this plan. Local implementation is complete from `120d641`.
 
-The revised taxonomy is implemented locally in the packaged profile, Issues
-projection, validator, tests, documentation, frozen additive migration, and
-readable policy review UI
-`conditions-taxonomy-4`. Group collapse, severity summaries, legacy-policy
-fallbacks, dependent filter behavior, historical identity separation, and
-deterministic historical migration payloads are included. The prior production
-policy state was not reverified in this checkpoint; do not infer live
-activation from repository state.
+Implemented locally so far: the shared operator Status/Attention/reason
+projection; six conserved Issues summary cards; retained unresolved findings
+visible by default; primary and secondary filters; dataset-wide column Clear;
+complete Category/Type navigation before row pagination; operator-safe row
+and CSV state; Software Decisions exclusion/link routing; and administrator
+fresh-assessment coverage counts. The administrator coverage query now keys
+retained rows by condition_key and links each condition to its filtered Issues
+view. Evaluator coverage records measured platform and servicing scopes, uses
+Ready signals for measured evidence, and writes fresh recovery assessments
+before resolving absent findings. ADR-0023 records the durable operator
+state/count contract. The operator vocabulary is now Pending (not Awaiting
+data), and group headers expose Needs action, Blocked, and Pending counts with
+visible per-state controls. Blocked and Pending rows expose a concise reason,
+owner, and safe next-step link where one is available.
+Critical-priority blocking is also implemented per the approved rule: an
+active Critical finding in Needs action blocks only Medium, Low, and
+Informational findings sharing its canonical subject or participant; High,
+Paused, Pending, resolved, and already Blocked Critical findings do not block.
+Generic absent-result recovery no longer manufactures positive evidence;
+clearing remains dependent on producer-specific current recovery authority.
+Rendered labels are authoritative for selected-group sorting. The database
+Evidence and Context projections now cover the complete operator-visible text,
+including servicing, identity, Hudu, platform, software, and offline paths.
+The Identity subject projection uses the renderer's canonical-hostname
+selection. Database filters, HTML ordering/pagination, and CSV use that shared
+selected-scope ordering contract. PostgreSQL execution plans and cardinality
+remain to be measured against the deployed data.
 
-Implementation completed in `1121dbb`.
+The Critical-priority projection is also enforced at operator Hudu action
+queueing, notification candidate selection, and notification send-time
+rechecks. Participant coverage and administrator coverage compare exact
+participant identity sets, excluding context participants.
 
-Validation recorded: 90 focused Operations tests passed; `manage.py check` and
-`makemigrations --check --dry-run` passed; all five embedded historical/final
-policy payloads decoded successfully; the 0174 payload is byte-identical to
-the version shipped in `143d242`; targeted Ruff checks, Python compilation,
-and `git diff --check` passed.
+Validation: the focused Issues queue suite passes (37 tests); the full
+Operations suite passes (172 tests, 2 opt-in PostgreSQL tests skipped); Django
+checks, migration-drift checks, Python compilation, targeted Ruff checks, and
+`git diff --check` pass.
+`httpx==0.27.2` is now installed locally and the full ingest suite passes
+(246 passed, 57 skipped). The hardcoded-domain ratchet now documents the
+operator vocabulary and pre-existing dispatch definitions; the software
+read-model test now stubs the catalog projection introduced by its current
+implementation. The latest Pending terminology, conservative visibility, and
+Critical-priority corrections add focused queue coverage, and the Operations
+suite remains at 172 passed with two PostgreSQL tests skipped.
 
-Production activation was not independently verified in the original
-implementation checkpoint. It was subsequently verified active externally as
-`conditions-taxonomy-4` on 2026-09-17. A manually triggered platform evaluator
-then exposed two identity fingerprint queries that still called unavailable
-pgcrypto `digest`; those paths now use PostgreSQL 16's qualified
-`pg_catalog.sha256` and require regression validation before redeployment.
+Next action: after an explicitly authorized deployment, run the deployed
+PostgreSQL query-plan and row-count review, followed by read-only production
+reconciliation of card conservation, Category/Type totals, assessments,
+links/CSVs, and service health.
+No commit, push, deployment, migration, or production data mutation has been
+performed for this plan yet.
 
-Post-activation follow-up: the 2026-09-18 evaluator/source-health review found
-that Ninja materialized-view refreshes lacked tenant context, and the derived
-entity-link sync could close a history interval at its exact start timestamp.
-The corrective code and migration are now prepared locally; next action is
-deployment followed by a fresh Ninja collection and policy-4 assessment check.
-
-The fresh cycle validated those fixes and produced 5,468 policy-4 assessments.
-Remaining producer review exposed unsafe integer casts in patch classification
-for non-device VMX source links; those casts are now guarded and require a
-follow-up deployment and classifier run.
-
-Current UI refinement: the Issues page now presents policy-defined category
-cards under “Actionable work across the fleet,” with unfiltered totals and
-severity breakdowns, plus a separate Software decisions card. Table filters
-are compact per-column menus modeled on Inventory rather than a persistent
-row of text boxes; existing server-side full-dataset sorting and filtering is
-unchanged. Focused queue tests pass after this change. Next action: complete
-the Django check, then commit and push the UI refinement if validation stays
-clean.
+No commit, push, deployment, migration, or production data mutation has been
+performed for this plan yet.
+Pause only for a material product decision, conflicting user work, migration
+approval, production mutation, or separate commit/push authorization.

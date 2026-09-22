@@ -49,7 +49,9 @@ def assess(
 ) -> Decision:
     """Assess one participant scope; no writes, notifications or permissions.
 
-    No critical-hides-medium rule exists. Global software facts and individual
+    Critical-priority blocking is applied by the operator Issues projection
+    using canonical subjects and participants; it does not alter this
+    per-condition eligibility decision. Global software facts and individual
     exposure relationships can receive different decisions for the same finding.
     Unknown prerequisites cannot imply ready. Identity-resolution definitions
     explicitly omit the identity prerequisite, preventing self-blocking.

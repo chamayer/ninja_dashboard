@@ -13,6 +13,7 @@ from typing import Any
 from psycopg.types.json import Json
 
 from ingest import db
+from ingest.condition_priority import critical_priority_clause
 from ingest.connectors.hudu import archive_asset
 from ingest.sources import SourceConfig, load_sources
 
@@ -120,7 +121,7 @@ def _still_eligible(request_row: dict[str, Any]) -> bool:
     with db.transaction() as cur:
         cur.execute("SET LOCAL operations.tenant_id = 1")
         cur.execute(
-            """
+            f"""
                 SELECT EXISTS (
                 SELECT 1
                   FROM operations.findings finding
@@ -179,7 +180,7 @@ def _still_eligible(request_row: dict[str, Any]) -> bool:
                                  )
                           )
                    )
-            )
+            {critical_priority_clause('finding')}
             AND EXISTS (
                 SELECT 1
                   FROM operations.entity_observation_current eo

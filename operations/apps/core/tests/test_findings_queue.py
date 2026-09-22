@@ -1,3 +1,4 @@
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import parse_qs
@@ -7,6 +8,7 @@ from django.core.exceptions import PermissionDenied
 from django.test import RequestFactory
 
 from apps.core import views
+from apps.core.conditions.operator import operator_guidance, operator_state
 from apps.core.finding_actions import (
     ARCHIVE_HUDU_ASSETS,
     BULK_RETIRE_COMPUTERS,
@@ -123,8 +125,11 @@ def test_affected_device_rows_uses_one_filtered_finding_set(monkeypatch):
 
 def test_findings_queue_template_exposes_device_csv_and_grouped_types():
     template = Path("templates/findings_queue.html").read_text(encoding="utf-8")
+    source = Path("apps/core/views.py").read_text(encoding="utf-8")
 
-    assert "category_tiles" in template
+    assert "fleet_summary_cards" in template
+    for label in ("Unresolved", "Needs action", "Blocked", "Pending", "Paused", "Software decisions"):
+        assert label in source
     assert "format=devices_csv" in template
     assert "Issues CSV" in template
     assert "Shown issues CSV" not in template
@@ -134,35 +139,59 @@ def test_findings_queue_template_exposes_device_csv_and_grouped_types():
     assert "bulk-action" in template
     assert "table_finding" in template
     assert "sort_links.finding" in template
-    assert "issue-group-header" in template
+    assert "issues-group-navigation" in template
     assert "Issues summary" in template
     assert "Filtered results" in template
     assert "issues-column-filter" in template
+    assert "Clear column filters" in template
+    assert "More filters" in template
     assert "issues-results-intro" in template
     assert "current_result_summary" in template
     assert '<select name="issue" id="issues-issue-filter">' in template
     assert "issue_choices" in template
-    assert "issue-group-toggle" in template
-    assert "addEventListener('click'" in template
-    assert "row.hidden = expanded" in template
-    assert "issue_group_severity_summary" in template
+    assert "issues-type-link" in template
     assert "json_script:\"issue-taxonomy-data\"" in template
-    assert '<span class="issue-group-chevron"' in template
-    assert "querySelector('.issue-group-chevron')" in template
     assert "card.count }} / {{ card.total" not in template
     assert "card.percentage" not in template
     assert "action.label" in template
     assert "Why take this action?" in template
-    assert "Condition policy is unavailable" in template
     assert "action.confirmation" in template
     assert "Archive in Hudu" in template
-    assert "Hudu source record:" in template
+    assert "Hudu record:" in template
     assert "archiveHuduRow" in template
+
+
+def test_operator_projection_uses_operator_vocabulary_and_short_reasons():
+    now = datetime(2026, 9, 18, tzinfo=UTC)
+    assert operator_state(
+        status="open",
+        snoozed_until=None,
+        assessment={"disposition": "complete", "may_execute": True},
+        now=now,
+    ) == {"status": "active", "attention": "needs_action", "reason": "Ready for action"}
+    assert operator_state(
+        status="open",
+        snoozed_until=None,
+        assessment={"disposition": "blocked", "blockers": ["offline:extended_absence"]},
+        now=now,
+    ) == {"status": "active", "attention": "blocked", "reason": "Computer offline"}
+    assert operator_state(
+        status="open",
+        snoozed_until=now + timedelta(hours=1),
+        assessment=None,
+        now=now,
+    ) == {"status": "paused", "attention": "paused", "reason": "Paused by operator"}
+    assert operator_guidance(
+        attention="blocked", reason="Identity unresolved"
+    ) == {"owner": "Operator", "next_step": "Review identity", "route": "subject"}
+    assert operator_guidance(
+        attention="pending", reason="Patch data incomplete"
+    ) == {"owner": "Integration", "next_step": "Review patch collection", "route": "patch"}
 
 
 def test_findings_group_summaries_are_computed_before_screen_cap():
     source = Path("apps/core/views.py").read_text(encoding="utf-8")
-    assert source.index("display_group_summary =") < source.index("paginator = Paginator(findings_with_detail")
+    assert source.index("issue_group_headers =") < source.index("paginator = Paginator(findings_with_detail")
     assert "actionable_qs[:500]" not in source
 
 
@@ -294,15 +323,16 @@ def test_findings_queue_exposes_governed_response_filter():
     template = Path("templates/findings_queue.html").read_text(encoding="utf-8")
     for value in ("actionable", "blocked", "pending", "paused", "all"):
         assert value in source
-    assert 'name="response"' in template
-    assert "_condition_response_ids" in source
+    assert 'name="attention"' in template
+    assert "_condition_operator_states" in source
     assert "condition_participants" in source
-    assert '"Response reasons"' in source
-    assert '"Assessment scope"' in source
+    assert '"Attention"' in source
+    assert '"Reason"' in source
     assert "Policy:" not in template
     assert "row.assessment" not in template
     assert "finding_reviewed_distinct" in template
     assert "Reviewed distinct" in template
+    assert "category_tiles" not in template
 
 
 def test_findings_queue_canonicalizes_legacy_category_urls():
@@ -319,11 +349,56 @@ def test_findings_queue_retains_offline_evidence_for_explicit_review():
     assert "qs = qs.exclude(coalesced_offline_q)" not in source
 
 
-def test_findings_queue_category_cards_use_fleet_wide_eligible_counts():
+def test_findings_queue_summary_cards_use_fleet_wide_operator_counts():
     source = Path("apps/core/views.py").read_text(encoding="utf-8")
+    template = Path("templates/findings_queue.html").read_text(encoding="utf-8")
     assert "fleet_governed_qs = Finding.objects.filter" in source
-    assert "fleet_response_ids = _condition_response_ids" in source
-    assert "top_summary_qs = fleet_governed_qs.filter(id__in=fleet_actionable_ids)" in source
+    assert "fleet_states = _condition_operator_states" in source
+    assert '"label": "Pending"' in source
+    assert "Review by state" in template
+    assert "operator_owner" in source
+    assert "operator_next_step" in source
+
+
+def test_findings_queue_csv_projects_labels_before_export_and_has_one_owner_column():
+    source = Path("apps/core/views.py").read_text(encoding="utf-8")
+    queue = source[source.index("def findings_queue"):source.index("def _policy_candidate_state_action_blocked")]
+    assert queue.index('row["issue_label"]') < queue.index("if wants_csv(request)")
+    csv_section = queue[queue.index("def _findings_csv_response"):queue.index("# Keep these getters", queue.index("def _findings_csv_response"))]
+    assert csv_section.count('(\"Owner\"') == 1
+    assert queue.index("return _findings_csv_response()") > queue.index("findings_with_detail = [")
+
+
+def test_database_queue_projection_covers_rendered_evidence_context_and_subject_overrides():
+    source = Path("apps/core/views.py").read_text(encoding="utf-8")
+    queue = source[source.index("def findings_queue"):source.index("def _policy_candidate_state_action_blocked")]
+
+    # Every special Evidence renderer needs a matching database expression so
+    # column filters and sorting operate on what the operator actually sees.
+    for finding_type in (
+        "device_source_record_withdrawn",
+        "device_missing_from_source",
+        "device_offline",
+        "identity_conflict",
+        "cmdb_asset_stale",
+        "cross_client_serial",
+        "windows_servicing_%",
+        "vulnerable_software",
+        "known_malicious_hint",
+    ):
+        assert finding_type in queue
+
+    assert "operations.device_windows_servicing_current" in queue
+    assert "operations.device_session_current" in queue
+    assert "COALESCE(\n                       finding_details->>'hostname'," in queue
+    assert "database_qs = actionable_qs.annotate(**database_annotations)" in queue
+    assert 'f"rendered_{key}__icontains"' in queue
+
+
+def test_admin_health_is_admin_only():
+    source = Path("apps/core/views.py").read_text(encoding="utf-8")
+    assert "@require_admin" in source[source.rfind("@login_required", 0, source.index("def findings_admin_health")):source.index("def findings_admin_health")]
+    assert "condition_participants" in source[source.index("def _condition_coverage_summary"):source.index("def admin_finding_acknowledge")]
 
 
 def test_findings_queue_does_not_substitute_packaged_taxonomy():
@@ -373,6 +448,17 @@ def test_admin_health_exposes_unavailable_policy_state():
     assert "Condition policy is unavailable" in template
 
 
+def test_admin_coverage_tracks_condition_keys_and_links_to_issues():
+    source = Path("apps/core/views.py").read_text(encoding="utf-8")
+    template = Path("templates/findings_admin_health.html").read_text(encoding="utf-8")
+    assert "f.condition_key AS name" in source
+    assert "condition_coverage = _condition_coverage_summary(condition_profile)" in source
+    assert "findings_queue" in template
+    assert "row.category_key" in template
+    assert "row.type_key" in template
+    assert "row.name|urlencode" in template
+
+
 def test_device_issue_card_links_to_all_retained_responses():
     template = Path("templates/device_detail.html").read_text(encoding="utf-8")
     assert "status=all&amp;response=all&amp;subject_id={{ device.id }}" in template
@@ -385,13 +471,13 @@ def test_client_workspace_drilldowns_match_retained_issue_counts():
 
 def test_source_action_enqueue_requires_current_actionable_response():
     source = Path("apps/core/views.py").read_text(encoding="utf-8")
-    assert '_condition_response_ids([finding.id])["actionable"]' in source
+    assert '_condition_operator_states([finding.id])' in source
 
 
 def test_source_action_actionability_excludes_operator_managed_findings():
     source = Path("apps/core/views.py").read_text(encoding="utf-8")
     section = source[source.index("def _condition_response_ids"):source.index("def _operator_issue_type_groups")]
-    assert "f.status IN ('open', 'acknowledged')" in section
+    assert "f.status IN ('open', 'acknowledged', 'investigating')" in section
     assert "f.snoozed_until IS NULL OR f.snoozed_until <= now()" in section
     assert "may_execute" in section
     assert "may_clear" not in section

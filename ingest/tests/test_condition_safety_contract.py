@@ -324,6 +324,23 @@ def test_notification_recheck_accepts_participant_assessments_without_aggregate_
     assert "NOT EXISTS" in helper
 
 
+def test_critical_priority_only_blocks_lower_findings_with_complete_authority():
+    from ingest.condition_priority import critical_priority_clause
+
+    clause = critical_priority_clause("finding")
+    assert "finding.severity NOT IN ('medium', 'low', 'info')" in clause
+    assert "expected_scope" in clause
+    assert "participant_kind = 'condition'" in clause
+    assert clause.count("(") == clause.count(")")
+
+
+def test_notification_union_closes_entity_predicate_before_admin_branch():
+    source = (Path(__file__).parents[1] / "notifications.py").read_text()
+    entity = source[source.index("def _load_pending_findings"):source.index("def _load_route")]
+    union = entity.index("UNION ALL")
+    assert ")\n          {critical_priority_clause('f')}" in entity[:union]
+
+
 def test_identity_readiness_covers_group_members_and_reviewed_distinct_decisions():
     source = (Path(__file__).parents[1] / "condition_evidence.py").read_text()
     assert "candidate_device_ids" in source

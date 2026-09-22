@@ -5,7 +5,8 @@ import logging
 import os
 import re
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
+from datetime import timezone as dt_timezone
 from urllib import request as _urllib_request
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit
@@ -15,8 +16,9 @@ from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator
 from django.db import IntegrityError, connection, transaction
-from django.db.models import Count, Prefetch, Q
+from django.db.models import Case, CharField, Count, F, OuterRef, Prefetch, Q, Subquery, Value, When
 from django.db.models.expressions import RawSQL
+from django.db.models.functions import Cast, Coalesce, Concat
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -29,6 +31,18 @@ from . import capability as capability_evidence
 from . import category as category_evidence
 from .client_workspace import build_client_directory, build_client_workspace
 from .conditions.live import load_active_profile
+from .conditions.operator import (
+    ATTENTION_BLOCKED,
+    ATTENTION_NEEDS_ACTION,
+    ATTENTION_PAUSED,
+    ATTENTION_PENDING,
+    OPERATOR_ATTENTION_CHOICES,
+    OPERATOR_ATTENTION_LABELS,
+    OPERATOR_STATUS_CHOICES,
+    OPERATOR_STATUS_LABELS,
+    operator_guidance,
+    operator_state,
+)
 from .conditions.review import record_identity_reviewed_distinct
 from .csv_export import csv_response, wants_csv
 from .decorators import require_admin
@@ -282,9 +296,8 @@ def _condition_assessment_display(row_kind: str, finding_ids) -> dict[str, dict]
     result: dict[str, dict] = {}
     for finding_id, policy_version, policy_digest, assessed_at, response, participant_kind, participant_id, participant_role in rows:
         key = str(finding_id)
-        if isinstance(response, str):
-            response = json.loads(response)
-        response = response or {}
+        assessment_response = json.loads(response) if isinstance(response, str) else response
+        assessment_response = assessment_response or {}
         item = result.setdefault(
             key,
             {
@@ -299,13 +312,13 @@ def _condition_assessment_display(row_kind: str, finding_ids) -> dict[str, dict]
                 "may_execute": True,
             },
         )
-        item["dispositions"].add(response.get("disposition", "unknown"))
-        item["reasons"].update(response.get("reasons") or [])
-        item["blockers"].update(response.get("blockers") or [])
+        item["dispositions"].add(assessment_response.get("disposition", "unknown"))
+        item["reasons"].update(assessment_response.get("reasons") or [])
+        item["blockers"].update(assessment_response.get("blockers") or [])
         item["scopes"].add(
             f"{participant_kind}:{participant_id}:{participant_role}"
         )
-        item["may_execute"] = item["may_execute"] and bool(response.get("may_execute"))
+        item["may_execute"] = item["may_execute"] and bool(assessment_response.get("may_execute"))
     for item in result.values():
         for field in ("reasons", "blockers"):
             item[field] = sorted(item[field])
@@ -332,24 +345,40 @@ def _condition_response_ids(finding_ids) -> dict[str, set[str]]:
                 """
             WITH expected AS (
                 SELECT f.id,
-                       count(cp.finding_id) FILTER (WHERE cp.participant_role <> 'context') AS expected
+                       COALESCE(
+                           array_agg(DISTINCT
+                               cp.participant_kind || ':' || cp.participant_id::text || ':' || cp.participant_role
+                               ORDER BY cp.participant_kind || ':' || cp.participant_id::text || ':' || cp.participant_role
+                           ) FILTER (WHERE cp.participant_role <> 'context'),
+                           ARRAY[]::text[]
+                       ) AS expected_participants
                   FROM operations.findings f
                  LEFT JOIN operations.condition_participants cp
                     ON cp.tenant_id = f.tenant_id AND cp.row_kind = 'entity'
                    AND cp.finding_id = f.id
                  WHERE f.tenant_id = 1 AND f.id = ANY(%s::uuid[])
-                   AND f.status IN ('open', 'acknowledged')
+                   AND f.status IN ('open', 'acknowledged', 'investigating')
                    AND (f.snoozed_until IS NULL OR f.snoozed_until <= now())
                  GROUP BY f.id
             ), assessed AS (
                 SELECT a.finding_id,
                        bool_or(a.participant_kind = 'condition'
                                AND (a.response->>'may_execute')::boolean IS TRUE) AS condition_execute,
-                       count(DISTINCT (a.participant_kind, a.participant_id, a.participant_role))
-                           FILTER (WHERE a.participant_kind <> 'condition') AS assessed,
-                       count(DISTINCT (a.participant_kind, a.participant_id, a.participant_role))
-                           FILTER (WHERE a.participant_kind <> 'condition'
-                                   AND (a.response->>'may_execute')::boolean IS TRUE) AS participant_execute,
+                       COALESCE(
+                           array_agg(DISTINCT
+                               a.participant_kind || ':' || a.participant_id::text || ':' || a.participant_role
+                               ORDER BY a.participant_kind || ':' || a.participant_id::text || ':' || a.participant_role
+                           ) FILTER (WHERE a.participant_kind <> 'condition'),
+                           ARRAY[]::text[]
+                       ) AS assessed_participants,
+                       COALESCE(
+                           array_agg(DISTINCT
+                               a.participant_kind || ':' || a.participant_id::text || ':' || a.participant_role
+                               ORDER BY a.participant_kind || ':' || a.participant_id::text || ':' || a.participant_role
+                           ) FILTER (WHERE a.participant_kind <> 'condition'
+                                   AND (a.response->>'may_execute')::boolean IS TRUE),
+                           ARRAY[]::text[]
+                       ) AS executable_participants,
                        bool_or(a.response->>'disposition' = 'blocked') AS blocked,
                        bool_or(a.response->>'disposition' = 'unknown') AS unknown
                   FROM operations.condition_assessments a
@@ -360,8 +389,9 @@ def _condition_response_ids(finding_ids) -> dict[str, set[str]]:
                    AND a.assessed_at >= now() - (SELECT (policy->>'freshness_hours')::integer * interval '1 hour' FROM operations.condition_policy_versions WHERE active ORDER BY version DESC LIMIT 1)
                  GROUP BY a.finding_id
             )
-            SELECT e.id, e.expected, a.condition_execute, a.assessed,
-                   a.participant_execute, a.blocked, a.unknown
+            SELECT e.id, e.expected_participants, a.condition_execute,
+                   a.assessed_participants, a.executable_participants,
+                   a.blocked, a.unknown
               FROM expected e LEFT JOIN assessed a ON a.finding_id = e.id
                 """,
                 [batch, batch],
@@ -370,7 +400,7 @@ def _condition_response_ids(finding_ids) -> dict[str, set[str]]:
             for finding_id, expected, condition_execute, assessed, participant_execute, blocked, _unknown in rows:
                 key = str(finding_id)
                 complete = (
-                    bool(condition_execute) if expected == 0
+                    bool(condition_execute) if not expected
                     else assessed == expected and participant_execute == expected
                 )
                 if complete:
@@ -383,6 +413,136 @@ def _condition_response_ids(finding_ids) -> dict[str, set[str]]:
         if not any(key in values for values in result.values()):
             result["pending"].add(key)
     return result
+
+
+def _condition_operator_states(finding_ids, *, now=None) -> dict[str, dict[str, str]]:
+    """Project retained findings into the operator Status/Attention model."""
+    ids = [str(value) for value in finding_ids if value]
+    if not ids:
+        return {}
+    now = now or timezone.now()
+    # Critical blockers are global to the current tenant, not to the active
+    # Category/Type filter. Include active Critical candidates in the state
+    # calculation so filtering to a lower-severity group cannot bypass them.
+    critical_candidate_ids = list(
+        Finding.objects.filter(
+            tenant_id=1,
+            status__in=_FINDING_ACTIVE_STATUSES,
+            severity=Finding.Severity.CRITICAL,
+        ).values_list("id", flat=True)
+    )
+    assessment_ids = list(dict.fromkeys([*ids, *(str(value) for value in critical_candidate_ids)]))
+    response_ids = _condition_response_ids(assessment_ids)
+    response_by_id = {
+        key: ATTENTION_NEEDS_ACTION
+        for key in response_ids["actionable"]
+    }
+    response_by_id.update(
+        {key: ATTENTION_BLOCKED for key in response_ids["blocked"]}
+    )
+    response_by_id.update(
+        {key: ATTENTION_PENDING for key in response_ids["pending"]}
+    )
+    rows = list(Finding.objects.filter(tenant_id=1, id__in=assessment_ids).values(
+        "id", "status", "snoozed_until", "severity", "subject_type", "subject_id",
+        "finding_type__name",
+    ))
+    states = {}
+    for row in rows:
+        key = str(row["id"])
+        assessment_attention = response_by_id.get(key, ATTENTION_PENDING)
+        if row["snoozed_until"] and row["snoozed_until"] > now:
+            attention = ATTENTION_PAUSED
+        elif row["status"] in {
+            Finding.Status.RESOLVED,
+            Finding.Status.SUPPRESSED,
+            Finding.Status.WONTFIX,
+        }:
+            attention = ""
+        else:
+            attention = assessment_attention
+        states[key] = {
+            "status": operator_state(
+                status=row["status"],
+                snoozed_until=row["snoozed_until"],
+                assessment={
+                    "disposition": (
+                        "complete"
+                        if assessment_attention == ATTENTION_NEEDS_ACTION
+                        else assessment_attention
+                    ),
+                    "may_execute": assessment_attention == ATTENTION_NEEDS_ACTION,
+                },
+                now=now,
+            )["status"],
+            "attention": attention,
+            "reason": {
+                ATTENTION_NEEDS_ACTION: "Ready for action",
+                ATTENTION_BLOCKED: "Blocked by current evidence",
+                ATTENTION_PENDING: "Pending current assessment",
+                ATTENTION_PAUSED: "Paused by operator",
+            }.get(attention, ""),
+        }
+        states[key].update({"subject_type": row["subject_type"], "subject_id": str(row["subject_id"])})
+
+    critical_ids = {
+        key for key, state in states.items()
+        if state["attention"] == ATTENTION_NEEDS_ACTION
+        and next((row["severity"] for row in rows if str(row["id"]) == key), "") == Finding.Severity.CRITICAL
+    }
+    if critical_ids:
+        row_by_id = {str(row["id"]): row for row in rows}
+        critical_subjects = {
+            (row_by_id[key]["subject_type"], str(row_by_id[key]["subject_id"]))
+            for key in critical_ids
+        }
+        participant_keys: dict[str, set[tuple[str, str]]] = {key: set() for key in ids}
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT finding_id, participant_kind, participant_id
+                  FROM operations.condition_participants
+                 WHERE tenant_id = 1
+                   AND row_kind = 'entity'
+                   AND finding_id = ANY(%s::uuid[])
+                   AND participant_role <> 'context'
+                """,
+                [assessment_ids],
+            )
+            for finding_id, participant_kind, participant_id in cursor.fetchall():
+                participant_keys.setdefault(str(finding_id), set()).add(
+                    (participant_kind, str(participant_id))
+                )
+        critical_participants = set().union(
+            *(participant_keys.get(key, set()) for key in critical_ids)
+        )
+        for key, state in states.items():
+            row = row_by_id[key]
+            if key in critical_ids or row["severity"] not in {
+                Finding.Severity.MEDIUM,
+                Finding.Severity.LOW,
+                Finding.Severity.INFO,
+            } or state["attention"] in {ATTENTION_PAUSED, ATTENTION_PENDING, ATTENTION_BLOCKED}:
+                continue
+            same_subject = (row["subject_type"], str(row["subject_id"])) in critical_subjects
+            same_participant = bool(participant_keys.get(key, set()) & critical_participants)
+            if same_subject or same_participant:
+                critical_key = next(
+                    critical for critical in critical_ids
+                    if (
+                        (row_by_id[critical]["subject_type"], str(row_by_id[critical]["subject_id"]))
+                        == (row["subject_type"], str(row["subject_id"]))
+                        or participant_keys.get(critical, set()) & participant_keys.get(key, set())
+                    )
+                )
+                states[key].update({
+                    "attention": ATTENTION_BLOCKED,
+                    "reason": "Critical issue takes priority",
+                    "critical_finding_id": critical_key,
+                    "critical_subject_id": str(row_by_id[critical_key]["subject_id"]),
+                    "critical_type": row_by_id[critical_key]["finding_type__name"],
+                })
+    return {key: states[key] for key in ids if key in states}
 
 
 def _operator_issue_type_groups(
@@ -3212,7 +3372,9 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     with connection.cursor() as cur:
         cur.execute("SET LOCAL operations.tenant_id = 1")
 
-    status_filter = request.GET.get("status", "active")
+    status_filter = request.GET.get("status", "")
+    if status_filter == "all":
+        status_filter = ""
     severity_filter = request.GET.get("severity", "")
     type_filter = request.GET.get("type", "")
     issue_filter = request.GET.get("issue", "")
@@ -3222,9 +3384,18 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     client_filter = request.GET.get("client", "")
     platform_filter = request.GET.get("platform", "")
     online_filter = request.GET.get("online", "")
-    response_filter = request.GET.get("response", "actionable")
-    if response_filter not in {"all", "actionable", "blocked", "pending", "paused"}:
-        response_filter = "actionable"
+    attention_filter = request.GET.get("attention", "")
+    legacy_response_filter = request.GET.get("response", "")
+    if not attention_filter and legacy_response_filter:
+        attention_filter = {
+            "actionable": "needs_action",
+            "blocked": "blocked",
+            "pending": "pending",
+            "paused": "paused",
+            "all": "",
+        }.get(legacy_response_filter, "")
+    if attention_filter not in {"", "needs_action", "blocked", "pending"}:
+        attention_filter = ""
     subject_id_filter = (request.GET.get("subject_id") or "").strip()
     requested_device_id_filter = (request.GET.get("device_id") or "").strip()
     device_id_filter = ""
@@ -3250,6 +3421,20 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
         ),
         category_filter,
     )
+    if category_filter == requested_category_filter and requested_category_filter:
+        # Preserve old bookmarked category URLs by resolving the legacy
+        # registry category to the policy-owned taxonomy category.
+        legacy_type_names = set(
+            FindingType.objects.filter(category__name=requested_category_filter)
+            .values_list("name", flat=True)
+        )
+        category_filter = next(
+            (
+                item["key"] for item in issue_categories
+                if legacy_type_names.intersection(item["types"])
+            ),
+            category_filter,
+        )
     if (
         condition_policy_available
         and requested_category_filter
@@ -3282,13 +3467,21 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
         "owner",
     )
 
-    show_snoozed = request.GET.get("snoozed") == "1" or response_filter == "paused"
-    if status_filter == "active":
+    show_snoozed = request.GET.get("snoozed") != "0"
+    if status_filter in ("", "active"):
         qs = qs.filter(status__in=_FINDING_ACTIVE_STATUSES)
-    elif status_filter and status_filter != "all":
-        qs = qs.filter(status=status_filter)
-    # Hide snoozed issues by default; user can toggle to see them.
-    if not show_snoozed and status_filter not in ("all",):
+    elif status_filter == "open":
+        qs = qs.filter(status=Finding.Status.OPEN)
+    elif status_filter == "acknowledged":
+        qs = qs.filter(status__in=(Finding.Status.ACKNOWLEDGED, Finding.Status.INVESTIGATING))
+    elif status_filter == "paused":
+        qs = qs.filter(
+            status__in=_FINDING_ACTIVE_STATUSES,
+            snoozed_until__gt=timezone.now(),
+        )
+    elif status_filter == "resolved":
+        qs = qs.filter(status__in=(Finding.Status.RESOLVED, Finding.Status.SUPPRESSED, Finding.Status.WONTFIX))
+    if not show_snoozed:
         qs = qs.filter(Q(snoozed_until__isnull=True) | Q(snoozed_until__lt=timezone.now()))
 
     if category_filter:
@@ -3397,129 +3590,546 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     # Issues and must not inflate the Issues response counts or appear here.
     qs = qs.exclude(finding_type__name__in=_SOFTWARE_POLICY_CANDIDATE_TYPES)
 
-    # Response state is separate from operator handling. Governed findings are
+    # Attention is separate from operator Status. Governed findings are
     # filtered only after all subject and evidence filters have been applied.
     governed_qs = qs
-    response_ids = _condition_response_ids(governed_qs.values_list("id", flat=True))
-    if response_filter != "all":
-        if response_filter == "paused":
-            response_ids["paused"] = set(
-                str(value) for value in governed_qs.filter(snoozed_until__gt=timezone.now()).values_list("id", flat=True)
-            )
-            selected_ids = response_ids["paused"]
-        else:
-            selected_ids = response_ids[response_filter]
+    operator_states = _condition_operator_states(
+        governed_qs.values_list("id", flat=True)
+    )
+    if attention_filter:
+        selected_ids = {
+            key for key, state in operator_states.items()
+            if state["attention"] == attention_filter
+        }
         qs = qs.filter(id__in=selected_ids)
 
-    severity_qs = qs
     if severity_filter:
         qs = qs.filter(severity=severity_filter)
 
     actionable_qs = qs
-    response_matching = actionable_qs.count()
-
-    # Tile counts and the headline are computed before the display slice from
-    # the fully filtered queryset, so they remain exact beyond 500 rows.
-    severity_tile_counts = {
-        row["severity"]: row["n"]
-        for row in severity_qs.values("severity").annotate(n=Count("id"))
-    }
-    total_matching = qs.count()
-    actionable_matching = actionable_qs.count()
-    affected_devices = _affected_device_rows(actionable_qs)
-    affected_client_count = len({row["client"] for row in affected_devices if row["client"]})
-    result_summary_parts = [
-        f"{total_matching} issue rows",
-        f"{len(affected_devices)} affected Computers",
-        f"{affected_client_count} affected clients",
-    ]
-    current_result_summary = " · ".join(result_summary_parts)
-
-    if request.GET.get("format") == "devices_csv":
-        return csv_response(
-            affected_devices,
-            columns=[
-                ("Hostname", "hostname"),
-                ("Client", "client"),
-                ("Operating system", "os_name"),
-                ("OS release", "os_release_id"),
-                ("OS build", "os_build_number"),
-                ("Finding types", "finding_types"),
-                ("Device ID", "device_id"),
-            ],
-            filename_stem="affected_devices",
-        )
-
-    # Prebuild severity tiles — each is a dict the template renders
-    # directly (avoids needing a custom dict-lookup template filter).
-    # Clicking a tile TOGGLES that severity in the filter set.
-    severity_tiles = []
-    for sev, label in Finding.Severity.choices:
-        params = request.GET.copy()
-        params.pop("page", None)
-        is_active = severity_filter == sev
-        if is_active:
-            params.pop("severity", None)  # click again to clear
-        else:
-            params["severity"] = sev
-        severity_tiles.append(
-            {
-                "value": sev,
-                "label": label,
-                "count": severity_tile_counts.get(sev, 0),
-                "href": "?" + params.urlencode() if params else "?",
-                "active": is_active,
-            }
-        )
-    category_tiles = []
-    # Top category cards are fleet-wide eligible counts. They deliberately do
-    # not inherit the selected category, type, client, severity, or search
-    # filters; the governed response contract still determines eligibility.
+    # Top cards are fleet-wide operator populations. They deliberately do not
+    # inherit any selected filters below them and use one captured state map.
     fleet_governed_qs = Finding.objects.filter(
         tenant_id=1,
         status__in=_FINDING_ACTIVE_STATUSES,
-    ).filter(
-        Q(snoozed_until__isnull=True) | Q(snoozed_until__lt=timezone.now())
     ).exclude(finding_type__name__in=_SOFTWARE_POLICY_CANDIDATE_TYPES)
-    fleet_response_ids = _condition_response_ids(
-        fleet_governed_qs.values_list("id", flat=True)
-    )
-    fleet_actionable_ids = fleet_response_ids["actionable"]
-    top_summary_qs = fleet_governed_qs.filter(id__in=fleet_actionable_ids)
+    fleet_ids = list(fleet_governed_qs.values_list("id", flat=True))
+    fleet_states = _condition_operator_states(fleet_ids)
+    fleet_counts = {
+        attention: sum(
+            1 for state in fleet_states.values() if state["attention"] == attention
+        )
+        for attention in (
+            ATTENTION_NEEDS_ACTION,
+            ATTENTION_BLOCKED,
+            ATTENTION_PENDING,
+            ATTENTION_PAUSED,
+        )
+    }
     fleet_policy_qs = Finding.objects.filter(
         tenant_id=1,
         status__in=_FINDING_ACTIVE_STATUSES,
         snoozed_until__isnull=True,
         finding_type__name__in=_SOFTWARE_POLICY_CANDIDATE_TYPES,
     )
-    for category in issue_categories:
-        key, label, names = category["key"], category["label"], category.get("types", set())
-        counts = {sev: 0 for sev, _ in Finding.Severity.choices}
-        for finding in top_summary_qs.filter(finding_type__name__in=names).values("severity").annotate(n=Count("id")):
-            counts[finding["severity"]] += finding["n"]
-        # Category cards are intentionally links from a clean fleet-wide view,
-        # not from whichever filters happen to be active below them.
-        params = {"status": "active", "response": "actionable", "category": key}
-        severity_links = []
-        for sev, sev_label in Finding.Severity.choices:
-            sev_params = params.copy()
-            sev_params["severity"] = sev
-            severity_links.append({"label": sev_label, "count": counts[sev], "href": "?" + urlencode(sev_params), "value": sev})
-        category_tiles.append({"label": label, "total": sum(counts.values()), "href": "?" + urlencode(params), "severity_links": severity_links})
     fleet_policy_count = fleet_policy_qs.count()
+    fleet_summary_cards = [
+        {
+            "label": "Unresolved",
+            "value": len(fleet_ids),
+            "note": "open, acknowledged, or paused Issues",
+            "href": "?status=active",
+        },
+        {
+            "label": "Needs action",
+            "value": fleet_counts[ATTENTION_NEEDS_ACTION],
+            "note": "current evidence permits action",
+            "href": "?status=active&attention=needs_action",
+        },
+        {
+            "label": "Blocked",
+            "value": fleet_counts[ATTENTION_BLOCKED],
+            "note": "a prerequisite prevents action",
+            "href": "?status=active&attention=blocked",
+        },
+        {
+            "label": "Pending",
+            "value": fleet_counts[ATTENTION_PENDING],
+            "note": "assessment or source data is missing",
+            "href": "?status=active&attention=pending",
+        },
+        {
+            "label": "Paused",
+            "value": fleet_counts[ATTENTION_PAUSED],
+            "note": "paused by an operator",
+            "href": "?status=paused",
+        },
+        {
+            "label": "Software decisions",
+            "value": fleet_policy_count,
+            "note": "separate decision workflow",
+            "href": reverse("software_decisions_queue") + "?decision=pending",
+        },
+    ]
 
     _SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
-    # The screen intentionally stays bounded so it remains responsive, but an
-    # explicit CSV is a report of the complete filtered set. Keeping its input
-    # uncapped makes its row count agree with the headline rather than silently
-    # truncating at the screen limit.
-    findings = sorted(
-        actionable_qs,
-        key=lambda f: (
-            _SEVERITY_ORDER.get(f.severity, 9),
-            -(f.last_detected_at or f.last_seen_at).timestamp(),
-        ),
+    # Do not materialize the fleet queue merely to render collapsed group
+    # headers. A Type/evidence selection opens rows; the unselected queue uses
+    # database counts below and keeps the potentially very large finding set
+    # out of Python memory.
+    show_finding_rows = bool(
+        type_filter
+        or issue_filter
+        or active_group_key
+        or device_id_filter
+        or subject_id_filter
+        or wants_csv(request)
     )
+    table_filter_keys = ("severity", "finding", "subject", "evidence", "context", "status", "date")
+    table_filters = {
+        key: (request.GET.get(f"table_{key}") or "").strip()
+        for key in table_filter_keys
+    }
+    sort_key = request.GET.get("sort", "group")
+    if sort_key not in {"group", "severity", "finding", "subject", "evidence", "context", "status", "date"}:
+        sort_key = "group"
+    sort_dir = request.GET.get("dir", "asc")
+    if sort_dir not in {"asc", "desc"}:
+        sort_dir = "asc"
+    # Rendered labels are authoritative for operator sorting. Build database
+    # expressions from those labels rather than ordering by condition keys,
+    # UUIDs, or stored engine statuses.
+    type_labels = {
+        type_name: group["label"]
+        for group in issue_type_groups.values()
+        for type_name in group["types"]
+    }
+    issue_labels = {
+        type_name: (
+            profile.definitions.get(type_name, {}).get("label", type_name)
+            if profile else type_name
+        )
+        for type_name in type_labels
+    }
+
+    def _label_case(labels: dict[str, str]):
+        return Case(
+            *[
+                When(finding_type__name=key, then=Value(value))
+                for key, value in labels.items()
+            ],
+            default=Value(""),
+            output_field=CharField(),
+        )
+
+    type_label_expression = _label_case(type_labels)
+    issue_label_expression = _label_case(issue_labels)
+    severity_label_expression = Case(
+        *[
+            When(severity=value, then=Value(label))
+            for value, label in Finding.Severity.choices
+        ],
+        default=Value(""),
+        output_field=CharField(),
+    )
+    status_label_expression = Case(
+        *[
+            When(id=key, then=Value(OPERATOR_STATUS_LABELS.get(state["status"], "")))
+            for key, state in operator_states.items()
+        ],
+        default=Value(""),
+        output_field=CharField(),
+    )
+    device_name_expression = Coalesce(
+        Subquery(
+            Device.objects.filter(
+                tenant_id=1,
+                id=OuterRef("subject_id"),
+                deleted_at__isnull=True,
+            ).values("canonical_hostname")[:1],
+            output_field=CharField(),
+        ),
+        Value("(unnamed device)"),
+        output_field=CharField(),
+    )
+    subject_label_expression = Case(
+        When(subject_type=Finding.SubjectType.DEVICE, then=device_name_expression),
+        When(
+            subject_type=Finding.SubjectType.CLIENT,
+            then=Coalesce(F("client__display_name"), Value("(unnamed client)")),
+        ),
+        When(
+            subject_type__in=(Finding.SubjectType.SOFTWARE_PRODUCT, Finding.SubjectType.SOFTWARE_VERSION),
+            then=Coalesce(
+                RawSQL("finding_details->>'canonical_name'", []),
+                Value("(unnamed software)"),
+            ),
+        ),
+        default=Value(""),
+        output_field=CharField(),
+    )
+    identity_subject_expression = RawSQL(
+        """
+        COALESCE(
+            (
+                SELECT d.canonical_hostname
+                 FROM operations.devices d
+                 WHERE d.tenant_id = 1
+                   AND d.deleted_at IS NULL
+                   AND d.id::text IN (
+                       SELECT jsonb_array_elements_text(
+                           COALESCE(finding_details->'candidate_device_ids', '[]'::jsonb)
+                       )
+                   )
+                   AND d.canonical_hostname = COALESCE(
+                       finding_details->>'hostname',
+                       finding_details->>'canonical_hostname'
+                   )
+                 ORDER BY d.created_at, d.id
+                 LIMIT 1
+            ),
+            (
+                SELECT d.canonical_hostname
+                 FROM operations.devices d
+                 WHERE d.tenant_id = 1
+                   AND d.deleted_at IS NULL
+                   AND d.id::text IN (
+                       SELECT jsonb_array_elements_text(
+                           COALESCE(finding_details->'candidate_device_ids', '[]'::jsonb)
+                       )
+                   )
+                 ORDER BY d.created_at, d.id
+                 LIMIT 1
+            ),
+            '(unnamed device)'
+        )
+        """,
+        [],
+    )
+    hudu_subject_expression = RawSQL(
+        """
+        COALESCE(
+            (
+                SELECT CASE WHEN count(*) = 1 THEN max(d.canonical_hostname) END
+                  FROM operations.v_device_source_link link
+                  JOIN operations.devices d ON d.id = link.device_id
+                  JOIN operations.sources source ON source.id = link.source_id
+                 WHERE link.tenant_id = 1
+                   AND d.deleted_at IS NULL
+                   AND source.name = 'Hudu'
+                   AND link.external_id = finding_details->>'asset_id'
+            ),
+            finding_details->>'name',
+            'Hudu record'
+        )
+        """,
+        [],
+    )
+    subject_label_expression = Case(
+        When(finding_type__name="identity_conflict", then=identity_subject_expression),
+        When(finding_type__name="cmdb_asset_stale", then=hudu_subject_expression),
+        default=subject_label_expression,
+        output_field=CharField(),
+    )
+    platform_suffix = Case(
+        When(
+            finding_type__name__in=("missing_required_platform", "stale_required_platform"),
+            finding_details__platform__gt="",
+            then=Concat(Value(": "), RawSQL("finding_details->>'platform'", [])),
+        ),
+        default=Value(""),
+        output_field=CharField(),
+    )
+    offline_suffix = Case(
+        When(
+            finding_details__reason_suppressed="device_offline",
+            then=Value(" (device offline)"),
+        ),
+        default=Value(""),
+        output_field=CharField(),
+    )
+    issue_display_expression = Concat(
+        issue_label_expression,
+        platform_suffix,
+        offline_suffix,
+        output_field=CharField(),
+    )
+    detail_expression = RawSQL(
+        """
+        CASE
+          WHEN finding_type_id = (SELECT id FROM operations.finding_types WHERE name = 'missing_required_platform')
+            THEN 'missing ' || COALESCE(finding_details->>'platform', '?')
+          WHEN finding_type_id = (SELECT id FROM operations.finding_types WHERE name = 'stale_required_platform')
+            THEN 'stale ' || COALESCE(finding_details->>'platform', '?')
+                 || CASE WHEN COALESCE(finding_details->>'gap_age_hours', finding_details->>'gap_hours') IS NOT NULL
+                         THEN ' · ' || (COALESCE(finding_details->>'gap_age_hours', finding_details->>'gap_hours')) || 'h'
+                         ELSE '' END
+          WHEN finding_type_id = (SELECT id FROM operations.finding_types WHERE name = 'device_unenrolled')
+            THEN COALESCE(finding_details->>'power_state', 'unknown')
+                 || CASE WHEN finding_details->>'days_since_last_seen' IS NOT NULL
+                        THEN ' · ' || finding_details->>'days_since_last_seen' || 'd' ELSE '' END
+                 || ' · via ' || COALESCE(finding_details->>'observed_via', 'tracked')
+          WHEN finding_type_id = (SELECT id FROM operations.finding_types WHERE name = 'device_source_record_withdrawn')
+            THEN 'removed from ' || COALESCE(finding_details->>'source', 'source')
+                 || CASE WHEN finding_details->>'withdrawn_at' IS NOT NULL
+                         THEN ' · ' || left(finding_details->>'withdrawn_at', 10) ELSE '' END
+          WHEN finding_type_id = (SELECT id FROM operations.finding_types WHERE name = 'device_missing_from_source')
+            THEN 'no current sources'
+                 || CASE WHEN NULLIF(finding_details->>'last_source', '') IS NOT NULL
+                         THEN ' · last: ' || finding_details->>'last_source' ELSE '' END
+                 || CASE WHEN NULLIF(finding_details->>'last_seen_at', '') IS NOT NULL
+                         THEN ' · ' || left(finding_details->>'last_seen_at', 10) ELSE '' END
+          WHEN finding_type_id IN (SELECT id FROM operations.finding_types WHERE name IN ('device_offline', 'device_long_offline'))
+            THEN CASE
+                    WHEN COALESCE(
+                        finding_details->>'fully_offline_since',
+                        finding_details->>'last_contact_at',
+                        finding_details->>'last_seen_at'
+                    ) IS NOT NULL
+                    THEN 'fully offline since ' || left(COALESCE(
+                        finding_details->>'fully_offline_since',
+                        finding_details->>'last_contact_at',
+                        finding_details->>'last_seen_at'
+                    ), 10)
+                    ELSE 'no source has contact'
+                 END
+                 || CASE WHEN NULLIF(finding_details->>'last_seen_source', '') IS NOT NULL
+                         THEN ' (last: ' || finding_details->>'last_seen_source' || ')' ELSE '' END
+          WHEN finding_type_id = (SELECT id FROM operations.finding_types WHERE name = 'device_role_conflict')
+            THEN COALESCE(finding_details->>'previous_role', '?') || ' → '
+                 || COALESCE(finding_details->>'new_role', '?')
+          WHEN finding_type_id = (SELECT id FROM operations.finding_types WHERE name = 'identity_conflict')
+            THEN COALESCE(
+                    CASE WHEN NULLIF(finding_details->>'candidate_count', '') IS NOT NULL
+                         THEN finding_details->>'candidate_count' || ' Computer records' END,
+                    'possible duplicate Computer'
+                 )
+                 || CASE WHEN COALESCE(finding_details->>'evidence_summary', finding_details->>'match_signal') IS NOT NULL
+                         THEN ' · ' || COALESCE(finding_details->>'evidence_summary', finding_details->>'match_signal') ELSE '' END
+          WHEN finding_type_id = (SELECT id FROM operations.finding_types WHERE name = 'cmdb_asset_stale')
+            THEN COALESCE(finding_details->>'name', 'Hudu record')
+                 || CASE WHEN NULLIF(finding_details->>'layout', '') IS NOT NULL
+                         THEN ' · ' || finding_details->>'layout' ELSE '' END
+                 || ' · linked source record is gone'
+          WHEN finding_type_id = (SELECT id FROM operations.finding_types WHERE name = 'cross_client_serial')
+            THEN CASE WHEN finding_details->>'device_count' IS NOT NULL
+                            AND finding_details->>'client_count' IS NOT NULL
+                            AND NULLIF(finding_details->>'serial', '') IS NOT NULL
+                      THEN finding_details->>'device_count' || ' devices across '
+                           || finding_details->>'client_count' || ' clients share serial '
+                           || finding_details->>'serial'
+                      ELSE 'cross-client serial' END
+          WHEN finding_type_id IN (SELECT id FROM operations.finding_types WHERE name LIKE 'windows_servicing_%')
+            THEN concat_ws(' · ',
+                    NULLIF(finding_details->>'os_name', ''),
+                    'build ' || COALESCE(finding_details->>'os_build_number', finding_details->>'build_number', '?'),
+                    NULLIF(finding_details->>'cycle', ''),
+                    CASE WHEN NULLIF(finding_details->>'security_support_ends_on', '') IS NOT NULL
+                         THEN CASE WHEN finding_type_id IN (
+                                  SELECT id FROM operations.finding_types WHERE name LIKE 'windows_servicing_%_eol'
+                              )
+                              THEN 'support ended ' ELSE 'ends ' END
+                              || finding_details->>'security_support_ends_on' END
+                 )
+          WHEN finding_type_id IN (SELECT id FROM operations.finding_types WHERE name IN (
+                'unauthorized_av', 'unauthorized_rmm', 'unauthorized_remote_access',
+                'suspicious_name', 'install_path_suspicious', 'eol_runtime'
+          ))
+            THEN CASE WHEN NULLIF(finding_details->>'canonical_name', '') IS NOT NULL
+                      THEN finding_details->>'canonical_name'
+                           || CASE WHEN NULLIF(finding_details->>'publisher', '') IS NOT NULL
+                                   THEN ' (' || finding_details->>'publisher' || ')' ELSE '' END
+                           || CASE WHEN COALESCE(
+                                      NULLIF(finding_details->>'location', ''),
+                                      NULLIF(finding_details->>'install_path', '')
+                                  ) IS NOT NULL
+                                   THEN ' @ ' || COALESCE(
+                                      NULLIF(finding_details->>'location', ''),
+                                      NULLIF(finding_details->>'install_path', '')
+                                   ) ELSE '' END
+                      ELSE COALESCE(finding_details->>'reason', '') END
+          WHEN finding_type_id = (SELECT id FROM operations.finding_types WHERE name = 'multi_av_conflict')
+            THEN COALESCE(
+                    (SELECT string_agg(value, ', ')
+                       FROM jsonb_array_elements_text(COALESCE(finding_details->'av_products', '[]'::jsonb)) value),
+                    'multiple AV products'
+                 )
+          WHEN finding_type_id = (SELECT id FROM operations.finding_types WHERE name = 'rare_recent')
+            THEN COALESCE(NULLIF(concat_ws(' · ',
+                    NULLIF(finding_details->>'canonical_name', ''),
+                    CASE WHEN finding_details->>'fleet_device_count' IS NOT NULL
+                         THEN 'on ' || finding_details->>'fleet_device_count' || ' machine'
+                              || CASE WHEN finding_details->>'fleet_device_count' <> '1' THEN 's' ELSE '' END END,
+                    CASE WHEN finding_details->>'first_seen_days' IS NOT NULL
+                         THEN 'first seen ' || finding_details->>'first_seen_days' || 'd ago' END
+                 ), ''), 'rare install')
+          WHEN finding_type_id = (SELECT id FROM operations.finding_types WHERE name = 'whitelist_suggestion')
+            THEN CASE WHEN finding_details->>'fleet_device_count' IS NOT NULL
+                           AND finding_details->>'threshold' IS NOT NULL
+                      THEN 'installed on ' || finding_details->>'fleet_device_count'
+                           || ' devices (review threshold ' || finding_details->>'threshold' || ')'
+                      WHEN finding_details->>'fleet_device_count' IS NOT NULL
+                      THEN 'installed on ' || finding_details->>'fleet_device_count'
+                           || ' devices; no decision recorded'
+                      ELSE COALESCE(finding_details->>'reason', 'widespread software with no decision') END
+          WHEN finding_type_id = (SELECT id FROM operations.finding_types WHERE name = 'vulnerable_software')
+            THEN COALESCE(finding_details->>'reason', 'matched vulnerability intelligence')
+                 || CASE WHEN finding_details->>'worst_cvss' IS NOT NULL
+                         THEN ' · CVSS ' || finding_details->>'worst_cvss' ELSE '' END
+                 || CASE WHEN jsonb_array_length(COALESCE(finding_details->'kev_cves', '[]'::jsonb)) > 0
+                         THEN ' · KEV: ' || COALESCE((
+                              SELECT string_agg(value, ', ')
+                                FROM jsonb_array_elements_text(finding_details->'kev_cves') WITH ORDINALITY items(value, ord)
+                               WHERE ord <= 3
+                         ), '')
+                         WHEN jsonb_array_length(COALESCE(finding_details->'high_cves', '[]'::jsonb)) > 0
+                         THEN ' · high CVEs: ' || COALESCE((
+                              SELECT string_agg(value, ', ')
+                                FROM jsonb_array_elements_text(finding_details->'high_cves') WITH ORDINALITY items(value, ord)
+                               WHERE ord <= 3
+                         ), '')
+                         ELSE '' END
+          WHEN finding_type_id = (SELECT id FROM operations.finding_types WHERE name = 'known_malicious_hint')
+            THEN CASE WHEN finding_details->>'threat_hit_count' IS NOT NULL
+                      THEN finding_details->>'threat_hit_count' || ' community threat-intel hit'
+                           || CASE WHEN finding_details->>'threat_hit_count' <> '1' THEN 's' ELSE '' END
+                      ELSE COALESCE(finding_details->>'reason', 'community threat-intel accumulation') END
+          ELSE COALESCE(finding_details->>'platform', '')
+        END
+        """,
+        [],
+    )
+    context_expression = RawSQL(
+        """
+        CASE
+          WHEN finding_type_id IN (
+              SELECT id FROM operations.finding_types WHERE name IN ('identity_conflict', 'cmdb_asset_stale')
+          ) THEN COALESCE((SELECT display_name FROM operations.clients WHERE id = client_id), '')
+          WHEN subject_type = 'device' THEN concat_ws(' · ',
+              COALESCE(
+                  (SELECT c.display_name FROM operations.devices d
+                    JOIN operations.clients c ON c.id = d.client_id
+                   WHERE d.tenant_id = 1 AND d.deleted_at IS NULL AND d.id = subject_id),
+                  (SELECT display_name FROM operations.clients WHERE id = client_id)
+              ),
+              NULLIF(concat_ws(' ',
+                  COALESCE(
+                      NULLIF(finding_details->>'os_name', ''),
+                      (SELECT NULLIF(os_name, '')
+                         FROM operations.device_windows_servicing_current
+                        WHERE tenant_id = 1 AND device_id = subject_id),
+                      (SELECT NULLIF(os_name, '') FROM operations.devices
+                        WHERE tenant_id = 1 AND deleted_at IS NULL AND id = subject_id)
+                  ),
+                  (SELECT NULLIF(os_release_id, '')
+                     FROM operations.device_windows_servicing_current
+                    WHERE tenant_id = 1 AND device_id = subject_id),
+                  COALESCE(
+                      NULLIF(finding_details->>'os_build_number', ''),
+                      NULLIF(finding_details->>'build_number', ''),
+                      (SELECT NULLIF(os_build_number, '')
+                         FROM operations.device_windows_servicing_current
+                        WHERE tenant_id = 1 AND device_id = subject_id)
+                  )
+              ), ''),
+              (SELECT 'online via ' || array_to_string(online_sources, ', ')
+                 FROM operations.device_session_current
+                WHERE device_id = subject_id AND array_length(online_sources, 1) > 0)
+          )
+          WHEN subject_type = 'client' THEN concat_ws(' · ',
+              COALESCE((SELECT display_name FROM operations.clients WHERE id = client_id), ''),
+              'client-wide'
+          )
+          WHEN subject_type IN ('software_product', 'software_version') THEN concat_ws(' · ',
+              NULLIF(finding_details->>'publisher', ''),
+              CASE WHEN subject_type = 'software_version' THEN 'software release' ELSE 'software title' END
+          )
+          ELSE 'platform or source context'
+        END
+        """,
+        [],
+        output_field=CharField(),
+    )
+    evidence_date_expression = Case(
+        When(
+            finding_type__name="device_missing_from_source",
+            then=RawSQL("NULLIF(finding_details->>'last_seen_at', '')::timestamptz", []),
+        ),
+        When(
+            finding_type__name="device_source_record_withdrawn",
+            then=RawSQL("NULLIF(finding_details->>'withdrawn_at', '')::timestamptz", []),
+        ),
+        default=Value(None),
+    )
+    database_sort_fields = {
+        "group": (type_label_expression, issue_display_expression, "id"),
+        "severity": (severity_label_expression, "id"),
+        "finding": (issue_display_expression, type_label_expression, "id"),
+        "subject": (subject_label_expression, "id"),
+        "evidence": (detail_expression, "id"),
+        "context": (context_expression, "id"),
+        "status": (status_label_expression, "id"),
+        "date": (evidence_date_expression, "id"),
+    }
+    database_annotations = {
+        "rendered_group": type_label_expression,
+        "rendered_severity": severity_label_expression,
+        "rendered_finding": issue_display_expression,
+        "rendered_subject": subject_label_expression,
+        "rendered_evidence": detail_expression,
+        "rendered_context": context_expression,
+        "rendered_status": status_label_expression,
+        "rendered_date": Cast(evidence_date_expression, CharField()),
+    }
+    database_qs = actionable_qs.annotate(**database_annotations)
+    for key in table_filter_keys:
+        value = table_filters[key]
+        if value:
+            database_qs = database_qs.filter(
+                **{f"rendered_{key}__icontains": value}
+            )
+    database_query_mode = sort_key in database_sort_fields
+    database_page_mode = (
+        show_finding_rows
+        and not wants_csv(request)
+        and database_query_mode
+    )
+    database_page = None
+    findings = []
+    if show_finding_rows:
+        if database_page_mode:
+            order = []
+            for field in database_sort_fields[sort_key]:
+                expression = F(field) if isinstance(field, str) else field
+                order.append(
+                    expression.desc(nulls_last=True)
+                    if sort_dir == "desc"
+                    else expression.asc(nulls_last=True)
+                )
+            database_page = Paginator(database_qs.order_by(*order), 50).get_page(
+                request.GET.get("page")
+            )
+            findings = list(database_page.object_list)
+        elif database_query_mode:
+            order = []
+            for field in database_sort_fields[sort_key]:
+                expression = F(field) if isinstance(field, str) else field
+                order.append(
+                    expression.desc(nulls_last=True)
+                    if sort_dir == "desc"
+                    else expression.asc(nulls_last=True)
+                )
+            findings = list(database_qs.order_by(*order))
+        else:
+            # CSV and rendered-cell filters require their complete selected
+            # scope; ordinary group browsing uses the database paginator above.
+            findings = sorted(
+                actionable_qs,
+                key=lambda f: (
+                    _SEVERITY_ORDER.get(f.severity, 9),
+                    -(f.last_detected_at or f.last_seen_at).timestamp(),
+                ),
+            )
 
     # Per-device map of platforms whose latest source-reported state is online.
     # Freshness is deliberately separate from this state and remains available
@@ -3904,6 +4514,49 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     )
     for row in findings_with_detail:
         row["assessment"] = assessments.get(str(row["f"].id))
+        projected = operator_state(
+            status=row["f"].status,
+            snoozed_until=row["f"].snoozed_until,
+            assessment=row["assessment"],
+            now=timezone.now(),
+        )
+        governed_state = operator_states.get(str(row["f"].id))
+        row["operator_status"] = governed_state["status"] if governed_state else projected["status"]
+        row["operator_status_label"] = OPERATOR_STATUS_LABELS[row["operator_status"]]
+        row["operator_attention"] = (
+            governed_state["attention"] if governed_state else projected["attention"]
+        )
+        row["operator_reason"] = (
+            governed_state.get("reason", projected["reason"])
+            if governed_state
+            else projected["reason"]
+        )
+        if row["operator_attention"] == ATTENTION_PENDING and row["operator_reason"] == "Ready for action":
+            row["operator_reason"] = "Pending current assessment"
+        elif row["operator_attention"] == ATTENTION_BLOCKED and row["operator_reason"] == "Ready for action":
+            row["operator_reason"] = "Blocked by current evidence"
+        guidance = operator_guidance(
+            attention=row["operator_attention"],
+            reason=row["operator_reason"],
+            severity=row["f"].severity,
+        )
+        row["operator_owner"] = guidance["owner"]
+        row["operator_next_step"] = guidance["next_step"]
+        row["critical_finding_id"] = governed_state.get("critical_finding_id") if governed_state else ""
+        row["operator_next_url"] = {
+            "subject": row["subject_url"],
+            "reporting": (
+                f'{row["subject_url"]}?tab=observations' if row["subject_url"] else ""
+            ),
+            "sources": reverse("sources_status"),
+            "patch": reverse("patch_evidence_page"),
+            "coverage": reverse("fleet_coverage"),
+            "critical": (
+                f'{reverse("findings_queue")}?{urlencode({"type": governed_state.get("critical_type", ""), "subject_id": governed_state.get("critical_subject_id", "")})}'
+                if governed_state and governed_state.get("critical_type")
+                else ""
+            ),
+        }.get(guidance["route"], "")
 
     # A duplicate-Computer Finding carries the whole collision group.  Resolve
     # the IDs once here so operators can inspect or compare the actual
@@ -3960,7 +4613,37 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
                 }
             )
         row["duplicate_candidates"] = candidates
-    if wants_csv(request):
+
+    # Resolve operator labels before both HTML and CSV rendering. CSV must
+    # use the same taxonomy projection as the page and cannot rely on fields
+    # added later in the response path.
+    for row in findings_with_detail:
+        condition = profile.definitions.get(row["f"].finding_type.name) if profile else None
+        row["issue_label"] = condition["label"] if condition else "Unclassified issue"
+        type_group = next(
+            (group for group in issue_type_groups.values()
+             if row["f"].finding_type.name in group["types"]),
+            None,
+        )
+        category_group = next(
+            (category for category in issue_categories
+             if row["f"].finding_type.name in category["types"]),
+            None,
+        )
+        row["issue_type_key"] = type_group["value"] if type_group else ""
+        row["issue_type_label"] = type_group["label"] if type_group else "Unclassified issue"
+        row["issue_category_key"] = category_group["key"] if category_group else ""
+        row["issue_category_label"] = category_group["label"] if category_group else "Unclassified issue"
+        row["issue_display_label"] = row["issue_label"]
+        details = row["f"].finding_details or {}
+        if details.get("platform") and row["f"].finding_type.name in {
+            "missing_required_platform", "stale_required_platform",
+        }:
+            row["issue_display_label"] += f": {details['platform']}"
+        if details.get("reason_suppressed") == "device_offline":
+            row["issue_display_label"] += " (device offline)"
+
+    def _findings_csv_response():
         return csv_response(
             findings_with_detail,
             columns=[
@@ -3969,8 +4652,6 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
                 ("Issue", lambda r: r["issue_label"]),
                 ("Category", lambda r: r["issue_category_label"]),
                 ("Client", lambda r: (r["f"].client.display_name if r["f"].client else "")),
-                ("Subject type", lambda r: r["f"].subject_type),
-                ("Subject id", lambda r: str(r["f"].subject_id) if r["f"].subject_id else ""),
                 (
                     "Hostname",
                     lambda r: r.get("subject_hostname")
@@ -4000,69 +4681,35 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
                 ),
                 ("Detail", "detail"),
                 ("Online sources", "online_sources"),
-                ("Status", lambda r: r["f"].status),
+                ("Status", "operator_status_label"),
                 (
-                    "Response",
-                    lambda r: (r.get("assessment") or {}).get("disposition", "pending"),
+                    "Attention",
+                    lambda r: OPERATOR_ATTENTION_LABELS.get(r["operator_attention"], "")
+                    if r["operator_attention"]
+                    else "",
                 ),
-                (
-                    "Response reasons",
-                    lambda r: "; ".join((r.get("assessment") or {}).get("reasons", [])),
-                ),
-                (
-                    "Response blockers",
-                    lambda r: "; ".join((r.get("assessment") or {}).get("blockers", [])),
-                ),
-                (
-                    "Assessment scope",
-                    lambda r: "; ".join((r.get("assessment") or {}).get("scopes", [])),
-                ),
+                ("Reason", "operator_reason"),
+                ("Owner", "operator_owner"),
+                ("Next step", "operator_next_step"),
                 ("Confidence", lambda r: r["f"].confidence),
                 ("First seen", lambda r: r["f"].first_seen_at),
                 ("Last seen", lambda r: r["f"].last_seen_at),
                 ("Last detected", lambda r: r["f"].last_detected_at),
                 ("Snoozed until", lambda r: r["f"].snoozed_until),
-                ("Owner", lambda r: (r["f"].owner.username if r["f"].owner else "")),
             ],
             filename_stem="findings",
         )
 
-    for row in findings_with_detail:
-        condition = profile.definitions.get(row["f"].finding_type.name) if profile else None
-        row["issue_label"] = condition["label"] if condition else "Unclassified issue"
-        row["issue_type_label"] = next(
-            (
-                group["label"]
-                for group in issue_type_groups.values()
-                if row["f"].finding_type.name in group["types"]
-            ),
-            "Unclassified issue",
-        ) or "Unclassified issue"
-        row["issue_category_label"] = next(
-            (category["label"] for category in issue_categories
-             if row["f"].finding_type.name in category["types"]),
-            "Unclassified issue",
-        )
-        row["issue_display_label"] = row["issue_label"]
-        details = row["f"].finding_details or {}
-        if details.get("platform") and row["f"].finding_type.name in {
-            "missing_required_platform", "stale_required_platform",
-        }:
-            row["issue_display_label"] += f": {details['platform']}"
-        if details.get("reason_suppressed") == "device_offline":
-            row["issue_display_label"] += " (device offline)"
-
-    # These filters intentionally operate on the rendered cell values, not a
-    # partial database approximation. The complete filtered queryset is small
-    # enough to materialize here, and this keeps filtering faithful to what an
-    # operator actually sees in the table.
+    # Keep these getters as a parity reference for the database annotations
+    # above. Database filtering and ordering must remain equivalent to the
+    # operator-visible table text.
     table_filter_specs = (
         ("severity", lambda row: row["f"].get_severity_display()),
         ("finding", lambda row: row["issue_display_label"]),
         ("subject", lambda row: row["subject_label"]),
         ("evidence", lambda row: row["detail"]),
         ("context", lambda row: row["context"]),
-        ("status", lambda row: row["f"].get_status_display()),
+        ("status", lambda row: row["operator_status_label"]),
         ("date", lambda row: row.get("evidence_date")),
     )
     table_filters = {
@@ -4077,29 +4724,146 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             return value.isoformat(sep=" ")
         return str(value)
 
-    findings_with_detail = [
-        row
-        for row in findings_with_detail
-        if all(
-            not table_filters[key]
-            or table_filters[key].casefold() in _table_value(getter(row)).casefold()
-            for key, getter in table_filter_specs
-        )
+    if not database_query_mode:
+        findings_with_detail = [
+            row
+            for row in findings_with_detail
+            if all(
+                not table_filters[key]
+                or table_filters[key].casefold() in _table_value(getter(row)).casefold()
+                for key, getter in table_filter_specs
+            )
+        ]
+    matching_ids = [row["f"].id for row in findings_with_detail]
+    matching_qs = qs.filter(id__in=matching_ids)
+    total_matching = (
+        database_qs.count()
+        if database_query_mode
+        else len(findings_with_detail)
+        if show_finding_rows
+        else qs.count()
+    )
+    response_matching = total_matching
+    actionable_matching = total_matching
+    matching_qs = database_qs if database_query_mode else (
+        qs if not show_finding_rows else matching_qs
+    )
+    affected_devices = _affected_device_rows(matching_qs)
+    affected_client_count = len({row["client"] for row in affected_devices if row["client"]})
+    result_summary_parts = [
+        f"{total_matching} issue rows",
+        f"{len(affected_devices)} affected Computers",
+        f"{affected_client_count} affected clients",
     ]
-    display_group_summary = {}
-    for row in findings_with_detail:
-        counts = display_group_summary.setdefault(
-            row["issue_type_label"],
-            {value: 0 for value, _label in Finding.Severity.choices},
-        )
-        counts[row["f"].severity] += 1
+    current_result_summary = " · ".join(result_summary_parts)
 
-    sort_key = request.GET.get("sort", "group")
-    if sort_key not in {"group", "severity", "finding", "subject", "evidence", "context", "status", "date"}:
-        sort_key = "group"
-    sort_dir = request.GET.get("dir", "asc")
-    if sort_dir not in {"asc", "desc"}:
-        sort_dir = "asc"
+    if request.GET.get("format") == "devices_csv":
+        return csv_response(
+            affected_devices,
+            columns=[
+                ("Hostname", "hostname"),
+                ("Client", "client"),
+                ("Operating system", "os_name"),
+                ("OS release", "os_release_id"),
+                ("OS build", "os_build_number"),
+                ("Finding types", "finding_types"),
+                ("Device ID", "device_id"),
+            ],
+            filename_stem="affected_devices",
+        )
+    state_counts_by_type: dict[str, dict[str, int]] = {}
+    for finding_id, finding_type_name in governed_qs.values_list("id", "finding_type__name"):
+        attention = operator_states.get(str(finding_id), {}).get("attention", ATTENTION_PENDING)
+        counts = state_counts_by_type.setdefault(
+            finding_type_name,
+            {"needs_action": 0, "blocked": 0, "pending": 0},
+        )
+        if attention in counts:
+            counts[attention] += 1
+    current_type_counts = {}
+    for row in findings_with_detail:
+        current_type_counts[row["f"].finding_type.name] = (
+            current_type_counts.get(row["f"].finding_type.name, 0) + 1
+        )
+    if not show_finding_rows or database_query_mode:
+        current_type_counts = {
+            row["finding_type__name"]: row["n"]
+            for row in database_qs.values("finding_type__name").annotate(n=Count("id"))
+        }
+
+    def _group_link(category_key: str, type_key: str, attention: str = "") -> str:
+        params = request.GET.copy()
+        params.pop("page", None)
+        params["category"] = category_key
+        params["type"] = type_key
+        params.pop("issue", None)
+        params.pop("response", None)
+        if attention:
+            params["attention"] = attention
+        params["sort"] = "group"
+        return "?" + params.urlencode()
+
+    issue_group_headers = []
+    for category in issue_categories:
+        category_types = []
+        for group in issue_type_groups.values():
+            if group["category"] != category["key"]:
+                continue
+            names = set(group["types"])
+            current_count = sum(current_type_counts.get(name, 0) for name in names)
+            state_counts = {
+                state: sum(state_counts_by_type.get(name, {}).get(state, 0) for name in names)
+                for state in ("needs_action", "blocked", "pending")
+            }
+            unresolved_count = sum(state_counts.values())
+            if not current_count and not unresolved_count:
+                continue
+            category_types.append(
+                {
+                    "key": group["value"],
+                    "label": group["label"],
+                    "current_count": current_count,
+                    "unresolved_count": unresolved_count,
+                    "state_counts": state_counts,
+                    "state_links": [
+                        {
+                            "label": label,
+                            "value": state,
+                            "count": state_counts[state],
+                            "href": _group_link(category["key"], group["value"], state),
+                        }
+                        for state, label in (
+                            ("needs_action", "Needs action"),
+                            ("blocked", "Blocked"),
+                            ("pending", "Pending"),
+                        )
+                        if state_counts[state]
+                    ],
+                    "expanded": bool(
+                        type_filter == group["value"]
+                        or issue_filter in names
+                        or active_group_key and names.intersection({type_filter})
+                        or device_id_filter
+                        or subject_id_filter
+                    ),
+                    "href": _group_link(category["key"], group["value"]),
+                }
+            )
+        if category_types:
+            issue_group_headers.append(
+                {
+                    "key": category["key"],
+                    "label": category["label"],
+                    "current_count": sum(item["current_count"] for item in category_types),
+                    "unresolved_count": sum(item["unresolved_count"] for item in category_types),
+                    "state_counts": {
+                        state: sum(item["state_counts"][state] for item in category_types)
+                        for state in ("needs_action", "blocked", "pending")
+                    },
+                    "types": category_types,
+                }
+            )
+
     sort_getters = {
         "group": lambda row: (row["issue_type_label"], row["issue_label"]),
         "severity": lambda row: row["f"].get_severity_display(),
@@ -4107,40 +4871,23 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
         "subject": lambda row: row["subject_label"],
         "evidence": lambda row: row["detail"],
         "context": lambda row: row["context"],
-        "status": lambda row: row["f"].get_status_display(),
+        "status": lambda row: row["operator_status_label"],
         "date": lambda row: row.get("evidence_date") or datetime.min,
     }
-    findings_with_detail.sort(
-        key=lambda row: _table_value(sort_getters[sort_key](row)).casefold(),
-        reverse=sort_dir == "desc",
-    )
-    # The default grouped view renders every collapsed group header so the
-    # operator can see the complete queue structure at once. Column-sorted
-    # views remain paginated, but sorting still happens above this boundary on
-    # the complete filtered dataset.
-    page_size = (len(findings_with_detail) or 1) if sort_key == "group" else 50
-    paginator = Paginator(findings_with_detail, page_size)
-    page = paginator.get_page(request.GET.get("page"))
-    for row in findings_with_detail:
-        row["issue_group"] = row["issue_type_label"]
-    severity_labels = dict(Finding.Severity.choices)
-    for row in page.object_list:
-        severity_counts = display_group_summary.get(
-            row["issue_group"], {value: 0 for value, _label in Finding.Severity.choices}
+    if not database_query_mode:
+        findings_with_detail.sort(
+            key=lambda row: _table_value(sort_getters[sort_key](row)).casefold(),
+            reverse=sort_dir == "desc",
         )
-        row["issue_group_count"] = sum(severity_counts.values())
-        row["issue_group_severity_summary"] = [
-            f"{severity_labels[value]} {count}"
-            for value, count in severity_counts.items()
-            if count
-        ]
-        row["issue_group_expanded"] = bool(
-            type_filter
-            or issue_filter
-            or active_group_key
-            or device_id_filter
-            or subject_id_filter
-        )
+    if wants_csv(request):
+        return _findings_csv_response()
+    # Group headers are rendered from the complete filtered set. Findings are
+    # paginated only after a Type/Issue/drilldown has opened a group.
+    if database_page_mode:
+        page = database_page
+    else:
+        paginator = Paginator(findings_with_detail if show_finding_rows else [], 50)
+        page = paginator.get_page(request.GET.get("page"))
 
     table_base_params = []
     excluded_table_params = {"page", "sort", "dir"}
@@ -4148,6 +4895,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     for key, values in request.GET.lists():
         if key not in excluded_table_params:
             table_base_params.extend((key, value) for value in values)
+    table_clear_query = urlencode(table_base_params)
     sort_links = {}
     for candidate in ("group", "severity", "finding", "subject", "evidence", "context", "status", "date"):
         params = request.GET.copy()
@@ -4211,14 +4959,9 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             ),
             "active_platform": platform_filter,
             "active_online": online_filter,
-            "active_response": response_filter,
-            "response_choices": (
-                ("actionable", "Actionable"),
-                ("blocked", "Blocked"),
-                ("pending", "Pending or unknown"),
-                ("paused", "Attention paused"),
-                ("all", "All retained"),
-            ),
+            "active_attention": attention_filter,
+            "attention_choices": OPERATOR_ATTENTION_CHOICES,
+            "operator_status_choices": OPERATOR_STATUS_CHOICES,
             "active_q": q_filter,
             "active_confidence": confidence_filter,
             "active_client": client_filter,
@@ -4226,8 +4969,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             "active_device_id": device_id_filter,
             "active_group_key": active_group_key,
             "show_snoozed": show_snoozed,
-            "severity_tiles": severity_tiles,
-            "category_tiles": category_tiles,
+            "fleet_summary_cards": fleet_summary_cards,
             "fleet_policy_count": fleet_policy_count,
             "total_matching": total_matching,
             "actionable_matching": actionable_matching,
@@ -4236,10 +4978,11 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             "table_filters": table_filters,
             "table_filter_specs": [key for key, _getter in table_filter_specs],
             "table_base_params": table_base_params,
+            "table_clear_query": table_clear_query,
             "sort_links": sort_links,
             "active_table_sort": sort_key,
             "active_table_dir": sort_dir,
-            "show_group_headers": sort_key == "group",
+            "issue_group_headers": issue_group_headers,
             "affected_device_count": len(affected_devices),
             "page_query": page_query.urlencode(),
             "finding_actions": available_finding_actions(request.user),
@@ -4626,7 +5369,8 @@ def _queue_selected_hudu_archives(request: HttpRequest, ids: list[str], action) 
             # source mutation for a finding that is already blocked, pending,
             # stale, or missing a required participant assessment. The worker
             # repeats this check immediately before the external API call.
-            if str(finding.id) not in _condition_response_ids([finding.id])["actionable"]:
+            governed = _condition_operator_states([finding.id]).get(str(finding.id), {})
+            if governed.get("attention") != ATTENTION_NEEDS_ACTION:
                 no_longer_eligible += 1
                 continue
             # Recheck the exact current source record. A Finding is evidence,
@@ -6939,7 +7683,7 @@ def software_title_lookup(request: HttpRequest, name: str, source: str) -> HttpR
         messages.error(request, f"Unknown lookup source '{source}'.")
         return redirect("software_detail", name=canonical_name)
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(dt_timezone.utc)
     with transaction.atomic(), connection.cursor() as cur:
         cur.execute("SET LOCAL operations.tenant_id = 1")
         cur.execute(
@@ -8246,6 +8990,7 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
 
 
 @login_required
+@require_admin
 def findings_admin_health(request: HttpRequest) -> HttpResponse:
     """Admin/platform-health findings page."""
     status_filter = request.GET.get("status", "active")
@@ -8271,11 +9016,14 @@ def findings_admin_health(request: HttpRequest) -> HttpResponse:
         finding.assessment = assessments.get(str(finding.id))
 
     finding_types = FindingType.objects.filter(finding_class="admin").order_by("name")
+    condition_profile = None
     try:
-        load_active_profile()
+        condition_profile = load_active_profile()
         condition_policy_available = True
     except (RuntimeError, ValueError):
         condition_policy_available = False
+
+    condition_coverage = _condition_coverage_summary(condition_profile)
 
     return render(
         request,
@@ -8290,8 +9038,127 @@ def findings_admin_health(request: HttpRequest) -> HttpResponse:
             "active_status": status_filter,
             "active_severity": severity_filter,
             "active_type": type_filter,
+            "condition_coverage": condition_coverage,
         },
     )
+
+
+def _condition_coverage_summary(profile) -> list[dict]:
+    """Return fresh assessment coverage for every active policy condition."""
+    definitions = profile.definitions if profile else {}
+    if not definitions:
+        return []
+    names = sorted(definitions)
+    taxonomy_by_condition = {
+        condition: {
+            "category": category["key"],
+            "category_label": category["label"],
+            "type": issue_type["key"],
+            "type_label": issue_type["label"],
+        }
+        for category in profile.issue_taxonomy
+        for issue_type in category["types"]
+        for condition in issue_type["conditions"]
+    }
+    placeholders = ", ".join(["%s"] * len(names))
+    with connection.cursor() as cur:
+        cur.execute("SELECT to_regclass('operations.condition_assessments') IS NOT NULL")
+        if not cur.fetchone()[0]:
+            return [
+                {
+                    "name": name,
+                    "label": definitions[name].get("label", name),
+                    "category": taxonomy_by_condition.get(name, {}).get("category_label", definitions[name].get("category", "")),
+                    "category_key": taxonomy_by_condition.get(name, {}).get("category", ""),
+                    "type": taxonomy_by_condition.get(name, {}).get("type_label", definitions[name].get("type", "")),
+                    "type_key": taxonomy_by_condition.get(name, {}).get("type", ""),
+                    "retained": 0,
+                    "assessed": 0,
+                    "missing": 0,
+                }
+                for name in names
+            ]
+        cur.execute(
+            f"""
+            WITH retained AS (
+                SELECT 'entity' AS row_kind, f.id AS finding_id, f.condition_key AS name
+                  FROM operations.findings f
+                 WHERE f.tenant_id = 1
+                   AND f.status IN ('open', 'acknowledged', 'investigating')
+                   AND f.condition_key IN ({placeholders})
+                UNION ALL
+                SELECT 'admin', f.id, f.condition_key
+                  FROM operations.admin_findings f
+                 WHERE f.tenant_id = 1
+                   AND f.status IN ('open', 'acknowledged', 'investigating')
+                   AND f.condition_key IN ({placeholders})
+            ), assessed AS (
+                SELECT a.row_kind, a.finding_id,
+                       COALESCE(
+                           array_agg(DISTINCT
+                               a.participant_kind || ':' || a.participant_id::text || ':' || a.participant_role
+                               ORDER BY a.participant_kind || ':' || a.participant_id::text || ':' || a.participant_role
+                           ) FILTER (WHERE a.participant_kind <> 'condition'
+                                   AND a.participant_role <> 'context'),
+                           ARRAY[]::text[]
+                       ) AS participants,
+                       bool_or(a.participant_kind = 'condition') AS condition_assessed
+                  FROM operations.condition_assessments a
+                  JOIN operations.condition_policy_versions p
+                    ON p.version = a.policy_version AND p.active
+                 WHERE a.tenant_id = 1
+                   AND a.assessed_at >= now() -
+                       (p.policy->>'freshness_hours')::integer * interval '1 hour'
+                 GROUP BY a.row_kind, a.finding_id
+            ), expected AS (
+                SELECT row_kind, finding_id,
+                       COALESCE(
+                           array_agg(DISTINCT
+                               participant_kind || ':' || participant_id::text || ':' || participant_role
+                               ORDER BY participant_kind || ':' || participant_id::text || ':' || participant_role
+                           ),
+                           ARRAY[]::text[]
+                       ) AS participants
+                  FROM operations.condition_participants
+                 WHERE participant_role <> 'context'
+                 GROUP BY row_kind, finding_id
+            )
+            SELECT r.name, count(*) AS retained,
+                   count(*) FILTER (
+                       WHERE (COALESCE(array_length(e.participants, 1), 0) = 0 AND a.condition_assessed)
+                          OR (COALESCE(array_length(e.participants, 1), 0) > 0
+                              AND a.participants = e.participants)
+                   ) AS assessed
+              FROM retained r
+              LEFT JOIN assessed a
+                ON a.row_kind = r.row_kind AND a.finding_id = r.finding_id
+              LEFT JOIN expected e
+                ON e.row_kind = r.row_kind AND e.finding_id = r.finding_id
+             GROUP BY r.name
+            """,
+            names + names,
+        )
+        counts = {
+            name: (int(retained), int(assessed))
+            for name, retained, assessed in cur.fetchall()
+        }
+    return [
+        {
+            "name": name,
+            "label": definitions[name].get("label", name),
+            "category": taxonomy_by_condition.get(name, {}).get("category_label", definitions[name].get("category", "")),
+            "category_key": taxonomy_by_condition.get(name, {}).get("category", ""),
+            "type": taxonomy_by_condition.get(name, {}).get("type_label", definitions[name].get("type", "")),
+            "type_key": taxonomy_by_condition.get(name, {}).get("type", ""),
+            "retained": counts.get(name, (0, 0))[0],
+            "assessed": counts.get(name, (0, 0))[1],
+            "missing": max(
+                0,
+                counts.get(name, (0, 0))[0] - counts.get(name, (0, 0))[1],
+            ),
+        }
+        for name in names
+    ]
 
 
 @login_required

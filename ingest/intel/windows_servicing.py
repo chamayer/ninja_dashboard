@@ -504,7 +504,9 @@ def _record_assessment(cur, tenant_id, finding_id, finding_type_id,
         cur,
         condition,
         (identity_signal,),
-        EvaluationCoverage(False, False, False, False),
+        # The servicing table was read during this collector cycle and the
+        # identity signal was evaluated for this device.
+        EvaluationCoverage(True, True, True, True),
         now=now,
         reevaluation_key=f"windows_servicing:{condition_key}",
         participant=participant,

@@ -46,6 +46,11 @@ def test_software_read_models_refresh_in_dependency_order(monkeypatch) -> None:
     monkeypatch.setattr(software.db, "pool", pool)
 
     lifecycle_runs = []
+    catalog_runs = []
+    monkeypatch.setattr(
+        "ingest.software_catalog.project_software_catalog",
+        lambda: catalog_runs.append(True) or {},
+    )
     monkeypatch.setattr(
         "ingest.intel.eol_match.run_once", lambda: lifecycle_runs.append(True) or 0
     )
@@ -57,3 +62,4 @@ def test_software_read_models_refresh_in_dependency_order(monkeypatch) -> None:
         "REFRESH MATERIALIZED VIEW CONCURRENTLY operations.v_software_safety",
     ]
     assert lifecycle_runs == [True]
+    assert catalog_runs == [True]

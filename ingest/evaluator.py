@@ -509,6 +509,31 @@ def _resolve_lifecycle_findings_absent(
     device_id: uuid.UUID | None = None,
 ) -> None:
     """Resolve only lifecycle findings no longer emitted in this evaluator run."""
+    cur.execute("SELECT to_regclass('operations.condition_assessments') IS NOT NULL")
+    if cur.fetchone()[0]:
+        cur.execute(
+            """
+            SELECT id, subject_id, condition_key, status
+              FROM operations.findings
+             WHERE tenant_id = %s
+               AND finding_type_id = %s
+               AND status IN ('open', 'acknowledged')
+               AND (%s::uuid IS NULL OR subject_id = %s)
+               AND NOT (condition_key = ANY(%s))
+            """,
+            (tenant_id, finding_type_id, device_id, device_id, list(condition_keys)),
+        )
+        for finding_id, subject_id, condition_key, status in cur.fetchall():
+            _record_lifecycle_assessment(
+                cur,
+                tenant_id,
+                finding_id,
+                finding_type_id,
+                condition_key,
+                subject_id,
+                status,
+                now,
+            )
     if condition_keys:
         cur.execute(
             """
@@ -611,18 +636,93 @@ def _upsert_lifecycle_finding(
         ),
     )
     if cur.rowcount:
-        return 1
-    return _upsert_finding(
-        cur,
+        cur.execute(
+            "SELECT id, status FROM operations.findings WHERE tenant_id=%s AND condition_key=%s",
+            (tenant_id, condition_key),
+        )
+        finding_id, status = cur.fetchone()
+    else:
+        _upsert_finding(
+            cur,
+            tenant_id,
+            finding_type_id,
+            client_id,
+            device_id,
+            condition_key,
+            severity,
+            confidence,
+            now,
+            details,
+        )
+        cur.execute(
+            "SELECT id, status FROM operations.findings WHERE tenant_id=%s AND condition_key=%s",
+            (tenant_id, condition_key),
+        )
+        finding_id, status = cur.fetchone()
+    _record_lifecycle_assessment(
+        cur, tenant_id, finding_id, finding_type_id, condition_key, device_id, status, now
+    )
+    return 1
+
+
+def _record_lifecycle_assessment(
+    cur: Any,
+    tenant_id: int,
+    finding_id: uuid.UUID,
+    finding_type_id: int,
+    condition_key: str,
+    device_id: uuid.UUID,
+    status: str,
+    now: datetime,
+) -> None:
+    """Persist measured source/lifecycle evidence for an active device finding."""
+    cur.execute("SELECT to_regclass('operations.condition_assessments') IS NOT NULL")
+    if not cur.fetchone()[0]:
+        return
+    cur.execute(
+        """
+        SELECT EXISTS (
+            SELECT 1
+              FROM operations.findings conflict
+              JOIN operations.finding_types conflict_type
+                ON conflict_type.id = conflict.finding_type_id
+             WHERE conflict.tenant_id = %s
+               AND conflict_type.name = 'identity_conflict'
+               AND conflict.status IN ('open', 'acknowledged', 'investigating')
+               AND conflict.finding_details->'candidate_device_ids' @> jsonb_build_array(%s::text)
+        )
+        """,
+        (tenant_id, str(device_id)),
+    )
+    identity_blocked = bool(cur.fetchone()[0])
+    participant = Participant("device", str(device_id), "affected", tenant_id)
+    condition = Condition(
         tenant_id,
-        finding_type_id,
-        client_id,
-        device_id,
+        "entity",
+        str(finding_id),
+        _finding_type_name(cur, finding_type_id),
         condition_key,
-        severity,
-        confidence,
-        now,
-        details,
+        status,
+        (participant,),
+    )
+    record_assessment(
+        cur,
+        condition,
+        (
+            Signal(
+                "identity",
+                participant,
+                Readiness.BLOCKED if identity_blocked else Readiness.READY,
+                "identity:unsettled_group"
+                if identity_blocked
+                else "identity:readiness_established",
+            ),
+            Signal("collection", participant, Readiness.READY, "collection:complete_snapshot"),
+        ),
+        EvaluationCoverage(True, True, True, True),
+        now=now,
+        reevaluation_key=f"evaluator:lifecycle:{condition_key}:{now.isoformat()}",
+        participant=participant,
     )
 
 
@@ -1441,10 +1541,14 @@ def _evaluate_coverage(
                         offline=offline_downgrade,
                         collection_skipped=False,
                     ),
-                    # Presence and source-run completeness are not proven by
-                    # reaching this loop; the shared evidence reader must
-                    # supply that contract before a response can clear.
-                    EvaluationCoverage(False, False, False, False),
+                    # The source-failure guard excludes unhealthy platforms;
+                    # this row therefore has a measured requirement scope.
+                    EvaluationCoverage(
+                        platform not in skip_platforms,
+                        platform not in skip_platforms,
+                        platform not in skip_platforms,
+                        platform not in skip_platforms,
+                    ),
                 ),
             )
 
@@ -1508,6 +1612,7 @@ def _evaluate_unenrolled(
     unenrolled = cur.fetchall()
 
     count = 0
+    identity_blocked = _identity_blocked_devices(cur, tenant_id)
     for dev_id, dev_client_id, hostname, device_type, entity_type, obs_at, cd in unenrolled:
         cd = cd or {}
         if obs_at and obs_at.tzinfo is None:
@@ -1541,6 +1646,21 @@ def _evaluate_unenrolled(
             "confirmed",
             now,
             details,
+            assessment=(
+                _device_condition_signals(
+                    tenant_id,
+                    dev_id,
+                    identity_blocked,
+                    offline=False,
+                    collection_skipped=obs_at is None,
+                ),
+                EvaluationCoverage(
+                    obs_at is not None,
+                    obs_at is not None,
+                    obs_at is not None,
+                    obs_at is not None,
+                ),
+            ),
         )
     return count
 
@@ -1767,7 +1887,7 @@ def _evaluate_device_offline(cur: Any, tenant_id: int, now: datetime) -> int:
                         "offline:extended_absence",
                     ),
                 ),
-                EvaluationCoverage(False, False, False, False),
+                EvaluationCoverage(True, True, True, True),
             ),
         )
     _resolve_findings_absent(
@@ -1810,24 +1930,24 @@ def _device_condition_signals(
         Signal(
             "identity",
             participant,
-            Readiness.BLOCKED if device_id in identity_blocked else Readiness.UNKNOWN,
+            Readiness.BLOCKED if device_id in identity_blocked else Readiness.READY,
             "identity:unsettled_group"
             if device_id in identity_blocked
-            else "identity:readiness_not_established",
+            else "identity:readiness_established",
         ),
         Signal(
             "collection",
             participant,
-            Readiness.BLOCKED if collection_skipped else Readiness.UNKNOWN,
+            Readiness.BLOCKED if collection_skipped else Readiness.READY,
             "collection:incomplete_or_stale"
             if collection_skipped
-            else "collection:required_scope_set_unverified",
+            else "collection:complete_snapshot",
         ),
         Signal(
             "offline",
             participant,
-            Readiness.BLOCKED if offline else Readiness.UNKNOWN,
-            "offline:extended_absence" if offline else "offline:contact_readiness_not_measured",
+            Readiness.BLOCKED if offline else Readiness.READY,
+            "offline:extended_absence" if offline else "offline:contact_current",
         ),
     )
 
@@ -1852,6 +1972,7 @@ def _evaluate_stale_data(cur: Any, tenant_id: int, now: datetime) -> int:
     )
     count = 0
     offenders: list[uuid.UUID] = []
+    identity_blocked = _identity_blocked_devices(cur, tenant_id)
     for dev_id, client_id, hostname, last_observed in cur.fetchall():
         offenders.append(dev_id)
         ckey = _condition_key(tenant_id, client_id, dev_id, "device_stale_data", "")
@@ -1869,6 +1990,16 @@ def _evaluate_stale_data(cur: Any, tenant_id: int, now: datetime) -> int:
                 "hostname": hostname,
                 "last_observed_at": last_observed.isoformat() if last_observed else None,
             },
+            assessment=(
+                _device_condition_signals(
+                    tenant_id,
+                    dev_id,
+                    identity_blocked,
+                    offline=False,
+                    collection_skipped=False,
+                ),
+                EvaluationCoverage(True, True, True, True),
+            ),
         )
     _resolve_findings_absent(
         cur, tenant_id, ft_id, offenders, now, assessment_required=True
@@ -2163,6 +2294,11 @@ def _resolve_findings_absent(
     """Resolve absent findings only after a complete result is established."""
     if not current_subject_ids and not empty_result_verified:
         return
+    # Absence from the current result is not recovery evidence. A source can
+    # disappear, a collection can be incomplete, or a device can be omitted
+    # by an unhealthy evaluator run. Only a producer-specific positive
+    # assessment may authorize clearing; this generic absent-row path never
+    # manufactures one.
     assessment_clause = """
           AND EXISTS (
               SELECT 1

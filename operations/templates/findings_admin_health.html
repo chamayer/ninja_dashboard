@@ -15,6 +15,28 @@
     {% endif %}
 </div>
 
+{% if condition_coverage %}
+<div class="card">
+    <h2>Condition assessment coverage</h2>
+    <p class="muted">Fresh active-policy assessments for retained findings. Missing rows remain visible in Issues and are not treated as cleared.</p>
+    <table class="ops-table">
+        <thead><tr><th>Category</th><th>Type</th><th>Issue</th><th class="num">Retained</th><th class="num">Fresh assessments</th><th class="num">Missing</th></tr></thead>
+        <tbody>
+        {% for row in condition_coverage %}
+            <tr>
+                <td>{{ row.category }}</td>
+                <td>{{ row.type }}</td>
+                <td><a href="{% url 'findings_queue' %}?category={{ row.category_key|urlencode }}&type={{ row.type_key|urlencode }}&issue={{ row.name|urlencode }}">{{ row.label }}</a></td>
+                <td class="num">{{ row.retained }}</td>
+                <td class="num">{{ row.assessed }}</td>
+                <td class="num">{{ row.missing }}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
 <div class="card">
     <form action="" method="get" style="display: flex; gap: 1rem; flex-wrap: wrap; align-items: end;">
         <div>

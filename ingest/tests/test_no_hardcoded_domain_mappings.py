@@ -85,6 +85,12 @@ KNOWN: dict[str, str] = {
     "_BUILTIN_ALIASES": "MIGRATE alias mapping; alias TABLES already exist for client/platform/publisher",
     "_CANONICAL_SLUG_MAP": "BASELINE 2026-08-05 - not individually reviewed",
     "_CARD_TITLE_OVERRIDES": "BASELINE 2026-08-05 - not individually reviewed",
+    "_COVERAGE_STATES": "EXEMPT operator coverage-state display vocabulary",
+    "_CLOSED_STATUSES": "EXEMPT operator workflow status vocabulary",
+    "_ACKNOWLEDGED_STATUSES": "EXEMPT operator workflow status vocabulary",
+    "_REASON_LABELS": "EXEMPT operator-facing reason labels",
+    "OPERATOR_ATTENTION_CHOICES": "EXEMPT operator Issues filter vocabulary",
+    "OPERATOR_STATUS_CHOICES": "EXEMPT operator Issues status vocabulary",
     "_CLASSIFIER_DEFAULTS": "MIGRATE classifier defaults; belongs in config rows",
     "_CLIENT_DOMAIN_LABELS": "EXEMPT UI/dashboard definition",
     "_COALESCED_OFFLINE_FINDING_TYPES": "MIGRATE finding type -> coalesce-when-offline behavior; same shape as finding_types.suppressed_by_approval (0136) and .subject_scope (0130), so it belongs in that registry",
@@ -123,6 +129,7 @@ KNOWN: dict[str, str] = {
     "_LIFECYCLE_NEGATIVE_POWER_STATES": "MIGRATE power-state vocabulary",
     "_LIFECYCLE_POSITIVE_POWER_STATES": "MIGRATE power-state vocabulary",
     "_LIFECYCLE_REPORTED_MODES": "BASELINE 2026-08-05 - not individually reviewed",
+    "_MATCHERS": "EXEMPT identity matching dispatch definitions",
     "_LOOKUP_SOURCES": "BASELINE 2026-08-05 - not individually reviewed",
     "_NAMESPACES": "BASELINE 2026-08-05 - not individually reviewed",
     "_NINJA_DEVICE_MATERIAL_FIELDS": "MIGRATE material projection definition",
@@ -169,6 +176,7 @@ KNOWN: dict[str, str] = {
     "_SCALAR_SUFFIX_RULES": "BASELINE 2026-08-05 - not individually reviewed",
     "_SEVERITY_OPTIONS": "EXEMPT UI/dashboard definition",
     "_SEVERITY_RANK": "MIGRATE severity ordering",
+    "_SIGNALS": "EXEMPT identity signal dispatch definitions",
     "_SOFTWARE_POLICY_CANDIDATE_TYPES": (
         "MIGRATE finding type -> offered as a software policy candidate; same "
         "shape as finding_types.suppressed_by_approval (0136) and "
@@ -176,6 +184,7 @@ KNOWN: dict[str, str] = {
     ),
     "_SOURCES_FALLBACK": "BASELINE 2026-08-05 - not individually reviewed",
     "_STATUS_OPTIONS": "EXEMPT UI/dashboard definition",
+    "_TAG_OWNED_SOURCES": "EXEMPT capability source ownership boundary",
     "_STOP_TOKENS": "BASELINE 2026-08-05 - not individually reviewed",
     "_TIMELINE_PARAM_MAPPINGS": "BASELINE 2026-08-05 - not individually reviewed",
     "_TRENDS_PARAM_MAPPINGS": "BASELINE 2026-08-05 - not individually reviewed",
