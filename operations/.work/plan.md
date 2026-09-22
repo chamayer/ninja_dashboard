@@ -371,15 +371,17 @@ found a missing outer `{% endif %}` in `findings_queue.html`; the first CSV
 smoke test found unescaped `%` literals in a psycopg RawSQL expression. Both
 are corrected locally and covered by focused tests.
 
-Validation of the local follow-up: 40 focused Issues tests pass; Django
-checks, migration-drift checks, Python compilation, targeted Ruff, and
-`git diff --check` pass. The production authenticated HTML and CSV smoke tests
-remain failing on deployed commit `d0ea05f` until this local follow-up is
-approved, committed, and pushed. No migration or production data mutation is
-required.
+Commit `82674f5` pushed the performance, template, and percent-literal
+corrections. Its authenticated smoke run found one additional RawSQL issue:
+PostgreSQL gives `||` higher precedence than `->>`, so every JSON-text
+extraction used as a concatenation operand must be parenthesized. The current
+local follow-up makes that correction across the Evidence projection and adds
+a regression test. Validation: 41 focused Issues tests pass; Django checks,
+migration-drift checks, Python compilation, targeted Ruff, and `git diff
+--check` pass. No migration or production data mutation is required.
 
-Next action: obtain separate approval to commit and push this performance and
-smoke-test correction, then rerun the authenticated production HTML and CSV
-smoke tests and measure the corrected queue projection runtime.
+Next action: obtain separate approval to commit and push the RawSQL precedence
+correction, then rerun the authenticated production HTML and CSV smoke tests
+and measure the corrected queue projection runtime.
 Pause only for a material product decision, conflicting user work, migration
 approval, production mutation, or separate commit/push authorization.

@@ -405,6 +405,12 @@ def test_database_evidence_projection_escapes_psycopg_percent_literals():
     assert "LIKE 'windows_servicing_%'" not in queue
 
 
+def test_database_evidence_projection_parenthesizes_json_text_before_concatenation():
+    source = Path("apps/core/views.py").read_text(encoding="utf-8")
+    queue = source[source.index("def findings_queue"):source.index("def _policy_candidate_state_action_blocked")]
+    assert "|| finding_details->>" not in queue
+
+
 def test_admin_health_is_admin_only():
     source = Path("apps/core/views.py").read_text(encoding="utf-8")
     assert "@require_admin" in source[source.rfind("@login_required", 0, source.index("def findings_admin_health")):source.index("def findings_admin_health")]

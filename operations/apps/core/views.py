@@ -3878,7 +3878,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
           WHEN finding_type_id = (SELECT id FROM operations.finding_types WHERE name = 'device_unenrolled')
             THEN COALESCE(finding_details->>'power_state', 'unknown')
                  || CASE WHEN finding_details->>'days_since_last_seen' IS NOT NULL
-                        THEN ' · ' || finding_details->>'days_since_last_seen' || 'd' ELSE '' END
+                        THEN ' · ' || (finding_details->>'days_since_last_seen') || 'd' ELSE '' END
                  || ' · via ' || COALESCE(finding_details->>'observed_via', 'tracked')
           WHEN finding_type_id = (SELECT id FROM operations.finding_types WHERE name = 'device_source_record_withdrawn')
             THEN 'removed from ' || COALESCE(finding_details->>'source', 'source')
@@ -3887,7 +3887,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
           WHEN finding_type_id = (SELECT id FROM operations.finding_types WHERE name = 'device_missing_from_source')
             THEN 'no current sources'
                  || CASE WHEN NULLIF(finding_details->>'last_source', '') IS NOT NULL
-                         THEN ' · last: ' || finding_details->>'last_source' ELSE '' END
+                         THEN ' · last: ' || (finding_details->>'last_source') ELSE '' END
                  || CASE WHEN NULLIF(finding_details->>'last_seen_at', '') IS NOT NULL
                          THEN ' · ' || left(finding_details->>'last_seen_at', 10) ELSE '' END
           WHEN finding_type_id IN (SELECT id FROM operations.finding_types WHERE name IN ('device_offline', 'device_long_offline'))
@@ -3905,14 +3905,14 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
                     ELSE 'no source has contact'
                  END
                  || CASE WHEN NULLIF(finding_details->>'last_seen_source', '') IS NOT NULL
-                         THEN ' (last: ' || finding_details->>'last_seen_source' || ')' ELSE '' END
+                         THEN ' (last: ' || (finding_details->>'last_seen_source') || ')' ELSE '' END
           WHEN finding_type_id = (SELECT id FROM operations.finding_types WHERE name = 'device_role_conflict')
             THEN COALESCE(finding_details->>'previous_role', '?') || ' → '
                  || COALESCE(finding_details->>'new_role', '?')
           WHEN finding_type_id = (SELECT id FROM operations.finding_types WHERE name = 'identity_conflict')
             THEN COALESCE(
                     CASE WHEN NULLIF(finding_details->>'candidate_count', '') IS NOT NULL
-                         THEN finding_details->>'candidate_count' || ' Computer records' END,
+                         THEN (finding_details->>'candidate_count') || ' Computer records' END,
                     'possible duplicate Computer'
                  )
                  || CASE WHEN COALESCE(finding_details->>'evidence_summary', finding_details->>'match_signal') IS NOT NULL
@@ -3920,15 +3920,15 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
           WHEN finding_type_id = (SELECT id FROM operations.finding_types WHERE name = 'cmdb_asset_stale')
             THEN COALESCE(finding_details->>'name', 'Hudu record')
                  || CASE WHEN NULLIF(finding_details->>'layout', '') IS NOT NULL
-                         THEN ' · ' || finding_details->>'layout' ELSE '' END
+                         THEN ' · ' || (finding_details->>'layout') ELSE '' END
                  || ' · linked source record is gone'
           WHEN finding_type_id = (SELECT id FROM operations.finding_types WHERE name = 'cross_client_serial')
             THEN CASE WHEN finding_details->>'device_count' IS NOT NULL
                             AND finding_details->>'client_count' IS NOT NULL
                             AND NULLIF(finding_details->>'serial', '') IS NOT NULL
-                      THEN finding_details->>'device_count' || ' devices across '
-                           || finding_details->>'client_count' || ' clients share serial '
-                           || finding_details->>'serial'
+                      THEN (finding_details->>'device_count') || ' devices across '
+                           || (finding_details->>'client_count') || ' clients share serial '
+                           || (finding_details->>'serial')
                       ELSE 'cross-client serial' END
           WHEN finding_type_id IN (SELECT id FROM operations.finding_types WHERE name LIKE 'windows_servicing_%%')
             THEN concat_ws(' · ',
@@ -3940,7 +3940,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
                                   SELECT id FROM operations.finding_types WHERE name LIKE 'windows_servicing_%%_eol'
                               )
                               THEN 'support ended ' ELSE 'ends ' END
-                              || finding_details->>'security_support_ends_on' END
+                              || (finding_details->>'security_support_ends_on') END
                  )
           WHEN finding_type_id IN (SELECT id FROM operations.finding_types WHERE name IN (
                 'unauthorized_av', 'unauthorized_rmm', 'unauthorized_remote_access',
@@ -3949,7 +3949,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             THEN CASE WHEN NULLIF(finding_details->>'canonical_name', '') IS NOT NULL
                       THEN finding_details->>'canonical_name'
                            || CASE WHEN NULLIF(finding_details->>'publisher', '') IS NOT NULL
-                                   THEN ' (' || finding_details->>'publisher' || ')' ELSE '' END
+                                  THEN ' (' || (finding_details->>'publisher') || ')' ELSE '' END
                            || CASE WHEN COALESCE(
                                       NULLIF(finding_details->>'location', ''),
                                       NULLIF(finding_details->>'install_path', '')
@@ -3969,24 +3969,24 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             THEN COALESCE(NULLIF(concat_ws(' · ',
                     NULLIF(finding_details->>'canonical_name', ''),
                     CASE WHEN finding_details->>'fleet_device_count' IS NOT NULL
-                         THEN 'on ' || finding_details->>'fleet_device_count' || ' machine'
+                         THEN 'on ' || (finding_details->>'fleet_device_count') || ' machine'
                               || CASE WHEN finding_details->>'fleet_device_count' <> '1' THEN 's' ELSE '' END END,
                     CASE WHEN finding_details->>'first_seen_days' IS NOT NULL
-                         THEN 'first seen ' || finding_details->>'first_seen_days' || 'd ago' END
+                         THEN 'first seen ' || (finding_details->>'first_seen_days') || 'd ago' END
                  ), ''), 'rare install')
           WHEN finding_type_id = (SELECT id FROM operations.finding_types WHERE name = 'whitelist_suggestion')
             THEN CASE WHEN finding_details->>'fleet_device_count' IS NOT NULL
                            AND finding_details->>'threshold' IS NOT NULL
-                      THEN 'installed on ' || finding_details->>'fleet_device_count'
-                           || ' devices (review threshold ' || finding_details->>'threshold' || ')'
+                      THEN 'installed on ' || (finding_details->>'fleet_device_count')
+                           || ' devices (review threshold ' || (finding_details->>'threshold') || ')'
                       WHEN finding_details->>'fleet_device_count' IS NOT NULL
-                      THEN 'installed on ' || finding_details->>'fleet_device_count'
+                      THEN 'installed on ' || (finding_details->>'fleet_device_count')
                            || ' devices; no decision recorded'
                       ELSE COALESCE(finding_details->>'reason', 'widespread software with no decision') END
           WHEN finding_type_id = (SELECT id FROM operations.finding_types WHERE name = 'vulnerable_software')
             THEN COALESCE(finding_details->>'reason', 'matched vulnerability intelligence')
                  || CASE WHEN finding_details->>'worst_cvss' IS NOT NULL
-                         THEN ' · CVSS ' || finding_details->>'worst_cvss' ELSE '' END
+                         THEN ' · CVSS ' || (finding_details->>'worst_cvss') ELSE '' END
                  || CASE WHEN jsonb_array_length(COALESCE(finding_details->'kev_cves', '[]'::jsonb)) > 0
                          THEN ' · KEV: ' || COALESCE((
                               SELECT string_agg(value, ', ')
@@ -4002,7 +4002,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
                          ELSE '' END
           WHEN finding_type_id = (SELECT id FROM operations.finding_types WHERE name = 'known_malicious_hint')
             THEN CASE WHEN finding_details->>'threat_hit_count' IS NOT NULL
-                      THEN finding_details->>'threat_hit_count' || ' community threat-intel hit'
+                      THEN (finding_details->>'threat_hit_count') || ' community threat-intel hit'
                            || CASE WHEN finding_details->>'threat_hit_count' <> '1' THEN 's' ELSE '' END
                       ELSE COALESCE(finding_details->>'reason', 'community threat-intel accumulation') END
           ELSE COALESCE(finding_details->>'platform', '')
