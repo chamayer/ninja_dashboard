@@ -6,6 +6,7 @@ from urllib.parse import parse_qs
 import pytest
 from django.core.exceptions import PermissionDenied
 from django.test import RequestFactory
+from django.template.loader import get_template
 
 from apps.core import views
 from apps.core.conditions.operator import operator_guidance, operator_state
@@ -353,7 +354,8 @@ def test_findings_queue_summary_cards_use_fleet_wide_operator_counts():
     source = Path("apps/core/views.py").read_text(encoding="utf-8")
     template = Path("templates/findings_queue.html").read_text(encoding="utf-8")
     assert "fleet_governed_qs = Finding.objects.filter" in source
-    assert "fleet_states = _condition_operator_states" in source
+    assert "fleet_id_keys = {str(finding_id) for finding_id in fleet_ids}" in source
+    assert "if operator_states.keys() == fleet_id_keys" in source
     assert '"label": "Pending"' in source
     assert "Review by state" in template
     assert "operator_owner" in source
@@ -395,6 +397,14 @@ def test_database_queue_projection_covers_rendered_evidence_context_and_subject_
     assert 'f"rendered_{key}__icontains"' in queue
 
 
+def test_database_evidence_projection_escapes_psycopg_percent_literals():
+    source = Path("apps/core/views.py").read_text(encoding="utf-8")
+    queue = source[source.index("def findings_queue"):source.index("def _policy_candidate_state_action_blocked")]
+    assert "LIKE 'windows_servicing_%%'" in queue
+    assert "LIKE 'windows_servicing_%%_eol'" in queue
+    assert "LIKE 'windows_servicing_%'" not in queue
+
+
 def test_admin_health_is_admin_only():
     source = Path("apps/core/views.py").read_text(encoding="utf-8")
     assert "@require_admin" in source[source.rfind("@login_required", 0, source.index("def findings_admin_health")):source.index("def findings_admin_health")]
@@ -428,6 +438,18 @@ def test_condition_response_reads_are_batched():
     assert "for offset in range(0, len(ids), 1000)" in source
     assert "batch = ids[offset:offset + 1000]" in source
     assert "[batch, batch]" in source
+
+
+def test_operator_state_uses_an_id_index_for_critical_priority():
+    source = Path("apps/core/views.py").read_text(encoding="utf-8")
+    section = source[source.index("def _condition_operator_states"):source.index("def _operator_issue_type_groups")]
+    assert 'row_by_id = {str(row["id"]): row for row in rows}' in section
+    assert 'row_by_id[key]["severity"]' in section
+    assert 'next((row["severity"] for row in rows' not in section
+
+
+def test_findings_queue_template_compiles():
+    get_template("findings_queue.html")
 
 
 def test_device_surface_exposes_governed_response_state():

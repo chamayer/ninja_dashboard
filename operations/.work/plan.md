@@ -2,7 +2,8 @@
 
 ## Status
 
-**Implementation complete locally; deployment verification pending.** This supersedes the
+**Implementation complete and pushed; production correctness reconciliation
+passed, with query-performance review pending.** This supersedes the
 completed taxonomy rollout plan. The active taxonomy remains five Categories,
 34 Types, and 53 Issues. This work changes the operator projection, count
 semantics, assessment coverage, and Issues-page layout; it does not rename
@@ -351,14 +352,34 @@ implementation. The latest Pending terminology, conservative visibility, and
 Critical-priority corrections add focused queue coverage, and the Operations
 suite remains at 172 passed with two PostgreSQL tests skipped.
 
-Next action: after an explicitly authorized deployment, run the deployed
-PostgreSQL query-plan and row-count review, followed by read-only production
-reconciliation of card conservation, Category/Type totals, assessments,
-links/CSVs, and service health.
-No commit, push, deployment, migration, or production data mutation has been
-performed for this plan yet.
+Deployment verification on 2026-09-22: commit `d0ea05f` was pushed to both
+remotes; the Operations `/healthz` endpoint returned HTTP 200; the Operations,
+ingest, Postgres, and Metabase containers reported healthy; and all Django
+migrations reported applied. The first shell query incorrectly returned zero
+tenant rows because it omitted the required `operations.tenant_id` session
+context. A corrected read-only query under tenant 1 found 24,548 open and
+445,919 resolved Findings, 6,491 current-taxonomy assessments, successful
+recent source/evaluator runs, and 4,229 complete observation snapshots.
 
-No commit, push, deployment, migration, or production data mutation has been
-performed for this plan yet.
+Production reconciliation classified all 22,749 governed open Findings
+exactly once: 2,213 Needs action, 184 Blocked, and 20,352 Pending; 1,799
+Software decisions remain separate. It also exposed an O(n²) Critical-priority
+scan in the shared operator-state projection. The current local follow-up
+indexes rows by ID, reuses the selected projection for unfiltered fleet cards,
+and adds regression coverage. The first authenticated HTML smoke test also
+found a missing outer `{% endif %}` in `findings_queue.html`; the first CSV
+smoke test found unescaped `%` literals in a psycopg RawSQL expression. Both
+are corrected locally and covered by focused tests.
+
+Validation of the local follow-up: 40 focused Issues tests pass; Django
+checks, migration-drift checks, Python compilation, targeted Ruff, and
+`git diff --check` pass. The production authenticated HTML and CSV smoke tests
+remain failing on deployed commit `d0ea05f` until this local follow-up is
+approved, committed, and pushed. No migration or production data mutation is
+required.
+
+Next action: obtain separate approval to commit and push this performance and
+smoke-test correction, then rerun the authenticated production HTML and CSV
+smoke tests and measure the corrected queue projection runtime.
 Pause only for a material product decision, conflicting user work, migration
 approval, production mutation, or separate commit/push authorization.

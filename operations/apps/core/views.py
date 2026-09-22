@@ -485,13 +485,16 @@ def _condition_operator_states(finding_ids, *, now=None) -> dict[str, dict[str, 
         }
         states[key].update({"subject_type": row["subject_type"], "subject_id": str(row["subject_id"])})
 
+    # State projection can cover the complete fleet. Index the loaded rows
+    # before identifying Critical findings: scanning ``rows`` once per ready
+    # finding made the default Issues view quadratic in the queue size.
+    row_by_id = {str(row["id"]): row for row in rows}
     critical_ids = {
         key for key, state in states.items()
         if state["attention"] == ATTENTION_NEEDS_ACTION
-        and next((row["severity"] for row in rows if str(row["id"]) == key), "") == Finding.Severity.CRITICAL
+        and row_by_id[key]["severity"] == Finding.Severity.CRITICAL
     }
     if critical_ids:
-        row_by_id = {str(row["id"]): row for row in rows}
         critical_subjects = {
             (row_by_id[key]["subject_type"], str(row_by_id[key]["subject_id"]))
             for key in critical_ids
@@ -3614,7 +3617,15 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
         status__in=_FINDING_ACTIVE_STATUSES,
     ).exclude(finding_type__name__in=_SOFTWARE_POLICY_CANDIDATE_TYPES)
     fleet_ids = list(fleet_governed_qs.values_list("id", flat=True))
-    fleet_states = _condition_operator_states(fleet_ids)
+    # The default queue already covers the fleet. Reuse its governed state
+    # projection for the unfiltered summary cards instead of evaluating the
+    # same complete population a second time.
+    fleet_id_keys = {str(finding_id) for finding_id in fleet_ids}
+    fleet_states = (
+        operator_states
+        if operator_states.keys() == fleet_id_keys
+        else _condition_operator_states(fleet_ids)
+    )
     fleet_counts = {
         attention: sum(
             1 for state in fleet_states.values() if state["attention"] == attention
@@ -3919,14 +3930,14 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
                            || finding_details->>'client_count' || ' clients share serial '
                            || finding_details->>'serial'
                       ELSE 'cross-client serial' END
-          WHEN finding_type_id IN (SELECT id FROM operations.finding_types WHERE name LIKE 'windows_servicing_%')
+          WHEN finding_type_id IN (SELECT id FROM operations.finding_types WHERE name LIKE 'windows_servicing_%%')
             THEN concat_ws(' · ',
                     NULLIF(finding_details->>'os_name', ''),
                     'build ' || COALESCE(finding_details->>'os_build_number', finding_details->>'build_number', '?'),
                     NULLIF(finding_details->>'cycle', ''),
                     CASE WHEN NULLIF(finding_details->>'security_support_ends_on', '') IS NOT NULL
                          THEN CASE WHEN finding_type_id IN (
-                                  SELECT id FROM operations.finding_types WHERE name LIKE 'windows_servicing_%_eol'
+                                  SELECT id FROM operations.finding_types WHERE name LIKE 'windows_servicing_%%_eol'
                               )
                               THEN 'support ended ' ELSE 'ends ' END
                               || finding_details->>'security_support_ends_on' END
