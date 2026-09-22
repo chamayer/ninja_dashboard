@@ -4092,11 +4092,18 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
         "rendered_status": status_label_expression,
         "rendered_date": Cast(evidence_date_expression, CharField()),
     }
-    database_qs = actionable_qs.annotate(**database_annotations)
+    # The display rows below derive these labels in Python. Do not select every
+    # expensive rendered expression for a normal page or CSV export: only a
+    # requested column filter needs its database annotation. This keeps the
+    # full-fleet export from evaluating Evidence and Context SQL for every row
+    # merely to sort by the default group label.
+    database_qs = actionable_qs
     for key in table_filter_keys:
         value = table_filters[key]
         if value:
-            database_qs = database_qs.filter(
+            database_qs = database_qs.annotate(
+                **{f"rendered_{key}": database_annotations[f"rendered_{key}"]}
+            ).filter(
                 **{f"rendered_{key}__icontains": value}
             )
     database_query_mode = sort_key in database_sort_fields
@@ -4745,6 +4752,11 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
                 for key, getter in table_filter_specs
             )
         ]
+    # A findings CSV needs the fully projected and filtered row set, but not
+    # the page-only affected-device summary or collapsed group navigation.
+    # Return before those fleet-wide follow-up queries and aggregations.
+    if request.GET.get("format") == "csv":
+        return _findings_csv_response()
     matching_ids = [row["f"].id for row in findings_with_detail]
     matching_qs = qs.filter(id__in=matching_ids)
     total_matching = (
@@ -4890,8 +4902,6 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             key=lambda row: _table_value(sort_getters[sort_key](row)).casefold(),
             reverse=sort_dir == "desc",
         )
-    if wants_csv(request):
-        return _findings_csv_response()
     # Group headers are rendered from the complete filtered set. Findings are
     # paginated only after a Type/Issue/drilldown has opened a group.
     if database_page_mode:

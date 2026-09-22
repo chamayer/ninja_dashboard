@@ -380,8 +380,27 @@ a regression test. Validation: 41 focused Issues tests pass; Django checks,
 migration-drift checks, Python compilation, targeted Ruff, and `git diff
 --check` pass. No migration or production data mutation is required.
 
-Next action: obtain separate approval to commit and push the RawSQL precedence
-correction, then rerun the authenticated production HTML and CSV smoke tests
-and measure the corrected queue projection runtime.
+Commit `ccfe5b5` pushed the RawSQL precedence correction to both remotes.
+After the automatic update, an authenticated read-only production HTML request
+returned HTTP 200 in 21.83 seconds. A scoped authenticated CSV export returned
+HTTP 200 in 16.414 seconds with the expected operator-facing columns and no
+engine-internal columns. A full-fleet CSV export did not complete within four
+minutes and was interrupted without any data mutation. This proves the page,
+template, and scoped CSV are correct, but full-export performance remains a
+separate follow-up.
+
+Local full-export optimization is complete: database annotations are now added
+only for requested column filters, rather than selecting every expensive
+rendered expression for every exported row, and `format=csv` returns before
+page-only affected-device summaries and collapsed-group aggregation. Sorting,
+column-filter, and CSV label contracts remain unchanged. Focused validation is
+41 tests passing with Django checks, migration-drift checks, compilation,
+targeted Ruff, and `git diff --check` passing.
+
+Next action: obtain separate approval to commit and push the full-fleet CSV
+optimization, then run the authenticated production full-export timing and
+verify its column/filter/sort contract. A browser-session smoke test remains
+advisable, but the authenticated server-side request covers the same
+authorization and rendering path.
 Pause only for a material product decision, conflicting user work, migration
 approval, production mutation, or separate commit/push authorization.

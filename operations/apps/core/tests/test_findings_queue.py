@@ -365,10 +365,13 @@ def test_findings_queue_summary_cards_use_fleet_wide_operator_counts():
 def test_findings_queue_csv_projects_labels_before_export_and_has_one_owner_column():
     source = Path("apps/core/views.py").read_text(encoding="utf-8")
     queue = source[source.index("def findings_queue"):source.index("def _policy_candidate_state_action_blocked")]
-    assert queue.index('row["issue_label"]') < queue.index("if wants_csv(request)")
+    assert queue.index('row["issue_label"]') < queue.index('if request.GET.get("format") == "csv"')
     csv_section = queue[queue.index("def _findings_csv_response"):queue.index("# Keep these getters", queue.index("def _findings_csv_response"))]
     assert csv_section.count('(\"Owner\"') == 1
     assert queue.index("return _findings_csv_response()") > queue.index("findings_with_detail = [")
+    assert queue.index('if request.GET.get("format") == "csv"') < queue.index(
+        "affected_devices = _affected_device_rows"
+    )
 
 
 def test_database_queue_projection_covers_rendered_evidence_context_and_subject_overrides():
@@ -393,7 +396,8 @@ def test_database_queue_projection_covers_rendered_evidence_context_and_subject_
     assert "operations.device_windows_servicing_current" in queue
     assert "operations.device_session_current" in queue
     assert "COALESCE(\n                       finding_details->>'hostname'," in queue
-    assert "database_qs = actionable_qs.annotate(**database_annotations)" in queue
+    assert "database_qs = actionable_qs" in queue
+    assert '**{f"rendered_{key}": database_annotations[f"rendered_{key}"]}' in queue
     assert 'f"rendered_{key}__icontains"' in queue
 
 
