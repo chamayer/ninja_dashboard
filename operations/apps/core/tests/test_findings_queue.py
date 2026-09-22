@@ -208,6 +208,14 @@ def test_collapsed_queue_skips_affected_device_rollup_until_a_type_is_opened():
     assert "_affected_device_rows(matching_qs) if needs_affected_devices else []" in source
 
 
+def test_filtered_issue_queue_reuses_the_fleet_operator_state_projection():
+    source = Path("apps/core/views.py").read_text(encoding="utf-8")
+
+    assert "fleet_states = _condition_operator_states(fleet_ids)" in source
+    assert "if governed_id_keys.issubset(fleet_id_keys)" in source
+    assert "{finding_id: fleet_states[finding_id] for finding_id in governed_id_keys}" in source
+
+
 def test_issue_work_status_uses_one_operator_label_without_a_repeated_reason():
     source = Path("apps/core/views.py").read_text(encoding="utf-8")
     template = Path("templates/findings_queue.html").read_text(encoding="utf-8")
@@ -388,7 +396,8 @@ def test_findings_queue_summary_cards_use_fleet_wide_operator_counts():
     template = Path("templates/findings_queue.html").read_text(encoding="utf-8")
     assert "fleet_governed_qs = Finding.objects.filter" in source
     assert "fleet_id_keys = {str(finding_id) for finding_id in fleet_ids}" in source
-    assert "if operator_states.keys() == fleet_id_keys" in source
+    assert "fleet_states = _condition_operator_states(fleet_ids)" in source
+    assert "if governed_id_keys.issubset(fleet_id_keys)" in source
     assert '"label": "Pending"' in source
     assert "Review by state" in template
     assert "operator_owner" in source

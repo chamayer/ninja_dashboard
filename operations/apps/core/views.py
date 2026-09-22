@@ -3621,11 +3621,27 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     # Issues and must not inflate the Issues response counts or appear here.
     qs = qs.exclude(finding_type__name__in=_SOFTWARE_POLICY_CANDIDATE_TYPES)
 
+    # Top cards are fleet-wide operator populations. They deliberately do not
+    # inherit any selected filters below them. Calculate that state once: an
+    # active Type selection is a subset of the fleet and can reuse the exact
+    # same projection, rather than recalculating every participant assessment.
+    fleet_governed_qs = Finding.objects.filter(
+        tenant_id=1,
+        status__in=_FINDING_ACTIVE_STATUSES,
+    ).exclude(finding_type__name__in=_SOFTWARE_POLICY_CANDIDATE_TYPES)
+    fleet_ids = list(fleet_governed_qs.values_list("id", flat=True))
+    fleet_id_keys = {str(finding_id) for finding_id in fleet_ids}
+    fleet_states = _condition_operator_states(fleet_ids)
+
     # Attention is separate from operator Status. Governed findings are
     # filtered only after all subject and evidence filters have been applied.
     governed_qs = qs
-    operator_states = _condition_operator_states(
-        governed_qs.values_list("id", flat=True)
+    governed_ids = list(governed_qs.values_list("id", flat=True))
+    governed_id_keys = {str(finding_id) for finding_id in governed_ids}
+    operator_states = (
+        {finding_id: fleet_states[finding_id] for finding_id in governed_id_keys}
+        if governed_id_keys.issubset(fleet_id_keys)
+        else _condition_operator_states(governed_ids)
     )
     if attention_filter:
         selected_ids = {
@@ -3638,22 +3654,6 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
         qs = qs.filter(severity=severity_filter)
 
     actionable_qs = qs
-    # Top cards are fleet-wide operator populations. They deliberately do not
-    # inherit any selected filters below them and use one captured state map.
-    fleet_governed_qs = Finding.objects.filter(
-        tenant_id=1,
-        status__in=_FINDING_ACTIVE_STATUSES,
-    ).exclude(finding_type__name__in=_SOFTWARE_POLICY_CANDIDATE_TYPES)
-    fleet_ids = list(fleet_governed_qs.values_list("id", flat=True))
-    # The default queue already covers the fleet. Reuse its governed state
-    # projection for the unfiltered summary cards instead of evaluating the
-    # same complete population a second time.
-    fleet_id_keys = {str(finding_id) for finding_id in fleet_ids}
-    fleet_states = (
-        operator_states
-        if operator_states.keys() == fleet_id_keys
-        else _condition_operator_states(fleet_ids)
-    )
     fleet_counts = {
         attention: sum(
             1 for state in fleet_states.values() if state["attention"] == attention

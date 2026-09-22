@@ -445,5 +445,10 @@ links are one grid item, preventing an expanded list from taking a neighboring
 Type's grid cell; the header keeps only shown/unresolved totals because the
 expanded list carries state totals. Next action: validate this display
 correction together with the queue performance changes before commit.
+Filtered active queues now reuse the one exact fleet-state projection for the
+unfiltered summary cards; previously they recalculated the complete state model
+for both the selected Type and the fleet. Resolved-history scopes still receive
+their own projection because they are not a subset of the active fleet. Next
+action: validate the consolidated queue correction locally and in production.
 Pause only for a material product decision, conflicting user work, migration
 approval, production mutation, or separate commit/push authorization.
