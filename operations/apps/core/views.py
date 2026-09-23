@@ -7864,8 +7864,8 @@ _JOB_CATALOG: list[dict] = [
     {"id": "platform-evaluate",  "name": "Platform evaluator",   "category": "evaluators", "endpoint": "run/platform-evaluate", "status_key": "platform_evaluator", "status_source": "run_log", "description": "Update computer, coverage, identity, and lifecycle findings."},
     {"id": "resolver",           "name": "Identity resolver",    "category": "evaluators", "endpoint": "run/resolver",          "status_key": "identity_resolver", "status_source": "run_log", "description": "Match source records to the right computer."},
     {"id": "parity-check",       "name": "Parity check",         "category": "evaluators", "endpoint": "run/parity-check",      "status_key": "parity_check",     "status_source": "run_log", "description": "Find gaps between collected data and Operations."},
-    {"id": "agent-compliance", "name": "Agent compliance", "category": "evaluators", "endpoint": "run/agent-compliance", "status_key": "agent_compliance", "status_source": "run_log", "run_all": False, "description": "Refresh the legacy agent-compliance bridge when it is enabled."},
-    {"id": "agent-compliance-evaluate", "name": "Agent compliance review", "category": "evaluators", "endpoint": "run/agent-compliance/evaluate", "status_key": "agent_compliance.evaluate", "status_source": "run_log", "run_all": False, "description": "Reassess the legacy agent-compliance bridge when it is enabled."},
+    {"id": "agent-compliance", "name": "Agent compliance", "category": "evaluators", "endpoint": "run/agent-compliance", "status_key": "agent_compliance", "status_source": "run_log", "run_all": False, "legacy_bridge": True, "description": "Refresh the legacy agent-compliance bridge when it is enabled."},
+    {"id": "agent-compliance-evaluate", "name": "Agent compliance review", "category": "evaluators", "endpoint": "run/agent-compliance/evaluate", "status_key": "agent_compliance.evaluate", "status_source": "run_log", "run_all": False, "legacy_bridge": True, "description": "Reassess the legacy agent-compliance bridge when it is enabled."},
     # Intel connectors
     {"id": "intel-kev",          "name": "Intel: CISA KEV",           "category": "intel", "endpoint": "run/intel-kev",         "status_key": "cisa_kev",   "status_source": "intel", "description": "Refresh CISA's list of actively exploited vulnerabilities."},
     {"id": "intel-nvd",          "name": "Intel: NVD (CVE feed)",     "category": "intel", "endpoint": "run/intel-nvd",         "status_key": "nvd",        "status_source": "intel", "description": "Refresh vulnerability details from NIST's NVD."},
@@ -7916,6 +7916,9 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
     """List every schedulable job with last-run status and a run-now button."""
     category_filter = (request.GET.get("category") or "").strip().lower()
     status_filter = (request.GET.get("status") or "").strip().lower()
+    agent_compliance_enabled = os.environ.get("AGENT_COMPLIANCE_ENABLED", "false").strip().lower() in {
+        "1", "true", "yes", "on",
+    }
 
     intel_status: dict[str, dict] = {}
     with transaction.atomic(), connection.cursor() as cur:
@@ -7937,6 +7940,7 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
             intel_status = {}
 
     run_log_status: dict[str, dict] = {}
+    queued_job_status: dict[str, dict] = {}
     recent_runs: list[dict] = []
     try:
         with transaction.atomic(), connection.cursor() as cur:
@@ -7955,6 +7959,37 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
                     "last_success_at": r[3] if r[1] else None,
                     "rows_touched": r[4] or 0,
                     "last_error": (r[5] or "")[:200],
+                }
+            # The durable Jobs queue is the history authority for registered
+            # scheduled/operator work.  Several queue handlers intentionally
+            # do not create legacy run_log rows, so using run_log alone makes
+            # successful work look as if it never ran.
+            cur.execute(
+                """
+                SELECT DISTINCT ON (job_key)
+                       job_key, status, requested_at, started_at, completed_at,
+                       rows_touched, error
+                  FROM operations.operator_job_runs
+                 WHERE tenant_id = 1
+                 ORDER BY job_key, requested_at DESC, id DESC
+                """
+            )
+            for r in cur.fetchall():
+                queue_state = {
+                    "completed": "ok",
+                    "failed": "failed",
+                    "stalled": "stalled",
+                    "queued": "queued",
+                    "running": "running",
+                    "cancelled": "cancelled",
+                }.get(r[1], r[1])
+                queued_job_status[r[0]] = {
+                    "last_status": queue_state,
+                    "last_run_at": r[4] or r[3] or r[2],
+                    "last_success_at": r[4] if r[1] == "completed" else None,
+                    "rows_touched": r[5] or 0,
+                    "last_error": (r[6] or "")[:200],
+                    "activity_label": "Last run" if r[1] in {"completed", "failed", "stalled", "cancelled"} else "Requested",
                 }
             # Aggregate recent activity for the panel at the bottom.
             cur.execute(
@@ -7991,6 +8026,7 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
                 })
     except Exception:
         run_log_status = {}
+        queued_job_status = {}
         recent_runs = []
     recent_runs.sort(key=lambda r: r["started_at"] or now - timedelta(days=365), reverse=True)
     recent_runs = recent_runs[:25]
@@ -8030,16 +8066,28 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
     categories = set()
     for entry in list(_JOB_CATALOG) + dynamic_source_entries:
         categories.add(entry["category"])
-        source = entry["status_source"]
-        if source == "intel":
-            status = intel_status.get(entry["status_key"]) or {}
-        elif source == "run_log_like":
-            status = _lookup_run_log_like(entry["status_key"])
+        disabled_reason = ""
+        if entry.get("legacy_bridge") and not agent_compliance_enabled:
+            # These bridge jobs no-op when disabled.  Do not offer a Run now
+            # control or call their empty history a failed schedule.
+            status = {}
+            disabled_reason = "Disabled — legacy bridge is not enabled."
         else:
-            status = run_log_status.get(entry["status_key"]) or {}
+            # A catalog job is registered work when it has a durable queue
+            # history.  Keep run_log as a fallback for pre-queue/direct runs
+            # and for dynamic source rows, which are not queue jobs.
+            status = queued_job_status.get(entry["id"]) or {}
+            if not status:
+                source = entry["status_source"]
+                if source == "intel":
+                    status = intel_status.get(entry["status_key"]) or {}
+                elif source == "run_log_like":
+                    status = _lookup_run_log_like(entry["status_key"])
+                else:
+                    status = run_log_status.get(entry["status_key"]) or {}
         last_run_at = status.get("last_run_at")
         last_success_at = status.get("last_success_at")
-        state = "never_run"
+        state = "disabled" if disabled_reason else "never_run"
         if status.get("last_status") == "ok":
             state = "ok"
         elif status.get("last_status"):
@@ -8060,6 +8108,8 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
             "age": age,
             "rows_touched": status.get("rows_touched", 0),
             "last_error": status.get("last_error", ""),
+            "activity_label": status.get("activity_label", "Last run"),
+            "disabled_reason": disabled_reason,
             "is_stale": is_stale,
             "no_run_now": entry.get("no_run_now", False),
         })

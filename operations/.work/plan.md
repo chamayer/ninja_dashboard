@@ -154,6 +154,26 @@ with one environment skip, 2 Jobs tests, Django checks, migration autodetection,
 template loading, and diff check all pass. Next action: obtain explicit commit
 and push approval including reviewed migration 0182.
 
+Current corrective scope: Jobs catalog status must use the durable queue as
+the history authority for registered work, falling back to legacy `run_log`
+only when no queue record exists. This corrects completed resolver work being
+shown as "Never run." Agent compliance is an optional legacy bridge; when its
+feature flag is off, its catalog rows must say Disabled, explain why, and not
+offer a no-op Run now action. No migration is required. Next: validate the
+queue-first status projection, template behavior, and disabled bridge controls;
+then obtain separate commit and push approval.
+
+Implemented locally: the catalog now reads the latest durable queue row first
+for every registered job and uses `run_log` only as a historical fallback.
+Queue states render as queued/running/cancelled/ok rather than treating an
+absent legacy log row as "Never run." The disabled Agent compliance bridge and
+its review step now render as Disabled with a short explanation and no run
+button. Validation: Python compilation, 2 focused Jobs tests, Django checks,
+template loading, and `git diff --check` passed. Full Ruff remains blocked by
+70 pre-existing findings in `apps/core/views.py`; no automatic formatting was
+applied. No migration, commit, push, deployment, or production mutation has
+occurred. Next: obtain separate commit and push approval.
+
 Released through `edf1767`: migration 0178 adds the tenant-scoped durable Jobs queue,
 active-request coalescing indexes, RLS/grants, and queue-health registration.
 Jobs now enqueues individual runs and sequential batches; the ingest scheduler

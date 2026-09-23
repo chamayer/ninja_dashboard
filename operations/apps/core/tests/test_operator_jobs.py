@@ -45,6 +45,7 @@ def test_operator_jobs_use_a_durable_queue_and_separate_stall_watchdog():
 def test_jobs_status_uses_operator_language_and_safe_controls():
     views = Path("apps/core/views.py").read_text(encoding="utf-8")
     template = Path("templates/admin_job_status.html").read_text(encoding="utf-8")
+    jobs_template = Path("templates/admin_jobs.html").read_text(encoding="utf-8")
     urls = Path("config/urls.py").read_text(encoding="utf-8")
 
     assert '"queued": "Queued"' in views
@@ -67,3 +68,10 @@ def test_jobs_status_uses_operator_language_and_safe_controls():
     assert "admin_job_history_retry" in urls
     assert "admin_job_status" in urls
     assert "admin_job_retry" in urls
+    assert "queued_job_status" in views
+    assert "operator_job_runs" in views
+    assert "legacy_bridge" in views
+    assert "Disabled — legacy bridge is not enabled." in views
+    assert "The durable Jobs queue is the history authority" in views
+    assert "No recorded run yet" in jobs_template
+    assert "No run available" in jobs_template

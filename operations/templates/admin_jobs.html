@@ -56,6 +56,9 @@
   .state-pill.failed    { background: #fee2e2; color: #991b1b; }
   .state-pill.never_run { background: #f3f4f6; color: #6b7280; }
   .state-pill.stale     { background: #fef3c7; color: #92400e; }
+  .state-pill.running   { background: #dbeafe; color: #1e40af; }
+  .state-pill.queued    { background: #e0e7ff; color: #3730a3; }
+  .state-pill.cancelled, .state-pill.disabled { background: #f3f4f6; color: #4b5563; }
 
   .job-row form { margin: 0; }
   .job-row button {
@@ -154,13 +157,24 @@
                     {% else %}
                         <span class="state-pill ok">Ok</span>
                     {% endif %}
+                {% elif j.state == 'disabled' %}
+                    <span class="state-pill disabled">Disabled</span>
+                {% elif j.state == 'running' %}
+                    <span class="state-pill running">Running</span>
+                {% elif j.state == 'queued' %}
+                    <span class="state-pill queued">Queued</span>
+                {% elif j.state == 'cancelled' %}
+                    <span class="state-pill cancelled">Cancelled</span>
                 {% elif j.state == 'never_run' %}
-                    <span class="state-pill never_run" title="No run log entry yet — job hasn't run since deploy, or emits no run_log">Never run</span>
+                    <span class="state-pill never_run" title="No recorded run yet">Never run</span>
                 {% else %}
                     <span class="state-pill failed">{{ j.state|title }}</span>
                 {% endif %}
             </div>
             <div class="desc">{{ j.description }}</div>
+            {% if j.disabled_reason %}
+                <div class="err-preview" style="color:var(--muted);">{{ j.disabled_reason }}</div>
+            {% endif %}
             {% if j.active_run %}
                 <div class="err-preview" style="color:#1d4ed8;">{{ j.active_run.status_label }} — <a href="{% url 'admin_job_status' %}?run={{ j.active_run.id }}">view progress</a></div>
             {% endif %}
@@ -170,14 +184,16 @@
         </div>
         <div class="meta">
             {% if j.last_run_at %}
-                Last run<br><strong>{{ j.last_run_at|date:"Y-m-d H:i" }}</strong>
+                {{ j.activity_label }}<br><strong>{{ j.last_run_at|date:"Y-m-d H:i" }}</strong>
                 {% if j.rows_touched %}<br>{{ j.rows_touched }} rows{% endif %}
             {% else %}
-                <em>no runs recorded</em>
+                <em>{% if j.disabled_reason %}not enabled{% else %}no runs recorded{% endif %}</em>
             {% endif %}
         </div>
         <div>
-            {% if j.no_run_now %}
+            {% if j.disabled_reason %}
+                <span class="muted" style="font-size:0.82rem;">No run available</span>
+            {% elif j.no_run_now %}
                 <a href="{{ ingest_public_url }}/run/sources/enqueue" target="_blank" rel="noopener"
                    style="display:inline-block; padding:0.4rem 0.85rem; border-radius:4px; border:1px solid var(--border); background:#fff; text-decoration:none; font-size:0.85rem; font-weight:600; color:#1a1a2e;">
                    Scoped run…
