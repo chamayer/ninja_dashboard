@@ -10,6 +10,7 @@ def test_operator_jobs_use_a_durable_queue_and_separate_stall_watchdog():
     assert "FOR UPDATE SKIP LOCKED" in queue
     assert "status = 'stalled'" in queue
     assert "operator jobs waiting for database capacity" in queue
+    assert "except PoolTimeout:" in queue
     assert 'id="operator_job_queue"' in main
     assert 'id="operator_job_queue_stale_recovery"' in main
     assert "uq_operator_job_runs_active" in migration

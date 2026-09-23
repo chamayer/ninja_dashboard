@@ -22,7 +22,11 @@ _LEASE_MINUTES = 90
 def process_next() -> dict[str, int]:
     """Recover expired work, then execute at most one requested job."""
     recover_stale()
-    row = _claim_next()
+    try:
+        row = _claim_next()
+    except PoolTimeout:
+        log.warning("operator jobs waiting for database capacity")
+        return {"completed": 0, "failed": 0}
     if row is None:
         return {"completed": 0, "failed": 0}
     try:
