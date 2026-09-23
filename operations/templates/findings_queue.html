@@ -327,10 +327,8 @@
                     <th><a href="{{ sort_links.severity }}">Severity</a><details class="issues-column-filter"><summary>Filter</summary><div class="issues-column-filter-options"><input form="issues-table-filter-form" type="search" name="table_severity" value="{{ table_filters.severity }}" placeholder="Contains text" aria-label="Filter Severity"><button form="issues-table-filter-form" type="submit">Apply</button></div></details></th>
                     <th><a href="{{ sort_links.finding }}">Finding</a><details class="issues-column-filter"><summary>Filter</summary><div class="issues-column-filter-options"><input form="issues-table-filter-form" type="search" name="table_finding" value="{{ table_filters.finding }}" placeholder="Contains text" aria-label="Filter Finding"><button form="issues-table-filter-form" type="submit">Apply</button></div></details></th>
                     <th><a href="{{ sort_links.subject }}">Subject</a><details class="issues-column-filter"><summary>Filter</summary><div class="issues-column-filter-options"><input form="issues-table-filter-form" type="search" name="table_subject" value="{{ table_filters.subject }}" placeholder="Contains text" aria-label="Filter Subject"><button form="issues-table-filter-form" type="submit">Apply</button></div></details></th>
-                    <th><a href="{{ sort_links.evidence }}">Evidence</a><details class="issues-column-filter"><summary>Filter</summary><div class="issues-column-filter-options"><input form="issues-table-filter-form" type="search" name="table_evidence" value="{{ table_filters.evidence }}" placeholder="Contains text" aria-label="Filter Evidence"><button form="issues-table-filter-form" type="submit">Apply</button></div></details></th>
                     <th><a href="{{ sort_links.context }}">Context</a><details class="issues-column-filter"><summary>Filter</summary><div class="issues-column-filter-options"><input form="issues-table-filter-form" type="search" name="table_context" value="{{ table_filters.context }}" placeholder="Contains text" aria-label="Filter Context"><button form="issues-table-filter-form" type="submit">Apply</button></div></details></th>
                     <th><a href="{{ sort_links.status }}">Status</a><details class="issues-column-filter"><summary>Filter</summary><div class="issues-column-filter-options"><input form="issues-table-filter-form" type="search" name="table_status" value="{{ table_filters.status }}" placeholder="Contains text" aria-label="Filter Status"><button form="issues-table-filter-form" type="submit">Apply</button></div></details></th>
-                    <th class="num"><a href="{{ sort_links.date }}">Evidence date</a><details class="issues-column-filter"><summary>Filter</summary><div class="issues-column-filter-options"><input form="issues-table-filter-form" type="search" name="table_date" value="{{ table_filters.date }}" placeholder="Contains text" aria-label="Filter Evidence date"><button form="issues-table-filter-form" type="submit">Apply</button></div></details></th>
                     <th style="width:13.5rem;">Actions</th>
                 </tr>
             </thead>
@@ -370,7 +368,6 @@
                             {% endif %}
                         {% endif %}
                     </td>
-                    <td>{{ row.detail|default:"—" }}</td>
                     <td class="muted">
                         {{ row.context|default:"—" }}
                     </td>
@@ -379,7 +376,6 @@
                         {% if row.operator_status_note %}<br><span class="muted" style="font-size:0.7rem;">{{ row.operator_status_note }}</span>{% endif %}
                         {% if f.snoozed_until %}<br><span class="muted" style="font-size:0.7rem;">Paused until {{ f.snoozed_until|date:"Y-m-d" }}</span>{% endif %}
                     </td>
-                    <td class="muted num">{% if row.evidence_date %}<span style="font-size:0.7rem;">{{ row.evidence_label }}</span><br>{{ row.evidence_date|date:"Y-m-d H:i" }}{% endif %}</td>
                     <td>
                         <div class="issue-row-actions">
                             <a class="issue-row-action issue-row-action--primary" href="{{ row.review_url }}">Review</a>

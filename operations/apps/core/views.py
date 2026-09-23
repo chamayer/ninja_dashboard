@@ -16,7 +16,7 @@ from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator
 from django.db import IntegrityError, connection, transaction
-from django.db.models import Case, CharField, Count, F, OuterRef, Prefetch, Q, Subquery, Value, When
+from django.db.models import Case, CharField, Count, F, Func, OuterRef, Prefetch, Q, Subquery, Value, When
 from django.db.models.expressions import RawSQL
 from django.db.models.functions import Cast, Coalesce, Concat
 from django.http import HttpRequest, HttpResponse, JsonResponse
@@ -3723,13 +3723,13 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
         or subject_id_filter
         or wants_csv(request)
     )
-    table_filter_keys = ("severity", "finding", "subject", "evidence", "context", "status", "date")
+    table_filter_keys = ("severity", "finding", "subject", "context", "status")
     table_filters = {
         key: (request.GET.get(f"table_{key}") or "").strip()
         for key in table_filter_keys
     }
     sort_key = request.GET.get("sort", "group")
-    if sort_key not in {"group", "severity", "finding", "subject", "evidence", "context", "status", "date"}:
+    if sort_key not in {"group", "severity", "finding", "subject", "context", "status"}:
         sort_key = "group"
     sort_dir = request.GET.get("dir", "asc")
     if sort_dir not in {"asc", "desc"}:
@@ -4105,30 +4105,66 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
         ),
         default=Value(None),
     )
+    evidence_context_expression = Case(
+        When(
+            finding_type__name="device_missing_from_source",
+            then=Concat(
+                Value("Last source evidence: "),
+                Func(
+                    evidence_date_expression,
+                    Value("YYYY-MM-DD HH24:MI"),
+                    function="TO_CHAR",
+                    output_field=CharField(),
+                ),
+            ),
+        ),
+        When(
+            finding_type__name="device_source_record_withdrawn",
+            then=Concat(
+                Value("Source withdrawn: "),
+                Func(
+                    evidence_date_expression,
+                    Value("YYYY-MM-DD HH24:MI"),
+                    function="TO_CHAR",
+                    output_field=CharField(),
+                ),
+            ),
+        ),
+        default=Value(""),
+        output_field=CharField(),
+    )
+    # Context is the operator's supporting information: the condition detail,
+    # environment/source context, and a relevant source-lifecycle timestamp.
+    # Keep this database expression aligned with _display_row below so column
+    # filtering and ordering use the text actually displayed in the table.
+    display_context_expression = Func(
+        Value(" · "),
+        Func(detail_expression, Value(""), function="NULLIF"),
+        Func(context_expression, Value(""), function="NULLIF"),
+        Func(evidence_context_expression, Value(""), function="NULLIF"),
+        function="CONCAT_WS",
+        output_field=CharField(),
+    )
     database_sort_fields = {
         "group": (type_label_expression, issue_display_expression, "id"),
         "severity": (severity_label_expression, "id"),
         "finding": (issue_display_expression, type_label_expression, "id"),
         "subject": (subject_label_expression, "id"),
-        "evidence": (detail_expression, "id"),
-        "context": (context_expression, "id"),
+        "context": (display_context_expression, "id"),
         "status": (status_label_expression, "id"),
-        "date": (evidence_date_expression, "id"),
     }
     database_annotations = {
         "rendered_group": type_label_expression,
         "rendered_severity": severity_label_expression,
         "rendered_finding": issue_display_expression,
         "rendered_subject": subject_label_expression,
-        "rendered_evidence": detail_expression,
-        "rendered_context": context_expression,
+        "rendered_context": display_context_expression,
         "rendered_status": status_label_expression,
-        "rendered_date": Cast(evidence_date_expression, CharField()),
     }
     # The display rows below derive these labels in Python. Do not select every
     # expensive rendered expression for a normal page or CSV export: only a
     # requested column filter needs its database annotation. This keeps the
-    # full-fleet export from evaluating Evidence and Context SQL for every row
+    # full-fleet export from evaluating Context SQL for every row
     # merely to sort by the default group label.
     database_qs = actionable_qs
     for key in table_filter_keys:
@@ -4556,10 +4592,15 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             evidence_date = raw_evidence_date
         elif isinstance(raw_evidence_date, str):
             evidence_date = parse_datetime(raw_evidence_date)
+        if detail := _detail_string(f):
+            context_parts.insert(0, detail)
+        if evidence_date:
+            context_parts.append(
+                f"{evidence_label}: {evidence_date.strftime('%Y-%m-%d %H:%M')}"
+            )
 
         return {
             "f": f,
-            "detail": _detail_string(f),
             "online_sources": online_sources,
             "subject_hostname": _subject_display_name(f),
             "device_context": device_context,
@@ -4576,8 +4617,6 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             "publisher": details.get("publisher", ""),
             "fleet_device_count": details.get("fleet_device_count"),
             "threshold": details.get("threshold"),
-            "evidence_date": evidence_date,
-            "evidence_label": evidence_label,
         }
 
     findings_with_detail = [_display_row(f) for f in findings]
@@ -4754,7 +4793,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
                         "security_support_ends_on", ""
                     ),
                 ),
-                ("Detail", "detail"),
+                ("Context", "context"),
                 ("Online sources", "online_sources"),
                 ("Status", "work_status_label"),
                 ("Details", "operator_status_note"),
@@ -4774,10 +4813,8 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
         ("severity", lambda row: row["f"].get_severity_display()),
         ("finding", lambda row: row["issue_display_label"]),
         ("subject", lambda row: row["subject_label"]),
-        ("evidence", lambda row: row["detail"]),
         ("context", lambda row: row["context"]),
         ("status", lambda row: row["work_status_label"]),
-        ("date", lambda row: row.get("evidence_date")),
     )
     table_filters = {
         key: (request.GET.get(f"table_{key}") or "").strip()
@@ -4962,10 +4999,8 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
         "severity": lambda row: row["f"].get_severity_display(),
         "finding": lambda row: row["issue_display_label"],
         "subject": lambda row: row["subject_label"],
-        "evidence": lambda row: row["detail"],
         "context": lambda row: row["context"],
         "status": lambda row: row["operator_status_label"],
-        "date": lambda row: row.get("evidence_date") or datetime.min,
     }
     if not database_query_mode:
         findings_with_detail.sort(
@@ -4994,7 +5029,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             table_base_params.extend((key, value) for value in values)
     table_clear_query = urlencode(table_base_params)
     sort_links = {}
-    for candidate in ("group", "severity", "finding", "subject", "evidence", "context", "status", "date"):
+    for candidate in ("group", "severity", "finding", "subject", "context", "status"):
         params = request.GET.copy()
         params.pop("page", None)
         params["sort"] = candidate

@@ -2,6 +2,15 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.126.5] — 2026-09-23 — Issues table clarity
+
+### Changed
+
+- Simplified the Issues table to Severity, Finding, Subject, Context, Status,
+  and Actions.
+- Combined supporting evidence and relevant source-lifecycle dates into
+  Context, including its CSV export, sorting, and column filtering.
+
 ## [0.126.4] — 2026-09-22 — Targeted issue refresh
 
 ### Changed

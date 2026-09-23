@@ -163,6 +163,22 @@ def test_findings_queue_template_exposes_device_csv_and_grouped_types():
     assert "row.review_url" in template
 
 
+def test_findings_queue_uses_one_context_column_for_supporting_information():
+    template = Path("templates/findings_queue.html").read_text(encoding="utf-8")
+    source = Path("apps/core/views.py").read_text(encoding="utf-8")
+
+    assert 'sort_links.context' in template
+    assert 'name="table_context"' in template
+    assert "sort_links.evidence" not in template
+    assert "sort_links.date" not in template
+    assert 'name="table_evidence"' not in template
+    assert 'name="table_date"' not in template
+    assert "row.detail" not in template
+    assert "row.evidence_date" not in template
+    assert 'context_parts.insert(0, detail)' in source
+    assert 'f"{evidence_label}: {evidence_date.strftime' in source
+
+
 def test_every_issue_row_has_a_direct_review_path_and_review_actions_are_not_alert_actions():
     source = Path("apps/core/views.py").read_text(encoding="utf-8")
     template = Path("templates/finding_review.html").read_text(encoding="utf-8")
@@ -523,12 +539,12 @@ def test_findings_queue_csv_projects_operator_labels_without_internal_owner_colu
     )
 
 
-def test_database_queue_projection_covers_rendered_evidence_context_and_subject_overrides():
+def test_database_queue_projection_covers_merged_context_and_subject_overrides():
     source = Path("apps/core/views.py").read_text(encoding="utf-8")
     queue = source[source.index("def findings_queue"):source.index("def _policy_candidate_state_action_blocked")]
 
-    # Every special Evidence renderer needs a matching database expression so
-    # column filters and sorting operate on what the operator actually sees.
+    # Every condition detail and source timestamp rendered in Context needs a
+    # matching database expression so filters and sorting use what operators see.
     for finding_type in (
         "device_source_record_withdrawn",
         "device_missing_from_source",
@@ -545,6 +561,11 @@ def test_database_queue_projection_covers_rendered_evidence_context_and_subject_
     assert "operations.device_windows_servicing_current" in queue
     assert "operations.device_session_current" in queue
     assert "COALESCE(\n                       finding_details->>'hostname'," in queue
+    assert '"evidence": (detail_expression, "id")' not in queue
+    assert '"date": (evidence_date_expression, "id")' not in queue
+    assert '"context": (display_context_expression, "id")' in queue
+    assert 'Func(detail_expression, Value(""), function="NULLIF")' in queue
+    assert 'Func(evidence_context_expression, Value(""), function="NULLIF")' in queue
     assert "database_qs = actionable_qs" in queue
     assert '**{f"rendered_{key}": database_annotations[f"rendered_{key}"]}' in queue
     assert 'f"rendered_{key}__icontains"' in queue

@@ -597,3 +597,12 @@ schema change or production action was performed. Validation: focused queue
 tests, Django checks, template loading, compilation, and diff check pass.
 Next action: review the local behavior and obtain separate commit/push
 authorization.
+
+Main-table information-density correction complete locally. Finding remains the
+issue and Subject remains its affected object; condition-specific evidence and
+source/lifecycle timestamps are merged into Context, with no separate Evidence
+or Evidence date columns or controls. CSV and visible table filtering/sorting
+use the same merged Context contract. No schema, source, or production change
+is in scope. Validation: 55 focused queue tests, Django checks, template
+loading, compilation, import-order lint, and diff check pass. Next action:
+obtain separate commit and push authorization if the local change is approved.
