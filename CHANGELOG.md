@@ -2,6 +2,20 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.126.13] — 2026-09-23 — Jobs workflow controls
+
+### Added
+
+- Added migration 0180 for durable Job lanes, worker heartbeats, and an
+  immutable Job event timeline.
+
+### Changed
+
+- Split durable Jobs into Collection, Evaluation, Intelligence, and Service
+  lanes under a bounded shared worker capacity.
+- Mark Jobs interrupted by an ingest restart immediately, with a retryable
+  operator explanation instead of waiting for the lease timeout.
+
 ## [0.126.12] — 2026-09-23 — Job telemetry
 
 ### Changed

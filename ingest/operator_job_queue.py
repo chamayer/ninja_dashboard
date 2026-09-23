@@ -7,6 +7,7 @@ queues: its entries represent registered platform work, not a source mutation.
 from __future__ import annotations
 
 import logging
+import threading
 import uuid
 from typing import Any
 
@@ -18,6 +19,29 @@ log = logging.getLogger(__name__)
 
 _TABLE = "operations.operator_job_runs"
 _LEASE_MINUTES = 90
+_HEARTBEAT_SECONDS = 30
+_WORKER_CAPACITY = threading.BoundedSemaphore(2)
+
+_JOB_LANES = {
+    "patches": "collection",
+    "agent-observations": "collection",
+    "documentation-observations": "collection",
+    "notifications-dispatch": "service",
+    "notifications-digest": "service",
+    "retention-history": "service",
+    "software-enqueue-orgs": "service",
+    "software-queue-drain": "collection",
+}
+
+
+def lane_for(job_key: str) -> str:
+    """Return the registered worker lane for a durable Jobs definition."""
+    if job_key.startswith("intel-"):
+        return "intelligence"
+    return _JOB_LANES.get(job_key, "evaluation")
+
+
+WORKER_LANES = ("collection", "evaluation", "intelligence", "service")
 
 
 class JobProgress:
@@ -31,10 +55,27 @@ class JobProgress:
             cur.execute("SET LOCAL operations.tenant_id = 1")
             cur.execute(
                 f"""UPDATE {_TABLE}
-                       SET stage = %s, stage_detail = %s, stage_updated_at = NOW(),
+                       SET stage = %s, stage_detail = %s, stage_updated_at = NOW(), heartbeat_at = NOW(),
                            lease_expires_at = NOW() + INTERVAL '{_LEASE_MINUTES} minutes'
                      WHERE tenant_id = 1 AND id = %s AND status = 'running'""",
                 (stage, detail, self.job_id),
+            )
+            cur.execute(
+                """INSERT INTO operations.operator_job_events
+                       (tenant_id, job_id, event_type, stage, detail)
+                    VALUES (1, %s, 'stage', %s, %s)""",
+                (self.job_id, stage, detail),
+            )
+
+    def heartbeat(self) -> None:
+        with db.transaction() as cur:
+            cur.execute("SET LOCAL operations.tenant_id = 1")
+            cur.execute(
+                f"""UPDATE {_TABLE}
+                       SET heartbeat_at = NOW(),
+                           lease_expires_at = NOW() + INTERVAL '{_LEASE_MINUTES} minutes'
+                     WHERE tenant_id = 1 AND id = %s AND status = 'running'""",
+                (self.job_id,),
             )
 
 
@@ -51,13 +92,13 @@ def enqueue_automatic(job_key: str) -> bool:
             cur.execute("SET LOCAL operations.tenant_id = 1")
             cur.execute(
                 f"""
-                INSERT INTO {_TABLE} (id, tenant_id, job_key, requested_by_id)
-                VALUES (%s, 1, %s, NULL)
+                INSERT INTO {_TABLE} (id, tenant_id, job_key, lane, requested_by_id)
+                VALUES (%s, 1, %s, %s, NULL)
                 ON CONFLICT (tenant_id, job_key) WHERE status IN ('queued', 'running')
                 DO NOTHING
                 RETURNING id
                 """,
-                (uuid.uuid4(), job_key),
+                (uuid.uuid4(), job_key, lane_for(job_key)),
             )
             return cur.fetchone() is not None
     except PoolTimeout:
@@ -65,22 +106,42 @@ def enqueue_automatic(job_key: str) -> bool:
         return False
 
 
-def process_next() -> dict[str, int]:
-    """Recover expired work, then execute at most one requested job."""
+def process_next(lane: str = "evaluation") -> dict[str, int]:
+    """Recover expired work, then execute one queued job from its lane."""
+    if lane not in WORKER_LANES:
+        raise ValueError(f"Unknown Jobs worker lane: {lane}")
+    if not _WORKER_CAPACITY.acquire(blocking=False):
+        return {"completed": 0, "failed": 0}
+    try:
+        return _process_next_in_lane(lane)
+    finally:
+        _WORKER_CAPACITY.release()
+
+
+def _process_next_in_lane(lane: str) -> dict[str, int]:
     recover_stale()
     try:
-        row = _claim_next()
+        row = _claim_next(lane)
     except PoolTimeout:
         log.warning("operator jobs waiting for database capacity")
         return {"completed": 0, "failed": 0}
     if row is None:
         return {"completed": 0, "failed": 0}
+    progress = JobProgress(row["id"])
+    stopped = threading.Event()
+    heartbeat = threading.Thread(
+        target=_heartbeat_loop, args=(progress, stopped), daemon=True
+    )
+    heartbeat.start()
     try:
-        rows = _execute(row["job_key"], JobProgress(row["id"]))
+        rows = _execute(row["job_key"], progress)
     except Exception as exc:
         log.exception("operator job %s failed", row["job_key"])
         _finish(row["id"], "failed", error=str(exc)[:2000])
         return {"completed": 0, "failed": 1}
+    finally:
+        stopped.set()
+        heartbeat.join(timeout=1)
     _finish(row["id"], "completed", rows=rows)
     return {"completed": 1, "failed": 0}
 
@@ -97,7 +158,7 @@ def recover_stale() -> int:
                        stage_updated_at = NOW(), completed_at = NOW(), lease_expires_at = NULL,
                        error = 'Run stopped responding. Review and retry when ready.'
                  WHERE tenant_id = 1 AND status = 'running'
-                   AND lease_expires_at < NOW()
+                   AND heartbeat_at < NOW() - INTERVAL '{_LEASE_MINUTES} minutes'
                 """
             )
             return cur.rowcount
@@ -108,15 +169,53 @@ def recover_stale() -> int:
         return 0
 
 
-def _claim_next() -> dict[str, Any] | None:
+def recover_interrupted() -> int:
+    """Close runs left behind by this process being replaced or restarted."""
+    with db.transaction() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        cur.execute(
+            f"""UPDATE {_TABLE}
+                   SET status = 'stalled', stage = 'Interrupted by service restart',
+                       stage_detail = 'The worker was replaced before this run finished.',
+                       stage_updated_at = NOW(), heartbeat_at = NOW(), completed_at = NOW(),
+                       lease_expires_at = NULL,
+                       error = 'Interrupted by service restart. Retry when ready.'
+                 WHERE tenant_id = 1 AND status = 'running'
+             RETURNING id"""
+        )
+        interrupted_ids = [row[0] for row in cur.fetchall()]
+        interrupted = len(interrupted_ids)
+        if interrupted_ids:
+            cur.execute(
+                """INSERT INTO operations.operator_job_events
+                       (tenant_id, job_id, event_type, stage, detail)
+                    SELECT tenant_id, id, 'interrupted', stage, stage_detail
+                      FROM operations.operator_job_runs
+                     WHERE tenant_id = 1 AND id = ANY(%s)""",
+                (interrupted_ids,),
+            )
+    if interrupted:
+        log.warning("operator jobs: marked %d run(s) interrupted by service restart", interrupted)
+    return interrupted
+
+
+def _heartbeat_loop(progress: JobProgress, stopped: threading.Event) -> None:
+    while not stopped.wait(_HEARTBEAT_SECONDS):
+        try:
+            progress.heartbeat()
+        except Exception:
+            log.exception("operator job heartbeat failed")
+
+
+def _claim_next(lane: str) -> dict[str, Any] | None:
     with db.transaction() as cur:
         cur.execute("SET LOCAL operations.tenant_id = 1")
         cur.execute(
             f"""
             WITH candidate AS (
                 SELECT id FROM {_TABLE}
-                 WHERE tenant_id = 1 AND status = 'queued'
-                 ORDER BY requested_at, id
+                 WHERE tenant_id = 1 AND lane = %s AND status = 'queued'
+                 ORDER BY priority DESC, requested_at, id
                  FOR UPDATE SKIP LOCKED LIMIT 1
             )
             UPDATE {_TABLE} job
@@ -127,7 +226,8 @@ def _claim_next() -> dict[str, Any] | None:
               FROM candidate
              WHERE job.id = candidate.id
             RETURNING job.id, job.job_key
-            """
+            """,
+            (lane,),
         )
         row = cur.fetchone()
     return {"id": row[0], "job_key": row[1]} if row else None

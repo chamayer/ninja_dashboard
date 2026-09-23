@@ -2479,6 +2479,9 @@ def main() -> None:
     # exists — nothing survives a restart. Left alone these accumulate
     # forever and make "is this domain healthy?" unanswerable.
     runlog.reap_orphaned()
+    # A durable Jobs attempt cannot survive this process. Mark it immediately
+    # so operators can retry instead of waiting for its lease to expire.
+    operator_job_queue.recover_interrupted()
 
     documentation_schedule_hours = min(settings.DOCUMENTATION_SCHEDULE_HOURS, 4)
     if settings.DOCUMENTATION_SCHEDULE_HOURS > documentation_schedule_hours:
@@ -2528,16 +2531,18 @@ def main() -> None:
         id="source_action_requests",
         max_instances=1,
     )
-    # Operator-triggered Jobs work is durable and intentionally serialized.
-    # The queue must not compete with every catalog entry at once for the
-    # ingest connection pool.
-    scheduler.add_job(
-        operator_job_queue.process_next,
-        "interval",
-        seconds=10,
-        id="operator_job_queue",
-        max_instances=1,
-    )
+    # Durable Jobs have bounded lanes. A slow evaluator must not block source
+    # collection, Intel refresh, or service work; the queue module applies the
+    # shared two-worker capacity ceiling for the ingest connection pool.
+    for lane in operator_job_queue.WORKER_LANES:
+        scheduler.add_job(
+            operator_job_queue.process_next,
+            "interval",
+            seconds=10,
+            args=[lane],
+            id=f"operator_job_queue_{lane}",
+            max_instances=1,
+        )
     # Separate from the worker: a wedged run must still become visible.
     scheduler.add_job(
         operator_job_queue.recover_stale,

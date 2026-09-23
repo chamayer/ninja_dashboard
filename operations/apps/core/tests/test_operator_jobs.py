@@ -6,6 +6,7 @@ def test_operator_jobs_use_a_durable_queue_and_separate_stall_watchdog():
     main = Path("../ingest/main.py").read_text(encoding="utf-8")
     migration = Path("apps/core/migrations/0178_operator_job_queue.py").read_text(encoding="utf-8")
     progress_migration = Path("apps/core/migrations/0179_add_operator_job_progress.py").read_text(encoding="utf-8")
+    workflow_migration = Path("apps/core/migrations/0180_operator_job_workflow_controls.py").read_text(encoding="utf-8")
 
     assert "operations.operator_job_runs" in queue
     assert "FOR UPDATE SKIP LOCKED" in queue
@@ -13,9 +14,11 @@ def test_operator_jobs_use_a_durable_queue_and_separate_stall_watchdog():
     assert "class JobProgress" in queue
     assert "stage_updated_at" in queue
     assert "_software_classify_with_intel" in queue
+    assert "recover_interrupted" in queue
+    assert "WORKER_LANES" in queue
     assert "operator jobs waiting for database capacity" in queue
     assert "except PoolTimeout:" in queue
-    assert 'id="operator_job_queue"' in main
+    assert 'id=f"operator_job_queue_{lane}"' in main
     assert 'id="operator_job_queue_stale_recovery"' in main
     assert "def enqueue_automatic" in queue
     assert 'args=["patches"]' in main
@@ -24,6 +27,8 @@ def test_operator_jobs_use_a_durable_queue_and_separate_stall_watchdog():
     assert "uq_operator_job_runs_active" in migration
     assert "ENABLE ROW LEVEL SECURITY" in migration
     assert "stage_updated_at" in progress_migration
+    assert "operator_job_events" in workflow_migration
+    assert "heartbeat_at" in workflow_migration
 
 
 def test_jobs_status_uses_operator_language_and_safe_controls():
@@ -39,7 +44,8 @@ def test_jobs_status_uses_operator_language_and_safe_controls():
     assert "Job activity" in template
     assert "Queue position" in template
     assert "Current work" in template
-    assert "Last update" in template
+    assert "Stage update" in template
+    assert "Worker alive" in template
     assert "Recent system activity" in template
     assert '"origin": "Automatic"' in views
     assert "Show error details" in template

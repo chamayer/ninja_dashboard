@@ -13,6 +13,8 @@
   .job-state { font-weight:700; } .job-state.queued { color:#1d4ed8; } .job-state.running { color:#7c3aed; } .job-state.completed { color:#15803d; } .job-state.failed,.job-state.stalled { color:#b91c1c; } .job-state.cancelled { color:#64748b; }
   .job-error { color:#991b1b; max-width:38ch; white-space:normal; }
   .job-error pre { max-width:72rem; max-height:22rem; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; color:inherit; }
+  .job-timeline { margin:.45rem 0 0; font-size:.78rem; color:var(--muted); }
+  .job-timeline li { margin:.25rem 0; }
   .job-cancel { border:1px solid var(--border); border-radius:4px; background:#fff; padding:.3rem .55rem; cursor:pointer; }
   .job-progress { min-width:16rem; }
   .job-progress-note { display:block; font-size:.78rem; color:var(--muted); margin-top:.2rem; }
@@ -28,11 +30,11 @@
 <table class="job-status-table">
   <thead><tr><th>Job</th><th>Started by</th><th>Current work</th><th>Requested</th><th>Started</th><th>Finished</th><th>Result</th><th>Action</th></tr></thead>
   <tbody>{% for run in runs %}<tr>
-    <td><strong>{{ run.name }}</strong>{% if run.batch_id %}<br><span class="muted">Batch run</span>{% endif %}</td>
+    <td><strong>{{ run.name }}</strong><br><span class="muted">{{ run.lane|title }} lane</span>{% if run.batch_id %}<br><span class="muted">Batch run</span>{% endif %}</td>
     <td>{{ run.origin }}</td>
-    <td class="job-progress"><span class="job-state {{ run.status }}">{{ run.status_label }}</span><strong class="job-progress-note">{% if run.status == 'queued' %}Queue position {{ run.queue_position }}{% else %}{{ run.stage }}{% endif %}</strong>{% if run.stage_detail %}<span class="job-progress-note">{{ run.stage_detail }}</span>{% endif %}{% if run.elapsed %}<span class="job-progress-note">Elapsed {{ run.elapsed }}</span>{% endif %}{% if run.stage_updated_at %}<span class="job-progress-note">Last update {{ run.stage_updated_at|date:"Y-m-d H:i:s" }}</span>{% endif %}</td>
+    <td class="job-progress"><span class="job-state {{ run.status }}">{{ run.status_label }}</span><strong class="job-progress-note">{% if run.status == 'queued' %}Queue position {{ run.queue_position }}{% else %}{{ run.stage }}{% endif %}</strong>{% if run.stage_detail %}<span class="job-progress-note">{{ run.stage_detail }}</span>{% endif %}{% if run.elapsed %}<span class="job-progress-note">Elapsed {{ run.elapsed }}</span>{% endif %}{% if run.stage_updated_at %}<span class="job-progress-note">Stage update {{ run.stage_updated_at|date:"Y-m-d H:i:s" }}</span>{% endif %}{% if run.heartbeat_at and run.status == 'running' %}<span class="job-progress-note">Worker alive {{ run.heartbeat_at|date:"Y-m-d H:i:s" }}</span>{% endif %}</td>
     <td>{{ run.requested_at|date:"Y-m-d H:i:s" }}</td><td>{{ run.started_at|date:"Y-m-d H:i:s"|default:"—" }}</td><td>{{ run.completed_at|date:"Y-m-d H:i:s"|default:"—" }}</td>
-    <td>{% if run.rows_touched is not None %}{{ run.rows_touched }} updated{% endif %}{% if run.error %}<div class="job-error">{{ run.error }}</div>{% endif %}</td>
+    <td>{% if run.rows_touched is not None %}{{ run.rows_touched }} updated{% endif %}{% if run.error %}<details class="job-error"><summary>Show error details</summary><pre>{{ run.error }}</pre></details>{% endif %}{% if run.events %}<details class="job-timeline"><summary>Run timeline</summary><ul>{% for event in run.events %}<li>{{ event.at|date:"Y-m-d H:i:s" }} — {{ event.stage }}{% if event.detail %}: {{ event.detail }}{% endif %}</li>{% endfor %}</ul></details>{% endif %}</td>
     <td>{% if run.status == 'queued' %}<form method="post" action="{% url 'admin_job_cancel' run.id %}">{% csrf_token %}<button class="job-cancel" type="submit">Cancel</button></form>{% elif run.status == 'running' %}<span class="muted">Cannot safely stop</span>{% elif run.status == 'failed' or run.status == 'stalled' %}<form method="post" action="{% url 'admin_job_retry' run.id %}">{% csrf_token %}<button class="job-cancel" type="submit">Retry</button></form>{% else %}—{% endif %}</td>
   </tr>{% endfor %}</tbody>
 </table>

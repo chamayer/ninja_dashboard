@@ -7891,6 +7891,16 @@ _JOB_CATALOG: list[dict] = [
 _JOB_INDEX = {j["id"]: j for j in _JOB_CATALOG}
 
 
+def _job_lane(job_key: str) -> str:
+    if job_key.startswith("intel-"):
+        return "intelligence"
+    if job_key in {"patches", "agent-observations", "documentation-observations", "software-queue-drain"}:
+        return "collection"
+    if job_key in {"notifications-dispatch", "notifications-digest", "retention-history", "software-enqueue-orgs"}:
+        return "service"
+    return "evaluation"
+
+
 @login_required
 def admin_jobs(request: HttpRequest) -> HttpResponse:
     """List every schedulable job with last-run status and a run-now button."""
@@ -8167,12 +8177,12 @@ def _enqueue_operator_job(
         cur.execute(
             """
             INSERT INTO operations.operator_job_runs
-                (id, tenant_id, job_key, batch_id, requested_by_id)
-            VALUES (%s, 1, %s, %s, %s)
+                (id, tenant_id, job_key, lane, batch_id, requested_by_id)
+            VALUES (%s, 1, %s, %s, %s, %s)
             ON CONFLICT (tenant_id, job_key) WHERE status IN ('queued', 'running')
             DO NOTHING RETURNING id
             """,
-            (uuid.uuid4(), job_key, batch_id, user_id),
+            (uuid.uuid4(), job_key, _job_lane(job_key), batch_id, user_id),
         )
         row = cur.fetchone()
         if row:
@@ -8205,6 +8215,7 @@ def _operator_job_runs(*, limit: int = 100, run_id: str = "", batch_id: str = ""
         cur.execute(
             f"""SELECT id, job_key, batch_id, requested_by_id, requested_at, started_at, completed_at,
                         status, attempts, rows_touched, error, stage, stage_detail, stage_updated_at,
+                        lane, heartbeat_at,
                         CASE WHEN status = 'queued' THEN (
                             SELECT COUNT(*) + 1 FROM operations.operator_job_runs earlier
                              WHERE earlier.tenant_id = 1 AND earlier.status = 'queued'
@@ -8217,6 +8228,20 @@ def _operator_job_runs(*, limit: int = 100, run_id: str = "", batch_id: str = ""
             params,
         )
         rows = cur.fetchall()
+        job_ids = [row[0] for row in rows]
+        events_by_job: dict[uuid.UUID, list[dict]] = {job_id: [] for job_id in job_ids}
+        if job_ids:
+            cur.execute(
+                """SELECT job_id, event_at, event_type, stage, detail
+                     FROM operations.operator_job_events
+                    WHERE tenant_id = 1 AND job_id = ANY(%s)
+                    ORDER BY event_at DESC, id DESC""",
+                (job_ids,),
+            )
+            for event in cur.fetchall():
+                events_by_job.setdefault(event[0], []).append(
+                    {"at": event[1], "type": event[2], "stage": event[3], "detail": event[4]}
+                )
     labels = {entry["id"]: entry["name"] for entry in _JOB_CATALOG}
     status_labels = {
         "queued": "Queued", "running": "Running", "completed": "Completed",
@@ -8244,8 +8269,9 @@ def _operator_job_runs(*, limit: int = 100, run_id: str = "", batch_id: str = ""
             "status": row[7], "status_label": status_labels.get(row[7], row[7]),
             "attempts": row[8], "rows_touched": row[9], "error": row[10],
             "stage": row[11], "stage_detail": row[12], "stage_updated_at": row[13],
-            "queue_position": row[14],
+            "lane": row[14], "heartbeat_at": row[15], "queue_position": row[16],
             "elapsed": elapsed_label(row[5], row[6]),
+            "events": events_by_job.get(row[0], []),
         }
         for row in rows
     ]
