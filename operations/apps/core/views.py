@@ -8250,12 +8250,23 @@ def _operator_job_runs(*, limit: int = 100, run_id: str = "", batch_id: str = ""
     ]
 
 
+_HISTORY_RETRYABLE_KINDS = {
+    "software_classifier": "software-classify-only",
+    "patch_findings": "patch-classify",
+    "platform_evaluator": "platform-evaluate",
+    "identity_resolver": "resolver",
+    "parity_check": "parity-check",
+    "notifications_dispatch": "notifications-dispatch",
+    "notifications_digest": "notifications-digest",
+}
+
+
 def _recent_job_history(*, limit: int = 100) -> list[dict]:
     """Show observed system work not represented by a durable queue row."""
     with transaction.atomic(), connection.cursor() as cur:
         cur.execute("SET LOCAL operations.tenant_id = 1")
         cur.execute(
-            """SELECT kind, ok, started_at, ended_at, rows, LEFT(COALESCE(error, ''), 240)
+            """SELECT kind, ok, started_at, ended_at, rows, COALESCE(error, '')
                  FROM operations.run_log
                 WHERE tenant_id = 1
                 ORDER BY started_at DESC
@@ -8267,6 +8278,7 @@ def _recent_job_history(*, limit: int = 100) -> list[dict]:
                 "name": row[0].replace("_", " ").replace(".", " · ").title(),
                 "origin": "Automatic", "started_at": row[2], "completed_at": row[3],
                 "rows_touched": row[4], "ok": row[1], "error": row[5],
+                "retry_job_key": _HISTORY_RETRYABLE_KINDS.get(row[0]) if not row[1] else "",
             }
             for row in cur.fetchall()
         ]
@@ -8334,6 +8346,21 @@ def admin_job_retry(request: HttpRequest, run_id: uuid.UUID) -> HttpResponse:
     else:
         messages.info(request, "An equivalent run is already queued or running.")
     return redirect(reverse("admin_job_status") + f"?run={new_id}")
+
+
+@login_required
+@require_admin
+@require_POST
+def admin_job_history_retry(request: HttpRequest, job_key: str) -> HttpResponse:
+    """Retry a failed historical run only through an explicit safe mapping."""
+    if job_key not in _HISTORY_RETRYABLE_KINDS.values():
+        raise PermissionDenied("This historical job cannot be retried from Job activity.")
+    run_id, created = _enqueue_operator_job(job_key, request.user.id)
+    if created:
+        messages.success(request, "Retry queued. Follow its progress here.")
+    else:
+        messages.info(request, "An equivalent run is already queued or running.")
+    return redirect(reverse("admin_job_status") + f"?run={run_id}")
 
 
 # ─────────────────────────────────────────────────────────────────────

@@ -35,5 +35,9 @@ def test_jobs_status_uses_operator_language_and_safe_controls():
     assert "Queue position" in template
     assert "Recent system activity" in template
     assert '"origin": "Automatic"' in views
+    assert "Show error details" in template
+    assert "admin_job_history_retry" in template
+    assert "_HISTORY_RETRYABLE_KINDS" in views
+    assert "admin_job_history_retry" in urls
     assert "admin_job_status" in urls
     assert "admin_job_retry" in urls

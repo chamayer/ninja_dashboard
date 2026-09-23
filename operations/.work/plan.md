@@ -104,12 +104,22 @@ tests and 36 ingest condition-safety tests passed; targeted Ruff, Python
 compilation, and diff checks passed. Full-repository Ruff still has unrelated
 pre-existing findings in the large Operations views module.
 
-Release prepared as version 0.126.10. Next: commit and push the reviewed
-release, then verify the automatic rollout and migration state. Production
-verification should confirm automatic runs appear as **Automatic**, only one
-active queue worker executes, and Job activity reflects both queue and
-independent system history. No new migration is needed because migration 0178
-already stores the required automatic-origin and lifecycle fields.
+Released as `dbc963c` / version 0.126.10 to both remotes. Automatic GitOps
+replacement completed; Operations and ingest became healthy. An approved
+manual migration check found no pending migrations and confirmed 0178 applied.
+
+Follow-up in progress: historical system activity currently truncates database
+errors and has no action despite a safe registered-job equivalent. Preserve the
+complete error behind an expandable detail control and allow **Retry** only
+for explicitly mapped failed history kinds. Do not guess a retry target for
+unmapped source or infrastructure records. No migration is required.
+
+Implemented locally: Job history now retains and displays the full stored
+error in an expandable control. Failed history rows provide **Retry** only
+when the run kind is explicitly mapped to a registered Job; Software
+Classifier maps to the no-intel refresh path used by its schedule. Validation:
+Django checks, template loading, and 58 focused Operations tests passed.
+Release prepared as version 0.126.11; no migration is required.
 
 ---
 

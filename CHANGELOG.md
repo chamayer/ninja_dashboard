@@ -2,6 +2,14 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.126.11] — 2026-09-23 — Job history recovery
+
+### Fixed
+
+- Restored full stored error details for failed Job history entries.
+- Added safe Retry actions for failed historical runs with an explicit
+  registered Job mapping, including Software Classifier.
+
 ## [0.126.10] — 2026-09-23 — Unified Job activity
 
 ### Changed
