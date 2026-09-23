@@ -2,13 +2,13 @@
 
 ## Status
 
-**Discovery and migration design in progress.** This supersedes the completed
+**Unified activity implementation in progress.** This supersedes the completed
 Issues-page plan below. Existing unrelated untracked root `.work/probe_*` and
 bootstrap files must remain untouched.
 
 ## Goal
 
-Make every operator-triggered collection and evaluator run durable,
+Make every operator-triggered and scheduled collection and evaluator run durable,
 capacity-safe, observable, and recoverable. Provide an operator-facing Job
 status page linked from Jobs, with clear queued/running/succeeded/failed/stalled
 state and useful recovery guidance.
@@ -44,9 +44,14 @@ external Hudu mutations and is also not suitable.
 - Allow operators to cancel Queued work, including remaining queued batch
   items. Running work is not forcibly stopped: the status page must state that
   it cannot safely be interrupted mid-run.
-- Jobs remains the catalog. A new Job status page is the operational surface;
-  it must show current/recent work and a concise next action, with detailed
-  diagnostics restricted to administrators.
+- Jobs remains the catalog. A new Job activity page is the operational surface;
+  it must show operator and automatic work together, an honest lifecycle
+  indicator (queued, running, terminal), queue position and elapsed time, and
+  a concise next action, with detailed diagnostics restricted to administrators.
+- Scheduled work uses the same queue row with no requesting user and is shown
+  as **Automatic**. The page also retains recent run-log and connector history
+  so system work outside this queue is still visible rather than silently
+  omitted.
 
 ## Scope
 
@@ -63,8 +68,9 @@ external Hudu mutations and is also not suitable.
 2. Add the reviewed queue schema and worker claim/finalize contract.
 3. Route Run now/Run all through enqueue; retain legacy endpoints only for
    scheduler compatibility.
-4. Build the status page: current queue, recent runs, batches, filters,
-   auto-refresh, errors, durations, rows, retry, and clear recovery guidance.
+4. Build the activity page: current queue, recent runs, batches, filters,
+   automatic origin, lifecycle progress, queue position, elapsed duration,
+   rows, retry, and clear recovery guidance.
 5. Add queue health and regression tests, including the Patch-classifier
    pool-exhaustion case.
 6. Validate locally, then obtain separate approval for migration, commit,
@@ -72,7 +78,7 @@ external Hudu mutations and is also not suitable.
 
 ## Checkpoint and next action
 
-Implemented locally: migration 0178 adds the tenant-scoped durable Jobs queue,
+Released through `edf1767`: migration 0178 adds the tenant-scoped durable Jobs queue,
 active-request coalescing indexes, RLS/grants, and queue-health registration.
 Jobs now enqueues individual runs and sequential batches; the ingest scheduler
 claims one run at a time, while an independent watchdog marks expired runs
@@ -86,9 +92,24 @@ Python compilation, focused queue/Issues tests (58 passed), targeted Ruff, and
 diff check. The full Ruff run has pre-existing unrelated violations. No
 production mutation, migration, commit, or push has occurred.
 
-Next: complete final code review, run the remaining focused ingest checks, then
-obtain separate approval for release versioning, commit/push, automatic
-deployment with migration 0178, and production status-workflow verification.
+Implemented locally: scheduled catalog work now enters the durable queue with
+a null requester and is displayed as **Automatic**. Job activity combines
+operator and automatic queue entries, shows lifecycle progress without
+inventing a percentage, queue position, elapsed time, cancellation/retry, and
+recent independent system history. The Jobs catalog now includes scheduled
+documentation, legacy bridge, end-of-life, category, and maintenance work.
+
+Validation: Django checks and template loading passed; 58 focused Operations
+tests and 36 ingest condition-safety tests passed; targeted Ruff, Python
+compilation, and diff checks passed. Full-repository Ruff still has unrelated
+pre-existing findings in the large Operations views module.
+
+Release prepared as version 0.126.10. Next: commit and push the reviewed
+release, then verify the automatic rollout and migration state. Production
+verification should confirm automatic runs appear as **Automatic**, only one
+active queue worker executes, and Job activity reflects both queue and
+independent system history. No new migration is needed because migration 0178
+already stores the required automatic-origin and lifecycle fields.
 
 ---
 

@@ -2,6 +2,18 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.126.10] — 2026-09-23 — Unified Job activity
+
+### Changed
+
+- Routed scheduled collection, evaluator, intelligence, notification, and
+  maintenance Jobs through the durable Jobs queue as **Automatic** work.
+- Expanded Job activity to show Automatic and operator runs together, with
+  lifecycle progress, queue position, elapsed time, and recorded supporting
+  system activity.
+- Added scheduled documentation, legacy bridge, end-of-life, category, and
+  maintenance work to the Jobs catalog.
+
 ## [0.126.9] — 2026-09-23 — Durable Jobs status
 
 ### Added

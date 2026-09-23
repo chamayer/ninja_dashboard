@@ -7852,6 +7852,7 @@ _JOB_CATALOG: list[dict] = [
     # against run_log.kind so any per-instance source row surfaces.
     {"id": "patches",            "name": "Ninja source cycle",   "category": "source ingest", "endpoint": "run/patches",   "status_key": "source.Ninja",         "status_source": "run_log_like",  "description": "Full Ninja API pull: devices, activities, patches, custom fields, matviews."},
     {"id": "agent-observations", "name": "Agent observations",   "category": "source ingest", "endpoint": "run/agents",    "status_key": "source.",              "status_source": "run_log_like",  "description": "Fetch device inventory + agent presence from every source."},
+    {"id": "documentation-observations", "name": "Documentation observations", "category": "source ingest", "endpoint": "run/sources/enqueue", "status_key": "source.Hudu", "status_source": "run_log_like", "run_all": False, "description": "Refresh connected documentation records on their slower schedule."},
     # Evaluators
     {"id": "software-classify",  "name": "Software classifier (+ auto-intel)", "category": "evaluators", "endpoint": "run/software-classify", "status_key": "software_classifier", "status_source": "run_log", "description": "Run intel matcher + catalog enrichers then the software finding classifier."},
     # Same underlying job as the entry above, minus the intel pre-steps, so it
@@ -7863,6 +7864,8 @@ _JOB_CATALOG: list[dict] = [
     {"id": "platform-evaluate",  "name": "Platform evaluator",   "category": "evaluators", "endpoint": "run/platform-evaluate", "status_key": "platform_evaluator", "status_source": "run_log", "description": "Refresh coverage, identity, and lifecycle findings."},
     {"id": "resolver",           "name": "Identity resolver",    "category": "evaluators", "endpoint": "run/resolver",          "status_key": "identity_resolver", "status_source": "run_log", "description": "Merge candidate resolver + layered-entity write path."},
     {"id": "parity-check",       "name": "Parity check",         "category": "evaluators", "endpoint": "run/parity-check",      "status_key": "parity_check",     "status_source": "run_log", "description": "Cross-check ingest state against derived operational reality."},
+    {"id": "agent-compliance", "name": "Agent compliance", "category": "evaluators", "endpoint": "run/agent-compliance", "status_key": "agent_compliance", "status_source": "run_log", "run_all": False, "description": "Refresh the legacy agent-compliance bridge when it is enabled."},
+    {"id": "agent-compliance-evaluate", "name": "Agent compliance review", "category": "evaluators", "endpoint": "run/agent-compliance/evaluate", "status_key": "agent_compliance.evaluate", "status_source": "run_log", "run_all": False, "description": "Reassess the legacy agent-compliance bridge when it is enabled."},
     # Intel connectors
     {"id": "intel-kev",          "name": "Intel: CISA KEV",           "category": "intel", "endpoint": "run/intel-kev",         "status_key": "cisa_kev",   "status_source": "intel", "description": "CISA Known Exploited Vulnerabilities feed (~1,200 CVEs)."},
     {"id": "intel-nvd",          "name": "Intel: NVD (CVE feed)",     "category": "intel", "endpoint": "run/intel-nvd",         "status_key": "nvd",        "status_source": "intel", "description": "NIST NVD v2 CVE delta pull."},
@@ -7875,9 +7878,14 @@ _JOB_CATALOG: list[dict] = [
     {"id": "intel-lolrmm",       "name": "Intel: LOLRMM corpus",       "category": "intel", "endpoint": "run/intel-lolrmm", "status_key": "lolrmm", "status_source": "intel", "description": "Refresh the LOLRMM corpus and exact one-to-one local product matches."},
     {"id": "intel-otx",          "name": "Intel: AlienVault OTX",     "category": "intel", "endpoint": "run/intel-otx",         "status_key": "otx",        "status_source": "intel", "description": "Community threat-intel pulses from OTX."},
     {"id": "intel-abusech",      "name": "Intel: abuse.ch",           "category": "intel", "endpoint": "run/intel-abusech",     "status_key": "abusech",    "status_source": "intel", "description": "MalwareBazaar + ThreatFox recent dump files."},
+    {"id": "intel-endoflife",    "name": "Intel: end-of-life",         "category": "intel", "endpoint": "run/intel-endoflife",   "status_key": "endoflife",  "status_source": "intel", "description": "Refresh supported-version and end-of-life data."},
+    {"id": "intel-category",     "name": "Intel: software categories", "category": "intel", "endpoint": "run/intel-category",    "status_key": "category_match", "status_source": "intel", "description": "Refresh software-category evidence from catalog data."},
     # Notifications
     {"id": "notifications-dispatch", "name": "Notifications dispatch", "category": "notifications", "endpoint": "run/notifications/dispatch", "status_key": "notifications_dispatch", "status_source": "run_log", "description": "Deliver queued notifications."},
     {"id": "notifications-digest",   "name": "Notifications digest",   "category": "notifications", "endpoint": "run/notifications/digest",   "status_key": "notifications_digest",   "status_source": "run_log", "description": "Send scheduled digest routes."},
+    {"id": "retention-history", "name": "History cleanup", "category": "maintenance", "endpoint": "", "status_key": "retention.observation_history", "status_source": "run_log", "run_all": False, "description": "Remove closed historical observations after the configured retention period."},
+    {"id": "software-enqueue-orgs", "name": "Software inventory schedule", "category": "maintenance", "endpoint": "", "status_key": "", "status_source": "run_log", "run_all": False, "description": "Schedule the next background software-inventory sweep."},
+    {"id": "software-queue-drain", "name": "Software inventory worker", "category": "maintenance", "endpoint": "", "status_key": "", "status_source": "run_log", "run_all": False, "description": "Process the background software-inventory queue."},
 ]
 
 _JOB_INDEX = {j["id"]: j for j in _JOB_CATALOG}
@@ -8195,9 +8203,15 @@ def _operator_job_runs(*, limit: int = 100, run_id: str = "", batch_id: str = ""
     with transaction.atomic(), connection.cursor() as cur:
         cur.execute("SET LOCAL operations.tenant_id = 1")
         cur.execute(
-            f"""SELECT id, job_key, batch_id, requested_at, started_at, completed_at,
-                        status, attempts, rows_touched, error
+            f"""SELECT id, job_key, batch_id, requested_by_id, requested_at, started_at, completed_at,
+                        status, attempts, rows_touched, error,
+                        CASE WHEN status = 'queued' THEN (
+                            SELECT COUNT(*) + 1 FROM operations.operator_job_runs earlier
+                             WHERE earlier.tenant_id = 1 AND earlier.status = 'queued'
+                               AND (earlier.requested_at, earlier.id) < (job.requested_at, job.id)
+                        ) END AS queue_position
                    FROM operations.operator_job_runs
+                  AS job
                   WHERE {' AND '.join(clauses)}
                   ORDER BY requested_at DESC LIMIT %s""",
             params,
@@ -8208,15 +8222,54 @@ def _operator_job_runs(*, limit: int = 100, run_id: str = "", batch_id: str = ""
         "queued": "Queued", "running": "Running", "completed": "Completed",
         "failed": "Failed", "stalled": "Needs attention", "cancelled": "Cancelled",
     }
+    now = timezone.now()
+
+    def elapsed_label(started_at, completed_at) -> str:
+        began = started_at
+        ended = completed_at or now
+        if began is None:
+            return ""
+        seconds = max(0, int((ended - began).total_seconds()))
+        if seconds < 60:
+            return "under a minute"
+        if seconds < 3600:
+            return f"{seconds // 60}m"
+        return f"{seconds // 3600}h {(seconds % 3600) // 60}m"
+
     return [
         {
             "id": row[0], "job_key": row[1], "name": labels.get(row[1], row[1]),
-            "batch_id": row[2], "requested_at": row[3], "started_at": row[4],
-            "completed_at": row[5], "status": row[6], "status_label": status_labels.get(row[6], row[6]),
-            "attempts": row[7], "rows_touched": row[8], "error": row[9],
+            "batch_id": row[2], "origin": "Automatic" if row[3] is None else "Operator",
+            "requested_at": row[4], "started_at": row[5], "completed_at": row[6],
+            "status": row[7], "status_label": status_labels.get(row[7], row[7]),
+            "attempts": row[8], "rows_touched": row[9], "error": row[10],
+            "queue_position": row[11],
+            "elapsed": elapsed_label(row[5], row[6]),
         }
         for row in rows
     ]
+
+
+def _recent_job_history(*, limit: int = 100) -> list[dict]:
+    """Show observed system work not represented by a durable queue row."""
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        cur.execute(
+            """SELECT kind, ok, started_at, ended_at, rows, LEFT(COALESCE(error, ''), 240)
+                 FROM operations.run_log
+                WHERE tenant_id = 1
+                ORDER BY started_at DESC
+                LIMIT %s""",
+            (limit,),
+        )
+        return [
+            {
+                "name": row[0].replace("_", " ").replace(".", " · ").title(),
+                "origin": "Automatic", "started_at": row[2], "completed_at": row[3],
+                "rows_touched": row[4], "ok": row[1], "error": row[5],
+            }
+            for row in cur.fetchall()
+        ]
 
 
 @login_required
@@ -8231,6 +8284,7 @@ def admin_job_status(request: HttpRequest) -> HttpResponse:
                 run_id=(request.GET.get("run") or "").strip(),
                 batch_id=(request.GET.get("batch") or "").strip(),
             ),
+            "history": _recent_job_history(),
         },
     )
 

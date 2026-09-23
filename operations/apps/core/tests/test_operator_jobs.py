@@ -13,6 +13,10 @@ def test_operator_jobs_use_a_durable_queue_and_separate_stall_watchdog():
     assert "except PoolTimeout:" in queue
     assert 'id="operator_job_queue"' in main
     assert 'id="operator_job_queue_stale_recovery"' in main
+    assert "def enqueue_automatic" in queue
+    assert 'args=["patches"]' in main
+    assert 'args=["platform-evaluate"]' in main
+    assert 'args=["intel-nvd"]' in main
     assert "uq_operator_job_runs_active" in migration
     assert "ENABLE ROW LEVEL SECURITY" in migration
 
@@ -27,6 +31,9 @@ def test_jobs_status_uses_operator_language_and_safe_controls():
     assert "def admin_job_cancel" in views
     assert "status = 'queued'" in views
     assert "Cannot safely stop" in template
-    assert "Job status" in template
+    assert "Job activity" in template
+    assert "Queue position" in template
+    assert "Recent system activity" in template
+    assert '"origin": "Automatic"' in views
     assert "admin_job_status" in urls
     assert "admin_job_retry" in urls

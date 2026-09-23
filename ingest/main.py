@@ -2490,26 +2490,29 @@ def main() -> None:
 
     scheduler = BackgroundScheduler()
     scheduler.add_job(
-        run_patching_once,
+        operator_job_queue.enqueue_automatic,
         "interval",
         hours=settings.patch_ingest_schedule_hours,
         id="patch_ingest_cycle",
+        args=["patches"],
     )
     scheduler.add_job(
-        run_agent_observations_once,
+        operator_job_queue.enqueue_automatic,
         "interval",
         hours=settings.AGENT_COMPLIANCE_SCHEDULE_HOURS,
         id="agent_observations_cycle",
+        args=["agent-observations"],
         max_instances=1,
     )
     # INTERIM companion to agent_observations_cycle — see
     # run_documentation_observations_once and `.work/backlog.md`. Removing
     # this job plus the two source filters restores the single unified cycle.
     scheduler.add_job(
-        run_documentation_observations_once,
+        operator_job_queue.enqueue_automatic,
         "interval",
         hours=documentation_schedule_hours,
         id="documentation_observations_cycle",
+        args=["documentation-observations"],
         max_instances=1,
     )
     scheduler.add_job(
@@ -2568,73 +2571,82 @@ def main() -> None:
     # Set AGENT_COMPLIANCE_ENABLED=True in the deploy env to actually
     # run them. Cadence matches modern AGENT_COMPLIANCE_SCHEDULE_HOURS.
     scheduler.add_job(
-        run_agent_compliance_once,
+        operator_job_queue.enqueue_automatic,
         "interval",
         hours=settings.AGENT_COMPLIANCE_SCHEDULE_HOURS,
         id="agent_compliance_ingest_cycle",
+        args=["agent-compliance"],
         max_instances=1,
     )
     scheduler.add_job(
-        run_agent_compliance_evaluate_once,
+        operator_job_queue.enqueue_automatic,
         "interval",
         hours=settings.AGENT_COMPLIANCE_SCHEDULE_HOURS,
         id="agent_compliance_evaluate_cycle",
+        args=["agent-compliance-evaluate"],
         max_instances=1,
     )
     scheduler.add_job(
-        run_identity_resolver_once,
+        operator_job_queue.enqueue_automatic,
         "interval",
         minutes=30,
         id="identity_resolver_cycle",
+        args=["resolver"],
         max_instances=1,
     )
     scheduler.add_job(
-        run_platform_evaluate_once,
+        operator_job_queue.enqueue_automatic,
         "interval",
         hours=4,
         id="platform_evaluate_cycle",
+        args=["platform-evaluate"],
         max_instances=1,
     )
     if settings.NOTIFY_ENABLED:
         scheduler.add_job(
-            run_notifications_dispatch_once,
+            operator_job_queue.enqueue_automatic,
             "interval",
             minutes=settings.NOTIFY_DISPATCH_SCHEDULE_MINUTES,
             id="notifications_dispatch_cycle",
+            args=["notifications-dispatch"],
             max_instances=1,
         )
     if settings.NOTIFY_DIGEST_ENABLED:
         scheduler.add_job(
-            run_notifications_digest_once,
+            operator_job_queue.enqueue_automatic,
             "cron",
             hour=settings.NOTIFY_DIGEST_HOUR,
             minute=0,
             id="notifications_digest_cycle",
+            args=["notifications-digest"],
             max_instances=1,
         )
     # Nightly closed-history retention. Never touches open SCD-2 versions
     # (guaranteed by the security-definer function in migration 0074).
     scheduler.add_job(
-        run_observation_history_prune_once,
+        operator_job_queue.enqueue_automatic,
         "cron",
         hour=int(getattr(settings, "OBSERVATION_HISTORY_RETENTION_HOUR", 3)),
         minute=0,
         id="observation_history_retention_cycle",
+        args=["retention-history"],
         max_instances=1,
     )
     if settings.SOFTWARE_QUEUE_ENABLED:
         scheduler.add_job(
-            enqueue_all_orgs_once,
+            operator_job_queue.enqueue_automatic,
             "interval",
             hours=settings.SOFTWARE_INGEST_SCHEDULE_HOURS,
             id="software_enqueue_orgs_cycle",
+            args=["software-enqueue-orgs"],
             max_instances=1,
         )
         scheduler.add_job(
-            run_software_queue_once,
+            operator_job_queue.enqueue_automatic,
             "interval",
             minutes=settings.SOFTWARE_QUEUE_POLL_MINUTES,
             id="software_queue_drain_cycle",
+            args=["software-queue-drain"],
             max_instances=1,
         )
     # ADR-0015 step 6. Not gated on SOFTWARE_QUEUE_ENABLED or INTEL_ENABLED:
@@ -2643,108 +2655,122 @@ def main() -> None:
     # through the separately scheduled matcher/Winget/Chocolatey jobs, so
     # this path deliberately skips those pre-steps.
     scheduler.add_job(
-        run_software_classify_scheduled,
+        operator_job_queue.enqueue_automatic,
         "interval",
         hours=settings.SOFTWARE_CLASSIFY_SCHEDULE_HOURS,
         id="software_classify_cycle",
+        args=["software-classify-only"],
         max_instances=1,
     )
     if settings.INTEL_ENABLED:
         scheduler.add_job(
-            run_intel_nvd_once,
+            operator_job_queue.enqueue_automatic,
             "interval",
             hours=settings.INTEL_NVD_SCHEDULE_HOURS,
             id="intel_nvd_cycle",
+            args=["intel-nvd"],
             max_instances=1,
         )
         scheduler.add_job(
-            run_intel_cpe_dict_once,
+            operator_job_queue.enqueue_automatic,
             "interval",
             hours=settings.INTEL_CATALOG_SCHEDULE_HOURS,
             id="intel_cpe_dict_cycle",
+            args=["intel-cpe-dict"],
             max_instances=1,
         )
         scheduler.add_job(
-            run_intel_kev_once,
+            operator_job_queue.enqueue_automatic,
             "interval",
             hours=settings.INTEL_KEV_SCHEDULE_HOURS,
             id="intel_kev_cycle",
+            args=["intel-kev"],
             max_instances=1,
         )
         scheduler.add_job(
-            run_intel_epss_once,
+            operator_job_queue.enqueue_automatic,
             "interval",
             hours=settings.INTEL_EPSS_SCHEDULE_HOURS,
             id="intel_epss_cycle",
+            args=["intel-epss"],
             max_instances=1,
         )
         scheduler.add_job(
-            run_intel_matcher_once,
+            operator_job_queue.enqueue_automatic,
             "interval",
             hours=settings.INTEL_MATCHER_SCHEDULE_HOURS,
             id="intel_matcher_cycle",
+            args=["intel-matcher"],
             max_instances=1,
         )
         scheduler.add_job(
-            run_intel_winget_once,
+            operator_job_queue.enqueue_automatic,
             "interval",
             hours=settings.INTEL_CATALOG_SCHEDULE_HOURS,
             id="intel_winget_cycle",
+            args=["intel-winget"],
             max_instances=1,
         )
         scheduler.add_job(
-            run_intel_chocolatey_once,
+            operator_job_queue.enqueue_automatic,
             "interval",
             hours=settings.INTEL_CATALOG_SCHEDULE_HOURS,
             id="intel_chocolatey_cycle",
+            args=["intel-chocolatey"],
             max_instances=1,
         )
         scheduler.add_job(
-            run_intel_otx_once,
+            operator_job_queue.enqueue_automatic,
             "interval",
             hours=settings.INTEL_OSINT_SCHEDULE_HOURS,
             id="intel_otx_cycle",
+            args=["intel-otx"],
             max_instances=1,
         )
         scheduler.add_job(
-            run_intel_abusech_once,
+            operator_job_queue.enqueue_automatic,
             "interval",
             hours=settings.INTEL_OSINT_SCHEDULE_HOURS,
             id="intel_abusech_cycle",
+            args=["intel-abusech"],
             max_instances=1,
         )
         # Corpus pull, so it shares the catalog cadence with cpe_dict,
         # winget and chocolatey rather than the faster OSINT one. Release
         # cycles change on the order of weeks.
         scheduler.add_job(
-            run_intel_endoflife_once,
+            operator_job_queue.enqueue_automatic,
             "interval",
             hours=settings.INTEL_CATALOG_SCHEDULE_HOURS,
             id="intel_endoflife_cycle",
+            args=["intel-endoflife"],
             max_instances=1,
         )
         # Capability projection reads only local tables (rules + catalog), so
         # it is cheap and carries no vendor rate limit. Shares the catalog
         # cadence because rules change on the order of weeks.
         scheduler.add_job(
-            run_intel_capability_once,
+            operator_job_queue.enqueue_automatic,
             "interval",
             hours=settings.INTEL_CAPABILITY_SCHEDULE_HOURS,
             id="intel_capability_cycle",
+            args=["intel-capability"],
             max_instances=1,
         )
         scheduler.add_job(
-            run_intel_category_once,
+            operator_job_queue.enqueue_automatic,
             "interval",
             hours=settings.INTEL_CATEGORY_SCHEDULE_HOURS,
             id="intel_category_cycle",
+            args=["intel-category"],
             max_instances=1,
         )
         scheduler.add_job(
-            run_intel_lolrmm_once,
+            operator_job_queue.enqueue_automatic,
             "interval",
             hours=settings.INTEL_CATALOG_SCHEDULE_HOURS,
             id="intel_lolrmm_cycle",
+            args=["intel-lolrmm"],
             max_instances=1,
         )
     scheduler.start()
@@ -2780,8 +2806,8 @@ def main() -> None:
     else:
         log.info("No patch catch-up needed (fresh install or recent run)")
 
-    threading.Thread(target=run_agent_observations_once, daemon=True).start()
-    log.info("Agent observations: firing immediately on startup")
+    operator_job_queue.enqueue_automatic("agent-observations")
+    log.info("Agent observations: queued startup run")
 
     try:
         documentation_sources = load_sources()
@@ -2798,10 +2824,7 @@ def main() -> None:
             "firing run_once",
             documentation_schedule_hours,
         )
-        threading.Thread(
-            target=run_documentation_observations_once,
-            daemon=True,
-        ).start()
+        operator_job_queue.enqueue_automatic("documentation-observations")
     else:
         log.info(
             "No documentation-observations catch-up needed (recent successful run)"
@@ -2821,7 +2844,7 @@ def main() -> None:
             "Catch-up: software classifier has no successful run in %dh — firing",
             settings.SOFTWARE_CLASSIFY_SCHEDULE_HOURS,
         )
-        threading.Thread(target=run_software_classify_scheduled, daemon=True).start()
+        operator_job_queue.enqueue_automatic("software-classify-only")
     else:
         log.info("No software classifier catch-up needed (recent successful run)")
 
@@ -2867,26 +2890,26 @@ def _intel_catchup() -> None:
         log.exception("Intel catch-up status probe failed")
         done = set()
 
-    plan: list[tuple[str, object]] = [
-        ("cisa_kev",   run_intel_kev_once),
-        ("nvd",        run_intel_nvd_once),
-        ("cpe_dict",   run_intel_cpe_dict_once),
-        ("epss",       run_intel_epss_once),
-        ("winget",     run_intel_winget_once),
-        ("chocolatey", run_intel_chocolatey_once),
-        ("otx",        run_intel_otx_once),
-        ("abusech",    run_intel_abusech_once),
-        ("endoflife",  run_intel_endoflife_once),
-        ("matcher",    run_intel_matcher_once),
-        ("capability_match", run_intel_capability_once),
-        ("category_match", run_intel_category_once),
-        ("lolrmm", run_intel_lolrmm_once),
+    plan: list[tuple[str, str]] = [
+        ("cisa_kev", "intel-kev"),
+        ("nvd", "intel-nvd"),
+        ("cpe_dict", "intel-cpe-dict"),
+        ("epss", "intel-epss"),
+        ("winget", "intel-winget"),
+        ("chocolatey", "intel-chocolatey"),
+        ("otx", "intel-otx"),
+        ("abusech", "intel-abusech"),
+        ("endoflife", "intel-endoflife"),
+        ("matcher", "intel-matcher"),
+        ("capability_match", "intel-capability"),
+        ("category_match", "intel-category"),
+        ("lolrmm", "intel-lolrmm"),
     ]
     fired = []
-    for connector, fn in plan:
+    for connector, job_key in plan:
         if connector in done:
             continue
-        threading.Thread(target=fn, daemon=True).start()
+        operator_job_queue.enqueue_automatic(job_key)
         fired.append(connector)
     if fired:
         log.info("Intel catch-up: fired %s", ", ".join(fired))

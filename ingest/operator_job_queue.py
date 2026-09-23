@@ -7,6 +7,7 @@ queues: its entries represent registered platform work, not a source mutation.
 from __future__ import annotations
 
 import logging
+import uuid
 from typing import Any
 
 from psycopg_pool import PoolTimeout
@@ -17,6 +18,33 @@ log = logging.getLogger(__name__)
 
 _TABLE = "operations.operator_job_runs"
 _LEASE_MINUTES = 90
+
+
+def enqueue_automatic(job_key: str) -> bool:
+    """Queue scheduled work through the same durable path as Jobs.
+
+    A null requester means the scheduler initiated it.  The active-row index
+    coalesces an overdue cadence with work already queued or running, which is
+    preferable to accumulating duplicate automatic runs while the worker is
+    busy.
+    """
+    try:
+        with db.transaction() as cur:
+            cur.execute("SET LOCAL operations.tenant_id = 1")
+            cur.execute(
+                f"""
+                INSERT INTO {_TABLE} (id, tenant_id, job_key, requested_by_id)
+                VALUES (%s, 1, %s, NULL)
+                ON CONFLICT (tenant_id, job_key) WHERE status IN ('queued', 'running')
+                DO NOTHING
+                RETURNING id
+                """,
+                (uuid.uuid4(), job_key),
+            )
+            return cur.fetchone() is not None
+    except PoolTimeout:
+        log.warning("automatic job %s waiting for database capacity", job_key)
+        return False
 
 
 def process_next() -> dict[str, int]:
@@ -109,6 +137,7 @@ def _execute(job_key: str) -> int | None:
         chocolatey,
         cisa_kev,
         cpe_dict,
+        category_match,
         epss,
         lolrmm,
         matcher,
@@ -126,6 +155,12 @@ def _execute(job_key: str) -> int | None:
         "resolver": lambda: main.run_identity_resolver_once(),
         "patches": lambda: main.run_patching_once(),
         "agent-observations": lambda: main.run_agent_observations_once(),
+        "documentation-observations": lambda: main.run_documentation_observations_once(),
+        "agent-compliance": lambda: main.run_agent_compliance_once(),
+        "agent-compliance-evaluate": lambda: main.run_agent_compliance_evaluate_once(),
+        "retention-history": lambda: main.run_observation_history_prune_once(),
+        "software-enqueue-orgs": lambda: main.enqueue_all_orgs_once(),
+        "software-queue-drain": lambda: main.run_software_queue_once(),
         "notifications-dispatch": lambda: main.notify_dispatch(tenant_id=1),
         "notifications-digest": lambda: main.notify_send_digest(tenant_id=1),
         "intel-nvd": nvd.run_once,
@@ -139,6 +174,8 @@ def _execute(job_key: str) -> int | None:
         "intel-lolrmm": lolrmm.run_once,
         "intel-otx": otx.run_once,
         "intel-abusech": abusech.run_once,
+        "intel-endoflife": lambda: main.run_intel_endoflife_once(),
+        "intel-category": category_match.run_once,
     }
     if job_key not in jobs:
         raise ValueError(f"Unknown registered job: {job_key}")
