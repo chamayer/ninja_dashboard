@@ -5,10 +5,14 @@ def test_operator_jobs_use_a_durable_queue_and_separate_stall_watchdog():
     queue = Path("../ingest/operator_job_queue.py").read_text(encoding="utf-8")
     main = Path("../ingest/main.py").read_text(encoding="utf-8")
     migration = Path("apps/core/migrations/0178_operator_job_queue.py").read_text(encoding="utf-8")
+    progress_migration = Path("apps/core/migrations/0179_add_operator_job_progress.py").read_text(encoding="utf-8")
 
     assert "operations.operator_job_runs" in queue
     assert "FOR UPDATE SKIP LOCKED" in queue
     assert "status = 'stalled'" in queue
+    assert "class JobProgress" in queue
+    assert "stage_updated_at" in queue
+    assert "_software_classify_with_intel" in queue
     assert "operator jobs waiting for database capacity" in queue
     assert "except PoolTimeout:" in queue
     assert 'id="operator_job_queue"' in main
@@ -19,6 +23,7 @@ def test_operator_jobs_use_a_durable_queue_and_separate_stall_watchdog():
     assert 'args=["intel-nvd"]' in main
     assert "uq_operator_job_runs_active" in migration
     assert "ENABLE ROW LEVEL SECURITY" in migration
+    assert "stage_updated_at" in progress_migration
 
 
 def test_jobs_status_uses_operator_language_and_safe_controls():
@@ -33,6 +38,8 @@ def test_jobs_status_uses_operator_language_and_safe_controls():
     assert "Cannot safely stop" in template
     assert "Job activity" in template
     assert "Queue position" in template
+    assert "Current work" in template
+    assert "Last update" in template
     assert "Recent system activity" in template
     assert '"origin": "Automatic"' in views
     assert "Show error details" in template

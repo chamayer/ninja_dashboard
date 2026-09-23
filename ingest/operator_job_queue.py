@@ -20,6 +20,24 @@ _TABLE = "operations.operator_job_runs"
 _LEASE_MINUTES = 90
 
 
+class JobProgress:
+    """Persist a factual current stage for one active Jobs run."""
+
+    def __init__(self, job_id: Any) -> None:
+        self.job_id = job_id
+
+    def update(self, stage: str, detail: str = "") -> None:
+        with db.transaction() as cur:
+            cur.execute("SET LOCAL operations.tenant_id = 1")
+            cur.execute(
+                f"""UPDATE {_TABLE}
+                       SET stage = %s, stage_detail = %s, stage_updated_at = NOW(),
+                           lease_expires_at = NOW() + INTERVAL '{_LEASE_MINUTES} minutes'
+                     WHERE tenant_id = 1 AND id = %s AND status = 'running'""",
+                (stage, detail, self.job_id),
+            )
+
+
 def enqueue_automatic(job_key: str) -> bool:
     """Queue scheduled work through the same durable path as Jobs.
 
@@ -58,7 +76,7 @@ def process_next() -> dict[str, int]:
     if row is None:
         return {"completed": 0, "failed": 0}
     try:
-        rows = _execute(row["job_key"])
+        rows = _execute(row["job_key"], JobProgress(row["id"]))
     except Exception as exc:
         log.exception("operator job %s failed", row["job_key"])
         _finish(row["id"], "failed", error=str(exc)[:2000])
@@ -74,7 +92,9 @@ def recover_stale() -> int:
             cur.execute(
                 f"""
                 UPDATE {_TABLE}
-                   SET status = 'stalled', completed_at = NOW(), lease_expires_at = NULL,
+                   SET status = 'stalled', stage = 'Needs attention',
+                       stage_detail = 'No progress update before the safety deadline.',
+                       stage_updated_at = NOW(), completed_at = NOW(), lease_expires_at = NULL,
                        error = 'Run stopped responding. Review and retry when ready.'
                  WHERE tenant_id = 1 AND status = 'running'
                    AND lease_expires_at < NOW()
@@ -100,7 +120,8 @@ def _claim_next() -> dict[str, Any] | None:
                  FOR UPDATE SKIP LOCKED LIMIT 1
             )
             UPDATE {_TABLE} job
-               SET status = 'running', started_at = NOW(),
+               SET status = 'running', stage = 'Starting', stage_detail = '',
+                   stage_updated_at = NOW(), started_at = NOW(),
                    lease_expires_at = NOW() + INTERVAL '{_LEASE_MINUTES} minutes',
                    attempts = attempts + 1
               FROM candidate
@@ -117,14 +138,22 @@ def _finish(job_id: Any, status: str, *, rows: int | None = None, error: str = "
         cur.execute("SET LOCAL operations.tenant_id = 1")
         cur.execute(
             f"""UPDATE {_TABLE}
-                 SET status = %s, completed_at = NOW(), lease_expires_at = NULL,
+                 SET status = %s, stage = %s, stage_detail = %s,
+                       stage_updated_at = NOW(), completed_at = NOW(), lease_expires_at = NULL,
                        rows_touched = %s, error = %s
                  WHERE id = %s AND status = 'running'""",
-            (status, rows, error, job_id),
+            (
+                status,
+                "Completed" if status == "completed" else "Failed",
+                "Finished" if status == "completed" else "Review the recorded error.",
+                rows,
+                error,
+                job_id,
+            ),
         )
 
 
-def _execute(job_key: str) -> int | None:
+def _execute(job_key: str, progress: JobProgress) -> int | None:
     """Run a catalog job synchronously in the bounded queue worker.
 
     Importing main here avoids its startup import cycle. The direct lower-level
@@ -147,37 +176,60 @@ def _execute(job_key: str) -> int | None:
     )
 
     jobs = {
-        "patch-classify": lambda: main.patch_classify(tenant_id=1),
-        "platform-evaluate": lambda: main.platform_evaluate(tenant_id=1),
-        "parity-check": lambda: main.parity_check_run(tenant_id=1),
-        "software-classify": lambda: main.software_classify(tenant_id=1),
-        "software-classify-only": lambda: main.software_classify(tenant_id=1),
-        "resolver": lambda: main.run_identity_resolver_once(),
-        "patches": lambda: main.run_patching_once(),
-        "agent-observations": lambda: main.run_agent_observations_once(),
-        "documentation-observations": lambda: main.run_documentation_observations_once(),
-        "agent-compliance": lambda: main.run_agent_compliance_once(),
-        "agent-compliance-evaluate": lambda: main.run_agent_compliance_evaluate_once(),
-        "retention-history": lambda: main.run_observation_history_prune_once(),
-        "software-enqueue-orgs": lambda: main.enqueue_all_orgs_once(),
-        "software-queue-drain": lambda: main.run_software_queue_once(),
-        "notifications-dispatch": lambda: main.notify_dispatch(tenant_id=1),
-        "notifications-digest": lambda: main.notify_send_digest(tenant_id=1),
-        "intel-nvd": nvd.run_once,
-        "intel-cpe-dict": cpe_dict.run_once,
-        "intel-kev": cisa_kev.run_once,
-        "intel-epss": epss.run_once,
-        "intel-matcher": matcher.run_once,
-        "intel-winget": winget.run_once,
-        "intel-chocolatey": chocolatey.run_once,
-        "intel-capability": capability_match.run_once,
-        "intel-lolrmm": lolrmm.run_once,
-        "intel-otx": otx.run_once,
-        "intel-abusech": abusech.run_once,
-        "intel-endoflife": lambda: main.run_intel_endoflife_once(),
-        "intel-category": category_match.run_once,
+        "patch-classify": ("Classifying patch state", lambda: main.patch_classify(tenant_id=1)),
+        "platform-evaluate": ("Evaluating platform conditions", lambda: main.platform_evaluate(tenant_id=1)),
+        "parity-check": ("Checking operational parity", lambda: main.parity_check_run(tenant_id=1)),
+        "software-classify-only": ("Classifying installed software", lambda: main.software_classify(tenant_id=1)),
+        "resolver": ("Resolving computer identity", lambda: main.run_identity_resolver_once()),
+        "patches": ("Collecting Ninja information", lambda: main.run_patching_once()),
+        "agent-observations": ("Collecting agent observations", lambda: main.run_agent_observations_once()),
+        "documentation-observations": ("Collecting documentation observations", lambda: main.run_documentation_observations_once()),
+        "agent-compliance": ("Refreshing agent compliance", lambda: main.run_agent_compliance_once()),
+        "agent-compliance-evaluate": ("Reviewing agent compliance", lambda: main.run_agent_compliance_evaluate_once()),
+        "retention-history": ("Cleaning closed history", lambda: main.run_observation_history_prune_once()),
+        "software-enqueue-orgs": ("Scheduling software inventory", lambda: main.enqueue_all_orgs_once()),
+        "software-queue-drain": ("Collecting software inventory", lambda: main.run_software_queue_once()),
+        "notifications-dispatch": ("Sending notifications", lambda: main.notify_dispatch(tenant_id=1)),
+        "notifications-digest": ("Preparing notification digest", lambda: main.notify_send_digest(tenant_id=1)),
+        "intel-nvd": ("Refreshing NVD intelligence", nvd.run_once),
+        "intel-cpe-dict": ("Refreshing CPE dictionary", cpe_dict.run_once),
+        "intel-kev": ("Refreshing exploited-vulnerability intelligence", cisa_kev.run_once),
+        "intel-epss": ("Refreshing exploit-likelihood scores", epss.run_once),
+        "intel-matcher": ("Matching software to vulnerabilities", matcher.run_once),
+        "intel-winget": ("Refreshing Windows package intelligence", winget.run_once),
+        "intel-chocolatey": ("Refreshing Chocolatey intelligence", chocolatey.run_once),
+        "intel-capability": ("Projecting software capabilities", capability_match.run_once),
+        "intel-lolrmm": ("Refreshing remote-management intelligence", lolrmm.run_once),
+        "intel-otx": ("Refreshing threat intelligence", otx.run_once),
+        "intel-abusech": ("Refreshing malware intelligence", abusech.run_once),
+        "intel-endoflife": ("Refreshing end-of-life intelligence", lambda: main.run_intel_endoflife_once()),
+        "intel-category": ("Refreshing software categories", category_match.run_once),
     }
+    if job_key == "software-classify":
+        return _software_classify_with_intel(progress, matcher, winget, chocolatey, main)
     if job_key not in jobs:
         raise ValueError(f"Unknown registered job: {job_key}")
-    result = jobs[job_key]()
+    stage, job = jobs[job_key]
+    progress.update(stage, "This job does not publish a measurable work total.")
+    result = job()
+    return int(result) if isinstance(result, int) else None
+
+
+def _software_classify_with_intel(
+    progress: JobProgress, matcher: Any, winget: Any, chocolatey: Any, main: Any
+) -> int | None:
+    """Run the advertised auto-intel sequence with each real stage recorded."""
+    if main.settings.INTEL_ENABLED:
+        for stage, job in (
+            ("Matching software to vulnerabilities", matcher.run_once),
+            ("Refreshing Windows package intelligence", winget.run_once),
+            ("Refreshing Chocolatey intelligence", chocolatey.run_once),
+        ):
+            progress.update(stage, "This stage does not publish a measurable work total.")
+            job()
+    progress.update("Classifying installed software", "This stage does not publish a measurable work total.")
+    result = main.software_classify(tenant_id=1)
+    progress.update("Refreshing software views", "Making the completed classification available to operators.")
+    with db.pool.connection() as conn, conn.cursor() as cur:
+        cur.execute("REFRESH MATERIALIZED VIEW operations.v_software_safety")
     return int(result) if isinstance(result, int) else None

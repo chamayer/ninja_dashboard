@@ -2,7 +2,7 @@
 
 ## Status
 
-**Unified activity implementation in progress.** This supersedes the completed
+**Job telemetry implementation in progress.** This supersedes the completed
 Issues-page plan below. Existing unrelated untracked root `.work/probe_*` and
 bootstrap files must remain untouched.
 
@@ -52,6 +52,10 @@ external Hudu mutations and is also not suitable.
   as **Automatic**. The page also retains recent run-log and connector history
   so system work outside this queue is still visible rather than silently
   omitted.
+- A queue status is only operator-facing progress when it is a recorded job
+  stage. Do not display arbitrary percentages. Each job records its current
+  stage, its last stage update, and an explicit "no measurable units" message
+  when the underlying producer has no reliable work total.
 
 ## Scope
 
@@ -120,6 +124,21 @@ when the run kind is explicitly mapped to a registered Job; Software
 Classifier maps to the no-intel refresh path used by its schedule. Validation:
 Django checks, template loading, and 58 focused Operations tests passed.
 Release prepared as version 0.126.11; no migration is required.
+
+Current work: replace the synthetic lifecycle bars with durable stage telemetry
+for every registered Job. Migration 0179 will add stage, detail, and update
+time fields to the existing tenant-scoped queue. Composite Software Classifier
+work will record its real matcher, enrichers, classifier, and view-refresh
+stages; all other registered jobs record their actual dispatched operation.
+No percentage is displayed unless a producer supplies a real total.
+
+Implemented locally and prepared as version 0.126.12: migration 0179 persists
+the current stage, explanatory detail, and last update for every durable Job.
+The worker updates those fields at every real dispatch boundary and renews its
+lease. Validation: Django checks, migration autodetection, template loading,
+58 focused Operations tests, 36 ingest safety tests, targeted Ruff,
+compilation, and diff checks passed. Next: commit/push with the reviewed
+migration and verify the rollout before treating the live status as updated.
 
 ---
 

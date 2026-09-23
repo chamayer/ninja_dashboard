@@ -14,10 +14,8 @@
   .job-error { color:#991b1b; max-width:38ch; white-space:normal; }
   .job-error pre { max-width:72rem; max-height:22rem; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; color:inherit; }
   .job-cancel { border:1px solid var(--border); border-radius:4px; background:#fff; padding:.3rem .55rem; cursor:pointer; }
-  .job-progress { min-width:10rem; }
-  .job-progress-track { height:.42rem; background:#e5e7eb; border-radius:99px; overflow:hidden; margin:.3rem 0; }
-  .job-progress-fill { height:100%; background:#64748b; } .job-progress-fill.queued { width:25%; background:#2563eb; } .job-progress-fill.running { width:65%; background:#7c3aed; } .job-progress-fill.completed { width:100%; background:#16a34a; } .job-progress-fill.failed,.job-progress-fill.stalled { width:100%; background:#dc2626; } .job-progress-fill.cancelled { width:100%; background:#94a3b8; }
-  .job-progress-note { font-size:.78rem; color:var(--muted); }
+  .job-progress { min-width:16rem; }
+  .job-progress-note { display:block; font-size:.78rem; color:var(--muted); margin-top:.2rem; }
   .job-section { margin:1.5rem 0 .6rem; font-size:1rem; }
 </style>
 
@@ -28,11 +26,11 @@
 
 {% if runs %}
 <table class="job-status-table">
-  <thead><tr><th>Job</th><th>Started by</th><th>Progress</th><th>Requested</th><th>Started</th><th>Finished</th><th>Result</th><th>Action</th></tr></thead>
+  <thead><tr><th>Job</th><th>Started by</th><th>Current work</th><th>Requested</th><th>Started</th><th>Finished</th><th>Result</th><th>Action</th></tr></thead>
   <tbody>{% for run in runs %}<tr>
     <td><strong>{{ run.name }}</strong>{% if run.batch_id %}<br><span class="muted">Batch run</span>{% endif %}</td>
     <td>{{ run.origin }}</td>
-    <td class="job-progress"><span class="job-state {{ run.status }}">{{ run.status_label }}</span><div class="job-progress-track"><div class="job-progress-fill {{ run.status }}"></div></div><span class="job-progress-note">{% if run.status == 'queued' %}Queue position {{ run.queue_position }}{% elif run.status == 'running' %}Working now{% elif run.status == 'completed' %}Finished{% elif run.status == 'failed' or run.status == 'stalled' %}Review needed{% else %}Stopped before starting{% endif %}{% if run.elapsed %} · {{ run.elapsed }}{% endif %}</span></td>
+    <td class="job-progress"><span class="job-state {{ run.status }}">{{ run.status_label }}</span><strong class="job-progress-note">{% if run.status == 'queued' %}Queue position {{ run.queue_position }}{% else %}{{ run.stage }}{% endif %}</strong>{% if run.stage_detail %}<span class="job-progress-note">{{ run.stage_detail }}</span>{% endif %}{% if run.elapsed %}<span class="job-progress-note">Elapsed {{ run.elapsed }}</span>{% endif %}{% if run.stage_updated_at %}<span class="job-progress-note">Last update {{ run.stage_updated_at|date:"Y-m-d H:i:s" }}</span>{% endif %}</td>
     <td>{{ run.requested_at|date:"Y-m-d H:i:s" }}</td><td>{{ run.started_at|date:"Y-m-d H:i:s"|default:"—" }}</td><td>{{ run.completed_at|date:"Y-m-d H:i:s"|default:"—" }}</td>
     <td>{% if run.rows_touched is not None %}{{ run.rows_touched }} updated{% endif %}{% if run.error %}<div class="job-error">{{ run.error }}</div>{% endif %}</td>
     <td>{% if run.status == 'queued' %}<form method="post" action="{% url 'admin_job_cancel' run.id %}">{% csrf_token %}<button class="job-cancel" type="submit">Cancel</button></form>{% elif run.status == 'running' %}<span class="muted">Cannot safely stop</span>{% elif run.status == 'failed' or run.status == 'stalled' %}<form method="post" action="{% url 'admin_job_retry' run.id %}">{% csrf_token %}<button class="job-cancel" type="submit">Retry</button></form>{% else %}—{% endif %}</td>

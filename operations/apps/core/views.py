@@ -8204,7 +8204,7 @@ def _operator_job_runs(*, limit: int = 100, run_id: str = "", batch_id: str = ""
         cur.execute("SET LOCAL operations.tenant_id = 1")
         cur.execute(
             f"""SELECT id, job_key, batch_id, requested_by_id, requested_at, started_at, completed_at,
-                        status, attempts, rows_touched, error,
+                        status, attempts, rows_touched, error, stage, stage_detail, stage_updated_at,
                         CASE WHEN status = 'queued' THEN (
                             SELECT COUNT(*) + 1 FROM operations.operator_job_runs earlier
                              WHERE earlier.tenant_id = 1 AND earlier.status = 'queued'
@@ -8243,7 +8243,8 @@ def _operator_job_runs(*, limit: int = 100, run_id: str = "", batch_id: str = ""
             "requested_at": row[4], "started_at": row[5], "completed_at": row[6],
             "status": row[7], "status_label": status_labels.get(row[7], row[7]),
             "attempts": row[8], "rows_touched": row[9], "error": row[10],
-            "queue_position": row[11],
+            "stage": row[11], "stage_detail": row[12], "stage_updated_at": row[13],
+            "queue_position": row[14],
             "elapsed": elapsed_label(row[5], row[6]),
         }
         for row in rows
@@ -8310,7 +8311,9 @@ def admin_job_cancel(request: HttpRequest, run_id: uuid.UUID) -> HttpResponse:
         cur.execute("SET LOCAL operations.tenant_id = 1")
         cur.execute(
             """UPDATE operations.operator_job_runs
-                   SET status = 'cancelled', completed_at = NOW(),
+                   SET status = 'cancelled', stage = 'Cancelled',
+                       stage_detail = 'Cancelled before work started.', stage_updated_at = NOW(),
+                       completed_at = NOW(),
                        error = 'Cancelled before work started.'
                  WHERE tenant_id = 1 AND id = %s AND status = 'queued'""",
             (run_id,),

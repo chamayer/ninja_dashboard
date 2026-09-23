@@ -2,6 +2,19 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.126.12] — 2026-09-23 — Job telemetry
+
+### Changed
+
+- Replaced synthetic Job progress bars with recorded current-stage and
+  last-update telemetry.
+- Software Classifier (+ auto-intel) now follows and reports its advertised
+  intelligence, classification, and view-refresh stages.
+
+### Added
+
+- Added migration 0179 for durable Job-stage telemetry.
+
 ## [0.126.11] — 2026-09-23 — Job history recovery
 
 ### Fixed
