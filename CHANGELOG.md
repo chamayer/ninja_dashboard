@@ -2,6 +2,19 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.126.15] — 2026-09-23 — Software Jobs controls
+
+### Fixed
+
+- Added migration 0182 to grant Operations the Jobs-queue update permission
+  required for Cancel and Retry actions.
+- Moved Software classifier work to its own lane so long rebuilds do not block
+  patching, platform, identity, or parity evaluation.
+- Coalesced Software classifier modes by scope, superseding queued narrower
+  work when a broader full or auto-intel run is requested.
+- Replaced ambiguous queued Job placeholders with lane-local position, waiting
+  reason, Not started/Not completed, and explicit result wording.
+
 ## [0.126.14] — 2026-09-23 — Software classifier workflow
 
 ### Added

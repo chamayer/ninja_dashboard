@@ -7,6 +7,7 @@ def test_operator_jobs_use_a_durable_queue_and_separate_stall_watchdog():
     migration = Path("apps/core/migrations/0178_operator_job_queue.py").read_text(encoding="utf-8")
     progress_migration = Path("apps/core/migrations/0179_add_operator_job_progress.py").read_text(encoding="utf-8")
     workflow_migration = Path("apps/core/migrations/0180_operator_job_workflow_controls.py").read_text(encoding="utf-8")
+    software_lane_migration = Path("apps/core/migrations/0182_software_job_lane_and_operations_controls.py").read_text(encoding="utf-8")
 
     assert "operations.operator_job_runs" in queue
     assert "FOR UPDATE SKIP LOCKED" in queue
@@ -33,8 +34,12 @@ def test_operator_jobs_use_a_durable_queue_and_separate_stall_watchdog():
     assert "incremental=True" in queue
     assert "_SOFTWARE_CLASSIFIER_JOBS" in queue
     assert "job_key <> ALL" in queue
+    assert "_admit_software_classifier" in queue
+    assert '"software"' in queue
     assert "software-classify-full" in Path("apps/core/views.py").read_text(encoding="utf-8")
     assert "_queue_software_rebuild_after_commit" in Path("apps/core/views.py").read_text(encoding="utf-8")
+    assert "GRANT SELECT, INSERT, UPDATE ON operations.operator_job_runs TO operations_app" in software_lane_migration
+    assert "Superseded by a broader Software classifier run" in software_lane_migration
 
 
 def test_jobs_status_uses_operator_language_and_safe_controls():
@@ -50,8 +55,10 @@ def test_jobs_status_uses_operator_language_and_safe_controls():
     assert "Job activity" in template
     assert "Queue position" in template
     assert "Current work" in template
-    assert "Stage update" in template
-    assert "Worker alive" in template
+    assert "Updated" in template
+    assert "Worker active" in template
+    assert "Not started" in template
+    assert "Waiting for work already running in this lane" in views
     assert "Recent system activity" in template
     assert '"origin": "Automatic"' in views
     assert "Show error details" in template

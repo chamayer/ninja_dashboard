@@ -133,6 +133,27 @@ production migration has occurred. Next action: obtain explicit approval to
 commit and push the reviewed migration and software workflow release; only
 then plan the shared evaluator framework as a separate scope.
 
+Current corrective scope: repair the deployed Job Cancel permission failure and
+make the Software classifier the first lane/mode implementation of the future
+evaluator framework. Migration 0182 will grant Operations queue update rights,
+move existing Software classifier rows to a dedicated Software lane, and
+supersede redundant queued classifier modes. Queue admission will use an
+explicit mode-priority policy; status will use lane-local queue positions and
+plain not-started/waiting/result wording with no placeholder dashes. No commit,
+push, deployment, or production migration is authorized yet.
+
+Implemented locally: migration 0182 grants Operations the queue update right,
+moves all Software classifier modes to the dedicated Software lane, and
+cancels queued narrower Software runs when a broader queued/running mode
+already covers them. Queue admission now serializes classifier requests with a
+transaction advisory lock and applies mode priority (incremental < full <
+auto-intel). Job activity now shows lane-local positions, a waiting reason,
+Not started/Not completed, an explicit queued result, and no placeholder dash
+for a missing action. Validation: compilation, targeted Ruff, 36 ingest tests
+with one environment skip, 2 Jobs tests, Django checks, migration autodetection,
+template loading, and diff check all pass. Next action: obtain explicit commit
+and push approval including reviewed migration 0182.
+
 Released through `edf1767`: migration 0178 adds the tenant-scoped durable Jobs queue,
 active-request coalescing indexes, RLS/grants, and queue-health registration.
 Jobs now enqueues individual runs and sequential batches; the ingest scheduler

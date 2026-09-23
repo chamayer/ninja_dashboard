@@ -31,6 +31,9 @@ _JOB_LANES = {
     "retention-history": "service",
     "software-enqueue-orgs": "service",
     "software-queue-drain": "collection",
+    "software-classify": "software",
+    "software-classify-only": "software",
+    "software-classify-full": "software",
 }
 
 _SOFTWARE_CLASSIFIER_JOBS = (
@@ -38,6 +41,11 @@ _SOFTWARE_CLASSIFIER_JOBS = (
     "software-classify-only",
     "software-classify-full",
 )
+_SOFTWARE_JOB_PRIORITY = {
+    "software-classify-only": 1,
+    "software-classify-full": 2,
+    "software-classify": 3,
+}
 
 
 def lane_for(job_key: str) -> str:
@@ -47,7 +55,7 @@ def lane_for(job_key: str) -> str:
     return _JOB_LANES.get(job_key, "evaluation")
 
 
-WORKER_LANES = ("collection", "evaluation", "intelligence", "service")
+WORKER_LANES = ("collection", "evaluation", "software", "intelligence", "service")
 
 
 class JobProgress:
@@ -96,6 +104,8 @@ def enqueue_automatic(job_key: str) -> bool:
     try:
         with db.transaction() as cur:
             cur.execute("SET LOCAL operations.tenant_id = 1")
+            if not _admit_software_classifier(cur, job_key):
+                return False
             cur.execute(
                 f"""
                 INSERT INTO {_TABLE} (id, tenant_id, job_key, lane, requested_by_id)
@@ -110,6 +120,42 @@ def enqueue_automatic(job_key: str) -> bool:
     except PoolTimeout:
         log.warning("automatic job %s waiting for database capacity", job_key)
         return False
+
+
+def _admit_software_classifier(cur, job_key: str) -> bool:
+    """Coalesce classifier modes by the work each one subsumes.
+
+    Incremental work is narrower than a full rebuild; auto-intel is broader
+    than both. Queued narrower work is superseded, but running work is never
+    interrupted. An advisory lock serializes competing scheduler and UI
+    requests before they can create cross-key duplicates.
+    """
+    priority = _SOFTWARE_JOB_PRIORITY.get(job_key)
+    if priority is None:
+        return True
+    cur.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", ("operations.software_classifier",))
+    cur.execute(
+        f"""SELECT id, job_key, status FROM {_TABLE}
+             WHERE tenant_id = 1 AND job_key = ANY(%s::text[])
+               AND status IN ('queued', 'running')
+             FOR UPDATE""",
+        (list(_SOFTWARE_CLASSIFIER_JOBS),),
+    )
+    active = cur.fetchall()
+    if any(_SOFTWARE_JOB_PRIORITY[row[1]] >= priority for row in active):
+        return False
+    superseded = [row[0] for row in active if row[2] == "queued"]
+    if superseded:
+        cur.execute(
+            f"""UPDATE {_TABLE}
+                   SET status = 'cancelled', stage = 'Superseded',
+                       stage_detail = 'Superseded by a broader Software classifier run.',
+                       stage_updated_at = NOW(), completed_at = NOW(),
+                       error = 'Superseded before work started.'
+                 WHERE tenant_id = 1 AND id = ANY(%s) AND status = 'queued'""",
+            (superseded,),
+        )
+    return True
 
 
 def process_next(lane: str = "evaluation") -> dict[str, int]:

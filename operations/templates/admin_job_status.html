@@ -22,7 +22,7 @@
 </style>
 
 <div class="job-status-head">
-  <div><h1>Job activity</h1><div class="muted">All requested and scheduled work. Updates every 15 seconds; one queued job runs at a time.</div></div>
+  <div><h1>Job activity</h1><div class="muted">All requested and scheduled work. Updates every 15 seconds; work runs independently by lane.</div></div>
   <a href="{% url 'admin_jobs' %}">Back to Jobs</a>
 </div>
 
@@ -32,10 +32,10 @@
   <tbody>{% for run in runs %}<tr>
     <td><strong>{{ run.name }}</strong><br><span class="muted">{{ run.lane|title }} lane</span>{% if run.batch_id %}<br><span class="muted">Batch run</span>{% endif %}</td>
     <td>{{ run.origin }}</td>
-    <td class="job-progress"><span class="job-state {{ run.status }}">{{ run.status_label }}</span><strong class="job-progress-note">{% if run.status == 'queued' %}Queue position {{ run.queue_position }}{% else %}{{ run.stage }}{% endif %}</strong>{% if run.stage_detail %}<span class="job-progress-note">{{ run.stage_detail }}</span>{% endif %}{% if run.elapsed %}<span class="job-progress-note">Elapsed {{ run.elapsed }}</span>{% endif %}{% if run.stage_updated_at %}<span class="job-progress-note">Stage update {{ run.stage_updated_at|date:"Y-m-d H:i:s" }}</span>{% endif %}{% if run.heartbeat_at and run.status == 'running' %}<span class="job-progress-note">Worker alive {{ run.heartbeat_at|date:"Y-m-d H:i:s" }}</span>{% endif %}</td>
-    <td>{{ run.requested_at|date:"Y-m-d H:i:s" }}</td><td>{{ run.started_at|date:"Y-m-d H:i:s"|default:"—" }}</td><td>{{ run.completed_at|date:"Y-m-d H:i:s"|default:"—" }}</td>
-    <td>{% if run.rows_touched is not None %}{{ run.rows_touched }} updated{% endif %}{% if run.error %}<details class="job-error"><summary>Show error details</summary><pre>{{ run.error }}</pre></details>{% endif %}{% if run.events %}<details class="job-timeline"><summary>Run timeline</summary><ul>{% for event in run.events %}<li>{{ event.at|date:"Y-m-d H:i:s" }} — {{ event.stage }}{% if event.detail %}: {{ event.detail }}{% endif %}</li>{% endfor %}</ul></details>{% endif %}</td>
-    <td>{% if run.status == 'queued' %}<form method="post" action="{% url 'admin_job_cancel' run.id %}">{% csrf_token %}<button class="job-cancel" type="submit">Cancel</button></form>{% elif run.status == 'running' %}<span class="muted">Cannot safely stop</span>{% elif run.status == 'failed' or run.status == 'stalled' %}<form method="post" action="{% url 'admin_job_retry' run.id %}">{% csrf_token %}<button class="job-cancel" type="submit">Retry</button></form>{% else %}—{% endif %}</td>
+    <td class="job-progress"><span class="job-state {{ run.status }}">{{ run.status_label }}</span><strong class="job-progress-note">{% if run.status == 'queued' %}Not started{% else %}{{ run.stage }}{% endif %}</strong>{% if run.status == 'queued' %}<span class="job-progress-note">Queue position {{ run.queue_position }} in the {{ run.lane }} lane</span><span class="job-progress-note">{{ run.queue_reason }}</span>{% elif run.stage_detail %}<span class="job-progress-note">{{ run.stage_detail }}</span>{% endif %}{% if run.elapsed %}<span class="job-progress-note">Elapsed {{ run.elapsed }}</span>{% endif %}{% if run.stage_updated_at and run.status != 'queued' %}<span class="job-progress-note">Updated {{ run.stage_updated_at|date:"Y-m-d H:i:s" }}</span>{% endif %}{% if run.heartbeat_at and run.status == 'running' %}<span class="job-progress-note">Worker active {{ run.heartbeat_at|date:"Y-m-d H:i:s" }}</span>{% endif %}</td>
+    <td>{{ run.requested_at|date:"Y-m-d H:i:s" }}</td><td>{% if run.started_at %}{{ run.started_at|date:"Y-m-d H:i:s" }}{% else %}Not started{% endif %}</td><td>{% if run.completed_at %}{{ run.completed_at|date:"Y-m-d H:i:s" }}{% else %}Not completed{% endif %}</td>
+    <td>{% if run.rows_touched is not None %}{{ run.rows_touched }} updated{% else %}{{ run.result_label }}{% endif %}{% if run.error %}<details class="job-error"><summary>Show error details</summary><pre>{{ run.error }}</pre></details>{% endif %}{% if run.events %}<details class="job-timeline"><summary>Run timeline</summary><ul>{% for event in run.events %}<li>{{ event.at|date:"Y-m-d H:i:s" }}: {{ event.stage }}{% if event.detail %}: {{ event.detail }}{% endif %}</li>{% endfor %}</ul></details>{% endif %}</td>
+    <td>{% if run.status == 'queued' %}<form method="post" action="{% url 'admin_job_cancel' run.id %}">{% csrf_token %}<button class="job-cancel" type="submit">Cancel</button></form>{% elif run.status == 'running' %}<span class="muted">Cannot safely stop</span>{% elif run.status == 'failed' or run.status == 'stalled' %}<form method="post" action="{% url 'admin_job_retry' run.id %}">{% csrf_token %}<button class="job-cancel" type="submit">Retry</button></form>{% else %}<span class="muted">No action</span>{% endif %}</td>
   </tr>{% endfor %}</tbody>
 </table>
 {% else %}<p class="muted">No queued or requested jobs match this view.</p>{% endif %}
@@ -49,7 +49,7 @@
     <td><strong>{{ run.name }}</strong></td><td>{{ run.origin }}</td>
     <td>{{ run.started_at|date:"Y-m-d H:i:s" }}</td><td>{{ run.completed_at|date:"Y-m-d H:i:s"|default:"Running or not recorded" }}</td>
     <td>{% if run.ok %}<span class="job-state completed">Completed</span>{% else %}<span class="job-state failed">Needs attention</span>{% endif %}{% if run.rows_touched is not None %}<br><span class="muted">{{ run.rows_touched }} updated</span>{% endif %}{% if run.error %}<details class="job-error"><summary>Show error details</summary><pre>{{ run.error }}</pre></details>{% endif %}</td>
-    <td>{% if run.retry_job_key %}<form method="post" action="{% url 'admin_job_history_retry' run.retry_job_key %}">{% csrf_token %}<button class="job-cancel" type="submit">Retry</button></form>{% else %}—{% endif %}</td>
+    <td>{% if run.retry_job_key %}<form method="post" action="{% url 'admin_job_history_retry' run.retry_job_key %}">{% csrf_token %}<button class="job-cancel" type="submit">Retry</button></form>{% else %}<span class="muted">No retry available</span>{% endif %}</td>
   </tr>{% endfor %}</tbody>
 </table>
 {% else %}<p class="muted">No recorded system activity yet.</p>{% endif %}

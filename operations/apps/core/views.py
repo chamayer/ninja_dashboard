@@ -7889,9 +7889,19 @@ _JOB_CATALOG: list[dict] = [
 ]
 
 _JOB_INDEX = {j["id"]: j for j in _JOB_CATALOG}
+_SOFTWARE_CLASSIFIER_JOBS = (
+    "software-classify-only", "software-classify-full", "software-classify",
+)
+_SOFTWARE_JOB_PRIORITY = {
+    "software-classify-only": 1,
+    "software-classify-full": 2,
+    "software-classify": 3,
+}
 
 
 def _job_lane(job_key: str) -> str:
+    if job_key in _SOFTWARE_CLASSIFIER_JOBS:
+        return "software"
     if job_key.startswith("intel-"):
         return "intelligence"
     if job_key in {"patches", "agent-observations", "documentation-observations", "software-queue-drain"}:
@@ -8174,6 +8184,9 @@ def _enqueue_operator_job(
     """Create, or coalesce with, one active registered Jobs request."""
     with transaction.atomic(), connection.cursor() as cur:
         cur.execute("SET LOCAL operations.tenant_id = 1")
+        existing_id = _admit_software_classifier_job(cur, job_key)
+        if existing_id is not None:
+            return existing_id, False
         cur.execute(
             """
             INSERT INTO operations.operator_job_runs
@@ -8198,6 +8211,40 @@ def _enqueue_operator_job(
     if row is None:
         raise RuntimeError("Unable to create or find the requested job")
     return row[0], False
+
+
+def _admit_software_classifier_job(cur, job_key: str) -> uuid.UUID | None:
+    """Apply the same classifier-mode supersession policy as ingest."""
+    priority = _SOFTWARE_JOB_PRIORITY.get(job_key)
+    if priority is None:
+        return None
+    cur.execute(
+        "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+        ("operations.software_classifier",),
+    )
+    cur.execute(
+        """SELECT id, job_key, status FROM operations.operator_job_runs
+             WHERE tenant_id = 1 AND job_key = ANY(%s::text[])
+               AND status IN ('queued', 'running')
+             FOR UPDATE""",
+        (list(_SOFTWARE_CLASSIFIER_JOBS),),
+    )
+    active = cur.fetchall()
+    broader = [row for row in active if _SOFTWARE_JOB_PRIORITY[row[1]] >= priority]
+    if broader:
+        return broader[0][0]
+    superseded = [row[0] for row in active if row[2] == "queued"]
+    if superseded:
+        cur.execute(
+            """UPDATE operations.operator_job_runs
+                   SET status = 'cancelled', stage = 'Superseded',
+                       stage_detail = 'Superseded by a broader Software classifier run.',
+                       stage_updated_at = NOW(), completed_at = NOW(),
+                       error = 'Superseded before work started.'
+                 WHERE tenant_id = 1 AND id = ANY(%s) AND status = 'queued'""",
+            (superseded,),
+        )
+    return None
 
 
 def _queue_software_rebuild_after_commit(user_id: int) -> None:
@@ -8232,8 +8279,15 @@ def _operator_job_runs(*, limit: int = 100, run_id: str = "", batch_id: str = ""
                         CASE WHEN status = 'queued' THEN (
                             SELECT COUNT(*) + 1 FROM operations.operator_job_runs earlier
                              WHERE earlier.tenant_id = 1 AND earlier.status = 'queued'
+                               AND earlier.lane = job.lane
                                AND (earlier.requested_at, earlier.id) < (job.requested_at, job.id)
-                        ) END AS queue_position
+                        ) END AS queue_position,
+                        CASE WHEN status = 'queued' THEN CASE WHEN EXISTS (
+                            SELECT 1 FROM operations.operator_job_runs running
+                             WHERE running.tenant_id = 1 AND running.lane = job.lane
+                               AND running.status = 'running'
+                        ) THEN 'Waiting for work already running in this lane.'
+                        ELSE 'Waiting for earlier queued work in this lane.' END END AS queue_reason
                    FROM operations.operator_job_runs
                   AS job
                   WHERE {' AND '.join(clauses)}
@@ -8262,6 +8316,17 @@ def _operator_job_runs(*, limit: int = 100, run_id: str = "", batch_id: str = ""
     }
     now = timezone.now()
 
+    def result_label(status: str, rows_touched, error: str) -> str:
+        if status == "queued":
+            return "No work has run yet."
+        if status == "cancelled":
+            return "Cancelled before work started."
+        if error:
+            return "Review the recorded error."
+        if rows_touched is None:
+            return "No item count reported."
+        return ""
+
     def elapsed_label(started_at, completed_at) -> str:
         began = started_at
         ended = completed_at or now
@@ -8283,6 +8348,7 @@ def _operator_job_runs(*, limit: int = 100, run_id: str = "", batch_id: str = ""
             "attempts": row[8], "rows_touched": row[9], "error": row[10],
             "stage": row[11], "stage_detail": row[12], "stage_updated_at": row[13],
             "lane": row[14], "heartbeat_at": row[15], "queue_position": row[16],
+            "queue_reason": row[17], "result_label": result_label(row[7], row[9], row[10]),
             "elapsed": elapsed_label(row[5], row[6]),
             "events": events_by_job.get(row[0], []),
         }
